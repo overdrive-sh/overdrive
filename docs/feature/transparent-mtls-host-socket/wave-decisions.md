@@ -3,10 +3,48 @@
 **Wave**: DISCUSS (wave 2 of 6) · **Agent**: Luna (nw-product-owner) · **Date**: 2026-06-11
 · **Density**: `lean` + `ask-intelligent` (DISCUSS hard default)
 
-This feature is the **host-socket transparent-mTLS ENFORCEMENT mechanism** — the
-consumer that finally encrypts the wire using the SVID that the CA mints
-(J-SEC-001 / #28) and the IdentityMgr holds + exposes via `IdentityRead`
-(J-SEC-002 / #35).
+This feature is the **transparent-mTLS ENFORCEMENT mechanism** — the consumer
+that finally encrypts the wire using the SVID that the CA mints (J-SEC-001 / #28)
+and the IdentityMgr holds + exposes via `IdentityRead` (J-SEC-002 / #35).
+
+---
+
+## RE-GROUNDING ADDENDUM (2026-06-12) — the DISCUSS mechanism below is SUPERSEDED by ADR-0069
+
+> **Read this first.** The DISCUSS-wave decisions recorded below (D2's
+> spike-first in-band walking skeleton; the "in-band sidecarless kTLS,
+> auth-session == data-session, agent EXITS the data path, kTLS on the
+> workload's OWN socket" hypothesis; the Cilium fallback) describe the
+> mechanism **as it stood at DISCUSS (2026-06-11), with the mechanism
+> deliberately un-pinned**. The DESIGN wave **settled it**: **ADR-0069
+> (2026-06-12)** locked a **universal agent-light L4 proxy** as the v1
+> mechanism for #26 and **superseded** the in-band kTLS-on-the-workload's-own-
+> socket model (retained only as a tracked future optimization). The
+> spike-first risk was **resolved by 6 committed Tier-3 spikes** (verdict:
+> proxy, not in-band) — so D2's "FAIL → Cilium fallback" branch did NOT fire;
+> the proxy is the answer.
+>
+> What this changes for the artifacts (all re-grounded 2026-06-12 by Luna per
+> `design/upstream-changes.md` + `design/review-adversarial-2026-06-12.md` F1):
+> kTLS on the **agent's peer-facing leg** (not the workload's socket); agent is
+> **agent-LIGHT not OUT** (forward agent-idle, return/deliver agent-light
+> splice); **BIDIRECTIONAL** v1 (outbound `cgroup_connect4` + inbound TPROXY
+> server-mTLS); **NO restart-survival** (2 sockets/connection); **process/exec
+> ONLY** (WASM dropped as a distinct path — auto-covered by the same proxy when
+> a WASM driver lands); **#222 folded in** as the STAGED guest-stack intercept
+> adapter of the ONE proxy (not a separate mechanism); **honest claim** =
+> chain-to-bundle authn + encryption, NO intended-peer pinning (#178 upgrade);
+> **authorization out of scope** (#27/#38). The re-grounded artifacts are
+> `docs/product/jobs.yaml` § J-SEC-003, both journeys, and the re-scoped slices
+> 00–05 (slice-00 = the composed proxy walking skeleton; the in-band
+> spike/restart-survival/WASM slices are superseded/deleted).
+>
+> The CORE job is UNCHANGED (consume the held SVID to encrypt the wire
+> in-kernel, auth-session == data-session, workload holds nothing, provable on
+> the wire, `IdentityRead` reader). The DISCUSS decisions below are retained as
+> the **historical record of how the mechanism question was framed and de-risked**
+> — NOT as the current mechanism. Where they describe the in-band model, ADR-0069
+> governs.
 
 ---
 
@@ -17,18 +55,21 @@ consumer that finally encrypts the wire using the SVID that the CA mints
   encryption is automatic and undisableable (vision principle 2). The HONEST
   observables are TEST-tier (see § Honest observables). Per CLAUDE.md the workload
   verb is `overdrive deploy <SPEC>`, never `job submit`.
-- **[D2] Walking skeleton = SPIKE-FIRST.** The issue mandates a Tier-3 spike
-  BEFORE the design locks. WS = the thinnest end-to-end slice that disproves the
-  core hypothesis: prove `sockops ACTIVE_ESTABLISHED → pidfd_getfd → rustls
-  handshake presenting the held SVID (via IdentityRead) → kTLS install → tcpdump
-  shows TLS 1.3 records` for ONE process→process flow on the 6.18 Lima/LVH kernel,
-  with the plaintext race window closed (fail-closed: no plaintext egress before
-  kTLS install). **Named falsification**: "disproves in-band sidecarless kTLS on
-  our kernel if the handoff cannot be made race-free for one process flow → fall
-  back to Cilium out-of-band-auth + separate encryption." This is Slice 00.
+- **[D2] Walking skeleton = the BLOCKING composed proxy WS (re-grounded to
+  ADR-0069).** The DISCUSS-era spike-first framing was settled by the 6 committed
+  Tier-3 spikes (verdict: the agent-light L4 proxy). The walking skeleton is now the
+  COMPOSED proxy WS: the thinnest end-to-end cut that proves the full path holds on a
+  real transparent intercept — `cgroup_connect4` (outbound) / nft-TPROXY (inbound)
+  intercept → agent drains pre-arm plaintext losslessly → rustls handshake on the
+  agent's peer-facing leg presenting the held SVID (via IdentityRead) → kTLS arm →
+  post-arm bidirectional multi-record transfer with NO RST, under normal AND delayed
+  timing, on the 6.18 Lima/LVH kernel. **Named falsification**: the composition does
+  not hold (post-arm RST on the intercept lifecycle, the increment-e failure mode) →
+  every later slice is blocked until the RST is engineered around. This is Slice 00,
+  the BLOCKING first DELIVER slice.
 - **[D3] Research depth = lightweight.** Matches the sibling security-primitive
-  journeys (built-in-ca, workload-identity-manager). Three dataplane research docs
-  + ADR-0068 already cover the mechanism, the race window, and the kernel pin; no
+  journeys (built-in-ca, workload-identity-manager). Three dataplane research docs +
+  ADR-0068 + the 6 committed spike findings cover the mechanism and the kernel pin; no
   new research wave.
 - **[D4] JTBD = yes; new job J-SEC-003.** This is the on-the-wire ENFORCEMENT peer
   of mint(J-SEC-001)/hold(J-SEC-002) — a distinct job (different progress: "the
@@ -54,54 +95,57 @@ DISCUSS is grounded in the corrected reality, NOT the stale issue body:
    SOLE blocker is the userspace `rustls/ktls` bridge (rustls/ktls#59 / #62),
    tracked in **#229**. In-place rekey is OUT of v1 scope (teardown + reconnect);
    this is a TRACKED DEPENDENCY, not an open design risk for #26.
-3. **"fd acquisition differs per workload kind" → resolved by the host-socket vs
-   guest-stack taxonomy.** #26 handles host-socket only (process via `pidfd_getfd`;
-   WASM in-process). microVM/unikernel are **#222's** problem (host L4 tap proxy).
+3. **"fd acquisition differs per workload kind" → resolved by the universal proxy
+   (ADR-0069).** The agent owns its own legs (it does not acquire the workload's
+   socket), so fd-acquisition no longer varies by workload kind. v1 ships process/exec
+   (the only driver that exists); a future WASM driver's host-socket workloads are
+   auto-covered by the same proxy, and guest-stack (microVM/unikernel) routes through
+   the SAME mechanism via the STAGED guest-stack intercept adapter (**#222**, repurposed
+   by ADR-0069 — not a separate mechanism).
 
 ---
 
-## The genuine, still-open risk DISCUSS honors (the WS hypothesis)
+## The genuine, still-open risk (the composed walking-skeleton gate)
 
-Two load-bearing hypotheses the walking-skeleton spike (Slice 00) must validate:
+The mechanism risk DISCUSS deliberately left un-pinned was settled by the 6 committed
+Tier-3 spikes (verdict: the agent-light L4 proxy, ADR-0069) — sidecarless in-kernel
+mTLS where the auth-session IS the data-session is proven on a real kernel, and the
+agent-light L4 proxy is lossless for every protocol kind (the userspace handshake
+buffer captures pre-arm plaintext and flushes it after the handshake; no kernel patch).
 
-- **In-band sidecarless kTLS is unshipped anywhere.** No production mesh does
-  it: Cilium does out-of-band auth + WireGuard/IPsec (separate encryption); Istio
-  ztunnel keeps a userspace proxy in the data path; Linkerd same. Overdrive's
-  target — auth-session == data-session, agent then EXITS the data path — has zero
-  shipping precedent (race-window research Finding 6; CP-restart research Gap 1).
-- **The plaintext race window.** Between sockops `ACTIVE_ESTABLISHED` firing and
-  kTLS install completing, a workload `write()` can leak cleartext: sk_msg has only
-  PASS/DROP/REDIRECT, no lossless HOLD; `bpf_msg_cork_bytes` does not buffer
-  (race-window research Findings 1–2).
-
-**Documented fallback** (if in-band kTLS doesn't pan out): the Cilium model —
-out-of-band auth + separate encryption (or a userspace proxy that stays in the
-data path, à la Istio ztunnel / Architecture C). The 6.18 pin also legitimises an
-out-of-tree write-block patch (lossless backpressure) as an appliance-OS option,
-but that is a DESIGN-wave call, not pinned here.
+The ONE load-bearing risk the walking skeleton (Slice 00) still validates is the
+**composition under a real transparent intercept**: the spikes proved every primitive
+in isolation, but increment-e's composed harness RST'd on the intercept lifecycle and
+increments-f/h removed the intercept to prove their primitive. Slice 00 — the BLOCKING
+first DELIVER slice — proves the full composed path (real intercept → handshake on the
+agent's leg → kTLS arm → post-arm bidirectional multi-record transfer, NO RST, both
+directions, under normal AND delayed timing). FAIL → the composition does not hold and
+every later slice is blocked until the RST is engineered around. There is no fallback
+mechanism to adopt; the proxy is the answer.
 
 ---
 
-## Scope Assessment: PASS — 5 stories + 1 spike, 1 bounded context (workload-identity / dataplane mTLS), estimated ~7–9 days
+## Scope Assessment: PASS — 6 stories (Slice 00 = the BLOCKING composed WS), 1 bounded context (workload-identity / dataplane mTLS), estimated ~7–9 days
 
 Run BEFORE journey-visualization investment (Elephant Carpaccio gate, Phase 1.5).
 Oversized-signal check (oversized = any 2+ firing):
 
 | Signal | Threshold | This feature | Fires? |
 |---|---|---|---|
-| User stories | >10 | 5 (US-MTLS-01..05) + 1 spike (US-MTLS-00) | No |
-| Bounded contexts / modules | >3 | 1 context (host-socket dataplane mTLS); touches sockops + agent rustls + kTLS install but one enforcement concern | No |
-| WS integration points | >5 | the WS is a SPIKE (one process flow): sockops detect → fd acquire → handshake (reads IdentityRead) → kTLS install → wire capture = ~5, and deliberately thin | No (at the boundary; the spike IS the thinning lever) |
-| Estimated effort | >2 weeks | ~7–9 days (spike ~2d, then 5 × ≤1-day slices) — under 2 weeks | No |
-| Independent shippable outcomes | multiple | 1 coherent outcome (host-socket workloads' wire is encrypted with their own SVID, in-kernel) | No |
+| User stories | >10 | 6 (US-MTLS-00 composed WS + US-MTLS-01..05) | No |
+| Bounded contexts / modules | >3 | 1 context (host-socket dataplane mTLS); touches the intercept + agent rustls + kTLS arm + splice pumps but one enforcement concern | No |
+| WS integration points | >5 | the WS is the composed proxy path, one flow each way: transparent intercept → lossless capture → handshake on the agent's leg (reads IdentityRead) → kTLS arm → bidirectional transfer = ~5, and deliberately thin | No (at the boundary; the composed WS IS the thinning lever) |
+| Estimated effort | >2 weeks | ~7–9 days (6 × ≤1–1.5-day slices) — under 2 weeks | No |
+| Independent shippable outcomes | multiple | 1 coherent outcome (host-socket workloads' wire is encrypted with their own SVID, in-kernel, both directions) | No |
 
 **Zero signals fire.** The feature is one coherent capability (host-socket
-workloads carry TLS 1.3 on the wire with their own SVID, in-kernel, agent out of
-the path), already correctly carved from the guest-stack path (#222) and the
-rekey/rotation/revocation concerns (#229/#40/Phase 5). It is **not** split
-further; it IS sliced thinly (carpaccio) — 1 spike + 5 ≤1-day slices, each
+workloads carry TLS 1.3 on the peer-facing wire with their own SVID, in-kernel,
+both directions, agent-light), already correctly carved from the staged guest-stack
+adapter (#222) and the rekey/rotation/revocation concerns (#229/#40/Phase 5). It is
+**not** split further; it IS sliced thinly (carpaccio) — 6 ≤1–1.5-day slices, each
 end-to-end against the wire-capture observable, each with a named learning
-hypothesis. The spike-first WS keeps the riskiest assumption cheapest to learn.
+hypothesis. The BLOCKING composed walking skeleton (Slice 00) keeps the riskiest
+remaining assumption (the composition) cheapest to learn.
 
 > Note: `story-map` does not exist yet at this phase (it is authored in § Story
 > Map of the feature-delta). The scope verdict is recorded here per the Phase-1.5
@@ -115,43 +159,44 @@ Unlike the sibling #35 (which had a DIVERGE wave that minted J-SEC-002 and locke
 Option 1), **#26 has no DIVERGE artifacts** (`docs/feature/transparent-mtls-host-socket/diverge/`
 does not exist). The job-grounding therefore rests on:
 
-- The three dataplane research docs (mechanism, race window, recommended
-  architecture) + the CP-restart survival research — all High-confidence, primary
-  -kernel-sourced.
+- The dataplane research docs + the 6 committed Tier-3 spike findings — all
+  High-confidence, primary-kernel-sourced.
 - ADR-0068 (the pinned-kernel decision that settles the kernel floor).
 - The J-SEC-001 / J-SEC-002 jobs + journeys this feature consumes.
 
-**Consequence / mitigation**: the option space (in-band kTLS [Arch A] vs proxy
-[Arch C] vs out-of-band auth + separate encryption [Cilium]) is NOT pre-narrowed
-by a DIVERGE recommendation. DISCUSS deliberately does NOT pin the mechanism — it
-pins the WHAT (the wire carries TLS 1.3 with the workload's own SVID, in-kernel,
-fail-closed) and the acceptance OBSERVABLES, and runs the **spike-first walking
-skeleton (Slice 00)** to settle the riskiest mechanism question empirically before
-DESIGN locks. The DESIGN wave (solution-architect) owns the mechanism choice,
-informed by the spike outcome. This is the honest substitute for a DIVERGE
-recommendation, recorded here as a risk so DESIGN does not assume a pre-validated
-option.
+**Consequence / mitigation**: DISCUSS deliberately did NOT pin the mechanism — it
+pinned the WHAT (the wire carries TLS 1.3 with the workload's own SVID, in-kernel,
+fail-closed, both directions) and the acceptance OBSERVABLES, and left the mechanism
+for the DESIGN wave to settle empirically. The DESIGN wave settled it: **ADR-0069
+locked the universal agent-light L4 proxy** on the strength of the 6 committed Tier-3
+spikes (no DIVERGE-recommended option was needed; the spikes ARE the empirical
+narrowing). The one residual risk — the COMPOSITION under a real transparent intercept
+— is gated by the BLOCKING composed walking skeleton (Slice 00), not assumed.
 
 ---
 
 ## Honest observables (foundation feature — TEST-tier security evidence)
 
 There is NO operator CLI verb for "encrypt this workload" this phase. The HONEST
-observable is TEST-tier security evidence, exactly as the J-SEC-002 journey did it:
+observable is TEST-tier security evidence, exactly as the J-SEC-002 journey did it
+(re-grounded to the agent-light L4 proxy, ADR-0069):
 
-- `tcpdump` / wire-capture on the veth shows **TLS 1.3 Application Data records**
-  (content type 0x17), not cleartext, between two host-socket workloads.
-- `ss -K` shows the **kTLS ULP installed** on the workload's socket.
-- A **negative test** shows a handshake **fails closed** on a wrong/absent SVID
-  (no TLS Application Data and no cleartext on the wire).
-- A **race-window probe** shows **no cleartext byte egresses** before kTLS install
-  (write() immediately on connect() return + deliberately delayed install).
+- `tcpdump` / wire-capture on the **peer-facing leg** shows **TLS 1.3 Application Data
+  records** (content type 0x17), not cleartext of the payload, both directions.
+- `ss -tie` shows the **kTLS ULP installed** on the **agent's peer-facing leg**
+  (`tcp-ulp-tls 1.3 aes-gcm-256`), NOT the workload's socket.
+- `strace` shows the agent **agent-light** — zero per-byte forward syscalls (agent-idle
+  sockmap egress redirect); only `splice`/`ppoll` on the return/deliver path (~1 splice
+  per record), NOT a per-byte userspace proxy.
+- A **negative test** shows a handshake **fails closed** cause-distinct on an absent SVID
+  (outbound) or a missing/untrusted client cert (inbound `nocert`/`wrongca`) — no TLS
+  Application Data and no cleartext.
 
 Each slice's "After/sees" is framed against these concrete observables (the
 security-reviewer-facing wire capture IS the value), so slices are not empty
 `@infrastructure` shells. The slice-composition hard gate is respected: every
-slice has a genuine observable. The walking-skeleton spike's observable is the
-wire capture for one process flow.
+slice has a genuine observable. The composed walking skeleton's observable is the
+lossless, RST-free, TLS-1.3-on-the-peer-wire capture for one composed flow each way.
 
 ---
 
@@ -160,13 +205,14 @@ wire capture for one process flow.
 - **`docs/product/jobs.yaml`**: appended **J-SEC-003** (`served_by_phase: 2`,
   `status: active`, `relates_to: J-SEC-002`, full dimensions + four forces) +
   changelog entry.
-- **`docs/product/journeys/enforce-transparent-mtls-on-the-wire.yaml`**: NEW
-  product-level journey mapping J-SEC-003, Sam persona, lightweight depth, happy
-  path + the load-bearing error/race paths (plaintext race window;
-  handshake-fail-closed on absent/wrong SVID; CP/agent-restart survival of
-  in-flight kTLS sessions; KeyUpdate-unsupported → teardown+reconnect deferred to
-  #229). Header states it does NOT extend the J-SEC-002 journey and names the
-  #222/#229/#40 carve-outs.
+- **`docs/product/journeys/enforce-transparent-mtls-on-the-wire.yaml`**: product-level
+  journey mapping J-SEC-003, Sam persona, lightweight depth, happy path (both
+  directions) + the load-bearing error/resource paths (handshake-fail-closed on
+  absent/wrong/untrusted creds; resource limits + pump-stall supervision;
+  agent-restart → new-connection re-handshake, NO in-flight survival in v1;
+  KeyUpdate-unsupported → teardown+reconnect deferred to #229). RE-GROUNDED 2026-06-12
+  to ADR-0069 (the agent-light L4 proxy). Header states it does NOT extend the J-SEC-002
+  journey and names the #222/#178/#27/#38/#229/#40 carve-outs.
 - **`docs/product/personas/sam-platform-security-engineer.yaml`**: added
   `J-SEC-003` to `related_jobs` + a `j_sec_003_lens` (on-the-wire enforcement
   questions / success-signals / frustrations).
@@ -186,16 +232,16 @@ wire capture for one process flow.
 Tier-1 `[REF]` sections emitted (lean default). `ask-intelligent` triggers that
 fired this wave are reported to the orchestrator (NOT auto-expanded):
 
-- **Trigger: NO DIVERGE wave** → the mechanism option space is un-narrowed.
-  Reported as the § Risk above; the spike-first WS is the mitigation. DESIGN may
-  want a focused options pass (Arch A vs Arch C vs Cilium-fallback) if the spike
-  is inconclusive.
-- **Trigger: a novel/unshipped core hypothesis** (in-band sidecarless kTLS) →
-  surfaced as the WS falsification + the documented Cilium fallback. No
-  auto-expansion; the spike settles it.
-- **Trigger: a server-speaks-first protocol scope question** (SMTP/FTP/SSH have an
-  irreducible data-loss window without a write-block) → surfaced as an open
-  question / DESIGN scope call, not resolved in DISCUSS.
+- **Trigger: NO DIVERGE wave** → the mechanism was left for DESIGN to settle.
+  Reported as the § Risk above; the 6 committed Tier-3 spikes were the empirical
+  narrowing, and ADR-0069 locked the agent-light L4 proxy. The residual risk (the
+  composition) is gated by the BLOCKING composed walking skeleton (Slice 00).
+- **Trigger: a novel/unshipped core hypothesis** (sidecarless in-kernel mTLS where the
+  auth-session IS the data-session) → settled empirically by the 6 committed Tier-3
+  spikes on a real kernel; no fallback was needed.
+- **Trigger: lossless capture for all protocol kinds** → resolved by the agent's
+  userspace handshake buffer, which is lossless for every protocol kind (client- or
+  server-first); no kernel patch. The question is closed.
 
 No Tier-2 expansions were auto-rendered.
 

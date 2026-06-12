@@ -350,65 +350,122 @@ jobs:
     status: active
 
   - id: J-SEC-003
-    title: "Transparently encrypt every host-socket workload's traffic with its own SVID, in-kernel, with the platform out of the data path — no sidecar, no cleartext on the wire"
+    title: "Transparently encrypt every workload's traffic with its own SVID, in-kernel, via an agent-light L4 proxy the workload can't disable — no sidecar, no cleartext on the peer wire, both directions"
     relates_to: J-SEC-002
     situation: >
-      When a host-socket workload I run (a process via the exec driver, or a
-      WASM function via wasmtime — whose TCP terminates in the HOST kernel)
-      opens a connection — and design principle 3 says "every packet carries
-      cryptographic workload identity" and principle 2 says mTLS is in-kernel
-      and undisableable — and the platform already MINTS a forgery-proof SVID
-      (J-SEC-001 / #28) and HOLDS it bound to the running set, readable via the
-      IdentityRead port (J-SEC-002 / #35) — but NOTHING yet consumes that held
-      identity to encrypt the actual bytes on the wire, so the promise is true
-      in principle but not observable on a packet capture,
+      When a host-socket workload I run (a process via the exec driver — the
+      only workload kind in v1) opens an outbound connection, OR an inbound
+      connection arrives at one of my server workloads — and design principle 3
+      says "every packet carries cryptographic workload identity" and principle
+      2 says mTLS is in-kernel and undisableable — and the platform already
+      MINTS a forgery-proof SVID (J-SEC-001 / #28) and HOLDS it bound to the
+      running set, readable via the IdentityRead port (J-SEC-002 / #35) — but
+      NOTHING yet consumes that held identity to encrypt the actual bytes on the
+      wire, so the promise is true in principle but not observable on a packet
+      capture,
     motivation: >
-      I want the platform to detect the host-socket connection in the kernel
-      (sockops), perform the TLS 1.3 handshake on the workload's behalf in the
-      node agent (rustls, presenting the held SVID read via IdentityRead, leaf
-      key per ADR-0063 D9), install the negotiated session keys into the
-      workload's own socket via kTLS (setsockopt TLS_TX/TLS_RX), and then LEAVE
-      THE DATA PATH — so encryption is in-kernel and the workload holds NOTHING
-      and is identity-unaware (Overdrive is sidecarless) — and I want the
-      plaintext race window between connection-established and kTLS-installed to
-      be closed fail-closed (no cleartext byte egresses before kTLS is armed),
+      I want every node's agent to enforce both halves of every flow it touches
+      via a single universal agent-light L4 proxy (ADR-0069). OUTBOUND, the
+      workload's connect() is transparently intercepted (cgroup_connect4 rewrite)
+      to a node-local agent leg; the agent drains the workload's plaintext
+      losslessly into a bounded userspace buffer, performs the rustls TLS 1.3
+      CLIENT handshake with the real peer presenting the workload's held SVID
+      (read via IdentityRead, leaf key per ADR-0063 D9), arms kTLS on the
+      peer-facing leg, and hands the steady-state byte movement to the kernel
+      (forward agent-IDLE via an in-kernel sockmap egress redirect into the
+      kTLS-armed leg; return agent-LIGHT via a zero-copy splice pump on a plain
+      kTLS-RX leg). INBOUND, the connection aimed at a server workload's logical
+      address is transparently intercepted via TPROXY to the agent's
+      IP_TRANSPARENT listener; the agent recovers the original destination
+      (getsockname), selects that server workload's held SVID, performs the
+      rustls TLS 1.3 SERVER handshake (presents the server SVID AND
+      requires-and-verifies the client's presented SVID chains to the trust
+      bundle via WebPkiClientVerifier), arms kTLS-RX, and splices the decrypted
+      plaintext to the identity-unaware server workload (agent-light). BOTH
+      workloads are identity-unaware and hold NOTHING (no cert, no key — each
+      holds an ordinary plaintext socket to its node's agent); the agent holds
+      the leaf key and the kTLS state on its own legs; and a handshake against an
+      absent SVID (the client side) or a missing/untrusted client cert (the
+      server side) fails closed — no cleartext reaches the peer wire,
     outcome: >
-      so design principle 3 is OPERATIONALLY TRUE ON THE WIRE for host-socket
-      workloads — provable by wire capture showing TLS 1.3 records (not
-      cleartext) between two host-socket workloads — and principle 2's "mTLS is
+      so design principle 3 is OPERATIONALLY TRUE ON THE WIRE for v1 host-socket
+      (process/exec) workloads, in BOTH directions — provable by a wire capture
+      showing TLS 1.3 records (content type 0x17), zero cleartext of the payload
+      on the peer-facing leg, between two workloads — and principle 2's "mTLS is
       in-kernel and cannot be disabled" is real, not aspirational: the SAME TLS
       1.3 session that authenticated carries the data (auth-session ==
-      data-session), encryption runs in the kernel via kTLS, the platform agent
-      is out of the steady-state data path, and a handshake against an absent or
-      wrong SVID fails closed (no plaintext fallback). This is the on-the-wire
-      ENFORCEMENT peer of the mint(J-SEC-001)/hold(J-SEC-002) chain — 001 mints
-      identity, 002 holds/reads it, 003 consumes it to encrypt the wire.
+      data-session — the rustls handshake's extracted secrets ARE the kTLS keys
+      on the agent's peer-facing leg), the steady-state crypto runs in the kernel
+      via kTLS, the agent is AGENT-LIGHT (idle on the forward path, ~1 splice per
+      TLS record on the return/deliver path — not a per-byte userspace proxy),
+      and the security claim is HONEST: v1 authenticates chain-to-trust-bundle
+      ONLY (the peer is SOME valid cluster workload) with NO intended-peer
+      identity pinning (a routing bug / VIP collision / valid-but-unintended SVID
+      is NOT prevented in v1 — that gap closes with the #178 SAN-match upgrade,
+      not a v1 prereq). This is the on-the-wire ENFORCEMENT peer of the
+      mint(J-SEC-001)/hold(J-SEC-002) chain — 001 mints identity, 002 holds/reads
+      it, 003 consumes it to encrypt the wire. The proxy is UNIVERSAL across
+      workload kinds by construction (ADR-0069 folded #222 into #26): a future
+      WASM driver's host-socket workloads are auto-covered by the same outbound
+      mechanism, and guest-stack (microVM/unikernel) routes through the same
+      proxy via a STAGED guest-stack intercept adapter (#222). v1 does NOT
+      provide restart-survival (the agent owns both legs + the kTLS state; an
+      agent restart drops in-flight sessions, which re-handshake on reconnect)
+      and carries a 2-sockets-per-connection density cost — both are the accepted
+      trade for uniformity + losslessness over the superseded in-band model's
+      restart-survival + 1-socket density (a tracked future optimization).
     job_dimensions:
       functional: >
-        On a host-socket connection: (a) sockops detects the
-        ESTABLISHED transition in the kernel; (b) the node agent acquires the
-        workload's socket (process: pidfd_getfd; WASM: in-process host fd) and
-        performs a rustls TLS 1.3 handshake presenting the held SVID (read via
-        the IdentityRead port) and verifying the peer against the trust bundle;
-        (c) the agent installs the negotiated TLS 1.3 session keys into kTLS on
-        the workload's socket (setsockopt TLS_TX/TLS_RX) and exits the data
-        path; (d) the wire carries TLS 1.3 Application Data records, NOT
-        cleartext; (e) no cleartext byte egresses before kTLS is installed
-        (fail-closed); (f) a handshake against an absent/wrong SVID fails closed
-        with no plaintext fallback.
+        OUTBOUND (client side): (a) the workload's connect() is transparently
+        intercepted (cgroup_connect4 rewrite) to the agent's plaintext leg
+        (leg F); (b) the agent drains the pre-arm plaintext losslessly into a
+        bounded userspace buffer, performs a rustls TLS 1.3 CLIENT handshake on
+        the peer-facing leg (leg B) presenting the held SVID (read via the
+        IdentityRead port) and verifying the peer chains to the trust bundle;
+        (c) the agent arms kTLS on leg B (setsockopt TCP_ULP "tls" then
+        TLS_TX/TLS_RX, in that order — SOCKMAP membership before TCP_ULP for the
+        forward path), flushes the captured plaintext as the first
+        application_data, and hands steady state to the kernel (forward
+        agent-idle sockmap egress redirect F→B; return agent-light splice
+        B→pipe→F). INBOUND (server side): (a) the connection aimed at a server
+        workload's logical address is transparently intercepted via TPROXY to
+        the agent's IP_TRANSPARENT listener (leg C); (b) the agent recovers the
+        original destination via getsockname() and selects that server
+        workload's AllocationId → held SVID; (c) the agent performs a rustls
+        TLS 1.3 SERVER handshake presenting the server SVID and
+        requiring-and-verifying the client's SVID chains to the trust bundle
+        (WebPkiClientVerifier REQUIRE+VERIFY), arms kTLS-RX, and splices the
+        decrypted plaintext to the identity-unaware server workload (leg S,
+        agent-light). BOTH directions: (d) the peer-facing leg carries TLS 1.3
+        Application Data records (0x17), NOT cleartext of the payload; (e) the
+        workload's plaintext lives only on the host-internal leg F / leg S by
+        design; (f) a handshake against an absent SVID (outbound) or a
+        missing/untrusted client cert (inbound, fail-closed on nocert/wrongca)
+        fails closed with no plaintext to the peer / to the server workload; (g)
+        the bounded pre-arm buffer, handshake deadline, and per-allocation
+        in-flight ceiling are enforced fail-closed; (h) the agent's own leg-B
+        dial is NOT re-intercepted (no recursion) and the workload CANNOT
+        self-exempt the intercept.
       emotional: >
         Trust that "mTLS is default and cannot be disabled" and "every packet
-        carries identity" are now TRUE ON THE WIRE for host-socket workloads —
+        carries identity" are now TRUE ON THE PEER WIRE in BOTH directions —
         provable by a packet capture Sam runs himself (tcpdump shows TLS 1.3
-        records; ss -K shows the kTLS ULP installed) — not a claim he has to
-        take on faith. Security he cannot accidentally turn off.
+        0x17 records and zero payload cleartext on the peer leg; ss -tie shows
+        tcp-ulp-tls 1.3 aes-gcm-256 on the agent's leg) — not a claim he has to
+        take on faith. Security he cannot accidentally turn off, and a workload
+        cannot evade. Honest about its boundary: he knows v1 proves "the peer is
+        a valid cluster workload, encrypted end-to-end," NOT "the peer is the
+        exact one I meant" — and he is told so plainly rather than sold an
+        intended-peer guarantee v1 does not hold.
       social: >
         Tell a security reviewer "encryption uses the SAME TLS 1.3 session that
         authenticated the workload (auth-session == data-session), terminated
-        in-kernel via kTLS, sidecarless, with the platform agent out of the
-        steady-state data path" — and have a wire capture prove it, rather than
-        the ztunnel/sidecar shape where a userspace proxy stays in the data path
-        for the whole connection.
+        in-kernel via kTLS on the agent's peer-facing leg, sidecarless, with the
+        agent AGENT-LIGHT (kernel-splice forward, ~1 splice per record return) —
+        not a userspace proxy copying every byte like ztunnel/Istio — and the v1
+        claim is precisely chain-to-bundle transport authentication +
+        encryption, no intended-peer pinning (that's the #178 upgrade)" — and
+        have a wire capture prove it, with no overclaim a reviewer can puncture.
     four_forces:
       push: >
         Identity is now mintable (J-SEC-001) and held/readable (J-SEC-002), but
@@ -419,26 +476,34 @@ jobs:
         the bytes are never encrypted with it, and a packet capture would show
         cleartext.
       pull: >
-        sockops detects the connection → the agent does the rustls TLS 1.3
-        handshake presenting the held SVID → kTLS installs the session keys on
-        the workload's own socket → the agent exits the data path → the wire
-        carries TLS 1.3 records, in-kernel, with the workload holding nothing.
-        Strictly stronger than ztunnel/Istio (userspace proxy stays in the data
-        path) — the agent leaves after the handshake.
+        A single universal agent-light L4 proxy (ADR-0069) enforces both
+        directions: transparent intercept (cgroup_connect4 outbound / TPROXY
+        inbound) → the agent does the rustls TLS 1.3 handshake presenting the
+        workload's held SVID → kTLS arms on the agent's peer-facing leg → the
+        kernel carries steady-state crypto (forward agent-idle, return/deliver
+        agent-light) → the peer wire carries TLS 1.3 records, with both workloads
+        holding nothing. ONE mechanism for ALL workload kinds (process/exec now;
+        WASM auto-covered when a WASM driver lands; guest-stack via the staged
+        #222 adapter) — strictly better than ztunnel/Istio (whose userspace proxy
+        copies every byte for the connection's life) on the steady-state path,
+        and lossless for client-speaks-first flows (the in-band model could not
+        be made lossless).
       anxiety: >
-        "Has anyone shipped in-band sidecarless kTLS where the auth-session IS
-        the data-session and the agent then exits the data path?" — NO; every
-        production mesh either does out-of-band auth + separate encryption
-        (Cilium: WireGuard/IPsec) or keeps a userspace proxy in the data path
-        (Istio ztunnel). "Can the plaintext race window between sockops
-        ESTABLISHED and kTLS install be closed?" — sk_msg has only PASS/DROP/
-        REDIRECT, no lossless HOLD; bpf_msg_cork_bytes does not buffer.
-        Mitigated: a Tier-3 SPIKE FIRST on ONE process→process flow validates
-        BOTH hypotheses before any design locks; the 6.18 pin (ADR-0068) removes
-        all kernel-version anxiety (in-kernel TLS 1.3 TX+RX + CONFIG_NET_HANDSHAKE
-        guaranteed); and the DOCUMENTED FALLBACK is the Cilium model
-        (out-of-band auth + separate encryption, or a userspace proxy) if in-band
-        kTLS cannot be made race-free.
+        "Has anyone shipped sidecarless in-kernel kTLS where the auth-session IS
+        the data-session and the agent then leaves the per-byte path?" — the
+        in-band variant (kTLS on the workload's OWN socket, agent fully out) was
+        foreclosed as not-lossless and not-universal; the agent-light L4 proxy is
+        the shape that is BOTH (ADR-0069). Mitigated: 6 committed Tier-3 spikes on
+        a real 7.0 kernel (≥ the pinned 6.18 floor) proved every primitive —
+        forward agent-idle sockmap-egress-redirect → kTLS-TX (15/15), return
+        agent-light splice on a plain kTLS-RX leg, the SOCKMAP-before-TCP_ULP
+        ordering invariant, and the full inbound half (TPROXY intercept +
+        orig-dst recovery + server-mTLS + kTLS-RX + agent-light splice-to-server,
+        fail-closed on nocert/wrongca). The 6.18 pin (ADR-0068) removes all
+        kernel-version anxiety. The ONE thing the spikes did NOT prove is the
+        COMPOSITION under a real transparent intercept (increment-e RST'd on the
+        intercept lifecycle) — so the composed walking-skeleton is the BLOCKING
+        first DELIVER slice, not an assumption.
       habit: >
         Teams reach for sidecar injection (Istio/Linkerd inject Envoy/
         linkerd-proxy into the pod) or the SPIRE Workload API (the workload
@@ -446,23 +511,36 @@ jobs:
         Overdrive's kernel-mediated, workload-holds-nothing model is a different
         shape — the workload is identity-unaware and never touches crypto.
     source: >
-      whitepaper §7 ("Transparent mTLS — one identity model, two enforcement
-      mechanisms"), §8 (Identity and mTLS), §6 addendum; vision.md design
-      principles 2 (in-kernel undisableable mTLS) + 3 (every packet carries
-      identity); ADR-0068 (pinned 6.18 LTS appliance kernel; KeyUpdate kernel-
-      ready, userspace-bridge-blocked);
-      docs/research/dataplane/transparent-mtls-recommended-architecture-research.md,
-      docs/research/dataplane/sockops-mtls-ktls-installation-comprehensive-research.md
-      (Gap-4 RESOLVED),
-      docs/research/dataplane/sockops-ktls-plaintext-race-window-research.md (the
-      race-window deep-dive + comparison matrix — the WS hypothesis),
-      docs/research/dataplane/ktls-sockops-cp-restart-survival-research.md
-      (CP-restart survival). Carve-outs: guest-stack workloads (microVM/
-      unikernel) → #222 (host L4 tap proxy, a SEPARATE feature); in-place SVID
-      rekey / TLS 1.3 KeyUpdate → #229 (userspace rustls/ktls bridge gap; v1 =
-      teardown+reconnect); certificate-rotation workflow → #40; revocation
-      (CRL/OCSP) → Phase 5; multi-node → #36. Distilled from the whitepaper +
-      research, not from user interviews (per the header precedent).
+      ADR-0069 (transparent mTLS via a universal agent-light L4 proxy — the
+      LOCKED mechanism, 2026-06-12; supersedes the in-band sockops+kTLS-on-the-
+      workload's-own-socket model as v1; folds #222 into #26 as the staged
+      guest-stack intercept adapter; bidirectional host-socket v1); whitepaper
+      §7/§8 (amended by ADR-0069 — "one identity model, two enforcement
+      mechanisms" collapses to one universal mechanism), §6 addendum; vision.md
+      design principles 2 (in-kernel undisableable mTLS) + 3 (every packet
+      carries identity); ADR-0068 (pinned 6.18 LTS appliance kernel);
+      ADR-0063/0067 (built-in CA / leaf key / IdentityMgr). The 6 committed
+      spike findings (foundation of record) under
+      docs/feature/transparent-mtls-host-socket/spike/: findings.md (basic
+      mechanism + the SOCKMAP-before-TCP_ULP ordering invariant + control
+      records), findings-egress-ktls-splice.md (forward agent-idle),
+      findings-splice-return.md (return agent-light), findings-userspace-relay.md
+      / findings-lossless-hybrid.md (lossless handshake-window capture; the
+      in-band-lossless foreclosure), findings-inbound-intercept.md (the inbound
+      half — TPROXY intercept + orig-dst recovery + server-mTLS + kTLS-RX +
+      agent-light splice-to-server, fail-closed on nocert/wrongca). Carve-outs:
+      guest-stack workloads (microVM/unikernel) → #222 (the STAGED guest-stack
+      intercept adapter of the #26 universal proxy, NOT a separate mechanism);
+      intended-peer identity pinning (east-west SPIFFE-ID resolution) → #178 (VIP
+      path #61) — v1 is chain-to-bundle authn only; authorization (allow/deny who
+      may connect to whom) → BPF-LSM socket_connect #27 fed by policy_verdicts
+      #38 (related #49) — a SEPARATE subsystem this feature MUST NOT duplicate;
+      in-place SVID rekey / TLS 1.3 KeyUpdate → #229 (v1 = teardown+reconnect);
+      certificate-rotation workflow → #40; revocation (CRL/OCSP) → Phase 5;
+      multi-node → #36; in-band restart-survival + 1-socket density → a tracked
+      future optimization (the superseded model's unique win). Distilled from the
+      whitepaper + research + the committed spikes, not from user interviews (per
+      the header precedent).
     served_by_phase: 2
     status: active
 
@@ -689,30 +767,56 @@ changelog:
   - date: 2026-06-11
     change: >
       Added J-SEC-003 for the transparent-mtls-host-socket feature (GH #26,
-      roadmap step 2.4), authored by the DISCUSS wave. This is the on-the-wire
-      ENFORCEMENT peer of the J-SEC-001 (mint, #28) / J-SEC-002 (hold/read,
-      #35) chain: 001 mints a forgery-proof SVID, 002 holds it bound to the
-      running set and exposes it via the IdentityRead port, and J-SEC-003
-      CONSUMES that held identity to encrypt the wire — sockops detects the
-      host-socket connection, the node agent performs the rustls TLS 1.3
-      handshake presenting the held SVID, kTLS installs the session keys on the
-      workload's own socket, the agent exits the data path, and the wire carries
-      TLS 1.3 records with no cleartext before kTLS install (fail-closed).
-      carries relates_to: J-SEC-002 + full functional/emotional/social
-      dimensions + four forces. SCOPE — host-socket workloads ONLY (process,
-      WASM): guest-stack workloads (microVM/unikernel, TCP terminates in the
-      GUEST kernel) are #222 (host L4 tap proxy, a SEPARATE feature, the
-      corrected whitepaper §7 "one identity model, two enforcement mechanisms"
-      split); in-place SVID rekey / TLS 1.3 KeyUpdate is #229 (userspace
-      rustls/ktls bridge gap — kernel-side IS present at v6.18 per ADR-0068; v1
-      = teardown+reconnect); certificate-rotation workflow is #40; revocation is
-      Phase 5; multi-node is #36. Grounded in the post-ADR-0068 reality (6.18
-      pin removes kernel-version anxiety, NOT the stale #26 issue body's "5.10
-      floor / KeyUpdate-must-be-handled / fd-acquisition-differs-per-kind"
-      framing). The DISCUSS wave is spike-first (D2): the walking skeleton is a
-      Tier-3 SPIKE that disproves the core hypothesis — in-band sidecarless kTLS
-      (auth-session == data-session, agent exits the data path) is unshipped
-      anywhere, and the plaintext race window may be unclosable — with the
-      Cilium out-of-band-auth + separate-encryption model as the DOCUMENTED
-      FALLBACK. served_by_phase: 2. Existing entries unmodified. See
+      roadmap step 2.4), authored by the DISCUSS wave. (HISTORICAL — this entry
+      records the DISCUSS-wave authoring on the in-band kTLS-on-the-workload's-
+      own-socket model; SUPERSEDED 2026-06-12 by ADR-0069, the universal
+      agent-light L4 proxy — see the next entry. The job ENTRY itself is
+      re-grounded to the proxy model.) This is the on-the-wire ENFORCEMENT peer
+      of the J-SEC-001 (mint, #28) / J-SEC-002 (hold/read, #35) chain: 001 mints
+      a forgery-proof SVID, 002 holds it bound to the running set and exposes it
+      via the IdentityRead port, and J-SEC-003 CONSUMES that held identity to
+      encrypt the wire. As authored (the in-band model, since superseded): the
+      node agent performed the rustls TLS 1.3 handshake presenting the held SVID
+      and installed kTLS on the workload's own socket. carries relates_to:
+      J-SEC-002 + full functional/emotional/social dimensions + four forces.
+      SCOPE as authored (since corrected by ADR-0069): host-socket only, with
+      guest-stack as a separate #222 feature; in-place SVID rekey / TLS 1.3
+      KeyUpdate is #229 (userspace rustls/ktls bridge gap — kernel-side IS
+      present at v6.18 per ADR-0068; v1 = teardown+reconnect); certificate-
+      rotation workflow is #40; revocation is Phase 5; multi-node is #36.
+      Grounded in the post-ADR-0068 reality (6.18 pin removes kernel-version
+      anxiety, NOT the stale #26 issue body's "5.10 floor / KeyUpdate-must-be-
+      handled / fd-acquisition-differs-per-kind" framing). The DISCUSS wave left
+      the mechanism un-pinned for the DESIGN wave to settle empirically.
+      served_by_phase: 2. Existing entries unmodified. See
       docs/feature/transparent-mtls-host-socket/.
+  - date: 2026-06-12
+    change: >
+      RE-GROUNDED J-SEC-003 to the DESIGN-decided mechanism (ADR-0069 —
+      transparent mTLS via a universal agent-light L4 proxy). The DISCUSS-wave
+      job was authored on the in-band "kTLS on the workload's OWN socket, agent
+      fully out, restart-survivable, host-socket/outbound only, WASM in-scope"
+      model, which ADR-0069 SUPERSEDED as v1 (retained only as a tracked future
+      optimization). The CORE job is UNCHANGED (consume the held SVID to encrypt
+      the wire in-kernel, auth-session == data-session, workload holds nothing,
+      provable on the wire, relates_to J-SEC-002 as an IdentityRead reader). What
+      changed in the dimensions/forces/outcome: (1) mechanism = agent-light L4
+      PROXY (kTLS on the agent's peer-facing leg, NOT the workload's socket); (2)
+      agent is LIGHT not OUT (forward agent-idle kernel splice; return/deliver
+      agent-light ~1 splice per record, scheduled per-record for the connection's
+      life); (3) BIDIRECTIONAL v1 (outbound cgroup_connect4 + inbound TPROXY
+      server-mTLS, both spike-proven); (4) NO restart-survival in v1
+      (2-sockets/connection; the agent owns both legs + kTLS state); (5) HONEST
+      security claim = chain-to-bundle transport authn + encryption, NO
+      intended-peer pinning (the wrong-but-valid-peer case is NOT protected in
+      v1 — that is the #178 upgrade); (6) authorization is OUT of scope
+      (#27/#38); (7) workload kinds = process/exec ONLY in v1 — WASM dropped as a
+      distinct concern (auto-covered by the same proxy once a WASM driver lands),
+      guest-stack STAGED to #222 as the guest-stack intercept adapter of the ONE
+      universal proxy (NOT a separate mechanism). Anchored on the 6 committed
+      Tier-3 spike findings. Driven by design/upstream-changes.md (the architect's
+      back-propagation handoff) + design/review-adversarial-2026-06-12.md F1
+      (CRITICAL — the stale executable handoff artifacts could otherwise lead a
+      crafter to implement the superseded system). Source re-pointed to ADR-0069
+      + the spike findings. served_by_phase unchanged (2). Other entries
+      unmodified.

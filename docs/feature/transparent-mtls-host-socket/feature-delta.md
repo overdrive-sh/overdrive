@@ -1,41 +1,51 @@
 <!-- markdownlint-disable MD024 -->
 # Feature Delta — transparent-mtls-host-socket (GH #26 · roadmap step 2.4)
 
-**Wave**: DISCUSS (wave 2 of 6) · **Agent**: Luna (nw-product-owner) · **Density**: `lean` + `ask-intelligent` (DISCUSS hard default)
+**Wave**: DISCUSS (wave 2 of 6) · **Agent**: Luna (nw-product-owner) · **Density**: `lean` + `ask-intelligent` (DISCUSS hard default) · **Re-grounded 2026-06-12 to ADR-0069** (the universal agent-light L4 proxy)
 
 This is the single narrative artifact for the transparent-mtls-host-socket
-feature. All DISCUSS content lives here under
-`## Wave: DISCUSS / [REF] <Section>` headings. Tier-1 `[REF]` sections are emitted
-(lean default); no Tier-2 expansions were auto-rendered — the fired
-`ask-intelligent` triggers are reported to the orchestrator (see
-`wave-decisions.md` § Density & Triggers).
+feature. The DISCUSS `[REF]` sections below pin the WHAT and the acceptance
+observables; the `## Wave: DESIGN` sections (from `## Wave: DESIGN / [REF]
+Mechanism Decision` onward) pin the HOW. Both describe the **same mechanism**:
+the **universal agent-light L4 proxy** locked by **ADR-0069** (2026-06-12). The
+DISCUSS sections were re-grounded onto that mechanism — they no longer describe
+the superseded in-band kTLS-on-the-workload's-own-socket model.
 
-This feature is the **host-socket transparent-mTLS ENFORCEMENT mechanism** — the
-consumer that finally **encrypts the wire** using the SVID that the CA mints
+This feature is the **transparent-mTLS ENFORCEMENT mechanism** — the consumer
+that finally **encrypts the wire** using the SVID that the CA mints
 (J-SEC-001 / #28) and the IdentityMgr holds + exposes via the `IdentityRead` port
 (J-SEC-002 / #35). The **job J-SEC-003 is authored this wave** (DISCUSS minted it —
 there was NO DIVERGE wave for #26; see `wave-decisions.md` § Risk). The
-**mechanism is NOT pinned** (in-band kTLS [Arch A] vs proxy [Arch C] vs Cilium
-out-of-band-auth fallback) — DISCUSS pins the WHAT and the acceptance observables,
-and runs a **spike-first walking skeleton (Slice 00)** to settle the riskiest
-mechanism question empirically before DESIGN locks.
+**mechanism is pinned by ADR-0069**: ONE universal **agent-light L4 proxy** for
+all workload kinds (process/exec in v1; guest-stack staged to #222), bidirectional
+(outbound + inbound). The mechanism was settled empirically by 6 committed Tier-3
+spikes (verdict: proxy; lossless on the stock pinned 6.18 kernel — no kernel patch,
+no race window). DISCUSS pins the WHAT and the acceptance observables; the DESIGN
+sections pin the contract (`MtlsEnforcement`, 4 methods, bidirectional) and the
+F4–F7 limits/supervision/authn-boundary.
 
 ---
 
 ## Wave: DISCUSS / [REF] Feature Summary
 
-**What**: For **host-socket workloads** (process via the exec driver; WASM via
-wasmtime — whose TCP terminates in the HOST kernel), the Overdrive node agent
-turns a plaintext TCP connection into a **kernel-encrypted TLS 1.3 session
-carrying the workload's own SVID**, with the **workload holding nothing** and the
-**agent out of the steady-state data path**. The mechanism (subject to the Slice-00
-spike): kernel **sockops** detects the connection's ESTABLISHED transition →
-the node agent acquires the workload's socket (process: `pidfd_getfd`; WASM:
-in-process host fd) and performs a **rustls TLS 1.3 handshake** presenting the
-**held SVID** it reads via the `IdentityRead` port (J-SEC-002/#35), verifying the
-peer against the trust bundle → the negotiated session keys install into **kTLS**
-on the workload's socket (`setsockopt TLS_TX/TLS_RX`) → the agent **exits the data
-path**. The wire then carries TLS 1.3 Application Data records, in-kernel.
+**What**: For **host-socket workloads** (process via the exec driver in v1 — TCP
+terminates in the HOST kernel), the Overdrive node agent turns a plaintext TCP
+connection into a **kernel-encrypted TLS 1.3 session carrying the workload's own
+SVID**, **bidirectionally**, with the **workload holding nothing** and the **agent
+agent-light** (out of the per-byte path via in-kernel splice — not a userspace
+proxy copying every byte). The mechanism (ADR-0069, the universal agent-light L4
+proxy): the workload's connection is **transparently intercepted** to an
+agent-owned leg (outbound: `cgroup_connect4`-rewrite to the agent's plaintext leg
+F; inbound: TPROXY to the agent's `IP_TRANSPARENT` leg C); the agent drains the
+pre-arm plaintext **losslessly** into a bounded userspace buffer and performs a
+**rustls TLS 1.3 handshake on its own peer-facing leg** (leg B as client / leg C
+as server) presenting the **held SVID** it reads via the `IdentityRead` port
+(J-SEC-002/#35) and verifying the peer against the trust bundle → the negotiated
+session keys install into **kTLS on the agent's peer-facing leg**
+(`setsockopt TLS_TX/TLS_RX`) → steady state is handed to the kernel (forward
+**agent-idle** sockmap egress redirect; return/deliver **agent-light** `splice`
+pump). The peer-facing wire then carries TLS 1.3 Application Data records,
+in-kernel.
 
 **Why** (J-SEC-003): so design principle 3 — "every packet carries cryptographic
 workload identity" — and principle 2 — "mTLS is in-kernel and undisableable" — are
@@ -47,31 +57,38 @@ ENFORCEMENT peer** of the mint(001)/hold(002) chain: 001 mints, 002 holds/reads,
 **003 encrypts the wire**.
 
 **Feature type**: Infrastructure / security primitive (D1) — no operator-facing
-verb this phase; the HONEST observables are TEST-tier (wire capture, `ss -K`,
-fail-closed negative test, race-window probe). Spans the dataplane (sockops +
-kTLS install), the node agent (rustls handshake), and the read of the
-`IdentityRead` port (`overdrive-core`).
+verb this phase; the HONEST observables are TEST-tier (wire capture on the
+peer-facing leg, `ss -tie` showing the kTLS ULP, fail-closed negative test,
+agent-light `strace`). Spans the dataplane (the intercept programs + kTLS arm +
+the splice pumps), the node agent (rustls handshake + the per-connection
+lifecycle), and the read of the `IdentityRead` port (`overdrive-core`).
 
-**Scope boundary — host-socket ONLY** (corrected whitepaper §7 "one identity
-model, two enforcement mechanisms"):
+**Scope boundary** — **RE-GROUNDED 2026-06-12 to ADR-0069** (the universal
+agent-light L4 proxy). ADR-0069 amended whitepaper §7/§8: the prior "one identity
+model, **two** enforcement mechanisms" framing collapses to **one** universal
+mechanism. v1 host-socket #26 is **process/exec ONLY and BIDIRECTIONAL** (outbound
++ inbound). The original DISCUSS table read "host-socket ONLY; #222 a SEPARATE
+feature; WASM in-scope" — corrected below:
 
-| In scope (#26) | Out of scope (referenced by issue #) |
+| In scope (#26 v1) | Out of scope (referenced by issue #) |
 |---|---|
-| Process (exec driver) — TCP in host kernel | Guest-stack: microVM / unikernel (TCP in GUEST kernel) → **#222** (host L4 tap proxy, SEPARATE feature) |
-| WASM (wasmtime, in-process host sockets) | In-place SVID rekey / TLS 1.3 KeyUpdate → **#229** (userspace rustls/ktls bridge gap; v1 = teardown+reconnect) |
-| | Certificate-rotation workflow → **#40** (depends on #39) |
-| | Revocation (CRL/OCSP) → Phase 5 · Multi-node → **#36** |
+| Process (exec driver) — TCP in host kernel — **the only workload kind in v1** | **Guest-stack** (microVM / unikernel, TCP in GUEST kernel) → **#222**, the **STAGED guest-stack intercept ADAPTER of the ONE universal proxy** (feeds the same `MtlsEnforcement` port from a tap/TPROXY/TC source) — **NOT a separate mechanism** (ADR-0069 folded #222 into #26) |
+| **BIDIRECTIONAL**: outbound (client, `cgroup_connect4` intercept) **+** inbound (server, TPROXY intercept → server-mTLS → splice-to-server) | **WASM as a distinct mTLS path** → NONE in v1 (only `ExecDriver` exists); WASM host-socket workloads are **auto-covered by the same proxy** when a WASM driver lands — a separate roadmap concern |
+| Authentication (chain-to-trust-bundle) + encryption (TLS 1.3 / kTLS), both directions, fail-closed | **Authorization** (allow/deny who-may-connect-to-whom) → BPF-LSM `socket_connect` **#27** fed by `policy_verdicts` **#38** (related **#49**) — a SEPARATE subsystem the proxy MUST NOT duplicate |
+| | **Intended-peer identity pinning** → **#178** (east-west SPIFFE-ID resolution; VIP path **#61**). v1 = chain-to-bundle authn **only**, NO intended-peer pinning (a valid-but-unintended SVID is NOT prevented; not "protected" until #178) |
+| | In-place SVID rekey / TLS 1.3 KeyUpdate → **#229** (v1 = teardown+reconnect); Certificate-rotation workflow → **#40** (depends on #39); Revocation (CRL/OCSP) → Phase 5; Multi-node → **#36**; in-band restart-survival + 1-socket density → tracked future optimization (ADR-0069 A1) |
 
-**Evidence base**: `docs/research/dataplane/transparent-mtls-recommended-architecture-research.md`
-(the recommended hybrid; host-socket vs guest-stack taxonomy — Finding 1),
-`.../sockops-mtls-ktls-installation-comprehensive-research.md` (rustls→kTLS
-mechanics; Gap-4 RESOLVED), `.../sockops-ktls-plaintext-race-window-research.md`
-(the race-window deep-dive + comparison matrix — the WS hypothesis),
-`.../ktls-sockops-cp-restart-survival-research.md` (CP-restart survival — feeds an
-error path), **ADR-0068** (pinned 6.18 LTS kernel; KeyUpdate kernel-ready /
-userspace-blocked), whitepaper §7/§8/§6 addendum, vision principles 2+3. Consumes
-the shipped `IdentityRead` port + `Arc<IdentityMgr>` (#35) and the `Ca` hierarchy +
-leaf key (#28, ADR-0063 D9).
+**Evidence base**: the **6 committed Tier-3 spike findings** under
+`docs/feature/transparent-mtls-host-socket/spike/` (the mechanism settled
+empirically on a real 7.0 kernel — verdict: proxy, lossless, no kernel patch),
+**ADR-0069** (the universal agent-light L4 proxy decision; folds #222 into #26),
+`docs/research/dataplane/transparent-mtls-recommended-architecture-research.md`
+(the host L4 transparent-mTLS proxy recommendation; host-socket vs guest-stack
+taxonomy), `.../sockops-mtls-ktls-installation-comprehensive-research.md`
+(rustls→kTLS mechanics), **ADR-0068** (pinned 6.18 LTS kernel; KeyUpdate
+kernel-ready / userspace-blocked → #229), whitepaper §7/§8/§6 addendum, vision
+principles 2+3. Consumes the shipped `IdentityRead` port + `Arc<IdentityMgr>` (#35)
+and the `Ca` hierarchy + leaf key (#28, ADR-0063 D9).
 
 ---
 
@@ -95,20 +112,23 @@ leaf key (#28, ADR-0063 D9).
 ## Wave: DISCUSS / [REF] JTBD One-liner
 
 **J-SEC-003** — *"Transparently encrypt every host-socket workload's traffic with
-its own SVID, in-kernel, with the platform out of the data path — no sidecar, no
-cleartext on the wire."* `relates_to: J-SEC-002`.
+its own SVID, in-kernel, both directions, via an agent-light L4 proxy the workload
+can't disable — no sidecar, no cleartext on the peer wire."* `relates_to: J-SEC-002`.
 
-> When a host-socket workload I run (process or WASM, TCP terminating in the host
-> kernel) opens a connection — and the platform already MINTS a forgery-proof SVID
-> (#28) and HOLDS it readable via `IdentityRead` (#35) — but NOTHING yet consumes
-> it on the wire, **I want** the platform to detect the connection in the kernel
-> (sockops), perform the TLS 1.3 handshake on the workload's behalf (rustls,
-> presenting the held SVID), install the session keys into kTLS on the workload's
-> own socket, and LEAVE THE DATA PATH — and close the plaintext race window
-> fail-closed — **so** principles 2 + 3 are operationally true ON THE WIRE for
-> host-socket workloads (provable by wire capture showing TLS 1.3 records), the
-> auth-session IS the data-session, encryption is in-kernel via kTLS, the agent is
-> out of the steady-state path, and a handshake against an absent/wrong SVID fails
+> When a host-socket workload I run (process via the exec driver, TCP terminating
+> in the host kernel) opens an outbound connection, OR an inbound connection
+> arrives at one of my server workloads — and the platform already MINTS a
+> forgery-proof SVID (#28) and HOLDS it readable via `IdentityRead` (#35) — but
+> NOTHING yet consumes it on the wire, **I want** the platform to transparently
+> intercept the connection to a node-local agent leg, perform the TLS 1.3
+> handshake on the workload's behalf (rustls, on the agent's own peer-facing leg,
+> presenting the held SVID), arm kTLS on the agent's leg, and hand steady state to
+> the kernel (forward agent-idle, return/deliver agent-light) — losslessly, with no
+> cleartext on the peer wire before encryption is armed — **so** principles 2 + 3
+> are operationally true ON THE WIRE for host-socket workloads (provable by wire
+> capture showing TLS 1.3 records, both directions), the auth-session IS the
+> data-session, encryption is in-kernel via kTLS, the agent is agent-light (not a
+> per-byte userspace proxy), and a handshake against an absent/wrong SVID fails
 > closed.
 
 **Authored in DISCUSS (no DIVERGE wave) — see `wave-decisions.md` § Risk.** Full
@@ -122,19 +142,22 @@ enforcement that completes the mint→hold→enforce chain).
 | Force | Statement | Scenario it seeds |
 |---|---|---|
 | **Push** | Identity is mintable (#28) + held/readable (#35) but NOTHING consumes it on the wire — principles 2/3 are aspirational until an enforcer ships. | Happy path: the wire carries TLS 1.3 records (US-MTLS-02/03). |
-| **Pull** | sockops detects → rustls handshake presents the held SVID → kTLS installs → agent exits → wire carries TLS 1.3, agent out of the path. | Happy path + "agent out of the data path" (US-MTLS-03). |
-| **Anxiety** | In-band sidecarless kTLS is unshipped; the plaintext race window may be unclosable. (Mitigated: spike FIRST; 6.18 pin removes kernel anxiety; documented Cilium fallback.) | The spike (US-MTLS-00); race-window probe (US-MTLS-04). |
-| **Habit** | Sidecar injection (Istio/Linkerd) / SPIRE Workload API (workload fetches its own SVID, userspace TLS). | "Workload holds NOTHING / is identity-unaware" (US-MTLS-02). |
+| **Pull** | transparent intercept → rustls handshake on the agent's leg presents the held SVID → kTLS arms on the agent's leg → kernel carries steady state (forward agent-idle, return/deliver agent-light) → peer wire carries TLS 1.3, agent out of the per-byte path. | Happy path + "agent agent-light, in-kernel" (US-MTLS-03). |
+| **Anxiety** | A sidecarless in-kernel mTLS mechanism is unshipped anywhere; will it actually compose on the real kernel without leaking cleartext? (Mitigated: 6 committed Tier-3 spikes settled it — proxy, lossless, no kernel patch, no race window; the 6.18 pin removes kernel anxiety; the composed walking skeleton (Slice 00) is the BLOCKING first gate.) | The composed walking skeleton (US-MTLS-00); fail-closed probe (US-MTLS-05). |
+| **Habit** | Sidecar injection (Istio/Linkerd) / SPIRE Workload API (workload fetches its own SVID, userspace TLS); ztunnel's per-byte userspace proxy. | "Workload holds NOTHING / is identity-unaware; agent is agent-light not a userspace proxy" (US-MTLS-02/03). |
 
 ---
 
-## Wave: DISCUSS / [REF] Brownfield Evaluation + Walking Skeleton (D2 — SPIKE-FIRST)
+## Wave: DISCUSS / [REF] Brownfield Evaluation + Walking Skeleton (D2 — COMPOSED PROXY WS)
 
 **This is a brownfield feature: a net-new ENFORCEMENT mechanism consuming
 already-shipped seams (the held SVID + trust bundle via `IdentityRead`, the CA
 hierarchy + leaf key). There is NO greenfield walking-skeleton proposal — and the
-walking skeleton is a SPIKE (D2), because the issue mandates a Tier-3 spike before
-the design locks.**
+walking skeleton is the COMPOSED PROXY WS (Slice 00, BLOCKING): the 6 committed
+Tier-3 spikes already settled the mechanism (verdict: proxy) and de-risked every
+primitive in isolation, but did NOT prove the COMPOSITION under a real transparent
+intercept (increment-e RST'd on the intercept lifecycle), so the first DELIVER
+slice is a composed Tier-3 acceptance test that proves they compose.**
 
 | Already shipped (consumed, not rebuilt) | Where | This feature adds |
 |---|---|---|
@@ -142,36 +165,38 @@ the design locks.**
 | `Arc<IdentityMgr>` held-SVID map + hydrated `TrustBundle` | `overdrive-control-plane` (#35) | Nothing — it reads, never mutates the held set |
 | `SvidMaterial` (cert PEM/DER + serial + spiffe_id + node-held `leaf_key`, ADR-0063 D9, redacted Debug) | `overdrive-core` (#28) | The material it presents in the rustls handshake (workload never holds it) |
 | `Ca` hierarchy (Root → per-node Intermediate → workload SVID) + `trust_bundle()` | `overdrive-core` (#28, ADR-0063) | Verifies the peer against `current_bundle()` |
-| Pinned 6.18 LTS kernel (in-kernel TLS 1.3 TX+RX + `CONFIG_NET_HANDSHAKE`) | ADR-0068 | The kernel the spike + enforcement run on (no version anxiety) |
-| eBPF + bpffs-pin discipline (`pinning = ByName`, `/sys/fs/bpf/overdrive/`) | `.claude/rules/development.md` | The sockops program + (link/map) pinning the enforcement attaches |
+| Pinned 6.18 LTS kernel (in-kernel TLS 1.3 TX+RX + `CONFIG_NET_HANDSHAKE`) | ADR-0068 | The kernel the proxy runs on (no version anxiety) |
+| eBPF + bpffs-pin discipline (`pinning = ByName`, `/sys/fs/bpf/overdrive/`) | `.claude/rules/development.md` | The `cgroup_connect4`/sockops/`sk_skb` programs + (link/map) pinning the proxy attaches |
+| `cgroup_connect4_service` program family + the connect4-rewrite shape | `overdrive-bpf` | The outbound transparent-intercept program (reuses the rewrite shape) |
 
-**Walking skeleton (D2 — SPIKE-FIRST, Slice 00)**: a Tier-3 spike on the 6.18
-Lima/LVH kernel that proves the full handoff for **ONE process→process flow**:
-`sockops ACTIVE_ESTABLISHED detected → agent acquires the workload's socket
-(pidfd_getfd) → rustls TLS 1.3 handshake presenting the held SVID (read via
-IdentityRead) and verifying the peer → kTLS install (setsockopt TLS_TX/TLS_RX) →
-agent exits → tcpdump shows TLS 1.3 Application Data records on the wire`, AND the
-plaintext race window is closed fail-closed (no cleartext byte egresses before
-kTLS install). **The spike's observable IS the wire capture for one flow.**
+**Walking skeleton (Slice 00, BLOCKING)**: a COMPOSED Tier-3 acceptance test on the
+6.18 Lima/LVH kernel that proves the full proxy path holds end-to-end with **NO RST
+post-arm**, for ONE composed flow per direction —
+`transparent intercept (outbound cgroup_connect4-rewrite to leg F / inbound TPROXY
+to leg C) → agent drains pre-arm plaintext losslessly → rustls TLS 1.3 handshake on
+the agent's peer-facing leg (read held SVID via IdentityRead, verify the peer) →
+kTLS arm on the agent's leg → post-arm bidirectional multi-record transfer →
+tcpdump shows TLS 1.3 Application Data records on the peer-facing wire`, under BOTH
+normal AND traced/delayed timing. **The observable IS the lossless, RST-free, TLS
+1.3-on-the-peer-wire capture for both halves of one composed flow.**
 
-**Named falsification** (load-bearing): if the handoff cannot be made race-free for
-one process flow on our kernel, in-band sidecarless kTLS is **disproven for
-Overdrive** → fall back to the **Cilium model** (out-of-band auth + separate
-encryption, or a userspace proxy that stays in the data path, à la Architecture C).
-The spike is the cheapest place to learn the riskiest assumption; every downstream
-slice is additive on a proven (or fallen-back) mechanism.
+**Named risk** (load-bearing): the spikes proved the primitives in isolation but
+increment-e's composed harness RST'd on the intercept lifecycle. The composition
+is NOT yet demonstrated end-to-end; Slice 00 closes that gap and is the BLOCKING
+first slice. Every downstream slice is additive on the proven composition.
 
 ---
 
 ## Wave: DISCUSS / [REF] Scope Assessment (Elephant Carpaccio Gate — Phase 1.5)
 
-**Verdict: PASS — right-sized as ONE feature, sliced into 1 spike + 5 thin
-vertical cuts.** Full signal table + the DIVERGE-absence risk are in
-`wave-decisions.md` § Scope Assessment / § Risk. Zero oversized signals fire
-(5 stories + 1 spike; 1 bounded context; spike-thinned WS; ~7–9 days; 1 coherent
-outcome). The feature is already correctly carved from the guest-stack path (#222)
-and the rekey/rotation/revocation/multi-node concerns (#229/#40/Phase-5/#36); it is
-NOT split further.
+**Verdict: PASS — right-sized as ONE feature, sliced into 6 thin vertical cuts
+(Slice 00 = the BLOCKING composed proxy walking skeleton).** Full signal table +
+the DIVERGE-absence risk are in `wave-decisions.md` § Scope Assessment / § Risk.
+Zero oversized signals fire (6 slices; 1 bounded context; composed WS thinned to
+one flow per direction; ~7–9 days; 1 coherent outcome). The feature is already
+correctly carved from the guest-stack ADAPTER (#222, staged) and the
+rekey/rotation/revocation/multi-node concerns (#229/#40/Phase-5/#36); it is NOT
+split further.
 
 ---
 
@@ -179,46 +204,45 @@ NOT split further.
 
 > Material honesty: there is NO operator GUI/CLI surface for this feature. The
 > "TUI mockups" below are the **honest observable surfaces** — the wire capture
-> (`tcpdump`), the socket-diag (`ss -K`), and the test runner — which is what Sam
+> (`tcpdump`), the socket-diag (`ss -tie`), and the test runner — which is what Sam
 > actually looks at. CLI should feel like CLI; a security primitive's surface is
 > its evidence, not a dashboard.
 
 ### Horizontal flow (the complete journey, all backbone activities)
 
 ```
-[Trigger: host-socket    [A. Detect the       [B. Handshake on        [C. Install kTLS,      [D. Prove on the wire]
- workload opens a TCP     connection in        the workload's          agent exits the
- connection]              the kernel]          behalf, present SVID]    data path]
+[Trigger: host-socket    [A. Intercept to      [B. Handshake on        [C. Arm kTLS on the    [D. Prove on the wire]
+ workload opens/accepts   the agent's leg]      the agent's leg,        agent's leg, kernel
+ a TCP connection]                              present held SVID]       carries steady state]
         |                       |                       |                      |                      |
         v                       v                       v                      v                      v
-  workload write()        sockops ACTIVE_       agent: pidfd_getfd      setsockopt(TCP_ULP    tcpdump on veth:
-  (process / WASM)         ESTABLISHED fires    -> rustls TLS 1.3       'tls') + TLS_TX/RX     TLS 1.3 App Data
-                           synchronously        handshake, presents     on the WORKLOAD's      records (0x17),
-                           (before connect()    the HELD SVID (read     own socket; agent      NOT cleartext;
-                           returns)             via IdentityRead),      EXITS the data path    ss -K: kTLS ULP
-                                                verifies peer vs                                installed
-                                                trust bundle
+  workload connect()      OUTBOUND: cgroup_     agent: rustls TLS 1.3   setsockopt(TCP_ULP    tcpdump on veth:
+  (process/exec) or        connect4 rewrite     handshake on its OWN    'tls')+TLS_TX/RX on    TLS 1.3 App Data
+  inbound arrival          to agent leg F;      peer-facing leg (B      the AGENT's leg;       records (0x17) on
+                           INBOUND: TPROXY to   client / C server),     forward agent-IDLE     the PEER leg, NOT
+                           agent leg C +        presents the HELD SVID   sockmap egress         cleartext; ss -tie:
+                           getsockname orig-dst (read via IdentityRead), redirect; return/      kTLS ULP on the
+                           agent drains pre-arm verifies peer vs        deliver agent-LIGHT     agent's leg
+                           plaintext LOSSLESSLY trust bundle             splice pump
   Feels: (workload is     Feels(Sam): focused  Feels(Sam): focused      Feels(Sam):            Feels(Sam):
-   identity-unaware,       'does the kernel     'does it present the     reassured 'ss -K       CONFIDENT 'a capture
-   holds nothing)          catch it before      WORKLOAD's identity,     shows kTLS; the        I ran shows TLS 1.3 —
-                           the workload can      not the node's?'        agent left; kernel     principle made real'
-                           write?'                                       does the crypto'
-  Artifacts: workload     Artifacts: sockops    Artifacts: held         Artifacts: workload    Artifacts: TLS 1.3
-   socket fd               program, the          SvidMaterial +          socket fd, kTLS         records on the wire,
-                           ESTABLISHED event     TrustBundle (read       crypto_info             ss -K ULP state
-                                                 via IdentityRead)        (auth-session ==
-                                                                          data-session)
+   identity-unaware,       'is the traffic      'does it present the     reassured 'ss -tie     CONFIDENT 'a capture
+   holds nothing)          captured before it   WORKLOAD's identity,     shows kTLS on the      I ran shows TLS 1.3 —
+                           reaches the peer      not the node's? both    agent's leg; the       principle made real,
+                           un-encrypted?'        client AND server?'     kernel does crypto'    both directions'
+  Artifacts: agent-       Artifacts: cgroup_    Artifacts: held         Artifacts: agent's     Artifacts: TLS 1.3
+   owned leg (F / C)       connect4/TPROXY       SvidMaterial +          leg fd, kTLS           records on the peer
+                           programs, recovered   TrustBundle (read       crypto_info            wire, ss -tie ULP
+                           orig-dst, lossless    via IdentityRead)        (auth-session ==       state, strace
+                           pre-arm buffer                                 data-session)          agent-idle/-light
 
-  >>> RACE-WINDOW GATE (load-bearing): between B's ESTABLISHED and C's kTLS install, a gate armed before
-      connect()/accept() returns keeps the wire FAIL-CLOSED for confidentiality (no cleartext byte reaches
-      the wire before kTLS is armed). The gate MECHANISM (sk_msg DROP-until-armed vs sockmap redirect vs an
-      out-of-tree write-block) is a DESIGN choice the spike informs -- NOT pinned in DISCUSS. Residual
-      data-loss window (writes during the 10-100ms agent turnaround dropped, not buffered) -> connection
-      RESET if drops>0, request-first protocols retry. The 6.18 pin makes an out-of-tree write-block
-      (lossless) a DESIGN option.
+  >>> LOSSLESS HANDSHAKE WINDOW: between A's intercept and C's kTLS arm, the agent captures the workload's
+      pre-arm plaintext in a bounded USERSPACE BUFFER and flushes it as the first application_data after the
+      handshake — fail-closed AND LOSSLESS for every protocol kind (no dropped pre-arm bytes, no RESET, no
+      race window). No in-kernel gate, no write-block, no kernel patch. The buffer is bounded (F4 limits).
 
-  >>> SPIKE-FIRST (Slice 00): the ENTIRE flow above is proven for ONE process->process flow on the 6.18
-      kernel BEFORE the design locks. Falsification -> fall back to Cilium out-of-band-auth + separate encryption.
+  >>> COMPOSED PROXY WS (Slice 00, BLOCKING): the ENTIRE flow above is proven end-to-end for ONE composed flow
+      per direction on the 6.18 kernel, with NO RST post-arm, under normal AND delayed timing — BEFORE any
+      other slice lands. The 6 committed spikes settled the mechanism (proxy); Slice 00 proves it composes.
 ```
 
 ### Emotional arc (Sam — confidence-building pattern: skeptical → reassured → confident)
@@ -227,50 +251,52 @@ NOT split further.
   skeptical/                                                                          confident/
   threat-modelling                                                                    relieved
        |                                                                                  ^
-       |  "in-band sidecarless kTLS is unshipped;                                         |
-       |   the race window may be unclosable —          reassured                         |
-       |   show me a packet capture"                    incrementally                     |
+       |  "a sidecarless in-kernel mTLS                                                   |
+       |   mechanism is unshipped — does it             reassured                         |
+       |   compose? show me a packet capture"           incrementally                     |
        |                                       _____________________________             |
-       |                                      /  spike proves one flow;     \             |
-       |        SPIKE (Slice 00)             /   ss -K shows kTLS; no        \   wire      |
-       v____________________________________/    cleartext before install;   \__capture___|
-        Slice 00          Slice 01-02          a wrong SVID fails closed       Slice 03-05
-       (riskiest          (sockops detect +    (Slice 04 race-window probe,    (the agent is out
-        assumption        agent handshake,     Slice 03 fail-closed)           of the path; tcpdump
-        cheapest to        held SVID presented)                                shows TLS 1.3)
-        learn)
+       |                                      /  composed WS proves one     \             |
+       |     COMPOSED WS (Slice 00)          /   flow each way, no RST;      \   wire      |
+       v____________________________________/    ss -tie shows kTLS; absent  \__capture___|
+        Slice 00          Slice 01-02          /missing/untrusted creds       Slice 03-05
+       (the composition   (transparent          fail closed                   (the agent is
+        the spikes did    intercept + agent                                    agent-light;
+        not prove)        handshake, both roles)                               tcpdump TLS 1.3,
+                                                                               both directions)
 ```
 
 No jarring transitions: confidence builds progressively (each slice's observable
-is a small win Sam verifies himself with `tcpdump` / `ss -K`); the error/race
-paths guide to resolution (fail-closed + reset-and-retry), not added anxiety; the
-spike de-risks the peak-tension assumption (unshipped in-band kTLS) FIRST.
+is a small win Sam verifies himself with `tcpdump` / `ss -tie`); the error paths
+guide to resolution (fail-closed + re-handshake-on-reconnect), not added anxiety;
+the composed walking skeleton de-risks the peak-tension assumption (does the proxy
+compose under a real intercept?) FIRST.
 
 ### Honest observable surfaces (the "what Sam sees")
 
 ```
 +-- Wire capture (TEST tier — the headline observable) ----------------------+
-| $ tcpdump -i overdrive-veth0 -X 'tcp port 8443'                            |
+| $ tcpdump -i overdrive-veth0 -X 'tcp port 8443'   # on the PEER-facing leg |
 |   ... IP a.b.c.d.54321 > w.x.y.z.8443: ...                                 |
 |     0x0000:  ... 1703 0304 00a7  ...   <-- TLS 1.3 App Data (0x17 03 03)   |
 |   NO cleartext "GET /payments HTTP/1.1" anywhere in the capture            |
 +----------------------------------------------------------------------------+
 
-+-- Socket diag (kTLS ULP installed) ----------------------------------------+
-| $ ss -K  (or: ss -ti, ulp tls)                                            |
-|   tcp ESTAB ... ulp tls  <-- the kTLS Upper Layer Protocol is installed    |
++-- Socket diag (kTLS ULP installed on the AGENT's leg) ---------------------+
+| $ ss -tie                                                                  |
+|   tcp ESTAB ... tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw    |
+|     <-- the kTLS ULP is installed on the agent's peer-facing leg           |
 +----------------------------------------------------------------------------+
 
-+-- Fail-closed negative test (wrong/absent SVID) ---------------------------+
-| flow with absent/wrong SVID -> NO TLS 1.3 App Data on the wire AND no      |
-| cleartext -> connection fails closed (rustls aborts / agent refuses)       |
++-- Fail-closed negative test (absent SVID / missing-or-untrusted peer) -----+
+| flow with absent SVID (outbound) or nocert/wrongca (inbound) -> NO TLS 1.3 |
+| App Data on the peer wire AND no cleartext -> fails closed (rustls aborts / |
+| agent refuses); inbound delivers 0 bytes to the server workload            |
 +----------------------------------------------------------------------------+
 
-+-- Race-window probe (no cleartext before kTLS install) --------------------+
-| write("PLAINTEXT_PROBE") immediately on connect() return, kTLS install     |
-| deliberately delayed 500ms -> tcpdump shows EITHER TLS 1.3 records OR zero  |
-| app bytes -> NEVER the string "PLAINTEXT_PROBE" on the wire; drop-counter   |
-| signals whether the window fired                                           |
++-- Agent-light cost proof (strace) -----------------------------------------+
+| FORWARD: zero per-byte syscalls (agent-idle sockmap egress redirect, 15/15)|
+| RETURN/DELIVER: only splice/ppoll, ~1 splice per TLS record (agent-light)  |
+|   -> the agent is NOT a per-byte userspace proxy (not the ztunnel shape)   |
 +----------------------------------------------------------------------------+
 ```
 
@@ -287,9 +313,9 @@ truth and integration risk. (Companion to
 |---|---|---|---|
 | **SVID / `SvidMaterial`** (cert + leaf key presented in the handshake) | J-SEC-002/#35's `Arc<IdentityMgr>` held map, read via `IdentityRead::svid_for(&AllocationId)` — **#26 is a READER, never an issuer** | the agent's rustls `ClientConfig`/`ServerConfig` (cert + leaf key for the handshake) | **HIGH** — if #26 re-issues or holds its own copy instead of reading the held map, it duplicates #35's source of truth and the credential drifts on rotation/drop. #26 MUST read via `IdentityRead`. |
 | **`TrustBundle`** (peer-verification anchor) | J-SEC-002/#35's `IdentityRead::current_bundle()` (hydrated from `Ca::trust_bundle()`) | the agent's rustls peer-verification | **HIGH** — a stale bundle accepts a revoked/expired peer or rejects a valid one. Single source = the hydrated bundle behind `IdentityRead`; #26 never caches its own. |
-| **workload socket fd** (the object kTLS installs on) | the workload's own socket — process: `pidfd_getfd` from the sockops-triggered event; WASM: in-process host fd | `setsockopt(TCP_ULP/TLS_TX/TLS_RX)`; the kTLS context (`icsk_ulp_data`) | **HIGH** — fd OWNERSHIP is load-bearing for restart survival (kTLS state is socket-owned; survives an agent restart iff the workload owns the fd). A DESIGN decision the spike's handoff targets (workload-owns-fd). |
-| **kTLS `crypto_info`** (negotiated TLS 1.3 keys / IV / record seq) | the rustls handshake's extracted secrets — **auth-session == data-session** | `setsockopt(TLS_TX/TLS_RX)` on the workload socket; observable as TLS 1.3 records (tcpdump) + the kTLS ULP (`ss -K`) | **HIGH** — the SAME session that authenticated must carry the data; a mismatch breaks the "auth-session is the data-session" property the whole design rests on. |
-| **`AllocationId` / `SpiffeId`** (which workload's identity to present) | the `SpiffeId` newtype + the allocation lifecycle (`spiffe://overdrive.local/job/<name>/alloc/<id>`, J-SEC-001 derivation) | the `IdentityRead` lookup key; the SAN the peer sees in the presented SVID | **MEDIUM** — the lookup key must match the held-map key (#35's `AllocationId`); a mismatch reads `None` and (correctly) fails the handshake closed. |
+| **agent's peer-facing leg** (the object kTLS arms on) | the agent's own dialed/accepted socket (leg B outbound / leg C inbound) — NOT the workload's socket | `setsockopt(TCP_ULP/TLS_TX/TLS_RX)`; the kTLS context (`icsk_ulp_data`); the forward sockmap redirect; the return/deliver splice pump | **HIGH** — kTLS lives on the AGENT's leg, not the workload's socket — that distinction IS the proxy model. The agent's kTLS-RX leg MUST be a PLAIN (no-psock) leg for the splice pump to work (a psock fights kTLS RX). The workload holds a plaintext socket to the agent (leg F / leg S) and nothing else. |
+| **kTLS `crypto_info`** (negotiated TLS 1.3 keys / IV / record seq) | the rustls handshake's extracted secrets — **auth-session == data-session** | `setsockopt(TLS_TX/TLS_RX)` on the agent's leg; observable as TLS 1.3 records (tcpdump on the peer leg) + the kTLS ULP (`ss -tie`) | **HIGH** — the SAME session that authenticated must carry the data; a mismatch breaks the "auth-session is the data-session" property the whole design rests on. |
+| **`AllocationId` / `SpiffeId`** (which workload's identity to present) | the `SpiffeId` newtype + the allocation lifecycle (`spiffe://overdrive.local/job/<name>/alloc/<id>`, J-SEC-001 derivation); inbound, the SERVER workload's alloc recovered from the TPROXY orig-dst via `getsockname()` | the `IdentityRead` lookup key; the SAN the peer sees in the presented SVID | **MEDIUM** — the lookup key must match the held-map key (#35's `AllocationId`); a mismatch reads `None` and (correctly) fails the handshake closed. |
 
 **Integration checkpoints** (validated before DESIGN handoff):
 
@@ -297,80 +323,89 @@ truth and integration risk. (Companion to
    issuance, no #26-local cache) — single source of truth preserved across #35/#26.
 2. The kTLS keys installed are the **rustls handshake's** extracted secrets
    (auth-session == data-session) — not a separately-negotiated session.
-3. The sockops gate is inserted **synchronously at ESTABLISHED** (before
-   connect()/accept() returns) — the race-window fail-closed property.
+3. The pre-arm plaintext is captured **losslessly** in the agent's bounded
+   userspace buffer and flushed after the handshake — no cleartext on the peer
+   wire before encryption is armed, no dropped bytes, no RESET (the fail-closed
+   AND lossless confidentiality property).
 
 ---
 
 ## Wave: DISCUSS / [REF] Story Map
 
 **Persona**: Sam (platform/security engineer) · **Goal**: host-socket workloads
-carry TLS 1.3 on the wire with their own SVID, in-kernel, agent out of the path —
-provable by a packet capture, with no cleartext leak and fail-closed handshakes.
+carry TLS 1.3 on the peer-facing wire with their own SVID, in-kernel, both
+directions, agent agent-light (not a per-byte userspace proxy) — provable by a
+packet capture, with no cleartext leak and fail-closed handshakes.
 
 ### Backbone (platform activities, left → right)
 
-| A. Detect the connection in the kernel | B. Handshake on the workload's behalf | C. Install kTLS, agent exits | D. Prove & guard on the wire |
+| A. Transparently intercept to the agent's leg | B. Handshake on the agent's leg (client + server) | C. Arm kTLS on the agent's leg, kernel carries steady state | D. Prove & guard on the wire |
 |---|---|---|---|
-| sockops ACTIVE/PASSIVE_ESTABLISHED detect (S00 spike, S01) | rustls TLS 1.3 handshake (S00 spike, S02) | kTLS install on the workload socket (S00 spike, S03) | tcpdump shows TLS 1.3 records (S00 spike, S03) |
-| acquire the workload socket fd (S00 spike, S01) | present the held SVID via IdentityRead (S02) | agent EXITS the data path (S03) | fail-closed on absent/wrong SVID (S04) |
-| gate the race window (S04) | verify peer vs trust bundle (S02) | (restart: new conns re-handshake) (S05) | no cleartext before kTLS install (S04) · restart re-handshake; in-flight survival spike-gated (S05) |
+| outbound `cgroup_connect4`-rewrite to leg F; inbound TPROXY to leg C + `getsockname` orig-dst (S00, S01) | rustls TLS 1.3 handshake on the agent's leg, both roles (S00, S02) | kTLS arms on the agent's leg B / leg C (S00, S03/S04) | tcpdump shows TLS 1.3 records on the peer leg, both ways (S00, S03/S04) |
+| drain pre-arm plaintext losslessly; agent owns the leg (S00, S01) | present the held SVID via IdentityRead (S02) | forward agent-idle splice; return/deliver agent-light splice (S03/S04) | fail-closed on absent SVID / nocert / wrongca (S05) |
+| agent's own leg-B dial not re-intercepted; workload can't self-exempt (S01, S05) | verify peer vs trust bundle (S02) | (restart: new connections re-handshake) | resource limits + pump supervision + honest authn boundary (S05) |
 
-### Walking Skeleton (thinnest end-to-end, all activities — SPIKE-FIRST)
+### Walking Skeleton (thinnest end-to-end, all activities — COMPOSED PROXY WS, BLOCKING)
 
-**Slice 00** (the spike): for ONE process→process flow on the 6.18 kernel, prove
-the full A→B→C→D handoff (sockops detect → fd acquire → rustls handshake presenting
-the held SVID → kTLS install → agent exits → tcpdump shows TLS 1.3 records),
-race-free. The minimum cut that touches every backbone activity, on one flow.
-Falsification → Cilium fallback.
+**Slice 00** (the composed proxy WS, BLOCKING): for ONE composed flow per direction
+on the 6.18 kernel, prove the full A→B→C→D path holds end-to-end with **NO RST
+post-arm** (transparent intercept → drain pre-arm plaintext losslessly → rustls
+handshake on the agent's leg presenting the held SVID → kTLS arm → post-arm
+bidirectional multi-record transfer → tcpdump shows TLS 1.3 records), under BOTH
+normal AND traced/delayed timing. The minimum cut that touches every backbone
+activity, one composed flow each way. The 6 committed spikes settled the mechanism;
+this proves it composes (increment-e RST'd on the intercept lifecycle).
 
-### Release 1 (the productionised happy path past the spike)
+### Release 1 (the productionised happy path past the walking skeleton)
 
-**Slice 01** (sockops detection + fd acquisition, productionised),
-**Slice 02** (agent rustls handshake presenting the held SVID via IdentityRead),
-**Slice 03** (kTLS install + agent exits + wire-capture acceptance). Targets the
-North-Star observable: the wire carries TLS 1.3 records for host-socket flows.
+**Slice 01** (transparent intercept + leg-acquire, both directions, + the
+intercept-recursion exemption mechanism), **Slice 02** (agent rustls handshake on
+its peer-facing leg presenting the held SVID via IdentityRead, client AND server
+roles), **Slice 03** (OUTBOUND enforce: kTLS arms on leg B + forward agent-idle
+splice + return agent-light splice + wire capture), **Slice 04** (INBOUND enforce:
+orig-dst → server-mTLS → kTLS-RX → agent-light splice-to-server). Targets the
+North-Star observable: the peer-facing wire carries TLS 1.3 records, both directions.
 
-### Release 2 (the guards: fail-closed + race-window + durability)
+### Release 2 (the guardrails: fail-closed + limits + supervision + honest boundary)
 
-**Slice 04** (handshake fail-closed on absent/wrong SVID + no-cleartext-before-kTLS
-race-window probe), **Slice 05** (CP/agent-restart survival of in-flight kTLS +
-new-connection re-handshake; the WASM-in-process variant). Targets the guardrail
-observables (fail-closed, no-cleartext, restart-survival).
+**Slice 05** (fail-closed on absent SVID / nocert / wrongca with cause-distinct
+reasons + the F4/F7 resource limits at concrete values + F6 pump supervision + the
+F5 intercept-exemption negatives + the honest F1 authn-vs-authz boundary). Targets
+the guardrail observables (fail-closed, no leak, no evade, honest claim).
 
-### Slice list (each = one ≤1-day vertical cut; Slice 00 = ~2-day spike)
+### Slice list (each = one ≤1–1.5-day vertical cut; Slice 00 = the BLOCKING composed WS)
 
 | Slice | Stories | Learning hypothesis (disproves X if it fails) | Brief |
 |---|---|---|---|
-| 00 (**walking skeleton — SPIKE**) | US-MTLS-00 | in-band sidecarless kTLS is achievable race-free on the 6.18 kernel for ONE process flow: sockops→pidfd_getfd→rustls(present held SVID)→kTLS install→agent exits→tcpdump shows TLS 1.3, no cleartext before install. **FAIL → Cilium out-of-band-auth + separate-encryption fallback** | `slices/slice-00-spike-inband-ktls-one-flow.md` |
-| 01 | US-MTLS-01 | sockops detects a host-socket ESTABLISHED transition synchronously (before the workload can write) and the agent acquires the workload's socket fd (process: pidfd_getfd) — productionised from the spike | `slices/slice-01-sockops-detect-and-acquire-fd.md` |
-| 02 | US-MTLS-02 | the agent performs the rustls TLS 1.3 handshake presenting the HELD SVID (read via IdentityRead) and verifying the peer vs the trust bundle — the workload holds nothing / is identity-unaware | `slices/slice-02-agent-handshake-present-held-svid.md` |
-| 03 | US-MTLS-03 | the negotiated session keys install into kTLS on the workload's socket (auth-session == data-session), the agent EXITS the data path, and tcpdump shows TLS 1.3 records (ss -K shows the ULP) | `slices/slice-03-ktls-install-agent-exits-wire-capture.md` |
-| 04 | US-MTLS-04 | a handshake against an absent/wrong SVID fails closed (no cleartext) AND no cleartext byte egresses before kTLS install (race-window probe, fail-closed for confidentiality) | `slices/slice-04-fail-closed-and-race-window.md` |
-| 05 | US-MTLS-05 | after a node-agent restart, new connections re-handshake and re-install kTLS (the unconditional Phase-2 promise) and the WASM-in-process variant works identically; in-flight kTLS survival across the restart is spike/DESIGN-gated (holds IFF workload-owns-fd + bpffs-pinned link/maps — not an unconditional Phase-2 AC) | `slices/slice-05-restart-survival-and-wasm-variant.md` |
+| 00 (**composed proxy walking skeleton — BLOCKING**) | US-MTLS-00 | the agent-light L4 proxy COMPOSES under a real transparent intercept (outbound `cgroup_connect4` / inbound TPROXY) → pre-arm capture → handshake on the agent's leg → kTLS arm → post-arm bidirectional multi-record transfer holds with NO RST, under normal AND delayed timing. **FAIL → the composition does not hold; every later slice is blocked until the RST is engineered around** | `slices/slice-00-composed-proxy-walking-skeleton.md` |
+| 01 | US-MTLS-01 | the platform transparently intercepts the workload's outbound connect (`cgroup_connect4`-rewrite to leg F) AND inbound arrival (TPROXY to leg C + `getsockname` orig-dst) to an agent-owned leg, drains the outbound pre-arm plaintext losslessly, and keeps the agent's own leg-B dial from recursing (the bypass agent-private) | `slices/slice-01-transparent-intercept-and-leg-acquire.md` |
+| 02 | US-MTLS-02 | the agent performs the rustls TLS 1.3 handshake on its peer-facing leg presenting the HELD SVID (read via IdentityRead) and verifying the peer vs the trust bundle — as CLIENT (leg B) and as SERVER (leg C, REQUIRE+VERIFY the client SVID) — the workloads hold nothing | `slices/slice-02-agent-handshake-present-held-svid.md` |
+| 03 | US-MTLS-03 | OUTBOUND enforce: the negotiated secrets arm kTLS on the agent's leg B (auth-session == data-session), forward is agent-idle (sockmap egress redirect → kTLS-TX) and return is agent-light (`splice` on a plain kTLS-RX leg), and tcpdump shows TLS 1.3 records on the peer wire (ss -tie shows the ULP) | `slices/slice-03-outbound-enforce-ktls-splice-wire-capture.md` |
+| 04 | US-MTLS-04 | INBOUND enforce: orig-dst selects the server SVID → server-mTLS (REQUIRE+VERIFY the client SVID) → kTLS-RX arm on leg C → agent-light `splice` delivers byte-exact plaintext to the identity-unaware server workload, while the client-facing wire carries TLS `0x17` ciphertext only | `slices/slice-04-inbound-enforce-server-mtls-ktls-rx-splice.md` |
+| 05 | US-MTLS-05 | the encryption cannot be bypassed and the boundary is honest: absent/missing/untrusted creds fail closed cause-distinct (both directions), the F4/F7 resource limits + F6 pump supervision hold at their concrete values with no leak, the intercept cannot be self-exempted (F5), and v1 is exactly chain-to-bundle authn — NO intended-peer pinning (the #178 upgrade) | `slices/slice-05-fail-closed-limits-supervision-authn-boundary.md` |
 
 ---
 
 ## Wave: DISCUSS / [REF] Priority Rationale
 
-Execution order = **riskiest assumption first** (the spike), then the **happy-path
-dependency chain** (detect → handshake → install/prove), then the **guards**
-(fail-closed/race-window, then durability). Per Value × Urgency / Effort with
+Execution order = **the composition first** (the blocking walking skeleton), then
+the **happy-path dependency chain** (intercept → handshake → outbound enforce →
+inbound enforce), then the **guardrails**. Per Value × Urgency / Effort with
 Walking-Skeleton > Riskiest-Assumption > Highest-Value tie-breaking.
 
 | Order | Slice | Why this position |
 |---|---|---|
-| 1 | S00 (spike) | **Riskiest assumption + walking skeleton.** Does in-band sidecarless kTLS work race-free on our kernel AT ALL? If the handoff cannot be made race-free for one process flow, the entire in-band mechanism is wrong and the design must adopt the Cilium fallback. Cheapest place to learn it; everything downstream is moot if it fails. Urgency 5 (derisks the fatal assumption). |
-| 2 | S01 | Depends on S00 (productionises the sockops-detect + fd-acquire the spike proved). First step of the happy-path chain; the gate insertion point the race-window guard (S04) builds on. |
-| 3 | S02 | Depends on S01 (needs the acquired fd). The handshake that presents the HELD SVID via `IdentityRead` — the integration seam with #35. Moderate uncertainty (rustls + reading a shipped port). |
-| 4 | S03 | Depends on S02 (needs the handshake's extracted secrets). The kTLS install + agent-exit + the **North-Star wire-capture observable** (TLS 1.3 on the wire). Highest value (it IS the headline). |
-| 5 | S04 | Depends on S03 (needs the install path to gate). The two guardrails — fail-closed on wrong/absent SVID, no-cleartext-before-install. High value (the security invariants), moderate effort (the gate + negative tests). |
-| 6 | S05 | Depends on S03 (needs in-flight kTLS sessions to survive). Lowest mechanism uncertainty (additive durability + the WASM variant on a proven path) but carries the fd-ownership-for-restart caveat. Resolves the restart-survival error path last so the durability surface is stable. |
+| 1 | S00 (composed WS) | **Riskiest assumption + walking skeleton.** Does the agent-light L4 proxy COMPOSE under a real transparent intercept AT ALL? The spikes proved the primitives in isolation but increment-e's composed harness RST'd on the intercept lifecycle. If the composition does not hold (post-arm RST) every later slice is blocked. Cheapest place to learn it. Urgency 5 (derisks the fatal assumption). BLOCKING. |
+| 2 | S01 | Depends on S00 (productionises the transparent intercept + leg-acquire the WS composed). First step of the happy-path chain; the intercept-exemption mechanism the F5 negatives (S05) build on. |
+| 3 | S02 | Depends on S01 (needs the agent-acquired leg + the recovered inbound orig-dst). The handshake on the agent's leg that presents the HELD SVID via `IdentityRead`, both roles — the integration seam with #35. Moderate uncertainty (rustls + reading a shipped port). |
+| 4 | S03 | Depends on S02 (needs the handshake's extracted secrets). OUTBOUND enforce: kTLS arm on leg B + forward agent-idle splice + return agent-light splice + the **North-Star wire-capture observable** (TLS 1.3 on the peer wire). Highest value (it IS the headline). |
+| 5 | S04 | Depends on S02 (needs the server-role handshake) + S01 (the inbound orig-dst). INBOUND enforce: orig-dst → server-mTLS → kTLS-RX → agent-light splice-to-server. The second direction that makes "between two workloads" real. |
+| 6 | S05 | Depends on S03 + S04 (needs both enforce paths to guard) + S02 (the handshakes to fail closed) + S01 (the intercept-exemption mechanism). The security teeth — fail-closed cause-distinct, resource limits + pump supervision, the intercept-exemption negatives, and the honest authn boundary. Resolves the guardrails last so the surface to guard is stable. |
 
-Dependency chain: **S00 → S01 → S02 → S03 → {S04, S05}** (S04 and S05 both depend
-on S03 but not on each other — parallelisable after S03). The order puts
-fail-closed/race-window (S04) before restart-survival (S05) because the
-confidentiality guardrails are higher-value security invariants than durability.
+Dependency chain: **S00 → S01 → S02 → {S03, S04} → S05** (S03 and S04 both depend
+on S02 but not on each other — parallelisable after S02; S05 depends on both). The
+order puts both enforce directions before the guardrails (S05) because the
+guardrails harden a stable enforcement surface.
 
 ---
 
@@ -385,50 +420,46 @@ These apply to every story; stated once here rather than repeated per story.
   it would drift on rotation/drop. Reading `None` for an allocation is the
   fail-closed signal (the agent refuses the handshake rather than presenting a
   stale credential).
-- **Workload holds NOTHING; kernel does mTLS (whitepaper §7, CLAUDE.md § "Workload
-  identity model").** The workload is identity-unaware — no cert, no key. It opens
-  ordinary sockets; the kernel-side sockops + kTLS terminate/originate TLS
-  transparently using material the platform (the node agent) supplies. There is no
-  SPIRE-agent-style workload-held copy. Any design that puts SVID material inside
-  the workload is a violation.
+- **Workload holds NOTHING; the platform does mTLS (whitepaper §7, CLAUDE.md §
+  "Workload identity model").** The workload is identity-unaware — no cert, no key.
+  It opens ordinary sockets; the agent-light L4 proxy terminates/originates TLS
+  transparently on its OWN peer-facing leg using material the platform (the node
+  agent) supplies. There is no SPIRE-agent-style workload-held copy. Any design
+  that puts SVID material inside the workload is a violation.
 - **Auth-session == data-session.** The SAME TLS 1.3 session that authenticated
-  the workload (the rustls handshake) carries the data (its extracted secrets
-  install into kTLS). This is the property that distinguishes Overdrive's target
-  from Cilium's out-of-band-auth model (where auth and encryption are separate
-  sessions). The spike validates it; if it cannot hold, the Cilium fallback
-  (separate sessions) is the documented alternative.
-- **Fail-closed for confidentiality (the race window).** A gate armed in kernel
-  context before connect()/accept() returns to the workload keeps NO cleartext byte
-  on the wire before kTLS is armed. The gate MECHANISM (sk_msg DROP-until-armed vs
-  sockmap redirect vs an out-of-tree write-block) is a DESIGN choice the spike
-  informs — DISCUSS pins the observable, not the mechanism. The residual is a
-  DATA-LOSS window (writes during the 10–100ms agent turnaround are SK_DROP'd, not
-  buffered — sk_msg has no lossless HOLD), closed by connection RESET if drops > 0;
-  request-first protocols (HTTP, gRPC, PostgreSQL) retry. **Server-speaks-first
-  protocols (SMTP/FTP/SSH)** have an irreducible data-loss window without a
-  write-block and are a **DESIGN scope call** (see Open Questions).
-- **Mechanism is NOT pinned (DISCUSS pins WHAT, not HOW).** In-band kTLS
-  (Architecture A) vs sockmap proxy (Architecture C) vs Cilium out-of-band-auth +
-  separate encryption — the choice is DESIGN's, informed by the Slice-00 spike. The
-  6.18 pin (ADR-0068) legitimises an out-of-tree write-block patch (lossless
-  backpressure) as an appliance-OS option, but that too is a DESIGN call. DISCUSS
-  does NOT pin kTLS struct shapes, the exact sockops attach mechanism, or the
-  write-block decision.
+  the peer (the rustls handshake on the agent's leg) carries the data (its
+  extracted secrets install into kTLS on that same leg). This is the property that
+  distinguishes Overdrive's mTLS from an out-of-band-auth model (where auth and
+  encryption are separate sessions) — the spikes proved it round-trips on a real
+  kernel.
+- **Fail-closed AND lossless for confidentiality.** No cleartext byte reaches the
+  peer wire before encryption is armed. The agent captures the workload's pre-arm
+  plaintext in a bounded userspace handshake buffer and flushes it as the first
+  `application_data` after the handshake — lossless (no dropped bytes, no RESET) for
+  EVERY protocol kind. There is no in-kernel gate, no write-block, no kernel patch,
+  and no race window (the userspace buffer is the lossless capture primitive).
+- **Mechanism pinned by ADR-0069: the agent-light L4 proxy.** ONE universal
+  mechanism for all workload kinds, bidirectional. The exact `MtlsEnforcement`
+  contract (4 methods), kTLS `crypto_info` mapping, and intercept mechanics are
+  pinned in the `## Wave: DESIGN` sections, grounded on the committed spike findings.
 - **Pinned 6.18 LTS kernel (ADR-0068) — no version anxiety.** In-kernel TLS 1.3
-  TX+RX and `CONFIG_NET_HANDSHAKE` are guaranteed; the kernel is a controlled
-  constant, not a design axis. The platform tests exactly the one kernel it ships
-  (+ bpf-next soft-fail).
-- **kTLS state is socket-owned (restart survival).** kTLS crypto lives on the
-  socket (`icsk_ulp_data`), freed only on socket close — so an in-flight session
-  survives an agent restart IFF the WORKLOAD owns the socket fd, and the sockops
-  bpf_link + maps are bpffs-pinned (`pinning = ByName`, `/sys/fs/bpf/overdrive/`).
-  fd-ownership is a DESIGN decision the spike's handoff targets. A FULL NODE REBOOT
-  wipes everything kernel-owned (bpffs pins do not survive a reboot) → every
-  connection re-handshakes from scratch.
-- **Host-socket ONLY (the scope boundary).** Process (exec driver) + WASM
-  (wasmtime in-process host sockets) — TCP terminates in the HOST kernel.
-  Guest-stack workloads (microVM/unikernel, TCP in the GUEST kernel) are **#222**
-  (host L4 tap proxy, a SEPARATE feature). Do NOT pull #222 in.
+  TX+RX, `CONFIG_NET_HANDSHAKE`, sockmap, and `splice`/`tls_sw_splice_read` are
+  guaranteed; the kernel is a controlled constant, not a design axis. The platform
+  tests exactly the one kernel it ships (+ bpf-next soft-fail).
+- **NO restart-survival in v1 (the accepted proxy trade).** The agent owns both
+  legs and the kTLS state, so an agent restart drops in-flight sessions — they
+  re-handshake on reconnect (new connections re-run the
+  intercept→handshake→arm path). v1 carries a 2-sockets-per-connection density cost.
+  Restart-survival + 1-socket density were the superseded in-band model's unique
+  win and are retained ONLY as a tracked future optimization (ADR-0069 A1 / DEFER-1).
+- **All workload kinds via the proxy: process/exec v1, guest-stack staged #222.**
+  v1 ships process (exec driver) only — TCP terminates in the HOST kernel. There is
+  no distinct WASM path (only `ExecDriver` exists; a future WASM driver's
+  host-socket workloads are auto-covered by the same proxy). Guest-stack workloads
+  (microVM/unikernel, TCP in the GUEST kernel) route through the SAME mechanism via
+  a STAGED guest-stack intercept ADAPTER (**#222**, repurposed by ADR-0069 from "a
+  separate mechanism" to "the guest-stack intercept adapter of the #26 universal
+  proxy") — not a second enforcement mechanism. Do NOT pull #222 into v1.
 - **In-place rekey deferred to #229; rotation to #40.** v1 SVID rotation on a
   long-lived connection = TEARDOWN + RECONNECT (kernel-side KeyUpdate IS present at
   v6.18, but the userspace rustls/ktls bridge is not — rustls/ktls#59 / #62, #229).
@@ -436,256 +467,279 @@ These apply to every story; stated once here rather than repeated per story.
 - **No operator CLI verb; #26 is a FOUNDATION feature (D1).** Encryption is
   automatic and undisableable (vision principle 2) — there is no `overdrive`
   subcommand to "encrypt this workload". The HONEST observable surfaces are
-  TEST-tier: `tcpdump` showing TLS 1.3 records, `ss -K` showing the kTLS ULP, a
-  fail-closed negative test, a race-window probe. Per CLAUDE.md the workload verb
+  TEST-tier: `tcpdump` showing TLS 1.3 records on the peer-facing leg, `ss -tie`
+  showing the kTLS ULP on the agent's leg, a fail-closed negative test, an
+  agent-light `strace`. Per CLAUDE.md the workload verb
   is `overdrive deploy <SPEC>`, never `job submit`. Do NOT invent a CLI verb.
 
 ---
 
 ## Wave: DISCUSS / [REF] User Stories
 
-Every story traces to `job_id: J-SEC-003`. Every non-`@infrastructure` story has an
-Elevator Pitch whose "After" references a real, executable verification entry point
-(the wire capture / `ss -K` / the test runner — the honest user-invocable
-observable for a security primitive with no operator verb). ACs are embedded and
-derived from the UAT scenarios.
+Every story traces to `job_id: J-SEC-003`. Every story's "After" references a real,
+executable verification entry point (the wire capture / `ss -tie` / the test
+runner — the honest user-invocable observable for a security primitive with no
+operator verb). ACs are embedded and derived from the UAT scenarios.
+
+> **The authoritative, fully-specified ACs + UAT scenarios for each story live in
+> the slice files** (`slices/slice-00…05`, re-grounded to ADR-0069 / the agent-light
+> L4 proxy). The summaries below are the DISCUSS-level narrative; each names its
+> slice. US-MTLS-00→05 map 1:1 to Slices 00→05.
 
 > **Elevator-Pitch "After" caveat (SAME as built-in-ca / workload-identity-manager
 > — a security primitive with NO operator CLI verb)**: encryption is automatic and
 > undisableable; there is no `overdrive` subcommand to "encrypt this workload".
-> Each pitch's "After" references a real, executable verification entry point — a
-> `tcpdump` wire capture showing TLS 1.3 records (or `ss -K` showing the kTLS ULP,
-> or a fail-closed negative test) — which is the honest user-invocable observable
-> output for this feature, not an invented subcommand. The DECISION enabled is
-> Sam's trust decision (the genuine J-SEC-003 connection: is the wire actually
-> encrypted with the workload's own SVID, in-kernel, agent out of the path, no
+> Each story's "After" references a real, executable verification entry point — a
+> `tcpdump` wire capture showing TLS 1.3 records on the peer-facing leg (or `ss
+> -tie` showing the kTLS ULP on the agent's leg, or a fail-closed negative test, or
+> an agent-light `strace`) — which is the honest user-invocable observable output
+> for this feature, not an invented subcommand. The DECISION enabled is Sam's trust
+> decision (the genuine J-SEC-003 connection: is the wire actually encrypted with
+> the workload's own SVID, in-kernel, both directions, agent agent-light, no
 > cleartext leak, fail-closed?).
 >
 > **Foundation-feature exception to the strict elevator-pitch gate (recorded
 > explicitly, NOT a silent pass — mirroring built-in-ca / #35)**: the strict nWave
 > gate requires a real user-invocable entry point. #26 does not strictly satisfy
-> that on its own — every Phase-2 proof is TEST-tier (a `tcpdump` capture / `ss -K`
-> / a race-window probe in a gated `integration-tests` Lima run), because the
-> feature is a foundation security primitive with no operator verb and encryption
-> is undisableable by design. The gate is met by a **deliberate, documented
-> foundation-feature exception mirroring built-in-ca and #35, NOT by a live
-> operator surface and NOT by an invented CLI verb** (inventing a verb to dodge the
-> gate is the dishonest move; recording the exception is the honest one). Recorded
-> here, in `wave-decisions.md` (D1), and in the DoR validation (the
-> elevator-pitch / slice-composition items note it with this evidence pointer).
+> that on its own — every Phase-2 proof is TEST-tier (a `tcpdump` capture / `ss
+> -tie` / a fail-closed negative test / an agent-light `strace` in a gated
+> `integration-tests` Lima run), because the feature is a foundation security
+> primitive with no operator verb and encryption is undisableable by design. The
+> gate is met by a **deliberate, documented foundation-feature exception mirroring
+> built-in-ca and #35, NOT by a live operator surface and NOT by an invented CLI
+> verb** (inventing a verb to dodge the gate is the dishonest move; recording the
+> exception is the honest one). Recorded here, in `wave-decisions.md` (D1), and in
+> the DoR validation (the elevator-pitch / slice-composition items note it with
+> this evidence pointer).
 
-### US-MTLS-00 — SPIKE: prove in-band sidecarless kTLS race-free on the pinned kernel (or fall back) `@spike`
+### US-MTLS-00 — the COMPOSED proxy walking skeleton: a real intercept end-to-end, both directions, NO RST `@walking_skeleton`
 
-**Type**: Spike (time-boxed Tier-3 investigation; the walking skeleton). **Fixed
-duration**: ~2 days. **Clear learning objective**: validate (or disprove) the two
-load-bearing hypotheses before any design locks.
+**Type**: Composed Tier-3 acceptance test (the BLOCKING walking skeleton — production
+code, NOT a spike; the 6 committed spikes already ran). **The authoritative ACs +
+UAT scenarios are in `slices/slice-00-composed-proxy-walking-skeleton.md`.**
 
-**Problem**: Sam will not let the design lock on in-band sidecarless kTLS — a
-mechanism **no production mesh has shipped** — without proof it works race-free on
-Overdrive's actual pinned kernel. Cilium does out-of-band auth + WireGuard/IPsec;
-Istio ztunnel keeps a userspace proxy in the data path. The plaintext race window
-(sk_msg has no lossless HOLD) might be unclosable. He needs a Tier-3 spike on the
-6.18 Lima/LVH kernel that either proves the full handoff for ONE process→process
-flow, or honestly falls back to the documented Cilium model.
+**Problem**: the 6 committed Tier-3 spikes settled the MECHANISM (verdict: the
+agent-light L4 proxy) and proved every PRIMITIVE in isolation — but did NOT prove the
+COMPOSITION under a real transparent intercept (increment-e RST'd on the intercept
+lifecycle; increments-f/h removed the intercept to prove their primitive). Sam will
+not let any later slice build on a composition that has never held end-to-end.
 
-**Who**: Platform/security engineer | de-risking the riskiest mechanism assumption
-| wants empirical proof on the real kernel before betting the design on an
-unshipped mechanism.
+**Who**: Platform/security engineer | de-risking the riskiest remaining assumption (the
+composition, not the mechanism) | wants the WHOLE proxy path proven on a real intercept,
+both directions, with no post-arm RST, before any other slice lands.
 
-**Solution**: A Tier-3 spike harness on the 6.18 kernel that drives ONE
-process→process host-socket flow through the full handoff — sockops
-`ACTIVE_ESTABLISHED` detect → `pidfd_getfd` the workload socket → rustls TLS 1.3
-handshake presenting the held SVID (read via `IdentityRead`) and verifying the peer
-→ kTLS install (`setsockopt TLS_TX/TLS_RX`) → agent exits → `tcpdump` shows TLS 1.3
-records — with a deliberately delayed kTLS install widening the race window to test
-fail-closed (no cleartext before install). Time-boxed; the deliverable is a
-PASS/FAIL verdict + the wire capture, NOT production code.
-
-#### Elevator Pitch
-
-- **Before**: in-band sidecarless kTLS is a mechanism no one has shipped; betting
-  the #26 design on it without proof on the real kernel risks a wrong contract that
-  propagates through DESIGN and DELIVER.
-- **After**: a Tier-3 spike on the 6.18 Lima kernel produces a `tcpdump` capture
-  for one process→process flow showing TLS 1.3 Application Data records (with `ss
-  -K` showing the kTLS ULP installed and a race-window probe showing zero cleartext
-  before install) — OR a documented FAIL verdict that triggers the Cilium
-  out-of-band-auth + separate-encryption fallback.
-- **Decision enabled**: Sam (and the DESIGN wave) decides whether to proceed with
-  in-band kTLS (Architecture A) or adopt the documented fallback — the riskiest
-  mechanism question settled empirically, not assumed.
-
-#### Domain Examples
-
-1. **Happy path (spike PASS)** — On the 6.18 Lima kernel, process `client` (alloc
-   `a1b2c3`, SVID `spiffe://overdrive.local/job/web/alloc/a1b2c3`) connects to
-   process `server` (alloc `d4e5f6`, SVID `.../job/api/alloc/d4e5f6`). sockops
-   fires `ACTIVE_ESTABLISHED`; the agent `pidfd_getfd`s the client socket, runs the
-   rustls TLS 1.3 handshake presenting `a1b2c3`'s held SVID (read via
-   `IdentityRead`) and verifying `d4e5f6` against the trust bundle, installs kTLS,
-   and exits. `tcpdump -i overdrive-veth0` shows TLS 1.3 App Data records (0x17);
-   `ss -K` shows the kTLS ULP on both sockets.
-2. **Race-window probe (fail-closed proof)** — `client` calls `write("PLAINTEXT_PROBE")`
-   immediately on `connect()` return; the spike harness delays the kTLS install by
-   500ms. `tcpdump` shows EITHER TLS 1.3 records OR zero application bytes —
-   NEVER the string `PLAINTEXT_PROBE` on the wire. The sk_msg drop-counter records
-   whether the window fired.
-3. **Falsification (spike FAIL → fallback)** — If the handoff cannot be made
-   race-free (e.g. cleartext leaks before the gate is active, or the kTLS install
-   cannot be driven from the acquired fd on this kernel), the spike returns a FAIL
-   verdict naming the failure mode, and the design adopts the Cilium model
-   (out-of-band auth + separate encryption, or a userspace proxy à la
-   Architecture C). This is a SUCCESSFUL spike outcome (it answered the question),
-   not a failure.
-
-#### UAT Scenarios (BDD)
-
-##### Scenario: One host-socket flow carries TLS 1.3 on the wire after the in-kernel handoff
-Given two host-socket workloads on the pinned 6.18 kernel, each with a held SVID
-When the platform performs the sockops-detect to rustls-handshake to kTLS-install handoff for one connection between them
-Then a wire capture between them shows TLS 1.3 Application Data records and no cleartext
-And the kTLS ULP is installed on each workload's socket
-
-##### Scenario: No cleartext escapes before encryption is armed, even when install is delayed
-Given a host-socket workload that writes immediately after its connection is established
-And the kTLS installation is deliberately delayed
-When the platform captures the wire during the delay
-Then no cleartext application bytes appear on the wire before kTLS is installed
-
-##### Scenario: The spike returns an honest verdict that decides the mechanism
-Given the spike has run the full handoff on the pinned kernel
-When the handoff cannot be made race-free for one flow
-Then the spike reports a FAIL verdict naming the failure mode
-And the documented fallback (out-of-band auth + separate encryption) is selected for the design
-
-#### Acceptance Criteria
-
-- [ ] On the 6.18 Lima/LVH kernel, a Tier-3 spike drives ONE process→process
-  host-socket flow through `sockops ACTIVE_ESTABLISHED → pidfd_getfd → rustls TLS
-  1.3 handshake presenting the held SVID (read via `IdentityRead`) and verifying
-  the peer → kTLS install (`setsockopt TLS_TX/TLS_RX`) → agent exits`.
-- [ ] A `tcpdump` capture on the veth shows TLS 1.3 Application Data records
-  (content type 0x17) and NO cleartext payload; `ss -K` shows the kTLS ULP
-  installed on the socket.
-- [ ] A race-window probe (write immediately on connect() return + deliberately
-  delayed kTLS install) shows NO cleartext byte on the wire before install (a
-  drop-counter signals whether the window fired).
-- [ ] The spike produces an explicit PASS/FAIL verdict; on FAIL it names the
-  failure mode and selects the documented Cilium fallback (out-of-band auth +
-  separate encryption / userspace proxy) — a successful spike outcome either way.
-- [ ] The verdict + the wire capture are recorded (the spike's deliverable is the
-  evidence + the verdict, not production code).
-
-#### Technical Notes
-
-- Time-boxed to ~2 days; the deliverable is evidence + a verdict, not a shippable
-  mechanism. If the spike PASSES, Slices 01–03 productionise the proven handoff; if
-  it FAILS, the DESIGN wave adopts the fallback and the downstream slices re-shape.
-- The fd-ownership choice (workload owns the socket fd, per the CP-restart-survival
-  research) is targeted by the spike's handoff so Slice 05's restart-survival
-  observable is reachable.
-- This is the ONE place a spike is the right tool (the mechanism is genuinely
-  unshipped + has no Tier-2 backstop — `BPF_PROG_TEST_RUN` is unavailable for the
-  relevant socket-context hooks; it can only be settled at Tier 3).
-
----
-
-### US-MTLS-01 — sockops detects the host-socket connection and the agent acquires its socket
-
-**Problem**: For the platform to encrypt a host-socket workload's traffic, it must
-first NOTICE the connection in the kernel — synchronously, before the
-identity-unaware workload can write a cleartext byte — and get a handle to the
-workload's own socket. Today there is no detection path: a host-socket workload's
-connections are invisible to the platform's identity layer.
-
-**Who**: Platform/security engineer | wiring the kernel detection path | wants
-host-socket connections detected in-kernel before the workload writes, with the
-workload's socket acquired for the agent to drive TLS on.
-
-**Solution**: A kernel sockops program detects the `ACTIVE_ESTABLISHED` /
-`PASSIVE_ESTABLISHED` transition synchronously (in kernel context, before
-connect()/accept() returns to the workload), and the node agent acquires the
-workload's socket fd (process: `pidfd_getfd` from the sockops-triggered event).
-This is the productionised detection+acquire step the Slice-00 spike proved.
+**Solution**: A composed Tier-3 acceptance test on the 6.18 kernel that drives the full
+agent-light L4 proxy path for ONE composed flow per direction — OUTBOUND (real
+`cgroup_connect4` intercept → agent drains pre-arm plaintext losslessly → rustls TLS 1.3
+CLIENT handshake on leg B presenting the held SVID (read via `IdentityRead`) → kTLS arm
+on leg B → post-arm **bidirectional** multi-record transfer) AND INBOUND (real nft-TPROXY
+intercept → `getsockname` orig-dst → server-mTLS → kTLS-RX arm → splice-to-server,
+byte-exact plaintext at S) — under BOTH normal AND traced/delayed timing, with **NO RST
+post-arm**. The observable IS the lossless, RST-free, TLS-1.3-on-the-peer-wire capture
+for both halves.
 
 #### Elevator Pitch
 
-- **Before**: a host-socket workload's TCP connections are invisible to the
-  platform's identity layer — nothing notices them, so nothing can encrypt them.
-- **After**: a host-socket connection is detected in the kernel the moment it
-  reaches ESTABLISHED (before the workload can write), and the agent holds the
-  workload's socket — observable in a Tier-3 test as the sockops program firing on
-  the connection and the agent acquiring the fd (the connection is now under the
-  platform's control for the handshake to follow).
-- **Decision enabled**: Sam decides the platform reliably notices host-socket
-  connections in-kernel before any cleartext can escape — or rejects a detection
-  path that fires too late (after the workload could write) or misses connections.
+- **Before**: the primitives are spike-proven in isolation, but increment-e's composed
+  harness RST'd on the intercept lifecycle — the composition has never held end-to-end,
+  so every later slice would build on a hope.
+- **After**: a composed Tier-3 acceptance test on the 6.18 Lima kernel shows, for one
+  composed flow each way, a real intercept → handshake on the agent's leg → kTLS arm →
+  post-arm bidirectional multi-record transfer with NO RST, under normal AND delayed
+  timing — a `tcpdump` capture shows TLS 1.3 Application Data records on the peer-facing
+  wire (both directions) and `ss -tie` shows the kTLS ULP on the agent's leg.
+- **Decision enabled**: Sam decides the agent-light L4 proxy genuinely composes under a
+  real transparent intercept — or learns the composition does not hold (post-arm RST)
+  before any productionisation depends on it.
 
 #### Domain Examples
 
-1. **Active side (process client)** — process `web` (alloc `a1b2c3`) calls
-   `connect()` to `api`. The sockops program fires `ACTIVE_ESTABLISHED`
-   synchronously during the ESTABLISHED transition (before `connect()` returns);
-   the agent `pidfd_getfd`s `web`'s socket. The detection precedes any `write()`.
-2. **Passive side (process server)** — process `api` (alloc `d4e5f6`) has a
-   listening socket; the final ACK of the 3WHS arrives. The sockops program fires
-   `PASSIVE_ESTABLISHED` before `accept()` returns the new socket to `api`; the
-   agent acquires the accepted socket. For request-first protocols the server reads
-   first, so detection precedes the server's first write naturally.
-3. **Non-host-socket connection (correctly ignored)** — a guest-stack workload
-   (microVM) opens a connection; its TCP terminates in the GUEST kernel, so there
-   is no host `struct sock` and the host sockops program never sees it — correctly
-   out of #26's scope (that is #222's path). The detection path does not fire and
-   does not error.
+1. **Outbound composed (happy path)** — On the 6.18 Lima kernel, process `client` (alloc
+   `a1b2c3`, SVID `spiffe://overdrive.local/job/web/alloc/a1b2c3`) connects to `api`
+   (alloc `d4e5f6`). `cgroup_connect4` rewrites the connect to the agent's leg-F
+   listener; the agent drains the pre-arm plaintext losslessly, runs the rustls TLS 1.3
+   CLIENT handshake on leg B presenting `a1b2c3`'s held SVID (read via `IdentityRead`)
+   and verifying the peer chains to the bundle, arms kTLS on leg B, and post-arm
+   bidirectional multi-record transfer completes with NO RST. `tcpdump -i
+   overdrive-veth0` shows TLS 1.3 App Data records (0x17); `ss -tie` shows the kTLS ULP
+   on the agent's leg.
+2. **Inbound composed (happy path)** — a connection aimed at `d4e5f6`'s logical address
+   is nft-TPROXY-redirected to the agent's `IP_TRANSPARENT` leg-C listener;
+   `getsockname()` recovers the original destination → selects `d4e5f6`'s held SVID; the
+   agent runs the server-side mutual-TLS handshake (presents the server SVID,
+   `WebPkiClientVerifier` REQUIRE+VERIFY the client SVID), arms kTLS-RX, and `splice`s the
+   decrypted plaintext to the identity-unaware server workload S byte-exact, NO RST.
+3. **Timing robustness (the increment-e failure mode defeated)** — the same composed
+   flow is exercised under a deliberate handshake-window delay; the post-arm transfer
+   never RSTs in either timing regime (the increment-e composed-intercept RST is engineered
+   around).
 
 #### UAT Scenarios (BDD)
 
-##### Scenario: A host-socket connection is detected before the workload can write
-Given a host-socket workload that opens a TCP connection
-When the connection reaches the established state in the kernel
-Then the platform detects the connection synchronously before the workload's first write
-And the platform holds a handle to the workload's own socket
+##### Scenario: A real intercepted flow carries TLS 1.3 both ways with no reset
+Given two host-socket workloads on the pinned 6.18 kernel, each with a held SVID, neither holding any cert or key
+And the platform transparently intercepts the client's outbound connect and the server's inbound arrival
+When the workloads exchange application bytes in both directions after the platform completes the handshake and arms encryption
+Then a wire capture on the peer-facing leg shows TLS 1.3 Application Data records in both directions and no cleartext of the payload
+And the connection is never reset after encryption is armed, under both normal and deliberately delayed timing
 
-##### Scenario: A guest-stack connection is correctly not detected by the host path
-Given a guest-stack workload (microVM or unikernel) whose TCP terminates in the guest kernel
-When that workload opens a connection
-Then the host detection path does not fire for it and does not error
+##### Scenario: The composed path holds before any other behaviour is built on it
+Given the composed intercept-to-handshake-to-encrypt-to-transfer path for both directions
+When it is exercised as the first acceptance gate
+Then it passes before any other enforcement slice is accepted
 
 #### Acceptance Criteria
 
-- [ ] A kernel sockops program fires on a host-socket workload's `ACTIVE_ESTABLISHED` / `PASSIVE_ESTABLISHED` transition, synchronously in kernel context (before connect()/accept() returns to the workload) — observable in a Tier-3 test (the program runs; the connection is gated before the workload writes).
-- [ ] The node agent acquires the workload's own socket fd (process: `pidfd_getfd`) for the detected connection.
-- [ ] A guest-stack workload's connection (TCP in the guest kernel) does NOT trigger the host detection path and does not error (correctly out of scope — #222).
-- [ ] The sockops program + its maps/link are bpffs-pinned (`pinning = ByName`, `/sys/fs/bpf/overdrive/`) — the prerequisite for the restart-survival observable (Slice 05).
+> Authoritative ACs in `slices/slice-00-composed-proxy-walking-skeleton.md`. Summary:
+
+- [ ] OUTBOUND composed: a real `cgroup_connect4` intercept → lossless pre-arm drain →
+  rustls TLS 1.3 CLIENT handshake on leg B presenting the held SVID (read via
+  `IdentityRead`) → kTLS arm on leg B → post-arm bidirectional multi-record transfer,
+  NO RST.
+- [ ] INBOUND composed: a real nft-TPROXY intercept → `getsockname` orig-dst →
+  server-mTLS (`WebPkiClientVerifier` REQUIRE+VERIFY) → kTLS-RX arm → splice-to-server,
+  byte-exact plaintext at S, NO RST.
+- [ ] The peer-facing leg carries TLS 1.3 Application Data records (`tcpdump` 0x17) in
+  both directions; the workload's plaintext appears only on the host-internal leg F /
+  leg S, never on the peer leg.
+- [ ] The composed path holds under BOTH normal AND traced/delayed timing (the
+  increment-e post-arm RST mode is defeated).
+- [ ] The agent reads SVID + bundle ONLY via `IdentityRead` (a READER, never an
+  issuer/cache); kTLS arms on the agent's leg (leg B / leg C), NOT the workload's socket.
 
 #### Technical Notes
 
-- The exact sockops attach mechanism (legacy `BPF_PROG_ATTACH` vs `bpf_link`
-  pinned to bpffs) and the fd-acquisition path are DESIGN's to pin — both reach
-  restart survival (the link must be pinned either way). Productionises the
-  Slice-00 spike's detect+acquire step.
-- WASM (in-process host fd) detection is the Slice-05 variant; US-MTLS-01's core is
-  the process path.
+- The BLOCKING first DELIVER slice (F2): no other slice lands until this passes. It is a
+  composed acceptance test, NOT a spike — a FAIL here is a real defect to engineer
+  around, not a learning outcome.
+- The cost is engineering the composed intercept lifecycle so it does not RST (the
+  increment-e failure mode) and wiring the bidirectional transfer + the dual
+  (outbound + inbound) harness on the real kernel; the primitives are already proven.
+- No Tier-2 backstop exists for these socket-context hooks (`BPF_PROG_TEST_RUN` is
+  unavailable) — it can only be settled at Tier 3.
 
 ---
 
-### US-MTLS-02 — the agent performs the TLS 1.3 handshake presenting the held SVID
+### US-MTLS-01 — the workload's traffic is transparently intercepted to the agent's leg, both directions, no recursion
 
-**Problem**: Once a host-socket connection is detected, the platform must perform
-the TLS 1.3 handshake **on the workload's behalf**, presenting the **workload's own
-held SVID** (not the node's, not the agent's) and verifying the peer — because the
-workload is identity-unaware and holds nothing. There is no handshake path today,
-and the credential it must present lives behind #35's `IdentityRead` port.
+**Problem**: For the platform to encrypt a host-socket workload's traffic, the
+workload's connection must be transparently brought under the agent's control —
+before the identity-unaware workload can reach the real peer un-encrypted — in BOTH
+directions, and the agent's OWN peer-facing dial must not recurse into the same
+intercept. Today there is no intercept path: a host-socket workload's connections
+flow straight to the peer in cleartext. **The authoritative ACs are in
+`slices/slice-01-transparent-intercept-and-leg-acquire.md`.**
 
-**Who**: Platform/security engineer | wiring the agent's mutual-TLS handshake |
-wants the agent to present the WORKLOAD's held SVID (read via IdentityRead) and
-verify the peer against the trust bundle, with the workload holding nothing.
+**Who**: Platform/security engineer | wiring the transparent intercept | wants
+host-socket connections redirected to an agent-owned leg before any cleartext
+escapes, in both directions, with the agent's own dial exempt and the workload
+unable to self-exempt.
 
-**Solution**: The node agent performs a rustls TLS 1.3 handshake on the workload's
-acquired socket, presenting the held `SvidMaterial` it reads via
-`IdentityRead::svid_for(&AllocationId)` (#35; leaf key per ADR-0063 D9) and
-verifying the peer against `IdentityRead::current_bundle()`. #26 is a READER of the
-held set — it never mints, re-issues, or caches its own copy.
+**Solution**: OUTBOUND, a `cgroup_connect4`-rewrite program redirects the workload's
+`connect()` to the agent's node-local leg-F listener (reusing the established
+`cgroup_connect4_service` shape); the agent `accept()`s leg F and drains the pre-arm
+plaintext losslessly into a bounded userspace buffer. INBOUND, an nft-TPROXY rule
+redirects a connection aimed at a server workload's logical address to the agent's
+`IP_TRANSPARENT` leg-C listener, and `getsockname()` recovers the original
+destination (NOT `SO_ORIGINAL_DST`). The agent's own outbound leg-B dial is NOT
+re-intercepted (a narrowly-scoped, agent-private `SO_MARK`/cgroup-scoping bypass the
+program checks-and-skips), and a workload cannot replicate the bypass to self-exempt.
+
+#### Elevator Pitch
+
+- **Before**: a host-socket workload's TCP connections flow straight to the peer in
+  cleartext — nothing intercepts them, so nothing can encrypt them, and a naive
+  agent dial would recurse into its own intercept.
+- **After**: the workload's outbound connect is transparently rewritten
+  (`cgroup_connect4`) to the agent's leg F and its inbound arrival is TPROXY-redirected
+  to the agent's leg C — observable in a Tier-3 test as the connect rewritten / the
+  arrival redirected, the pre-arm plaintext drained losslessly, the inbound orig-dst
+  recovered, and the agent's own leg-B dial NOT re-intercepted.
+- **Decision enabled**: Sam decides the platform reliably brings host-socket
+  connections under agent control before any cleartext can escape (both directions) and
+  the workload cannot evade interception — or rejects an intercept that loses pre-arm
+  bytes, cannot recover the inbound orig-dst, or recurses.
+
+#### Domain Examples
+
+1. **Outbound intercept (process client)** — process `web` (alloc `a1b2c3`) calls
+   `connect()` to `api`. The `cgroup_connect4` mtls-variant rewrites the destination
+   to the agent's leg-F listener; the agent `accept()`s and `recv()`s `web`'s pre-arm
+   plaintext into a bounded userspace buffer losslessly (no dropped bytes; route by
+   `local_port` only — `findings-userspace-relay.md` Unknown 1).
+2. **Inbound intercept (process server)** — a connection aimed at `api`'s (alloc
+   `d4e5f6`) logical address is nft-TPROXY-redirected to the agent's `IP_TRANSPARENT`
+   leg-C listener; `getsockname()` on the accepted leg-C socket recovers the original
+   destination, which selects `d4e5f6`'s `AllocationId` → its held SVID.
+3. **No recursion / no self-exempt** — the agent's own leg-B dial to the real peer is
+   NOT re-intercepted by the workload `cgroup_connect4` program (the agent's egress
+   carries an agent-private bypass, outside the workload attach subtree); a workload
+   setting the bypass on its own socket is STILL intercepted (the bypass is unreachable
+   from the workload).
+
+#### UAT Scenarios (BDD)
+
+##### Scenario: A workload's outbound connection is brought under platform control before it reaches the peer
+Given a host-socket workload that opens an outbound TCP connection
+When the connection is established
+Then the platform transparently routes it through the node agent before any byte reaches the real peer
+And the agent captures the workload's first bytes without losing any or resetting the connection
+
+##### Scenario: An inbound connection to a server workload is brought under platform control and the right identity is selected
+Given an inbound connection aimed at a server workload's logical address
+When the platform transparently intercepts it
+Then the platform recovers the address the client aimed at and selects that server workload's own identity
+
+##### Scenario: A workload cannot evade the platform's interception
+Given a host-socket workload trying to bypass interception on its own sockets
+When it opens a connection
+Then it is still intercepted, because the bypass that exempts the agent's own connections is unreachable from the workload
+
+#### Acceptance Criteria
+
+> Authoritative ACs in `slices/slice-01-transparent-intercept-and-leg-acquire.md`. Summary:
+
+- [ ] A `cgroup_connect4`-rewrite program redirects a host-socket workload's `connect()` to the agent's leg-F listener; the agent `accept()`s and `recv()`s the pre-arm plaintext LOSSLESSLY (no dropped bytes), routing by `local_port` only.
+- [ ] An nft-TPROXY rule redirects a connection aimed at a server workload's logical address to the agent's `IP_TRANSPARENT` leg-C listener; `getsockname()` recovers the original destination (NOT `SO_ORIGINAL_DST`).
+- [ ] The agent's own leg-B dial is NOT re-intercepted (no recursion) via the agent-private `SO_MARK`/cgroup-scoping bypass; a workload CANNOT replicate it to self-exempt (the F5 negatives are S05; the mechanism is here).
+- [ ] The intercept program + its maps/link are bpffs-pinned (`pinning = ByName`, `/sys/fs/bpf/overdrive/`); the `IP_TRANSPARENT` listener + nft-TPROXY setup succeed under `CAP_NET_ADMIN` (the agent is privileged; the workload is unprivileged and holds nothing).
+
+#### Technical Notes
+
+- The exact intercept attach mechanism + the nft-TPROXY triple are DESIGN's to pin
+  (the `cgroup_connect4` mtls-variant reuses the established `cgroup_connect4_service`
+  attach boundary). Productionises the Slice-00 composed walking skeleton's
+  intercept + leg-acquire step.
+- There is no distinct WASM path (only `ExecDriver` exists); a future WASM driver's
+  host-socket workloads are auto-covered by the same intercept. Guest-stack is the
+  staged #222 adapter, out of v1.
+
+---
+
+### US-MTLS-02 — the agent performs the TLS 1.3 handshake presenting the held SVID (client AND server roles)
+
+**Problem**: Once a host-socket connection is intercepted, the platform must perform
+the TLS 1.3 handshake **on the workload's behalf**, on the **agent's own peer-facing
+leg** (NOT the workload's socket), presenting the **workload's own held SVID** (not
+the node's, not the agent's) and verifying the peer — in BOTH roles (CLIENT outbound /
+SERVER inbound) — because the workload is identity-unaware and holds nothing. There is
+no handshake path today, and the credential it must present lives behind #35's
+`IdentityRead` port. **The authoritative ACs are in
+`slices/slice-02-agent-handshake-present-held-svid.md`.**
+
+**Who**: Platform/security engineer | wiring the agent's mutual-TLS handshake (both
+roles) | wants the agent to present the WORKLOAD's held SVID (read via IdentityRead)
+and verify the peer against the trust bundle, with the workloads holding nothing.
+
+**Solution**: The node agent performs a rustls TLS 1.3 handshake on its OWN
+peer-facing leg (leg B outbound as CLIENT, leg C inbound as SERVER), presenting the
+held `SvidMaterial` it reads via `IdentityRead::svid_for(&AllocationId)` (#35; leaf
+key per ADR-0063 D9) and verifying the peer against `IdentityRead::current_bundle()`.
+Inbound, it acts as the SERVER: presents the server workload's SVID AND
+requires-and-verifies the client's presented SVID chains to the bundle via
+`WebPkiClientVerifier` (REQUIRE+VERIFY). #26 is a READER of the held set — it never
+mints, re-issues, or caches its own copy. v1 verification is chain-to-bundle ONLY
+(NOT intended-peer pinning — that is #178).
 
 #### Elevator Pitch
 
@@ -736,271 +790,300 @@ And it does not use a separately cached copy
 
 #### Acceptance Criteria
 
-- [ ] The node agent performs a rustls TLS 1.3 handshake on the detected workload's socket, presenting the held `SvidMaterial` read via `IdentityRead::svid_for(&AllocationId)` (#35) — #26 reads, never mints/caches.
-- [ ] The agent verifies the peer against `IdentityRead::current_bundle()` (the hydrated bundle behind #35's port); a peer that does not chain to it aborts the handshake (the fail-closed proof is Slice 04).
+> Authoritative ACs in `slices/slice-02-agent-handshake-present-held-svid.md`. Summary:
+
+- [ ] OUTBOUND (client): the agent performs a rustls TLS 1.3 CLIENT handshake on leg B presenting the held `SvidMaterial` read via `IdentityRead::svid_for(&AllocationId)` (#35) and verifying the peer chains to `IdentityRead::current_bundle()` — #26 reads, never mints/caches.
+- [ ] INBOUND (server): the agent performs a rustls TLS 1.3 SERVER handshake on leg C presenting the server SVID AND requiring-and-verifying the client's SVID chains to the bundle via `WebPkiClientVerifier` (REQUIRE+VERIFY); the fail-closed negatives (absent SVID outbound; nocert/wrongca inbound) are Slice 05.
 - [ ] The presented leaf chains to the root and its SAN is the workload's SPIFFE URI (`spiffe://overdrive.local/job/<name>/alloc/<id>`) — provable via `openssl verify` / the captured handshake at the TEST tier.
-- [ ] The workload process holds no cert and no key (the leaf key stays with the agent, read via the port) — the workload is identity-unaware.
+- [ ] BOTH workloads hold no cert and no key (the leaf key stays with the agent, read via the port) — the workloads are identity-unaware.
 
 #### Technical Notes
 
 - The exact rustls config shape (ClientConfig/ServerConfig, the
-  `IdentityRead`-backed cert resolver) is DESIGN's to pin. #26 takes the
-  `IdentityRead` port as a required constructor parameter (port-trait discipline,
-  `.claude/rules/development.md`).
-- Server-speaks-first vs request-first protocol handling interacts with the race
-  window (Slice 04) and is a DESIGN scope call (see Open Questions).
+  `IdentityRead`-backed cert resolver, the server-side `WebPkiClientVerifier`) is
+  DESIGN's to pin. #26 takes the `IdentityRead` port as a required constructor
+  parameter (port-trait discipline, `.claude/rules/development.md`).
+- Two server-config mechanics bind on DELIVER (`findings-inbound-intercept.md` §
+  Mechanics): suppress `NewSessionTicket` (`send_tls13_tickets = 0` — a post-handshake
+  ticket hits `-EIO` on raw kTLS-RX); read `peer_certificates()` for the fail-closed
+  guard BEFORE `dangerous_extract_secrets()` consumes the connection.
 
 ---
 
-### US-MTLS-03 — kTLS install on the workload's socket, agent exits, wire carries TLS 1.3
+### US-MTLS-03 — OUTBOUND enforce: kTLS arms on the agent's leg B, forward agent-idle + return agent-light, wire carries TLS 1.3
 
-**Problem**: A completed handshake is not enough — for the encryption to be
-**in-kernel** and the **agent out of the data path** (the property that
-distinguishes Overdrive from ztunnel), the negotiated session keys must install
-into **kTLS on the workload's own socket** (auth-session == data-session) and the
-agent must LEAVE. Then a packet capture must prove the wire actually carries TLS
-1.3 records.
+**Problem**: A completed outbound handshake is not enough — for the encryption to be
+**in-kernel** and the agent **agent-light** (NOT a per-byte userspace proxy — the
+property that distinguishes Overdrive from ztunnel), the negotiated session keys must
+arm **kTLS on the agent's peer-facing leg B** (auth-session == data-session) and the
+kernel must carry the steady state. Then a packet capture must prove the peer-facing
+wire actually carries TLS 1.3 records. **The authoritative ACs are in
+`slices/slice-03-outbound-enforce-ktls-splice-wire-capture.md`.**
 
-**Who**: Platform/security engineer | wiring the kTLS install + agent-exit | wants
-the negotiated session installed into the kernel on the workload's socket, the
-agent out of the steady-state path, and TLS 1.3 records provable on the wire.
+**Who**: Platform/security engineer | wiring the outbound kTLS arm + agent-light
+splice | wants the negotiated session armed into the kernel on the agent's leg, the
+agent out of the per-byte path, and TLS 1.3 records provable on the peer wire.
 
-**Solution**: After the handshake (US-MTLS-02), the agent installs the rustls
-handshake's extracted secrets into kTLS on the workload's socket (`setsockopt
-TCP_ULP "tls"` + `TLS_TX/TLS_RX`) — the SAME session that authenticated — and exits
-the data path. The kernel then does TLS record framing + symmetric crypto
-autonomously; the agent is out of the steady-state byte path.
+**Solution**: After the outbound handshake (US-MTLS-02), the agent arms the rustls
+handshake's extracted secrets into kTLS on leg B (`setsockopt TCP_ULP "tls"` +
+`TLS_TX/TLS_RX`) — the SAME session that authenticated — and hands steady state to the
+kernel: **forward** (F→B) is **agent-idle** (an in-kernel sockmap EGRESS redirect,
+`bpf_sk_redirect_map flags=0`, drives `tcp_sendmsg_locked` on leg B → encrypted egress;
+zero agent per-byte syscalls); **return** (B→F) is **agent-light** (a bounded
+`splice(legB → pipe → legF)` pump on a plain kTLS-RX leg, `tls_sw_splice_read`
+decrypting each record, ~1 splice per record).
 
 #### Elevator Pitch
 
-- **Before**: even with a completed handshake, there is no in-kernel encryption on
-  the workload's socket and no proof the wire is encrypted — and a userspace proxy
-  staying in the path (the ztunnel shape) would not be "agent out of the data path".
-- **After**: the negotiated session installs into kTLS on the workload's own socket
-  and the agent exits — observable as `ss -K` showing the kTLS ULP installed and a
-  `tcpdump` capture on the veth showing TLS 1.3 Application Data records (content
-  type 0x17), never cleartext, between two host-socket workloads.
-- **Decision enabled**: Sam decides the encryption is genuinely in-kernel with the
-  agent out of the path (the auth-session is the data-session) — or rejects a
-  design where a userspace proxy quietly handles every byte for the whole
-  connection.
+- **Before**: even with a completed handshake, there is no in-kernel encryption on the
+  agent's leg and no proof the wire is encrypted — and a userspace proxy staying in the
+  path (the ztunnel shape) would not be agent-light.
+- **After**: the negotiated session arms kTLS on the agent's leg B and the kernel
+  carries steady state (forward agent-idle, return agent-light) — observable as `ss -tie`
+  showing the kTLS ULP on the agent's leg and a `tcpdump` capture on the peer-facing
+  wire showing TLS 1.3 Application Data records (content type 0x17), never cleartext.
+- **Decision enabled**: Sam decides the encryption is genuinely in-kernel with the agent
+  agent-light (the auth-session is the data-session) — or rejects a design where a
+  userspace proxy quietly copies every byte for the whole connection.
 
 #### Domain Examples
 
-1. **Happy path (the North-Star observable)** — after `a1b2c3`↔`d4e5f6`'s
-   handshake, the agent installs the extracted secrets into kTLS on both sockets
-   and exits. `ss -K` shows `ulp tls` on each socket; `tcpdump -i overdrive-veth0`
-   shows TLS 1.3 App Data records (0x17 03 03); a `GET /payments HTTP/1.1` the
-   workload sent never appears in cleartext in the capture.
-2. **Agent out of the steady-state path** — after install, the agent's process is
-   absent from the byte path: the kernel encrypts/decrypts each record; the agent
-   does no per-byte work (strictly cheaper than ztunnel's userspace per-byte copy).
-3. **Auth-session == data-session** — the kTLS `crypto_info` installed is the
-   rustls handshake's own extracted secrets (same keys/IV/record-seq) — not a
-   separately negotiated session; the data records continue the authenticated
-   session's record sequence.
+1. **Happy path (the North-Star observable)** — after `a1b2c3`↔`d4e5f6`'s handshake, the
+   agent arms the extracted secrets into kTLS on leg B; leg F's RX is sockmap-egress
+   redirected into leg B's kTLS TX. `ss -tie` shows `tcp-ulp-tls 1.3 aes-gcm-256`;
+   `tcpdump -i overdrive-veth0` shows TLS 1.3 App Data records (0x17 03 03); a `GET
+   /payments HTTP/1.1` the workload sent never appears in cleartext on the peer wire (it
+   lives only on the host-internal leg F).
+2. **Forward agent-idle** — `strace` of the agent shows ZERO per-byte syscalls on the
+   forward path; the kernel's `tcp_sendmsg_locked` encrypts each record
+   (`findings-egress-ktls-splice.md`, 15/15).
+3. **Return agent-light** — `strace` shows only `splice`/`ppoll` on the return path (zero
+   payload `read`/`write`), byte-exact plaintext on leg F, ~1 `splice` per TLS record
+   (`findings-splice-return.md`).
 
 #### UAT Scenarios (BDD)
 
-##### Scenario: The wire carries TLS 1.3 records between two host-socket workloads
-Given two host-socket workloads whose handshake has completed
-When the platform installs the negotiated session into the kernel and steps out of the data path
-Then a wire capture between them shows TLS 1.3 Application Data records and no cleartext
-And the kTLS upper-layer protocol is installed on each workload's socket
+##### Scenario: The wire carries TLS 1.3 records on the outbound peer-facing leg
+Given two host-socket workloads whose outbound handshake has completed
+When the platform arms encryption on its own peer-facing leg and hands steady state to the kernel
+Then a wire capture on the peer-facing leg shows TLS 1.3 Application Data records and no cleartext of the payload
+And the kTLS upper-layer protocol is installed on the agent's peer-facing leg
 
-##### Scenario: Encryption is in-kernel with the platform out of the steady-state data path
-Given a host-socket connection whose encryption is armed in the kernel
+##### Scenario: Encryption is in-kernel with the agent agent-light on the steady-state path
+Given an outbound connection whose encryption is armed in the kernel
 When the workloads exchange application bytes
-Then the kernel performs the record framing and encryption
-And the platform agent is not in the steady-state byte path
+Then the kernel performs the forward record framing and encryption with zero agent per-byte syscalls
+And the agent moves the return path via splice only (~1 splice per record), never copying a payload byte in userspace
 
 #### Acceptance Criteria
 
-- [ ] The agent installs the rustls handshake's extracted secrets into kTLS on the workload's own socket (`setsockopt TCP_ULP "tls"` + `TLS_TX/TLS_RX`) — the auth-session's secrets (auth-session == data-session), not a separately negotiated session.
-- [ ] After install the agent EXITS the data path — the kernel does the steady-state record framing + crypto; the agent does no per-byte work.
-- [ ] `ss -K` shows the kTLS ULP installed on each workload's socket (TEST tier, via Lima).
-- [ ] A `tcpdump` capture on the veth between two host-socket workloads shows TLS 1.3 Application Data records (content type 0x17) and NEVER the cleartext payload (TEST tier, gated `integration-tests`, via Lima).
+> Authoritative ACs in `slices/slice-03-outbound-enforce-ktls-splice-wire-capture.md`. Summary:
+
+- [ ] The agent arms the rustls handshake's extracted secrets into kTLS on leg B (`setsockopt TCP_ULP "tls"` + `TLS_TX/TLS_RX`) — the auth-session's secrets (auth-session == data-session), not a separately negotiated session.
+- [ ] Forward agent-idle: `tcpdump` on the peer-facing wire shows 0x17 records and the agent issues ZERO per-byte forward syscalls (strace); return agent-light: `strace` shows only `splice`/`ppoll`, byte-exact plaintext on leg F, ~1 splice per record.
+- [ ] `ss -tie` shows the kTLS ULP on leg B (`tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw`) (TEST tier, via Lima).
+- [ ] A `tcpdump` capture on the peer-facing wire shows TLS 1.3 Application Data records (0x17) and NEVER the cleartext payload (the workload's plaintext is on leg F, host-internal, by design) — the K1 North-Star observable.
+- [ ] (Tier-3 invariant) SOCKMAP-insert AFTER `TCP_ULP "tls"` returns `EINVAL` (the natural insert→ULP order passes; the reverse must fail).
 
 #### Technical Notes
 
-- The exact kTLS `crypto_info` struct construction (mapping rustls extracted
-  secrets → `TLS_TX/TLS_RX`) and the record-sequence handling are DESIGN's to pin —
-  DISCUSS pins the observable (TLS 1.3 on the wire), not the struct shape.
-- This is the North-Star observable slice (the wire carries TLS 1.3); it is the
-  headline value and is prioritised accordingly (P4 in the chain, highest value).
+- The exact kTLS `crypto_info` struct construction (mapping rustls extracted secrets →
+  `TLS_TX/TLS_RX`) and the record-sequence handling are DESIGN's to pin — DISCUSS pins
+  the observable (TLS 1.3 on the peer wire), not the struct shape.
+- This is the outbound North-Star observable slice (the wire carries TLS 1.3); it is the
+  headline value and is prioritised accordingly. Slice 04 mirrors it inbound.
 
 ---
 
-### US-MTLS-04 — fail-closed on absent/wrong SVID; no cleartext before kTLS install
+### US-MTLS-04 — INBOUND enforce: orig-dst → server-mTLS → kTLS-RX → agent-light splice-to-server
 
-**Problem**: The encryption guarantee is only real if it CANNOT be bypassed: a
-handshake against an absent or wrong SVID must **fail closed** (no plaintext
-fallback), and no cleartext byte may **leak before kTLS is armed** (the plaintext
-race window). Both are the security invariants a reviewer pushes hardest on.
+**Problem**: The outbound half (US-MTLS-03) encrypts a workload's *client* traffic, but
+"between two workloads" is only real when the *server* half is enforced too. After the
+inbound intercept (US-MTLS-01) selects the server workload's identity from the
+TPROXY-recovered original destination, the platform must complete the server-side
+mutual-TLS handshake, arm kTLS-RX on the agent's client-facing leg, and deliver the
+**byte-exact decrypted plaintext** to the identity-unaware server workload — while the
+client-facing wire carries ciphertext only. **The authoritative ACs are in
+`slices/slice-04-inbound-enforce-server-mtls-ktls-rx-splice.md`.**
 
-**Who**: Platform/security engineer | threat-modelling the bypass paths | wants the
-handshake to fail closed on a wrong/absent SVID and zero cleartext to egress before
-kTLS install.
+**Who**: Platform/security engineer | wiring the inbound/server enforce path | wants the
+server-side mutual-TLS to verify the client SVID, the kernel to decrypt, and the server
+workload to read byte-exact plaintext without holding anything.
 
-**Solution**: The handshake fails closed when `IdentityRead` returns absent for the
-allocation (the agent refuses rather than presenting a stale credential) or when
-the peer does not chain to the trust bundle (rustls aborts). A gate armed before
-connect()/accept() returns keeps no cleartext on the wire before kTLS is armed (the
-gate mechanism — sk_msg DROP-until-armed vs sockmap redirect vs an out-of-tree
-write-block — is a DESIGN choice the spike informs, not pinned here); the residual
-data-loss window is closed by connection reset if drops > 0.
+**Solution**: The TPROXY-recovered original destination (`getsockname` on leg C, Slice
+01) selects the server workload's `AllocationId` → held SVID via `IdentityRead`. The
+agent runs the server-side rustls TLS 1.3 handshake on leg C (presents the server SVID,
+`WebPkiClientVerifier` REQUIRE+VERIFY the client's SVID chains to the bundle), arms
+kTLS-RX on leg C, and drives an agent-light `splice(legC → pipe → legS)` pump that
+delivers the byte-exact decrypted plaintext to the server workload S. The client-facing
+leg carries TLS `0x17` app_data only; the plaintext appears only on the agent→S leg.
 
 #### Elevator Pitch
 
-- **Before**: an absent/wrong SVID could fall back to plaintext, and a workload
-  write during the agent's handshake turnaround could leak cleartext — the
-  encryption guarantee would be bypassable.
-- **After**: a flow with an absent/wrong SVID produces NO TLS Application Data and
-  NO cleartext on the wire (fail-closed), and a race-window probe (write immediately
-  on connect() return + deliberately delayed kTLS install) shows zero cleartext
-  bytes before install — observable as a `tcpdump` capture that never contains the
-  plaintext probe string and a drop-counter signalling the window.
-- **Decision enabled**: Sam decides the encryption cannot be bypassed by an
-  absent/wrong SVID or a write-before-install race — or rejects the feature if
-  either leaks cleartext.
+- **Before**: only the outbound/client direction is encrypted — an inbound connection to
+  a server workload would still be enforced by nothing, and "between two workloads" would
+  be half-true.
+- **After**: an inbound connection is TPROXY-intercepted, the server workload's identity
+  is selected from the recovered orig-dst, the server-side mutual-TLS verifies the client
+  SVID, kTLS-RX decrypts in-kernel, and the server workload reads the byte-exact request
+  as plaintext — observable as `tcpdump` showing 0x17 on the client leg, byte-exact
+  plaintext at S, `strace` showing splice-only delivery, and `ss -tie` showing kTLS-RX.
+- **Decision enabled**: Sam decides the inbound half works agent-light and the server
+  workload reads byte-exact plaintext while the wire carries ciphertext — or rejects an
+  inbound path that leaks request cleartext or copies bytes in userspace.
 
 #### Domain Examples
 
-1. **Absent SVID (bounded convergence window, #35's O1)** — alloc `g7h8i9` reached
-   Running but its SVID is not yet held (one reconcile tick behind, #35).
-   `IdentityRead::svid_for(&g7h8i9)` returns `None`; the agent refuses the
-   handshake; the connection does not proceed in cleartext. `tcpdump` shows no TLS
-   App Data and no cleartext.
-2. **Wrong peer (does not chain to the bundle)** — a peer presents a credential not
-   chaining to `current_bundle()`; rustls aborts the handshake. No TLS App Data, no
-   cleartext.
-3. **Race-window probe** — `web` calls `write("PLAINTEXT_PROBE")` immediately on
-   `connect()` return; the kTLS install is delayed 500ms. The gate
-   (armed before connect() returned; mechanism per DESIGN/spike) drops the write;
-   `tcpdump` shows EITHER TLS 1.3 records OR zero app bytes — never `PLAINTEXT_PROBE`
-   on the wire; the drop-counter increments; the connection resets and the app
-   retries (request-first).
+1. **Orig-dst → identity** — a connection aimed at `d4e5f6`'s logical address is
+   TPROXY-redirected to the agent's leg C; `getsockname()` recovers
+   `127.0.0.2:18443` → selects `d4e5f6`'s `AllocationId` → its held SVID via
+   `IdentityRead` (`findings-inbound-intercept.md` §1).
+2. **Server-mTLS + kTLS-RX** — the agent presents `d4e5f6`'s server SVID;
+   `WebPkiClientVerifier` REQUIRE+VERIFY the client's SVID chains to the bundle; a valid
+   client cert → handshake succeeds, kTLS-RX armed (`ss -tie` `rxconf:sw`).
+3. **Byte-exact plaintext at S, agent-light** — the agent `splice`s the decrypted
+   plaintext to the server workload S byte-exact; the client-facing leg carries `0x17`
+   records only (cleartext-marker hits on the client leg = 0); `strace` shows the agent
+   moves the payload via `splice`/`ppoll` only (`findings-inbound-intercept.md` §3/§5).
 
 #### UAT Scenarios (BDD)
 
-##### Scenario: A handshake against an absent or wrong identity fails closed
-Given a host-socket connection whose held SVID is absent, or whose peer does not chain to the trust bundle
+##### Scenario: An inbound connection is server-authenticated and the server workload reads byte-exact plaintext
+Given an intercepted inbound connection aimed at a server workload whose SVID is held, presenting a valid client SVID
+When the platform completes the server-side handshake, arms kTLS-RX, and delivers the request to the server workload
+Then the server workload reads the byte-exact request as plaintext while it holds no certificate or private key
+And the client-facing wire carries TLS 1.3 Application Data records and no cleartext of the request
+
+##### Scenario: The platform stays out of the per-byte path on the inbound deliver
+Given an inbound connection whose kTLS-RX is armed on the agent's client-facing leg
+When the client streams a request
+Then the kernel decrypts each record and the agent delivers it to the server workload via splice only (~1 splice per record)
+And the agent never copies a payload byte through userspace
+
+#### Acceptance Criteria
+
+> Authoritative ACs in `slices/slice-04-inbound-enforce-server-mtls-ktls-rx-splice.md`. Summary:
+
+- [ ] Orig-dst → identity: the TPROXY-recovered original destination selects the server workload's `AllocationId` → its held SVID via `IdentityRead`.
+- [ ] Server-mTLS: the agent presents the server SVID and `WebPkiClientVerifier` REQUIRE+VERIFY the client's SVID chains to the bundle; a valid client cert → handshake succeeds, kTLS-RX armed (`ss -tie` `rxconf:sw`).
+- [ ] Byte-exact plaintext to S: the server workload reads the byte-exact request as plaintext; the client-facing leg carries `0x17` app_data only (cleartext-marker hits = 0); the decrypted plaintext appears ONLY on the agent→S leg.
+- [ ] Agent-light: `strace` shows the agent moves the inbound payload via `splice`/`ppoll` only (zero per-byte payload I/O); leg C carries no psock on its RX (same plain-kTLS-RX invariant as the outbound return).
+
+#### Technical Notes
+
+- The entire inbound path (TPROXY intercept + orig-dst + server-mTLS + kTLS-RX +
+  agent-light splice-to-S) is proven end-to-end in `findings-inbound-intercept.md`
+  §1–§5 (increment-i, kernel 7.0); the slice productionises the identity-selection
+  lookup (orig-dst → `AllocationId` → SVID via `IdentityRead`, which the spike hardcoded)
+  and re-proves the loopback spike topology in the real netns/veth shape.
+- The fail-closed negatives (nocert/wrongca, distinct reasons) are Slice 05; the verifier
+  REQUIRE+VERIFY is wired here, the dedicated negative proofs are S05.
+
+---
+
+### US-MTLS-05 — the guardrails: fail-closed (cause-distinct), resource limits, pump supervision, intercept-exemption negatives, the honest authn boundary
+
+**Problem**: The encryption guarantee is only real if it CANNOT be bypassed and the
+platform claims exactly what it proves: a handshake against an absent SVID (outbound) or
+a missing/untrusted client cert (inbound) must **fail closed** cause-distinct; the
+bounded pre-arm buffer / handshake deadline / in-flight ceiling must be enforced
+fail-closed at their concrete values; a stalled return/deliver pump must be torn down
+with no leak; the agent's leg-B dial must provably not be re-intercepted and a workload
+must provably be unable to self-exempt; and v1 must be documented as
+**chain-to-bundle transport authn + encryption ONLY — NO intended-peer pinning**. **The
+authoritative ACs are in
+`slices/slice-05-fail-closed-limits-supervision-authn-boundary.md`.**
+
+**Who**: Platform/security engineer | threat-modelling the bypass paths and the boundary
+| wants fail-closed on wrong/absent/untrusted creds, enforced resource limits, supervised
+pumps, an un-evadable intercept, and an honest v1 claim.
+
+**Solution**: Fail-closed (both directions, cause-distinct): outbound `IdentityRead`
+`None` → `AbsentSvid`; outbound non-chaining peer → `PeerVerificationFailed`; inbound
+`nocert`/`wrongca` → `WebPkiClientVerifier` rejects with a distinct reason per case,
+BEFORE any splice (S receives 0 bytes). Resource limits (F4/F7) at concrete values:
+`max_prearm_bytes = 256 KiB` → `BufferLimitExceeded`; `handshake_deadline = 5 s` →
+`HandshakeTimeout`; `max_inflight_per_alloc = 128` → `InFlightLimitExceeded` — all
+fail-closed, cleanup leaks nothing. Pump supervision (F6): a return/deliver pump stalled
+for `pump_stall_deadline = 30 s` with a record pending is `Stalled` → the worker tears
+the connection down. Intercept-exemption negatives (F5): the agent's leg-B dial is NOT
+re-intercepted AND a workload CANNOT self-exempt. The honest authn boundary (F1): v1
+authenticates chain-to-bundle ONLY, with NO intended-peer pinning (the `PeerIdentityMismatch`
+test is `#[ignore]`-gated on #178).
+
+#### Elevator Pitch
+
+- **Before**: an absent/wrong/untrusted cred could fall back to plaintext, an unbounded
+  pre-arm buffer is a DoS surface, a stalled pump could strand resources, a workload might
+  self-exempt the intercept, and a doc could overclaim intended-peer protection — the
+  guarantee would be bypassable or dishonest.
+- **After**: a flow with an absent/wrong/untrusted cred produces NO TLS Application Data
+  and NO cleartext (fail-closed cause-distinct, both directions); the limits trip their
+  cause-distinct errors at their concrete values with no leak; a stalled pump tears down
+  and reports `Gone`; a workload that tries to self-exempt is still intercepted; and the
+  platform claims exactly chain-to-bundle authn + encryption, no intended-peer pinning.
+- **Decision enabled**: Sam decides the encryption cannot be bypassed AND the platform
+  claims exactly what it proves — or rejects the feature if a cred leaks cleartext, a
+  limit is unenforced, a pump leaks, a workload self-exempts, or a doc/test overclaims
+  intended-peer protection.
+
+#### Domain Examples
+
+1. **Fail-closed cause-distinct** — alloc `g7h8i9` reached Running but its SVID is not
+   yet held (one reconcile tick behind, #35); `IdentityRead::svid_for(&g7h8i9)` returns
+   `None` → `AbsentSvid`, the agent refuses, no cleartext to the peer. Inbound, a client
+   presenting no cert (`nocert`) and one with an untrusted CA (`wrongca`) each reject with
+   their DISTINCT reason BEFORE any splice; the server workload receives 0 bytes.
+2. **Resource limits at concrete values** — a workload streams > 256 KiB of pre-arm
+   plaintext while the handshake stalls → `BufferLimitExceeded` (buffer dropped, leg
+   reset, no cleartext); a handshake exceeding 5 s → `HandshakeTimeout`; the 129th
+   concurrent in-flight connection for one alloc → `InFlightLimitExceeded`.
+3. **Pump supervision + intercept exemption + honest boundary** — a return/deliver pump
+   whose bytes-spliced counter has not advanced for 30 s with a record pending is
+   `Stalled` → the worker tears the connection down → `Gone`, no leak; the agent's leg-B
+   dial is NOT re-intercepted and a workload setting the bypass on its own socket is STILL
+   intercepted; v1 verifies chain-to-bundle ONLY, the `PeerIdentityMismatch` test is
+   `#[ignore]`-gated on #178 and no doc/test calls the wrong-but-valid-peer case
+   "protected."
+
+#### UAT Scenarios (BDD)
+
+##### Scenario: A handshake against an absent or untrusted identity fails closed, cause-distinct
+Given an intercepted connection whose held SVID is absent (outbound), or whose client presents no cert or an untrusted-CA cert (inbound)
 When the platform attempts the handshake
-Then the connection fails closed with no TLS application data and no cleartext on the wire
+Then the connection fails closed with a cause-distinct reason, no application data, and no cleartext of the payload
+And no plaintext is delivered to the server workload
 
-##### Scenario: No cleartext escapes before encryption is armed
-Given a host-socket workload that writes immediately after its connection is established
-And the kTLS installation is deliberately delayed
-When the wire is captured during the delay
-Then no cleartext application bytes appear on the wire before kTLS is installed
-And the dropped-write count signals that the race window fired
+##### Scenario: Resource exhaustion and a stalled pump are bounded and fail-closed
+Given a workload that streams into the pre-arm buffer while the handshake stalls, or a return/deliver pump that strands with a record pending
+When the bounded limit is exceeded or the pump stalls past its deadline
+Then each limit trips its cause-distinct error at its concrete value, the cleanup leaks nothing, and a stalled pump is torn down and reports Gone
 
-#### Acceptance Criteria
-
-- [ ] A handshake where `IdentityRead::svid_for` returns absent for the allocation fails closed — the agent refuses rather than presenting a stale credential; no cleartext egresses (TEST tier).
-- [ ] A handshake where the peer does not chain to `IdentityRead::current_bundle()` aborts (rustls) — no TLS Application Data, no cleartext on the wire.
-- [ ] No cleartext byte reaches the wire before kTLS is armed (the confidentiality fail-closed property): the gate is armed before connect()/accept() returns. The gate MECHANISM (sk_msg DROP-until-armed vs sockmap redirect vs out-of-tree write-block) is a DESIGN choice the spike informs — NOT pinned here.
-- [ ] A race-window probe (write immediately on connect() return + deliberately delayed kTLS install) captured by `tcpdump` shows EITHER TLS 1.3 records OR zero application bytes — NEVER the plaintext probe string; a drop-counter signals the window; the connection resets if drops > 0 and a request-first app retries (TEST tier, via Lima).
-
-#### Technical Notes
-
-- The residual data-loss window (sk_msg has no lossless HOLD — `bpf_msg_cork_bytes`
-  does not buffer) is closed by connection reset (drops > 0), correct for
-  request-first protocols. Server-speaks-first protocols (SMTP/FTP/SSH) need a
-  write-block (out-of-tree, legitimised by the 6.18 pin) and are a DESIGN scope
-  call (Open Questions).
-- The exact gate mechanism (sk_msg DROP-until-armed vs sockmap proxy redirect vs
-  the write-block patch) is DESIGN's, informed by the Slice-00 spike — DISCUSS pins
-  the observable (no cleartext before install), not the mechanism.
-
----
-
-### US-MTLS-05 — in-flight kTLS survives an agent restart; new connections re-handshake; WASM variant
-
-**Problem**: A node-agent restart (crash/upgrade) must not silently break in-flight
-encrypted connections or leave them unencrypted — and the platform must encrypt
-WASM workloads (in-process host sockets) identically to processes. kTLS state is
-socket-owned, so survival hinges on fd-ownership; new connections after a restart
-must re-handshake cleanly.
-
-**Who**: Platform/security engineer | threat-modelling restart + covering the WASM
-workload kind | wants in-flight kTLS sessions to survive an agent restart (when the
-workload owns the fd), new connections to re-handshake, and WASM to work like
-process.
-
-**Solution**: Because kTLS crypto lives on the socket (`icsk_ulp_data`, freed only
-on socket close) and the sockops bpf_link + maps are bpffs-pinned, an in-flight
-session survives an agent restart IFF the workload owns the socket fd; new
-connections re-run the detect→handshake→install handoff (the held SVID is
-re-readable via `IdentityRead`). The WASM path uses the in-process host fd (no
-`pidfd_getfd`) but is otherwise identical.
-
-#### Elevator Pitch
-
-- **Before**: a node-agent restart could break in-flight encrypted connections or
-  leave them unencrypted, and WASM workloads have no enforcement path.
-- **After**: after an agent restart, new connections re-handshake and re-install
-  kTLS (the unconditional promise), and a WASM workload's wire carries TLS 1.3
-  records identically to a process (`tcpdump`); AND — spike/DESIGN-gated — where the
-  workload owns the socket and the sockops link/maps are bpffs-pinned, an in-flight
-  kTLS session survives the restart (observable as `ss -K` still showing the ULP
-  after the agent is `kill -9`'d and the live exchange continuing). In-flight
-  survival is NOT an unconditional Phase-2 acceptance gate; the spike validates the
-  composed shape.
-- **Decision enabled**: Sam decides a restart does not silently degrade encryption
-  and that WASM is covered — or rejects a design where a restart drops kTLS state or
-  WASM is unencrypted.
-
-#### Domain Examples
-
-1. **In-flight survival** — `a1b2c3`↔`d4e5f6` have a live kTLS session; the
-   workload owns the socket fd; the sockops link + maps are bpffs-pinned. The
-   node-agent process is `kill -9`'d. `ss -K` still shows the kTLS ULP on the
-   sockets; the workloads continue exchanging TLS 1.3 records (record-sequence
-   continuity intact); a fresh agent re-hydrates its management view from the
-   bpffs pins without re-handshaking the live connection (CP-restart research §C
-   shape).
-2. **New connection after restart** — after the agent restart, `web` opens a NEW
-   connection to `api`; the detect→handshake→install handoff re-runs (the held SVID
-   is re-readable via `IdentityRead`); `tcpdump` shows TLS 1.3 records on the new
-   connection.
-3. **WASM variant** — a WASM workload `coinflip` (wasmtime, in-process host socket)
-   opens a connection; the agent acquires the in-process host fd (no `pidfd_getfd`),
-   performs the handshake presenting `coinflip`'s held SVID, installs kTLS, exits;
-   `tcpdump` shows TLS 1.3 records identical to the process path.
-
-#### UAT Scenarios (BDD)
-
-##### Scenario: An in-flight encrypted connection survives a node-agent restart
-Given two host-socket workloads with a live kernel-encrypted session, where the workload owns the socket and the detection state is pinned
-When the node agent process restarts
-Then the kernel encryption stays installed on the sockets
-And the workloads continue exchanging TLS 1.3 records without re-handshaking the live connection
-And a new connection opened after the restart re-handshakes and is encrypted
-
-##### Scenario: A WASM workload's wire is encrypted identically to a process workload
-Given a WASM workload (in-process host sockets) that opens a connection
-When the platform performs the detect-handshake-install handoff for it
-Then a wire capture shows TLS 1.3 records identical to the process path
-And the WASM workload holds no certificate or private key
+##### Scenario: A workload cannot evade interception and the v1 claim is honest
+Given a workload trying to self-exempt the intercept, and the platform's v1 security claim
+When it opens a connection and a security reviewer reads the claim
+Then the workload is still intercepted (the bypass is agent-private), and the claim is exactly chain-to-bundle authn + encryption with no intended-peer pinning
 
 #### Acceptance Criteria
 
-- [ ] (Spike/DESIGN-gated — NOT an unconditional Phase-2 AC) WHERE the spike confirms the composed shape (workload owns the socket fd; sockops bpf_link + maps bpffs-pinned), an in-flight kTLS session survives a node-agent `kill -9` + restart — observable: `ss -K` still shows the kTLS ULP and the workloads continue exchanging TLS 1.3 records with record-sequence continuity (TEST tier, via Lima). If the spike does not confirm it, the documented behaviour is new-connection re-handshake.
-- [ ] A fresh agent re-hydrates its management view from the bpffs pins (`PinnedLink::from_pin` / `Map::from_pin`) without re-handshaking the live connection.
-- [ ] A NEW connection opened after the restart re-runs the detect→handshake→install handoff (held SVID re-read via `IdentityRead`) and carries TLS 1.3 records.
-- [ ] A WASM workload (wasmtime, in-process host fd — no `pidfd_getfd`) is detected, handshaked, and kTLS-installed identically; `tcpdump` shows TLS 1.3 records; the WASM workload holds no cert/key.
-- [ ] (Documented, not an AC) a FULL NODE REBOOT wipes all kernel-owned state (bpffs pins do not survive a reboot) → every connection re-handshakes from scratch — stated as expected behaviour, not promised survival.
+> Authoritative ACs in `slices/slice-05-fail-closed-limits-supervision-authn-boundary.md`. Summary:
+
+- [ ] Outbound fail-closed: `IdentityRead::svid_for` `None` → `AbsentSvid`; a peer not chaining to the bundle → `PeerVerificationFailed` (no TLS app data, no cleartext). Inbound fail-closed, distinct reasons: `nocert` and `wrongca` each reject with their DISTINCT reason BEFORE any splice; S receives 0 bytes.
+- [ ] Resource limits (concrete values): `max_prearm_bytes = 256 KiB` → `BufferLimitExceeded`; `handshake_deadline = 5 s` → `HandshakeTimeout`; `max_inflight_per_alloc = 128` → `InFlightLimitExceeded`; cleanup leaks no fd/sockmap/kTLS state (re-query `liveness` → `Gone`). Assert the CONCRETE values, not field existence.
+- [ ] Pump supervision (F6): a pump stalled for `pump_stall_deadline = 30 s` with a record pending → `Stalled` → the worker tears the connection down → `Gone`, no leak; `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` emitted.
+- [ ] Intercept-exemption negatives (F5): the agent's leg-B dial is NOT re-intercepted (no recursion); a workload that sets the bypass on its own socket is STILL intercepted (the bypass is agent-private).
+- [ ] Honest authn boundary (F1): a test asserts v1 verifies chain-to-bundle ONLY (both directions); the wrong-but-valid-peer `PeerIdentityMismatch` test is present but `#[ignore]`-gated on #178; NO AC/doc/test calls the wrong-but-valid-peer case "protected" until #178 lands.
 
 #### Technical Notes
 
-- fd-ownership (workload owns the socket) is the load-bearing precondition for
-  in-flight survival (kTLS state is socket-owned; CP-restart-survival research §B/§C)
-  — targeted by the Slice-00 spike's handoff. The restart-survival GUARANTEE is a
-  DESIGN/spike observable, not promised beyond "new connections re-handshake" if
-  the spike does not confirm the composed behaviour.
-- The WASM variant differs only in fd acquisition (in-process host fd vs
-  `pidfd_getfd`); the handshake/install/observable are identical.
+- The inbound fail-closed (nocert/wrongca, distinct reasons) is proven in
+  `findings-inbound-intercept.md` §4; the resource-limit + pump-supervision tests need
+  the deliberately-exceeded-buffer / stalled-handshake / paused-pump harnesses; the
+  exemption negatives + the `#[ignore]`-gated boundary placeholder are small.
+- Authorization (allow/deny) is the BPF-LSM `socket_connect` hook (#27) fed by
+  `policy_verdicts` (#38; related #49) — a SEPARATE subsystem the proxy MUST NOT
+  duplicate. Intended-peer SAN-match is the #178 upgrade (VIP path #61). Operator-tunable
+  limits are a separate deferral (v1 = compile-time defaults).
 
 ---
 
@@ -1008,45 +1091,49 @@ And the WASM workload holds no certificate or private key
 
 ### Objective
 
-By the end of #26, host-socket workloads (process, WASM) carry TLS 1.3 on the wire
-with their own SVID, in-kernel, with the platform agent out of the steady-state
-data path — provable by a packet capture — with no cleartext egressing before kTLS
-install (fail-closed), handshakes failing closed on absent/wrong SVIDs, and the
-in-band sidecarless kTLS mechanism validated on the pinned 6.18 kernel by a
-spike-first walking skeleton (or the documented Cilium fallback adopted).
+By the end of #26, v1 host-socket (process/exec) workloads carry TLS 1.3 on the
+peer-facing wire with their own SVID, in-kernel, BOTH directions, with the platform
+agent **agent-light** (idle on the forward path, ~1 splice per record on the
+return/deliver path) — provable by a packet capture — with no cleartext on the peer
+wire (losslessly, via the userspace handshake buffer), handshakes failing closed
+cause-distinct on absent/wrong/untrusted creds, and the agent-light L4 proxy's
+**composition** validated on the pinned 6.18 kernel by the BLOCKING composed walking
+skeleton.
 
 ### Outcome KPIs
 
 | # | Who | Does What | By How Much | Baseline | Measured By | Type |
 |---|---|---|---|---|---|---|
-| K1 | host-socket flows (process + WASM) | carry TLS 1.3 records on the wire (not cleartext) | 100% of established host-socket flows carry TLS 1.3 Application Data; 0% carry cleartext payload (fail-closed) | 0% (no enforcer exists — the CA mints, the IdentityMgr holds, nothing encrypts the wire) | Tier-3 `tcpdump` on the veth: TLS 1.3 records (0x17) present, cleartext payload absent (Slice 03) | Leading (North Star) |
-| K2 | cleartext bytes before kTLS install | egress on the wire during the sockops→kTLS race window | 0 cleartext bytes before kTLS install (fail-closed for confidentiality) | n/a (no enforcer ⇒ no install path today) | Tier-3 race-window probe: write on connect() return + delayed install; `tcpdump` never shows the plaintext probe; drop-counter signals the window (Slice 04) | Guardrail |
-| K3 | handshakes against an absent/wrong SVID | fall back to plaintext / proceed in cleartext | 0 plaintext fallbacks — every absent/wrong-SVID handshake fails closed (no TLS App Data, no cleartext) | n/a | Tier-3 negative test: absent SVID (IdentityRead None) and wrong peer (no chain to bundle) both yield no TLS App Data and no cleartext (Slice 04) | Guardrail |
-| K4 | the platform agent | stays in the steady-state byte data path (the ztunnel anti-pattern) | agent absent from the steady-state byte path; kTLS ULP installed on the workload's own socket (in-kernel encryption) | n/a | Tier-3 `ss -K` shows the kTLS ULP on the workload socket; the agent does no per-byte work after install (Slice 03) | Guardrail |
-| K5 | node-agent restart | breaks new connections (no re-handshake) — and, where the spike confirms the shape, breaks in-flight sessions | UNCONDITIONAL: new connections after a restart re-handshake and re-install kTLS. SPIKE/DESIGN-GATED: 0 in-flight sessions broken IFF the workload owns the fd + bpffs-pinned link/maps (validated by the Slice-00 spike; not an unconditional Phase-2 promise) | n/a (no enforcer ⇒ no held kTLS state today) | Tier-3: `kill -9` the agent → a new connection re-handshakes (unconditional); where fd-owned + pinned, `ss -K` still shows the ULP and the in-flight session continues (Slice 05) | Guardrail |
-| K6 | the in-band sidecarless kTLS mechanism | is assumed without empirical proof on the real kernel | the walking-skeleton spike returns an explicit PASS/FAIL verdict on the 6.18 kernel for one flow (PASS = proceed; FAIL = documented Cilium fallback) | unproven (no shipping precedent for in-band sidecarless kTLS) | Tier-3 spike verdict + wire capture for one process→process flow (Slice 00) | Leading (riskiest-assumption gate) |
+| K1 | v1 host-socket flows (process/exec) | carry TLS 1.3 records on the peer-facing wire (not cleartext), both directions | 100% of established host-socket flows carry TLS 1.3 Application Data on the peer leg; 0% carry cleartext payload (fail-closed) | 0% (no enforcer exists — the CA mints, the IdentityMgr holds, nothing encrypts the wire) | Tier-3 `tcpdump` on the peer-facing leg: TLS 1.3 records (0x17) present, cleartext payload absent, both directions (Slices 03/04) | Leading (North Star) |
+| K2 | cleartext bytes on the peer wire before encryption is armed | egress during the handshake window | 0 cleartext bytes on the peer wire before kTLS arms (the pre-arm plaintext is captured losslessly in the agent's userspace buffer and flushed after the handshake — no dropped bytes, no RESET) | n/a (no enforcer ⇒ no arm path today) | Tier-3: the pre-arm plaintext arrives at the peer exactly once, in order, as the first application_data; the peer capture never shows cleartext before 0x17 (Slices 03/04) | Guardrail |
+| K3 | handshakes against an absent/wrong/untrusted cred | fall back to plaintext / proceed in cleartext | 0 plaintext fallbacks — every absent SVID (outbound) and missing/untrusted client cert (inbound `nocert`/`wrongca`) handshake fails closed cause-distinct (no TLS App Data, no cleartext) | n/a | Tier-3 negative test: outbound absent SVID (IdentityRead None) and non-chaining peer; inbound nocert/wrongca each fail closed with a distinct reason, 0 bytes to S (Slice 05) | Guardrail |
+| K4 | the platform agent | stays in the steady-state per-byte data path (the ztunnel anti-pattern) | agent AGENT-LIGHT, not a per-byte userspace proxy: forward agent-idle (zero per-byte syscalls); return/deliver agent-light (~1 splice per record); kTLS ULP armed on the agent's peer-facing leg (in-kernel encryption) | n/a | Tier-3 `strace`: zero per-byte forward syscalls + only `splice`/`ppoll` on return; `ss -tie` shows the kTLS ULP on the agent's leg (Slices 03/04) | Guardrail |
+| K5 | a return/deliver splice pump / a resource-exhausting workload | strands resources or pins the agent (unbounded pre-arm buffer / stalled pump) | every limit fail-closed at its concrete value (256 KiB pre-arm / 5 s handshake / 128 in-flight / 30 s pump-stall); a stalled pump is torn down (Gone, no leak) | n/a (no enforcer ⇒ no held proxy state today) | Tier-3: each limit trips its cause-distinct error at its concrete value, cleanup leaks nothing, a stalled pump reports Gone (Slice 05) | Guardrail |
+| K6 | the agent-light L4 proxy's composition | is assumed to hold under a real transparent intercept without proof | the BLOCKING composed walking skeleton holds end-to-end (real intercept → handshake → kTLS arm → post-arm bidirectional transfer, NO RST, both directions, normal AND delayed timing) | unproven (the spikes proved the primitives in isolation; increment-e's composed harness RST'd on the intercept lifecycle) | Tier-3 composed acceptance test for one flow each way (Slice 00) | Leading (riskiest-assumption gate) |
 
 ### Metric hierarchy
 
 - **North Star**: K1 — % of host-socket flows that carry TLS 1.3 records on the
-  wire (the single signal that on-the-wire enforcement is operationally true, the
-  reason J-SEC-003 exists).
-- **Leading indicators**: K6 (the spike validates the mechanism — the gate that
-  de-risks K1) and K1 itself.
-- **Guardrails (must NOT degrade)**: K2 (no cleartext before install), K3 (handshake
-  fail-closed), K4 (agent out of the data path / in-kernel), K5 (restart survival).
+  peer-facing wire (the single signal that on-the-wire enforcement is operationally
+  true, the reason J-SEC-003 exists).
+- **Leading indicators**: K6 (the composed walking skeleton proves the composition —
+  the gate that de-risks K1) and K1 itself.
+- **Guardrails (must NOT degrade)**: K2 (no cleartext on the peer wire before arm, lossless),
+  K3 (handshake fail-closed cause-distinct), K4 (agent agent-light / in-kernel), K5
+  (resource limits + pump supervision fail-closed).
 
 ### Hypothesis
 
-We believe that detecting host-socket connections in the kernel (sockops),
-performing the TLS 1.3 handshake on the workload's behalf (rustls, presenting the
-held SVID read via `IdentityRead`), installing the negotiated session into kTLS on
-the workload's socket, and exiting the data path will, for host-socket workloads,
-make principles 2 + 3 operationally true on the wire. We will know this is true
-when **100% of established host-socket flows carry TLS 1.3 records on the wire
-(K1)**, with 0 cleartext bytes before install (K2), every absent/wrong-SVID
-handshake failing closed (K3), and the agent out of the steady-state path (K4) —
-gated by the spike's PASS verdict on the pinned kernel (K6).
+We believe that transparently intercepting host-socket connections (`cgroup_connect4`
+outbound / TPROXY inbound), performing the TLS 1.3 handshake on the agent's peer-facing
+leg (rustls, presenting the held SVID read via `IdentityRead`), arming the negotiated
+session into kTLS on the agent's leg, and handing steady state to the kernel (forward
+agent-idle, return/deliver agent-light) will, for v1 host-socket workloads, make
+principles 2 + 3 operationally true on the wire, both directions. We will know this is
+true when **100% of established host-socket flows carry TLS 1.3 records on the peer-facing
+wire (K1)**, with 0 cleartext on the peer wire before arm (K2, lossless), every
+absent/wrong/untrusted-cred handshake failing closed cause-distinct (K3), and the agent
+agent-light (K4) — gated by the composed walking skeleton holding on the pinned kernel (K6).
 
 ### Handoff to DEVOPS (platform-architect)
 
@@ -1064,30 +1151,31 @@ gated by the spike's PASS verdict on the pinned kernel (K6).
 
 ---
 
-## Wave: DISCUSS / [REF] Open Questions (surfaced as blockers, NOT invented answers)
+## Wave: DISCUSS / [REF] Open Questions (resolved by DESIGN / ADR-0069)
 
-These are surfaced for DESIGN, not resolved in DISCUSS (DISCUSS pins WHAT, not HOW):
+DISCUSS pinned the WHAT (the wire carries TLS 1.3 with the workload's own SVID,
+in-kernel, fail-closed, both directions) and left the mechanism un-pinned. The DESIGN
+wave settled every open question; they are recorded here as closed inputs:
 
-1. **Mechanism choice (in-band kTLS [Arch A] vs proxy [Arch C] vs Cilium
-   out-of-band-auth fallback).** Un-narrowed (no DIVERGE wave). The Slice-00 spike
-   settles the riskiest input; DESIGN owns the choice. **Blocker only if the spike
-   is inconclusive** — then DESIGN may want a focused options pass.
-2. **Server-speaks-first protocol coverage (SMTP/FTP/SSH).** These have an
-   irreducible data-loss window without a write-block (the server's greeting is
-   SK_DROP'd before kTLS is armed). The 6.18 pin legitimises an out-of-tree
-   write-block patch (lossless backpressure), but adopting it is a DESIGN scope call
-   (kernel-maintenance cost vs protocol coverage). DISCUSS does NOT pin it.
-3. **fd-ownership for restart survival.** kTLS state is socket-owned; in-flight
-   survival needs the WORKLOAD to own the fd (CP-restart-survival research §B/§C).
-   The spike's handoff targets workload-owns-fd; DESIGN must pin it before the
-   restart-survival AC (Slice 05) is committed-to as a guarantee vs "new connections
-   re-handshake".
-4. **The exact sockops attach mechanism (legacy `BPF_PROG_ATTACH` vs bpffs-pinned
-   `bpf_link`) and the kTLS `crypto_info` struct mapping.** DESIGN's to pin; both
-   reach restart survival (link must be pinned either way).
+1. **Mechanism choice — RESOLVED (ADR-0069): the universal agent-light L4 proxy.** The 6
+   committed Tier-3 spikes settled it empirically (verdict: proxy); the
+   in-band-on-the-workload's-own-socket model is superseded as v1 (a tracked future
+   optimization), and there is no documented fallback to adopt. The exact
+   `MtlsEnforcement` signature (OQ-1) is now ACCEPTED (user-approved 2026-06-12 —
+   see the DESIGN § "MtlsEnforcement Port Contract (ACCEPTED)").
+2. **Lossless capture for all protocol kinds — RESOLVED (ADR-0069):** the agent's
+   userspace handshake buffer is lossless for every protocol kind (client- or
+   server-first); no dropped pre-arm bytes, no RESET, no kernel patch.
+3. **Composition under a real transparent intercept — gated by Slice 00 (the BLOCKING
+   composed walking skeleton).** The spikes proved the primitives in isolation;
+   increment-e's composed harness RST'd on the intercept lifecycle. Slice 00 is the
+   empirical gate; every later slice is additive on the proven composition.
+4. **The exact intercept attach mechanism + the kTLS `crypto_info` struct mapping** are
+   pinned in the DESIGN sections (grounded on the committed spike findings); the
+   `MtlsEnforcement` method signatures (OQ-1) are ACCEPTED (user-approved 2026-06-12).
 
-None of these block the DISCUSS handoff — they are DESIGN-wave inputs, with the
-spike (Slice 00) the empirical gate for #1/#3.
+None of these blocked the DISCUSS handoff — DISCUSS pins WHAT, not HOW; the DESIGN wave
+(ADR-0069) owns the mechanism and is recorded in the `## Wave: DESIGN` sections below.
 
 ---
 
@@ -1095,24 +1183,24 @@ spike (Slice 00) the empirical gate for #1/#3.
 
 | # | DoR Item | Status | Evidence |
 |---|---|---|---|
-| 1 | Problem statement clear, domain language | PASS | Each story's Problem is in security-engineer domain language (identity-unaware workloads, host sockets, the held SVID, fail-closed, the plaintext race window) — no "implement sockops". |
-| 2 | User/persona with specific characteristics | PASS | Sam Okafor (`sam-platform-security-engineer.yaml`) with a J-SEC-003 lens — threat-models by default, verifies with `tcpdump`/`ss -K`/`openssl verify`, distrusts security that can be turned off. |
+| 1 | Problem statement clear, domain language | PASS | Each story's Problem is in security-engineer domain language (identity-unaware workloads, host sockets, the held SVID, the agent's peer-facing leg, fail-closed, agent-light) — no "implement sockops". |
+| 2 | User/persona with specific characteristics | PASS | Sam Okafor (`sam-platform-security-engineer.yaml`) with a J-SEC-003 lens — threat-models by default, verifies with `tcpdump`/`ss -tie`/`openssl verify`, distrusts security that can be turned off. |
 | 3 | 3+ domain examples with real data | PASS | Every story has 3 examples with real allocs (`a1b2c3`/`d4e5f6`/`g7h8i9`), real SPIFFE URIs (`spiffe://overdrive.local/job/web/alloc/a1b2c3`), real protocols (HTTP/gRPC), real workloads (`web`/`api`/`coinflip`). No `user123`. |
 | 4 | UAT in Given/When/Then (3–7 scenarios) | PASS | Each story has 2–3 business-outcome scenarios (titles describe WHAT the user achieves — "the wire carries TLS 1.3 records", "a handshake against an absent identity fails closed" — never "sockops fires" or kTLS struct names). 13 scenarios across 6 stories. |
-| 5 | AC derived from UAT | PASS | Each story's ACs are derived from its scenarios + the four-forces/job-map edge cases; observable + testable (tcpdump/ss -K/drop-counter), not implementation ("use TLS_TX struct X"). |
-| 6 | Right-sized (1–3 days, 3–7 scenarios) | PASS | 5 ≤1-day slices + 1 ~2-day spike; each story 4–5 ACs, 2–3 scenarios. Scope assessment PASS (zero oversized signals). |
+| 5 | AC derived from UAT | PASS | Each story's ACs are derived from its scenarios + the four-forces/job-map edge cases; observable + testable (tcpdump/`ss -tie`/agent-light strace/fail-closed negative), not implementation ("use TLS_TX struct X"). |
+| 6 | Right-sized (1–3 days, 3–7 scenarios) | PASS | 6 ≤1–1.5-day slices (Slice 00 = the BLOCKING composed walking skeleton); each story 4–5 ACs, 2–3 scenarios. Scope assessment PASS (zero oversized signals). |
 | 7 | Technical notes: constraints/dependencies | PASS | § System Constraints (cross-cutting) + per-story Technical Notes; the mechanism is deliberately NOT pinned (DESIGN's), with the spike as the gate. |
 | 8 | Dependencies resolved or tracked | PASS | Consumes shipped #35 (`IdentityRead` + `Arc<IdentityMgr>`) + #28 (`Ca` + leaf key) + ADR-0068 (kernel). Carve-outs tracked by real issue #: #222 (guest-stack), #229 (rekey), #40 (rotation), #36 (multi-node), Phase 5 (revocation). NO DIVERGE risk recorded in `wave-decisions.md`. |
 | 9 | Outcome KPIs defined with measurable targets | PASS | K1–K6 with Who/Does-what/By-how-much/Baseline/Measured-by; North Star K1 (100% host-socket flows carry TLS 1.3), guardrails K2–K5 (binary: 0 cleartext / 0 fallback / agent-out / 0-broken), gate K6 (spike verdict). |
 
-**DoR Status: PASSED** (pending peer review). Elevator-Pitch gate: every
-non-`@spike` story has a Before/After/Decision-enabled triplet whose "After"
-references a real executable observable (`tcpdump`/`ss -K`/negative test); the
-foundation-feature exception (no operator verb; TEST-tier observables) is recorded
-explicitly above (§ User Stories preamble), in `wave-decisions.md` (D1), and here —
-mirroring built-in-ca and #35. Slice-composition gate: no slice is empty
-`@infrastructure` — every slice has a genuine wire-capture / `ss -K` / fail-closed
-observable.
+**DoR Status: PASSED** (pending peer review). Elevator-Pitch gate: every story
+(including the composed walking skeleton) has a Before/After/Decision-enabled triplet
+whose "After" references a real executable observable (`tcpdump`/`ss -tie`/agent-light
+`strace`/negative test); the foundation-feature exception (no operator verb; TEST-tier
+observables) is recorded explicitly above (§ User Stories preamble), in
+`wave-decisions.md` (D1), and here — mirroring built-in-ca and #35. Slice-composition
+gate: no slice is empty `@infrastructure` — every slice has a genuine wire-capture /
+`ss -tie` / fail-closed observable.
 
 ---
 
@@ -1121,15 +1209,15 @@ observable.
 - **Every story traces to `job_id: J-SEC-003`** (the on-the-wire enforcement job,
   `docs/product/jobs.yaml` § J-SEC-003). N:1 mapping — 6 stories → 1 job.
 - **Hands off to**: `solution-architect` (DESIGN) — journey (visual + YAML) +
-  story map + user-stories + outcome KPIs + the un-pinned mechanism question + the
-  spike-first walking skeleton; `acceptance-designer` (DISTILL) — the journey YAML
-  (embedded Gherkin) + integration points + outcome KPIs; `platform-architect`
-  (DEVOPS) — outcome KPIs (Tier-3 wire-capture / ss-K / drop-counter
-  instrumentation).
-- **The DESIGN wave owns the mechanism choice** (in-band kTLS vs proxy vs Cilium
-  fallback), informed by the Slice-00 spike. DISCUSS pinned the WHAT and the
-  acceptance observables, not the HOW (no kTLS struct shapes, no sockops attach
-  mechanism, no write-block decision).
+  story map + user-stories + outcome KPIs + the BLOCKING composed walking skeleton;
+  `acceptance-designer` (DISTILL) — the journey YAML (embedded Gherkin) + integration
+  points + outcome KPIs; `platform-architect` (DEVOPS) — outcome KPIs (Tier-3
+  wire-capture / `ss -tie` / strace agent-light instrumentation).
+- **The DESIGN wave resolved the mechanism** (ADR-0069 — the universal agent-light L4
+  proxy; the in-band-on-the-workload's-own-socket model is superseded as v1, a tracked
+  future optimization). DISCUSS pinned the WHAT and the acceptance observables, not the
+  HOW (no kTLS struct shapes, no intercept attach mechanism); the agent's userspace
+  handshake buffer is lossless, so no kernel patch is needed.
 
 ---
 
@@ -1145,12 +1233,54 @@ mTLS via an agent-light L4 proxy** as THE enforcement mechanism for ALL workload
 kinds (process/exec, WASM, microVM, unikernel). The previously-primary in-band
 kTLS-on-the-workload's-own-socket model is SUPERSEDED as v1 and retained as a
 tracked FUTURE OPTIMIZATION (it uniquely wins restart-survival + 1-socket density;
-loses uniformity + losslessness). Mechanism fully de-risked; no Cilium fallback;
-no kernel patch.
+loses uniformity + losslessness). The mechanism's **primitives** are de-risked
+(each proven in isolation); the **composition under a real transparent intercept**
+is the FIRST DELIVER slice (a BLOCKING composed Tier-3 walking skeleton —
+increment-e's steady-state RST is unresolved; see the DESIGN Handoff § + ADR-0069
+§ Enforcement). No Cilium fallback; no kernel patch.
 
 **This amends** whitepaper §7/§8 (two enforcement mechanisms → one) and the DISCUSS
 "mechanism is NOT pinned" framing. It re-grounds the back-propagation flagged in
 `design/upstream-changes.md` (J-SEC-003 + slices 00–05).
+
+## Wave: DESIGN / [REF] Proven-Mechanism Traceability
+
+**Every design element below rests on a COMMITTED spike finding — not assertion,
+not re-derivation.** The mechanism was empirically settled by 6 Tier-3 spikes (5
+follow-ups + the original) on a real 7.0 kernel (≥ the pinned 6.18 floor,
+ADR-0068), software kTLS, AES-256-GCM TLS 1.3, committed under
+`docs/feature/transparent-mtls-host-socket/spike/` at `353cdc52`. **DELIVER
+implements to the ADR-0069 contract using these findings as the reference for the
+exact syscalls / flags / ordering — it does NOT re-discover the mechanism.** The
+matrix maps each design element → the committed finding (doc + verdict/section)
+that proved it → the proven constant/pattern DELIVER reuses → the gitignored probe
+pointer (NON-DURABLE; see § Durability below).
+
+| Design element | Committed finding (doc · verdict/section) | Proven constant / pattern (the reference DELIVER builds on) | Probe pointer (gitignored, non-durable) |
+|---|---|---|---|
+| **`MtlsEnforcement::enforce` — rustls→kTLS arm** (`dangerous_extract_secrets` → `ktls` → `setsockopt TCP_ULP "tls"`+`TLS_TX`/`TLS_RX`) | `findings.md` · Increment A WORKS (Unknowns 1+2 CONFIRMED) | `ss -tie`: `tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw`; agent writes/reads plaintext, kernel does crypto; `strings pcap \| grep MARKER` = 0; constants `SOL_TLS=282 TLS_TX=1 TLS_RX=2 TCP_ULP=31 AES_GCM_256=52 sizeof(crypto_info)=56` | `spike-scratch/increment-a/`, `increment-b/` |
+| **`MtlsEnforcement::enforce` — forward steady state (agent-idle)** sockmap EGRESS-redirect `bpf_sk_redirect_map(flags=0)` leg F RX → leg B kTLS TX | `findings-egress-ktls-splice.md` · verdict (a) YES, Assertions 1–3 PASS, **15/15** | `flags=0` (EGRESS, NOT `BPF_F_INGRESS`) drives `tcp_sendmsg_locked` on the kTLS target → `1703 03` records on the peer wire; agent ZERO per-byte syscalls (strace); hand-rolled `#[link_section="sk_skb/stream_verdict"]` (no aya `#[sk_skb]` macro) | `spike-scratch/increment-f-egress-ktls-splice/` |
+| **return splice pump (agent-light) + `liveness`** `splice(legB→pipe→legF)` via `tls_sw_splice_read` on a **plain, no-psock** kTLS-RX leg | `findings-splice-return.md` · verdict (a) CONFIRMED, Assertions 1–4 | `strace` = only `splice`/`ppoll`, ZERO payload read/write; byte-exact (86 / 100000 B); ~1 `splice` per TLS record (≤16384 B/record); clean decrypted payload (no header/inner-type/tag); `einval_on_B=0` | `spike-scratch/increment-h-splice-return/` |
+| **leg B carries NO psock/verdict on its RX** (D-MTLS-5; the return-`splice` precondition) | `findings-ktls-rx-splice.md` · verdict (b) NO (return-via-verdict foreclosed) + `findings-egress-ktls-splice.md` mechanic #2 | a psock on leg B's RX fights kTLS RX (`ConnectionAborted` 103) AND `tls_sw_read_sock` returns `-EINVAL` on a psock → no agent-idle push; the `splice`-on-no-psock leg sidesteps both | `spike-scratch/increment-g-ktls-rx-splice/` |
+| **transparent intercept** `cgroup/connect4`-rewrite → agent `accept()`s leg F; lossless `recv()` capture | `findings-userspace-relay.md` · Unknown 1 WORKS; Unknown 2 PARTIAL (handshake-window LOSSLESS) | `cgroup/connect4` rewrites dest to the agent listener (workload unaware); ordinary `recv()` drains pre-arm plaintext (80/80); flush as in-order TLS 1.3 `0x17`, zero plaintext on leg B; gate/route the splice by `local_port` only (the `sk_msg`/`sock_ops` `local_ip4` byte-order disagreement) | `spike-scratch/increment-e-userspace-relay/` |
+| **arming invariant** SOCKMAP-insert-before-`TCP_ULP "tls"` (D-MTLS-7; `probe` check 3; `ArmingOrderViolation`) | `findings.md` · Increment D (`insert→ULP` rc=0; `ULP→insert` rc=−1 `EINVAL`) + corroborated `findings-egress-ktls-splice.md` (leg B inserted before `TCP_ULP`) | reverse ordering = `EINVAL` (both replace `sk->sk_prot`); the natural detect→gate→install flow satisfies it; **Tier-3 AC**: `tls-ULP-after-sockmap == EINVAL` | `spike-scratch/increment-c/` (compose micro-probes) |
+| **control records** (`NewSessionTicket`/KeyUpdate → `EIO` on raw kTLS RX → reuse `ktls::KtlsStream`) | `findings.md` · Increment B load-bearing finding + Design implication #4 | raw-kTLS RX only decrypts `application_data`; a control record returns `EIO`; `ktls::KtlsStream` runs the control-message loop → favoured over raw `setsockopt` | `spike-scratch/increment-a/`, `increment-b/` |
+| **why proxy, NOT in-band** (D-MTLS-1/2; ADR-0069 Alternatives A1/A2) — in-band lossless foreclosed 3 ways | `findings-lossless-hybrid.md` (source-TX-bypass RST 3/3) · `findings-userspace-relay.md` Unknown 4 (#222-collapse) · `findings.md` Increment C (no `sk_msg` HOLD) + `sockmap-redirect-live-socket-liveness-research.md` / `sockops-ktls-lossless-hold-bpf-only-research.md` | (1) `sk_msg` has PASS/DROP/REDIRECT, no HOLD → pre-arm write `SK_DROP`→`EACCES`+dead conn; (2) redirecting a live socket's own egress bypasses its TX → RST; (3) lossless capture structurally requires a 2-socket proxy ⇒ the lossless variant of #26 *is* #222 | `spike-scratch/increment-{c,d,e}/` |
+
+### Durability — committed findings are the foundation of record; `spike-scratch/` is throwaway
+
+The **committed findings docs** (`spike/findings*.md`, at `353cdc52`) are the
+**durable anchor and the foundation of record** for every citation above and in the
+ADR / contract / upstream-changes. They survive a clean checkout and are the SSOT
+DISCUSS re-grounds onto and DELIVER references.
+
+The probe code under `spike-scratch/increment-{a..h}/` is **gitignored, throwaway,
+per nW-spike discipline** — it may NOT survive a clean checkout, was never promoted,
+and touched no `overdrive-*` API. It is cited above ONLY as a secondary convenience
+pointer (a reviewer with the working tree may inspect it). **DELIVER may consult it
+if present but MUST NOT depend on it**; the load-bearing evidence is always the
+committed finding, never the probe dir. The throwaway code is NOT to be committed —
+it stays throwaway.
 
 ## Wave: DESIGN / [REF] Domain (DDD) — bounded context + ubiquitous language
 
@@ -1181,10 +1311,12 @@ existing flow telemetry.
 1. **`MtlsEnforcement` port** — `overdrive-core` (`core`, pure trait). The driven
    contract: intercept-arm → drive-handshake-and-arm-kTLS → run-steady-state-splice
    → teardown. Behaviour pinned in rustdoc + a DST equivalence harness.
-2. **`HostMtlsEnforcement` adapter** — `adapter-host` (EXTEND `overdrive-host` or a
-   dedicated `overdrive-mtls-host` crate — OQ-2). The production proxy over
+2. **`HostMtlsEnforcement` adapter** — EXTEND **`overdrive-dataplane`**
+   (`adapter-host`; the established userspace eBPF host adapter hosting
+   `EbpfDataplane` — unsafe allowed, `aya` + BPF `build.rs` already present;
+   OQ-2 resolved). The production proxy over
    sockops/sk_msg/sockmap/kTLS/`splice`/`cgroup_connect4`; consumes `IdentityRead`;
-   reuses `ktls::KtlsStream`.
+   reuses `ktls::KtlsStream`. (`overdrive-host` ruled out — `#![forbid(unsafe_code)]`.)
 3. **`SimMtlsEnforcement` adapter** — `overdrive-sim` (`adapter-sim`). The DST
    double modelling the observable contract in-memory.
 4. **mTLS proxy agent** — `overdrive-worker` (EXTEND; the node-agent home). Owns the
@@ -1232,15 +1364,15 @@ mirroring `Dataplane`):
   failure). The agent then supervises the return splice pump.
 - **A teardown method** for connection close (release legs, drop the pump).
 
-> **OQ-1 (blocker for the orchestrator → crafter dispatch)**: the EXACT method
-> names, parameter types (does the drive method take an owned fd / a `pidfd` handle
-> / an `AllocationId` + a connection descriptor?), and the return/error type
-> (`MtlsEnforcementError` variants) are a DESIGN decision that needs the orchestrator
-> to confirm the precise signatures with the user before the crafter dispatch — so
-> the crafter does NOT improvise surface (the `workflow-result-error-model`
-> precedent in CLAUDE.md). The ADR fixes the *model*; the *signature* must be pinned
-> in the dispatch. The architect names the model and the four phases; it does NOT
-> guess the wire shape of the connection handle.
+> **OQ-1 — ACCEPTED (user-approved 2026-06-12)**: the EXACT method
+> names, parameter types (the drive method takes an owned fd / an
+> `AllocationId` + a connection descriptor — see SD-1…SD-4), and the return/error
+> type (`MtlsEnforcementError` variants) are pinned in the § "MtlsEnforcement Port
+> Contract (ACCEPTED)" section below — so the crafter does NOT improvise surface
+> (the `workflow-result-error-model` precedent in CLAUDE.md). The ADR fixes the
+> *model*; the *signature* is the accepted contract DELIVER implements to. The
+> bidirectional 4-method shape (`probe`/`enforce`-dispatch-on-`Direction`/`liveness`/`teardown`)
+> is the locked wire shape of the connection handle.
 
 ### Consumed port — `IdentityRead` (REUSE AS-IS)
 
@@ -1283,11 +1415,12 @@ MIT/Apache-2.0 and well-maintained.
 
 Full table in `brief.md` § "Transparent mTLS … extension" § 6. Summary verdict
 tally: **3 REUSE-AS-IS** (`IdentityRead`, `SvidMaterial`/`TrustBundle`, `rustls`) ·
-**4 EXTEND** (`cgroup_connect4_service`, `overdrive-bpf`, `overdrive-worker`, the
-aya loader/pin pattern) · **1 CREATE-NEW port** (`MtlsEnforcement` — `Dataplane`
-does not fit) · **1 CREATE-NEW dep** (`ktls`) · **1 EXTEND-or-new-crate open**
-(`HostMtlsEnforcement` home — OQ-2). Default-EXTEND honored; both CREATE-NEWs
-justified.
+**5 EXTEND** (`cgroup_connect4_service`, `overdrive-bpf`, `overdrive-worker`, the
+aya loader/pin pattern, and **`overdrive-dataplane`** as the `HostMtlsEnforcement`
+home — OQ-2 **resolved**, no new crate; `overdrive-host` ruled out for
+`#![forbid(unsafe_code)]`) · **1 CREATE-NEW port** (`MtlsEnforcement` — `Dataplane`
+does not fit) · **1 CREATE-NEW dep** (`ktls`). Default-EXTEND honored throughout;
+the single CREATE-NEW (`ktls`) justified.
 
 ## Wave: DESIGN / [REF] Open Questions / Deferrals (blockers for the orchestrator)
 
@@ -1296,29 +1429,36 @@ creation** — surfaced here, NOT resolved unilaterally, NO GH issues created by
 architect (CLAUDE.md "Deferrals require GitHub issues — AND user approval BEFORE
 creation").
 
-- **OQ-1 (signature pin — blocker)**: the EXACT `MtlsEnforcement` method
-  names/params/error type. The ADR fixes the model + four phases; the wire shape of
-  the connection handle (owned fd vs `pidfd` vs `AllocationId` + descriptor) and
-  `MtlsEnforcementError` variants must be pinned in the dispatch so the crafter does
-  not invent surface. **Action**: orchestrator pins with the user before dispatch.
-- **OQ-2 (adapter home)**: `HostMtlsEnforcement` in `overdrive-host` (EXTEND) vs a
-  dedicated `overdrive-mtls-host` crate (the proxy pulls `ktls` + a BPF object —
-  compile-graph hygiene). DELIVER-pinnable within ADR-0069; default EXTEND. **Action**:
-  decide at first DELIVER step or pin now.
+- **OQ-1 (signature pin) — ACCEPTED (user-approved 2026-06-12)**: the EXACT
+  `MtlsEnforcement` method names/params/error type are pinned in the § "MtlsEnforcement
+  Port Contract (ACCEPTED)" section. The bidirectional 4-method contract
+  (`probe`/`enforce`-dispatch-on-`Direction`/`liveness`/`teardown`,
+  `InterceptedConnection { leg, routed, alloc, expected_peer }`, `MtlsLimits`, the
+  cause-distinct errors) is the accepted contract DELIVER implements to. No longer a
+  blocker.
+- **OQ-2 (adapter home) — RESOLVED (user-decided 2026-06-12)**: **no new crate.**
+  `HostMtlsEnforcement` EXTENDS **`overdrive-dataplane`** (the established
+  `adapter-host` userspace eBPF crate — `unsafe` already allowed, `aya.workspace =
+  true` + BPF `build.rs` already present; every reason a new crate would give is
+  already satisfied here); the kernel-side sockops/`sk_skb`/`cgroup_connect4`-mtls
+  programs EXTEND **`overdrive-bpf`** (one shared BPF object); `SimMtlsEnforcement`
+  stays in `overdrive-sim`. **`overdrive-host` ruled out** —
+  `src/lib.rs:21` is `#![forbid(unsafe_code)]` and the proxy is irreducibly
+  `unsafe`. **Revisit trigger** (not a blocker): if mTLS later needs isolation from
+  the LB/service dataplane (so the proxy's `ktls`/`rustls` stack does not couple the
+  service-dataplane compile graph), split into a dedicated crate then.
 - **DEFER-1 (restart-survival future optimization)**: the in-band
   kTLS-on-own-socket model (restart-survival + 1-socket density) is retained as a
   tracked future optimization. **Needs a product-owner-approved GH issue** (no number
   exists). NOT created here. **Action**: surface to the user; on approval `gh issue
   create`; cite the number wherever referenced.
-- **DEFER-2 (bidirectional-fully-agent-idle)**: a fully agent-idle BOTH-direction
-  kernel splice (the return direction is currently agent-light, not idle) would need
-  a kernel patch (push-driven kTLS-RX→sockmap, or relaxing `tls_sw_read_sock`'s
-  psock refusal) — out-of-tree, kernel-version-gated. **Needs a GH issue if
-  pursued.** NOT created here. **Action**: surface to the user.
-- **DEFER-3 (multi-node)**: cross-node mTLS (the peer on a different node) is the
+- **DEFER-2 (multi-node)**: cross-node mTLS (the peer on a different node) is the
   existing #36 multi-node scope; the proxy mechanism does not change it but the
   reachability concern is out of #26's single-node v1. **Action**: confirm #36
   covers it (verify with `gh issue view 36 --comments`) before citing.
+
+  (The agent-light splice return is the design; a fully-agent-idle bidirectional
+  return is a non-goal, not pursued — NO kernel patch is or will be required.)
 
 ## Wave: DESIGN / [REF] DESIGN Handoff
 
@@ -1329,8 +1469,1272 @@ creation").
   (`tcpdump`, `ss -tie`, the splice-pump liveness, the probe `health.startup.refused`
   path). **No external-integration contract tests** (both TLS sides are
   Overdrive-native east-west mTLS).
-- **Blockers carried (above)**: OQ-1 (signature pin), OQ-2 (adapter home), DEFER-1/2/3
-  (need product-owner-approved GH issues — architect created none).
+- **BLOCKING FIRST SLICE — composed Tier-3 walking skeleton (F2).** Before ANY
+  other DELIVER slice: a composed Tier-3 acceptance test — real `cgroup_connect4`
+  intercept → workload pre-arm write → leg-B handshake → kTLS arm → **post-arm
+  bidirectional multi-record transfer with NO RST** — run under BOTH normal AND
+  traced/delayed timing. The spikes proved the *primitives* in isolation;
+  increment-e's composed harness RST'd on the intercept lifecycle and
+  increments-f/h removed the intercept. The composition is NOT yet demonstrated
+  end-to-end; this gate proves it and **supersedes the old in-band walking
+  skeleton**. (ADR-0069 § Consequences/Negative "Composition is unproven" + §
+  Enforcement.) Flagged for the slice re-grounding in `design/upstream-changes.md`.
+- **Resource + identity ACs must appear in the slices (F1/F4/F5).** The slice
+  re-grounding MUST surface: the F4 resource-limit fail-closed ACs
+  (`BufferLimitExceeded` / `HandshakeTimeout` / `InFlightLimitExceeded` + cleanup
+  no-leak); the F5 intercept-exemption ACs (leg B not re-intercepted; workload
+  cannot self-exempt); and the F1 authn-vs-authz boundary (authn-only in v1;
+  authorization is #27/#38; the wrong-but-valid-peer SAN-match negative test is a
+  reserved placeholder gated on #178).
+- **Authn-vs-authz boundary (F1).** This feature does authentication +
+  encryption, NOT authorization. Allow/deny is the BPF-LSM `socket_connect` hook
+  ([#27](https://github.com/overdrive-sh/overdrive/issues/27)) fed by compiled
+  `policy_verdicts` ([#38](https://github.com/overdrive-sh/overdrive/issues/38);
+  related [#49](https://github.com/overdrive-sh/overdrive/issues/49)).
+  Expected-destination identity pinning is downstream of #26 via east-west
+  resolution ([#178](https://github.com/overdrive-sh/overdrive/issues/178); VIP
+  path [#61](https://github.com/overdrive-sh/overdrive/issues/61)). The proxy MUST
+  NOT embed a policy engine. (No GH issues created here.)
+- **Blockers carried (above)**: DEFER-1/2/3 (need product-owner-approved GH issues).
+  OQ-1 (the `MtlsEnforcement` signature) is **ACCEPTED** (user-approved 2026-06-12 —
+  the contract DELIVER implements to). OQ-2 (adapter home) is **resolved** (extend
+  `overdrive-dataplane` + `overdrive-bpf`; no new crate).
 - **Back-propagation**: J-SEC-003 + slices 00–05 need re-grounding on the proxy
-  mechanism — flagged for the product-owner in `design/upstream-changes.md`. The
-  architect does NOT edit `jobs.yaml` or the slice files.
+  mechanism — flagged for the product-owner in `design/upstream-changes.md` (now
+  including the composed walking-skeleton gate + the F1/F4/F5 ACs). The architect
+  does NOT edit `jobs.yaml` or the slice files.
+
+## Wave: DESIGN / [REF] MtlsEnforcement Port Contract (ACCEPTED)
+
+> **STATUS: ACCEPTED (user-approved 2026-06-12 — bidirectional + F4–F7
+> revised).** The contract is now **bidirectional** (F3):
+> `InterceptedConnection` carries a `direction: Direction { Outbound, Inbound }`
+> and `enforce` dispatches on it — the inbound/passive half (TPROXY intercept →
+> orig-dst recovery → server-side mutual-TLS → kTLS-RX decrypt → splice-to-server)
+> is now a first-class path, grounded in `findings-inbound-intercept.md`
+> (increment-i, kernel 7.0). The earlier adversarial review's
+> Findings 1/4/5 remain folded in (authn-vs-authz boundary + reserved
+> `expected_peer`/`PeerIdentityMismatch` (F1); the `MtlsLimits` resource
+> contract + `BufferLimitExceeded`/`HandshakeTimeout`/`InFlightLimitExceeded`
+> (F4); the leg-B intercept-exemption postcondition (F5)), and the RE-review's
+> F4–F7 are now revised in: the guest-stack adapter is STAGED to
+> [#222](https://github.com/overdrive-sh/overdrive/issues/222) (F4 §); the
+> authn-only boundary is scoped honestly everywhere (F5 §); the return/deliver
+> pump supervision policy is pinned (F6 — `PumpLiveness` + `pump_stall_deadline`);
+> and `MtlsLimits` carries CONCRETE default values (F7). The 4-method shape +
+> SD-1…SD-4 + the OQ-2 home decision are UNCHANGED — the `direction` field, the
+> F6 `pump_stall_deadline`, and the F7 concrete values are ADDITIVE.**
+> This section pins the OQ-1 contract — now **ACCEPTED (user-approved
+> 2026-06-12)** — the exact
+> `MtlsEnforcement` trait signatures + SD-1…SD-4. OQ-2 (the host-adapter home) is
+> already **resolved** — extend `overdrive-dataplane` (userspace) + `overdrive-bpf`
+> (kernel); no new crate; `overdrive-host` ruled out (see § Open Questions and the
+> § "OQ-2 resolution — `HostMtlsEnforcement` home" subsection below).
+> It is the contract **DELIVER implements to** — the crafter MUST NOT invent public
+> surface beyond what is accepted here (CLAUDE.md § "Implement to the design —
+> never invent API surface"; the `workflow-result-error-model` precedent). The
+> ADR-0069 *model* (four-phase lifecycle + the spike-pinned invariants) is fixed;
+> this section pins the *signatures* within it. **Nothing here is implemented** —
+> no `src/` exists yet. The accepted sub-decisions (SD-1 … SD-4) are recorded
+> below with their rationale; they are the locked contract DELIVER builds to.
+
+**Agent**: Morgan (nw-solution-architect) · **Mode**: pin a contract within a
+user-locked decision · **Conventions matched**: `traits/driver.rs` (the
+`Driver`/`AllocationHandle`/`take_exit_receiver` shape — the closest analogue:
+a per-allocation lifecycle owned by the node agent, with an opaque handle and an
+event-stream surface), `traits/dataplane.rs` (the four-clause behaviour-docstring
+discipline + the `*Probe` Earned-Trust error variants), `traits/identity_read.rs`
+(the consumed port + the clause-mapped docstring SSOT the equivalence harness
+enforces).
+
+### Granularity decision (the load-bearing shape choice)
+
+ADR-0069's four phases are **intercept-arm → drive-handshake-and-arm-kTLS → run
+steady-state splice → teardown**, and they apply in BOTH directions (outbound
+client side; inbound server side — F3). The contract does NOT expose four methods
+1:1, and it does NOT expose separate outbound/inbound method families. The
+deciding question (per the dispatch) is **what the in-process worker
+(`overdrive-worker`, D-MTLS-10) actually calls**, and **what is DST-observable
+through the Sim adapter**. The answer, grounded in the spikes:
+
+**Bidirectional shape decision (F3 — `direction` field, NOT a sibling method).**
+The same four lifecycle phases govern both directions; the differences are
+adapter-internal mechanism (outbound: `cgroup_connect4` intercept + rustls
+*client* handshake + sockmap-egress forward; inbound: TPROXY intercept +
+`getsockname` orig-dst + rustls *server* handshake with `WebPkiClientVerifier` +
+splice-to-server). The contract therefore carries a `direction: Direction
+{ Outbound, Inbound }` discriminant on `InterceptedConnection`, and `enforce`
+dispatches on it — rather than a sibling `enforce_inbound` method. Rationale:
+(a) the *observable contract* is identical in both directions (bring an
+intercepted connection to steady-state-established mTLS, or fail-closed; observe
+pump liveness; tear down) — a sibling method would duplicate every postcondition
+and double the surface the sim must mirror; (b) the leg ownership is symmetric
+(outbound: leg F plaintext / leg B kTLS; inbound: leg S plaintext / leg C kTLS) —
+one owned-plaintext-fd + the routing fact covers both, with `direction` selecting
+which leg is which; (c) `EnforcedConnection` / `teardown` / `liveness` are
+direction-agnostic (a torn-down connection and a stalled pump look the same
+either way). The genuine inbound-only inputs (the original-destination the TPROXY
+listener recovered, which selects the *server* SVID) are carried as a
+`direction`-tagged variant payload, NOT new methods — see SD-1 below.
+
+- The **setup phases collapse into ONE async drive call** (`enforce`). Phases 1–2
+  (lossless handshake-window capture → rustls handshake on leg B presenting the
+  held SVID → arm kTLS on leg B → flush captured plaintext → install the forward
+  egress-redirect) are a single atomic "bring this connection to
+  steady-state-established" unit with one natural `Ok(handle)` / `Err(fail-closed)`
+  outcome. Splitting them into per-phase public methods would (a) expose ordering
+  the **arming invariant** (D-MTLS-7: SOCKMAP-before-`TCP_ULP`) makes
+  adapter-internal, not caller-sequenced — a caller that called them out of order
+  would hit `EINVAL`, exactly the invalid-state the type system should make
+  unrepresentable; and (b) leak adapter mechanism (which leg, which syscall) into
+  the port, violating "the port models WHAT, the adapter owns HOW." This mirrors
+  `Driver::start` — one call spawns the workload and returns an opaque
+  `AllocationHandle`; the caller never drives the sub-steps.
+
+- The **forward steady state is NOT a method** — it is **agent-idle** (the kernel
+  sockmap egress-redirect drives `tcp_sendmsg_locked`, the agent issues zero
+  per-byte syscalls; `findings-egress-ktls-splice.md` 15/15). `enforce` *installs*
+  it (the `sk_skb/stream_verdict` redirect, `flags=0`); nothing in the port drives
+  it per-byte. Pinning it as a "run forward" method would invent surface the
+  mechanism does not need.
+
+- The **return steady state IS agent-light** (the `splice(legB → pipe → legF)`
+  pump, ~1 splice/record; `findings-splice-return.md`). The agent must *drive*
+  this pump for the connection's life. **SD-2 below** is the genuine fork on how
+  the contract represents it (the port owns the pump internally vs the worker
+  drives it via a returned handle). The recommendation (SD-2) is **the port owns
+  the pump**; `enforce` returns once steady-state is established and the adapter's
+  own task drives the splice — so the port surface stays "establish / observe /
+  tear down," not "pump one record."
+
+- **`teardown` is one async call** keyed by the handle (release both legs, stop the
+  pump, drop the kTLS state) — the `Driver::stop` analogue.
+
+- **`probe` is separate** (Earned Trust; composition-root "wire→probe→use";
+  D-MTLS-11) — the `Dataplane`'s `*Probe` round-trip analogue, sync-or-async per
+  SD-3.
+
+So the minimal surface is **four methods**: `probe`, `enforce`, an **observation
+surface** for pump liveness (SD-4), and `teardown`. No "phase 1 / phase 2 / phase
+3" methods — the four ADR phases map to `enforce` (phases 1–2 + forward install),
+the adapter-internal pump (phase 3, agent-light), and `teardown` (phase 4).
+
+#### Per-method spike anchor (each method's mechanism is PROVEN, not assumed)
+
+Each method drives a spike-proven mechanism; DELIVER implements to the syscall /
+flag / ordering the named committed finding pins (see § Proven-Mechanism
+Traceability for the full matrix). The crafter references the finding for the
+exact wire shape — it does not re-derive the mechanism.
+
+| Method | Mechanism it drives | Proving committed finding |
+|---|---|---|
+| `enforce` OUTBOUND (handshake + kTLS arm) | rustls *client* `dangerous_extract_secrets` → `ktls` → `setsockopt TCP_ULP/TLS_TX/TLS_RX` on leg B | `findings.md` Increment A (WORKS) + Increment B (`ktls::KtlsStream` for control records) |
+| `enforce` OUTBOUND (transparent intercept + lossless capture) | `cgroup/connect4`-rewrite → `accept()` leg F → lossless `recv()` drain → flush | `findings-userspace-relay.md` Unknowns 1+2 |
+| `enforce` OUTBOUND (forward install, agent-idle) | `sk_skb/stream_verdict` sockmap EGRESS-redirect `flags=0` leg F→B kTLS-TX | `findings-egress-ktls-splice.md` (15/15, Assertions 1–3) |
+| `enforce` INBOUND (transparent intercept + orig-dst recovery) | `nft` TPROXY → `IP_TRANSPARENT` listener `accept()` leg C → `getsockname()` recovers ORIG_DST → selects server `AllocationId` | `findings-inbound-intercept.md` §1 + Mechanics #1 |
+| `enforce` INBOUND (server-side mutual-TLS + client-auth verify) | rustls *server* `ServerConfig` presents server SVID + `WebPkiClientVerifier` REQUIRE+VERIFY client SVID chains to bundle; fail-closed on `nocert`/`wrongca` | `findings-inbound-intercept.md` §2 + §4 |
+| `enforce` INBOUND (kTLS-RX arm + splice-to-server, agent-light) | arm kTLS-RX on leg C (suppress `NewSessionTicket`; read `peer_certificates` before `extract_secrets`) → `splice(legC→pipe→legS)` via `tls_sw_splice_read` | `findings-inbound-intercept.md` §3 + §5 + Mechanics #3/#6 |
+| `enforce` / `probe` (arming invariant) | SOCKMAP insert BEFORE `TCP_ULP "tls"` on leg B (reverse = `EINVAL`) | `findings.md` Increment D |
+| `liveness` + the return/deliver pump | `splice(legB→pipe→legF)` (outbound return) / `splice(legC→pipe→legS)` (inbound deliver) via `tls_sw_splice_read` on a plain no-psock kTLS-RX leg (~1/record) | `findings-splice-return.md` (CONFIRMED) · `findings-inbound-intercept.md` §5 |
+| (leg B / leg C no-psock precondition) | the kTLS-RX leg carries no sockmap/verdict on RX — else kTLS-RX fights it / `tls_sw_read_sock -EINVAL` | `findings-ktls-rx-splice.md` (verdict (b)) |
+| `probe` (3 substrate lies) | (1) kTLS arm round-trip; (2) forward egress-redirect emits ciphertext; (3) reverse arming order = `EINVAL` | `findings.md` A · `findings-egress-ktls-splice.md` · `findings.md` D (1:1 with `ProbeSentinel`) |
+
+### Newtypes (CREATE-NEW, minimal)
+
+Three new domain values (`InterceptedConnection`, `EnforcedConnection`, and the
+`MtlsLimits` resource contract added for F4). All are `overdrive-core` types per
+`.claude/rules/development.md` § "Newtypes — STRICT by default" (no raw primitive
+for a domain concept) — but kept to the **minimum the model + spikes + the
+review's resource/identity findings require**.
+
+1. **`InterceptedConnection`** — the descriptor the worker passes IN: the
+   transparently-intercepted connection the proxy must enforce, in EITHER
+   direction (F3). It is the *input identity* of one connection, carrying exactly
+   what the adapter needs to own the plaintext leg + the kTLS leg, and no more.
+   **SD-1 below** is the genuine fork on its payload (owned plaintext fd vs
+   `pidfd` handle vs 4-tuple). The recommended shape (SD-1) is an **owned
+   `OwnedFd` for the agent's accepted plaintext leg + a `direction`-tagged routing
+   fact**:
+   - **Outbound** (`Direction::Outbound`): the owned **leg F** (the workload-facing
+     plaintext leg the agent `accept()`ed off the `cgroup_connect4`-rewrite
+     intercept, `findings-userspace-relay.md` Unknown 1) + the **peer
+     `SocketAddrV4`** leg B must dial.
+   - **Inbound** (`Direction::Inbound`): the owned **leg C** (the client-facing
+     leg the agent `accept()`ed off the TPROXY/`IP_TRANSPARENT` listener,
+     `findings-inbound-intercept.md` §1) + the **recovered original destination**
+     (`getsockname` on leg C) which selects the *server* `AllocationId` whose SVID
+     to present. Leg S (the agent-owned plaintext leg to the server workload) is
+     opened by the adapter *inside* `enforce` (a same-node dial to the server
+     workload's real plaintext socket), so it is NOT a constructor input — the
+     worker hands over leg C, the adapter produces leg S.
+
+   The `direction` discriminant selects which mechanism `enforce` runs and which
+   leg the owned fd is. (Contrast the SUPERSEDED in-band model, which would have
+   passed a `pidfd_getfd` dup of the *workload's own* socket — the proxy owns its
+   own legs, so no `pidfd` is in the v1 contract.)
+
+   ```rust
+   /// Which half of the proxy this intercepted connection is (F3 — bidirectional).
+   /// Outbound = the workload is the CLIENT (its connect() was cgroup_connect4-
+   /// rewritten to the agent); Inbound = the workload is the SERVER (a connection
+   /// to its logical address was TPROXY-intercepted to the agent). `enforce`
+   /// dispatches on this; the observable contract is identical either way.
+   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+   pub enum Direction {
+       /// The intercepted workload is the connection's CLIENT (outbound connect()).
+       /// `cgroup_connect4` intercept → rustls CLIENT handshake on leg B →
+       /// sockmap-egress forward + splice return.
+       Outbound,
+       /// The intercepted workload is the connection's SERVER (inbound accept()).
+       /// TPROXY intercept → `getsockname` orig-dst → rustls SERVER handshake on
+       /// leg C (present server SVID, verify client SVID) → splice-to-server.
+       Inbound,
+   }
+
+   /// One transparently-intercepted workload connection to enforce, in either
+   /// direction (F3).
+   ///
+   /// OUTBOUND: produced after the `cgroup_connect4`-rewrite intercept lands the
+   /// workload on the agent's leg-F listener and the agent `accept()`s it
+   /// (`findings-userspace-relay.md` Unknown 1). `leg_plaintext` is leg F (the
+   /// workload-facing plaintext leg); `routed` is `Outbound { peer }` (the real
+   /// peer leg B dials).
+   ///
+   /// INBOUND: produced after the `nft` TPROXY + `IP_TRANSPARENT` intercept lands
+   /// a connection aimed at the server workload's logical address on the agent's
+   /// leg-C listener and the agent `accept()`s it (`findings-inbound-intercept.md`
+   /// §1). `leg_plaintext` is leg C (the CLIENT-facing leg — note: for inbound
+   /// the agent-owned kTLS leg IS the accepted leg, and the plaintext leg S to the
+   /// server workload is opened by the adapter inside `enforce`). `routed` is
+   /// `Inbound { orig_dst }` (the `getsockname`-recovered original destination
+   /// that selects the server SVID).
+   ///
+   /// Workload-holds-nothing (D-MTLS-9): this descriptor never carries SVID
+   /// material — only the plaintext/kTLS leg fd and the routing facts. The proxy
+   /// reads the SVID through `IdentityRead` inside `enforce`. Both the client AND
+   /// the server workload hold NOTHING.
+   #[derive(Debug)]
+   pub struct InterceptedConnection {
+       /// The agent-owned leg the worker `accept()`ed for this intercepted
+       /// connection, handed over by value (the port takes ownership, RAII close
+       /// on teardown). OUTBOUND: leg F (workload-facing plaintext). INBOUND:
+       /// leg C (client-facing — the kTLS leg the agent terminates TLS on).
+       /// Owned, not borrowed: the port's lifecycle outlives the worker's call
+       /// frame (the pump runs after `enforce` returns).
+       pub leg: std::os::fd::OwnedFd,
+       /// The direction discriminant + its direction-specific routing fact.
+       pub routed: Routed,
+       /// Whose held SVID to present. OUTBOUND: the CLIENT workload's SVID (the
+       /// `IdentityRead::svid_for` key). INBOUND: the SERVER workload's SVID,
+       /// selected by `Routed::Inbound { orig_dst }` → `AllocationId`. Either way
+       /// `svid_for(alloc) == None` is the fail-closed signal (`enforce` returns
+       /// `AbsentSvid`).
+       pub alloc: AllocationId,
+       /// OPTIONAL expected-destination SPIFFE identity (F1 / authn-vs-authz
+       /// boundary). When `Some`, `enforce` SAN-matches the authenticated peer
+       /// against it and returns `PeerIdentityMismatch` on a wrong-but-valid
+       /// peer (one that chains to the trust bundle but is NOT the intended
+       /// destination). **v1 leaves this `None` (authn-only)** in BOTH directions:
+       /// #26 enforces chain-to-trust-bundle authentication only, and the
+       /// expected-peer identity is supplied DOWNSTREAM by east-west SPIFFE-ID
+       /// resolution ([#178](https://github.com/overdrive-sh/overdrive/issues/178),
+       /// which "terminates in SPIFFE mTLS via sockops (#26)"). The field + the
+       /// `PeerIdentityMismatch` variant are reserved now so the SAN-match wires
+       /// the moment #178 supplies it — no contract change later. This is NOT
+       /// authorization (allow/deny is #27's BPF-LSM `socket_connect` hook fed by
+       /// #38's `policy_verdicts`); it is *identity pinning* of an
+       /// already-authenticated peer. **v1 = chain-to-bundle transport authn +
+       /// encryption, NO intended-peer pinning** (F5).
+       pub expected_peer: Option<SpiffeId>,
+   }
+
+   /// The direction-specific routing fact carried alongside the owned leg (F3).
+   #[derive(Debug, Clone, Copy)]
+   pub enum Routed {
+       /// OUTBOUND: the real peer `SocketAddrV4` leg B must dial to originate the
+       /// outbound mTLS session. V4 per the single-node Phase-1 scope (multi-node
+       /// peer reachability is #36 — DEFER-2); `SocketAddrV4` matches the
+       /// `Dataplane` local-backend call shape.
+       Outbound { peer: std::net::SocketAddrV4 },
+       /// INBOUND: the original destination the TPROXY listener recovered via
+       /// `getsockname()` on the accepted leg C (`findings-inbound-intercept.md`
+       /// §1 / Mechanics #1 — under TPROXY the orig-dst IS the accepted socket's
+       /// local addr, NOT `SO_ORIGINAL_DST`). This is what selects the SERVER
+       /// workload's `AllocationId` → its held SVID. The adapter dials the
+       /// server workload's real plaintext socket (leg S) inside `enforce`.
+       Inbound { orig_dst: std::net::SocketAddrV4 },
+   }
+   ```
+
+   > Note: `OwnedFd` is a primitive-ish std type, not a domain-bearing raw
+   > primitive — wrapping it in a further newtype buys nothing (it is already a
+   > typed, RAII-closing handle). The *domain* newtype is `InterceptedConnection`
+   > itself (the descriptor), which the newtype rule is satisfied by. `alloc` uses
+   > the existing `AllocationId` newtype; `peer`/`orig_dst` use `SocketAddrV4`
+   > exactly as `Dataplane::register_local_backend` does; `expected_peer` uses the
+   > existing `SpiffeId` newtype (`Option`, `None` in v1 — see the field doc /
+   > F1/F5). `Direction`/`Routed` are minimal additive enums, not raw
+   > discriminants (the make-invalid-states-unrepresentable lever: an inbound
+   > connection cannot carry a `peer` dial target, an outbound cannot carry an
+   > `orig_dst`).
+
+2. **`EnforcedConnection`** — the **opaque handle** the port returns from `enforce`
+   (the `AllocationHandle` analogue). The worker holds it to (a) tear the
+   connection down and (b) observe pump liveness. Its contents are the port's
+   private tracking state — the worker does NOT inspect them (mirrors
+   `AllocationHandle`'s "the node agent does not inspect its contents" doc). A
+   stable, `Clone`-able correlation id is the only field the worker reads, for
+   logging / liveness correlation.
+
+   ```rust
+   /// Opaque handle to a connection the proxy has brought to
+   /// steady-state-established. Returned by `MtlsEnforcement::enforce`; consumed
+   /// by `teardown`; correlated by `liveness`. The worker does NOT inspect the
+   /// adapter-private tracking state — only `id()` (a stable correlation key) is
+   /// caller-readable, mirroring `Driver`'s opaque `AllocationHandle`.
+   #[derive(Debug, Clone)]
+   pub struct EnforcedConnection {
+       /// Stable per-connection correlation id (the alloc + a monotonic
+       /// per-connection counter), for log/liveness correlation only. NOT a
+       /// security identity — the SVID identity is `alloc`'s, presented on leg B.
+       id: EnforcedConnectionId,
+       // adapter-private: leg-F/leg-B fds, the pump task handle, the sockmap
+       // membership keys. Not exposed; the host adapter owns them.
+   }
+   ```
+
+   `EnforcedConnectionId` is a thin newtype (`SpiffeId`-style: `Display` /
+   `FromStr` / `Serialize` round-trip) so DST and telemetry can name a connection
+   stably. It is derived `(AllocationId, u64)` — content-addressed within a node
+   session, no entropy.
+
+3. **`MtlsLimits`** — the **resource contract** for the lossless pre-arm buffer
+   (F4 / ADR-0069 § "Resource & robustness constraints") plus the F6 pump-stall
+   deadline. The pre-arm plaintext buffer is load-bearing but must be bounded: a
+   workload can stream into leg F (outbound) / a peer can stream into leg C
+   (inbound) while the handshake stalls, so an unbounded buffer is a DoS surface.
+   These limits are **adapter construction parameters** (they apply across all
+   connections, not per-connection), passed to the host/sim adapter's constructor
+   alongside `Arc<dyn IdentityRead>`. They are NOT operator-tunable in v1 —
+   **CONCRETE compile-time defaults pinned below (F7)**; operator-tunability of
+   `MtlsLimits` is tracked in
+   [#230](https://github.com/overdrive-sh/overdrive/issues/230) (created
+   2026-06-12 — see the handoff note).
+
+   ```rust
+   /// Resource bounds for the lossless pre-arm capture (F4) + the F6 pump-stall
+   /// deadline. Construction-time, not per-connection: the adapter holds one
+   /// `MtlsLimits` and applies it to every `enforce`. Fail-closed on every limit
+   /// — never queue-unbounded, never degrade to cleartext. The F7 defaults are
+   /// CONCRETE (not "sensible defaults"): the acceptance tests assert these exact
+   /// values, not merely field existence.
+   #[derive(Debug, Clone, Copy)]
+   pub struct MtlsLimits {
+       /// Max pre-arm plaintext bytes buffered per connection before kTLS arms.
+       /// Exceeding it ⇒ `BufferLimitExceeded`: drop the buffer, reset the
+       /// plaintext leg (leg F outbound / leg S not-yet-opened inbound), no
+       /// cleartext egresses. **F7 default: 256 KiB (262_144).** Rationale: covers
+       /// a request-first protocol's first flight (HTTP/2 headers, a gRPC request,
+       /// a Postgres startup) while the handshake completes in single-digit ms,
+       /// two orders of magnitude below what a stalled peer could otherwise pin.
+       pub max_prearm_bytes: usize,
+       /// Deadline for the handshake-and-arm (leg B outbound / leg C inbound).
+       /// Exceeding it ⇒ `HandshakeTimeout`: the stalled peer cannot pin agent
+       /// resources. **F7 default: 5 s.** Rationale: a same-node / east-west mTLS
+       /// handshake completes in ms; 5 s distinguishes a dead/stalled peer from
+       /// normal GC/scheduler variance without false-tripping.
+       pub handshake_deadline: Duration,
+       /// Max concurrent in-flight (pre-arm, not-yet-armed) connections per
+       /// `AllocationId`. Over-limit ⇒ the new intercept is refused fail-closed
+       /// (`InFlightLimitExceeded`), so one workload cannot exhaust the agent by
+       /// opening many stalled connections. **F7 default: 128.** Rationale: a
+       /// healthy workload arms each connection in ms, so 128 concurrent *pre-arm*
+       /// connections is far above any legitimate burst yet caps the
+       /// amplification one workload can inflict.
+       pub max_inflight_per_alloc: u32,
+       /// F6 — the no-progress window after which a return/deliver splice pump is
+       /// `PumpLiveness::Stalled`: the bytes-spliced counter has not advanced for
+       /// this long WHILE a record is pending on the kTLS-RX leg. The worker tears
+       /// the connection down on `Stalled` (teardown + fail-closed reset). A purely
+       /// idle connection (no pending record) is `Running`, never `Stalled`.
+       /// **F7 default: 30 s.** Rationale: generous enough that no healthy bursty
+       /// connection trips it, tight enough that a stranded pump is reclaimed
+       /// promptly.
+       pub pump_stall_deadline: Duration,
+   }
+
+   impl Default for MtlsLimits {
+       /// The F7 v1 defaults — pinned, not operator-tunable in v1. The acceptance
+       /// tests assert these exact values.
+       fn default() -> Self {
+           Self {
+               max_prearm_bytes: 256 * 1024,            // 256 KiB
+               handshake_deadline: Duration::from_secs(5),
+               max_inflight_per_alloc: 128,
+               pump_stall_deadline: Duration::from_secs(30),
+           }
+       }
+   }
+   ```
+
+   **Resource budget (F7 — the operator's exhaustion-reasoning surface; mirrors
+   ADR-0069 § "Resource & robustness constraints"):** per pre-arm connection ≤ 256
+   KiB buffer + ~3 fds (two legs + one `splice` pipe); per allocation ≤ 128 ×
+   (256 KiB + 3 fds) = **≤ 32 MiB + ≤ 384 fds** in the pre-arm window
+   (steady-state established connections drop the buffer, holding only ~3 fds
+   each); per node = Σ over allocations, sized against `RLIMIT_NOFILE`. The
+   in-flight ceiling makes the pre-arm contribution bounded and predictable.
+
+### The trait
+
+`#[async_trait]` at the boundary (mirroring `Dataplane` / `Driver` — async only
+where the contract genuinely awaits kernel I/O; the trait lives in `overdrive-core`
+but `async_trait` is a declarative macro with no runtime, so it stays off the
+`core` *I/O* surface exactly as `Dataplane` does today). `Send + Sync + 'static`
+to be held as `Arc<dyn MtlsEnforcement>` and shared across the worker's per-
+connection tasks.
+
+```rust
+//! [`MtlsEnforcement`] — the per-connection transparent-mTLS enforcement port
+//! (ADR-0069). The agent-light L4 proxy's driven contract, **bidirectional (F3)**:
+//! bring a transparently-intercepted workload connection — OUTBOUND (the workload
+//! is the client) OR INBOUND (the workload is the server) — to a
+//! steady-state-established mTLS session, observe the agent-light splice pump's
+//! liveness, and tear the connection down. `enforce` dispatches on
+//! `InterceptedConnection::routed` (the `Direction`):
+//! - **OUTBOUND**: lossless capture on leg F → rustls CLIENT handshake on leg B
+//!   presenting the held SVID → arm kTLS → install the forward egress-redirect →
+//!   return-splice pump (`findings-egress-ktls-splice.md` / `findings-splice-return.md`).
+//! - **INBOUND**: TPROXY-intercept → `getsockname` orig-dst → rustls SERVER
+//!   handshake on leg C (present the server SVID, REQUIRE+VERIFY the client SVID
+//!   chains to the bundle via `WebPkiClientVerifier`) → arm kTLS-RX → dial the
+//!   server workload (leg S) → splice the decrypted plaintext to it; fail-closed
+//!   on `nocert`/`wrongca` (`findings-inbound-intercept.md`).
+//!
+//! Production wires `HostMtlsEnforcement` (over sockops / sk_skb-stream_verdict /
+//! sockmap / kTLS / `splice` / `cgroup_connect4` / `nft`-TPROXY+`IP_TRANSPARENT`,
+//! consuming `IdentityRead`); simulation wires `SimMtlsEnforcement` (in-memory
+//! observable-contract mirror). The `mtls_enforcement_equivalence` DST harness
+//! drives both through the same call sequence (both directions) and asserts
+//! identical observable state (`.claude/rules/development.md` § "The DST
+//! equivalence test is the structural guard").
+//!
+//! Consumes `IdentityRead` (#35) as a REQUIRED constructor parameter — #26 is a
+//! READER, never an issuer (D-MTLS-9). BOTH the client AND the server workload
+//! hold NOTHING.
+//!
+//! **Scope (F1/F5 — authn + encryption, NOT authz; NO intended-peer pinning in
+//! v1).** This port AUTHENTICATES the peer (**chain-to-trust-bundle** only — that
+//! the peer is *some* valid cluster workload) and ENCRYPTS the wire (kTLS), in
+//! BOTH directions. It does NOT AUTHORIZE the connection — allow/deny is the
+//! BPF-LSM `socket_connect` hook
+//! ([#27](https://github.com/overdrive-sh/overdrive/issues/27)) fed by compiled
+//! `policy_verdicts` ([#38](https://github.com/overdrive-sh/overdrive/issues/38);
+//! related [#49](https://github.com/overdrive-sh/overdrive/issues/49)), a SEPARATE
+//! subsystem this port MUST NOT duplicate (no policy engine, no Regorus, no
+//! `policy_verdicts` read here). It also does NOT pin the *intended* peer:
+//! expected-destination identity pinning (`expected_peer` + `PeerIdentityMismatch`)
+//! is the [#178](https://github.com/overdrive-sh/overdrive/issues/178) UPGRADE
+//! (east-west SPIFFE-ID resolution supplies the expected peer); **v1 is authn-only**
+//! (`expected_peer == None`). **A routing bug / VIP collision / malicious
+//! in-cluster endpoint presenting a valid-but-unintended SVID is NOT prevented in
+//! v1** — the honest v1 claim is "chain-to-bundle transport authn + encryption, no
+//! intended-peer pinning." Docs/tests MUST NOT call the wrong-but-valid-peer case
+//! "protected" until #178 lands (F5).
+//!
+//! Resource-bounded by `MtlsLimits` (F4/F7): bounded pre-arm buffer (256 KiB),
+//! handshake deadline (5 s), per-allocation in-flight ceiling (128), pump-stall
+//! deadline (30 s, F6) — all fail-closed, never queue-unbounded; CONCRETE v1
+//! defaults the acceptance tests assert. Construction takes `MtlsLimits`
+//! alongside `IdentityRead`.
+
+#[async_trait]
+pub trait MtlsEnforcement: Send + Sync + 'static {
+    /// Earned-Trust probe (ADR-0069 § Enforcement; D-MTLS-11). Verify the proxy
+    /// substrate honours its contract in the REAL environment BEFORE any
+    /// connection is enforced. Composition-root invariant: wire → probe → use.
+    ///
+    /// # Preconditions
+    /// None. Called once at node startup, after the adapter is constructed and
+    /// its BPF objects/maps are loaded+pinned, before `enforce` is ever called.
+    ///
+    /// # Postconditions on `Ok(())`
+    /// The three catalogued substrate lies the spikes surfaced have been
+    /// exercised on a loopback sentinel and round-tripped clean:
+    /// (1) **kTLS arm round-trips** — a sentinel rustls handshake on a loopback
+    ///     leg B arms kTLS and a single `tls_sw_splice_read` of one record
+    ///     returns the exact sentinel plaintext (`findings.md` A; `findings-
+    ///     splice-return.md`);
+    /// (2) **the forward egress-redirect fires** — a sentinel byte written to a
+    ///     loopback leg F emerges ENCRYPTED on leg B's wire via the sockmap
+    ///     EGRESS redirect (`flags=0`, not `BPF_F_INGRESS`;
+    ///     `findings-egress-ktls-splice.md`);
+    /// (3) **the arming invariant holds** — SOCKMAP insert precedes `TCP_ULP
+    ///     "tls"`; the reverse ordering is observed to return `EINVAL`
+    ///     (`findings.md` D / D-MTLS-7).
+    /// After `Ok`, the proxy is declared usable; the node proceeds to serve.
+    ///
+    /// # Edge cases
+    /// Any sentinel round-trip failure (kTLS arm refused, the redirect produces
+    /// cleartext or no bytes, the reverse ordering does NOT return `EINVAL`)
+    /// returns a typed `MtlsEnforcementError` and the node MUST refuse to start
+    /// with a structured `health.startup.refused` event — it does NOT degrade to
+    /// a cleartext path (fail-closed for confidentiality).
+    ///
+    /// # Observable invariants
+    /// `probe` mutates no enforced connection (there are none yet) and leaks no
+    /// sentinel state — the loopback legs and pinned sentinel maps are torn down
+    /// before return regardless of outcome.
+    async fn probe(&self) -> Result<()>;
+
+    /// Bring `conn` to a steady-state-established mTLS session and return an
+    /// opaque [`EnforcedConnection`] handle. Phases 1–2 of ADR-0069 + the
+    /// steady-state install, as ONE atomic unit. **Dispatches on
+    /// `conn.routed` (the `Direction`)** — outbound (workload = client) vs
+    /// inbound (workload = server, F3).
+    ///
+    /// # Preconditions
+    /// - `conn.leg` is an OWNED, ESTABLISHED socket the agent `accept()`ed for a
+    ///   transparently-intercepted connection. OUTBOUND: leg F, the workload-facing
+    ///   plaintext leg off the `cgroup_connect4`-rewrite intercept
+    ///   (`findings-userspace-relay.md` Unknown 1). INBOUND: leg C, the
+    ///   client-facing leg off the TPROXY/`IP_TRANSPARENT` intercept
+    ///   (`findings-inbound-intercept.md` §1). The port takes ownership.
+    /// - `conn.routed` matches the direction: `Outbound { peer }` carries the real
+    ///   peer leg B dials; `Inbound { orig_dst }` carries the `getsockname`-
+    ///   recovered original destination that selects the server SVID.
+    /// - `conn.alloc` MAY be absent from the held set — see edge cases
+    ///   (fail-closed). OUTBOUND: the client workload's alloc. INBOUND: the server
+    ///   workload's alloc (selected by `orig_dst`). The caller does NOT pre-check
+    ///   `svid_for`; `enforce` is the single fail-closed gate.
+    ///
+    /// # Postconditions on `Ok(EnforcedConnection)` — OUTBOUND
+    /// After return, ALL of the following hold (the observable contract every
+    /// adapter MUST satisfy — what the `mtls_enforcement_equivalence` harness and
+    /// the Tier-3 wire tests check):
+    /// - The pre-arm plaintext the workload wrote during the handshake window was
+    ///   captured LOSSLESSLY and flushed to the peer as the first
+    ///   `application_data` on leg B (no dropped pre-arm bytes; rec_seq starts at
+    ///   0; `findings-userspace-relay.md` Unknown 2).
+    /// - Leg B carries TLS 1.3 records (`0x17`) presenting `conn.alloc`'s held
+    ///   SVID (read via `IdentityRead::svid_for(&conn.alloc)`); the peer was
+    ///   **authenticated** against `IdentityRead::current_bundle()` (chains to
+    ///   the trust bundle). Auth-session == data-session (the rustls handshake's
+    ///   extracted secrets ARE the kTLS keys on leg B). NO cleartext appears on
+    ///   the peer-facing wire (`tcpdump` oracle).
+    /// - The forward steady state is AGENT-IDLE: leg F's RX is sockmap
+    ///   EGRESS-redirected (`flags=0`) into leg B's kTLS TX; the agent issues
+    ///   zero per-byte syscalls forward (`findings-egress-ktls-splice.md`).
+    /// - The return-splice pump is RUNNING (the adapter's own task drives
+    ///   `splice(legB → pipe → legF)` on a plain — NO psock — kTLS-RX leg B;
+    ///   D-MTLS-4 / D-MTLS-5). `liveness(&handle)` reports `Running`.
+    /// - The arming invariant was honoured: SOCKMAP insert preceded `TCP_ULP
+    ///   "tls"` on leg B (D-MTLS-7).
+    /// - **Leg B was dialed with the intercept-exemption bypass (F5).** The
+    ///   agent's own outbound leg-B `connect()` is NOT re-intercepted by the
+    ///   workload `cgroup_connect4` rewrite — via a narrowly-scoped `SO_MARK`
+    ///   socket mark the program checks-and-skips, OR cgroup scoping (the program
+    ///   attaches to the *workload* subtree, not the agent's — the existing
+    ///   `cgroup_connect4_service` attach boundary). The bypass is agent-private:
+    ///   a workload CANNOT replicate it to self-exempt from interception (proven
+    ///   by the F5 Tier-3 obligations: leg B not re-intercepted AND workload
+    ///   cannot self-exempt). Without this, the agent's dial would recurse
+    ///   infinitely.
+    ///
+    /// # Postconditions on `Ok(EnforcedConnection)` — INBOUND (F3)
+    /// After return, ALL of the following hold (grounded in
+    /// `findings-inbound-intercept.md`; what the inbound Tier-3 tests check):
+    /// - The original destination was recovered via `getsockname()` on leg C and
+    ///   selected the server workload's `AllocationId` → its held SVID (§1).
+    /// - Leg C carries TLS 1.3 records (`0x17`); the agent's rustls SERVER
+    ///   handshake presented `conn.alloc`'s held server SVID (via
+    ///   `IdentityRead::svid_for`) AND the client's presented SVID was
+    ///   **REQUIRED + VERIFIED** to chain to `IdentityRead::current_bundle()` via
+    ///   `WebPkiClientVerifier` (§2). Auth-session == data-session (the rustls
+    ///   secrets ARE the kTLS-RX keys on leg C). NO cleartext of the request
+    ///   appears on the client-facing wire (it carries `0x17` app_data; §3).
+    /// - The server workload received the **byte-exact decrypted plaintext** on
+    ///   leg S (the agent dialed the server workload's real plaintext socket and
+    ///   spliced); the server workload holds NOTHING and is identity-unaware (§3).
+    /// - The deliver-splice pump is RUNNING (the adapter's own task drives
+    ///   `splice(legC → pipe → legS)` on a plain — NO psock — kTLS-RX leg C;
+    ///   same primitive as the outbound return). `liveness(&handle)` reports
+    ///   `Running`.
+    /// - Server-config mechanics honoured: `NewSessionTicket` suppressed
+    ///   (`send_tls13_tickets = 0`) and `peer_certificates()` read for the
+    ///   fail-closed guard BEFORE `dangerous_extract_secrets` consumed the
+    ///   connection (§ Mechanics #3/#6).
+    ///
+    /// # Postconditions — BOTH directions
+    /// - **Authn, NOT authz; NO intended-peer pinning in v1 (F1/F5).** This
+    ///   establishes the peer is *a valid cluster workload* (chains to the bundle),
+    ///   NOT that the connection is *authorized* (allow/deny is #27's BPF-LSM
+    ///   `socket_connect` hook fed by #38's `policy_verdicts`, a SEPARATE subsystem
+    ///   the proxy MUST NOT duplicate) and NOT that the peer is the *intended*
+    ///   destination. If `conn.expected_peer == Some(id)`, the authenticated peer's
+    ///   SPIFFE-SAN is additionally matched against `id` (expected-destination
+    ///   pinning); a mismatch is fail-closed (`PeerIdentityMismatch`). In **v1
+    ///   `expected_peer` is `None`** (authn-only) — the expected-peer identity is
+    ///   the #178 UPGRADE; this clause is a no-op until then. A
+    ///   valid-but-unintended SVID is NOT rejected in v1.
+    ///
+    /// # Edge cases (all FAIL-CLOSED — no cleartext, connection refused) — both directions
+    /// - `IdentityRead::svid_for(&conn.alloc) == None` ⇒ `Err(AbsentSvid)`; the
+    ///   handshake is refused, `conn.leg` is closed, no bytes egress (OUTBOUND: no
+    ///   client SVID; INBOUND: no server SVID for the selected `orig_dst`). (`None`
+    ///   is the held-set fail-closed signal — `identity_read.rs` clause 3.)
+    /// - `current_bundle() == None`, or the peer does not chain to it ⇒
+    ///   `Err(PeerVerificationFailed)` / `Err(AbsentBundle)`; refused, leg closed.
+    ///   INBOUND: this is the `nocert`/`wrongca` fail-closed path proven in
+    ///   `findings-inbound-intercept.md` §4 — the client SVID is absent or does not
+    ///   chain to the bundle; NO plaintext is spliced to the server workload.
+    /// - `conn.expected_peer == Some(id)` and the authenticated peer's SPIFFE-SAN
+    ///   does NOT match `id` (a wrong-but-valid peer — chains to the bundle but
+    ///   is not the intended destination) ⇒ `Err(PeerIdentityMismatch)`; refused,
+    ///   leg closed. **v1: unreachable while `expected_peer` is `None`** — the #178
+    ///   UPGRADE (F1/F5). A valid-but-unintended SVID is NOT rejected in v1.
+    /// - The peer/workload streamed more than `limits.max_prearm_bytes` of pre-arm
+    ///   plaintext before kTLS armed ⇒ `Err(BufferLimitExceeded)`: the buffer is
+    ///   dropped, the plaintext leg reset, no cleartext egresses (F4 / DoS guard).
+    /// - The handshake-and-arm exceeded `limits.handshake_deadline` ⇒
+    ///   `Err(HandshakeTimeout)`; refused, legs closed (F4 — leg B outbound / leg C
+    ///   inbound).
+    /// - The per-allocation in-flight ceiling `limits.max_inflight_per_alloc` is
+    ///   already reached for `conn.alloc` ⇒ `Err(InFlightLimitExceeded)`: the new
+    ///   intercept is refused, no cleartext (F4).
+    /// - The rustls handshake aborts (wrong SVID, alert, timeout) ⇒
+    ///   `Err(HandshakeFailed)`; refused, legs closed.
+    /// - The kTLS arm refuses on the kTLS leg ⇒ `Err(KtlsArmFailed)`; refused,
+    ///   legs closed.
+    /// - A SOCKMAP-after-`TCP_ULP` ordering violation surfaces as
+    ///   `Err(ArmingOrderViolation)` (`EINVAL`) — a structural defect the probe
+    ///   should have caught; if it reaches here the connection is refused.
+    /// On ANY error, the port owns the cleanup: every owned leg is closed (OUTBOUND:
+    /// leg F + any opened leg B; INBOUND: leg C + any opened leg S), no sockmap
+    /// membership or kTLS state leaks, and NO cleartext byte reached the wire
+    /// (OUTBOUND: the peer wire; INBOUND: the server workload's leg S — nothing is
+    /// spliced) — the confidentiality invariant the whole feature rests on.
+    ///
+    /// # Observable invariants
+    /// `enforce` is NOT idempotent and NOT replayable — each call enforces ONE
+    /// distinct connection (a fresh leg F). The returned `EnforcedConnection.id`
+    /// is unique per call within a node session.
+    async fn enforce(&self, conn: InterceptedConnection) -> Result<EnforcedConnection>;
+
+    /// The current liveness of the agent-light splice pump for `handle` — the
+    /// return pump `splice(legB → pipe → legF)` (OUTBOUND) or the deliver pump
+    /// `splice(legC → pipe → legS)` (INBOUND), both on a plain (no-psock) kTLS-RX
+    /// leg, ~1 `splice` per TLS record (`findings-splice-return.md` /
+    /// `findings-inbound-intercept.md` §5) — agent-light, zero-copy. This method
+    /// observes it; it does not drive it (the adapter's own task does — SD-2).
+    ///
+    /// # Preconditions
+    /// `handle` was returned by a prior `enforce` on THIS adapter and not yet
+    /// `teardown`'d. A handle for an unknown/torn-down connection reports
+    /// `Gone` (NOT an error — the post-teardown observable, mirroring
+    /// `Driver::status` returning `NotFound` after `stop`).
+    ///
+    /// # Postconditions
+    /// Returns `Running` while the pump is draining records OR is idle-but-ready
+    /// (no record pending); `Stalled { since }` when the pump's bytes-spliced
+    /// progress metric has NOT advanced for `MtlsLimits::pump_stall_deadline`
+    /// (F7 default 30 s) WHILE a record is pending on the kTLS-RX leg (a
+    /// crashed/stranded pump — the reliability sensitivity point ADR-0069 § ATAM
+    /// names); or `Gone` after teardown / leg close. A purely-idle connection
+    /// (no pending record) is `Running`, never `Stalled` (no false positives on
+    /// quiescent long-lived connections).
+    ///
+    /// # F6 supervision policy (what the worker does with `Stalled`)
+    /// The worker (D-MTLS-10) point-queries this on its reconciler-tick cadence
+    /// (SD-4). On observing `Stalled`, the worker MUST `teardown(handle)` —
+    /// **teardown + fail-closed reset** (close the legs, stop the pump, reclaim
+    /// kTLS/sockmap state). It does NOT reconnect-in-place (a foreign process
+    /// cannot resume a kTLS record sequence) and does NOT degrade to a userspace
+    /// copy loop (that re-enters the per-byte path A3 rejects). The connection
+    /// drops; request-retry protocols re-handshake on reconnect. Telemetry:
+    /// `mtls.pump.stalled` + `mtls.pump.teardown_on_stall` per allocation.
+    ///
+    /// # Observable invariants
+    /// Read-only: `liveness` never mutates the pump or the connection. This is
+    /// the worker's supervision surface (D-MTLS-10: the agent supervises the
+    /// splice pump) — analogous to `Driver`'s exit-event observation, but a
+    /// point query rather than a stream (SD-4 surfaces the stream alternative).
+    fn liveness(&self, handle: &EnforcedConnection) -> PumpLiveness;
+
+    /// Tear `handle` down: stop the splice pump (return outbound / deliver
+    /// inbound), remove the kTLS leg's sockmap membership (outbound leg B only —
+    /// inbound leg C carries none), drop the kTLS state, and close both legs
+    /// (outbound: leg F + leg B; inbound: leg C + leg S). Phase 4 of ADR-0069.
+    /// This is also the F6 stall-recovery action (the worker calls it on
+    /// observing `PumpLiveness::Stalled`).
+    ///
+    /// # Preconditions
+    /// `handle` was returned by a prior `enforce`. Idempotent: tearing down an
+    /// already-torn-down (or unknown) handle is `Ok(())`, NOT an error — mirrors
+    /// `Driver::stop` / `deregister_local_backend` idempotency.
+    ///
+    /// # Postconditions on `Ok(())`
+    /// Both legs are closed; the pump task has stopped; no sockmap membership or
+    /// kTLS state for this connection remains; `liveness(&handle)` returns
+    /// `Gone`. The workload's connection is closed (the proxy owned both legs;
+    /// no restart-survival in v1 — D-MTLS-2 / ADR-0069 Negative).
+    ///
+    /// # Observable invariants
+    /// After `teardown`, no further bytes move for this connection in either
+    /// direction; the per-connection resources are fully reclaimed (no fd/pump
+    /// leak), which the equivalence harness asserts by re-querying `liveness`.
+    async fn teardown(&self, handle: EnforcedConnection) -> Result<()>;
+}
+```
+
+### Error type + Result alias
+
+A `thiserror` enum with **cause-distinct** variants for exactly the failure modes
+the spikes surfaced (no catch-all `Internal(String)` — `.claude/rules/development.md`
+§ Errors), `#[from]` pass-through for the consumed `IdentityRead` absence boundary,
+and a `*Probe`-style refuse-to-start variant. The matching `Result` alias follows
+CLAUDE.md § "Rust library conventions".
+
+```rust
+/// Result alias used throughout the crate's mTLS-enforcement surface.
+pub type Result<T, E = MtlsEnforcementError> = std::result::Result<T, E>;
+
+#[derive(Debug, Error)]
+pub enum MtlsEnforcementError {
+    /// `IdentityRead::svid_for(&alloc) == None` — no held SVID for the
+    /// allocation whose connection was intercepted. The fail-closed signal:
+    /// the proxy refuses the handshake rather than presenting a stale/absent
+    /// credential (constraint: "Reader of `IdentityRead`, never an issuer";
+    /// `identity_read.rs` clause 3). Distinct from `AbsentBundle` so the
+    /// operator sees WHICH side of the identity read was empty.
+    #[error("no held SVID for allocation {alloc}; refusing handshake (fail-closed)")]
+    AbsentSvid { alloc: AllocationId },
+
+    /// `IdentityRead::current_bundle() == None` — no hydrated trust bundle to
+    /// verify the peer against. Fail-closed: the proxy will not complete a
+    /// handshake it cannot verify. Distinct from `AbsentSvid` (own identity) —
+    /// this is the peer-verification anchor.
+    #[error("no hydrated trust bundle; cannot verify peer (fail-closed)")]
+    AbsentBundle,
+
+    /// The leg-B rustls TLS 1.3 handshake aborted — a TLS alert, a wrong/expired
+    /// presented SVID rejected by the peer, or a handshake timeout. No kTLS was
+    /// armed; no cleartext egressed. Carries the rustls-side reason as a string
+    /// (the rustls error is not a stable typed surface to embed).
+    #[error("leg-B TLS handshake failed: {reason}")]
+    HandshakeFailed { reason: String },
+
+    /// The peer's presented certificate did not chain to `current_bundle()`'s
+    /// anchor. Fail-closed: the connection is refused. This is the
+    /// **authentication** failure (the peer is not a valid cluster workload).
+    /// Distinct from `HandshakeFailed` so a peer *identity* rejection is not
+    /// conflated with a transport/alert failure — the operator's remediation
+    /// differs (wrong peer identity vs broken TLS).
+    #[error("peer verification failed against the trust bundle: {reason}")]
+    PeerVerificationFailed { reason: String },
+
+    /// The authenticated peer chains to the trust bundle (it IS a valid cluster
+    /// workload) but its SPIFFE-SAN does NOT match the expected destination
+    /// `InterceptedConnection::expected_peer` — a wrong-but-valid peer. This is
+    /// **expected-destination identity pinning** (F1), NOT authorization (that is
+    /// #27's BPF-LSM `socket_connect` hook). Reserved now; **v1 never produces it
+    /// because `expected_peer` is `None`** — it wires the moment east-west
+    /// SPIFFE-ID resolution
+    /// ([#178](https://github.com/overdrive-sh/overdrive/issues/178)) supplies the
+    /// expected peer. Distinct from `PeerVerificationFailed` (authn) so the
+    /// "valid peer, wrong destination" case is diagnosable on its own.
+    #[error("peer identity mismatch: authenticated peer is not the expected destination: {reason}")]
+    PeerIdentityMismatch { reason: String },
+
+    /// The workload streamed more than `MtlsLimits::max_prearm_bytes` of pre-arm
+    /// plaintext into leg F before kTLS armed on leg B (F4 — the DoS guard on the
+    /// lossless capture buffer). Fail-closed: the buffer is dropped, leg F reset,
+    /// NO cleartext egresses. Cause-distinct (NOT a generic `Io`) so the operator
+    /// sees a resource-limit trip, not an I/O error.
+    #[error("pre-arm buffer limit exceeded for allocation {alloc}: capped at {max_prearm_bytes} bytes (fail-closed)")]
+    BufferLimitExceeded { alloc: AllocationId, max_prearm_bytes: usize },
+
+    /// The leg-B handshake-and-arm did not complete within
+    /// `MtlsLimits::handshake_deadline` (F4 — a stalled peer must not pin agent
+    /// resources). Fail-closed: legs closed, no cleartext. Distinct from
+    /// `HandshakeFailed` (an active TLS abort) — this is the *deadline* trip, a
+    /// different remediation (slow/stalled peer vs broken TLS).
+    #[error("leg-B handshake exceeded deadline {deadline:?} for allocation {alloc} (fail-closed)")]
+    HandshakeTimeout { alloc: AllocationId, deadline: Duration },
+
+    /// The per-allocation in-flight (pre-arm) connection ceiling
+    /// `MtlsLimits::max_inflight_per_alloc` is already reached for this
+    /// allocation (F4 — one workload cannot exhaust the agent by opening many
+    /// stalled connections). Fail-closed: the new intercept is refused, no
+    /// cleartext. Backpressure is *refuse*, never *queue-unbounded*.
+    #[error("in-flight connection limit {limit} reached for allocation {alloc}; refusing new intercept (fail-closed)")]
+    InFlightLimitExceeded { alloc: AllocationId, limit: u32 },
+
+    /// `setsockopt(TCP_ULP "tls")` / `TLS_TX` / `TLS_RX` refused on leg B after a
+    /// successful handshake — the kTLS arm itself failed (kernel rejected the
+    /// crypto_info, the ULP was already set, etc.). The extracted secrets were
+    /// valid (handshake completed) but the kernel would not take them. Distinct
+    /// from `HandshakeFailed` per `.claude/rules/development.md` § Errors — the
+    /// failing layer is the kTLS install, not the handshake.
+    #[error("kTLS arm on leg B refused by kernel: {source}")]
+    KtlsArmFailed {
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A SOCKMAP insert was attempted AFTER `TCP_ULP "tls"` on leg B and the
+    /// kernel returned `EINVAL` (both replace `sk->sk_prot`; `findings.md` D /
+    /// D-MTLS-7). This is the arming-invariant violation — a structural defect
+    /// `probe` is designed to catch; surfacing it as its own variant lets the
+    /// composition root and the Tier-3 `tls-ULP-after-sockmap == EINVAL` test
+    /// pin it precisely rather than hiding it inside a generic load failure.
+    #[error("arming-order violation: SOCKMAP insert after TCP_ULP \"tls\" returned EINVAL on leg B")]
+    ArmingOrderViolation,
+
+    /// The forward sockmap EGRESS-redirect (`sk_skb/stream_verdict`, `flags=0`)
+    /// could not be installed on the leg-F → leg-B pair — the BPF attach/map
+    /// update for the agent-idle forward path failed. Distinct from the kTLS
+    /// arm (a different kernel subsystem) and from teardown.
+    #[error("forward egress-redirect install failed on leg F→B: {source}")]
+    ForwardRedirectFailed {
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The Earned-Trust `probe` sentinel round-trip failed — one of the three
+    /// catalogued substrate lies (kTLS arm, forward redirect, arming order) did
+    /// NOT round-trip clean on the loopback sentinel. The node MUST refuse to
+    /// start (`health.startup.refused`); the proxy is not trustworthy. Mirrors
+    /// `DataplaneError::LocalBackendProbe` / `ReverseLocalProbe`. `which` names
+    /// the sentinel that failed so the refusal is diagnosable without
+    /// `Display`-grepping.
+    #[error("mTLS proxy probe round-trip failed [{which}]: {message}")]
+    Probe { which: ProbeSentinel, message: String },
+
+    /// Teardown could not fully reclaim a connection's resources — a leg close,
+    /// pump stop, or sockmap-membership removal errored. Surfaced (not swallowed)
+    /// so a resource leak is observable; the equivalence harness asserts no leak
+    /// on the `Ok` path.
+    #[error("teardown of connection {id} failed: {source}")]
+    TeardownFailed {
+        id: EnforcedConnectionId,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Underlying host I/O not covered by a more specific variant (leg-F
+    /// `accept`/fd plumbing, `splice` pump setup). `#[from] std::io::Error`
+    /// keeps `?` ergonomic at the host-adapter boundary, mirroring
+    /// `DriverError::Io` / `DataplaneError::Io`. Specific, diagnosable failures
+    /// get their own variant above; this is the genuine residual only.
+    #[error("mTLS enforcement I/O: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Which probe sentinel failed (for the refuse-to-start diagnosis). 1:1 with the
+/// three catalogued substrate lies the spikes surfaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeSentinel {
+    /// kTLS arm + one `tls_sw_splice_read` round-trip (findings.md A).
+    KtlsArmRoundTrip,
+    /// Forward sockmap EGRESS-redirect emits ciphertext (findings-egress-ktls-splice.md).
+    ForwardEgressRedirect,
+    /// SOCKMAP-after-TCP_ULP returns EINVAL (findings.md D).
+    ArmingOrderEinval,
+}
+
+/// Liveness of a connection's agent-light splice pump (return outbound / deliver
+/// inbound). F6: the worker tears the connection down on `Stalled` (teardown +
+/// fail-closed reset; see `liveness` § "F6 supervision policy").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PumpLiveness {
+    /// The pump is draining records OR idle-but-ready (no record pending) — the
+    /// path is live. A quiescent long-lived connection is `Running`, not `Stalled`.
+    Running,
+    /// The pump's bytes-spliced progress metric has NOT advanced since `since`,
+    /// for at least `MtlsLimits::pump_stall_deadline` (F7 default 30 s), WHILE a
+    /// record is pending on the kTLS-RX leg (a stranded/crashed pump — the path
+    /// is broken; ADR-0069 § ATAM reliability sensitivity). The worker's F6 policy
+    /// reacts by tearing the connection down.
+    Stalled { since: UnixInstant },
+    /// No live pump for this handle — torn down or never enforced (post-teardown
+    /// observable; not an error).
+    Gone,
+}
+```
+
+> Note on `AbsentSvid` vs a `#[from]` IdentityRead error: `IdentityRead` returns
+> `Option<SvidMaterial>` (absence is `None`, NOT a typed error — `identity_read.rs`
+> is infallible by design), so there is no `IdentityReadError` to `#[from]`. The
+> `#[from]` pass-through the dispatch asks for applies to the **I/O boundary**
+> (`std::io::Error`, the host-syscall surface), which `Io` provides. The
+> `IdentityRead` absence is mapped explicitly to the cause-distinct `AbsentSvid` /
+> `AbsentBundle` variants — which is the *more* honest shape than a blanket
+> `#[from]`, because it names WHICH read was empty (own-identity vs peer-anchor).
+
+### `SimMtlsEnforcement` sketch (DST-testability confirmation)
+
+The sim adapter confirms the contract is DST-observable: it mirrors the
+**observable contract state** in memory (no kernel, no `splice`, no BPF), so the
+`mtls_enforcement_equivalence` harness drives both adapters through the same call
+sequence and asserts identical observable reads — exactly the `SimDataplane` /
+`SimIdentityRead` pattern. What DST asserts on: the per-connection enforcement
+RESULT (was it established or fail-closed-refused, and WHY), the pump liveness
+transitions, and the teardown reclamation — NOT kernel internals (those are Tier-3).
+
+```rust
+/// In-memory [`MtlsEnforcement`] double for DST. Models the OBSERVABLE contract,
+/// not the kernel mechanism: it records, per enforced connection, the outcome
+/// (`Established` / a fail-closed reason), the pump liveness, and teardown — so a
+/// DST scenario asserts the SAME observable trajectory the host adapter produces,
+/// without sockops / kTLS / splice / BPF.
+///
+/// # What the scenario preloads (the fail-closed fork inputs)
+/// Like `SimIdentityRead`, the double is driven by a preloaded `IdentityRead`
+/// (the held-set snapshot) + a per-`AllocationId` scripted outcome map. To
+/// exercise a fail-closed path a scenario preloads an `IdentityRead` WITHOUT the
+/// alloc (→ `AbsentSvid`), or scripts a `HandshakeFailed` / `PeerVerificationFailed`
+/// outcome for an alloc. The happy path (alloc present + no scripted failure)
+/// yields `Ok(EnforcedConnection)` with `liveness == Running`. **Both directions
+/// (F3)**: the double reads `conn.routed`'s `Direction` and models the SAME
+/// observable outcome for `Outbound` and `Inbound` (the `nocert`/`wrongca` inbound
+/// fail-closed maps to the same `PeerVerificationFailed` the host produces). **F6**:
+/// a scenario can script a pump that transitions `Running → Stalled` (no progress
+/// past `pump_stall_deadline`) so the worker's teardown-on-stall policy is
+/// DST-observable without a real splice.
+pub struct SimMtlsEnforcement {
+    /// Consumed identity read surface — REQUIRED constructor param (no default),
+    /// per port-trait discipline. The double reads `svid_for` / `current_bundle`
+    /// exactly as the host adapter would, so the `AbsentSvid` / `AbsentBundle`
+    /// fail-closed branches are driven by the SAME `None` the host sees.
+    identity: Arc<dyn IdentityRead>,
+    /// Resource bounds — REQUIRED constructor param (F4), same shape the host
+    /// adapter takes. The double models the limit trips observably: a scenario
+    /// can drive `BufferLimitExceeded` / `HandshakeTimeout` /
+    /// `InFlightLimitExceeded` deterministically (e.g. preload N in-flight
+    /// connections for an alloc, then assert the N+1th `enforce` refuses).
+    limits: MtlsLimits,
+    /// Scripted per-alloc outcomes (absent ⇒ derive outcome from `identity`):
+    /// lets a scenario inject `HandshakeFailed` / `KtlsArmFailed` /
+    /// `ArmingOrderViolation` / `PeerIdentityMismatch` deterministically.
+    scripted: BTreeMap<AllocationId, ScriptedOutcome>,
+    /// Observable state DST asserts on: per established connection, its liveness.
+    /// `BTreeMap` for deterministic iteration (the equivalence guard walks it).
+    connections: Mutex<BTreeMap<EnforcedConnectionId, PumpLiveness>>,
+    /// Whether `probe` is scripted to refuse (default: Ok) — exercises the
+    /// refuse-to-start path deterministically.
+    probe_outcome: Result<(), (ProbeSentinel, String)>,
+}
+
+// enforce(): read svid_for(&conn.alloc) on the preloaded identity → None yields
+//   AbsentSvid (the real fail-closed branch, same input as host); else consult
+//   `scripted` for an injected failure; else record Running + return a handle.
+//   The pre-arm-capture / handshake / kTLS-arm / forward-redirect are MODELLED as
+//   "outcome decided," not performed — the double asserts the *contract outcome*,
+//   the Tier-3 wire test asserts the *kernel mechanism*.
+// liveness(): point-read `connections`. teardown(): set Gone, drop the entry.
+// probe(): return the scripted outcome (Ok or a typed Probe error → refuse-to-start).
+```
+
+The equivalence harness (`mtls_enforcement_equivalence`, a future DELIVER step,
+mirroring `identity_read_equivalence` / `ReverseNatLockstep`) drives both adapters
+through, **for BOTH directions** (F3): probe → enforce(`Outbound`, present alloc)
+→ assert `Running` → teardown → assert `Gone`; probe → enforce(`Inbound`, present
+alloc) → assert `Running` → teardown → assert `Gone`; and
+enforce(absent alloc) → assert `Err(AbsentSvid)` in each direction. It
+additionally exercises:
+- the **F4/F7 resource-limit fail-closed branches** (preload the in-flight
+  ceiling for an alloc → assert the next `enforce` returns `InFlightLimitExceeded`;
+  script an over-budget pre-arm stream → `BufferLimitExceeded`; a stalled
+  handshake → `HandshakeTimeout`) — observable in BOTH adapters; and **asserts the
+  CONCRETE F7 default values** (e.g. the `BufferLimitExceeded` trip fires at
+  exactly 256 KiB + 1; the `HandshakeTimeout` at the 5 s deadline; the
+  `InFlightLimitExceeded` at the 129th concurrent pre-arm; `pump_stall_deadline`
+  == 30 s) — not merely that the fields exist.
+- the **F6 pump-stall → teardown policy**: script a pump that stops making
+  progress with a record pending → assert `liveness` transitions to
+  `Stalled { since }` within `pump_stall_deadline`, assert the worker's
+  supervision loop tears the connection down, assert `Gone` after (no leak). The
+  sim models the same observable transition; the host adapter proves it at Tier-3
+  (pause the splice task with a pending RX record).
+
+The host adapter additionally carries the Tier-3 obligations the sim cannot model
+(they are the kernel-mechanism layer, asserted at Tier 3 per ADR-0069 §
+Enforcement):
+
+- The **composed walking-skeleton gate (F2 — the FIRST DELIVER slice, BLOCKING)**:
+  real `cgroup_connect4` intercept → pre-arm write → leg-B handshake → kTLS arm →
+  **post-arm bidirectional multi-record transfer with NO RST**, under BOTH normal
+  AND traced/delayed timing. The composed path was never demonstrated in the spikes
+  (increment-e RST'd on the intercept lifecycle); this gate closes that gap and
+  supersedes the old in-band walking skeleton. Must pass before any other slice.
+- The wire assertions (OUTBOUND): `tcpdump` shows TLS 1.3, zero cleartext on the
+  peer wire, `tls-ULP-after-sockmap == EINVAL`, the handshake-window capture is
+  lossless.
+- The **inbound Tier-3 obligations (F3)**, grounded strictly in
+  `findings-inbound-intercept.md`: (a) **orig-dst recovery** — a TPROXY-intercepted
+  connection to a server workload's logical address recovers the original
+  destination via `getsockname()` on leg C (§1); (b) **server-mTLS fail-closed on
+  `nocert`/`wrongca`** — a client with no cert or a cert from an untrusted CA is
+  rejected with a distinct reason and NO plaintext is spliced to the server
+  workload (§4); (c) **byte-exact plaintext to the server workload** on a valid
+  client cert, while the client-facing leg carries only TLS `0x17` records (§2/§3);
+  (d) **agent-light** — `strace` shows the agent moves the inbound payload via
+  `splice`/`ppoll` only, zero per-byte payload copy (§5); leg C carries no psock.
+  (The loopback-only spike must be re-proven in the netns/veth topology — the
+  spike's named scope boundary.)
+- The **F5 intercept-exemption obligations**: (a) the agent's leg-B dial is NOT
+  re-intercepted (no recursion); (b) a workload CANNOT self-exempt (the
+  `SO_MARK`/cgroup bypass is agent-private). References the
+  `cgroup_connect4_service` attach boundary. (For inbound, the agent's leg-S dial
+  to the server workload is a same-node plaintext dial that must likewise not be
+  TPROXY-re-intercepted — the TPROXY rule targets the workload's logical address,
+  not the agent→server leg.)
+- The **F6 pump-stall obligation**: pause the splice task with a pending RX record
+  → `liveness` reports `Stalled` within `pump_stall_deadline` (30 s) → the worker
+  tears down → `Gone`, no leak (both directions share the pump primitive).
+- The **F1/F5 authn-only boundary**: `PeerVerificationFailed` fail-closed on a peer
+  that does not chain to the bundle (OUTBOUND: the dialed peer's server cert;
+  INBOUND: the client's SVID — the `nocert`/`wrongca` path proven in
+  `findings-inbound-intercept.md` §4), AND a **reserved negative-test placeholder
+  for the wrong-but-valid-peer case** (`PeerIdentityMismatch`) — `#[ignore = "gated
+  on #178 supplying expected_peer"]` until #178 lands. **The docs/tests MUST NOT
+  call the wrong-but-valid-peer case "protected" until #178 lands** — v1 is
+  chain-to-bundle authn + encryption, no intended-peer pinning. Authorization is
+  #27's LSM hook, not this feature.
+
+### Sub-decisions (SD-1…SD-4) — ACCEPTED (user-approved 2026-06-12)
+
+These were the real forks within the model. Each is recorded with its accepted
+option (RECOMMENDED) + the rejected alternatives and trade-off; the user approved
+them 2026-06-12. They are the locked contract DELIVER builds to.
+
+- **SD-1 — `InterceptedConnection` payload (the connection descriptor).** What
+  does the worker pass IN? **Now bidirectional (F3): the answer is the same shape
+  in both directions — an owned accepted-leg `OwnedFd` + a `direction`-tagged
+  routing fact + `AllocationId`.**
+  - **(a, RECOMMENDED) owned accepted-leg `OwnedFd` + `Routed { Outbound { peer }
+    | Inbound { orig_dst } }` + `AllocationId`.** The proxy topology is symmetric:
+    OUTBOUND — "the workload's `connect()` is rewritten to the agent's leg-F
+    listener; the agent `accept()`s leg F" (`findings-userspace-relay.md` Unknown
+    1); INBOUND — "the connection to the server's logical addr is TPROXY-redirected
+    to the agent's `IP_TRANSPARENT` listener; the agent `accept()`s leg C, and
+    `getsockname` recovers the orig-dst" (`findings-inbound-intercept.md` §1). In
+    both, the agent already owns the accepted leg; handing the owned fd is the
+    honest shape (port takes ownership, RAII-closes on teardown, no half-moved fd).
+    The `direction`-tagged `Routed` carries the one direction-specific fact (the
+    peer to dial vs the orig-dst that selects the server SVID), making the
+    inbound/outbound mismatch unrepresentable. **Trade-off**: couples the contract
+    to "the worker does the `accept()`," which is exactly the proxy model (a
+    feature, not a leak).
+  - (b) a `pidfd` + raw fd handle (the SUPERSEDED in-band shape) — **rejected**: the
+    proxy owns its own legs; there is no workload-socket dup in v1. Passing a
+    `pidfd` would smuggle the dead in-band model's surface into the contract.
+  - (c) just the 4-tuple (`src`/`dst` addr+port) + `AllocationId`, port re-derives
+    the legs — **rejected**: forces the port to re-discover the accepted socket
+    from the tuple (racy, and re-does work the worker already did at `accept()`).
+  - (d) separate `enforce_outbound` / `enforce_inbound` methods carrying
+    direction-specific structs — **rejected**: duplicates every postcondition and
+    doubles the sim's mirror surface; the observable contract is identical either
+    way (see § "Bidirectional shape decision"). A `direction` discriminant on ONE
+    method + ONE descriptor is minimal.
+  - **Deciding factor**: who owns the accepted leg (the agent, both directions) +
+    keep ONE observable contract. **Recommend (a).**
+
+- **SD-2 — splice pump ownership (port-owns vs worker-drives).** The
+  agent-light pump (`splice(legB→pipe→legF)` outbound return / `splice(legC→pipe→
+  legS)` inbound deliver, ~1/record) must be driven for the connection's life,
+  in EITHER direction. Who owns the driving loop?
+  - **(a, RECOMMENDED) the PORT owns the pump.** `enforce` returns once
+    steady-state is established; the host adapter spawns its own task that drives
+    the splice pump; the worker observes liveness via `liveness(&handle)` and tears
+    down via `teardown`. **Trade-off**: the port surface stays small (establish /
+    observe / tear down — 4 methods); the pump-driving mechanism (`splice` cadence,
+    `ppoll` readiness) is adapter-internal HOW, correctly hidden. The worker
+    supervises *liveness*, not *each splice*. This matches `Driver` (the driver owns
+    the per-alloc watcher task; the worker observes `ExitEvent`s, doesn't drive the
+    process).
+  - (b) the WORKER drives the pump: the port exposes `pump_once(&handle) ->
+    Result<PumpProgress>` and the worker loops it. **Rejected**: leaks the
+    per-record `splice` cadence into the port (mechanism in the contract), makes the
+    worker responsible for readiness polling, and bloats the surface with a hot
+    method the sim must model per-record. The agent-light cost (~1 splice/record) is
+    an adapter concern, not a contract concern.
+  - **Deciding factor**: keep mechanism out of the port. The pump is HOW the return
+    path moves bytes; the port should expose only that it is *running / stalled /
+    gone*. **Recommend (a)** — and it is what the trait above is written to.
+
+- **SD-3 — `probe` async vs sync.** `Dataplane`'s probe-style checks are folded
+  into its async methods; `CgroupFs::probe` is sync. The mTLS probe does a real
+  loopback handshake + `splice` + BPF attach.
+  - **(a, RECOMMENDED) `async fn probe`.** The probe performs real kernel I/O (a
+    sentinel rustls handshake, a `tls_sw_splice_read`, a sockmap attach) — genuinely
+    awaits. Async matches the I/O reality and the `#[async_trait]` boundary the rest
+    of the trait uses. **Trade-off**: the composition root awaits it at startup
+    (already an async context — `run_server`).
+  - (b) sync `probe` that blocks — **rejected**: blocks a tokio worker on real
+    kernel I/O (the no-blocking-in-async rule), and the composition root is already
+    async. **Recommend (a)** (the trait above uses `async fn probe`).
+
+- **SD-4 — pump-liveness as a point query vs an event stream.** The worker
+  supervises the return pump. `liveness(&handle) -> PumpLiveness` is a point query
+  (above). The alternative is a `take_pump_events() -> Receiver<PumpEvent>` stream
+  (the `Driver::take_exit_receiver` shape).
+  - **(a, RECOMMENDED for v1) point query `liveness`.** The worker's supervision
+    need in v1 is "is this connection's return path still alive, and if not since
+    when" — a periodic point query (the reconciler-tick cadence the rest of the
+    worker already runs on) answers it. Minimal surface; trivially sim-modellable.
+    **Trade-off**: the worker polls rather than being pushed; for a per-connection
+    liveness check on a tick that is acceptable and matches the platform's
+    converge-on-tick model.
+  - (b) event stream `take_pump_events()` — **deferred, not rejected**: a push
+    stream is the better shape IF the worker needs immediate pump-death
+    notification (e.g. to re-handshake fast). That is a reliability optimisation of
+    the ATAM sensitivity point (stranded pump), not a v1 need. If the user wants it,
+    it is additive (the point query stays). **Recommend (a) for v1**; note (b) as a
+    clean additive follow-up if fast pump-death reaction is wanted.
+
+### OQ-2 resolution — `HostMtlsEnforcement` home
+
+**RESOLVED (user-decided 2026-06-12): NO new crate. Extend the existing crates.**
+The `HostMtlsEnforcement` userspace adapter extends **`overdrive-dataplane`**; the
+new kernel-side programs extend **`overdrive-bpf`**; `SimMtlsEnforcement` stays in
+`overdrive-sim`. This reverses this section's prior "dedicated `overdrive-mtls-host`
+crate" recommendation — the deciding factor that recommendation rested on
+(`overdrive-host` cannot host irreducibly-`unsafe` code) is real, but it argued
+only for *not `overdrive-host`*, not for a *new* crate. **`overdrive-dataplane`
+already satisfies every requirement the new crate was invented to provide.**
+
+**Verified facts (every prior new-crate rationale is already met by
+`overdrive-dataplane`):**
+
+1. **`unsafe` already allowed.** `overdrive-dataplane` is `crate_class =
+   "adapter-host"` with **no `forbid`/`deny` on `unsafe`** — 9 `src` files already
+   use `unsafe` (the raw `setsockopt`/`splice`/BPF-fd surface the proxy needs sits
+   among code shaped exactly like this). No forbid-lift, no erosion: the unsafe is
+   *expected* here, as it is the established userspace eBPF host adapter.
+2. **`aya` already a dependency** (`aya.workspace = true`). The BPF loader +
+   `pinning = ByName` discipline (ADR-0038/0040) is already wired here; reuse, do
+   not re-add.
+3. **A BPF `build.rs` already present.** `overdrive-dataplane`'s `build.rs` already
+   carries the `overdrive_bpf.o` dependency (CLAUDE.md's bpf-build-prereq footgun is
+   about *this* crate). The new sockops/`sk_skb`/`cgroup_connect4`-mtls programs
+   compile into the same shared BPF object via `overdrive-bpf` — no new build
+   coupling to invent.
+4. **"The crate that talks to the kernel."** `overdrive-dataplane` already hosts
+   `EbpfDataplane`; it IS the userspace↔kernel host adapter. Adding `ktls` +
+   `rustls` is a modest dep bump on a crate already in the kernel-dataplane graph.
+
+**`overdrive-host` ruled out** — `crates/overdrive-host/src/lib.rs:21` is
+`#![forbid(unsafe_code)]` (the safe-bindings crate: OS clock, OS entropy, host TCP
+transport, cgroup-fs, the `RcgenCa` adapter over safe `ring`/`rcgen`, the safe
+`linux-keyutils` wrapper). The proxy is irreducibly `unsafe`
+(`setsockopt(TCP_ULP/TLS_TX/TLS_RX)`, `splice(2)`, `pidfd`/BPF-fd plumbing through
+`libc`; `findings.md` D's 56-byte `tls12_crypto_info_aes_gcm_256` hand-roll), so it
+cannot share that crate without lifting a load-bearing safety property for every
+unrelated safe module.
+
+**Kernel programs → `overdrive-bpf`.** The new sockops, `sk_skb/stream_verdict`
+(forward egress-redirect), and `cgroup_connect4`-mtls (intercept) programs live
+alongside the existing `cgroup_connect4_service.rs` / XDP programs — one shared BPF
+object, per Component Decomposition #5.
+
+**Architectural-enforcement rule (ADR-0069 § Enforcement) restated for the resolved
+homes**: `overdrive-dataplane`/`overdrive-bpf` own the kernel/eBPF surface; the
+proxy's sockops/sk_msg/sockmap/kTLS/`splice` syscalls appear in no other crate —
+consistent with `EbpfDataplane` already living in `overdrive-dataplane`, and
+enforceable by a grep/ArchUnit-style gate asserting those syscalls are absent
+elsewhere. dst-lint is unaffected (both crates are `adapter-host`, not scanned).
+
+**The genuine trade — recorded as the revisit trigger, not a blocker.** A dedicated
+crate would isolate the proxy's `ktls`/`rustls` TLS stack from the LB/service
+dataplane's compile graph (concern isolation; a narrower blast radius). That was
+weighed and judged NOT worth a new crate "for now." **Revisit if** mTLS later needs
+isolation from the LB/service dataplane — then split `overdrive-dataplane`'s mTLS
+surface into a dedicated `adapter-host` crate, the `MtlsEnforcement` port boundary
+(unchanged) making that a non-breaking move.
+
+### Guest-stack adapter handoff — STAGED to #222 (F4)
+
+**The host-socket path (process/exec, WASM) is bidirectional v1 (outbound +
+inbound, both designed above). The guest-stack intercept adapter (microVM /
+unikernel) is STAGED to a follow-up:
+[#222](https://github.com/overdrive-sh/overdrive/issues/222).** #222 is no longer
+a *separate enforcement mechanism* — ADR-0069 folded it into #26's ONE universal
+agent-light L4 proxy. What remains for #222 is the **guest-stack intercept
+ADAPTER**: the same `MtlsEnforcement` port, the same `InterceptedConnection` /
+`EnforcedConnection` contract, the same agent-light splice pumps — fed by a
+guest-stack-specific intercept source instead of `cgroup_connect4` / `nft`-TPROXY.
+
+Guest-stack workloads terminate TCP in the *guest* kernel (invisible to host
+sockops / `cgroup_connect4`), so the intercept moves to the **tap/TPROXY/TC
+boundary** where the guest's virtio-net/tap flow meets the host. The adapter's job
+is to produce the SAME `InterceptedConnection` semantics the host path produces:
+
+- **Intercept source**: the microVM/unikernel's tap (Cloud Hypervisor virtio-net
+  tap) / TC / TPROXY boundary on the host side of the guest NIC — the place the
+  research already recommended a host L4 transparent mTLS proxy
+  (`transparent-mtls-recommended-architecture-research.md`;
+  `findings-userspace-relay.md` concludes the lossless path collapses into this
+  same two-socket host L4 proxy shape). Outbound: intercept the guest's egress
+  flow; inbound: intercept the flow aimed at the guest's logical address (the same
+  TPROXY mirror the host inbound path uses).
+- **`AllocationId` lookup**: map the virtio-net/tap flow (the tap device / the
+  guest's source or destination on that tap) to the owning `AllocationId` — the
+  guest-stack analogue of "which workload owns this socket." The control plane
+  owns the tap↔allocation binding (one tap per microVM allocation).
+- **Original-destination recovery**: recover the flow's original destination from
+  the tap/TPROXY boundary (TPROXY `getsockname` for the inbound mirror; the
+  egress flow's dst for outbound) — the guest-stack analogue of the host
+  `getsockname`/`connect4`-rewrite orig-dst.
+- **Conversion into `InterceptedConnection`**: the adapter `accept()`s the
+  intercepted leg and constructs the SAME `InterceptedConnection { leg, routed,
+  alloc, expected_peer }` the host path constructs — so `enforce` /
+  `liveness` / `teardown` and both splice pumps are reused VERBATIM. Only the
+  intercept *source* differs; the port contract and the agent-light steady state
+  are identical.
+
+**Scope of the staging**: the `MtlsEnforcement` port + `HostMtlsEnforcement`
+(host-socket, bidirectional) ship in #26 v1. The guest-stack intercept adapter
+(tap/TPROXY/TC source → `AllocationId` lookup → orig-dst → `InterceptedConnection`)
+is #222's deliverable, built on the unchanged v1 port boundary (so it is a
+non-breaking addition — the port boundary makes that a new adapter, not a contract
+change). **The orchestrator repurposes #222's body to "the guest-stack intercept
+adapter for the #26 universal proxy"** (no new issue — #222 already exists and is
+re-grounded by ADR-0069's fold). The product journey's stale "#222 is a SEPARATE
+feature" line is corrected to the staged-adapter framing (see § F4 journey fix /
+`upstream-changes.md`).
+
+### Handoff note for the orchestrator
+
+On user approval of this section: the crafter dispatch for the first
+`MtlsEnforcement` DELIVER step MUST pin the exact signatures above verbatim and
+explicitly forbid inventing surface (CLAUDE.md § "Implement to the design";
+"Orchestrators dispatching crafters … pin the exact signature in the dispatch and
+explicitly forbid inventing API"). The four-method surface (`probe` / `enforce` /
+`liveness` / `teardown`), the newtypes (`InterceptedConnection` — now carrying the
+`direction`-tagged `Routed` (F3) + the OPTIONAL `expected_peer` (F1) — / the
+`Direction` + `Routed` enums (F3) / `EnforcedConnection` + `EnforcedConnectionId` /
+`MtlsLimits` — now with the F7 CONCRETE defaults + the F6 `pump_stall_deadline`),
+the `MtlsEnforcementError` variant set (including `PeerIdentityMismatch` (F1) +
+`BufferLimitExceeded` / `HandshakeTimeout` / `InFlightLimitExceeded` (F4)), and the
+`PumpLiveness` / `ProbeSentinel` enums are the complete public contract — nothing
+beyond it is sanctioned without a new DESIGN decision. `enforce` dispatches on
+`Direction` (one method, both directions — F3); do NOT add `enforce_inbound`.
+**The dispatch MUST also carry**: the F2 composed walking-skeleton gate as the
+FIRST DELIVER slice (BLOCKING, before any other slice); the **F3 inbound Tier-3
+obligations** (orig-dst recovery, server-mTLS fail-closed on `nocert`/`wrongca`,
+byte-exact plaintext to the server workload, agent-light strace — grounded in
+`findings-inbound-intercept.md`); the F4/F7 resource-limit Tier-3 obligations
+(**assert the CONCRETE values** 256 KiB / 5 s / 128 / 30 s, not field existence);
+the **F6 pump-stall → teardown** obligation; the F5 intercept-exemption obligations;
+and the F1/F5 authn-only boundary (authorization is #27/#38, NOT this feature; the
+`expected_peer` SAN-match is the **#178 upgrade**, `#[ignore]`-gated, and the
+docs/tests MUST NOT call the wrong-but-valid-peer case "protected" until #178
+lands).
+
+**Operator-tunability — tracked in [#230](https://github.com/overdrive-sh/overdrive/issues/230)
+(created 2026-06-12).** The `MtlsLimits` F7 values (256 KiB / 5 s / 128 / 30 s) are
+compile-time defaults, NOT operator-tunable in v1. **Operator-tunability of
+`MtlsLimits` is tracked in #230** — the v1 defaults stand as pinned, un-tunable,
+compile-time constants until that work lands.
