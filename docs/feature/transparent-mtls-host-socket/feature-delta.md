@@ -1482,6 +1482,7 @@ MIT/Apache-2.0 and well-maintained.
 | D-MTLS-9 | Agent holds the leaf key (via `IdentityRead`); workload holds nothing | CLAUDE.md identity model; J-SEC-003 | ADR-0067; CLAUDE.md |
 | D-MTLS-10 | Process topology = in-process (the proxy agent runs IN the node binary, reading `IdentityRead` in-process — no separate agent process, no gRPC/CSR) | O3 in-process read (whitepaper §7); the agent is `overdrive-worker` control logic, not a sidecar process. Resolves the prior guided-session "in-process control-plane vs separate agent" open item | ADR-0067 D7; whitepaper §7 |
 | D-MTLS-11 | Earned-Trust `probe()` mandatory; wire→probe→use; refuse-to-start on failure | principle 12; exercises the catalogued substrate lies | ADR-0069 § Enforcement |
+| D-MTLS-12 | `probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted in-process via `rcgen` at call time (promote `rcgen` to `overdrive-dataplane` production dep). Substrate-self-test crypto, signed by NEITHER CA, never in the trust bundle, never on a real wire — #26 stays a reader, NOT an issuer | sentinel #1 is handshake-based (needs cert+key); `IdentityRead` is a reader; "workload-holds-nothing"/"two distinct CAs" intact; no key-at-rest in the binary (a-runtime over a-static) | SD-5; user 2026-06-12 |
 
 ## Wave: DESIGN / [REF] Reuse Analysis (HARD GATE)
 
@@ -1491,8 +1492,12 @@ tally: **3 REUSE-AS-IS** (`IdentityRead`, `SvidMaterial`/`TrustBundle`, `rustls`
 aya loader/pin pattern, and **`overdrive-dataplane`** as the `HostMtlsEnforcement`
 home — OQ-2 **resolved**, no new crate; `overdrive-host` ruled out for
 `#![forbid(unsafe_code)]`) · **1 CREATE-NEW port** (`MtlsEnforcement` — `Dataplane`
-does not fit) · **1 CREATE-NEW dep** (`ktls`). Default-EXTEND honored throughout;
-the single CREATE-NEW (`ktls`) justified.
+does not fit) · **1 CREATE-NEW dep** (`ktls`) · **1 PROMOTED dep** (`rcgen`:
+test-dep → production dep of `overdrive-dataplane`, for `probe`'s throwaway
+self-test sentinel cert — D-MTLS-12 / SD-5; already in the workspace graph, NOT
+an issuance path). Default-EXTEND honored throughout; the single CREATE-NEW
+(`ktls`) justified, and the `rcgen` promotion is a substrate-self-test edge, not
+identity issuance (#26 stays a reader).
 
 ## Wave: DESIGN / [REF] Open Questions / Deferrals (blockers for the orchestrator)
 
@@ -2599,11 +2604,14 @@ Enforcement):
   chain-to-bundle authn + encryption, no intended-peer pinning. Authorization is
   #27's LSM hook, not this feature.
 
-### Sub-decisions (SD-1…SD-4) — ACCEPTED (user-approved 2026-06-12)
+### Sub-decisions (SD-1…SD-5) — ACCEPTED (user-approved 2026-06-12)
 
 These were the real forks within the model. Each is recorded with its accepted
 option (RECOMMENDED) + the rejected alternatives and trade-off; the user approved
-them 2026-06-12. They are the locked contract DELIVER builds to.
+them 2026-06-12. They are the locked contract DELIVER builds to. (SD-5 — the
+`probe` sentinel-cert source — was added 2026-06-12 during DELIVER
+back-propagation when the composed walking skeleton surfaced that the probe's
+handshake-based sentinel #1 needs a cert source; user-approved.)
 
 - **SD-1 — `InterceptedConnection` payload (the connection descriptor).** What
   does the worker pass IN? **Now bidirectional (F3): the answer is the same shape
@@ -2689,6 +2697,52 @@ them 2026-06-12. They are the locked contract DELIVER builds to.
     the ATAM sensitivity point (stranded pump), not a v1 need. If the user wants it,
     it is additive (the point query stays). **Recommend (a) for v1**; note (b) as a
     clean additive follow-up if fast pump-death reaction is wanted.
+
+- **SD-5 — `probe` sentinel-cert source (substrate-self-test crypto).**
+  ACCEPTED (user-approved 2026-06-12). `probe`'s sentinel #1 (the contract
+  above, `probe` postcondition (1)) requires a **handshake-based** kTLS-arm
+  round-trip — "a sentinel rustls handshake on a loopback leg B arms kTLS and a
+  single `tls_sw_splice_read` of one record returns the exact sentinel
+  plaintext." A rustls handshake needs a cert+key. But the production adapter
+  holds only `IdentityRead` (a READER — #26 is **never an issuer**; CLAUDE.md
+  "two distinct CAs" / "workload-holds-nothing"), and `rcgen` is currently a
+  **test-only** dependency of `overdrive-dataplane`. So the adapter as designed
+  cannot mint the sentinel cert the loopback self-test handshake needs. Where
+  does the sentinel cert come from?
+  - **(a-runtime, RECOMMENDED) `probe` mints an ephemeral self-signed sentinel
+    cert+key in-process via `rcgen`.** Promote `rcgen` from `[dev-dependencies]`
+    to production `[dependencies]` in `overdrive-dataplane`; `probe()` generates
+    a throwaway self-signed cert+key at call time, uses it ONLY for the loopback
+    self-test handshake (the agent talks to itself over leg F/leg B), and drops
+    it before return (the existing § Observable-invariants "leaks no sentinel
+    state" teardown already covers it). **Trade-off**: one new production dep on
+    `overdrive-dataplane` — but `rcgen` is ALREADY in the workspace graph (this
+    crate's own test-dep), so the cost is a one-line `[dependencies]` promotion
+    with no new vendoring, and **no private key is baked into the shipped
+    binary**. Matches the spike-scratch pattern the probe was de-risked against
+    (`findings.md` A, `findings-egress-ktls-splice.md`).
+  - (b-static) embed a FIXED self-signed sentinel cert+key as `const` bytes —
+    **rejected**: no runtime cert-gen and no new production dep, but it compiles
+    a private key into the shipped artifact. Even though that key is
+    loopback-only and identifies nothing, a key-at-rest in the binary is a
+    standing item every SBOM / secret-scanner flags and every future reviewer
+    must reason about ("why is there a private key in `overdrive-dataplane`?"),
+    for no benefit over (a-runtime) since `rcgen` is already on hand.
+  - **The sentinel is substrate-probe crypto, NOT a workload identity.** The
+    sentinel cert is signed by **neither** the operator / control-plane HTTPS CA
+    (`mint_ephemeral_ca`) **nor** the workload-identity CA (`RcgenCa` /
+    `boot_ca`); it **never enters the trust bundle**; it **never reaches a real
+    peer** (loopback agent-to-itself only); it identifies no workload and is
+    discarded after the self-test. Therefore #26 stays a **reader** of
+    `IdentityRead` — generating a throwaway loopback self-test cert is NOT
+    "issuing an SVID," and **"workload-holds-nothing" / "two distinct CAs"
+    remain intact**. The `WebPkiClientVerifier` in `enforce` still verifies real
+    peers against the real `TrustBundle`; `probe` does not touch that path.
+  - **Deciding factor**: do the full 3-sentinel round-trip the contract already
+    specifies, with no key-at-rest in the artifact, reusing a workspace dep.
+    **Recommend (a-runtime).** Note for a future reviewer: the
+    `overdrive-dataplane` → `rcgen` PRODUCTION-dep edge added by this decision is
+    self-test crypto only; it does **not** make #26 an issuer.
 
 ### OQ-2 resolution — `HostMtlsEnforcement` home
 

@@ -36,6 +36,13 @@ mod integration {
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;
+    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 01-01, F2 — the
+    /// FIRST, BLOCKING DELIVER slice). The composed bidirectional proxy walking
+    /// skeleton over real netns/veth + cgroup-isolated workloads, NO RST. Drives
+    /// the scenario through the `MtlsEnforcement` driving port. Its `pki` / `roles`
+    /// test-fixture submodules live under
+    /// `tests/integration/mtls_composed_walking_skeleton/`.
+    mod mtls_composed_walking_skeleton;
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;

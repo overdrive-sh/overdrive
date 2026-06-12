@@ -18,6 +18,11 @@ mod acceptance {
     mod content_hash_cert_serial;
     mod core_newtype_roundtrip;
     mod core_newtype_validation;
+    // transparent-mtls-host-socket (ADR-0069, GH #26) — the
+    // `EnforcedConnectionId` correlation-key newtype completeness contract
+    // (Display / FromStr / serde roundtrip), the mandatory proptest call site
+    // for the newtype the `MtlsEnforcement` port returns. DELIVER step 01-01.
+    mod enforced_connection_id_completeness;
     mod extended_newtype_completeness;
     mod spiffe_region_validation;
 

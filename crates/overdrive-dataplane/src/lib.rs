@@ -36,6 +36,13 @@ pub mod gc;
 // typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
 pub mod sys;
 
+// transparent-mtls-host-socket (ADR-0069, GH #26; OQ-2 home). The
+// `HostMtlsEnforcement` adapter — the production agent-light L4 proxy over
+// `cgroup_connect4` / `nft`-TPROXY intercept, rustls TLS 1.3, kTLS arm, the
+// forward sockmap EGRESS-redirect, and the agent-light `splice(2)` pump. Consumes
+// `IdentityRead` (#35); kTLS arms on the agent's leg, never the workload's socket.
+pub mod mtls;
+
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;

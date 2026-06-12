@@ -86,6 +86,11 @@ aws-lc-rs       = "1"
 linux-keyutils  = "0.2"
 rcgen           = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rustls          = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
+# `ktls` — the kTLS control-record loop + arm seam for the transparent-mTLS
+# proxy (ADR-0069, GH #26). `findings.md` #4: NewSessionTicket/KeyUpdate → EIO on
+# raw kTLS RX; `ktls::CorkStream` + `config_ktls_*` run the control-message loop.
+# MIT/Apache-2.0 (OSS-first honoured; the one new dep DESIGN sanctioned).
+ktls            = "6"
 
 # --- Networking / HTTP ----------------------------------------------------
 hyper           = { version = "1", features = ["full"] }

@@ -1,0 +1,55 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "transparent-mtls-host-socket",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-12T15:26:08Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-12T15:38:14Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-12T15:38:15Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: adapter (probe/enforce/liveness/teardown) + kTLS/splice/tls_config + both BPF programs are implemented, clippy-clean, and probe() passes on the real 6.18 kernel; the composed acceptance test is RED at the roles.rs test-harness scaffolds (OutboundPeer::spawn). Remaining GREEN: implement roles.rs (OutboundPeer/OutboundWorkload/InboundServer/InboundWorker, lifted from increment-f/e/i) + real-kernel iteration of the bidirectional flow.",
+      "t": "2026-06-12T16:10:08Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN not reached (see GREEN phase) AND the commit is blocked by a Lima-guest environment issue \u2014 the lefthook doctest/clippy/nextest-affected hooks use the cargo-xtask-lima-run sudo path, which fails with 'target directory set to an empty string in CARGO_TARGET_DIR' (the guest sudo shell exports CARGO_TARGET_DIR empty; pre-existing, matches the Lima target-dir memory note). All 16 step files are staged + intact. Needs the VM env fixed OR user-approved --no-verify; a subagent cannot obtain that approval. fmt + bpf-clippy (non-sudo hooks) PASS.",
+      "t": "2026-06-12T16:10:20Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-12T17:33:20Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-12T17:38:18Z"
+    }
+  ]
+}

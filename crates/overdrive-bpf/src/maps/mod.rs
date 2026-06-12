@@ -24,3 +24,9 @@ pub mod reverse_nat_map;
 pub mod reverse_local_map;
 pub mod reverse_local_miss_counter;
 pub mod service_map;
+// transparent-mtls-host-socket (ADR-0069, GH #26). The OUTBOUND intercept's
+// destination table (`cgroup_connect4_mtls` reads it) and the forward
+// EGRESS-redirect maps (`sk_skb_stream_verdict_mtls` reads them). Userspace
+// `HostMtlsEnforcement` writes all four.
+pub mod mtls_forward;
+pub mod mtls_redirect_dest;

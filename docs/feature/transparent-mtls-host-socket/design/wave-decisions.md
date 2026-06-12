@@ -59,14 +59,18 @@ unresolved — see § "Review revisions" F2).
 | Upstream back-propagation | `docs/feature/transparent-mtls-host-socket/design/upstream-changes.md` |
 | This summary | `docs/feature/transparent-mtls-host-socket/design/wave-decisions.md` |
 
-## Key decisions (D-MTLS-1…11)
+## Key decisions (D-MTLS-1…12)
 
 See the feature-delta § "Wave: DESIGN / [REF] Decisions Table" for the full table.
 Highlights: D-MTLS-3 (NEW `MtlsEnforcement` port, `Dataplane` does not fit);
 D-MTLS-4 (forward agent-idle sockmap-egress, return agent-light `splice`); D-MTLS-5
 (leg B = plain kTLS-RX, NO psock); D-MTLS-10 (in-process agent — no separate
 process, no gRPC/CSR; resolves the prior open item); D-MTLS-11 (Earned-Trust
-`probe()` mandatory).
+`probe()` mandatory); D-MTLS-12 (added 2026-06-12 during DELIVER back-propagation —
+`probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted in-process
+via `rcgen`; substrate-self-test crypto, signed by neither CA, never in the trust
+bundle, never on a real wire — #26 stays a READER, NOT an issuer; promotes `rcgen`
+to an `overdrive-dataplane` production dep; SD-5, user-approved).
 
 ## Reuse Analysis verdict (hard gate)
 

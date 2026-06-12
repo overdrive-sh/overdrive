@@ -76,6 +76,36 @@ aya.workspace  = true
 libc.workspace = true
 nix.workspace  = true
 
+# transparent-mTLS proxy (ADR-0069, GH #26; OQ-2 home = this crate). The
+# `HostMtlsEnforcement` adapter terminates/originates TLS 1.3 on the AGENT's leg
+# using the held SVID + trust bundle read via `IdentityRead`. `rustls` drives the
+# handshake and `dangerous_extract_secrets()` is the kTLS-arm seam (spike-proven);
+# `rustls-pemfile` parses the held SVID/key PEM out of `SvidMaterial`. `tls12` is
+# off on this surface — the proxy is TLS-1.3-only (kTLS AES-256-GCM), but the
+# workspace `rustls` feature set is shared, so the default-features=false + ring
+# choice is inherited. The kTLS arm itself is a raw `setsockopt` hand-roll in
+# `mtls::ktls` (no `ktls` crate dep on the production path; `ktls` is dev-only for
+# the test peer that decrypts).
+# The workspace `rustls` is `default-features = false` (the control-plane reaches
+# `ServerConnection` / `ConfigBuilder::builder` via axum-server/tokio-rustls pulling
+# the `std` feature through Cargo's feature unification). This crate's graph pulls
+# no such dep, so it enables `std` explicitly — `ServerConnection` /
+# `ClientConnection` / `ConfigBuilder::builder` / `dangerous_extract_secrets` all
+# live behind `std`.
+rustls                   = { workspace = true, features = ["std"] }
+rustls-pemfile.workspace = true
+
+# `rcgen` — PRODUCTION dep for `MtlsEnforcement::probe`'s substrate self-test ONLY
+# (SD-5 / D-MTLS-12, user-approved 2026-06-12). `probe()` mints an EPHEMERAL
+# THROWAWAY self-signed sentinel cert+key in-process and uses it for the loopback
+# kTLS-arm round-trip sentinel (`probe` postcondition (1)). The sentinel is signed
+# by NEITHER CA, NEVER enters the trust bundle, NEVER reaches a real peer (loopback
+# agent-to-itself only), identifies no workload, and is discarded after the
+# self-test. #26 stays a READER of `IdentityRead`, NEVER an issuer — generating a
+# throwaway loopback self-test cert is not "issuing an SVID"; "two distinct CAs" /
+# "workload-holds-nothing" remain intact. No private key is baked into the binary.
+rcgen.workspace = true
+
 # `ipnet` — IPv4 CIDR + reserved-set types for the `allocators::VipRange`
 # allocator surface (ADR-0049 / step 01-01). Pure-Rust, no I/O.
 ipnet.workspace = true
@@ -118,6 +148,17 @@ overdrive-testing.workspace     = true
 tempfile.workspace              = true
 tokio                           = { workspace = true, features = ["macros", "rt-multi-thread"] }
 hex.workspace                   = true
+
+# transparent-mTLS composed walking-skeleton Tier-3 fixtures (GH #26, step
+# 01-01). The acceptance test mints a shared test PKI (`rcgen` — a CA + a server
+# leaf for the inbound S + a client leaf for the outbound peer) and stands up a
+# test peer that arms kTLS-RX (`ktls` + `tokio` current-thread) to decrypt the
+# proxy's ciphertext and prove byte-exact plaintext. `ktls` is DEV-ONLY (the test
+# peer's RX decrypt) — the production kTLS arm is the raw `setsockopt` hand-roll in
+# `mtls::ktls`, not the `ktls` crate. `rcgen` is now a PRODUCTION dep (above) for
+# `probe`'s throwaway self-test sentinel (SD-5 / D-MTLS-12); the test PKI consumes
+# the same production `rcgen` dep — no separate dev-dep entry needed.
+ktls.workspace  = true
 
 [lints]
 workspace = true

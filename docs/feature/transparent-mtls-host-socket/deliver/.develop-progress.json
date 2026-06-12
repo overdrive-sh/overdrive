@@ -1,0 +1,10 @@
+{
+  "feature_id": "transparent-mtls-host-socket",
+  "scope": "single-step",
+  "step_id": "01-01",
+  "status": "CHECKPOINTED",
+  "phases": {"PREPARE":"EXECUTED/PASS","RED_ACCEPTANCE":"EXECUTED/PASS","RED_UNIT":"EXECUTED/PASS","GREEN":"CHECKPOINT_PENDING","COMMIT":"BLOCKED_BY_DEPENDENCY"},
+  "resume_point": "Implement crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton/roles.rs (OutboundPeer<-inc-f, OutboundWorkload<-inc-e, InboundServer/InboundWorker<-inc-i), then iterate the adapter against real-kernel failures until composed_bidirectional_proxy_walking_skeleton_no_rst is green on 6.18 Lima.",
+  "crafter_agent_id": "adac0c907568694ad",
+  "open_decisions": ["probe-scope: narrowed substrate sentinel vs full 3-sentinel handshake round-trip (needs sentinel-cert source) -> architect", "commit env: CARGO_TARGET_DIR empty in Lima sudo path (xtask/src/main.rs:540)"]
+}
