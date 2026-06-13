@@ -96,12 +96,15 @@ pub struct InboundClientResult {
     pub observed_rst: bool,
 }
 
-/// Wire observations on a peer/client-facing leg — the confidentiality oracle.
-/// `app_data_records` counts TLS 1.3 `0x17` application_data records seen;
-/// `plaintext_marker_hits` counts cleartext appearances of the request marker on
-/// the peer-facing wire (MUST be 0).
+/// Wire observations on a peer/client-facing leg — the confidentiality oracle,
+/// bucketed BY DIRECTION (F3/F4). `records_request_dir` counts TLS 1.3 `0x17`
+/// application_data records in the request/forward direction (toward the peer-facing
+/// port); `records_response_dir` counts them in the response/return direction (from
+/// it). `plaintext_marker_hits` counts cleartext appearances of EITHER marker
+/// (request or response) on the peer-facing wire in EITHER direction (MUST be 0).
 pub struct WireObservations {
-    pub app_data_records: u64,
+    pub records_request_dir: u64,
+    pub records_response_dir: u64,
     pub plaintext_marker_hits: u64,
 }
 
@@ -146,7 +149,11 @@ enum WireCaptureState {
 /// `stop_and_scan` I/O — the capture is taken out under the lock, the lock dropped,
 /// the scan run, then the result cached under a fresh lock (single-threaded from the
 /// test, so the take→cache window is uncontended).
-fn stop_scan_cached(state: &parking_lot::Mutex<WireCaptureState>, marker: &[u8]) -> WireScan {
+fn stop_scan_cached(
+    state: &parking_lot::Mutex<WireCaptureState>,
+    request_marker: &[u8],
+    response_marker: &[u8],
+) -> WireScan {
     // Phase 1: under the lock, either read the cached scan or take the live capture.
     // Replace the state with a placeholder `Scanned(default)`, drop the lock, then
     // dispatch on the prior state — so the guard's last use is the `mem::replace` and
@@ -163,7 +170,7 @@ fn stop_scan_cached(state: &parking_lot::Mutex<WireCaptureState>, marker: &[u8])
         WireCaptureState::Live(capture) => capture,
     };
     // Phase 2: scan WITHOUT holding the lock (the capture I/O is slow).
-    let scan = taken.stop_and_scan(marker);
+    let scan = taken.stop_and_scan(request_marker, response_marker);
     // Phase 3: cache the real scan under a fresh lock.
     *state.lock() = WireCaptureState::Scanned(scan);
     scan
@@ -183,6 +190,11 @@ impl OutboundPeer {
         // — derived from captured bytes, not from the peer's decrypt-success.
         let cert = pki.peer_leaf.cert_der.clone();
         let key = pki.peer_leaf.key_der.clone_key();
+        // Present `[leaf, intermediate]`: the agent's leg-B client verifies the peer's
+        // server cert against the ROOT anchor only, so the peer must append the
+        // intermediate chain material for the path to build (production root →
+        // intermediate → leaf shape; F1).
+        let intermediate = pki.intermediate_cert_der();
         // REQUIRE+VERIFY the client's SVID against the test CA (F1): the peer is the
         // outbound mTLS server, so it must request and verify the client cert the
         // agent's leg B presents — otherwise the SVID-presentation path is never
@@ -206,7 +218,7 @@ impl OutboundPeer {
         let presented_client_spiffe = Arc::new(parking_lot::Mutex::new(None));
         let spiffe_slot = Arc::clone(&presented_client_spiffe);
         let handle = std::thread::spawn(move || {
-            outbound_peer_serve(&listener, cert, key, client_verifier, &spiffe_slot)
+            outbound_peer_serve(&listener, cert, intermediate, key, client_verifier, &spiffe_slot)
         });
         Self {
             addr,
@@ -234,9 +246,12 @@ impl OutboundPeer {
     /// the request/reply round-trip has completed, so every peer-leg record is on the
     /// captured wire.
     pub fn wire_observations(&self) -> WireObservations {
-        let scan = stop_scan_cached(&self.wire, OUTBOUND_REQUEST);
+        // The peer port IS the wire_port. The request (OUTBOUND_REQUEST, forward F→B)
+        // flows TOWARD it; the reply (OUTBOUND_REPLY, return B→F) flows FROM it.
+        let scan = stop_scan_cached(&self.wire, OUTBOUND_REQUEST, OUTBOUND_REPLY);
         WireObservations {
-            app_data_records: scan.app_data_records,
+            records_request_dir: scan.records_to_wire_port,
+            records_response_dir: scan.records_from_wire_port,
             plaintext_marker_hits: scan.plaintext_marker_hits,
         }
     }
@@ -256,6 +271,7 @@ impl OutboundPeer {
 fn outbound_peer_serve(
     listener: &TcpListener,
     cert: rustls::pki_types::CertificateDer<'static>,
+    intermediate: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
     client_verifier: Arc<dyn rustls::server::danger::ClientCertVerifier>,
     spiffe_slot: &parking_lot::Mutex<Option<SpiffeId>>,
@@ -269,9 +285,11 @@ fn outbound_peer_serve(
     // never asks for the client cert, and the gate would pass even if the agent's
     // leg-B SVID-presentation path were broken. Mirrors the production inbound
     // server side (`src/mtls/tls_config::server_config`).
+    // Present `[leaf, intermediate]` so the agent's root-anchor-only leg-B verifier
+    // builds `leaf → intermediate → root` (F1).
     let mut cfg = rustls::ServerConfig::builder()
         .with_client_cert_verifier(client_verifier)
-        .with_single_cert(vec![cert], key)
+        .with_single_cert(vec![cert, intermediate], key)
         .expect("peer server config");
     cfg.enable_secret_extraction = true;
     cfg.send_tls13_tickets = 0; // raw kTLS-RX hits EIO on a post-handshake ticket record
@@ -340,7 +358,16 @@ fn outbound_peer_serve(
     // the workload-side assertion (line 176) and the peer-wire assertion (line 192)
     // consistent rather than letting the workload succeed on an unconditional reply.
     if request_byte_exact {
-        let _ = (&stream).write_all(OUTBOUND_REPLY);
+        // F4: split the reply into TWO post-arm writes with an inter-write delay
+        // larger than the agent's decrypt-pump poll window (40 ms), so kTLS-TX frames
+        // ≥2 distinct TLS records on the return leg B (B→F direction). The workload
+        // reconstructs the concatenation byte-exact (its read loop accumulates until
+        // the full marker length).
+        let mid = OUTBOUND_REPLY.len() / 2;
+        let _ = (&stream).write_all(&OUTBOUND_REPLY[..mid]);
+        let _ = (&stream).flush();
+        std::thread::sleep(Duration::from_millis(150));
+        let _ = (&stream).write_all(&OUTBOUND_REPLY[mid..]);
         let _ = (&stream).flush();
     }
     std::thread::sleep(Duration::from_millis(600));
@@ -808,8 +835,14 @@ try:
         sys.stderr.write("request mismatch got=%d want=%d\n" % (len(got), len(request)))
         sys.exit(10)
     # reply over the S->C response leg (GAP 2 inbound half); the agent splices it
-    # back over leg C's kTLS.
-    conn.sendall(response)
+    # back over leg C's kTLS. F4: split into TWO writes with an inter-write delay
+    # larger than the agent's encrypt-pump read window (40 ms), so the agent's
+    # write_all into leg C's kTLS-TX frames >=2 distinct TLS records on the S->C
+    # direction. The client reconstructs the concatenation byte-exact.
+    mid = len(response) // 2
+    conn.sendall(response[:mid])
+    time.sleep(0.15)
+    conn.sendall(response[mid:])
     time.sleep(0.6)
     sys.exit(0)
 except (ConnectionResetError, BrokenPipeError) as e:
@@ -896,6 +929,11 @@ impl InboundWorker {
         // accepted as GAP-3-closing; there is no outbound intercept on the inbound
         // client, so it does NOT need the workload cgroup).
         let client_cert = pki.client_leaf.cert_der.clone();
+        // Present `[client_leaf, intermediate]`: the peer/server's verifier (the
+        // agent's leg-C server-mTLS `WebPkiClientVerifier`, root-anchor-only) needs
+        // the intermediate to build the path to the verified client leaf (F1). The
+        // SPIFFE-SAN assertion still reads chain position 0 (the leaf).
+        let client_intermediate = pki.intermediate_cert_der();
         let client_key = pki.client_leaf.key_der.clone_key();
         let ca_pem = pki.ca_cert_pem().to_string();
         let virt_addr = SocketAddrV4::new(
@@ -904,7 +942,14 @@ impl InboundWorker {
         );
         let send_delay = handshake_delay.max(Duration::from_millis(400));
         let client = std::thread::spawn(move || {
-            inbound_client_run(virt_addr, client_cert, client_key, &ca_pem, send_delay)
+            inbound_client_run(
+                virt_addr,
+                client_cert,
+                client_intermediate,
+                client_key,
+                &ca_pem,
+                send_delay,
+            )
         });
 
         Self {
@@ -944,10 +989,13 @@ impl InboundWorker {
         let client_result =
             self.client.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()));
         // The round-trip is done (client thread joined) — NOW stop + scan the capture
-        // so the confidentiality scan covers the application payload.
-        let scan = stop_scan_cached(&self.wire, INBOUND_REQUEST);
+        // so the confidentiality scan covers the application payload. The VIRT port IS
+        // the wire_port: the request (INBOUND_REQUEST, C→S) flows TOWARD it; the
+        // response (INBOUND_RESPONSE, S→C) flows FROM it.
+        let scan = stop_scan_cached(&self.wire, INBOUND_REQUEST, INBOUND_RESPONSE);
         let wire = WireObservations {
-            app_data_records: scan.app_data_records,
+            records_request_dir: scan.records_to_wire_port,
+            records_response_dir: scan.records_from_wire_port,
             plaintext_marker_hits: scan.plaintext_marker_hits,
         };
         (client_result, wire)
@@ -964,6 +1012,7 @@ pub type InboundClient = InboundWorker;
 fn inbound_client_run(
     virt_addr: SocketAddrV4,
     cert: rustls::pki_types::CertificateDer<'static>,
+    intermediate: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
     ca_pem: &str,
     send_delay: Duration,
@@ -972,9 +1021,11 @@ fn inbound_client_run(
     use rustls::{ClientConfig, ClientConnection};
 
     let roots = ca_root_store(ca_pem);
+    // Present `[client_leaf, intermediate]` so the agent's leg-C root-anchor-only
+    // `WebPkiClientVerifier` builds `leaf → intermediate → root` (F1).
     let cfg = ClientConfig::builder()
         .with_root_certificates(roots)
-        .with_client_auth_cert(vec![cert], key)
+        .with_client_auth_cert(vec![cert, intermediate], key)
         .expect("inbound client config");
     let Ok(tcp) = TcpStream::connect(virt_addr) else {
         return InboundClientResult { received_response_byte_exact: false, observed_rst: true };
@@ -998,11 +1049,25 @@ fn inbound_client_run(
 
     let mut observed_rst = false;
     {
-        let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
-        if tls.write_all(INBOUND_REQUEST).is_err() {
-            observed_rst = true;
+        // F4: split the request into TWO writes with an inter-write delay larger than
+        // the agent's decrypt-pump poll window (40 ms), so rustls emits >=2 distinct
+        // TLS 1.3 application_data records on leg C (C→S direction). The agent splices
+        // each record to leg S; the server S reconstructs the concatenation
+        // byte-exact (its recv loop accumulates until the full marker length).
+        let mid = INBOUND_REQUEST.len() / 2;
+        {
+            let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
+            if tls.write_all(&INBOUND_REQUEST[..mid]).and_then(|()| tls.flush()).is_err() {
+                observed_rst = true;
+            }
         }
-        let _ = tls.flush();
+        if !observed_rst {
+            std::thread::sleep(Duration::from_millis(150));
+            let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
+            if tls.write_all(&INBOUND_REQUEST[mid..]).and_then(|()| tls.flush()).is_err() {
+                observed_rst = true;
+            }
+        }
     }
 
     // Read the server's response back over leg C's kTLS (GAP 2 inbound half).

@@ -229,16 +229,27 @@ async fn drive_outbound(
          WebPkiClientVerifier must accept it with the expected SPIFFE SAN"
     );
 
-    // Confidentiality: 0x17 TLS 1.3 records on the peer-facing leg B; the
-    // workload's plaintext NEVER on the peer wire.
+    // Confidentiality (F3 + F4): MULTI-record TLS 1.3 ciphertext on the peer-facing
+    // leg B in BOTH directions — the forward F→B request AND the return B→F reply
+    // each frame ≥2 `0x17` application_data records — and NEITHER the request nor the
+    // response plaintext ever appears on the peer wire (in either direction).
     let wire = peer.wire_observations();
     assert!(
-        wire.app_data_records >= 1,
-        "leg B (peer-facing) must carry TLS 1.3 application_data (0x17) records"
+        wire.records_request_dir >= 2,
+        "leg B forward (F→B) must carry ≥2 TLS 1.3 application_data (0x17) records \
+         (multi-record post-arm transfer); got {}",
+        wire.records_request_dir
+    );
+    assert!(
+        wire.records_response_dir >= 2,
+        "leg B return (B→F) must carry ≥2 TLS 1.3 application_data (0x17) records \
+         (multi-record post-arm transfer); got {}",
+        wire.records_response_dir
     );
     assert_eq!(
         wire.plaintext_marker_hits, 0,
-        "the workload's plaintext must NEVER appear on the peer-facing leg B"
+        "neither the workload's request nor the peer's reply plaintext may EVER appear \
+         on the peer-facing leg B (both directions)"
     );
 
     adapter.teardown(handle.clone()).await.expect("outbound teardown");
@@ -311,15 +322,27 @@ async fn drive_inbound(
         "inbound transfer must NOT RST in either timing regime"
     );
 
-    // Confidentiality: 0x17 on the client-facing leg C; plaintext only on leg S.
-    // Scanned AFTER the round-trip joins (F2) so the scan covers the actual payload.
+    // Confidentiality (F3 + F4): MULTI-record TLS 1.3 ciphertext on the client-facing
+    // leg C in BOTH directions — the C→S request AND the S→C response each frame ≥2
+    // `0x17` application_data records — and NEITHER the request nor the response
+    // plaintext appears on leg C (in either direction). Scanned AFTER the round-trip
+    // joins (F2) so the scan covers the actual application payload.
     assert!(
-        wire.app_data_records >= 1,
-        "leg C (client-facing) must carry TLS 1.3 application_data (0x17) records"
+        wire.records_request_dir >= 2,
+        "leg C request (C→S) must carry ≥2 TLS 1.3 application_data (0x17) records \
+         (multi-record post-arm transfer); got {}",
+        wire.records_request_dir
+    );
+    assert!(
+        wire.records_response_dir >= 2,
+        "leg C response (S→C) must carry ≥2 TLS 1.3 application_data (0x17) records \
+         (multi-record post-arm transfer); got {}",
+        wire.records_response_dir
     );
     assert_eq!(
         wire.plaintext_marker_hits, 0,
-        "the request plaintext must NEVER appear on the client-facing leg C"
+        "neither the request nor the response plaintext may EVER appear on the \
+         client-facing leg C (both directions)"
     );
 
     adapter.teardown(handle.clone()).await.expect("inbound teardown");

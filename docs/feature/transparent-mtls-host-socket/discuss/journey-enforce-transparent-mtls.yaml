@@ -15,8 +15,9 @@ schema_version: 1
 # RE-GROUNDED 2026-06-12 to ADR-0069 (the architect's design/upstream-changes.md
 # handoff; review-adversarial-2026-06-12.md F1). The mechanism is a UNIVERSAL
 # AGENT-LIGHT L4 PROXY, BIDIRECTIONAL in host-socket v1 — kTLS on the agent's
-# peer-facing leg (NOT the workload's socket); agent agent-LIGHT (forward,
-# return, and deliver all agent-light splice pumps); NO restart-survival; 2 sockets
+# peer-facing leg (NOT the workload's socket); agent agent-LIGHT (no userspace
+# crypto; but NOT symmetric — decrypt/RX = zero-copy splice out of kTLS-RX,
+# encrypt/TX = read->write_all copy into kTLS-TX, D-MTLS-13); NO restart-survival; 2 sockets
 # per connection. This SUPERSEDES the in-band kTLS-on-the-workload's-own-socket
 # model authored in DISCUSS. Anchored on the 6 committed Tier-3 spike findings.
 #
@@ -40,7 +41,7 @@ journey:
     proxy), the kTLS state on the agent's peer-facing leg. OUTBOUND:
     cgroup_connect4 intercept -> agent leg F -> lossless pre-arm capture -> rustls
     TLS 1.3 CLIENT handshake on leg B presenting the held SVID -> kTLS arm ->
-    forward agent-light splice (splice legF->legB into kTLS-TX) + return agent-light splice. INBOUND: TPROXY
+    forward agent-light read->write_all COPY into kTLS-TX (NOT a splice into TX, which loses records) + return agent-light zero-copy splice. INBOUND: TPROXY
     intercept -> agent leg C -> getsockname orig-dst -> server-SVID selection ->
     rustls TLS 1.3 SERVER handshake (present server SVID + REQUIRE+VERIFY client
     SVID) -> kTLS-RX arm -> agent-light splice-to-server. Provable by a packet
@@ -52,7 +53,7 @@ journey:
 
   emotional_arc:
     start: "Skeptical — 'identity is minted and held, but show me a packet capture: is the peer wire actually encrypted with the workload's own SVID, in-kernel, BOTH ways, no payload cleartext leak — and is the agent really light, not a userspace proxy copying every byte?'"
-    middle: "Reassured incrementally — the composed walking skeleton proves a real intercepted flow goes TLS 1.3 on the peer wire with NO RST; outbound forward and return are both agent-light splice pumps; inbound TPROXY recovers orig-dst, server-mTLS verifies the client SVID, the server reads byte-exact plaintext; absent/missing/untrusted creds fail closed."
+    middle: "Reassured incrementally — the composed walking skeleton proves a real intercepted flow goes TLS 1.3 on the peer wire with NO RST; outbound forward (read->write_all copy into kTLS-TX) and return (zero-copy splice out of kTLS-RX) are both agent-light (the kernel does the crypto, the agent runs no cipher); inbound TPROXY recovers orig-dst, server-mTLS verifies the client SVID, the server reads byte-exact plaintext; absent/missing/untrusted creds fail closed."
     end: "Confident, and unsurprised by the boundary — 'the auth-session IS the data-session, encryption is in-kernel on the agent's leg, the agent is light not a proxy, fail-closed is proven both directions, a wire capture I ran shows TLS 1.3 both ways — and the platform claims exactly that (chain-to-bundle authn + encryption), not an intended-peer guarantee it does not hold (that's #178).'"
 
 steps:
@@ -75,7 +76,7 @@ steps:
         consumers: ["the agent's rustls ClientConfig (leg B) AND ServerConfig (leg C)"]
       - name: "agent peer-facing leg (leg B / leg C)"
         source: "the agent's own dialed/accepted socket (NOT the workload's socket)"
-        consumers: ["setsockopt(TCP_ULP/TLS_TX/TLS_RX); the forward / return / deliver splice pumps"]
+        consumers: ["setsockopt(TCP_ULP/TLS_TX/TLS_RX); the forward/response read->write_all copy pumps (into kTLS-TX) + the return/deliver zero-copy splice pumps (out of kTLS-RX)"]
       - name: "kTLS crypto_info"
         source: "the rustls handshake's extracted secrets (auth-session == data-session)"
         consumers: ["setsockopt(TLS_TX/TLS_RX) on the agent's leg; tcpdump 0x17 records; ss -tie tcp-ulp-tls"]
@@ -91,9 +92,11 @@ steps:
       byte-exact plaintext at S, fail-closed). This slice is the INTEGRATION
       gate that composes the proven pieces into the bidirectional netns/veth
       walking skeleton, closing the three narrow gaps: gap 1 outbound composed in
-      ONE flow (increment-e intercept+capture+flush wired to the increment-f
-      kTLS-TX splice), gap 2 bidirectional steady-state round-trip, gap 3 real
-      netns/veth + cgroup-isolated workloads (the spikes were loopback + siblings).
+      ONE flow (increment-e intercept+capture+flush wired to the shipped forward
+      read->write_all copy into kTLS-TX — D-MTLS-13; the increment-f sockmap egress
+      redirect it originally named was retired as non-viable), gap 2 bidirectional
+      steady-state round-trip, gap 3 real netns/veth + cgroup-isolated workloads
+      (the spikes were loopback + siblings).
     failure_modes:
       - "Post-arm RST when the outbound pieces are wired into ONE flow (gap 1) under the production intercept lifecycle -> the composition does not hold -> blocks every later slice until fixed. (The increment-e harness RST was a throwaway-harness artifact, not a kernel finding.)"
       - "Cleartext of the payload reaches the peer leg before kTLS arms -> the lossless handshake-window capture failed -> mechanism re-evaluation."
@@ -214,15 +217,17 @@ steps:
 
   - id: 3
     name: "Encryption is armed in-kernel on the agent's leg, the agent stays light, and the peer wire carries TLS 1.3 both ways"
-    command: "(internal — setsockopt TCP_ULP 'tls' + TLS_TX/TLS_RX on the agent's leg; forward / return / deliver splice pumps into the kTLS leg)"
+    command: "(internal — setsockopt TCP_ULP 'tls' + TLS_TX/TLS_RX on the agent's leg; forward/response read->write_all copy pumps into kTLS-TX + return/deliver zero-copy splice pumps out of kTLS-RX)"
     observable_surface: |
       +-- Wire + cost capture (TEST tier — the headline observable) -------------+
       | $ tcpdump 'tcp'  -> 1703 03 (0x17) app_data on the PEER leg, both ways    |
       |   -> NO cleartext of the payload on the peer leg                          |
       | $ ss -tie  -> tcp-ulp-tls version: 1.3 cipher: aes-gcm-256 rxconf: sw     |
       |   ON THE AGENT's leg (NOT the workload's socket)                          |
-      | $ strace agent -> FORWARD/RETURN/DELIVER: only splice/ppoll,              |
-      |   ~1 splice per record, zero userspace plaintext copy (agent-light)       |
+      | $ strace agent -> DECRYPT/RX (return, deliver): only splice/ppoll,        |
+      |   ~1 splice/record, zero-copy. ENCRYPT/TX (forward, response): per-record  |
+      |   read+write into kTLS-TX (userspace copy; kernel encrypts each write).    |
+      |   Agent runs NO cipher in either direction (agent-light).                  |
       +--------------------------------------------------------------------------+
     shared_artifacts:
       - name: "kTLS crypto_info"
@@ -233,15 +238,17 @@ steps:
         consumers: ["the security reviewer's tcpdump capture; the K1 North-Star KPI"]
     emotional_state:
       entry: "Skeptical — 'is the encryption really IN-KERNEL with the agent agent-light — or a userspace proxy copying every byte (the ztunnel anti-pattern)? Does a capture ACTUALLY show TLS 1.3, both ways?'"
-      exit: "Confident — 'tcpdump shows TLS 1.3 records both directions on the peer leg, ss -tie shows the kTLS ULP on the agent's leg, strace shows the agent splice-only on forward AND return (no per-byte payload copy) — the kernel carries the crypto, the agent is light, provable independent of the platform.'"
+      exit: "Confident — 'tcpdump shows TLS 1.3 records both directions on the peer leg, ss -tie shows the kTLS ULP on the agent's leg, strace shows the agent runs no cipher — splice-only (zero-copy) on the decrypt/RX directions, a per-record read+write into kTLS-TX (a userspace copy, the kernel encrypts each write) on the encrypt/TX directions — the kernel carries the crypto, the agent is light, provable independent of the platform.'"
     integration_checkpoint: |
       The kTLS keys are the handshake's extracted secrets (auth-session ==
-      data-session), not a separate session. Every reader leg (the agent's
-      return/deliver legs AND the forward kTLS-RX side) MUST be a PLAIN kTLS-RX
-      leg (no psock) for the splice to work; the forward path splices leg F into
-      leg B's kTLS-TX, the kernel tls_sw_sendmsg encrypting each record on
-      splice-in (no sockmap, no redirect — D-MTLS-13). The K1 North-Star
-      observable: TLS 1.3 records, NEVER the cleartext payload, on the
+      data-session), not a separate session. Every kTLS-RX reader leg (the agent's
+      return/deliver legs) MUST be a PLAIN kTLS-RX leg (no psock) for the
+      zero-copy splice-out to work. The encrypt/TX directions (forward, response)
+      are a read->write_all COPY into the kTLS-TX leg, the kernel tls_sw_sendmsg
+      encrypting each blocking write (NOT a splice into kTLS-TX — which loses
+      records; no sockmap, no redirect — D-MTLS-13); that TX leg likewise carries
+      no psock. The K1 North-Star observable: TLS 1.3 records, NEVER the cleartext
+      payload, on the
       peer-facing leg.
     failure_modes:
       - "tcpdump shows cleartext of the payload on the peer leg -> encryption is not on the wire (a blocking failure, not a degradation)."
@@ -324,9 +331,10 @@ changelog:
       walking-skeleton gate (NOT a prove-the-mechanism gate) that composes the
       spike-proven pieces into ONE bidirectional flow on the real netns/veth
       topology, closing the three NARROW gaps the spikes left open: gap 1 outbound
-      composed in ONE flow (increment-e intercept+capture+flush wired to the
-      increment-f kTLS-TX splice — proven on separate harnesses, never together),
-      gap 2 bidirectional steady-state round-trip (the response legs the spikes
+      composed in ONE flow (increment-e intercept+capture+flush wired to the shipped
+      forward read->write_all copy into kTLS-TX — D-MTLS-13; the increment-f sockmap
+      egress redirect it originally named was retired as non-viable, and proven only
+      on separate harnesses), gap 2 bidirectional steady-state round-trip (the response legs the spikes
       drove only one way of), gap 3 real netns/veth + cgroup-isolated workloads
       (all spikes were loopback + sibling processes). The increment-e harness RST
       is a throwaway-harness artifact, not a kernel finding. Slice 00 remains the

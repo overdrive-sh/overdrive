@@ -27,10 +27,12 @@ and the IdentityMgr holds + exposes via `IdentityRead` (J-SEC-002 / #35).
 > What this changes for the artifacts (all re-grounded 2026-06-12 by Luna per
 > `design/upstream-changes.md` + `design/review-adversarial-2026-06-12.md` F1):
 > kTLS on the **agent's peer-facing leg** (not the workload's socket); agent is
-> **agent-LIGHT not OUT** (agent-light `splice` pump in EVERY direction; the
-> forward was originally agent-idle via a sockmap egress redirect, retired
-> 2026-06-13 / D-MTLS-13 — see `design/wave-decisions.md` § "Forward-mechanism
-> pivot"); **BIDIRECTIONAL** v1 (outbound `cgroup_connect4` + inbound TPROXY
+> **agent-LIGHT not OUT** (the kernel kTLS engine does all crypto; agent runs no
+> cipher — but the pumps are NOT symmetric: decrypt/RX = zero-copy `splice` out of
+> kTLS-RX, encrypt/TX = `read → write_all` copy into kTLS-TX, because a splice into
+> kTLS-TX loses records; the forward was originally agent-idle via a sockmap egress
+> redirect, retired 2026-06-13 / D-MTLS-13 — see `design/wave-decisions.md`
+> § "Forward-mechanism pivot"); **BIDIRECTIONAL** v1 (outbound `cgroup_connect4` + inbound TPROXY
 > server-mTLS); **NO restart-survival** (2 sockets/connection); **process/exec
 > ONLY** (WASM dropped as a distinct path — auto-covered by the same proxy when
 > a WASM driver lands); **#222 folded in** as the STAGED guest-stack intercept
@@ -187,11 +189,17 @@ observable is TEST-tier security evidence, exactly as the J-SEC-002 journey did 
   records** (content type 0x17), not cleartext of the payload, both directions.
 - `ss -tie` shows the **kTLS ULP installed** on the **agent's peer-facing leg**
   (`tcp-ulp-tls 1.3 aes-gcm-256`), NOT the workload's socket.
-- `strace` shows the agent **agent-light** — only `splice`/`ppoll` in EVERY
-  direction (~1 splice per record), zero per-byte `read`/`write` of plaintext, NOT
-  a per-byte userspace proxy. (D-MTLS-13: the forward is now an agent-light `splice`
-  into kTLS-TX, not the retired agent-idle sockmap egress redirect — so it shows
-  `splice`/`ppoll`, not "zero forward syscalls.")
+- `strace` shows the agent **agent-light** (the kernel kTLS engine does all crypto;
+  the agent runs no cipher), but the cost is per-direction, NOT symmetric: the
+  decrypt/RX directions (outbound return, inbound deliver) show only `splice`/`ppoll`
+  (~1 splice per record, zero per-byte plaintext copy — zero-copy); the encrypt/TX
+  directions (outbound forward, inbound response) show a per-record `read`+`write`
+  into kTLS-TX (a userspace plaintext copy — the kernel `tls_sw_sendmsg` encrypts
+  each write). NOT a userspace-crypto proxy. (D-MTLS-13: the forward is now an
+  agent-light `read → write_all` copy into kTLS-TX, not the retired agent-idle
+  sockmap egress redirect and NOT a splice into kTLS-TX — which loses records — so
+  it shows per-record `read`+`write`, not "zero forward syscalls" and not
+  `splice`-only.)
 - A **negative test** shows a handshake **fails closed** cause-distinct on an absent SVID
   (outbound) or a missing/untrusted client cert (inbound `nocert`/`wrongca`) — no TLS
   Application Data and no cleartext.

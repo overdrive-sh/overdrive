@@ -2,7 +2,7 @@
 
 Four diagrams (Mermaid). L1 System Context + L2 Container are mandatory; L3
 Component is rendered TWICE for the proxy dataplane (a complex subsystem) — once
-for the OUTBOUND/client path (detect→intercept→handshake→kTLS-arm→forward-splice
+for the OUTBOUND/client path (detect→intercept→handshake→kTLS-arm→forward-encrypt-copy
 →return-splice) and once for the INBOUND/server path
 (TPROXY-intercept→orig-dst→server-mTLS→kTLS-RX→splice-to-server, F3). Every arrow
 is labelled with a verb. Abstraction levels are not mixed. The per-direction
@@ -59,7 +59,7 @@ C4Container
   Container_Boundary(node, "Overdrive node (single binary)") {
     Container(agent, "mTLS proxy agent", "overdrive-worker (adapter-host)", "Owns per-connection lifecycle BOTH directions: drive outbound client handshake (legs F+B), drive inbound server handshake (legs C+S), supervise the return/deliver splice pumps")
     Container(coreports, "Ports (traits)", "overdrive-core (core, no I/O)", "MtlsEnforcement (NEW) + IdentityRead (consumed)")
-    Container(hostadapter, "HostMtlsEnforcement", "adapter-host", "OUTBOUND: connect4-intercept · capture · rustls CLIENT handshake · kTLS arm · forward splice pump (legF→legB kTLS-TX) · return splice pump. INBOUND: TPROXY-intercept · getsockname orig-dst · rustls SERVER handshake + WebPkiClientVerifier · kTLS-RX arm · splice-to-server pump")
+    Container(hostadapter, "HostMtlsEnforcement", "adapter-host", "OUTBOUND: connect4-intercept · capture · rustls CLIENT handshake · kTLS arm · forward read->write_all COPY pump (legF->legB kTLS-TX) · return zero-copy splice pump. INBOUND: TPROXY-intercept · getsockname orig-dst · rustls SERVER handshake + WebPkiClientVerifier · kTLS-RX arm · deliver zero-copy splice-to-server pump · response read->write_all COPY pump")
     Container(simadapter, "SimMtlsEnforcement", "overdrive-sim (adapter-sim)", "In-memory contract model for DST equivalence")
     Container(identity, "IdentityMgr", "overdrive-control-plane (adapter-host)", "Held SVID map + hydrated trust bundle; implements IdentityRead")
     ContainerDb(bpf, "BPF programs + maps", "overdrive-bpf (kernel)", "OUTBOUND: cgroup_connect4 mtls-variant (intercept) — the forward path is an agent-light splice pump, no sockops/sk_skb forward-redirect program (D-MTLS-13). INBOUND: nft TPROXY + IP_TRANSPARENT listener (server intercept).")
@@ -82,9 +82,10 @@ C4Container
 ## L3 — Component (the proxy dataplane path — OUTBOUND / client side)
 
 The per-connection enforcement path inside `HostMtlsEnforcement`:
-detect → intercept → capture → handshake → kTLS-arm → forward-splice (agent-light)
-→ return-splice (agent-light). leg F = the agent-owned plaintext leg facing the
-workload; leg B = the agent-owned kTLS leg facing the peer.
+detect → intercept → capture → handshake → kTLS-arm → forward-encrypt-copy
+(agent-light `read → write_all` into kTLS-TX) → return-splice (agent-light zero-copy
+out of kTLS-RX). leg F = the agent-owned plaintext leg facing the workload; leg B =
+the agent-owned kTLS leg facing the peer.
 
 ```mermaid
 flowchart TB
@@ -101,8 +102,8 @@ flowchart TB
         HS["rustls TLS 1.3 handshake on leg B (present held SVID via IdentityRead; verify peer vs bundle)"]
         ARM["arm kTLS on leg B (ktls::KtlsStream; setsockopt TCP_ULP tls + TLS_TX/TLS_RX)"]
         FLUSH["flush captured plaintext as first application_data (rec_seq=0)"]
-        FSPLICE["forward pump: splice(legF → pipe → legB kTLS-TX) ~1/record"]
-        SPLICE["return pump: splice(legB → pipe → legF) ~1/record"]
+        FSPLICE["forward pump: read(legF) -> write_all(legB kTLS-TX) COPY (per-record read+write, NOT a splice)"]
+        SPLICE["return pump: splice(legB -> pipe -> legF) zero-copy ~1/record"]
     end
 
     IR["IdentityRead (svid_for + current_bundle)"]
@@ -120,11 +121,11 @@ flowchart TB
     FLUSH -->|"encrypted"| PEERAGENT
     PEERAGENT -.->|"decrypted plaintext (peer agent splices to its workload)"| PEERW
 
-    %% steady-state forward (agent-light)
+    %% steady-state forward (agent-light COPY, NOT zero-copy)
     W ==>|"plaintext bytes"| ACCEPT
-    ACCEPT ==>|"leg F RX"| FSPLICE
-    FSPLICE ==>|"splice into kTLS-TX"| LEGBKTLS
-    LEGBKTLS ==>|"TLS 1.3 encrypted"| PEERAGENT
+    ACCEPT ==>|"read(legF)"| FSPLICE
+    FSPLICE ==>|"write_all into kTLS-TX (userspace copy)"| LEGBKTLS
+    LEGBKTLS ==>|"TLS 1.3 encrypted (kernel tls_sw_sendmsg)"| PEERAGENT
 
     %% steady-state return (agent-light)
     PEERAGENT -->|"TLS 1.3 encrypted"| LEGBKTLS
@@ -138,12 +139,14 @@ flowchart TB
   agent's leg F; the agent accepts leg F, drains the pre-arm plaintext losslessly,
   handshakes on leg B (reading the held SVID via `IdentityRead`), arms kTLS, and
   flushes the captured bytes.
-- **Steady-state forward (thick `==>` arrows) — AGENT-LIGHT**: the agent drives a
-  `splice(legF → pipe → legB)` pump into leg B's kTLS-TX; the kernel's
-  `tls_sw_sendmsg` encrypts each record synchronously on splice-in; ~1 splice per
-  record, zero userspace plaintext copy — the agent drives the splice but does no
-  crypto (`findings-egress-ktls-splice.md`; D-MTLS-13 — this replaced an earlier
-  sockmap EGRESS-redirect that `MSG_DONTWAIT`-stalled,
+- **Steady-state forward (thick `==>` arrows) — AGENT-LIGHT but a COPY**: the agent
+  drives a bounded `read(legF) → write_all(legB)` COPY into leg B's kTLS-TX; the
+  kernel's `tls_sw_sendmsg` encrypts each blocking `write`. Per-record `read`+`write`,
+  plaintext copied through a userspace buffer — **NOT zero-copy, NOT a splice** (a
+  `splice` into kTLS-TX loses records). The agent runs no cipher; the kernel does the
+  crypto. This is NOT symmetric to the return's zero-copy splice (D-MTLS-13 — this
+  replaced an earlier sockmap EGRESS-redirect that `MSG_DONTWAIT`-stalled;
+  `crates/overdrive-dataplane/src/mtls/splice.rs`,
   `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
 - **Steady-state return (thin arrows from the peer-side agent) — AGENT-LIGHT**: leg
   B is a plain kTLS-RX socket (NO psock); the agent drives a
@@ -155,9 +158,11 @@ flowchart TB
 
 **Invariant (Tier-3 test target)**: every reader leg (leg B's RX here, leg C's RX
 inbound) carries NO sockmap verdict/psock — a psock both fights kTLS RX
-(`ConnectionAborted`) and returns `tls_sw_read_sock` `-EINVAL` on a splice. Both
-the forward and return pumps are `splice`, not a verdict redirect (D-MTLS-13 — the
-sockmap is gone on every path).
+(`ConnectionAborted`) and returns `tls_sw_read_sock` `-EINVAL` on a splice. The
+RETURN pump is a zero-copy `splice` out of kTLS-RX; the FORWARD pump is a
+`read → write_all` COPY into kTLS-TX (NOT a splice — a splice into kTLS-TX loses
+records). Neither is a verdict redirect (D-MTLS-13 — the sockmap is gone on every
+path); leg B carries no psock on either its RX or its TX.
 
 ---
 
@@ -222,8 +227,9 @@ flowchart TB
   ~1 splice/record (§3/§5). The server reads the byte-exact plaintext.
 
 **Invariant (Tier-3 test target)**: same as outbound — leg C carries NO sockmap
-verdict/psock on its RX; the deliver is `splice`, not a verdict redirect. The
-server's **response** leg (re-encrypt the server workload's reply onto leg C's
-kTLS-TX) reuses the outbound forward primitive — the agent-light
-`splice(legS → legC kTLS-TX)` pump (D-MTLS-13) — and is part of the composed
-walking-skeleton gate (NOT exercised in the inbound spike).
+verdict/psock on its RX; the deliver is a zero-copy `splice` out of kTLS-RX, not a
+verdict redirect. The server's **response** leg (re-encrypt the server workload's
+reply onto leg C's kTLS-TX) reuses the outbound forward primitive — the agent-light
+`read(legS) → write_all(legC kTLS-TX)` COPY pump (D-MTLS-13; NOT a splice into
+kTLS-TX, which loses records) — and is part of the composed walking-skeleton gate
+(NOT exercised in the inbound spike).

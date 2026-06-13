@@ -1,10 +1,17 @@
 //! Test PKI for the composed transparent-mTLS walking skeleton (step 01-01).
 //!
-//! Mints a shared CA, an outbound CLIENT leaf (the workload-as-client SVID the
+//! Mints a shared CA as a real **root → intermediate → leaf** chain (matching
+//! production issuance, which signs workload leaves from a node intermediate, NOT
+//! the root directly), an outbound CLIENT leaf (the workload-as-client SVID the
 //! agent presents on leg B), and an inbound SERVER leaf (the server-workload SVID
-//! the agent presents on leg C). All chain to the one CA, so the agent's
-//! `WebPkiClientVerifier` (inbound) and the peer's server-cert verification
-//! (outbound) both succeed against the shared trust bundle.
+//! the agent presents on leg C). The leaves are signed by the **intermediate**; the
+//! intermediate is signed by the **root**; the root self-signs. The trust bundle
+//! pins the ROOT as its anchor and carries the INTERMEDIATE as untrusted chain
+//! material (`intermediate_chain = Some(...)`), so a root-anchor-only verifier (the
+//! agent's `WebPkiClientVerifier` inbound, the peer's server-cert verification
+//! outbound) builds `leaf → intermediate → root` only when each presenting side
+//! appends the intermediate to its leaf — exactly the production-chain path F1
+//! exercises.
 //!
 //! DEV-ONLY: the production adapter consumes the held SVID via `IdentityRead` and
 //! NEVER mints. This module exists only so the test can populate the
@@ -42,7 +49,16 @@ pub struct Leaf {
 
 /// The shared test PKI.
 pub struct TestPki {
+    /// The ROOT cert PEM — the trust anchor the bundle pins and verifiers anchor on.
     ca_cert_pem: String,
+    /// The INTERMEDIATE cert PEM — untrusted chain material every presenting side
+    /// appends to its leaf so a root-anchor-only verifier can build the path. Also
+    /// the bundle's `intermediate_chain`.
+    intermediate_cert_pem: String,
+    /// The intermediate cert in DER form — for the harness presentation sites that
+    /// build a rustls config directly from `cert_der` (they present `[leaf,
+    /// intermediate]`).
+    intermediate_cert_der: CertificateDer<'static>,
     pub client_leaf: Leaf,
     pub server_leaf: Leaf,
     /// The OUTBOUND real-peer leaf: a SERVER cert with a DNS SAN matching the SNI
@@ -68,24 +84,30 @@ impl TestPki {
 
     #[must_use]
     pub fn mint() -> Self {
-        let ca = MintedCa::mint("overdrive-mtls-ws-CA");
+        // Root → intermediate → leaf (production issuance shape). The root
+        // self-signs; the intermediate is signed by the root; every workload leaf
+        // is signed by the INTERMEDIATE.
+        let root = MintedCa::mint_root("overdrive-mtls-ws-ROOT-CA");
+        let intermediate = root.mint_intermediate("overdrive-mtls-ws-INTERMEDIATE-CA");
 
         let client_spiffe = "spiffe://overdrive.local/ns/default/sa/client";
         let server_spiffe = "spiffe://overdrive.local/ns/default/sa/server";
         // The client leaf is clientAuth-only (no SNI to match — it is the client).
-        let client_leaf = ca.mint_leaf(client_spiffe, None, true);
+        let client_leaf = intermediate.mint_leaf(client_spiffe, None, true);
         // The server SVID is serverAuth + carries the SERVER_SNI DNS SAN so the
         // inbound client's SNI matches when it verifies the adapter's server cert.
-        let server_leaf = ca.mint_leaf(server_spiffe, Some(Self::SERVER_SNI), false);
+        let server_leaf = intermediate.mint_leaf(server_spiffe, Some(Self::SERVER_SNI), false);
         // The outbound real-peer leaf: serverAuth + the PEER_SNI DNS SAN.
-        let peer_leaf = ca.mint_leaf(
+        let peer_leaf = intermediate.mint_leaf(
             "spiffe://overdrive.local/ns/default/sa/peer",
             Some(Self::PEER_SNI),
             false,
         );
 
         Self {
-            ca_cert_pem: ca.cert_pem,
+            ca_cert_pem: root.cert_pem,
+            intermediate_cert_pem: intermediate.cert_pem.clone(),
+            intermediate_cert_der: CertificateDer::from(intermediate.cert_der),
             client_leaf,
             server_leaf,
             peer_leaf,
@@ -94,16 +116,28 @@ impl TestPki {
         }
     }
 
-    /// The CA cert PEM (the trust anchor the bundle wraps).
+    /// The ROOT cert PEM (the trust anchor the bundle pins; what verifiers anchor on).
     #[must_use]
     pub fn ca_cert_pem(&self) -> &str {
         &self.ca_cert_pem
     }
 
-    /// The shared trust bundle (root anchor = the CA; no intermediate).
+    /// The INTERMEDIATE cert in DER form — the harness presentation sites append
+    /// this to their leaf so a root-anchor-only verifier can build the path.
+    #[must_use]
+    pub fn intermediate_cert_der(&self) -> CertificateDer<'static> {
+        self.intermediate_cert_der.clone()
+    }
+
+    /// The shared trust bundle: root anchor = the ROOT; intermediate chain material
+    /// = the INTERMEDIATE (the production-shape bundle the agent reads via
+    /// `IdentityRead` and presents from in `tls_config`).
     #[must_use]
     pub fn trust_bundle(&self) -> TrustBundle {
-        TrustBundle::new(CaCertPem::new(self.ca_cert_pem.clone()), None)
+        TrustBundle::new(
+            CaCertPem::new(self.ca_cert_pem.clone()),
+            Some(CaCertPem::new(self.intermediate_cert_pem.clone())),
+        )
     }
 
     /// The client-leg SVID material the adapter reads via `IdentityRead`.
@@ -123,28 +157,55 @@ impl TestPki {
     /// Slice 05 reuses the PKI).
     #[must_use]
     pub fn untrusted_client_leaf(&self) -> Leaf {
-        let wca = MintedCa::mint("overdrive-mtls-ws-ROGUE-CA");
+        let wca = MintedCa::mint_root("overdrive-mtls-ws-ROGUE-CA");
         wca.mint_leaf("spiffe://rogue.local/ns/x/sa/rogue", None, true)
     }
 }
 
-/// A minted CA retaining its `CertificateParams` + `KeyPair` so it can build a
-/// reusable rcgen 0.14 `Issuer` for signing leaves (`Issuer::from_params`).
+/// A minted signing authority (root OR intermediate) retaining its
+/// `CertificateParams` + `KeyPair` so it can build a reusable rcgen 0.14 `Issuer`
+/// (`Issuer::from_params`) for signing the next level down (an intermediate, or a
+/// leaf). For an intermediate, `cert_der` is the intermediate's own signed bytes so
+/// callers can present it as chain material.
 struct MintedCa {
     params: CertificateParams,
     key: KeyPair,
     cert_pem: String,
+    /// The authority's own signed cert in DER — for an intermediate this is the
+    /// chain material presenting sides append to their leaf. (For a root it is the
+    /// self-signed root, used only by `untrusted_client_leaf`'s rogue path.)
+    cert_der: Vec<u8>,
 }
 
 impl MintedCa {
-    fn mint(cn: &str) -> Self {
+    /// Mint a self-signed ROOT CA (unconstrained path length — it signs the
+    /// intermediate, which signs leaves).
+    fn mint_root(cn: &str) -> Self {
         let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         params.distinguished_name.push(rcgen::DnType::CommonName, cn);
         let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
         let cert = params.self_signed(&key).unwrap();
         let cert_pem = cert.pem();
-        Self { params, key, cert_pem }
+        let cert_der = cert.der().to_vec();
+        Self { params, key, cert_pem, cert_der }
+    }
+
+    /// Mint an INTERMEDIATE CA signed by `self` (the root). It is a CA constrained
+    /// to a path length of 0 (it may sign leaves but no further CAs), mirroring a
+    /// production node intermediate.
+    fn mint_intermediate(&self, cn: &str) -> Self {
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+        params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+        params.use_authority_key_identifier_extension = true;
+        let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        // rcgen 0.14 2-arg `signed_by(intermediate_key, &root_issuer)`.
+        let root_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&self.params, &self.key);
+        let cert = params.signed_by(&key, &root_issuer).unwrap();
+        let cert_pem = cert.pem();
+        let cert_der = cert.der().to_vec();
+        Self { params, key, cert_pem, cert_der }
     }
 
     fn mint_leaf(&self, spiffe: &str, dns_san: Option<&str>, client_auth: bool) -> Leaf {

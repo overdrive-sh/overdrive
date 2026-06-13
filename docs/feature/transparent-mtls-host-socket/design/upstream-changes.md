@@ -54,7 +54,7 @@ feature-delta § "Proven-Mechanism Traceability" → Durability). The anchors us
 
 | Re-grounded AC | Proven spike observable to cite | Committed finding |
 |---|---|---|
-| Forward steady state (agent-light, D-MTLS-13) | `tcpdump` shows `1703 03` (0x17) records on the peer-facing wire; `strace` shows ONLY `splice`/`ppoll` on the forward pump (`splice(legF → legB)` into kTLS-TX, the kernel `tls_sw_sendmsg` encrypting on splice-in), ~1 splice/record, zero userspace plaintext copy. (The earlier sockmap EGRESS-redirect — `redir_err=0`, 15/15 — was retired for a `MSG_DONTWAIT`-stall, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`.) | `findings-egress-ktls-splice.md`; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` |
+| Forward steady state (agent-light COPY, D-MTLS-13) | `tcpdump` shows `1703 03` (0x17) records on the peer-facing wire; `strace` shows a per-record `read(legF)`+`write(legB)` on the forward pump into leg B's kTLS-TX (a `read → write_all` COPY — the kernel `tls_sw_sendmsg` encrypts each blocking `write`), NOT zero-copy and NOT `splice`/`ppoll`-only. A `splice` into kTLS-TX is NOT used (it loses records). (The earlier sockmap EGRESS-redirect — `redir_err=0`, 15/15 — was retired for a `MSG_DONTWAIT`-stall, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`.) | `crates/overdrive-dataplane/src/mtls/splice.rs` (the shipped `write_all` forward primitive); `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` |
 | Return steady state (agent-light) | `strace` shows ONLY `splice`/`ppoll`, zero payload read/write; byte-exact plaintext on leg F; ~1 `splice` per TLS record; `einval_on_B=0` | `findings-splice-return.md` |
 | ~~Arming invariant (Tier-3 AC)~~ MOOT (D-MTLS-13) | ~~`SOCKMAP`-insert AFTER `TCP_ULP "tls"` returns `EINVAL`~~ — no sockmap insert on any path now; retained as a historical kernel fact only | `findings.md` Increment D (historical) |
 | kTLS armed on leg B | `ss -tie` shows `tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw` (NOT `ss -K`, which is `--kill`) | `findings.md` A; `findings-egress-ktls-splice.md` mechanic #4 |
@@ -124,14 +124,16 @@ proved — closing the loop from proven evidence → acceptance criterion → te
      proven driving a real handshake in `findings.md` A (a minimal rcgen P-256 drove
      every spike; real `IdentityRead`/SPIFFE-SAN SVID is the productionisation).
    - **Slice 03 (kTLS install + agent exits + wire capture)** — re-scope: kTLS arms
-     on **leg B**; "agent exits" → "agent-light forward splice + agent-light return
-     splice"; the wire capture observable is unchanged (TLS 1.3 on the peer-facing
-     wire). Anchor each direction on its proven observable: forward AC ← `tcpdump`
-     shows 0x17 records + `strace` shows only `splice`/`ppoll` on the forward pump
-     (`splice(legF → legB)` into kTLS-TX; D-MTLS-13 replaced the sockmap
-     EGRESS-redirect, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`);
-     return AC ← `strace` shows only `splice`/`ppoll` (`findings-splice-return.md`);
-     `ss -tie` shows the kTLS ULP (`findings.md` A). (The earlier arming-invariant
+     on **leg B**; "agent exits" → "agent-light forward `read → write_all` copy +
+     agent-light return zero-copy splice"; the wire capture observable is unchanged
+     (TLS 1.3 on the peer-facing wire). Anchor each direction on its proven
+     observable: forward AC ← `tcpdump` shows 0x17 records + `strace` shows a
+     per-record `read`+`write` into kTLS-TX on the forward pump (a `read → write_all`
+     COPY — NOT a splice into kTLS-TX, which loses records; D-MTLS-13 replaced the
+     sockmap EGRESS-redirect, `crates/overdrive-dataplane/src/mtls/splice.rs` /
+     `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`); return AC ←
+     `strace` shows only `splice`/`ppoll` (`findings-splice-return.md`); `ss -tie`
+     shows the kTLS ULP (`findings.md` A). (The earlier arming-invariant
      Tier-3 AC — `SOCKMAP`-after-`TCP_ULP "tls"` == `EINVAL` — is MOOT under
      D-MTLS-13; no sockmap insert on any path now.)
    - **Slice 04 (fail-closed + race-window + resource limits + authn boundary)** —

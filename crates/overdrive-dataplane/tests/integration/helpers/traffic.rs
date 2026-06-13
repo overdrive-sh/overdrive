@@ -61,32 +61,60 @@ const ETH_P_ALL: std::os::raw::c_int = 0x0003;
 //
 // `WireScan` is the post-capture analysis: parse Eth+IPv4+TCP frames on `lo`,
 // reassemble the per-direction TCP byte stream, walk the TLS record framing to count
-// genuine `application_data` (type 0x17) records, and scan the raw payload for the
-// cleartext request marker (which MUST be absent on the peer leg).
+// genuine `application_data` (type 0x17) records PER DIRECTION, and scan the raw
+// payload for BOTH the request and the response cleartext markers (which MUST be
+// absent on the peer leg in EITHER direction). The step requires TLS records present
+// AND zero plaintext in BOTH directions — so the oracle buckets records by direction
+// (distinguished by whether `wire_port` is the stream's dst — traffic TOWARD the
+// wire-port endpoint, the request/forward leg — or its src — traffic FROM it, the
+// response/return leg) and scans both markers.
 // ---------------------------------------------------------------------------
 
 /// The TLS `application_data` content type (the `0x17` the tcpdump oracle looks for).
 const TLS_CONTENT_TYPE_APPLICATION_DATA: u8 = 0x17;
 /// TLS 1.2/1.3 legacy record-layer version bytes (`0x0303`) — the two bytes that
-/// follow the content type in every record header on the wire (TLS 1.3 keeps the
-/// `0x0303` legacy record version for middlebox compatibility).
-const TLS_LEGACY_RECORD_VERSION: [u8; 2] = [0x03, 0x03];
+/// follow the content type in MOST record headers on the wire (TLS 1.3 keeps the
+/// `0x0303` legacy record version for middlebox compatibility, RFC 8446 §5.1).
+const TLS_LEGACY_RECORD_VERSION_TLS12: [u8; 2] = [0x03, 0x03];
+/// TLS 1.0 legacy record-layer version bytes (`0x0301`) — the version the VERY FIRST
+/// `ClientHello` record carries on the wire (RFC 8446 §5.1: the initial ClientHello
+/// uses `0x0301` for backwards compatibility; every subsequent record uses `0x0303`).
+/// The framing walk MUST tolerate it or it desyncs on the first record of the
+/// client→server stream and counts zero records in the request/forward direction.
+const TLS_LEGACY_RECORD_VERSION_TLS10: [u8; 2] = [0x03, 0x01];
 /// TLS record header length: `type(1) + version(2) + length(2)`.
 const TLS_RECORD_HEADER_LEN: usize = 5;
 
-/// The result of scanning a captured peer-leg wire: how many genuine TLS 1.3
-/// `application_data` (`0x17`) records crossed the wire, and how many times the
-/// cleartext request marker appeared in the raw payload (MUST be 0 — plaintext on
-/// the peer leg is the confidentiality breach the whole feature exists to prevent).
+/// `true` iff `version` is a TLS record-layer legacy version that legitimately
+/// appears on the wire in a TLS 1.3 connection — either `0x0303` (the steady-state /
+/// post-`ServerHello` version) or `0x0301` (the initial `ClientHello` only).
+fn is_tls_record_version(version: [u8; 2]) -> bool {
+    version == TLS_LEGACY_RECORD_VERSION_TLS12 || version == TLS_LEGACY_RECORD_VERSION_TLS10
+}
+
+/// The result of scanning a captured peer-leg wire, bucketed BY DIRECTION: how many
+/// genuine TLS 1.3 `application_data` (`0x17`) records crossed each direction of the
+/// peer-facing leg, and how many times EITHER cleartext marker (request or response)
+/// appeared in the raw payload (MUST be 0 — plaintext on the peer leg is the
+/// confidentiality breach the whole feature exists to prevent).
+///
+/// The two directions are distinguished by whether `wire_port` is the stream's
+/// **dst** (`records_to_wire_port` — traffic flowing TOWARD the wire-port endpoint:
+/// the outbound forward F→B request, or the inbound C→S request) or its **src**
+/// (`records_from_wire_port` — traffic flowing FROM it: the outbound return B→F
+/// reply, or the inbound S→C response).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WireScan {
-    /// Count of TLS records whose content type is `0x17` (`application_data`),
-    /// derived by walking the record framing of the reassembled per-direction
-    /// streams — NOT a naive byte-substring count (which ciphertext could trip).
-    pub app_data_records: u64,
-    /// Count of appearances of the cleartext marker bytes in the captured TCP
-    /// payload across both directions. Any non-zero value means plaintext leaked
-    /// onto the peer-facing wire.
+    /// Count of `0x17` `application_data` records whose stream has `wire_port` as
+    /// its DESTINATION port — the request/forward direction. Derived by walking the
+    /// record framing (NOT a naive byte-substring count ciphertext could trip).
+    pub records_to_wire_port: u64,
+    /// Count of `0x17` `application_data` records whose stream has `wire_port` as its
+    /// SOURCE port — the response/return direction.
+    pub records_from_wire_port: u64,
+    /// Count of appearances of EITHER cleartext marker (request OR response) in the
+    /// captured TCP payload across both directions. Any non-zero value means
+    /// plaintext leaked onto the peer-facing wire.
     pub plaintext_marker_hits: u64,
 }
 
@@ -175,23 +203,34 @@ impl WireCapture {
     }
 
     /// Stop the capture, join the thread, and scan the captured frames for the
-    /// confidentiality oracle: the count of TLS 1.3 `application_data` records and
-    /// the count of cleartext-marker appearances on the peer-facing wire.
+    /// confidentiality oracle: the count of TLS 1.3 `application_data` records PER
+    /// DIRECTION and the count of cleartext appearances of EITHER marker (request OR
+    /// response) on the peer-facing wire.
+    ///
+    /// `request_marker` is the cleartext that flows TOWARD `wire_port` (the
+    /// request/forward leg); `response_marker` is the cleartext that flows FROM it
+    /// (the response/return leg). Both must be absent on the encrypted peer wire.
     ///
     /// # Panics
     /// Panics if the capture thread panicked (a precondition failure).
     #[must_use]
-    pub fn stop_and_scan(mut self, marker: &[u8]) -> WireScan {
+    pub fn stop_and_scan(mut self, request_marker: &[u8], response_marker: &[u8]) -> WireScan {
         self.stop.store(true, Ordering::SeqCst);
         let frames = self.handle.take().expect("wire-capture handle").join().expect("capture join");
-        scan_frames(&frames, self.wire_port, marker)
+        scan_frames(&frames, self.wire_port, request_marker, response_marker)
     }
 }
 
 /// Walk captured Ethernet+IPv4+TCP frames touching `wire_port`, reassemble the
 /// per-direction TCP byte streams, count genuine TLS `application_data` (`0x17`)
-/// records by walking the record framing, and count cleartext-marker appearances.
-fn scan_frames(frames: &[Vec<u8>], wire_port: u16, marker: &[u8]) -> WireScan {
+/// records by walking the record framing — bucketed BY DIRECTION — and count
+/// appearances of EITHER cleartext marker across both directions.
+fn scan_frames(
+    frames: &[Vec<u8>],
+    wire_port: u16,
+    request_marker: &[u8],
+    response_marker: &[u8],
+) -> WireScan {
     // Per-direction reassembled payload, keyed by (src_port, dst_port). Loopback
     // preserves in-order delivery per direction, so concatenating payloads in
     // arrival order reconstructs each direction's TLS byte stream.
@@ -211,13 +250,26 @@ fn scan_frames(frames: &[Vec<u8>], wire_port: u16, marker: &[u8]) -> WireScan {
         streams.entry((src_port, dst_port)).or_default().extend_from_slice(payload);
     }
 
-    let mut app_data_records: u64 = 0;
+    let mut records_to_wire_port: u64 = 0;
+    let mut records_from_wire_port: u64 = 0;
     let mut plaintext_marker_hits: u64 = 0;
-    for stream in streams.values() {
-        app_data_records += count_tls_app_data_records(stream);
-        plaintext_marker_hits += count_subslices(stream, marker);
+    for (&(src_port, dst_port), stream) in &streams {
+        let records = count_tls_app_data_records(stream);
+        // `wire_port` as the stream DESTINATION = traffic toward the wire-port
+        // endpoint (request/forward); as the SOURCE = traffic from it (response).
+        // A loopback `(wire_port, wire_port)` self-stream cannot occur (distinct
+        // ephemeral ports), so the two buckets never double-count a stream.
+        if dst_port == wire_port {
+            records_to_wire_port += records;
+        } else if src_port == wire_port {
+            records_from_wire_port += records;
+        }
+        // Scan BOTH markers in EITHER direction — neither the request nor the
+        // response plaintext may ever appear on the encrypted peer wire.
+        plaintext_marker_hits += count_subslices(stream, request_marker);
+        plaintext_marker_hits += count_subslices(stream, response_marker);
     }
-    WireScan { app_data_records, plaintext_marker_hits }
+    WireScan { records_to_wire_port, records_from_wire_port, plaintext_marker_hits }
 }
 
 /// Parse an Ethernet+IPv4+TCP frame, returning `(src_port, dst_port, tcp_payload)`
@@ -264,10 +316,16 @@ fn parse_tcp_payload(frame: &[u8]) -> Option<(u16, u16, &[u8])> {
 /// record framing of a reassembled per-direction stream. Each record is
 /// `type(1) version(2) length(2) payload(length)`; the walk skips
 /// `TLS_RECORD_HEADER_LEN + length` per record, so a `0x17` byte INSIDE ciphertext
-/// is never miscounted — only genuine record headers (with the `0x0303` legacy
-/// version) advance the counter. A stream that desyncs (a header whose version is
-/// not `0x0303`, or a length running past the captured bytes) stops the walk; the
-/// records counted up to that point are the genuine ones.
+/// is never miscounted — only genuine record headers (with a legitimate TLS-1.3
+/// legacy record version: `0x0303`, OR `0x0301` for the very first ClientHello —
+/// see [`is_tls_record_version`]) advance the counter. A stream that desyncs (a
+/// header whose version is neither, or a length running past the captured bytes)
+/// stops the walk; the records counted up to that point are the genuine ones.
+///
+/// Tolerating `0x0301` is load-bearing for the request/forward direction: the
+/// client→server stream's FIRST record is the ClientHello at version `0x0301`
+/// (RFC 8446 §5.1), so a `0x0303`-only walk would desync on record 0 and count
+/// zero application_data records in that direction.
 fn count_tls_app_data_records(stream: &[u8]) -> u64 {
     let mut count: u64 = 0;
     let mut i = 0usize;
@@ -275,10 +333,11 @@ fn count_tls_app_data_records(stream: &[u8]) -> u64 {
         let content_type = stream[i];
         let version = [stream[i + 1], stream[i + 2]];
         let length = u16::from_be_bytes([stream[i + 3], stream[i + 4]]) as usize;
-        // A genuine TLS record header carries the `0x0303` legacy record version.
-        // If it does not, we have desynced from the record framing (mid-ciphertext
-        // or a non-TLS stream) — stop rather than risk a false count.
-        if version != TLS_LEGACY_RECORD_VERSION {
+        // A genuine TLS record header carries a legitimate legacy record version
+        // (`0x0303`, or `0x0301` for the initial ClientHello). If it does not, we
+        // have desynced from the record framing (mid-ciphertext or a non-TLS stream)
+        // — stop rather than risk a false count.
+        if !is_tls_record_version(version) {
             break;
         }
         if content_type == TLS_CONTENT_TYPE_APPLICATION_DATA {

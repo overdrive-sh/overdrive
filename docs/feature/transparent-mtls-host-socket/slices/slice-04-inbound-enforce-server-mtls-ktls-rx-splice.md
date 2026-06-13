@@ -39,16 +39,19 @@ TLS `0x17` ciphertext only.
 
 ## OUT scope
 
-- The OUTBOUND (client) enforce path (kTLS-TX on leg B + agent-light forward splice
-  + return agent-light splice) → Slice 03. (D-MTLS-13: forward is agent-light, not
-  the retired sockmap egress redirect.)
+- The OUTBOUND (client) enforce path (kTLS-TX on leg B + agent-light forward
+  `read → write_all` copy + return agent-light zero-copy splice) → Slice 03.
+  (D-MTLS-13: the forward is an agent-light `write_all` copy into kTLS-TX, NOT a
+  splice into kTLS-TX and NOT the retired sockmap egress redirect.)
 - The inbound fail-closed negatives (nocert / wrongca) — the dedicated negative ACs
   → Slice 05 (the verifier REQUIRE+VERIFY is wired here; the dedicated negative
   proofs with distinct reasons are S05; the composed WS Slice 00 already touches
   the happy inbound path).
 - Resource limits / pump supervision / the authn-vs-authz boundary → Slice 05.
 - The server's response leg (re-encrypt S's reply onto leg C's kTLS-TX)
-  steady state — reuses the outbound forward primitive; the spike did NOT exercise
+  steady state — reuses the outbound forward primitive (the agent-light
+  `read(legS) → write_all(legC)` COPY into kTLS-TX, NOT a splice into kTLS-TX,
+  D-MTLS-13); the spike did NOT exercise
   it (`findings-inbound-intercept.md` § "What was NOT tested"), so it is composed in
   Slice 00 (the WS bidirectional transfer) and productionised here only to the
   extent the WS requires.

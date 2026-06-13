@@ -41,9 +41,10 @@ with the workload holding no cert and no key (identity-unaware).
 
 ## OUT scope
 
-- The kTLS arm + agent-light forward splice + return agent-light splice + wire
-  capture → Slice 03 (outbound) / Slice 04 (inbound) (this slice ends at a
-  completed handshake with extracted secrets ready; the bytes are not yet kTLS).
+- The kTLS arm + agent-light forward `read → write_all` copy (into kTLS-TX) +
+  return agent-light zero-copy splice + wire capture → Slice 03 (outbound) /
+  Slice 04 (inbound) (this slice ends at a completed handshake with extracted
+  secrets ready; the bytes are not yet kTLS).
 - The fail-closed-on-absent/wrong-SVID negative proofs (absent SVID outbound;
   nocert/wrongca inbound) → Slice 05 (the peer-verification abort path is
   exercised here; the dedicated negative ACs are S05).

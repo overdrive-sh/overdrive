@@ -40,14 +40,18 @@ unresolved — see § "Review revisions" F2).
   source-TX-bypass RST on redirecting the live socket (`findings-lossless-hybrid.md`
   + `sockmap-redirect-live-socket-liveness-research.md`); lossless capture
   structurally requires a proxy (`findings-userspace-relay.md`).
-- **Proxy proven agent-light BOTH directions**: agent-LIGHT zero-copy `splice` in
-  every direction (~1/record; `findings-splice-return.md`) — the forward `splice`
-  into kTLS-TX (`tls_sw_sendmsg` encrypts on splice-in) is the symmetric mirror of
-  the return `splice` out of kTLS-RX (`tls_sw_splice_read`). **(REVISED 2026-06-13,
+- **Proxy proven agent-light BOTH directions** (the kernel kTLS engine does all
+  crypto; the agent runs no cipher) — but NOT symmetric: the DECRYPT/RX directions
+  (outbound return, inbound deliver) are zero-copy `splice` out of kTLS-RX
+  (`tls_sw_splice_read`, ~1/record, no userspace copy; `findings-splice-return.md`);
+  the ENCRYPT/TX directions (outbound forward, inbound response) are a bounded
+  `read → write_all` COPY into kTLS-TX (`tls_sw_sendmsg` encrypts each `write`;
+  per-record `read`+`write`, NOT zero-copy). A `splice` into kTLS-TX loses records,
+  so the encrypt directions use a blocking `write_all`. **(REVISED 2026-06-13,
   D-MTLS-13: the forward was originally agent-IDLE via a sockmap-egress-redirect,
   15/15 in `findings-egress-ktls-splice.md`; that redirect was proven non-viable —
-  a `MSG_DONTWAIT`-backlog delivery stall — and retired; see § "Forward-mechanism
-  pivot" below.)**
+  a `MSG_DONTWAIT`-backlog delivery stall — and retired for the `write_all` copy;
+  see § "Forward-mechanism pivot" below.)**
 - **Basic mechanism proven**: `sockops → rustls → kTLS`, `pidfd_getfd` handoff,
   SOCKMAP-before-`TCP_ULP` ordering, control records via `ktls::KtlsStream`
   (`findings.md`).
@@ -68,8 +72,10 @@ unresolved — see § "Review revisions" F2).
 
 See the feature-delta § "Wave: DESIGN / [REF] Decisions Table" for the full table.
 Highlights: D-MTLS-3 (NEW `MtlsEnforcement` port, `Dataplane` does not fit);
-D-MTLS-4 (**REVISED 2026-06-13** — forward AND return are BOTH agent-light `splice`;
-the original agent-idle sockmap-egress was retired, see D-MTLS-13); D-MTLS-5
+D-MTLS-4 (**REVISED 2026-06-13** — forward and return are BOTH agent-light but NOT
+the same primitive: encrypt/TX = `read → write_all` copy into kTLS-TX, decrypt/RX =
+zero-copy `splice` out of kTLS-RX; the original agent-idle sockmap-egress was
+retired, see D-MTLS-13); D-MTLS-5
 (leg B = plain kTLS-RX, NO psock — now no psock on ANY leg); D-MTLS-7 (**MOOT
 2026-06-13** — sockmap-before-`TCP_ULP` invariant; no sockmap insert on any path);
 D-MTLS-10 (in-process agent — no separate process, no gRPC/CSR; resolves the prior
@@ -226,10 +232,15 @@ fail-closed/confidentiality model are ALL UNCHANGED.
 
 **What changed.** The OUTBOUND forward (encrypt) direction retired the agent-idle
 in-kernel **sockmap egress redirect** (`sk_skb/stream_verdict` +
-`bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX) for an **agent-light
-`splice(legF → legB)`** into leg B's kTLS-TX — symmetric to the return/deliver/
-response pumps; the kernel `tls_sw_sendmsg` encrypts each spliced record
-synchronously, the agent does ZERO crypto. The whole sockmap apparatus
+`bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX) for an **agent-light bounded
+`read(legF) → write_all(legB)` COPY** into leg B's kTLS-TX. The kernel
+`tls_sw_sendmsg` encrypts each blocking `write`; the agent does ZERO crypto, but it
+DOES copy each record's plaintext through a userspace buffer and issues a
+`read`+`write` per record — **NOT zero-copy, NOT agent-idle, and NOT symmetric to
+the return/deliver pumps** (those `splice` zero-copy out of kTLS-RX). A `splice`
+INTO kTLS-TX is NOT used (it loses records — the same `MSG_DONTWAIT` loss class the
+redirect suffered). The inbound response leg (S→C) uses the SAME `write_all`-into-
+kTLS-TX copy. The whole sockmap apparatus
 (`MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the
 `sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll) is
 DELETED. A **kTLS 0.5-RTT early-data drain** was added to every reader leg: drain
@@ -247,9 +258,13 @@ SSOT).**
   the *enqueue*, not the *delivery*). No production system runs the pattern (Istio
   ztunnel = userspace rustls; Cilium = network-layer IPsec/WireGuard + sockmap only
   for *plaintext* localhost-bypass); the kernel does not test it. A synchronous
-  userspace `splice`/`write` into kTLS-TX (no `MSG_DONTWAIT`/backlog) is the
-  correct, reliable mechanism — and is exactly the return-pump shape already
-  accepted.
+  blocking userspace `write_all` into kTLS-TX (no `MSG_DONTWAIT`/backlog) is the
+  correct, reliable mechanism. **(The research doc offered "`read → write` OR
+  `splice`"; the implementation found `splice` INTO kTLS-TX has the SAME
+  `MSG_DONTWAIT` loss — trace-confirmed `n_out=55 errno=0`, peer received 0 — so the
+  shipped forward is the blocking `write_all`, NOT a splice. It is therefore NOT the
+  same shape as the return pump, which `splice`s zero-copy OUT of kTLS-RX; both are
+  agent-light, but the forward is a userspace copy and the return is zero-copy.)**
 - `docs/research/dataplane/sockmap-strparser-engagement-race-research.md` and
   `spike/findings-sockmap-engagement-inkernel-enroll.md`: the in-kernel sockops
   enroll closed the engagement race deterministically, but the redirect-delivery
@@ -263,24 +278,26 @@ SSOT).**
 
 | Decision | Status after 2026-06-13 | Where reconciled |
 |---|---|---|
-| **D-MTLS-4** (forward/return mechanism) | **REVISED** — forward AND return are BOTH agent-light `splice`; the agent-idle sockmap-egress was retired | ADR-0069 (2026-06-13 amendment + Decision facts 3/4); feature-delta Decisions Table + the embedded contract + Traceability matrix + Tech Choices + glossary; slice-00/01/02/03/04 |
+| **D-MTLS-4** (forward/return mechanism) | **REVISED** — forward and return are BOTH agent-light (no userspace crypto) but NOT the same primitive: encrypt/TX (forward, inbound response) = `read → write_all` COPY into kTLS-TX (per-record `read`+`write`, NOT zero-copy — a splice into kTLS-TX loses records); decrypt/RX (return, inbound deliver) = zero-copy `splice` out of kTLS-RX. The agent-idle sockmap-egress was retired | ADR-0069 (2026-06-13 amendment + Decision facts 3/4); feature-delta Decisions Table + the embedded contract + Traceability matrix + Tech Choices + glossary; slice-00/01/02/03/04 |
 | **D-MTLS-5** (no psock on the kTLS-RX leg) | UNCHANGED, strengthened — now no psock on ANY leg (the sockmap is gone) | ADR-0069 fact 4; feature-delta Decisions Table |
 | **D-MTLS-7** (sockmap-before-`TCP_ULP` invariant) | **MOOT / SUPERSEDED** — no sockmap insert sequenced against `TCP_ULP` on any leg; the `tls-ULP-after-sockmap == EINVAL` Tier-3 test is retired (true kernel fact, governs no code path) | ADR-0069 fact 5 + Decision fact 3 note; feature-delta Decisions Table + Traceability matrix + glossary + per-method anchor table |
 | **D-MTLS-12 / SD-5** (rcgen sentinel cert) | **STILL LIVE** — VERIFIED against the shipped probe: `run_probe_sentinels` STILL does a loopback rustls handshake for the kTLS-arm round-trip, so the throwaway-`rcgen`-sentinel core is unchanged and the `overdrive-dataplane → rcgen` production-dep edge still ships. ONLY the *sockmap-engagement / ARMED-gate* portion of the probe's substrate-lie catalogue was mooted (the `ForwardEgressRedirect`/`ArmingOrderEinval` sub-sentinels) | ADR-0069 Earned-Trust probe §; feature-delta Decisions Table D-MTLS-12 note + `ProbeSentinel` enum + `probe` doc |
 | **D-MTLS-13** (NEW) | the pivot itself + the kTLS 0.5-RTT early-data drain | this section; ADR-0069 (2026-06-13 amendment); feature-delta Decisions Table D-MTLS-13 |
 
 **Probe surface (reconciled to the shipped contract).** `ProbeSentinel` is now ONE
-variant, `KtlsArmRoundTrip` (kTLS arm + agent-light forward `splice` round-trip on
-a loopback sentinel, reader leg drains 0.5-RTT early data). The obsolete
-`ForwardEgressRedirect` and `ArmingOrderEinval` sub-sentinels, and the
-`ArmingOrderViolation` / `ForwardRedirectFailed` `MtlsEnforcementError` variants,
-are GONE — there is no redirect to fire and no sockmap-insert ordering to violate.
+variant, `KtlsArmRoundTrip` (kTLS arm + agent-light forward-encrypt round-trip on a
+loopback sentinel — the forward `read → write_all` copy into kTLS-TX, NOT a splice
+into TX; reader leg drains 0.5-RTT early data). The obsolete `ForwardEgressRedirect`
+and `ArmingOrderEinval` sub-sentinels, and the `ArmingOrderViolation` /
+`ForwardRedirectFailed` `MtlsEnforcementError` variants, are GONE — there is no
+redirect to fire and no sockmap-insert ordering to violate.
 
 **Code-vs-design check (no contradiction surfaced).** The shipped contract code
 (`mtls_enforcement.rs`) and the shipped mechanism (`mtls/`) AGREE with everything
 documented above — `ProbeSentinel::KtlsArmRoundTrip` only, no
-`ArmingOrderViolation`/`ForwardRedirectFailed`, agent-light forward `enforce`
-postcondition, and `mtls::drain_early_plaintext` on every reader leg. No
+`ArmingOrderViolation`/`ForwardRedirectFailed`, the OUTBOUND forward `enforce`
+postcondition is agent-light-but-a-`write_all`-copy (NOT zero-copy, NOT a splice),
+and `mtls::drain_early_plaintext` on every reader leg. No
 design-vs-code disagreement was found; the back-propagation is a clean
 narrative-to-shipped-code reconciliation. (Per the dispatch constraint, no
 `crates/**` code was touched.)
