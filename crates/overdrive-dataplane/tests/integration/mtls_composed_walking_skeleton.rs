@@ -58,12 +58,8 @@ use overdrive_core::traits::mtls_enforcement::{
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 
 use super::helpers::mtls_netns_topology::{MtlsTopology, TopologyError};
-
-mod pki;
-mod roles;
-
-use pki::TestPki;
-use roles::{InboundServer, OutboundPeer, OutboundWorkload};
+use super::helpers::mtls_pki::TestPki;
+use super::helpers::mtls_roles::{self, InboundServer, OutboundPeer, OutboundWorkload};
 
 /// Test `IdentityRead` double — holds the minted SVIDs (keyed by `AllocationId`)
 /// plus the trust bundle, served as owned clones (the contract: a read never
@@ -282,7 +278,7 @@ async fn drive_inbound(
     // the agreed `agent_port`, spawns the client (presenting a valid client SVID
     // toward the virtual addr), and `accept()`s leg C + recovers orig-dst.
     let mut worker =
-        roles::InboundWorker::run(topo, server.addr(), pki, agent_port, handshake_delay);
+        mtls_roles::InboundWorker::run(topo, server.addr(), pki, agent_port, handshake_delay);
     let (leg_c, orig_dst) = worker.accept_leg_c_and_orig_dst();
 
     let conn = InterceptedConnection {

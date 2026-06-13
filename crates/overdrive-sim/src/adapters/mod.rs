@@ -35,6 +35,12 @@ pub mod driver;
 pub mod entropy;
 pub mod identity_read;
 pub mod llm;
+// transparent-mtls-host-socket step 02-02 — `SimMtlsEnforcement`, the in-memory
+// `overdrive_core::traits::mtls_enforcement::MtlsEnforcement` double. Models the
+// handshake OUTCOME (Established vs fail-closed) driven by a preloaded
+// `SimIdentityRead`; the `mtls_enforcement_equivalence` structural guard drives
+// both this and the host adapter through the same sequence (ADR-0069 F3).
+pub mod mtls_enforcement;
 pub mod observation_store;
 pub mod transport;
 // reconciler-memory-redb step 01-03 — `SimViewStore` impl of
@@ -54,3 +60,4 @@ pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
+pub use mtls_enforcement::SimMtlsEnforcement;

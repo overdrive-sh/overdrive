@@ -28,6 +28,10 @@
 // ADR-0069 contract vocabulary; the FFI-width casts are on compile-time-constant
 // struct sizes; the unwraps are the standard test idiom (a panic-with-message is
 // the right failure for a precondition).
+// `&mut self` on the accept-leg role methods is the harness's lifecycle API
+// shape (siblings on the same role take the receiver by mut to drive the spawned
+// child / capture state); clippy flags the accept methods that happen not to
+// mutate, but splitting the receiver convention per-method would be inconsistent.
 #![allow(
     clippy::similar_names,
     clippy::cast_possible_truncation,
@@ -37,7 +41,8 @@
     clippy::missing_const_for_fn,
     clippy::unused_self,
     clippy::match_same_arms,
-    reason = "test-harness role mechanics; raw socket glue + subprocess plumbing for the composed walking-skeleton gate"
+    clippy::needless_pass_by_ref_mut,
+    reason = "test-harness role mechanics; raw socket glue + subprocess plumbing for the transparent-mTLS Tier-3 gates"
 )]
 
 use std::io::{Read, Write};
@@ -51,9 +56,9 @@ use std::time::Duration;
 use overdrive_core::SpiffeId;
 use rustls::server::WebPkiClientVerifier;
 
-use super::super::helpers::mtls_netns_topology::MtlsTopology;
-use super::super::helpers::traffic::{WireCapture, WireScan};
-use super::pki::TestPki;
+use super::mtls_netns_topology::MtlsTopology;
+use super::mtls_pki::TestPki;
+use super::traffic::{WireCapture, WireScan};
 
 /// The loopback interface — where the outbound peer leg (peer binds `127.0.0.1`)
 /// and the inbound client-facing leg (client → `127.0.0.2` VIRT) physically carry
@@ -94,6 +99,15 @@ pub struct InboundServerResult {
 pub struct InboundClientResult {
     pub received_response_byte_exact: bool,
     pub observed_rst: bool,
+    /// The SERVER SPIFFE-id the inbound client extracted from the URI SAN of the
+    /// leaf the agent's leg-C SERVER handshake PRESENTED — read from
+    /// `conn.peer_certificates()[0]` (chain position 0 = the leaf) after the
+    /// handshake completed and verified the server cert chains to the bundle root.
+    /// `None` if the handshake never completed or the leaf carried no URI SAN.
+    /// This is the inbound counterpart of `OutboundPeer::presented_client_spiffe`:
+    /// it proves the agent presented `server_alloc`'s HELD server SVID (read via
+    /// `IdentityRead`, AC3 inbound) — surfaced to the test, not swallowed here.
+    pub presented_server_spiffe: Option<SpiffeId>,
 }
 
 /// Wire observations on a peer/client-facing leg — the confidentiality oracle,
@@ -384,10 +398,22 @@ fn outbound_peer_serve(
 /// the leaf carries no URI SAN. Mirrors the workspace's established URI-SAN
 /// extraction (`overdrive-host` `rcgen_ca_chain_verify` test).
 fn peer_presented_client_spiffe(conn: &rustls::ServerConnection) -> Option<SpiffeId> {
+    peer_presented_leaf_spiffe(conn.peer_certificates())
+}
+
+/// Extract the SPIFFE-id (sole URI SAN) from chain position 0 (the leaf) of a
+/// presented certificate chain. Direction-agnostic — the OUTBOUND peer feeds it
+/// `ServerConnection::peer_certificates()` (the verified CLIENT leaf), the INBOUND
+/// client feeds it `ClientConnection::peer_certificates()` (the verified SERVER
+/// leaf). Returns `None` when no chain was presented or the leaf carries no URI
+/// SAN. Mirrors the workspace's established URI-SAN extraction (`overdrive-host`
+/// `rcgen_ca_chain_verify` test).
+fn peer_presented_leaf_spiffe(
+    certs: Option<&[rustls::pki_types::CertificateDer<'_>]>,
+) -> Option<SpiffeId> {
     use x509_parser::prelude::FromDer as _;
 
-    let certs = conn.peer_certificates()?;
-    let leaf = certs.first()?;
+    let leaf = certs?.first()?;
     let (_, parsed) = x509_parser::certificate::X509Certificate::from_der(leaf.as_ref()).ok()?;
     let san = parsed.subject_alternative_name().ok()??;
     let uri = san.value.general_names.iter().find_map(|gn| match gn {
@@ -987,8 +1013,11 @@ impl InboundWorker {
     /// `wire_observations` runs only after `workload.join()`. Returns the client's
     /// round-trip result paired with the leg-C wire observations.
     pub fn join_client(mut self) -> (InboundClientResult, WireObservations) {
-        let fail =
-            || InboundClientResult { received_response_byte_exact: false, observed_rst: true };
+        let fail = || InboundClientResult {
+            received_response_byte_exact: false,
+            observed_rst: true,
+            presented_server_spiffe: None,
+        };
         let client_result =
             self.client.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()));
         // The round-trip is done (client thread joined) — NOW stop + scan the capture
@@ -1031,7 +1060,11 @@ fn inbound_client_run(
         .with_client_auth_cert(vec![cert, intermediate], key)
         .expect("inbound client config");
     let Ok(tcp) = TcpStream::connect(virt_addr) else {
-        return InboundClientResult { received_response_byte_exact: false, observed_rst: true };
+        return InboundClientResult {
+            received_response_byte_exact: false,
+            observed_rst: true,
+            presented_server_spiffe: None,
+        };
     };
     tcp.set_nodelay(true).ok();
     let sni = ServerName::try_from(TestPki::SERVER_SNI.to_string()).expect("server SNI");
@@ -1041,8 +1074,19 @@ fn inbound_client_run(
 
     // Drive the handshake.
     if !drive_client_handshake(&mut conn, &mut tcp) {
-        return InboundClientResult { received_response_byte_exact: false, observed_rst: true };
+        return InboundClientResult {
+            received_response_byte_exact: false,
+            observed_rst: true,
+            presented_server_spiffe: None,
+        };
     }
+    // The handshake completed AND verified the server cert chains to the bundle
+    // root (the client's `ClientConfig` anchors on the CA root store, so a
+    // server leaf that did not chain would have aborted the handshake above).
+    // Extract the SERVER SPIFFE-id from the presented leaf's URI SAN — this is
+    // the agent's HELD server SVID (read via `IdentityRead`), the inbound AC3
+    // identity proof. Read BEFORE any further connection use.
+    let presented_server_spiffe = peer_presented_leaf_spiffe(conn.peer_certificates());
     // The wire oracle is NO LONGER set here from handshake-success — the REAL
     // AF_PACKET capture on `lo` (owned by `InboundWorker`, filtered to the VIRT port)
     // counts the genuine `0x17` records on the client-facing leg and confirms the
@@ -1100,7 +1144,7 @@ fn inbound_client_run(
     let received_response_byte_exact = got == INBOUND_RESPONSE;
     // (the wire oracle is the AF_PACKET capture owned by `InboundWorker`, not set here.)
     std::thread::sleep(Duration::from_millis(300));
-    InboundClientResult { received_response_byte_exact, observed_rst }
+    InboundClientResult { received_response_byte_exact, observed_rst, presented_server_spiffe }
 }
 
 // ---- shared helpers ----

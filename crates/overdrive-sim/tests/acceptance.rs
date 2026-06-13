@@ -87,4 +87,13 @@ mod acceptance {
     // invariant. DELIVER replaces the pending bodies once the sim double and
     // invariant are introduced.
     mod identity_read_equivalence;
+
+    // transparent-mtls-host-socket (GH #26) step 02-02 — the structural guard
+    // for the `MtlsEnforcement` contract. Drives `SimMtlsEnforcement` through the
+    // 4-method contract sequence for BOTH directions and asserts the
+    // Established-vs-fail-closed OUTCOME (ADR-0069 F3). The host-arm equivalence
+    // evidence is the real-kernel Tier-3 `mtls_agent_handshake` /
+    // `mtls_composed_walking_skeleton` (the host adapter's `enforce` is a kernel
+    // I/O boundary, ungated-in-sim by design).
+    mod mtls_enforcement_equivalence;
 }
