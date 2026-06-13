@@ -31,7 +31,7 @@ several of which **no longer hold in v1**.
 
 | DISCUSS premise (in-band model) | v1 reality (proxy model) |
 |---|---|
-| "the agent EXITS the data path" / "agent fully out" | **Agent is LIGHT, not OUT.** Forward steady state is agent-idle (kernel splice); **return** steady state is agent-LIGHT (`splice` pump, ~1/record) — the agent stays scheduled per-record on the return path for the connection's life. |
+| "the agent EXITS the data path" / "agent fully out" | **Agent is LIGHT, not OUT.** Forward, return, and deliver steady state are all agent-LIGHT (`splice` pumps, ~1/record, zero userspace plaintext copy) — the agent stays scheduled per-record on every pump for the connection's life (D-MTLS-13). |
 | "kTLS on the workload's OWN socket" / "workload-owns-fd" | **kTLS lives on the agent's leg B**, not the workload's socket. The workload holds a plaintext socket to the agent (leg F). |
 | "restart-survivable" (kTLS state socket-owned + workload owns fd) | **No restart-survival in v1.** The agent owns both legs + the kTLS state; an agent restart drops in-flight sessions (re-handshake on reconnect). Restart-survival is the in-band model's unique win → out of v1 scope, a post-v1 optimization tracked in **#231** (ADR-0069 A1). |
 | "1 socket per connection" | **2 sockets per connection** (leg F + leg B). |
@@ -54,9 +54,9 @@ feature-delta § "Proven-Mechanism Traceability" → Durability). The anchors us
 
 | Re-grounded AC | Proven spike observable to cite | Committed finding |
 |---|---|---|
-| Forward steady state (agent-idle) | `tcpdump` shows `1703 03` (0x17) records on the peer-facing wire, agent issues ZERO per-byte syscalls (strace), `redir_err=0` — reproduced 15/15 | `findings-egress-ktls-splice.md` |
+| Forward steady state (agent-light, D-MTLS-13) | `tcpdump` shows `1703 03` (0x17) records on the peer-facing wire; `strace` shows ONLY `splice`/`ppoll` on the forward pump (`splice(legF → legB)` into kTLS-TX, the kernel `tls_sw_sendmsg` encrypting on splice-in), ~1 splice/record, zero userspace plaintext copy. (The earlier sockmap EGRESS-redirect — `redir_err=0`, 15/15 — was retired for a `MSG_DONTWAIT`-stall, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`.) | `findings-egress-ktls-splice.md`; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` |
 | Return steady state (agent-light) | `strace` shows ONLY `splice`/`ppoll`, zero payload read/write; byte-exact plaintext on leg F; ~1 `splice` per TLS record; `einval_on_B=0` | `findings-splice-return.md` |
-| Arming invariant (Tier-3 AC) | `SOCKMAP`-insert AFTER `TCP_ULP "tls"` returns `EINVAL` (the natural detect→gate→install order passes; the reverse must fail) | `findings.md` Increment D |
+| ~~Arming invariant (Tier-3 AC)~~ MOOT (D-MTLS-13) | ~~`SOCKMAP`-insert AFTER `TCP_ULP "tls"` returns `EINVAL`~~ — no sockmap insert on any path now; retained as a historical kernel fact only | `findings.md` Increment D (historical) |
 | kTLS armed on leg B | `ss -tie` shows `tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw` (NOT `ss -K`, which is `--kill`) | `findings.md` A; `findings-egress-ktls-splice.md` mechanic #4 |
 | No cleartext on the peer wire | `strings pcap \| grep <marker>` / cleartext count on leg B = 0; the workload's plaintext is on leg F (host-internal) BY DESIGN | `findings-userspace-relay.md` Unknown 2; `findings-egress-ktls-splice.md` Assertion 1 |
 | Lossless handshake-window capture | pre-arm plaintext arrives at the peer exactly once, in order, as the first `application_data` (rec_seq 0); no dropped bytes, no RESET | `findings-userspace-relay.md` Unknown 1+2; `findings-lossless-hybrid.md` |
@@ -124,13 +124,16 @@ proved — closing the loop from proven evidence → acceptance criterion → te
      proven driving a real handshake in `findings.md` A (a minimal rcgen P-256 drove
      every spike; real `IdentityRead`/SPIFFE-SAN SVID is the productionisation).
    - **Slice 03 (kTLS install + agent exits + wire capture)** — re-scope: kTLS arms
-     on **leg B**; "agent exits" → "agent-idle forward splice + agent-light return
+     on **leg B**; "agent exits" → "agent-light forward splice + agent-light return
      splice"; the wire capture observable is unchanged (TLS 1.3 on the peer-facing
      wire). Anchor each direction on its proven observable: forward AC ← `tcpdump`
-     shows 0x17 records + agent idle (`findings-egress-ktls-splice.md`, 15/15);
+     shows 0x17 records + `strace` shows only `splice`/`ppoll` on the forward pump
+     (`splice(legF → legB)` into kTLS-TX; D-MTLS-13 replaced the sockmap
+     EGRESS-redirect, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`);
      return AC ← `strace` shows only `splice`/`ppoll` (`findings-splice-return.md`);
-     `ss -tie` shows the kTLS ULP (`findings.md` A). Add a Tier-3 AC for the arming
-     invariant: `SOCKMAP`-after-`TCP_ULP "tls"` == `EINVAL` (`findings.md` D).
+     `ss -tie` shows the kTLS ULP (`findings.md` A). (The earlier arming-invariant
+     Tier-3 AC — `SOCKMAP`-after-`TCP_ULP "tls"` == `EINVAL` — is MOOT under
+     D-MTLS-13; no sockmap insert on any path now.)
    - **Slice 04 (fail-closed + race-window + resource limits + authn boundary)** —
      fail-closed is unchanged (`IdentityRead` `None` → refuse handshake; the
      `AbsentSvid` path). The "no-cleartext-before-kTLS" observable is now satisfied
@@ -140,7 +143,7 @@ proved — closing the loop from proven evidence → acceptance criterion → te
      server-speaks-first assumption. **ADD the F4 resource-limit ACs** (the pre-arm
      buffer is bounded — `BufferLimitExceeded` fail-closed; the handshake has a
      deadline — `HandshakeTimeout`; the per-allocation in-flight ceiling refuses
-     over-limit — `InFlightLimitExceeded`; cleanup leaks no fd/sockmap/kTLS state),
+     over-limit — `InFlightLimitExceeded`; cleanup leaks no fd/pump/kTLS state),
      and the F5 intercept-exemption ACs (agent leg B NOT re-intercepted; workload
      CANNOT self-exempt — referencing the `cgroup_connect4_service` attach
      boundary). **ADD the F1 authn-vs-authz boundary**: v1 authenticates
