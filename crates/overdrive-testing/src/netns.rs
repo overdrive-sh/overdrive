@@ -139,6 +139,24 @@ impl NetNs {
         Ok(())
     }
 
+    /// Disable TX-checksum-offload on `iface` inside this namespace via
+    /// `ethtool -K <iface> tx off`. Required for the dual-XDP NAT
+    /// programs' incremental L4-checksum fixup to be byte-correct: it
+    /// forces the kernel to materialise the FULL L4 checksum in
+    /// software on the sending veth, so the receive-side XDP hook sees
+    /// a valid (not `CHECKSUM_PARTIAL`) base to fold the NAT delta into.
+    /// See `crates/overdrive-bpf/src/shared/csum.rs` and
+    /// `ThreeIfaceTopology::create`.
+    ///
+    /// `ethtool -K … tx off` returns non-zero on virtual ifaces that do
+    /// not expose the feature; callers treat this as best-effort
+    /// (`let _ = …`), since on such ifaces packets already carry a FULL
+    /// checksum and no disable is needed.
+    pub fn ethtool_tx_off(&self, iface: &str) -> Result<(), NetNsError> {
+        run_ip(["netns", "exec", &self.name, "ethtool", "-K", iface, "tx", "off"])?;
+        Ok(())
+    }
+
     /// Build a `Command` that, when spawned, runs `cmd` (with `args`)
     /// inside this namespace. The caller controls the rest of the
     /// builder (stdin/stdout/stderr piping, env, etc.) — this is just
@@ -327,15 +345,31 @@ impl ThreeIfaceTopology {
         // Default route in backend-ns via lb-ns's backend-side iface.
         let _ = backend_ns.add_route("default", Some(&LB_BACKEND_IP.to_string()), None);
 
-        // No `ethtool -K` offload disabling here. Per ADR-0045 § 7,
-        // the post-pivot dual-XDP architecture (xdp_service_map_lookup
-        // at client-facing veth ingress + xdp_reverse_nat at
-        // backend-facing veth ingress) bypasses the kernel
-        // IP-forwarder, so `pskb_expand_head` + `skb_checksum_help`
-        // never run on the receive-side skb and the stale-csum-on-
-        // paged-skb condition never arises. Production-realistic veth
-        // defaults must work end-to-end; any test-fixture offload
-        // disable would mask a real production regression.
+        // Disable TX-checksum-offload on every veth end. The dual-XDP
+        // NAT programs fix the L4 checksum INCREMENTALLY (RFC 1624,
+        // O(1) delta over the rewritten IP + port — see
+        // `crates/overdrive-bpf/src/shared/csum.rs`), which requires the
+        // incoming packet to carry a FULL L4 checksum at the XDP hook.
+        // On a veth with TX-offload enabled, a locally-generated packet
+        // arrives with `CHECKSUM_PARTIAL` (the on-wire field holds only
+        // the pseudo-header sum), and an incremental delta on that
+        // partial value is garbage — every packet drops. `ethtool -K
+        // <iface> tx off` forces the kernel to materialise the FULL
+        // checksum in software before the packet leaves the sending
+        // veth, restoring a valid base for the incremental update.
+        //
+        // This mirrors the PRODUCTION operational invariant: the
+        // appliance OS disables TX offload on every LB veth at
+        // provisioning. It is applied on BOTH ends of each pair so the
+        // checksum is FULL regardless of which direction (forward DNAT
+        // reads `client_veth`→`lb_veth_a`; reverse SNAT reads
+        // `backend_veth`→`lb_veth_b`). See
+        // docs/research/dataplane/bpf-verifier-complexity-and-perf-optimization-research.md
+        // § R-1 and xdp-checksum-partial-veth-research.md (Approach F).
+        let _ = client_ns.ethtool_tx_off(&client_veth);
+        let _ = lb_ns.ethtool_tx_off(&lb_veth_a);
+        let _ = lb_ns.ethtool_tx_off(&lb_veth_b);
+        let _ = backend_ns.ethtool_tx_off(&backend_veth);
 
         Ok(Self { client_ns, lb_ns, backend_ns, client_veth, lb_veth_a, lb_veth_b, backend_veth })
     }

@@ -185,8 +185,50 @@
 #     ProgramInfo::verified_instruction_count. Unrelated to the
 #     transparent-mtls feature landed on the same branch.
 #
+#   Incremental-csum refactor (this commit): verified_insns = 1356.
+#     The chunked full-payload `recompute_l4_csum` + the
+#     `csum_diff_chunk<const N>` / `MAX_64_CHUNKS` engine in
+#     `crates/overdrive-bpf/src/shared/csum.rs` are DELETED. The L4
+#     checksum is now fixed up INCREMENTALLY (RFC 1624, O(1) delta over
+#     the rewritten dst-IP + dst-port via `csum_incremental_3_3` — the
+#     same big-endian-word-domain fold the IPv4-header checksum already
+#     used via `csum_incremental_2_2`, sidestepping the `bpf_csum_diff`
+#     byte-order-domain trap that the chunked engine had to correct with
+#     a trailing `swap_bytes`). This is Cilium's production NAT shape
+#     (bpf/lib/nat.h:489 — `csum_diff(&old_addr, 4, &new_addr, 4, 0)`,
+#     never a payload walk) per R-1 of
+#     docs/research/dataplane/bpf-verifier-complexity-and-perf-optimization-research.md.
+#
+#     The full recompute existed ONLY to tolerate `CHECKSUM_PARTIAL` on
+#     veth (TX-checksum-offload). It is superseded now that the
+#     operational invariant `ethtool -K <iface> tx off` on every LB veth
+#     is accepted (the appliance OS controls all interfaces): with TX
+#     offload off, the ingress packet carries a FULL L4 checksum at the
+#     XDP hook, so the incremental delta has a valid base. The Tier-3
+#     `ThreeIfaceTopology` fixture wires `tx off` on all four veth ends
+#     to match production. (aya#1562 — the variable-length-bpf_csum_diff
+#     constraint that forced the chunked engine — is no longer relevant:
+#     the incremental path uses NO bpf_csum_diff at all.)
+#
+#     Delta vs the chunked-csum baseline: 48395 → 1356 (−47039 insns,
+#     −97.2%). The csum cost center (the ~46K dominant residual)
+#     collapses entirely; 1356 is the FNV-1a 5-tuple hash + HoM chained
+#     lookup + bpf_fib_lookup + L2 MAC rewrite + sanity prologue —
+#     comparable to the pre-csum Slice-05-04 baseline (1211).
+#     1356 / 500,000 = 0.27% of the L1-cache-fits target. The +20% gate
+#     now enforces against THIS baseline (1356): `verified_insns ≤ 1627`.
+#
+#     Behaviour-preserving: the Tier-3
+#     `real_tcp_connection_completes_through_vip_with_payload_echo` e2e
+#     (real TCP handshake + payload echo through the VIP — exercises
+#     forward DNAT + reverse SNAT) and the `service_map_forward`
+#     `ten_tcp_syns_*` test (asserts the post-rewrite `tcp_checksum`
+#     recomputes to 0) both stay green — a wrong incremental fold drops
+#     every segment. Recorded against kernel 7.0.0-22-generic. Unrelated
+#     to the transparent-mtls feature landed on the same branch.
+#
 # Budget gates (ADR-0040 / architecture.md §7 D3 / ASR-2.2-03):
-#   verified_insns ≤ 58074      ← +20% delta vs the chunked-csum baseline (48395)
+#   verified_insns ≤ 1627       ← +20% delta vs the incremental-csum baseline (1356)
 #                                 — pinned by the integration test
 #                                 `verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline`
 #                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
@@ -194,9 +236,9 @@
 #   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
 #   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
 #
-# Recorded value (chunked-csum refactor):
-#   verified_insns = 48395
-#   48395 / 500,000 = 9.7% of the L1-cache-fits target.
+# Recorded value (incremental-csum refactor):
+#   verified_insns = 1356
+#   1356 / 500,000 = 0.27% of the L1-cache-fits target.
 #
 # DST companion:
 #   `MaglevDeterministic` invariant
@@ -213,7 +255,7 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=48395
+file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=1356
 
 # (`xdp_pass` baseline at 21 verified_insns is recorded under
 # perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when

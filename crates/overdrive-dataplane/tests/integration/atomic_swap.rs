@@ -429,12 +429,32 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     //                        because variable-length `bpf_csum_diff` is
     //                        verifier-rejected; the constant-`to_size`
     //                        chunking removes the 750-iteration unroll.
-    //                        151379 → 48395 (−68.0%). Behaviour-preserving:
-    //                        the computed checksum is byte-identical (the
-    //                        Tier-3 `real_tcp_connection_*` e2e gate proves
-    //                        it). Measured on kernel 7.0.0-22-generic.
-    // 48395 insns = 9.7% of the 500K L1-cache-fits target.
-    const BASELINE: u32 = 48_395;
+    //                        151379 → 48395 (−68.0%). Measured on kernel
+    //                        7.0.0-22-generic.
+    //   Incremental-csum refactor: 1356 — the chunked full-payload
+    //                        recompute (`recompute_l4_csum` + the
+    //                        `csum_diff_chunk` engine) is DELETED and the
+    //                        L4 checksum fixed up INCREMENTALLY (RFC 1624,
+    //                        O(1) delta over the rewritten IP + port via
+    //                        `csum_incremental_3_3`), gated on the
+    //                        `ethtool -K tx off` operational invariant on
+    //                        the LB veth (so the ingress packet carries a
+    //                        FULL L4 checksum to fold the delta into). This
+    //                        is Cilium's production NAT shape (bpf/lib/nat.h
+    //                        :489) and supersedes the chunked engine now
+    //                        that `tx off` is accepted. 48395 → 1356
+    //                        (−97.2%). The csum cost center collapses
+    //                        entirely; the residual is the FNV-1a 5-tuple
+    //                        hash + HoM chained lookup + bpf_fib_lookup +
+    //                        L2 MAC rewrite. Behaviour-preserving: the
+    //                        Tier-3 `real_tcp_connection_*` e2e (real TCP
+    //                        handshake + payload echo) and the
+    //                        `ten_tcp_syns_*` post-rewrite `tcp_checksum==0`
+    //                        assertion both stay green — a wrong checksum
+    //                        drops every segment. Measured on kernel
+    //                        7.0.0-22-generic.
+    // 1356 insns = 0.27% of the 500K L1-cache-fits target.
+    const BASELINE: u32 = 1_356;
     let upper_bound = BASELINE + (BASELINE / 5); // +20% per ASR-2.2-03
     assert!(
         insns <= upper_bound,
