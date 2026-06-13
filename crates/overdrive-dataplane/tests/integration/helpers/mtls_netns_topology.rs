@@ -161,6 +161,14 @@ impl MtlsTopology {
     /// `tag` disambiguates parallel runs (embed the test pid). On any mid-build
     /// failure the partial topology is torn down before the error surfaces.
     pub fn create(tag: &str) -> Result<Self, TopologyError> {
+        // The test is the COMPOSITION ROOT for the test: it drives `probe`/`enforce`
+        // directly (no `overdrive serve` boot), so it must install the process-default
+        // rustls `CryptoProvider` itself — the adapter no longer installs it (a library
+        // mutating process-global crypto state is the wrong layer; production's
+        // composition root in `overdrive-control-plane` owns the install). Guarded by
+        // `Once` so the single install happens exactly once across every test in the
+        // binary, regardless of how many topologies are stood up.
+        install_crypto_provider_once();
         check_privileges()?;
 
         let cgroup_root = "/sys/fs/cgroup/overdrive.slice";
@@ -327,4 +335,21 @@ impl Drop for MtlsTopology {
 
 fn svec(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| (*s).to_string()).collect()
+}
+
+/// Install the process-default rustls `CryptoProvider` exactly once for this test
+/// binary. The composed gate's `probe`/`enforce` run sentinel + real rustls
+/// handshakes that consume the process-default provider via
+/// `ServerConfig::builder()` / `ClientConfig::builder()`; with the adapter no
+/// longer installing it (the install is the composition root's job), the test
+/// harness — the composition root for the test — installs it. `Once` makes the
+/// single install idempotent across every topology stood up in the binary.
+fn install_crypto_provider_once() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        // A second install would return `Err`; `Once` guarantees this runs once, so
+        // the result is the authoritative install. Ignore it — if a provider was
+        // already installed by some earlier entrypoint, the handshakes still work.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 }

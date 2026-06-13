@@ -29,9 +29,9 @@ struct CryptoInfoAes256Gcm {
 /// rustls-extracted secrets. Returns the RX record sequence (the value
 /// `liveness`/splice reasoning needs for the kTLS-RX leg). AES-256-GCM only.
 ///
-/// The caller MUST have inserted `fd` into a sockmap BEFORE calling this when the
-/// leg is also a sockmap member (the arming invariant, D-MTLS-7) — this helper
-/// only does the ULP+crypto arm.
+/// The leg is NOT a sockmap member (the forward path is an agent-light `splice`
+/// pump, not a sockmap egress redirect), so there is no sockmap-before-ULP
+/// ordering constraint — this helper does the ULP+crypto arm directly.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "ExtractedSecrets is taken by value so the negotiated key material is moved in and dropped at the end of this scope after the arm — never lingering in the caller"
@@ -47,18 +47,17 @@ pub(super) fn arm_ktls_tx_rx(
     Ok(rx_seq)
 }
 
-/// `setsockopt(SOL_TCP, TCP_ULP, "tls")`. On `EINVAL` after a sockmap insert this
-/// is the arming-order violation (`findings.md` D); the caller maps it.
+/// `setsockopt(SOL_TCP, TCP_ULP, "tls")`. Any failure (the ULP already installed,
+/// the kernel TLS module absent, etc.) surfaces as `KtlsArmFailed` — the failing
+/// layer is the kTLS install.
 fn install_ulp(fd: RawFd) -> Result<(), MtlsEnforcementError> {
     let ulp = b"tls\0";
     // SAFETY: `setsockopt` with a 3-byte "tls" option string on a real TCP fd.
     let rc = unsafe { libc::setsockopt(fd, libc::SOL_TCP, libc::TCP_ULP, ulp.as_ptr().cast(), 3) };
     if rc != 0 {
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::EINVAL) {
-            return Err(MtlsEnforcementError::ArmingOrderViolation);
-        }
-        return Err(MtlsEnforcementError::KtlsArmFailed { source: err });
+        return Err(MtlsEnforcementError::KtlsArmFailed {
+            source: std::io::Error::last_os_error(),
+        });
     }
     Ok(())
 }

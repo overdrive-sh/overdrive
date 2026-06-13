@@ -12,15 +12,16 @@
 
 pub mod cgroup_connect4_service;
 // transparent-mtls-host-socket (ADR-0069, GH #26). The OUTBOUND `connect4`
-// intercept (`cgroup_connect4_mtls`) and the forward sockmap EGRESS-redirect
-// (`sk_skb_stream_verdict_mtls`, hand-rolled link_section — aya-ebpf 0.1.1 has no
-// `#[sk_skb]` macro). Both compile into the shared `overdrive_bpf.o`.
+// intercept (`cgroup_connect4_mtls`) routes the workload's `connect()` to the
+// agent's leg-F listener. The forward path is then an agent-light userspace
+// `splice(legF → legB)` pump in `overdrive-dataplane` (NOT a sockmap egress
+// redirect — see `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-
+// delivery-research.md`), so there is no kernel-side verdict/sockops program here.
 pub mod cgroup_connect4_mtls;
 // unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — the two
 // new cgroup_sock_addr hooks for the unconnected same-host UDP path.
 pub mod cgroup_recvmsg4_service;
 pub mod cgroup_sendmsg4_service;
 pub mod sanity;
-pub mod sk_skb_stream_verdict_mtls;
 pub mod xdp_reverse_nat;
 pub mod xdp_service_map;

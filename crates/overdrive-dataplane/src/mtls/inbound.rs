@@ -42,10 +42,15 @@ pub(super) fn establish(
     //    is read inside the handshake driver BEFORE extract_secrets consumes the
     //    connection (fail-closed guard, Mechanics #6). On nocert/wrongca the
     //    handshake aborts → PeerVerificationFailed; no leg S is dialed, nothing
-    //    spliced (fail-closed).
-    let secrets = server_handshake(leg_c_fd, svid, bundle, limits.handshake_deadline)?;
+    //    spliced (fail-closed). `early_deliver` is any 0.5-RTT request plaintext the
+    //    client sent and rustls already decrypted during the handshake window
+    //    (drained from `conn.reader()`); it must reach leg S ahead of the deliver pump.
+    let (secrets, early_deliver) =
+        server_handshake(leg_c_fd, svid, bundle, limits.handshake_deadline)?;
 
-    // 2. Arm kTLS-RX (+TX) on leg C from the extracted secrets.
+    // 2. Arm kTLS-RX (+TX) on leg C from the extracted secrets. The RX `rec_seq`
+    //    already accounts for the early records rustls decrypted in step 1, so the
+    //    deliver pump resumes at the NEXT on-wire record.
     ktls::arm_ktls_tx_rx(leg_c_fd, secrets)?;
 
     // 3. Dial leg S (the server workload's real plaintext socket). The orig-dst
@@ -60,15 +65,22 @@ pub(super) fn establish(
     let leg_s = super::dial_leg_s(server_dial_addr(orig_dst), limits.handshake_deadline)?;
     let leg_s_fd = leg_s.as_raw_fd();
 
-    // 4. Start the deliver splice pump (legC → pipe → legS) on the plain (no-psock)
-    //    kTLS-RX leg C — the C→S request path. `liveness` reports Running.
-    let deliver = PumpHandle::spawn(leg_c_fd, leg_s_fd, super::now_unix_nanos());
+    // 4. Start the deliver decrypt pump splice(legC → pipe → legS) on the plain
+    //    (no-psock) kTLS-RX leg C — the C→S request path. The kernel
+    //    tls_sw_splice_read decrypts each record. The early-data plaintext from
+    //    step 1 (`early_deliver`) is written to leg S FIRST, ahead of the splice loop,
+    //    so the server sees the client's 0.5-RTT request in order with no loss.
+    //    `liveness` reports Running.
+    let deliver =
+        PumpHandle::spawn_decrypt(leg_c_fd, leg_s_fd, early_deliver, super::now_unix_nanos());
 
-    // 5. Start the response splice pump (legS → pipe → legC) — the S→C response leg
-    //    (GAP 2 inbound half). leg S is plaintext; splicing into leg C drives leg
-    //    C's kTLS-TX, encrypting S's reply back to the client. Auxiliary pump (torn
-    //    down with the connection; not the `liveness`-observed pump).
-    let response = PumpHandle::spawn(leg_s_fd, leg_c_fd, super::now_unix_nanos());
+    // 5. Start the response encrypt pump read(legS) → write_all(legC) — the S→C
+    //    response leg (GAP 2 inbound half). leg S is plaintext; the blocking write
+    //    into leg C drives leg C's kTLS-TX, encrypting S's reply back to the client
+    //    (the proven kTLS-TX primitive). Auxiliary pump (torn down with the
+    //    connection; not the `liveness`-observed pump).
+    let response =
+        PumpHandle::spawn_encrypt(leg_s_fd, leg_c_fd, Vec::new(), super::now_unix_nanos());
 
     // Detach leg ownership into the ConnState (both legs closed on teardown).
     let leg_s_owned = unsafe { OwnedFd::from_raw_fd(leg_s_fd) };
@@ -87,13 +99,17 @@ const fn server_dial_addr(orig_dst: SocketAddrV4) -> SocketAddrV4 {
 
 /// Drive the rustls SERVER handshake on leg C (a raw fd, borrowed not owned),
 /// reading `peer_certificates()` for the fail-closed guard BEFORE extracting the
-/// secrets. The borrowed stream's Drop is suppressed so leg C stays open.
+/// secrets. Returns `(secrets, early_deliver)` — `early_deliver` is the client's
+/// 0.5-RTT request plaintext that rustls decrypted during the handshake and that
+/// must reach leg S ahead of the deliver pump (empty when the client sent none
+/// before its `Finished` was processed). The borrowed stream's Drop is suppressed
+/// so leg C stays open.
 fn server_handshake(
     leg_c_fd: RawFd,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
     deadline: std::time::Duration,
-) -> Result<ExtractedSecrets> {
+) -> Result<(ExtractedSecrets, Vec<u8>)> {
     let cfg = tls_config::server_config(svid, bundle)?;
     let tcp = unsafe { TcpStream::from_raw_fd(leg_c_fd) };
     tcp.set_read_timeout(Some(deadline)).ok();
@@ -112,9 +128,14 @@ fn server_handshake(
                 });
             }
         }
-        conn.dangerous_extract_secrets().map_err(|e| MtlsEnforcementError::HandshakeFailed {
-            reason: format!("extract secrets: {e}"),
-        })
+        // Drain any early application_data rustls decrypted while finishing the
+        // handshake BEFORE `dangerous_extract_secrets` consumes the connection
+        // (kTLS 0.5-RTT early-data correctness — see `mtls::drain_early_plaintext`).
+        let early_deliver = super::drain_early_plaintext(&mut conn.reader());
+        let secrets = conn.dangerous_extract_secrets().map_err(|e| {
+            MtlsEnforcementError::HandshakeFailed { reason: format!("extract secrets: {e}") }
+        })?;
+        Ok((secrets, early_deliver))
     })();
     std::mem::forget(tcp); // keep leg C open for the kTLS arm + splice
     result

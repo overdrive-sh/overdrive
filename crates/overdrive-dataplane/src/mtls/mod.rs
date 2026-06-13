@@ -5,14 +5,18 @@
 //! Implements [`MtlsEnforcement`](overdrive_core::traits::MtlsEnforcement) over
 //! the spike-proven kernel primitives: rustls TLS 1.3 client/server handshakes
 //! (consuming [`IdentityRead`](overdrive_core::traits::IdentityRead) for the held
-//! SVID + trust bundle), kTLS arm (`setsockopt TCP_ULP/TLS_TX/TLS_RX`), the
-//! forward sockmap EGRESS-redirect (`sk_skb/stream_verdict`, `flags=0`,
-//! agent-idle), and the agent-light `splice(2)` return/deliver pump.
+//! SVID + trust bundle), kTLS arm (`setsockopt TCP_ULP/TLS_TX/TLS_RX`), and the
+//! agent-light `splice(2)` pump in EVERY direction — forward (`legF → legB` into
+//! leg B's kTLS-TX), return (`legB → legF`), deliver (`legC → legS`), response
+//! (`legS → legC`). The forward path was a sockmap egress redirect; it is now a
+//! splice pump symmetric to the others (the redirect `MSG_DONTWAIT`-stalled
+//! ~10–15% of records — see
+//! `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
 //!
 //! Mechanism provenance (each method drives a spike-PROVEN syscall sequence):
 //! - OUTBOUND lossless capture — `findings-userspace-relay.md` Unknown 1+2.
-//! - OUTBOUND forward (agent-idle) — `findings-egress-ktls-splice.md` (15/15).
-//! - return/deliver splice (agent-light) — `findings-splice-return.md`.
+//! - splice into kTLS-TX (agent-light, forward + response) — `findings-splice-return.md`.
+//! - splice out of kTLS-RX (agent-light, return + deliver) — `findings-splice-return.md`.
 //! - INBOUND server-mTLS → kTLS-RX → splice-to-S — `findings-inbound-intercept.md`.
 //!
 //! `HostMtlsEnforcement::new` takes `Arc<dyn IdentityRead>` and [`MtlsLimits`] as
@@ -34,7 +38,7 @@
     reason = "raw libc syscall glue: struct-size → socklen_t (compile-time constant, ≤ 56 bytes) and Duration → time_t/suseconds_t casts are FFI-width conversions on bounded values; cannot truncate or wrap"
 )]
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::{SocketAddrV4, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
@@ -52,7 +56,6 @@ use overdrive_core::traits::mtls_enforcement::{
 use overdrive_core::wall_clock::UnixInstant;
 use parking_lot::Mutex;
 
-mod bpf_load;
 mod inbound;
 mod ktls;
 mod outbound;
@@ -61,11 +64,6 @@ mod tls_config;
 
 use splice::PumpHandle;
 
-/// The embedded BPF object (the same `overdrive_bpf.o` the `EbpfDataplane` loads),
-/// carrying the `sk_skb_stream_verdict_mtls` forward-redirect program +
-/// `MTLS_SOCKMAP` / `MTLS_FPORT` / `MTLS_ARMED` maps.
-const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-
 /// Per-connection adapter-private tracking state, keyed by
 /// [`EnforcedConnectionId`]. Holds the owned legs (closed on teardown) + the
 /// splice-pump handle. NOT exposed on [`EnforcedConnection`].
@@ -73,15 +71,15 @@ struct ConnState {
     /// The agent-owned legs to close on teardown. OUTBOUND: leg F + leg B.
     /// INBOUND: leg C + leg S.
     legs: Vec<OwnedFd>,
-    /// The primary return/deliver splice pump — the one `liveness` observes.
-    /// OUTBOUND: the return pump `splice(legB → legF)`. INBOUND: the deliver pump
-    /// `splice(legC → legS)`.
+    /// The primary splice pump — the request-carrying direction `liveness`
+    /// observes. OUTBOUND: the forward pump `splice(legF → legB)` (into leg B's
+    /// kTLS-TX). INBOUND: the deliver pump `splice(legC → legS)`.
     pump: PumpHandle,
     /// Auxiliary splice pumps torn down with the connection but NOT observed by
-    /// `liveness`. INBOUND carries the response pump `splice(legS → legC)` here (the
-    /// S→C response leg — GAP 2 inbound half; leg C's kTLS-TX encrypts S's reply
-    /// back to the client). OUTBOUND leaves this empty (its forward path is the
-    /// agent-idle sockmap egress redirect, not a pump).
+    /// `liveness`. OUTBOUND carries the return pump `splice(legB → legF)` (the B→F
+    /// response leg; leg B's kTLS-RX decrypts the peer's reply). INBOUND carries the
+    /// response pump `splice(legS → legC)` (the S→C response leg — GAP 2 inbound
+    /// half; leg C's kTLS-TX encrypts S's reply back to the client).
     aux_pumps: Vec<PumpHandle>,
 }
 
@@ -140,17 +138,16 @@ impl HostMtlsEnforcement {
 #[async_trait]
 impl MtlsEnforcement for HostMtlsEnforcement {
     async fn probe(&self) -> Result<()> {
-        // Earned-Trust: exercise the three catalogued substrate lies on a loopback
-        // sentinel (kTLS arm round-trip, forward egress-redirect, arming-order
-        // EINVAL) and tear the sentinel state down. Runs on a blocking task — the
-        // sentinel uses synchronous rustls + raw setsockopt.
-        let probe_obj = OVERDRIVE_BPF_OBJ;
-        tokio::task::spawn_blocking(move || outbound::run_probe_sentinels(probe_obj))
-            .await
-            .map_err(|e| MtlsEnforcementError::Probe {
+        // Earned-Trust: exercise the substrate the proxy relies on (kTLS arm +
+        // agent-light forward splice) on a loopback sentinel and tear the sentinel
+        // state down. Runs on a blocking task — the sentinel uses synchronous
+        // rustls + raw setsockopt + splice.
+        tokio::task::spawn_blocking(outbound::run_probe_sentinels).await.map_err(|e| {
+            MtlsEnforcementError::Probe {
                 which: ProbeSentinel::KtlsArmRoundTrip,
                 message: format!("probe task panicked: {e}"),
-            })?
+            }
+        })?
     }
 
     async fn enforce(&self, conn: InterceptedConnection) -> Result<EnforcedConnection> {
@@ -264,58 +261,102 @@ fn drain_prearm(
     Ok(held)
 }
 
-/// Exhaustively drain `leg_fd`'s recv queue to EMPTY (every byte present right now),
-/// bounded by `max_prearm_bytes`. Unlike [`drain_prearm`] this does NOT stop on the
-/// first short read — it loops with a non-blocking read until `EAGAIN`, so no
-/// straggler is left in the recv queue. This is the load-bearing pre-sockmap-insert
-/// drain on the OUTBOUND forward path: the sk_skb strparser engages from leg F's
-/// CURRENT recv-queue position the instant leg F joins the sockmap, so a leftover
-/// (possibly mid-record) straggler would stall the parser and the next steady-state
-/// skb (phase 2) would queue behind it and never redirect — the intermittent
-/// complete forward-delivery miss. Draining to truly empty before the insert closes
-/// it. Returns the drained bytes (the caller flushes them through leg B).
-fn drain_leg_to_empty(
+/// Drain every byte currently in `leg_fd`'s recv queue with non-blocking reads,
+/// appending to `held` and bounding the total by `max_prearm_bytes`. Returns the
+/// number of bytes drained on THIS pass (0 ⇒ the recv queue was empty). A single
+/// pass: read until the first `EAGAIN`/`WouldBlock`, which means the queue has no
+/// more readable bytes right now. The caller composes passes into the bounded
+/// stable-empty loop in [`drain_and_flush_until_stable`].
+fn drain_recv_queue_once(
+    stream: &TcpStream,
+    held: &mut Vec<u8>,
+    buf: &mut [u8],
+    max_prearm_bytes: usize,
+    alloc: &AllocationId,
+) -> Result<usize> {
+    let mut drained = 0usize;
+    loop {
+        // `Read` is implemented for `&TcpStream`; read through a fresh `&mut &TcpStream`
+        // so the borrow does not require an owned-mut binding.
+        match (&mut &*stream).read(buf) {
+            Ok(0) => break, // EOF — peer closed; nothing more to drain
+            Ok(n) => {
+                held.extend_from_slice(&buf[..n]);
+                drained += n;
+                if held.len() > max_prearm_bytes {
+                    return Err(MtlsEnforcementError::BufferLimitExceeded {
+                        alloc: alloc.clone(),
+                        max_prearm_bytes,
+                    });
+                }
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                break; // recv queue currently empty
+            }
+            Err(e) => return Err(MtlsEnforcementError::Io(e)),
+        }
+    }
+    Ok(drained)
+}
+
+/// Drain leg F's recv queue to EMPTY right now (one bounded drain pass) and return
+/// the captured bytes. Used as the final post-flip drain in `establish` (step 9, the
+/// flip-moment guard): after `ARMED=1`, any byte that `SK_PASS`ed to leg F's own recv
+/// queue in the window between the last capture read and the flip is read here and
+/// flushed through leg B. After the `ARMED=1` store is visible, every leg-F skb whose
+/// `sk_data_ready` fires sees `ARMED=1 → SK_REDIRECT`, so draining to `EAGAIN` leaves
+/// no byte un-forwarded (research Finding 2/6). Non-blocking reads; stops at the first
+/// `WouldBlock`/`EAGAIN` (queue currently empty). Bounded by `max_prearm_bytes`.
+fn drain_recv_queue(
     leg_fd: RawFd,
     max_prearm_bytes: usize,
     alloc: &AllocationId,
 ) -> Result<Vec<u8>> {
-    // Non-blocking reads: a `WouldBlock` means the recv queue is currently empty.
     set_read_timeout(leg_fd, Duration::from_millis(1))?;
     let mut held = Vec::new();
     let mut buf = vec![0u8; 16384];
     // SAFETY: borrow the fd as a TcpStream WITHOUT taking ownership (forget at end).
     let stream = unsafe { TcpStream::from_raw_fd(leg_fd) };
-    let result = (|| {
-        // Read repeatedly until two consecutive empty reads (the recv queue is
-        // drained AND no straggler is in flight from a same-burst segment).
-        let mut empties = 0u8;
-        while empties < 2 {
-            match (&stream).read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    held.extend_from_slice(&buf[..n]);
-                    empties = 0;
-                    if held.len() > max_prearm_bytes {
-                        return Err(MtlsEnforcementError::BufferLimitExceeded {
-                            alloc: alloc.clone(),
-                            max_prearm_bytes,
-                        });
-                    }
-                }
-                Err(ref e)
-                    if e.kind() == std::io::ErrorKind::WouldBlock
-                        || e.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    empties += 1;
-                }
-                Err(e) => return Err(MtlsEnforcementError::Io(e)),
-            }
-        }
-        Ok(())
-    })();
+    let result = drain_recv_queue_once(&stream, &mut held, &mut buf, max_prearm_bytes, alloc);
     std::mem::forget(stream);
     result?;
     Ok(held)
+}
+
+/// Drain every byte of already-decrypted plaintext rustls buffered during the
+/// handshake, BEFORE `dangerous_extract_secrets` consumes the connection.
+///
+/// kTLS 0.5-RTT early-data correctness: the TLS writer finishes the handshake and
+/// sends application_data immediately. A hand-rolled `read_tls`/`process_new_packets`
+/// loop that stops at `!is_handshaking()` may have already pulled that early
+/// application_data off the socket and decrypted it into rustls's internal plaintext
+/// buffer (coalesced with / right after the peer's `Finished`). `read_seq` is then
+/// advanced past those records — so the kTLS-RX arm (`rec_seq = read_seq`) correctly
+/// resumes at the NEXT on-wire record, but the bytes rustls already decrypted live
+/// ONLY in `conn.reader()` and would be lost. Draining them here and forwarding them
+/// downstream ahead of the deliver/return pump makes the kTLS-RX leg lose no early
+/// data. (The kernel-cork equivalent — `ktls::CorkStream` in the spikes — prevents
+/// the over-read at the socket; this is the userspace-drain equivalent for the
+/// hand-rolled synchronous rustls path, byte-for-byte correct because `read_seq`
+/// already accounts for the consumed records.)
+fn drain_early_plaintext(reader: &mut dyn Read) -> Vec<u8> {
+    let mut early = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => early.extend_from_slice(&buf[..n]),
+            // `Reader` over rustls's in-memory plaintext buffer signals "no more
+            // buffered plaintext right now" as `WouldBlock`; that is end-of-drain,
+            // not an error (no more records have been decrypted yet).
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(_) => break,
+        }
+    }
+    early
 }
 
 /// `setsockopt(SO_RCVTIMEO)` on a raw fd.
@@ -338,20 +379,6 @@ fn set_read_timeout(fd: RawFd, dur: Duration) -> Result<()> {
         return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
     }
     Ok(())
-}
-
-/// The host-order local port of a socket fd (for the forward-redirect FPORT key).
-fn local_port(fd: RawFd) -> Result<u16> {
-    let mut sa: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-    // SAFETY: getsockname into a sockaddr_in for an IPv4 TCP fd.
-    let rc = unsafe {
-        libc::getsockname(fd, std::ptr::from_mut(&mut sa).cast(), std::ptr::from_mut(&mut len))
-    };
-    if rc != 0 {
-        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
-    }
-    Ok(u16::from_be(sa.sin_port))
 }
 
 /// Process-monotonic "now" in nanos for the pump progress metric.
@@ -447,18 +474,6 @@ impl ConnectMarked for TcpStream {
     }
 }
 
-/// Flush captured pre-arm plaintext through an armed (kTLS) leg, encrypting it as
-/// the first application_data. `held` may be empty (no pre-arm bytes).
-fn flush_through(leg_fd: RawFd, held: &[u8]) -> Result<()> {
-    if held.is_empty() {
-        return Ok(());
-    }
-    let stream = unsafe { TcpStream::from_raw_fd(leg_fd) };
-    let result = (&stream).write_all(held).and_then(|()| (&stream).flush());
-    std::mem::forget(stream);
-    result.map_err(MtlsEnforcementError::Io)
-}
-
 impl HostMtlsEnforcement {
     /// OUTBOUND enforcement (`Direction::Outbound`).
     async fn enforce_outbound(&self, conn: InterceptedConnection) -> Result<EnforcedConnection> {
@@ -473,7 +488,7 @@ impl HostMtlsEnforcement {
         let id = self.next_id(alloc.clone());
 
         let established = tokio::task::spawn_blocking(move || {
-            outbound::establish(leg_f, peer, &svid, &bundle, &alloc, limits, OVERDRIVE_BPF_OBJ)
+            outbound::establish(leg_f, peer, &svid, &bundle, &alloc, limits)
         })
         .await
         .map_err(|e| {
@@ -512,16 +527,11 @@ impl HostMtlsEnforcement {
 // adapter-local alias is invented here (the pinned contract names no
 // `HostMtlsEnforcementError`).
 
-/// Construct a `ConnState` from the established legs + primary pump (no auxiliary
-/// pumps) — the OUTBOUND site (whose forward path is the sockmap egress redirect,
-/// not a pump).
-const fn new_conn_state(legs: Vec<OwnedFd>, pump: PumpHandle) -> ConnState {
-    ConnState { legs, pump, aux_pumps: Vec::new() }
-}
-
-/// Construct a `ConnState` with a primary pump + auxiliary pumps — the INBOUND site
-/// (the primary deliver pump `splice(legC → legS)` plus the response pump
-/// `splice(legS → legC)` in `aux_pumps`, the GAP-2 S→C response leg).
+/// Construct a `ConnState` with a primary pump + auxiliary pumps — both the
+/// OUTBOUND and INBOUND sites. OUTBOUND: the primary forward pump
+/// `splice(legF → legB)` plus the return pump `splice(legB → legF)` in `aux_pumps`.
+/// INBOUND: the primary deliver pump `splice(legC → legS)` plus the response pump
+/// `splice(legS → legC)` in `aux_pumps` (the GAP-2 S→C response leg).
 const fn new_conn_state_bidi(
     legs: Vec<OwnedFd>,
     pump: PumpHandle,

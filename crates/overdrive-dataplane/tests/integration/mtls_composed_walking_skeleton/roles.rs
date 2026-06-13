@@ -199,6 +199,11 @@ fn outbound_peer_serve(
             app_data_records: 0,
         };
     }
+    // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
+    // handshake BEFORE extract consumes the connection — those bytes seed `got` so
+    // the peer never loses an early-arriving forward record (kTLS early-data
+    // correctness; mirrors the production reader legs' `drain_early_plaintext`).
+    let mut got = drain_early_plaintext(&mut conn.reader());
     let secrets = conn.dangerous_extract_secrets().expect("peer extract secrets");
     arm_ktls_raw(fd, &secrets);
     std::mem::forget(tcp); // keep the fd open for the kTLS read/write
@@ -206,7 +211,6 @@ fn outbound_peer_serve(
     // Read the workload's request off the kTLS-RX leg (decrypted by the kernel).
     let stream = unsafe { TcpStream::from_raw_fd(fd) };
     stream.set_read_timeout(Some(Duration::from_secs(8))).ok();
-    let mut got = Vec::new();
     let mut buf = vec![0u8; 4096];
     let deadline = std::time::Instant::now() + Duration::from_secs(8);
     while got.len() < OUTBOUND_REQUEST.len() && std::time::Instant::now() < deadline {
@@ -260,6 +264,26 @@ fn outbound_peer_serve(
     std::thread::sleep(Duration::from_millis(600));
 
     PeerOutcome { request_byte_exact, plaintext_seen_on_wire: false, app_data_records }
+}
+
+/// Drain every byte of already-decrypted plaintext rustls buffered during the
+/// handshake, BEFORE `dangerous_extract_secrets` consumes the connection — the
+/// test-harness mirror of the production `mtls::drain_early_plaintext`. The peer's
+/// `read_seq` already counts these records, so the kTLS-RX arm resumes at the next
+/// on-wire record; without this the peer would lose any 0.5-RTT forward record the
+/// proxy's leg-B client sent coalesced with its `Finished`.
+fn drain_early_plaintext(reader: &mut dyn Read) -> Vec<u8> {
+    let mut early = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => early.extend_from_slice(&buf[..n]),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(_) => break,
+        }
+    }
+    early
 }
 
 /// Drive a rustls SERVER handshake to completion (synchronous); false on failure.
@@ -351,14 +375,16 @@ fn set_crypto_info(fd: RawFd, dir: libc::c_int, sec: &(u64, rustls::ConnectionTr
 // Productionises increment-e relay orchestrator. The workload is a real
 // cgroup-isolated subprocess (python3) in the workload netns; its connect() to the
 // real peer addr is transparently rewritten by cgroup_connect4_mtls to the agent's
-// leg-F listener (bound on the host veth IP, reachable from the netns).
+// leg-F listener (bound on the host veth IP, reachable from the netns). Leg F is an
+// ORDINARY accepted socket — the forward path is the adapter's agent-light
+// splice(legF -> legB) pump, NOT a sockmap egress redirect, so there is no sockops
+// enroll / verdict attach / FPORT / agent-cgroup setup here.
 // =====================================================================
 pub struct OutboundWorkload {
     _bpf: aya::Ebpf,
     _connect_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLink,
     leg_f_listener: TcpListener,
     workload: Option<Child>,
-    leg_f_port: u16,
     handshake_delay: Duration,
 }
 
@@ -371,8 +397,11 @@ impl OutboundWorkload {
     pub fn run(topo: &MtlsTopology, real_peer: SocketAddrV4, handshake_delay: Duration) -> Self {
         // The leg-F listener binds on the host veth IP (10.66.0.1) so the workload
         // in the netns can reach it over the veth. cgroup_connect4_mtls rewrites the
-        // workload's connect(fake_peer) -> (host_veth_ip, leg_f_port).
+        // workload's connect(fake_peer) -> (host_veth_ip, leg_f_port). Leg F is an
+        // ordinary accepted socket (the forward path is the adapter's splice pump),
+        // so no agent cgroup / sockops enroll / FPORT setup is needed.
         let host_veth_ip = Ipv4Addr::new(10, 66, 0, 1);
+
         let leg_f_listener =
             TcpListener::bind((host_veth_ip, 0)).expect("leg-F listener bind on host veth");
         let leg_f_port = leg_f_listener.local_addr().expect("leg-F addr").port();
@@ -424,7 +453,6 @@ impl OutboundWorkload {
             _connect_link: connect_link,
             leg_f_listener,
             workload: Some(workload),
-            leg_f_port,
             handshake_delay,
         }
     }
@@ -502,13 +530,13 @@ fn read_workload_outcome(code: Option<i32>) -> OutboundRoundTrip {
 /// writes OUTBOUND_REQUEST, then reads OUTBOUND_REPLY byte-exact.
 fn spawn_outbound_workload(topo: &MtlsTopology) -> Child {
     // The workload writes the request in TWO phases to exercise BOTH the lossless
-    // pre-arm capture AND the steady-state forward egress-redirect (GAP 1):
+    // pre-arm capture AND the steady-state forward splice (GAP 1):
     //   phase 1 (immediately on connect) — the PRE-ARM portion the agent drains
     //            losslessly during the handshake window and flushes through leg B;
-    //   phase 2 (after a 900ms delay) — the STEADY-STATE portion that arrives AFTER
-    //            the agent has armed kTLS + installed the forward redirect, so it
-    //            rides the agent-idle F→B sockmap egress redirect into leg B's kTLS
-    //            TX. The peer reconstructs both, in order, byte-exact.
+    //   phase 2 (after a delay) — the STEADY-STATE portion that arrives AFTER the
+    //            agent has armed kTLS + spawned the forward splice pump, so it rides
+    //            the agent-light splice(legF → legB) into leg B's kTLS TX. The peer
+    //            reconstructs both, in order, byte-exact.
     let split = OUTBOUND_REQUEST.len() / 2;
     let script = format!(
         r#"
@@ -523,10 +551,10 @@ try:
     s.connect(("{fake_ip}", {fake_port}))
     # phase 1: pre-arm plaintext (drained losslessly during the handshake window)
     s.sendall(part1)
-    # phase 2: steady-state bytes — written well after the agent has armed + installed
-    # the forward redirect (generous margin over the 400ms handshake-delay regime +
-    # the proxy's ~400ms drain/handshake/arm/settle), so they ride the agent-idle
-    # F->B egress redirect, not the recv queue.
+    # phase 2: steady-state bytes — written well after the agent has armed kTLS +
+    # spawned the forward splice pump (generous margin over the 400ms handshake-delay
+    # regime + the proxy's ~400ms drain/handshake/arm/settle), so they ride the
+    # agent-light splice(legF -> legB) into leg B's kTLS TX, not the pre-arm drain.
     time.sleep(2.0)
     s.sendall(part2)
     # read the peer's reply back over the spliced return leg (B->F).
