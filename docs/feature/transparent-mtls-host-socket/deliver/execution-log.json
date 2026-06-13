@@ -106,6 +106,55 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-13T15:27:43Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T15:35:44Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T15:35:44Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T16:37:49Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T17:03:16Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: outbound steady-state liveness==Running already covered by the DST equivalence harness (sim_mtls_enforcement_outcome_matches_contract_both_directions, Direction::Outbound arm); implementation_notes direct expressing pump-progress/liveness through the driving boundary (Tier-3 observables + equivalence harness), not standalone predicate unit tests",
+      "t": "2026-06-13T17:03:16Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T17:03:16Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-13T17:09:30Z"
     }
   ],
   "reviews": [

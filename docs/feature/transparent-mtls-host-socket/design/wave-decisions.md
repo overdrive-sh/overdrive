@@ -301,3 +301,210 @@ and `mtls::drain_early_plaintext` on every reader leg. No
 design-vs-code disagreement was found; the back-propagation is a clean
 narrative-to-shipped-code reconciliation. (Per the dispatch constraint, no
 `crates/**` code was touched.)
+
+## Intercept-surface boundary reconciliation (D-MTLS-14, 2026-06-13 — 02-01 ↔ 05-01)
+
+DELIVER step `02-01` ("Transparent intercept + leg-acquire") was dispatched and
+the crafter correctly **refused to write code**, returning a design-signature
+blocker; the orchestrator verified it against the source + contract (real, not a
+misread). This section reconciles the roadmap↔design inconsistency the blocker
+exposed. **Nothing in the locked decision moves** — the fold (D-MTLS-1,
+ADR-0069), OQ-2, SD-1…SD-5, the 4-method contract shape, and the
+forward-mechanism pivot (D-MTLS-13) are ALL UNCHANGED. This is a HOME/SCOPE
+reconciliation, not a contract change; no new `MtlsEnforcement` method, field, or
+variant is added.
+
+**The inconsistency.** Step `02-01`'s `implementation_scope` named a net-new
+production file `crates/overdrive-dataplane/src/mtls/intercept.rs` carrying
+"leg-F lossless pre-arm capture; inbound `IP_TRANSPARENT` listener + `getsockname`
+orig-dst recovery; TPROXY setup." But against the SHIPPED code + the accepted
+contract, every one of those is mis-homed:
+
+- **Lossless pre-arm capture** — ALREADY production from `01-01`
+  (`crates/overdrive-dataplane/src/mtls/mod.rs::drain_prearm` /
+  `drain_recv_queue` / `drain_recv_queue_once`). The `drain_early_plaintext`
+  0.5-RTT companion is also already there (D-MTLS-13).
+- **Outbound connect-rewrite + the structural F5 exemption** — ALREADY production
+  from `01-01` (`crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs`: the
+  rewrite + the attach-to-workload-subtree-only exemption). The **inbound** F5
+  `SO_MARK` bypass is ALREADY production (`mod.rs::dial_leg_s` +
+  `MTLS_LEG_S_DIAL_MARK`).
+- **`IP_TRANSPARENT` leg-C listener creation, nft-TPROXY install, `accept()`→build
+  `InterceptedConnection`, `getsockname` orig-dst recovery** — exist ONLY in the
+  `01-01` test harness
+  (`tests/integration/mtls_composed_walking_skeleton/roles.rs::{make_transparent_listener,
+  getsockname_orig, accept_leg_f, accept_leg_c_and_orig_dst}` +
+  `tests/integration/helpers/mtls_netns_topology.rs::install_tproxy`). These ARE
+  genuinely un-productionised — but the contract assigns their home to the
+  **composition root**, NOT a `mtls/` adapter file.
+
+**Why the composition root, not the adapter (the contract reading).** SD-1(a) is
+explicit: the `InterceptedConnection` payload is "an owned accepted-leg `OwnedFd` +
+a `direction`-tagged routing fact + `AllocationId`," and the decision text states
+this *deliberately* "couples the contract to 'the worker does the `accept()`,'
+which is exactly the proxy model (a feature, not a leak)." `InterceptedConnection`
+is the **input to `enforce`** — it is produced by whoever owns the
+listeners/`accept()`/orig-dst, which is the worker. There is **no `intercept()`
+method** on the 4-method `MtlsEnforcement` trait, and adding one is forbidden
+("Implement to the design — never invent API surface"). The shipped `inbound.rs`
+confirms the split: `establish` is HANDED the already-recovered `orig_dst`; it does
+NOT create the listener or call `getsockname` itself. The `01-01` test docstrings
+state the same ("the intercept setup (cgroup_connect4 / nft-TPROXY) + the leg-F/leg-C
+listener + the `accept()` are the WORKER's composition-root role … NOT adapter
+API"; "the install is the composition root's job").
+
+**The decision — the intercept-setup primitives are composition-root code, pinned
+as free functions in `overdrive-worker`, called by the `05-01` boot path; `02-01`
+is FOLDED.** The un-productionised primitives (IP_TRANSPARENT listener,
+nft-TPROXY install, `accept()`→`InterceptedConnection`, orig-dst recovery) are NOT
+adapter surface and NOT a `mtls/` file. They are the worker's intercept-install
++ leg-acquire role and land in `crates/overdrive-worker/src/` as part of `05-01`'s
+composition-root wiring (which the external-validity review already created and
+which already owns `overdrive-worker/src/`). `02-01` as a distinct "productionise
+`intercept.rs`" step is **vacuous** — all three of its candidate production
+concerns are either already shipped (`01-01`) or belong to `05-01`. It is folded
+into `01-01` (the parts already done) + `05-01` (the parts that remain).
+
+**Pinned signatures (composition-root intercept-setup primitives — `overdrive-worker`).**
+These are free functions / a small helper type the `05-01` boot path calls; they
+PRODUCE/FEED an `InterceptedConnection` for `enforce`. **None is a method on
+`MtlsEnforcement`** (the trait stays exactly `probe`/`enforce`/`liveness`/`teardown`).
+Newtypes per house style (`SocketAddrV4`, `OwnedFd`, `AllocationId`); a typed
+`thiserror` error; `OwnedFd` ownership handed by value into `InterceptedConnection`.
+The bodies productionise the proven `01-01` test-harness primitives verbatim
+(`make_transparent_listener` / `getsockname_orig` / `accept_*` / `install_tproxy`).
+
+```rust
+//! crates/overdrive-worker/src/mtls_intercept.rs — the worker's intercept-install
+//! + leg-acquire role (the composition-root side of SD-1(a)). Produces the
+//! `InterceptedConnection` that `HostMtlsEnforcement::enforce` consumes. NOT
+//! adapter API; the `MtlsEnforcement` trait is unchanged (4 methods).
+
+use std::net::SocketAddrV4;
+use std::os::fd::OwnedFd;
+
+use overdrive_core::AllocationId;
+use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
+
+/// Cause-distinct failure modes for the worker-side intercept install +
+/// leg-acquire. Typed (`thiserror`), no catch-all `Internal(String)`
+/// (`.claude/rules/development.md` § Errors). `Display` names the privilege /
+/// kernel-feature remediation an operator acts on.
+#[derive(Debug, thiserror::Error)]
+pub enum InterceptError {
+    /// `socket()` / `setsockopt(IP_TRANSPARENT)` / `bind` / `listen` failed
+    /// while creating the inbound leg-C listener. `IP_TRANSPARENT` needs
+    /// `CAP_NET_ADMIN`; the message names the failing syscall.
+    #[error("transparent leg-C listener setup failed on {addr}: {source}")]
+    TransparentListener { addr: SocketAddrV4, #[source] source: std::io::Error },
+    /// The nft-TPROXY prerouting install (or its `ip rule` / `ip route`
+    /// companions) failed — missing `nft_tproxy`, or insufficient privilege.
+    #[error("nft-TPROXY intercept install failed: {reason}")]
+    TproxyInstall { reason: String },
+    /// `accept()` on a leg listener errored or timed out (the intercept did
+    /// not deliver a connection).
+    #[error("leg accept failed on the {direction} intercept listener: {source}")]
+    Accept { direction: &'static str, #[source] source: std::io::Error },
+    /// `getsockname()` on the accepted leg-C socket returned no usable
+    /// original destination (under TPROXY the orig-dst IS the local addr;
+    /// a failure here means the TPROXY redirect did not land).
+    #[error("getsockname original-destination recovery failed: {source}")]
+    OrigDst { #[source] source: std::io::Error },
+}
+
+pub type Result<T, E = InterceptError> = std::result::Result<T, E>;
+
+/// Create the agent's `IP_TRANSPARENT` inbound leg-C listener bound to `addr`
+/// (the port the nft-TPROXY rule redirects to). `SO_REUSEADDR` + `IP_TRANSPARENT`
+/// + `bind` + `listen`, all under the agent's `CAP_NET_ADMIN`. Productionises
+/// `roles.rs::make_transparent_listener`.
+pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpListener>;
+
+/// Install the inbound nft-TPROXY prerouting intercept (+ the `ip rule fwmark`
+/// / `ip route local … table` companions) that redirects a connection aimed at
+/// `virt` to the agent's leg-C listener on `agent_port`, with the
+/// `MTLS_LEG_S_DIAL_MARK` exemption ordered first so the agent's own leg-S dial
+/// is not re-intercepted (F5 inbound). Productionises
+/// `mtls_netns_topology.rs::install_tproxy`'s production half (the harness's
+/// GAP-3 netns DNAT/masquerade is test-only and does NOT productionise — the
+/// production adapter dials the orig-dst verbatim, #178). Returns a guard whose
+/// `Drop` removes the rule/route/table.
+pub fn install_inbound_tproxy(
+    virt: SocketAddrV4,
+    agent_port: u16,
+) -> Result<TproxyInterceptGuard>;
+
+/// RAII guard removing the nft-TPROXY table + `ip rule`/`ip route` on `Drop`.
+pub struct TproxyInterceptGuard { /* private: the cleanup argv set */ }
+
+/// Accept the transparently-redirected OUTBOUND workload connection on the
+/// agent's leg-F listener and build the `InterceptedConnection` for `enforce`
+/// (`Routed::Outbound { peer }`, the real peer leg B dials). The owned leg F is
+/// handed by value (the port takes ownership; RAII-closes on teardown).
+/// Productionises `roles.rs::accept_leg_f`.
+pub fn accept_outbound_leg(
+    leg_f_listener: &std::net::TcpListener,
+    alloc: AllocationId,
+    peer: SocketAddrV4,
+) -> Result<InterceptedConnection>;
+
+/// Accept the TPROXY-redirected INBOUND connection on the agent's leg-C
+/// listener, recover the original destination via `getsockname` (NOT
+/// `SO_ORIGINAL_DST`), and build the `InterceptedConnection`
+/// (`Routed::Inbound { orig_dst }`, which selects the server SVID's
+/// `AllocationId`). The owned leg C is handed by value. Productionises
+/// `roles.rs::{accept_leg_c_and_orig_dst, getsockname_orig}`.
+pub fn accept_inbound_leg(
+    leg_c_listener: &std::net::TcpListener,
+    alloc: AllocationId,
+) -> Result<InterceptedConnection>;
+```
+
+(`Routed`/`InterceptedConnection` are the existing pinned contract types from
+`overdrive_core::traits::mtls_enforcement`; these functions CONSTRUCT them, they
+do not extend them. `expected_peer` is `None` in v1 — authn-only, F5/#178.)
+
+**Reconciled `02-01` ↔ `05-01` scope split (no overlap).**
+
+- **`01-01` (DONE, unchanged):** lossless pre-arm capture (`drain_prearm` et al.);
+  the outbound `cgroup_connect4_mtls` connect-rewrite + structural F5 exemption;
+  the inbound leg-S `SO_MARK` F5 bypass (`dial_leg_s` / `MTLS_LEG_S_DIAL_MARK`); the
+  0.5-RTT early-data drain. The intercept-setup primitives proven IN the test
+  harness.
+- **`02-01` — FOLDED (removed as a distinct DELIVER step).** Every candidate
+  production concern is either already shipped (`01-01`) or belongs to `05-01`;
+  there is no non-duplicative, non-already-done residue, and the only way to make
+  it net-new would be inventing a forbidden adapter `intercept()` method. The
+  `02-01` ACs are re-homed: AC1 (lossless capture) → `01-01` (done); AC3 (F5
+  no-recursion mechanism) → `01-01` (done); AC2 (IP_TRANSPARENT listener +
+  getsockname orig-dst), AC4 (CAP_NET_ADMIN intercept/listener setup), AC5
+  (accepted connection enforceable via the port without re-deriving routing from an
+  unsafe tuple — SD-1(a)) → `05-01` (the composition-root primitives above + the
+  e2e gate). The `crates/overdrive-dataplane/src/mtls/intercept.rs` file is NOT
+  created.
+- **`05-01` (the home for the remaining intercept work):** the `overdrive-worker`
+  composition-root primitives above (`mtls_intercept.rs`) + the `run_server`
+  wire→probe→use of `HostMtlsEnforcement` + the end-to-end Tier-3 gate. `05-01`
+  now lands the intercept-listener creation / TPROXY install / accept→
+  `InterceptedConnection` / orig-dst recovery that `02-01` mis-homed to the
+  adapter, **as the worker's role**, and proves them through the e2e deploy gate
+  (a workload deployed via `overdrive deploy <SPEC>` produces TLS 1.3 on its
+  peer-facing leg). No `mtls/intercept.rs`; no new trait surface.
+
+**Net dependency effect.** The happy-path chain is unchanged in ORDER
+(intercept → handshake → enforce → guardrails → activation); `02-02` (agent
+handshake) now depends on `01-01` directly (the intercept + leg-acquire foundation
+`02-01` was nominally productionising is already in `01-01` for the adapter-test
+path; the *production* intercept install moves to `05-01`, which is downstream of
+`02-02`/`02-03`/`03-01`/`04-01` and is where the e2e activation belongs). The
+re-dispatch instruction: **skip `02-01` (folded) and proceed to `02-02`**; land the
+intercept-setup primitives as part of `05-01`.
+
+| Decision | Status | Where reconciled |
+|---|---|---|
+| **D-MTLS-14** (NEW) | `02-01` intercept-surface boundary: the intercept-setup primitives are composition-root (`overdrive-worker`) free functions feeding `InterceptedConnection`, NOT a `mtls/` adapter file and NOT a trait method; `02-01` FOLDED into `01-01` (done) + `05-01` (remaining). The 4-method contract is UNCHANGED. | this section; `deliver/roadmap.json` (`02-01` removed, `05-01` scope + ACs extended, dependency edges); `feature-delta.md` (this primitive signature pin + Traceability); `slices/slice-01-…md` (folded marker) |
+
+**No GH issue created.** This reconciliation creates no deferral — the remaining
+intercept work has a concrete home (`05-01`) and the folded step's concerns are all
+accounted for. (#178 expected-peer pinning and #230 operator-tunable limits remain
+the only standing deferrals, unchanged.)

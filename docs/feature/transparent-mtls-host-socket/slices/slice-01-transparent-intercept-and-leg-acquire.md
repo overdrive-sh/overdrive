@@ -7,6 +7,30 @@
 > transparently REDIRECTED to an agent-owned leg, not adopted on the workload's
 > own fd.
 
+> **DELIVER re-home (D-MTLS-14, 2026-06-13 — `wave-decisions.md`).** This slice's
+> learning hypothesis is unchanged and sound, but its DELIVER work is split across
+> two steps, NOT a single "productionise `mtls/intercept.rs`" step (which would be
+> vacuous or would require inventing a forbidden adapter `intercept()` method):
+> - **Already shipped in DELIVER step `01-01`:** the lossless pre-arm capture
+>   (`overdrive-dataplane/src/mtls/mod.rs::drain_prearm`), the outbound
+>   `cgroup_connect4_mtls` connect-rewrite, and the F5 intercept-exemption
+>   mechanism (structural workload-cgroup-subtree scoping + the inbound leg-S
+>   `SO_MARK` bypass `dial_leg_s`/`MTLS_LEG_S_DIAL_MARK`).
+> - **Lands in DELIVER step `05-01`:** the production intercept INSTALL +
+>   leg-acquire — IP_TRANSPARENT leg-C listener creation, nft-TPROXY install,
+>   `accept()`→`InterceptedConnection`, `getsockname` orig-dst recovery. These are
+>   the **WORKER's composition-root role** (SD-1(a): "the worker does the
+>   `accept()`," a feature not a leak), landing as
+>   `overdrive-worker/src/mtls_intercept.rs` free functions that feed the
+>   `MtlsEnforcement` port — **NOT a `mtls/` adapter file and NOT a 5th trait
+>   method.** The `MtlsEnforcement` contract stays exactly
+>   `probe`/`enforce`/`liveness`/`teardown`.
+>
+> The former DELIVER step `02-01` is **FOLDED** (its concerns are all in `01-01`
+> or `05-01`); the F5 *negative proofs* remain DELIVER step `04-01`. The IN-scope
+> wording below describes "the agent" doing the install — read that as the **worker
+> composition root**, per the home split above.
+
 **Job**: J-SEC-003 | **Feature**: transparent-mtls-host-socket (GH #26) | **Stories**: US-MTLS-01
 
 ## Goal (one sentence)

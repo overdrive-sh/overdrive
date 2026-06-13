@@ -198,6 +198,36 @@ filter = '''
 '''
 test-group = 'cgroup-workload-shared'
 
+# Test group for the transparent-mTLS Tier-3 acceptance tests (ADR-0069,
+# GH #26). Each one stands up a real netns/veth + cgroup-isolated workload
+# topology AND loads the shared `cgroup_connect4_mtls` BPF object, programs
+# the process-global `MTLS_REDIRECT_DEST` map, and binds FIXED loopback
+# constants (`OUTBOUND_FAKE_PEER` 127.0.0.200:9443, the inbound VIRT addr,
+# the leg-S nft-TPROXY + ip-rule/route global state) — all of which are
+# process-global resources two concurrent test PROCESSES corrupt for each
+# other (a sibling's redirect-dest reprogram / bpffs pin / accept window
+# collides, surfacing as "leg-F accept ... intercept must deliver" failures).
+# Per `.claude/rules/testing.md` § "Leaked workload cgroups / Leftover XDP
+# attachments across runs", the nextest test-group is the only level that can
+# enforce the cross-process single-writer constraint (same rationale as
+# `bpf-artifact-shared` / `cgroup-workload-shared` above — `serial_test` only
+# synchronises within one process). Without it, adding the third mtls Tier-3
+# test (02-03 `mtls_outbound_enforce`) made the latent two-test race fire
+# deterministically.
+[test-groups.mtls-shared]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = '''
+    binary(integration)
+    & (
+        test(composed_bidirectional_proxy_walking_skeleton_no_rst)
+        | test(agent_handshake_presents_held_svid_client_and_server_roles)
+        | test(outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire)
+    )
+'''
+test-group = 'mtls-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,

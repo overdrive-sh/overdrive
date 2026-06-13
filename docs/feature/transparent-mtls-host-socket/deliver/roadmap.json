@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "transparent-mtls-host-socket",
     "created_at": "2026-06-12T14:15:23Z",
-    "total_steps": 7
+    "total_steps": 6
   },
   "phases": [
     {
@@ -42,39 +42,8 @@
     },
     {
       "id": "02",
-      "name": "Productionised happy path: intercept, handshake, outbound enforce",
+      "name": "Productionised happy path: handshake, outbound enforce",
       "steps": [
-        {
-          "id": "02-01",
-          "name": "Transparent intercept + leg-acquire (outbound rewrite + inbound TPROXY) with no recursion",
-          "description": "Productionise the intercept + leg-acquire for BOTH directions: outbound connect()-rewrite to the agent's leg-F listener with lossless pre-arm capture, inbound TPROXY redirect to an IP_TRANSPARENT leg-C listener with original-destination recovery, and the agent-private intercept-exemption mechanism so the agent's own peer dial is not re-intercepted. The F5 negative proofs are deferred to 04-01.",
-          "criteria": [
-            "An intercepted outbound connection is routed to the agent's leg-F listener and its pre-arm plaintext is captured LOSSLESSLY (no dropped bytes) into a bounded buffer [anchor: findings-userspace-relay.md Unknown 1 -- route by local_port only; a local_ip4 byte-order disagreement was found]",
-            "An intercepted inbound connection is redirected to the agent's IP_TRANSPARENT leg-C listener and the original destination is recovered via getsockname (NOT SO_ORIGINAL_DST) [anchor: findings-inbound-intercept.md §1 (ORIG_DST=127.0.0.2:18443 recovered)]",
-            "The agent's own peer-facing dial is NOT re-intercepted by the workload intercept program -- the bypass is agent-private and scoped to the agent, not the workload cgroup subtree [anchor: ADR-0069 'intercept-recursion / agent-leg-B exemption']",
-            "Intercept + listener setup succeed under the agent's privilege (CAP_NET_ADMIN); the workload is unprivileged and holds nothing [anchor: findings-inbound-intercept.md Mechanics #1]",
-            "An intercepted connection (either direction) is accepted, associated with the correct allocation, and enforceable through the MtlsEnforcement port without re-deriving routing from an unsafe socket tuple (SD-1 (a): the owned leg + direction-tagged routing fact; no pidfd, no 4-tuple re-derivation)"
-          ],
-          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_transparent_intercept.rs",
-          "scenario_name": "transparent_intercept_outbound_rewrite_inbound_tproxy_no_recursion",
-          "effort_hours": 6,
-          "dependencies": [
-            "01-01"
-          ],
-          "implementation_scope": {
-            "production_files": [
-              "crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs (outbound connect()-rewrite + the agent-private intercept-exemption bypass)",
-              "crates/overdrive-dataplane/src/mtls/intercept.rs (leg-F lossless pre-arm capture; inbound IP_TRANSPARENT listener + getsockname orig-dst recovery; TPROXY setup)",
-              "crates/overdrive-core/src/traits/mtls_enforcement.rs (Direction / Routed / InterceptedConnection finalised from the 01-01 stub)"
-            ],
-            "test_files": [
-              "crates/overdrive-dataplane/tests/integration/mtls_transparent_intercept.rs",
-              "crates/overdrive-core/tests/mtls_enforcement_newtypes.rs (proptest roundtrip ONLY for any newtype with a stable public serialization contract -- e.g. Direction/Routed Display/FromStr/serde, per the mandatory newtype call site; NOT a shape test of InterceptedConnection's owned-fd payload)"
-            ]
-          },
-          "implementation_notes": "Tier 3 for the intercept/orig-dst/lossless-capture observables (real cgroup_connect4 rewrite + TPROXY + getsockname on the real kernel; no BPF_PROG_TEST_RUN for cgroup_sock_addr / TPROXY contexts). Tier 1 / proptest is scoped to newtypes that carry a stable public serialization or value contract (the newtype-roundtrip mandatory call site) -- Direction / Routed where they FromStr/Display/serde. Do NOT write standalone unit tests of internal predicates (the local_port routing decision, the SO_MARK/cgroup bypass check-and-skip): exercise those through the driving boundary (the intercept acceptance test) and the DST equivalence harness, with the Tier-3 wire/orig-dst observables as the acceptance signal. Route the relay by local_port ONLY (the Unknown-1 byte-order trap). Mutation testing >=80% kill-rate diff-scoped (cargo xtask mutants --diff origin/main, Lima-prefixed because integration-tests participate) on the touched default-lane logic. IMPLEMENT TO THE ACCEPTED CONTRACT -- the InterceptedConnection payload is SD-1 (a); do NOT add fields or a pidfd. The F5 negative proofs are 04-01 scope -- only the bypass mechanism lands here. Integration tests gated behind `integration-tests`; RED scaffold convention for any test landing ahead of impl.",
-          "reference_implementation": "Gitignored spike-scratch reference: spike-scratch/increment-e-userspace-relay/ (cgroup_connect4 rewrite + orig-dst + lossless leg-F pre-arm capture — relay/src/{main,agent}.rs, bpf/src/main.rs) and spike-scratch/increment-i-inbound-intercept/ (TPROXY/IP_TRANSPARENT intercept + getsockname orig-dst — agent/src/main.rs; run-intercept-probe.sh isolates it). Exact intercept + leg-acquire mechanics to productionise."
-        },
         {
           "id": "02-02",
           "name": "Agent mutual-TLS handshake presenting the held SVID (client leg B + server leg C)",
@@ -90,7 +59,7 @@
           "scenario_name": "agent_handshake_presents_held_svid_client_and_server_roles",
           "effort_hours": 6,
           "dependencies": [
-            "02-01"
+            "01-01"
           ],
           "implementation_scope": {
             "production_files": [
@@ -157,7 +126,7 @@
           "effort_hours": 6,
           "dependencies": [
             "02-02",
-            "02-01"
+            "01-01"
           ],
           "implementation_scope": {
             "production_files": [
@@ -196,7 +165,7 @@
             "02-03",
             "03-01",
             "02-02",
-            "02-01"
+            "01-01"
           ],
           "implementation_scope": {
             "production_files": [
@@ -221,12 +190,13 @@
       "steps": [
         {
           "id": "05-01",
-          "name": "Wire HostMtlsEnforcement into the production node/worker boot path; probe-then-use, fail closed; live-allocation intercepts",
-          "description": "The external-validity step: the production node/worker composition root constructs HostMtlsEnforcement, runs probe() at startup and FAILS CLOSED on error (no silent boot without enforcement), and attaches the intercepts for live host-socket allocations -- so a workload deployed via `overdrive deploy` is actually enforced. Without this, adapter Tier-3 tests pass while production never enables mTLS (the built-in-ca 02-02 cold-boot regression class).",
+          "name": "Wire HostMtlsEnforcement into the production node/worker boot path; probe-then-use, fail closed; productionise the intercept install + leg-acquire for live allocations",
+          "description": "The external-validity step AND the home for the production intercept install + leg-acquire (the former 02-01 scope, folded here per D-MTLS-14): the production node/worker composition root constructs HostMtlsEnforcement, runs probe() at startup and FAILS CLOSED on error (no silent boot without enforcement), and -- as the WORKER's role, not adapter API -- creates the IP_TRANSPARENT leg-C listener, installs the nft-TPROXY intercept, accepts the redirected/rewritten workload leg, recovers the inbound original destination via getsockname, and hands the owned leg + direction-tagged routing fact INTO the MtlsEnforcement port (SD-1(a)) for live host-socket allocations -- so a workload deployed via `overdrive deploy` is actually enforced. Without this, adapter Tier-3 tests pass while production never enables mTLS (the built-in-ca 02-02 cold-boot regression class). The lossless pre-arm capture and the F5 intercept-exemption mechanism already shipped in 01-01; the agent-private bypass scoping is structural in cgroup_connect4_mtls.rs.",
           "criteria": [
             "The node/worker boot path constructs HostMtlsEnforcement with the identity read-port + MtlsLimits and runs probe() at startup, BEFORE serving any allocation traffic (the wire->probe->use composition-root invariant) [anchor: feature-delta MtlsEnforcement probe doc; ADR-0069 § Enforcement; D-MTLS-11]",
             "A failed probe() refuses to start with a structured health.startup.refused event and the node does NOT degrade to a cleartext path -- fail-closed for confidentiality (mirroring the existing ebpf_dataplane.probe() refusal in run_server)",
-            "For a live host-socket allocation, the boot path attaches the cgroup_connect4 / TPROXY intercepts so the workload's connections are routed through the agent's legs once it reaches Running",
+            "For a live host-socket allocation, the boot path creates the agent's IP_TRANSPARENT leg-C listener and installs the nft-TPROXY intercept (and the outbound cgroup_connect4 leg-F redirect), under the agent's CAP_NET_ADMIN, so the workload's connections are routed through the agent's legs once it reaches Running; the workload is unprivileged and holds nothing [anchor: findings-inbound-intercept.md §1 / Mechanics #1; ADR-0069 'intercept-recursion / agent-leg-B exemption'; D-MTLS-14]",
+            "An intercepted connection (either direction) is accepted by the worker, associated with the correct allocation, its inbound original destination recovered via getsockname (NOT SO_ORIGINAL_DST), and handed to the MtlsEnforcement port as an owned leg + direction-tagged routing fact -- enforceable without re-deriving routing from an unsafe socket tuple (SD-1(a): no pidfd, no 4-tuple re-derivation) [anchor: findings-inbound-intercept.md §1; feature-delta SD-1(a); D-MTLS-14]",
             "END-TO-END acceptance (the load-bearing gate): a normal exec workload deployed via `overdrive deploy <SPEC>` produces TLS 1.3 records (tcpdump 0x17) on its peer-facing leg with zero payload cleartext, and the peer reads byte-exact plaintext -- proven by a driving-port / end-to-end Tier-3 test that ACTUALLY RUNS under Lima (cargo xtask lima run -- ...), NOT a compile-check / --no-run",
             "The workload holds no SVID material (identity-unaware) and the CLI verb is `overdrive deploy <SPEC>` (NOT `job submit`); the e2e test exercises the real boot path, not the adapter in isolation"
           ],
@@ -241,14 +211,15 @@
           "implementation_scope": {
             "production_files": [
               "crates/overdrive-control-plane/src/lib.rs (run_server composition root: construct HostMtlsEnforcement with the identity read-port + MtlsLimits, probe()-then-use with health.startup.refused on failure, mirroring the existing ebpf_dataplane.probe() refusal)",
-              "crates/overdrive-worker/src/ (node/worker startup + allocation lifecycle: attach the intercepts for live host-socket allocations once an alloc reaches Running; supervise enforced connections)"
+              "crates/overdrive-worker/src/mtls_intercept.rs (the worker's intercept-install + leg-acquire role -- the composition-root side of SD-1(a), folded from 02-01 per D-MTLS-14: make_transparent_listener / install_inbound_tproxy(+RAII guard) / accept_outbound_leg / accept_inbound_leg(getsockname orig-dst). Free functions producing InterceptedConnection for enforce; NOT a mtls/ adapter file and NOT a MtlsEnforcement method. Exact signatures pinned in feature-delta D-MTLS-14 / wave-decisions.md.)",
+              "crates/overdrive-worker/src/ (node/worker startup + allocation lifecycle: create the listeners + install the intercepts via mtls_intercept.rs and hand the owned leg into enforce for live host-socket allocations once an alloc reaches Running; supervise enforced connections)"
             ],
             "test_files": [
               "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs (end-to-end: deploy an exec workload via the real boot path and assert TLS 1.3 on its peer-facing leg)"
             ]
           },
-          "implementation_notes": "Tier 3 end-to-end through the REAL production boot path. This is the step that closes the external-validity gap the review flagged (BLOCKER): no prior step wires HostMtlsEnforcement into run_server / the worker allocation lifecycle, so adapter Tier-3 tests could be green while `overdrive serve` never enables mTLS for real host-socket workloads. The acceptance gate MUST actually run under Lima (cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests); a --no-run / compile-check is explicitly insufficient -- 'a --no-run gate is green even when every fixture refuses at boot' is precisely the regression this step exists to prevent (the built-in-ca-operator-composition 02-02 cold-boot precedent). The composition root follows wire->probe->use: construct the adapter (BPF objects/maps loaded+pinned), call probe(), and refuse to start on Err with a structured health.startup.refused event -- reusing the exact precedent already in run_server for ebpf_dataplane.probe(). The probe is fail-closed for confidentiality: a node that cannot honor the encryption contract MUST NOT boot serving cleartext. The worker (D-MTLS-10, in-process node agent) attaches the intercepts for live allocations and supervises the enforced connections via the liveness point-query (SD-4). IMPLEMENT TO THE ACCEPTED CONTRACT -- probe/enforce/liveness/teardown only; do NOT invent wiring surface beyond the MtlsEnforcement port + the existing run_server/worker startup shape. The operator verb is `overdrive deploy <SPEC>`; do NOT invent a CLI verb (encryption is automatic and undisableable, no driving CLI surface). Mutation testing >=80% diff-scoped on any default-lane wiring logic (the probe-result branch, the allocation-attach predicate). RED scaffold convention; integration-tests gate.",
-          "reference_implementation": "No spike implementation — this is NEW production composition-root wiring. Codebase precedent to mirror: overdrive-control-plane/src/lib.rs run_server's ebpf_dataplane.probe() -> health.startup.refused fail-closed-on-boot pattern (apply the same wire->probe->use shape for HostMtlsEnforcement::probe at startup)."
+          "implementation_notes": "Tier 3 end-to-end through the REAL production boot path. This step also OWNS the production intercept install + leg-acquire (folded from the former 02-01 per D-MTLS-14): the IP_TRANSPARENT leg-C listener creation, the nft-TPROXY install, the accept()->InterceptedConnection, and the getsockname orig-dst recovery are the WORKER's composition-root role -- NOT adapter API and NOT a new MtlsEnforcement method (the trait stays probe/enforce/liveness/teardown). Productionise the proven 01-01 test-harness primitives verbatim (roles.rs::{make_transparent_listener, getsockname_orig, accept_leg_f, accept_leg_c_and_orig_dst}; mtls_netns_topology.rs::install_tproxy production half) as the free functions pinned in feature-delta D-MTLS-14. The lossless pre-arm capture (mod.rs::drain_prearm), the outbound cgroup_connect4_mtls rewrite, and the F5 exemption (structural cgroup-subtree scoping + the inbound dial_leg_s SO_MARK / MTLS_LEG_S_DIAL_MARK) ALREADY shipped in 01-01 -- do NOT re-create them; the harness GAP-3 netns DNAT/masquerade is test-only and does NOT productionise (the adapter dials orig-dst verbatim, #178). This is the step that closes the external-validity gap the review flagged (BLOCKER): no prior step wires HostMtlsEnforcement into run_server / the worker allocation lifecycle, so adapter Tier-3 tests could be green while `overdrive serve` never enables mTLS for real host-socket workloads. The acceptance gate MUST actually run under Lima (cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests); a --no-run / compile-check is explicitly insufficient -- 'a --no-run gate is green even when every fixture refuses at boot' is precisely the regression this step exists to prevent (the built-in-ca-operator-composition 02-02 cold-boot precedent). The composition root follows wire->probe->use: construct the adapter (BPF objects/maps loaded+pinned), call probe(), and refuse to start on Err with a structured health.startup.refused event -- reusing the exact precedent already in run_server for ebpf_dataplane.probe(). The probe is fail-closed for confidentiality: a node that cannot honor the encryption contract MUST NOT boot serving cleartext. The worker (D-MTLS-10, in-process node agent) creates the listeners, installs the intercepts, accepts the leg, builds InterceptedConnection, calls enforce, and supervises the enforced connections via the liveness point-query (SD-4). IMPLEMENT TO THE ACCEPTED CONTRACT -- probe/enforce/liveness/teardown only; do NOT add a mtls/intercept.rs adapter file, do NOT add an intercept() trait method, do NOT invent wiring surface beyond the MtlsEnforcement port + the mtls_intercept.rs free functions + the existing run_server/worker startup shape. The operator verb is `overdrive deploy <SPEC>`; do NOT invent a CLI verb (encryption is automatic and undisableable, no driving CLI surface). The F5 NEGATIVE proofs (agent dial provably not re-intercepted; workload provably cannot self-exempt) are 04-01 scope -- only the mechanism + the install land here. Mutation testing >=80% diff-scoped on any default-lane wiring logic (the probe-result branch, the allocation-attach predicate, the orig-dst recovery / routing-fact construction). RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "The intercept install + leg-acquire primitives to productionise are the PROVEN 01-01 test-harness functions (the SSOT for the mechanism): crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton/roles.rs::{make_transparent_listener (IP_TRANSPARENT leg-C listener), getsockname_orig (orig-dst recovery), accept_leg_f / accept_leg_c_and_orig_dst (accept -> owned leg + routing fact)} + helpers/mtls_netns_topology.rs::install_tproxy (the production nft-TPROXY half; the GAP-3 netns DNAT/masquerade is test-only). Move these into crates/overdrive-worker/src/mtls_intercept.rs as the free functions pinned in feature-delta D-MTLS-14. The composition-root wiring itself is NEW: codebase precedent to mirror is overdrive-control-plane/src/lib.rs run_server's ebpf_dataplane.probe() -> health.startup.refused fail-closed-on-boot pattern (apply the same wire->probe->use shape for HostMtlsEnforcement::probe at startup). The lossless pre-arm capture + F5 exemption + cgroup_connect4_mtls rewrite are already production (01-01) -- reuse, do not re-create."
         }
       ]
     }

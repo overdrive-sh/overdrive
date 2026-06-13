@@ -50,6 +50,13 @@ mod integration {
     /// (promoted out of the per-test subdir in step 02-02 so the agent-handshake
     /// acceptance test shares ONE role harness — no parallel implementation).
     mod mtls_composed_walking_skeleton;
+    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 02-03, F3/F5/D-MTLS-13) —
+    /// OUTBOUND-isolated per-direction wire/syscall observables: the forward
+    /// `read→write_all` COPY into leg B's kTLS-TX vs the return zero-copy `splice` out
+    /// of leg B's kTLS-RX. Drives `HostMtlsEnforcement::enforce(Outbound)` and asserts
+    /// the mechanism asymmetry from REAL strace + ss -tie ULP + the AF_PACKET wire
+    /// oracle, through the `MtlsEnforcement` driving port.
+    mod mtls_outbound_enforce;
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
