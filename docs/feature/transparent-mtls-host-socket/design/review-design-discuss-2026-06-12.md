@@ -1,11 +1,11 @@
 # Combined DISCUSS + DESIGN Review - transparent-mtls-host-socket
 
-**Reviewer**: Codex, applying DISCUSS handoff / DoR checks plus architecture review criteria  
-**Date**: 2026-06-12  
+**Reviewer**: Codex, applying DISCUSS handoff / DoR checks plus architecture review criteria \
+**Date**: 2026-06-12 \
 **Scope**: `feature-delta.md`, DISCUSS wave decisions, product/local journeys,
 J-SEC-003, Sam persona, slices 00-05, ADR-0069, C4 diagrams, design wave
 decisions, upstream-change notes, spike findings, product outcome registry, and
-existing review artifacts.  
+existing review artifacts. \
 **Verdict**: **rejected_pending_revisions**
 
 Review stance: the kernel feasibility is not being relitigated. The user premise

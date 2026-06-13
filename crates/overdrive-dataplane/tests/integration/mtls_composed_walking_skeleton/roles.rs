@@ -48,6 +48,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use overdrive_core::SpiffeId;
+use rustls::server::WebPkiClientVerifier;
+
 use super::super::helpers::mtls_netns_topology::MtlsTopology;
 use super::super::helpers::traffic::{WireCapture, WireScan};
 use super::pki::TestPki;
@@ -121,6 +124,15 @@ pub struct OutboundPeer {
     /// the peer's handshake-success bookkeeping. Stopped+scanned by
     /// `wire_observations`; the cached scan answers repeat calls.
     wire: parking_lot::Mutex<WireCaptureState>,
+    /// The CLIENT SPIFFE-id the peer's `WebPkiClientVerifier` REQUIRED and the peer
+    /// thread extracted from the presented (and verified) client leaf's URI SAN —
+    /// written by `outbound_peer_serve` BEFORE it extracts the kTLS secrets, read by
+    /// the test via `presented_client_spiffe`. `None` until the handshake completes
+    /// (or if the peer never saw a client cert — which cannot happen now the peer
+    /// REQUIRES client auth). This is what proves the agent's leg-B client handshake
+    /// actually PRESENTED the held client SVID (F1) — surfaced to the test, not
+    /// swallowed in the peer thread.
+    presented_client_spiffe: Arc<parking_lot::Mutex<Option<SpiffeId>>>,
 }
 
 /// Either the live capture (not yet scanned) or the cached scan result.
@@ -160,7 +172,6 @@ fn stop_scan_cached(state: &parking_lot::Mutex<WireCaptureState>, marker: &[u8])
 struct PeerOutcome {
     request_byte_exact: bool,
     plaintext_seen_on_wire: bool,
-    app_data_records: u64,
 }
 
 impl OutboundPeer {
@@ -172,6 +183,16 @@ impl OutboundPeer {
         // — derived from captured bytes, not from the peer's decrypt-success.
         let cert = pki.peer_leaf.cert_der.clone();
         let key = pki.peer_leaf.key_der.clone_key();
+        // REQUIRE+VERIFY the client's SVID against the test CA (F1): the peer is the
+        // outbound mTLS server, so it must request and verify the client cert the
+        // agent's leg B presents — otherwise the SVID-presentation path is never
+        // exercised and this gate would pass even if it were broken. Built from the
+        // SAME root-store construction the inbound client uses (`ca_root_store`),
+        // mirroring `src/mtls/tls_config::server_config`'s `WebPkiClientVerifier`.
+        let client_verifier =
+            WebPkiClientVerifier::builder(Arc::new(ca_root_store(pki.ca_cert_pem())))
+                .build()
+                .expect("peer client-cert verifier");
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("peer bind");
         let addr = match listener.local_addr().expect("peer addr") {
             std::net::SocketAddr::V4(a) => a,
@@ -181,17 +202,31 @@ impl OutboundPeer {
         // on the wire after the capture is live.
         let capture = WireCapture::start(LOOPBACK_IFACE, addr.port());
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let handle = std::thread::spawn(move || outbound_peer_serve(&listener, cert, key));
+        // Shared slot the peer thread writes the verified client SPIFFE-id into (F1).
+        let presented_client_spiffe = Arc::new(parking_lot::Mutex::new(None));
+        let spiffe_slot = Arc::clone(&presented_client_spiffe);
+        let handle = std::thread::spawn(move || {
+            outbound_peer_serve(&listener, cert, key, client_verifier, &spiffe_slot)
+        });
         Self {
             addr,
             handle: Some(handle),
             shutdown,
             wire: parking_lot::Mutex::new(WireCaptureState::Live(capture)),
+            presented_client_spiffe,
         }
     }
 
     pub fn addr(&self) -> SocketAddrV4 {
         self.addr
+    }
+
+    /// The CLIENT SPIFFE-id the peer's `WebPkiClientVerifier` REQUIRED + verified and
+    /// extracted from the presented client leaf's URI SAN (F1). `None` until the
+    /// leg-B handshake has completed; the test reads this after the round-trip to
+    /// assert the agent presented the held client SVID and its SAN matches.
+    pub fn presented_client_spiffe(&self) -> Option<SpiffeId> {
+        self.presented_client_spiffe.lock().clone()
     }
 
     /// Stop the wire capture (on first call) and scan it for the oracle. The scan is
@@ -222,18 +257,20 @@ fn outbound_peer_serve(
     listener: &TcpListener,
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
+    client_verifier: Arc<dyn rustls::server::danger::ClientCertVerifier>,
+    spiffe_slot: &parking_lot::Mutex<Option<SpiffeId>>,
 ) -> PeerOutcome {
     let Some((tcp, _)) = accept_with_timeout(listener, Duration::from_secs(10)) else {
-        return PeerOutcome {
-            request_byte_exact: false,
-            plaintext_seen_on_wire: false,
-            app_data_records: 0,
-        };
+        return PeerOutcome { request_byte_exact: false, plaintext_seen_on_wire: false };
     };
     tcp.set_nodelay(true).ok();
     let fd = tcp.as_raw_fd();
+    // REQUIRE+VERIFY the client SVID against the test CA (F1): without this the peer
+    // never asks for the client cert, and the gate would pass even if the agent's
+    // leg-B SVID-presentation path were broken. Mirrors the production inbound
+    // server side (`src/mtls/tls_config::server_config`).
     let mut cfg = rustls::ServerConfig::builder()
-        .with_no_client_auth()
+        .with_client_cert_verifier(client_verifier)
         .with_single_cert(vec![cert], key)
         .expect("peer server config");
     cfg.enable_secret_extraction = true;
@@ -242,11 +279,15 @@ fn outbound_peer_serve(
     tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
     let mut conn = rustls::ServerConnection::new(Arc::new(cfg)).expect("peer ServerConnection");
     if !drive_server_handshake(&mut conn, &mut tcp) {
-        return PeerOutcome {
-            request_byte_exact: false,
-            plaintext_seen_on_wire: false,
-            app_data_records: 0,
-        };
+        return PeerOutcome { request_byte_exact: false, plaintext_seen_on_wire: false };
+    }
+    // F1: read the presented (and verifier-accepted) client cert and record its URI
+    // SAN as a SpiffeId — BEFORE `dangerous_extract_secrets` consumes the connection
+    // (the same Mechanics #6 ordering the production inbound `server_handshake` uses).
+    // The verifier already REQUIRED + chain-verified it; this extracts the identity
+    // so the TEST can assert it equals the held client SVID's SPIFFE.
+    if let Some(spiffe) = peer_presented_client_spiffe(&conn) {
+        *spiffe_slot.lock() = Some(spiffe);
     }
     // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
     // handshake BEFORE extract consumes the connection — those bytes seed `got` so
@@ -287,13 +328,10 @@ fn outbound_peer_serve(
         );
     }
 
-    // The wire oracle is NO LONGER derived from this decrypt-success bookkeeping —
-    // the REAL AF_PACKET capture on `lo` (owned by `OutboundPeer`) counts the genuine
-    // `0x17` records and confirms the cleartext marker is absent. The peer's
-    // byte-exact reconstruction still drives `forward_delivered_byte_exact` (the
-    // workload's exit code), but `app_data_records` / `plaintext_marker_hits` come
-    // from captured bytes, not from `request_byte_exact`.
-    let app_data_records = u64::from(request_byte_exact);
+    // The wire oracle is NOT derived from this decrypt-success bookkeeping — the REAL
+    // AF_PACKET capture on `lo` (owned by `OutboundPeer`) counts the genuine `0x17`
+    // records and confirms the cleartext marker is absent. The peer's byte-exact
+    // reconstruction drives `forward_delivered_byte_exact` (the workload's exit code).
 
     // Reply (the return B→F leg, GAP 2) — encrypted by kTLS-TX. Reply ONLY when the
     // request reconstructed byte-exact, so the workload's exit code reflects forward
@@ -307,7 +345,29 @@ fn outbound_peer_serve(
     }
     std::thread::sleep(Duration::from_millis(600));
 
-    PeerOutcome { request_byte_exact, plaintext_seen_on_wire: false, app_data_records }
+    PeerOutcome { request_byte_exact, plaintext_seen_on_wire: false }
+}
+
+/// Extract the CLIENT SPIFFE-id (URI SAN) from the leaf certificate the peer's
+/// `WebPkiClientVerifier` REQUIRED + verified — the F1 identity proof. Reads
+/// `conn.peer_certificates()` (which must be called BEFORE
+/// `dangerous_extract_secrets` consumes the connection), parses the leaf DER with
+/// `x509-parser`, and returns the sole URI SAN parsed as a `SpiffeId`. `None` if no
+/// client cert was presented (cannot happen now the peer REQUIRES client auth) or
+/// the leaf carries no URI SAN. Mirrors the workspace's established URI-SAN
+/// extraction (`overdrive-host` `rcgen_ca_chain_verify` test).
+fn peer_presented_client_spiffe(conn: &rustls::ServerConnection) -> Option<SpiffeId> {
+    use x509_parser::prelude::FromDer as _;
+
+    let certs = conn.peer_certificates()?;
+    let leaf = certs.first()?;
+    let (_, parsed) = x509_parser::certificate::X509Certificate::from_der(leaf.as_ref()).ok()?;
+    let san = parsed.subject_alternative_name().ok()??;
+    let uri = san.value.general_names.iter().find_map(|gn| match gn {
+        x509_parser::extensions::GeneralName::URI(uri) => Some(*uri),
+        _ => None,
+    })?;
+    uri.parse::<SpiffeId>().ok()
 }
 
 /// Drain every byte of already-decrypted plaintext rustls buffered during the
@@ -869,22 +929,28 @@ impl InboundWorker {
         (OwnedFd::from(leg_c), orig_dst)
     }
 
-    pub fn join_client(mut self) -> InboundClientResult {
+    /// Join the inbound client thread, completing the C↔S round-trip, and only THEN
+    /// stop plus scan the client-facing leg-C wire capture (F2). Keeping the capture
+    /// live until after the client thread joins makes the confidentiality scan cover
+    /// the application request and response payload rather than just the
+    /// encrypted-handshake flight, whose outer TLS content type is also application
+    /// data, so a record count of one or more would otherwise be satisfiable by the
+    /// handshake alone. This mirrors the already-correct outbound ordering, where
+    /// `wire_observations` runs only after `workload.join()`. Returns the client's
+    /// round-trip result paired with the leg-C wire observations.
+    pub fn join_client(mut self) -> (InboundClientResult, WireObservations) {
         let fail =
             || InboundClientResult { received_response_byte_exact: false, observed_rst: true };
-        self.client.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()))
-    }
-
-    /// Stop the client-facing wire capture (on first call) and scan it for the leg-C
-    /// confidentiality oracle. Cached so repeat calls return the same scan. Called by
-    /// the test AFTER the request/response round-trip has completed, so every leg-C
-    /// record is on the captured wire.
-    pub fn client_wire_observations(&self) -> WireObservations {
+        let client_result =
+            self.client.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()));
+        // The round-trip is done (client thread joined) — NOW stop + scan the capture
+        // so the confidentiality scan covers the application payload.
         let scan = stop_scan_cached(&self.wire, INBOUND_REQUEST);
-        WireObservations {
+        let wire = WireObservations {
             app_data_records: scan.app_data_records,
             plaintext_marker_hits: scan.plaintext_marker_hits,
-        }
+        };
+        (client_result, wire)
     }
 }
 

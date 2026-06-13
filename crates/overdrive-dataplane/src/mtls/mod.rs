@@ -451,27 +451,121 @@ trait ConnectMarked {
 }
 
 impl ConnectMarked for TcpStream {
+    /// Connect the marked fd to `peer`, bounding the connect by `deadline`.
+    ///
+    /// `SO_RCVTIMEO` does NOT bound `connect(2)` — a broken DNAT/route would make a
+    /// blocking `connect` hang until the kernel's TCP connect timeout (~127 s),
+    /// wedging the `spawn_blocking` enforce task far past `handshake_deadline`. So
+    /// the marked socket goes non-blocking, issues `connect` (expecting
+    /// `EINPROGRESS`), waits for writability via `poll(POLLOUT)` with the remaining
+    /// deadline, then reads `SO_ERROR` to learn the actual connect result. On a
+    /// successful connect the fd is restored to BLOCKING mode (the downstream
+    /// `splice` pumps + reads require blocking semantics). On deadline-exceed it
+    /// returns `Io(TimedOut)` (fail-closed — `enforce`'s error path closes the owned
+    /// legs; nothing is spliced to the server workload).
     fn connect_timeout_marked(&self, peer: SocketAddrV4, deadline: Duration) -> Result<()> {
         let fd = self.as_raw_fd();
         let mut sa: libc::sockaddr_in = unsafe { std::mem::zeroed() };
         sa.sin_family = libc::AF_INET as libc::sa_family_t;
         sa.sin_port = peer.port().to_be();
         sa.sin_addr.s_addr = u32::from_ne_bytes(peer.ip().octets());
-        // Blocking connect with the process default timeout is acceptable for the
-        // single-flow walking skeleton; set a recv timeout to bound a stall.
-        set_read_timeout(fd, deadline)?;
-        let rc = unsafe {
-            libc::connect(
-                fd,
-                std::ptr::from_ref(&sa).cast(),
-                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-            )
-        };
-        if rc != 0 {
-            return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
-        }
-        Ok(())
+
+        // Put the fd in non-blocking mode so `connect` returns immediately with
+        // `EINPROGRESS` instead of blocking until the kernel's connect timeout.
+        let prev_flags = get_fd_flags(fd)?;
+        set_fd_flags(fd, prev_flags | libc::O_NONBLOCK)?;
+
+        let connect_result = nonblocking_connect_with_deadline(fd, &sa, deadline);
+
+        // Restore the prior (blocking) flags before returning, on every path — the
+        // splice pumps and reads downstream require blocking semantics.
+        let restore = set_fd_flags(fd, prev_flags);
+        connect_result?;
+        restore
     }
+}
+
+/// `fcntl(F_GETFL)` on a raw fd.
+fn get_fd_flags(fd: RawFd) -> Result<libc::c_int> {
+    // SAFETY: F_GETFL takes no extra argument on a valid fd.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL, 0) };
+    if flags < 0 {
+        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(flags)
+}
+
+/// `fcntl(F_SETFL, flags)` on a raw fd.
+fn set_fd_flags(fd: RawFd, flags: libc::c_int) -> Result<()> {
+    // SAFETY: F_SETFL with an int flags argument on a valid fd.
+    let rc = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+    if rc < 0 {
+        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Issue a non-blocking `connect` on `fd`, then `poll(POLLOUT)` with the remaining
+/// `deadline` and read `SO_ERROR` to learn the connect outcome. The caller owns
+/// setting/restoring `O_NONBLOCK`. Returns `Io(TimedOut)` if the deadline elapses
+/// before the socket becomes writable, or the `SO_ERROR` errno if the connect failed.
+fn nonblocking_connect_with_deadline(
+    fd: RawFd,
+    sa: &libc::sockaddr_in,
+    deadline: Duration,
+) -> Result<()> {
+    // SAFETY: connect with a sockaddr_in on the marked fd; non-blocking so it returns
+    // EINPROGRESS rather than blocking.
+    let rc = unsafe {
+        libc::connect(
+            fd,
+            std::ptr::from_ref(sa).cast(),
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        )
+    };
+    if rc == 0 {
+        return Ok(()); // connected immediately (loopback / already-resolved route)
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() != Some(libc::EINPROGRESS) {
+        return Err(MtlsEnforcementError::Io(err)); // a real, immediate connect failure
+    }
+
+    // EINPROGRESS: wait for writability (connect completion) bounded by the deadline.
+    let timeout_ms = i32::try_from(deadline.as_millis()).unwrap_or(i32::MAX);
+    let mut pfd = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+    // SAFETY: poll a single owned pollfd.
+    let pr = unsafe { libc::poll(std::ptr::from_mut(&mut pfd), 1, timeout_ms) };
+    if pr < 0 {
+        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
+    }
+    if pr == 0 {
+        // Deadline elapsed before the connect completed — fail-closed (a broken
+        // DNAT/route must not pin the enforce task for ~127 s).
+        return Err(MtlsEnforcementError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut)));
+    }
+
+    // Writable: read SO_ERROR for the actual connect result (a non-zero value means
+    // the connect failed asynchronously — ECONNREFUSED, EHOSTUNREACH, etc.).
+    let mut so_error: libc::c_int = 0;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: SO_ERROR yields a c_int on the connected fd.
+    let rc = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            std::ptr::from_mut(&mut so_error).cast(),
+            std::ptr::from_mut(&mut len),
+        )
+    };
+    if rc != 0 {
+        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
+    }
+    if so_error != 0 {
+        return Err(MtlsEnforcementError::Io(std::io::Error::from_raw_os_error(so_error)));
+    }
+    Ok(())
 }
 
 impl HostMtlsEnforcement {

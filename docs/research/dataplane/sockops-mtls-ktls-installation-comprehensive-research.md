@@ -51,7 +51,7 @@ For Overdrive's model (workload calls `connect()` → sockops intercepts → nod
 
 The fundamental constraint: there is a **race window** between `ACTIVE_ESTABLISHED_CB` firing (sockops notification) and the completion of the node agent's TLS handshake. During this window, any application `write()` will send plaintext.
 
-**Source**: [Linux Kernel in-kernel TLS handshake API](https://docs.kernel.org/networking/tls-handshake.html) — kernel.org, accessed 2026-06-04. **Reputation**: High (1.0). 
+**Source**: [Linux Kernel in-kernel TLS handshake API](https://docs.kernel.org/networking/tls-handshake.html) — kernel.org, accessed 2026-06-04. **Reputation**: High (1.0).
 
 **Sub-question 3 — What can sockops actually do? What is BPF-side vs userspace-side?**
 
@@ -65,7 +65,7 @@ The fundamental constraint: there is a **race window** between `ACTIVE_ESTABLISH
 
 **Sub-question 4 — The alternative architecture: sockmap redirect to per-connection proxy socket**
 
-**Evidence**: The practical architecture used by Istio Ambient ztunnel and Cilium's mutual auth approach is: **redirect the application's connection to a local per-node proxy socket** (via iptables or sockmap), where the proxy performs the TLS handshake on a new socket, and then proxies data. This avoids the handshake race entirely because the proxy owns the TLS socket. The application's plaintext connection goes to `localhost:PORT`, the proxy intercepts, does TLS to the remote, and forwards data. Cilium's current mTLS (1.20+) uses ztunnel with iptables redirection to a per-node proxy, NOT sockops+kTLS with in-place key installation. 
+**Evidence**: The practical architecture used by Istio Ambient ztunnel and Cilium's mutual auth approach is: **redirect the application's connection to a local per-node proxy socket** (via iptables or sockmap), where the proxy performs the TLS handshake on a new socket, and then proxies data. This avoids the handshake race entirely because the proxy owns the TLS socket. The application's plaintext connection goes to `localhost:PORT`, the proxy intercepts, does TLS to the remote, and forwards data. Cilium's current mTLS (1.20+) uses ztunnel with iptables redirection to a per-node proxy, NOT sockops+kTLS with in-place key installation.
 
 The "install keys and step out" model requires either (a) blocking the application socket until the handshake completes (not possible via BPF alone without a kernel mechanism) OR (b) using `SO_RCVBUF`/socket buffers to hold early data (fragile) OR (c) using a **separate control-channel handshake** between the two node agents keyed on 5-tuple, where both agents independently derive the same keys and install them on their respective data sockets before data flows — this requires strict coordination protocol and is novel, unshipped territory.
 
@@ -273,7 +273,7 @@ let extracted: ExtractedSecrets = conn.dangerous_extract_secrets()?;
 
 `ConnectionTrafficSecrets` enum variants (all contain `key: AeadKey` and `iv: Iv`):
 - `Aes128Gcm { key, iv }` — maps to `TLS_CIPHER_AES_GCM_128`
-- `Aes256Gcm { key, iv }` — maps to `TLS_CIPHER_AES_GCM_256` 
+- `Aes256Gcm { key, iv }` — maps to `TLS_CIPHER_AES_GCM_256`
 - `Chacha20Poly1305 { key, iv }` — maps to `TLS_CIPHER_CHACHA20_POLY1305`
 
 The `KernelConnection` type (via `dangerous_into_kernel_connection()`) is for cases where the application wants to continue managing key updates after kTLS is installed; it requires `enable_extract_secrets` on the config.
@@ -338,7 +338,7 @@ ConnectionTrafficSecrets::Chacha20Poly1305 { key, iv }
 A `BPF_MAP_TYPE_HASH` keyed by `{src_ip, src_port, dst_ip, dst_port, proto}` (the 5-tuple) maps connections to identity metadata. The sockops program writes the entry at connection establishment; the node agent and downstream policy programs read it.
 
 **IDENTITY_MAP likely schema** (design input for DISCUSS wave):
-- **Key**: source IP address (or cgroup ID for local allocation identification)  
+- **Key**: source IP address (or cgroup ID for local allocation identification)
 - **Value**: `{spiffe_id_bytes: [u8; 255], ttl_seconds: u32, allocation_id: u64}`
 - **Written by**: IdentityMgr (roadmap 2.13 / GH #35), which maps allocation IP assignments to SPIFFE IDs
 - **Read by**: sockops at connection establishment (to resolve which SVID to use), BPF LSM (for access control), XDP (for identity-based packet filtering)
@@ -642,7 +642,7 @@ The sockops program is comparatively simple (reads fields, writes to map, calls 
 ### Gap 3: Exact `tlshd` invocation pattern from a BPF sockops program
 **Issue**: While Oracle's `tlshd` implements the kernel handshake API for kernel consumers, the mechanism for triggering `tlshd` from a BPF sockops program (for arbitrary workload sockets) is not documented. The kernel's `tls_client_hello_x509()` API is for kernel subsystems, not for signalling from sockops. The bridge is unclear. **Attempted**: ktls-utils README, kernel tls-handshake.html. Not found. **Recommendation**: Review `ktls-utils` source code directly; may need to implement a custom netlink protocol between sockops and the node agent.
 
-### Gap 4: TLS 1.3 KeyUpdate exact LTS kernel availability  
+### Gap 4: TLS 1.3 KeyUpdate exact LTS kernel availability
 **Issue**: The KeyUpdate patch series targeted `net-next`. Exact stable kernel version and LTS backport status (does it ship in 6.6 LTS, 6.8, later?) is not confirmed from sources accessed. **Attempted**: mail-archive.com patch series, kernel.org docs. **Recommendation**: Check `linux/net/tls/tls_main.c` git log for the KeyUpdate commit and its stable backport tags.
 
 **Conflicting Information**:

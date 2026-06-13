@@ -214,6 +214,21 @@ async fn drive_outbound(
         "outbound post-arm transfer must NOT RST in either timing regime"
     );
 
+    // F1: the peer REQUIRED + verified the client SVID, and the SPIFFE-id it
+    // extracted from the presented client leaf's URI SAN matches the held client
+    // SVID's SPIFFE. This is what proves the agent's leg-B client handshake actually
+    // PRESENTED the held client SVID — without the peer's REQUIRE+VERIFY this gate
+    // would pass even if the SVID-presentation path were broken. The assertion lives
+    // HERE in the test (not swallowed in the peer thread): the peer surfaces the
+    // verified identity via `presented_client_spiffe`, and the round-trip having
+    // completed (above) guarantees the handshake finished.
+    assert_eq!(
+        peer.presented_client_spiffe().as_ref(),
+        Some(&pki.client_leaf.spiffe),
+        "the agent's leg-B handshake must present the held client SVID, and the peer's \
+         WebPkiClientVerifier must accept it with the expected SPIFFE SAN"
+    );
+
     // Confidentiality: 0x17 TLS 1.3 records on the peer-facing leg B; the
     // workload's plaintext NEVER on the peer wire.
     let wire = peer.wire_observations();
@@ -273,14 +288,16 @@ async fn drive_inbound(
         .expect("inbound enforce must reach steady-state-established (server-mTLS OK, NO RST)");
     assert_eq!(adapter.liveness(&handle), PumpLiveness::Running);
 
-    // Confidentiality: 0x17 on the client-facing leg C; plaintext only on leg S.
-    // Captured BEFORE join_client consumes the worker.
-    let wire = worker.client_wire_observations();
-
     // S receives the byte-exact decrypted plaintext; the response leg S→C carries
     // S's reply back to the client over leg C's kTLS (GAP 2 inbound half).
     let server_result = server.join();
-    let client_result = worker.join_client();
+    // F2: `join_client` joins the client thread (completing the round-trip) and ONLY
+    // THEN stops + scans the leg-C capture — so the confidentiality scan covers the
+    // application request/response payload, not merely the encrypted-handshake flight
+    // (whose outer content type is ALSO 0x17, which would let `app_data_records >= 1`
+    // pass before any application data ever crossed the wire). Mirrors the
+    // already-correct outbound ordering (capture scanned after `workload.join()`).
+    let (client_result, wire) = worker.join_client();
     assert!(
         server_result.received_request_byte_exact,
         "the server workload S must receive the byte-exact decrypted plaintext request"
@@ -294,6 +311,8 @@ async fn drive_inbound(
         "inbound transfer must NOT RST in either timing regime"
     );
 
+    // Confidentiality: 0x17 on the client-facing leg C; plaintext only on leg S.
+    // Scanned AFTER the round-trip joins (F2) so the scan covers the actual payload.
     assert!(
         wire.app_data_records >= 1,
         "leg C (client-facing) must carry TLS 1.3 application_data (0x17) records"
