@@ -47,6 +47,23 @@ fn link_present(iface: &str) -> bool {
     Command::new("ip").args(["link", "show", iface]).output().is_ok_and(|o| o.status.success())
 }
 
+/// Read `ethtool -k <iface>` and return whether `tx-checksumming` is ON.
+/// `None` when `ethtool` is unavailable or the iface does not report the
+/// feature line — the caller treats `None` as "cannot assert" (skip the
+/// offload assertion) rather than a failure, since some kernels/runners
+/// lack `ethtool` or the feature on a veth.
+fn tx_checksumming_on(iface: &str) -> Option<bool> {
+    let out = Command::new("ethtool").args(["-k", iface]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    stdout.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("tx-checksumming:")?;
+        Some(rest.split_whitespace().next() == Some("on"))
+    })
+}
+
 /// Returns `true` if the provision skipped due to missing `CAP_NET_ADMIN`
 /// (so the test can bail with a skip rather than fail on an unprivileged
 /// runner). Distinguishes the EPERM "no privilege" shape from a genuine
@@ -293,4 +310,126 @@ fn provision_recreates_pair_when_client_absent_but_peer_present() {
     delete_pair(&client);
     // The stashed orphan client dies with its netns.
     let _ = Command::new("ip").args(["netns", "del", &stash_ns]).output();
+}
+
+/// Production-correctness regression for commit 62fa6be2 (incremental L4
+/// checksum): after `provision`, BOTH ends of the LB veth pair must have
+/// TX-checksum-offload DISABLED (`ethtool -k <iface>` reports
+/// `tx-checksumming: off`). These are the SAME ifaces
+/// `EbpfDataplane::new_with_pin_dir` attaches `xdp_service_map_lookup` /
+/// `xdp_reverse_nat_lookup` to, so disabling offload here gives the
+/// receive-side XDP NAT hook a FULL (not `CHECKSUM_PARTIAL`) ingress
+/// checksum as the base for its incremental delta. Without it, every
+/// NAT'd packet's checksum is corrupted.
+///
+/// Also asserts the converge-on-boot IDEMPOTENCY guarantee (ADR-0061
+/// § 3.1): a SECOND `provision` over the now-offload-off pair re-observes
+/// offload off, emits no disable step, and converges to a silent success
+/// — offload stays off, no error.
+#[test]
+fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
+    let (client, backend) = iface_names('t');
+    delete_pair(&client);
+
+    let plan = plan_for(&client, &backend, "10.101.0.0/24");
+    match provision(&plan) {
+        Ok(()) => {}
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_disables_tx_offload_on_both_ends_and_is_idempotent: CAP_NET_ADMIN required ({err})"
+            );
+            return;
+        }
+        Err(err) => panic!("first provision failed: {err}"),
+    }
+    assert!(link_present(&client), "pair must exist after first provision");
+
+    // After provision, both ends must report offload OFF. When `ethtool`
+    // or the feature is unavailable on this runner, `None` → skip the
+    // offload assertion (but still exercise the idempotency path below).
+    let client_offload = tx_checksumming_on(&client);
+    let backend_offload = tx_checksumming_on(&backend);
+    if let Some(client_on) = client_offload {
+        assert!(!client_on, "client veth must have tx-checksumming OFF after provision");
+    }
+    if let Some(backend_on) = backend_offload {
+        assert!(!backend_on, "backend veth must have tx-checksumming OFF after provision");
+    }
+    if client_offload.is_none() && backend_offload.is_none() {
+        eprintln!(
+            "NOTE provision_disables_tx_offload_on_both_ends_and_is_idempotent: ethtool/tx-checksumming unavailable on this runner; offload state not asserted (idempotency still exercised)"
+        );
+    }
+
+    // Second provision over the offload-off pair must converge silently —
+    // re-observe offload off, emit no disable, no error.
+    provision(&plan).expect("second provision over an offload-off pair must converge silently");
+    if let Some(client_on) = tx_checksumming_on(&client) {
+        assert!(!client_on, "client veth must STILL have tx-checksumming OFF after re-converge");
+    }
+    if let Some(backend_on) = tx_checksumming_on(&backend) {
+        assert!(!backend_on, "backend veth must STILL have tx-checksumming OFF after re-converge");
+    }
+
+    delete_pair(&client);
+}
+
+/// Drift-repair: a COMPLETE pair whose TX-offload has drifted back ON
+/// (e.g. a manual `ethtool -K … tx on`, a driver reset, an operator
+/// fat-finger) must be converged back to offload-OFF by `provision` —
+/// the present-pair completion path (NOT the recreate path) must observe
+/// offload-on and emit the disable. This is the production scenario the
+/// `observe`→`converge_steps` offload read exists for: without an honest
+/// observation of the live offload state, a re-provision over a drifted
+/// pair would leave offload ON and silently corrupt every NAT'd packet
+/// (commit 62fa6be2). Guards the observer reporting the TRUE per-iface
+/// offload bit (not a constant), so converge emits the disable exactly
+/// when it is actually needed.
+#[test]
+fn provision_repairs_tx_offload_drifted_back_on() {
+    let (client, backend) = iface_names('d');
+    delete_pair(&client);
+
+    let plan = plan_for(&client, &backend, "10.102.0.0/24");
+    // Stand up a complete, converged pair (offload off) — or skip.
+    match provision(&plan) {
+        Ok(()) => {}
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_repairs_tx_offload_drifted_back_on: CAP_NET_ADMIN required ({err})"
+            );
+            return;
+        }
+        Err(err) => panic!("initial provision failed: {err}"),
+    }
+
+    // Drift offload BACK ON on both ends. If the feature is fixed /
+    // unsettable on this runner's veth, `ethtool -K … tx on` is a no-op
+    // and the observed state stays off — in which case this scenario
+    // cannot be constructed, so skip rather than assert a precondition we
+    // cannot establish.
+    let _ = Command::new("ethtool").args(["-K", &client, "tx", "on"]).output();
+    let _ = Command::new("ethtool").args(["-K", &backend, "tx", "on"]).output();
+    let drifted_on =
+        tx_checksumming_on(&client) == Some(true) || tx_checksumming_on(&backend) == Some(true);
+    if !drifted_on {
+        eprintln!(
+            "SKIP provision_repairs_tx_offload_drifted_back_on: could not force tx-offload back on (fixed feature / no ethtool); drift scenario not constructible"
+        );
+        delete_pair(&client);
+        return;
+    }
+
+    // Re-provision the (present, complete) pair: converge must OBSERVE the
+    // drifted-on offload and emit the disable, restoring offload-off.
+    provision(&plan).expect("provision must converge a complete pair whose offload drifted on");
+
+    if let Some(client_on) = tx_checksumming_on(&client) {
+        assert!(!client_on, "drifted-on client offload must be repaired to OFF by provision");
+    }
+    if let Some(backend_on) = tx_checksumming_on(&backend) {
+        assert!(!backend_on, "drifted-on backend offload must be repaired to OFF by provision");
+    }
+
+    delete_pair(&client);
 }

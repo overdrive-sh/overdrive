@@ -125,6 +125,16 @@ pub enum VethProvisionError {
     /// `ip route add <cidr> dev <iface>` failed.
     #[error("`ip route add {cidr} dev {iface}` failed (status={status:?}): {stderr}")]
     RouteAddFailed { cidr: String, iface: String, stderr: String, status: Option<i32> },
+    /// `ethtool -K <iface> tx off` failed for a non-benign reason. A
+    /// "feature is fixed" / "not supported" non-zero exit is benign (the
+    /// iface delivers a FULL checksum already, no disable needed) and is
+    /// swallowed before this surfaces; a genuine failure (EPERM, the
+    /// `ethtool` binary missing on a feature-bearing veth) is fatal —
+    /// booting with TX offload still ON would corrupt every NAT'd packet
+    /// (commit 62fa6be2), so refuse to boot rather than silently ship the
+    /// landmine.
+    #[error("`ethtool -K {iface} tx off` failed (status={status:?}): {stderr}")]
+    TxOffloadDisableFailed { iface: String, stderr: String, status: Option<i32> },
     /// Spawning `ip(8)` itself failed (binary missing, etc.).
     #[error("spawning `ip(8)` failed: {0}")]
     Spawn(#[from] std::io::Error),
@@ -177,7 +187,7 @@ pub fn derive_veth_plan(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "six independent observed kernel facts (presence/addr/up × client/peer); \
+    reason = "eight independent observed kernel facts (presence/addr/up/tx-offload × client/peer); \
               a flag-per-fact value object is the clearest model of the converge input \
               and is the shape ADR-0061 § 3.1 prescribes"
 )]
@@ -195,6 +205,14 @@ pub struct ObservedVeth {
     pub client_up: bool,
     /// `<backend_iface>` is administratively UP.
     pub backend_up: bool,
+    /// `<client_iface>` still has TX-checksum-offload ON (`ethtool -k
+    /// <client>` reports `tx-checksumming: on`). When `true`, converge
+    /// emits [`VethStep::DisableClientTxOffload`] to turn it off — the
+    /// incremental L4-csum invariant (commit 62fa6be2) requires it OFF.
+    pub client_tx_offload_on: bool,
+    /// `<backend_iface>` still has TX-checksum-offload ON. When `true`,
+    /// converge emits [`VethStep::DisableBackendTxOffload`].
+    pub backend_tx_offload_on: bool,
 }
 
 /// A single idempotent convergence action the executor applies via
@@ -227,6 +245,27 @@ pub enum VethStep {
     SetClientUp,
     /// `ip link set <backend> up`.
     SetBackendUp,
+    /// `ethtool -K <client> tx off` — disable TX-checksum-offload on the
+    /// client end. Emitted only when the client end's offload is still
+    /// ON (or the pair was freshly (re)created, since a new veth defaults
+    /// to offload ON). The dual-XDP NAT programs fix the L4 checksum
+    /// INCREMENTALLY (RFC 1624 — `crates/overdrive-bpf/src/shared/csum.rs`,
+    /// commit 62fa6be2), which requires the packet at the *receiving* XDP
+    /// hook to carry a FULL L4 checksum. With TX offload ON, a
+    /// locally-generated frame leaves the *sending* veth as
+    /// `CHECKSUM_PARTIAL` (the on-wire field holds only the pseudo-header
+    /// sum), and the incremental delta on that partial value is garbage —
+    /// every packet's checksum is corrupted. Disabling offload forces the
+    /// kernel to materialise the FULL checksum in software before the
+    /// frame leaves the sender, restoring a valid base for the delta.
+    DisableClientTxOffload,
+    /// `ethtool -K <backend> tx off` — same as
+    /// [`VethStep::DisableClientTxOffload`] for the backend end. Both ends
+    /// send and receive (forward DNAT reads the client→backend direction;
+    /// reverse SNAT reads backend→client), so the sender's tx-off on BOTH
+    /// ends is what makes each direction's receive-side ingress checksum
+    /// valid.
+    DisableBackendTxOffload,
     /// `ip route add <route_cidr> dev <client>` — always attempted
     /// idempotently (the connected route the kernel auto-creates on
     /// address assignment legitimately collides with `File exists`).
@@ -253,6 +292,14 @@ pub enum VethStep {
 ///   when the client address is absent, `AddBackendAddr` when the plan
 ///   has a backend gateway and that address is absent, `SetClientUp` /
 ///   `SetBackendUp` when an end is down.
+/// - **TX-checksum-offload** → `DisableClientTxOffload` /
+///   `DisableBackendTxOffload` emitted only when the respective end still
+///   has offload ON (or the pair was freshly (re)created — a new veth
+///   defaults to offload ON). An already-offload-off end emits nothing,
+///   so a re-run converges to a no-op. This completes the incremental
+///   L4-checksum production-correctness invariant (commit 62fa6be2): the
+///   receive-side XDP NAT hook needs a FULL (not `CHECKSUM_PARTIAL`)
+///   ingress checksum as the base for its O(1) delta fixup.
 /// - **Route** → `AddRoute` is ALWAYS emitted (the executor swallows the
 ///   `File exists` collision), so a complete pair still converges to
 ///   exactly `[AddRoute]` — a single idempotent noop — rather than an
@@ -307,6 +354,22 @@ pub fn converge_steps(plan: &VethProvisionPlan, observed: &ObservedVeth) -> Vec<
     }
     if recreated || !observed.backend_up {
         steps.push(VethStep::SetBackendUp);
+    }
+    // Disable TX-checksum-offload: needed when freshly (re)created (a new
+    // veth defaults to offload ON) OR when an existing iface still has it
+    // ON. Mirrors the SetClientUp / SetBackendUp emit-only-when-needed
+    // shape so a re-run over an already-offload-off pair converges to a
+    // no-op (the converge-on-boot guarantee, ADR-0061 § 3.1). This is the
+    // production equivalent of the Tier-3 fixture's `ethtool_tx_off`
+    // (overdrive-testing `ThreeIfaceTopology::create`); it completes the
+    // incremental-L4-csum production-correctness invariant from commit
+    // 62fa6be2 (without offload OFF the receive-side XDP hook folds the
+    // NAT delta into a CHECKSUM_PARTIAL base and corrupts every packet).
+    if recreated || observed.client_tx_offload_on {
+        steps.push(VethStep::DisableClientTxOffload);
+    }
+    if recreated || observed.backend_tx_offload_on {
+        steps.push(VethStep::DisableBackendTxOffload);
     }
     // Route is always attempted idempotently.
     steps.push(VethStep::AddRoute);
@@ -367,6 +430,24 @@ fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError>
         .backend_gateway
         .is_none_or(|gw| peer_present && iface_has_addr(&plan.backend_iface, gw));
 
+    // TX-offload is only meaningful for a present iface; an absent iface
+    // reports `false` (off). When the iface is absent the pair is
+    // (re)created, so the `recreated` path in converge_steps re-emits the
+    // disable regardless — the false here never suppresses a needed step.
+    //
+    // The two `&&` short-circuits are an impure-observer I/O shim whose
+    // `&&`→`||` mutant is end-state-INSENSITIVE: the downstream
+    // DisableTxOffload step is idempotent, so whether observe reports on
+    // or off, a second provision converges to offload-off either way and
+    // no end-state assertion can distinguish the mutant. Same untestable
+    // class as the sibling `client_present && iface_has_addr(...)` guard
+    // above. The KILLABLE decision logic lives in the pure
+    // `converge_steps` (fully mutation-covered).
+    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
+    let client_tx_offload_on = client_present && iface_tx_offload_on(&plan.client_iface);
+    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
+    let backend_tx_offload_on = peer_present && iface_tx_offload_on(&plan.backend_iface);
+
     Ok(ObservedVeth {
         client_present,
         peer_present,
@@ -374,6 +455,8 @@ fn observe(plan: &VethProvisionPlan) -> Result<ObservedVeth, VethProvisionError>
         backend_addr_present,
         client_up,
         backend_up,
+        client_tx_offload_on,
+        backend_tx_offload_on,
     })
 }
 
@@ -409,6 +492,54 @@ fn iface_has_addr(iface: &str, want: Ipv4Addr) -> bool {
     crate::iface::resolve_iface_ipv4(iface).is_ok_and(|got| got == want)
 }
 
+/// True when `iface` still has TX-checksum-offload ENABLED, read from
+/// `ethtool -k <iface>` (lowercase `-k` queries features; uppercase `-K`
+/// sets them). Parsed via [`tx_checksumming_on`].
+///
+/// Conservative on failure: if `ethtool` cannot be spawned, exits
+/// non-zero, or does not report a `tx-checksumming:` line at all (a
+/// virtual iface that does not expose the feature, or a missing
+/// `ethtool` binary), this returns `false` ("offload not on"). That is
+/// the correct default: an iface with no offload feature already
+/// delivers a FULL checksum, so no disable step is needed, and emitting
+/// one would be a wasted (harmless but noisy) `ethtool -K … tx off`. The
+/// converge `recreated` path still re-emits the disable after a fresh
+/// create regardless, so a transient read failure cannot leave a newly
+/// created pair with offload silently on.
+// mutants: skip — impure I/O shim: spawns real `ethtool -k` and reports
+// the kernel feature bit. Its body mutants (`-> true` / `-> false` /
+// delete `!`) are end-state-INSENSITIVE because the downstream disable is
+// idempotent (a wrong observation only adds or skips a redundant
+// `ethtool -K … tx off`; the converged offload-off end-state is the same).
+// Same untestable class as the sibling `iface_has_addr` shim. The pure,
+// KILLABLE parse logic is factored into `tx_checksumming_on` (unit-tested).
+fn iface_tx_offload_on(iface: &str) -> bool {
+    let Ok(out) = std::process::Command::new("ethtool").args(["-k", iface]).output() else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    tx_checksumming_on(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parse `ethtool -k <iface>` output for the `tx-checksumming:` feature
+/// line and return `true` iff it reports `on`. Pure (no I/O) so the
+/// parse is unit-testable in the default lane without `ethtool`.
+///
+/// `ethtool -k` prints one feature per line, e.g.
+/// `tx-checksumming: on` / `tx-checksumming: off [fixed]`. We match the
+/// `tx-checksumming:` prefix and check the value token is exactly `on`
+/// (so `off`, `off [fixed]`, and an absent line all read as "not on").
+fn tx_checksumming_on(ethtool_output: &str) -> bool {
+    ethtool_output.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed
+            .strip_prefix("tx-checksumming:")
+            .is_some_and(|rest| rest.split_whitespace().next() == Some("on"))
+    })
+}
+
 /// Apply a single [`VethStep`] via `ip(8)`. Idempotent: `EEXIST` /
 /// `File exists` on address and route add is swallowed; `ip link set up`
 /// is idempotent at the kernel.
@@ -441,6 +572,8 @@ fn execute_step(plan: &VethProvisionPlan, step: VethStep) -> Result<(), VethProv
         }
         VethStep::SetClientUp => link_up(&plan.client_iface),
         VethStep::SetBackendUp => link_up(&plan.backend_iface),
+        VethStep::DisableClientTxOffload => tx_offload_off(&plan.client_iface),
+        VethStep::DisableBackendTxOffload => tx_offload_off(&plan.backend_iface),
         VethStep::AddRoute => add_route(plan),
     }
 }
@@ -554,6 +687,63 @@ fn link_up(iface: &str) -> Result<(), VethProvisionError> {
     })
 }
 
+/// `ethtool -K <iface> tx off` — disable TX-checksum-offload so the
+/// kernel materialises the FULL L4 checksum in software before a frame
+/// leaves this veth end, giving the receive-side XDP NAT hook a valid
+/// base for its incremental delta (commit 62fa6be2, RFC 1624). Mirrors
+/// the Tier-3 fixture's `NetNs::ethtool_tx_off` shape, but with
+/// production typed-error discipline rather than best-effort `let _`.
+///
+/// A "feature is fixed" / "not supported" non-zero exit is BENIGN — such
+/// an iface already delivers a FULL checksum, so the disable is a no-op
+/// and is swallowed (idempotent converge success, ADR-0061 § 3.1). Any
+/// other failure — EPERM, or a missing `ethtool` binary on a
+/// feature-bearing veth — is FATAL: booting with offload still ON would
+/// corrupt every NAT'd packet, so it surfaces as
+/// [`VethProvisionError::TxOffloadDisableFailed`] and refuses the boot.
+fn tx_offload_off(iface: &str) -> Result<(), VethProvisionError> {
+    let out = match std::process::Command::new("ethtool").args(["-K", iface, "tx", "off"]).output()
+    {
+        Ok(out) => out,
+        Err(err) => {
+            return Err(VethProvisionError::TxOffloadDisableFailed {
+                iface: iface.to_owned(),
+                stderr: format!("spawning `ethtool` failed: {err}"),
+                status: None,
+            });
+        }
+    };
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if tx_offload_benign(&stderr) {
+        // The iface does not expose a settable tx-checksumming feature;
+        // it already delivers a FULL checksum, so no disable is needed.
+        return Ok(());
+    }
+    Err(VethProvisionError::TxOffloadDisableFailed {
+        iface: iface.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// True when an `ethtool -K … tx off` non-zero exit is BENIGN — the
+/// iface's tx-checksumming feature is fixed/unsupported, so it already
+/// delivers a FULL checksum and the disable is an idempotent no-op.
+///
+/// `ethtool` phrasing varies: a fixed feature prints `Cannot change ...`
+/// (often with `... it is fixed`), and a feature absent on the device
+/// prints `... not supported` / `Operation not supported`. Both mean
+/// "nothing to disable here". A genuine permission failure
+/// (`Operation not permitted`) is NOT benign and must surface.
+fn tx_offload_benign(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    (lower.contains("cannot change") || lower.contains("not supported"))
+        && !lower.contains("not permitted")
+}
+
 /// True when `ip link show <iface>` stderr indicates the interface is
 /// simply ABSENT (the normal first-boot create path), as opposed to a
 /// genuine failure (e.g. permission denied, `RTNETLINK answers: ...`).
@@ -575,13 +765,17 @@ fn link_absent(stderr: &str) -> bool {
 mod tests {
     use super::{
         ObservedVeth, VethProvisionPlan, VethStep, converge_steps, derive_veth_plan, link_absent,
+        tx_checksumming_on, tx_offload_benign,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
 
-    /// A complete (all-present, both-up) observation — the baseline the
-    /// converge tests mutate one field at a time.
+    /// A complete (all-present, both-up, offload-OFF) observation — the
+    /// baseline the converge tests mutate one field at a time. "Complete"
+    /// means fully CONVERGED, so TX-offload is already OFF on both ends
+    /// (the desired post-converge state); a complete pair therefore emits
+    /// no DisableTxOffload step (only the idempotent AddRoute noop).
     fn complete_observed() -> ObservedVeth {
         ObservedVeth {
             client_present: true,
@@ -590,6 +784,8 @@ mod tests {
             backend_addr_present: true,
             client_up: true,
             backend_up: true,
+            client_tx_offload_on: false,
+            backend_tx_offload_on: false,
         }
     }
 
@@ -642,6 +838,8 @@ mod tests {
                 VethStep::AddBackendAddr,
                 VethStep::SetClientUp,
                 VethStep::SetBackendUp,
+                VethStep::DisableClientTxOffload,
+                VethStep::DisableBackendTxOffload,
                 VethStep::AddRoute,
             ],
             "peer-absent corrupted pair must recreate then converge every downstream resource"
@@ -669,6 +867,8 @@ mod tests {
                 VethStep::AddBackendAddr,
                 VethStep::SetClientUp,
                 VethStep::SetBackendUp,
+                VethStep::DisableClientTxOffload,
+                VethStep::DisableBackendTxOffload,
                 VethStep::AddRoute,
             ],
             "inverse corrupted edge must recreate then converge every downstream resource, got {steps:?}"
@@ -690,6 +890,10 @@ mod tests {
             backend_addr_present: false,
             client_up: false,
             backend_up: false,
+            // Absent ifaces report offload off; the `recreated` path
+            // re-emits the disable after the fresh create regardless.
+            client_tx_offload_on: false,
+            backend_tx_offload_on: false,
         };
 
         let steps = converge_steps(&plan, &observed);
@@ -702,6 +906,8 @@ mod tests {
                 VethStep::AddBackendAddr,
                 VethStep::SetClientUp,
                 VethStep::SetBackendUp,
+                VethStep::DisableClientTxOffload,
+                VethStep::DisableBackendTxOffload,
                 VethStep::AddRoute,
             ],
             "absent pair must create then converge every downstream resource"
@@ -720,6 +926,141 @@ mod tests {
             vec![VethStep::AddRoute],
             "complete pair must converge to exactly [AddRoute] (idempotent noop), got {steps:?}"
         );
+    }
+
+    /// The production TX-offload-off invariant (commit 62fa6be2): a
+    /// present, otherwise-complete pair whose ends STILL have TX-offload
+    /// ON must emit `DisableClientTxOffload` AND `DisableBackendTxOffload`
+    /// (and nothing else but the idempotent `AddRoute`). Without offload
+    /// off, the incremental-L4-csum XDP NAT hook folds its delta into a
+    /// `CHECKSUM_PARTIAL` base and corrupts every packet — so the disable
+    /// is mandatory, not cosmetic.
+    #[test]
+    fn converge_disables_tx_offload_when_still_on_both_ends() {
+        let plan = plan_24();
+        let observed = ObservedVeth {
+            client_tx_offload_on: true,
+            backend_tx_offload_on: true,
+            ..complete_observed()
+        };
+
+        let steps = converge_steps(&plan, &observed);
+
+        assert_eq!(
+            steps,
+            vec![
+                VethStep::DisableClientTxOffload,
+                VethStep::DisableBackendTxOffload,
+                VethStep::AddRoute,
+            ],
+            "offload-on present pair must disable BOTH ends then route, got {steps:?}"
+        );
+    }
+
+    /// Idempotency (the converge-on-boot no-op guarantee, ADR-0061 § 3.1):
+    /// a present, complete pair whose offload is ALREADY OFF on both ends
+    /// must emit NEITHER disable step — a second `provision()` re-observes
+    /// offload off and converges to the single `[AddRoute]` noop. This is
+    /// the mirror of [`converge_disables_tx_offload_when_still_on_both_ends`]
+    /// and the property the conditional-emit predicate exists to satisfy:
+    /// emit the disable ONLY when offload is on.
+    #[test]
+    fn converge_omits_tx_offload_disable_when_already_off() {
+        let plan = plan_24();
+        // complete_observed() already has both *_tx_offload_on = false.
+        let steps = converge_steps(&plan, &complete_observed());
+
+        assert!(
+            !steps.contains(&VethStep::DisableClientTxOffload),
+            "offload-off client must NOT emit a disable (idempotent re-run): {steps:?}"
+        );
+        assert!(
+            !steps.contains(&VethStep::DisableBackendTxOffload),
+            "offload-off backend must NOT emit a disable (idempotent re-run): {steps:?}"
+        );
+    }
+
+    /// One disable per end, independently: only the end whose offload is
+    /// still ON gets a disable (guards a both-or-neither collapse — the
+    /// per-iface conditional must key on the per-iface fact).
+    #[test]
+    fn converge_disables_tx_offload_per_end_independently() {
+        let plan = plan_24();
+
+        let client_only = ObservedVeth { client_tx_offload_on: true, ..complete_observed() };
+        let steps = converge_steps(&plan, &client_only);
+        assert!(
+            steps.contains(&VethStep::DisableClientTxOffload),
+            "client on → disable: {steps:?}"
+        );
+        assert!(
+            !steps.contains(&VethStep::DisableBackendTxOffload),
+            "backend off → no disable: {steps:?}"
+        );
+
+        let backend_only = ObservedVeth { backend_tx_offload_on: true, ..complete_observed() };
+        let steps = converge_steps(&plan, &backend_only);
+        assert!(
+            !steps.contains(&VethStep::DisableClientTxOffload),
+            "client off → no disable: {steps:?}"
+        );
+        assert!(
+            steps.contains(&VethStep::DisableBackendTxOffload),
+            "backend on → disable: {steps:?}"
+        );
+    }
+
+    /// The pure `ethtool -k` parser: `tx-checksumming: on` reads as ON;
+    /// `off`, `off [fixed]`, and an absent line read as NOT on. Input
+    /// variations of one classification behaviour (Mandate 5) — one
+    /// parametrised assertion over the table.
+    #[test]
+    fn tx_checksumming_parse_classifies_ethtool_k_output() {
+        let on = "Features for ovd-veth-cli:\n\
+                  rx-checksumming: on\n\
+                  tx-checksumming: on\n\
+                  scatter-gather: on\n";
+        let off = "Features for ovd-veth-cli:\n\
+                   tx-checksumming: off\n";
+        let off_fixed = "tx-checksumming: off [fixed]\n";
+        // A device whose feature is fixed-ON still reports `on` and must
+        // read as on (converge will then try the disable, which the
+        // executor swallows as benign on a fixed feature).
+        let on_fixed = "tx-checksumming: on [fixed]\n";
+        let absent = "rx-checksumming: on\nscatter-gather: on\n";
+
+        let cases: &[(&str, bool)] =
+            &[(on, true), (off, false), (off_fixed, false), (on_fixed, true), (absent, false)];
+        for (output, expected) in cases {
+            assert_eq!(
+                tx_checksumming_on(output),
+                *expected,
+                "tx_checksumming_on({output:?}) should be {expected}",
+            );
+        }
+    }
+
+    /// The executor's benign-failure classifier: a fixed / unsupported
+    /// `ethtool -K … tx off` stderr is benign (idempotent no-op), but a
+    /// genuine permission failure is NOT (must surface as
+    /// `TxOffloadDisableFailed`).
+    #[test]
+    fn tx_offload_benign_classifies_ethtool_set_stderr() {
+        let cases: &[(&str, bool)] = &[
+            ("Cannot change tx-checksumming", true),
+            ("Cannot get device feature names: Operation not supported", true),
+            ("rx-checksumming: Operation not supported", true),
+            // EPERM is NOT benign — booting with offload on corrupts packets.
+            ("Cannot change tx-checksumming: Operation not permitted", false),
+            ("netlink error: Operation not permitted", false),
+        ];
+        for (stderr, expected) in cases {
+            assert_eq!(
+                tx_offload_benign(stderr),
+                *expected,
+                "tx_offload_benign({stderr:?}) should be {expected}",
+            );
+        }
     }
 
     /// Acceptance anchor (readable golden): the provisioner derives the
@@ -788,7 +1129,7 @@ mod tests {
 
     proptest! {
         /// Property: over the full present-pair partial-state space
-        /// (each of the four converge-relevant facts independently
+        /// (each of the six converge-relevant facts independently
         /// present/absent), `converge_steps`
         ///   (a) never emits Create/Recreate for a present pair with a
         ///       present peer;
@@ -797,16 +1138,24 @@ mod tests {
         ///       (the plan_24 backend gateway is always Some);
         ///   (d) emits `SetClientUp` / `SetBackendUp` iff the respective
         ///       end is down;
-        ///   (e) always ends with `AddRoute`.
+        ///   (e) emits `DisableClientTxOffload` / `DisableBackendTxOffload`
+        ///       iff the respective end still has TX-offload ON — the
+        ///       emit-only-when-needed predicate that makes a re-run over
+        ///       an offload-off pair a no-op (the converge-on-boot
+        ///       idempotency guarantee, ADR-0061 § 3.1);
+        ///   (f) always ends with `AddRoute`.
         /// This is the exhaustive desired-vs-actual invariant for the
         /// completion path — the regression class the old adopt-untouched
-        /// branch violated for every absent sub-resource.
+        /// branch violated for every absent sub-resource, now including
+        /// the production TX-offload-off invariant (commit 62fa6be2).
         #[test]
         fn converge_present_pair_emits_exactly_the_missing_resources(
             client_addr in any::<bool>(),
             backend_addr in any::<bool>(),
             client_up in any::<bool>(),
             backend_up in any::<bool>(),
+            client_tx_on in any::<bool>(),
+            backend_tx_on in any::<bool>(),
         ) {
             let plan = plan_24();
             let observed = ObservedVeth {
@@ -816,6 +1165,8 @@ mod tests {
                 backend_addr_present: backend_addr,
                 client_up,
                 backend_up,
+                client_tx_offload_on: client_tx_on,
+                backend_tx_offload_on: backend_tx_on,
             };
             let steps = converge_steps(&plan, &observed);
 
@@ -825,6 +1176,10 @@ mod tests {
             prop_assert_eq!(steps.contains(&VethStep::AddBackendAddr), !backend_addr);
             prop_assert_eq!(steps.contains(&VethStep::SetClientUp), !client_up);
             prop_assert_eq!(steps.contains(&VethStep::SetBackendUp), !backend_up);
+            // The new conditional-emit predicate: present pair (recreated
+            // == false) ⇒ disable emitted IFF offload still on.
+            prop_assert_eq!(steps.contains(&VethStep::DisableClientTxOffload), client_tx_on);
+            prop_assert_eq!(steps.contains(&VethStep::DisableBackendTxOffload), backend_tx_on);
             prop_assert_eq!(steps.last(), Some(&VethStep::AddRoute));
         }
 
