@@ -1331,11 +1331,12 @@ pointer (NON-DURABLE; see § Durability below).
 | Design element | Committed finding (doc · verdict/section) | Proven constant / pattern (the reference DELIVER builds on) | Probe pointer (gitignored, non-durable) |
 |---|---|---|---|
 | **`MtlsEnforcement::enforce` — rustls→kTLS arm** (`dangerous_extract_secrets` → `ktls` → `setsockopt TCP_ULP "tls"`+`TLS_TX`/`TLS_RX`) | `findings.md` · Increment A WORKS (Unknowns 1+2 CONFIRMED) | `ss -tie`: `tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw`; agent writes/reads plaintext, kernel does crypto; `strings pcap \| grep MARKER` = 0; constants `SOL_TLS=282 TLS_TX=1 TLS_RX=2 TCP_ULP=31 AES_GCM_256=52 sizeof(crypto_info)=56` | `spike-scratch/increment-a/`, `increment-b/` |
-| **`MtlsEnforcement::enforce` — forward steady state (agent-idle)** sockmap EGRESS-redirect `bpf_sk_redirect_map(flags=0)` leg F RX → leg B kTLS TX | `findings-egress-ktls-splice.md` · verdict (a) YES, Assertions 1–3 PASS, **15/15** | `flags=0` (EGRESS, NOT `BPF_F_INGRESS`) drives `tcp_sendmsg_locked` on the kTLS target → `1703 03` records on the peer wire; agent ZERO per-byte syscalls (strace); hand-rolled `#[link_section="sk_skb/stream_verdict"]` (no aya `#[sk_skb]` macro) | `spike-scratch/increment-f-egress-ktls-splice/` |
+| **`MtlsEnforcement::enforce` — forward steady state (agent-light, D-MTLS-13)** `splice(legF → legB)` into leg B's kTLS-TX; kernel `tls_sw_sendmsg` encrypts synchronously per record | `findings-splice-return.md` (the symmetric splice primitive) + `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` (why the redirect was retired) | the userspace `splice`/`write` to leg B hits `tls_sw_sendmsg` SYNCHRONOUSLY (no `MSG_DONTWAIT`/backlog) → `1703 03` records on the peer wire; agent does ZERO crypto, only `splice`/`ppoll`. **~~Originally a `bpf_sk_redirect_map(flags=0)` sockmap egress redirect (15/15 spike, `findings-egress-ktls-splice.md`)~~ RETIRED — the redirect's deferred `MSG_DONTWAIT` workqueue `-EAGAIN`-stalls ~10–15% of records on the real kernel.** SHIPPED 20/20, commit `bb6489ef` | (production `crates/.../mtls/`) |
+| **`MtlsEnforcement::enforce` — kTLS 0.5-RTT early-data drain (D-MTLS-13)** drain `conn.reader()` before `dangerous_extract_secrets`; forward ahead of the splice pump | shipped `mtls::drain_early_plaintext` (CorkStream-equivalent) | the rustls reader buffers any 0.5-RTT early application_data the peer sent during the handshake; the extracted `rx` `rec_seq` (`= read_seq`) already advanced past those records, so they'd be dropped if left in `conn.reader()`. Drained + forwarded → no loss | (production `crates/.../mtls/mod.rs`) |
 | **return splice pump (agent-light) + `liveness`** `splice(legB→pipe→legF)` via `tls_sw_splice_read` on a **plain, no-psock** kTLS-RX leg | `findings-splice-return.md` · verdict (a) CONFIRMED, Assertions 1–4 | `strace` = only `splice`/`ppoll`, ZERO payload read/write; byte-exact (86 / 100000 B); ~1 `splice` per TLS record (≤16384 B/record); clean decrypted payload (no header/inner-type/tag); `einval_on_B=0` | `spike-scratch/increment-h-splice-return/` |
 | **leg B carries NO psock/verdict on its RX** (D-MTLS-5; the return-`splice` precondition) | `findings-ktls-rx-splice.md` · verdict (b) NO (return-via-verdict foreclosed) + `findings-egress-ktls-splice.md` mechanic #2 | a psock on leg B's RX fights kTLS RX (`ConnectionAborted` 103) AND `tls_sw_read_sock` returns `-EINVAL` on a psock → no agent-idle push; the `splice`-on-no-psock leg sidesteps both | `spike-scratch/increment-g-ktls-rx-splice/` |
 | **transparent intercept** `cgroup/connect4`-rewrite → agent `accept()`s leg F; lossless `recv()` capture | `findings-userspace-relay.md` · Unknown 1 WORKS; Unknown 2 PARTIAL (handshake-window LOSSLESS) | `cgroup/connect4` rewrites dest to the agent listener (workload unaware); ordinary `recv()` drains pre-arm plaintext (80/80); flush as in-order TLS 1.3 `0x17`, zero plaintext on leg B; gate/route the splice by `local_port` only (the `sk_msg`/`sock_ops` `local_ip4` byte-order disagreement) | `spike-scratch/increment-e-userspace-relay/` |
-| **arming invariant** SOCKMAP-insert-before-`TCP_ULP "tls"` (D-MTLS-7; `probe` check 3; `ArmingOrderViolation`) | `findings.md` · Increment D (`insert→ULP` rc=0; `ULP→insert` rc=−1 `EINVAL`) + corroborated `findings-egress-ktls-splice.md` (leg B inserted before `TCP_ULP`) | reverse ordering = `EINVAL` (both replace `sk->sk_prot`); the natural detect→gate→install flow satisfies it; **Tier-3 AC**: `tls-ULP-after-sockmap == EINVAL` | `spike-scratch/increment-c/` (compose micro-probes) |
+| ~~**arming invariant** SOCKMAP-insert-before-`TCP_ULP "tls"` (D-MTLS-7; `probe` check 3; `ArmingOrderViolation`)~~ **MOOT 2026-06-13 (D-MTLS-13)** | `findings.md` · Increment D (historical) | ~~reverse ordering = `EINVAL`; Tier-3 AC `tls-ULP-after-sockmap == EINVAL`~~ — with the sockmap retired there is no SOCKMAP insert on any path; the invariant is a true kernel fact but governs no Overdrive code path. The `D-MTLS-7` decision, the `probe` sub-sentinel, the `ArmingOrderViolation` variant, and the Tier-3 AC are all retired. | (n/a — retired) |
 | **control records** (`NewSessionTicket`/KeyUpdate → `EIO` on raw kTLS RX → reuse `ktls::KtlsStream`) | `findings.md` · Increment B load-bearing finding + Design implication #4 | raw-kTLS RX only decrypts `application_data`; a control record returns `EIO`; `ktls::KtlsStream` runs the control-message loop → favoured over raw `setsockopt` | `spike-scratch/increment-a/`, `increment-b/` |
 | **why proxy, NOT in-band** (D-MTLS-1/2; ADR-0069 Alternatives A1/A2) — in-band lossless foreclosed 3 ways | `findings-lossless-hybrid.md` (source-TX-bypass RST 3/3) · `findings-userspace-relay.md` Unknown 4 (#222-collapse) · `findings.md` Increment C (no `sk_msg` HOLD) + `sockmap-redirect-live-socket-liveness-research.md` / `sockops-ktls-lossless-hold-bpf-only-research.md` | (1) `sk_msg` has PASS/DROP/REDIRECT, no HOLD → pre-arm write `SK_DROP`→`EACCES`+dead conn; (2) redirecting a live socket's own egress bypasses its TX → RST; (3) lossless capture structurally requires a 2-socket proxy ⇒ the lossless variant of #26 *is* #222 | `spike-scratch/increment-{c,d,e}/` |
 
@@ -1366,10 +1367,11 @@ ubiquitous language, pinned so the crafter and acceptance-designer share terms:
 | **leg B** | The agent-owned **kTLS** leg facing the real peer (carries TLS 1.3 records). |
 | **transparent intercept** | Rewriting the workload's `connect()` destination to the agent's leg-F listener (`cgroup_connect4`-rewrite default; TPROXY alt) so the workload is unaware. |
 | **handshake window** | The setup phase: drain pre-arm plaintext losslessly → rustls handshake on leg B → arm kTLS → flush captured plaintext. Userspace, lossless. |
-| **forward splice (agent-idle)** | Steady-state plaintext→ciphertext: in-kernel sockmap EGRESS-redirect leg F RX → leg B kTLS TX (`bpf_sk_redirect_map`, `flags=0`). Zero agent per-byte syscalls. |
-| **return splice (agent-light)** | Steady-state ciphertext→plaintext: `splice(legB → pipe → legF)` on a plain (no-psock) kTLS-RX leg (`tls_sw_splice_read`). Zero-copy, ~1 splice/record. |
+| **forward splice (agent-light, D-MTLS-13)** | Steady-state plaintext→ciphertext: `splice(legF → pipe → legB)` into leg B's kTLS-TX; the kernel `tls_sw_sendmsg` encrypts each record synchronously. ~1 splice/record, zero userspace plaintext copy. (Replaced the agent-idle sockmap EGRESS-redirect, retired 2026-06-13.) |
+| **return / deliver splice (agent-light)** | Steady-state ciphertext→plaintext: `splice(legB → pipe → legF)` (outbound return) / `splice(legC → pipe → legS)` (inbound deliver) on a plain (no-psock) kTLS-RX leg (`tls_sw_splice_read`). Zero-copy, ~1 splice/record. |
+| **early-data drain (D-MTLS-13)** | Before `dangerous_extract_secrets` arms kTLS-RX, drain `conn.reader()` of any 0.5-RTT early application_data and forward it ahead of the splice pump — the extracted `rx` `rec_seq` already accounts for the over-read records (`mtls::drain_early_plaintext`, the `ktls::CorkStream`-equivalent userspace drain). |
 | **held SVID** | The workload's `SvidMaterial` (cert + leaf key), read via `IdentityRead`, presented by the agent; the workload holds NOTHING. |
-| **arming invariant** | SOCKMAP insert MUST precede `TCP_ULP "tls"` on leg B (reverse = `EINVAL`; both replace `sk->sk_prot`). |
+| ~~**arming invariant**~~ (MOOT 2026-06-13, D-MTLS-7/13) | ~~SOCKMAP insert MUST precede `TCP_ULP "tls"` on leg B~~ — no sockmap insert on any path now. Retained as a historical kernel fact only. |
 
 No aggregates own durable state in this context (the proxy is per-connection,
 ephemeral; identity is owned by `IdentityMgr`). No new domain events beyond the
@@ -1393,9 +1395,12 @@ existing flow telemetry.
    double modelling the observable contract in-memory.
 4. **mTLS proxy agent** — `overdrive-worker` (EXTEND; the node-agent home). Owns the
    per-connection lifecycle and the return splice pump supervision.
-5. **New BPF programs** — `overdrive-bpf` (EXTEND): sockops, `sk_skb/stream_verdict`
-   (forward egress-redirect), `cgroup_connect4` mtls-variant (intercept). aya-ebpf
-   0.1.1 has no `#[sk_skb]` macro → hand-roll `#[link_section]` (proven in spikes).
+5. **New BPF programs** — `overdrive-bpf` (EXTEND): the `cgroup_connect4`
+   mtls-variant (outbound intercept) + the `nft`-TPROXY inbound intercept setup.
+   **(REVISED 2026-06-13, D-MTLS-13: the sockops `sock_ops_mtls_enroll` and the
+   `sk_skb/stream_verdict` forward egress-redirect programs were RETIRED with the
+   sockmap — the forward path is now a userspace `splice` pump with no kernel-side
+   program. The aya-ebpf-0.1.1-`#[sk_skb]`-macro hand-roll note is obsolete.)**
 
 ## Wave: DESIGN / [REF] Ports (driving + driven)
 
@@ -1424,16 +1429,18 @@ The shape below is the **DESIGN-named contract** (object-oriented paradigm;
 mirroring `Dataplane`):
 
 - **`probe(&self) -> Result<(), MtlsEnforcementError>`** — Earned-Trust:
-  wire→probe→use. Verify kTLS arm round-trips (sentinel handshake + one
-  `tls_sw_splice_read`), the sockmap egress-redirect fires (sentinel F→B byte
-  emerges encrypted), and the SOCKMAP-before-`TCP_ULP` ordering holds. Refuse-to-
-  start (`health.startup.refused`) on failure.
+  wire→probe→use. Verify the kTLS arm + agent-light forward `splice` round-trips
+  (sentinel handshake mints a throwaway `rcgen` cert → arm kTLS-TX/RX → `splice`
+  one record through kTLS-TX → peer's kTLS-RX `tls_sw_splice_read` reconstructs it
+  byte-exact; reader leg drains 0.5-RTT early data). One composed sentinel
+  (D-MTLS-13). Refuse-to-start (`health.startup.refused`) on failure.
 - **A per-connection drive method** that, given the detected connection + the
   `AllocationId` (whose SVID to present), performs: lossless capture → rustls
-  handshake (reading `IdentityRead::svid_for` + `current_bundle`) → kTLS arm on
-  leg B → install the forward egress-redirect → return `Ok` once steady-state is
-  established (or a typed fail-closed error on absent/wrong SVID or handshake
-  failure). The agent then supervises the return splice pump.
+  handshake (reading `IdentityRead::svid_for` + `current_bundle`) → drain 0.5-RTT
+  early data → kTLS arm on leg B → start the agent-light forward `splice` pump →
+  return `Ok` once steady-state is established (or a typed fail-closed error on
+  absent/wrong SVID or handshake failure). The adapter then drives both splice
+  pumps; the worker supervises liveness.
 - **A teardown method** for connection close (release legs, drop the pump).
 
 > **OQ-1 — ACCEPTED (user-approved 2026-06-12)**: the EXACT method
@@ -1460,8 +1467,9 @@ handshake). #26 is a READER — never mints/re-issues/caches.
 | kTLS arm + control records | `ktls` crate 6.x (NEW dep) | `findings.md` #4: `NewSessionTicket`/KeyUpdate → `EIO` on raw kTLS RX; `ktls::KtlsStream` runs the control-message loop. Favoured over raw `setsockopt` | MIT / Apache-2.0 — OSS |
 | BPF loader | aya 0.13.x (in workspace) + `pinning = ByName` (`/sys/fs/bpf/overdrive`) | The established loader + bpffs-pin discipline (ADR-0038/0040); reuse, do not reinvent | MIT / Apache-2.0 — OSS |
 | Transparent intercept | `cgroup/connect4`-rewrite (default) — extends `cgroup_connect4_service` | Proven (`findings-userspace-relay.md` Unknown 1); reuses the connect4-rewrite shape | (in-tree) |
-| Forward splice | in-kernel `bpf_sk_redirect_map` (`flags=0`, EGRESS) | Agent-idle, 15/15 (`findings-egress-ktls-splice.md`) | (kernel) |
-| Return splice | `splice(2)` + `tls_sw_splice_read` on a plain kTLS-RX leg | Agent-light zero-copy, ~1/record (`findings-splice-return.md`) | (kernel) |
+| Forward splice (D-MTLS-13) | `splice(2)` from leg F into leg B's kTLS-TX; kernel `tls_sw_sendmsg` encrypts synchronously | Agent-light, symmetric to the return; replaced the `bpf_sk_redirect_map(flags=0)` redirect (`MSG_DONTWAIT`-stall, `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`); SHIPPED 20/20 | (kernel) |
+| Return / deliver splice | `splice(2)` + `tls_sw_splice_read` on a plain kTLS-RX leg | Agent-light zero-copy, ~1/record (`findings-splice-return.md`) | (kernel) |
+| Early-data drain (D-MTLS-13) | userspace drain of `conn.reader()` before `dangerous_extract_secrets` (CorkStream-equivalent) | kTLS 0.5-RTT early application_data left in the rustls reader is otherwise dropped (the `rx` rec_seq already advanced past it); SHIPPED `mtls::drain_early_plaintext` | (`ktls` / in-tree) |
 | Kernel floor | pinned 6.18 LTS (ADR-0068) | In-kernel TLS 1.3 TX+RX + `CONFIG_NET_HANDSHAKE` + splice/sockmap guaranteed; no kernel patch | (appliance) |
 
 OSS-first honored; no proprietary tech. The one new dependency (`ktls`) is
@@ -1474,15 +1482,16 @@ MIT/Apache-2.0 and well-maintained.
 | D-MTLS-1 | ONE universal agent-light L4 proxy for all workload kinds; fold #222 into #26 | Uniformity + losslessness over restart-survival + density (user-locked) | ADR-0069; user 2026-06-12 |
 | D-MTLS-2 | In-band kTLS-on-own-socket = out of v1 scope — a post-v1 optimization tracked in **#231** (ADR-0069 A1) | No lossless client-speaks-first path in-band (foreclosed 3 ways); not universal | `findings-{lossless-hybrid,userspace-relay}.md` |
 | D-MTLS-3 | NEW driven port `MtlsEnforcement`; do NOT reuse `Dataplane` | Per-connection socket ops ≠ map writes | ADR-0069; `dataplane.rs` |
-| D-MTLS-4 | Forward = sockmap EGRESS-redirect (agent-idle); return = `splice(2)` on a plain (no-psock) kTLS-RX leg (agent-light) | The two proven agent-light primitives | `findings-egress-ktls-splice.md` (15/15); `findings-splice-return.md` |
-| D-MTLS-5 | leg B carries NO psock/verdict on its RX | psock fights kTLS RX (`ConnectionAborted`) + forecloses the agent-idle path (`tls_sw_read_sock -EINVAL`) | `findings-ktls-rx-splice.md` |
-| D-MTLS-6 | Transparent intercept = `cgroup_connect4`-rewrite (default), TPROXY (alt) | Proven; reuses existing connect4-rewrite shape | `findings-userspace-relay.md` |
-| D-MTLS-7 | SOCKMAP-insert-before-`TCP_ULP "tls"` (Tier-3 invariant) | Reverse = `EINVAL`; hard kernel ordering | `findings.md` increment D |
+| D-MTLS-4 | **(REVISED 2026-06-13 — see D-MTLS-13)** Forward AND return are BOTH agent-light `splice(2)` on a plain (no-psock) kTLS leg: forward `splice(legF → legB)` into leg B's kTLS-TX (kernel `tls_sw_sendmsg` encrypts synchronously), return `splice(legB → legF)` on leg B's kTLS-RX. Symmetric every direction. ~~Forward = sockmap EGRESS-redirect (agent-idle)~~ — RETIRED (the redirect `MSG_DONTWAIT`-stalls ~10–15%) | The proven agent-light `splice` primitive, every direction | `findings-splice-return.md`; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` (forward pivot) |
+| D-MTLS-5 | leg B carries NO psock/verdict on its RX (now: no psock on ANY leg, either direction — the sockmap is gone) | psock fights kTLS RX (`ConnectionAborted`) + forecloses the agent-idle path (`tls_sw_read_sock -EINVAL`) | `findings-ktls-rx-splice.md` |
+| D-MTLS-6 | Transparent intercept = `cgroup_connect4`-rewrite (outbound), TPROXY (inbound) | Proven; reuses existing connect4-rewrite shape | `findings-userspace-relay.md`; `findings-inbound-intercept.md` |
+| D-MTLS-7 | ~~SOCKMAP-insert-before-`TCP_ULP "tls"` (Tier-3 invariant)~~ **MOOT / SUPERSEDED 2026-06-13** — with the sockmap retired from the forward path (D-MTLS-13) there is NO sockmap insert sequenced against `TCP_ULP` on any leg. The invariant remains a true kernel fact (reverse = `EINVAL`; both replace `sk->sk_prot`) but governs no Overdrive code path; the `tls-ULP-after-sockmap == EINVAL` Tier-3 test is retired. | (kernel fact; no longer a design constraint) | `findings.md` increment D (historical) |
 | D-MTLS-8 | Control records via `ktls::KtlsStream`, not raw `setsockopt` | `NewSessionTicket`/KeyUpdate → `EIO` on raw RX | `findings.md` #4 |
 | D-MTLS-9 | Agent holds the leaf key (via `IdentityRead`); workload holds nothing | CLAUDE.md identity model; J-SEC-003 | ADR-0067; CLAUDE.md |
 | D-MTLS-10 | Process topology = in-process (the proxy agent runs IN the node binary, reading `IdentityRead` in-process — no separate agent process, no gRPC/CSR) | O3 in-process read (whitepaper §7); the agent is `overdrive-worker` control logic, not a sidecar process. Resolves the prior guided-session "in-process control-plane vs separate agent" open item | ADR-0067 D7; whitepaper §7 |
 | D-MTLS-11 | Earned-Trust `probe()` mandatory; wire→probe→use; refuse-to-start on failure | principle 12; exercises the catalogued substrate lies | ADR-0069 § Enforcement |
-| D-MTLS-12 | `probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted in-process via `rcgen` at call time (promote `rcgen` to `overdrive-dataplane` production dep). Substrate-self-test crypto, signed by NEITHER CA, never in the trust bundle, never on a real wire — #26 stays a reader, NOT an issuer | sentinel #1 is handshake-based (needs cert+key); `IdentityRead` is a reader; "workload-holds-nothing"/"two distinct CAs" intact; no key-at-rest in the binary (a-runtime over a-static) | SD-5; user 2026-06-12 |
+| D-MTLS-12 | `probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted in-process via `rcgen` at call time (promote `rcgen` to `overdrive-dataplane` production dep). Substrate-self-test crypto, signed by NEITHER CA, never in the trust bundle, never on a real wire — #26 stays a reader, NOT an issuer. **STILL LIVE after the 2026-06-13 forward-mechanism pivot** — the shipped `probe` STILL does a loopback rustls handshake (`run_probe_sentinels`), so the rcgen-sentinel-cert core is unchanged; only the *sockmap-engagement / ARMED-gate* portion of the probe's substrate-lie catalogue was mooted (see D-MTLS-13). The handshake sentinel's reader leg now also exercises the kTLS 0.5-RTT early-data drain (D-MTLS-13). | sentinel is handshake-based (needs cert+key); `IdentityRead` is a reader; "workload-holds-nothing"/"two distinct CAs" intact; no key-at-rest in the binary (a-runtime over a-static) | SD-5; user 2026-06-12 |
+| D-MTLS-13 | **(2026-06-13) Forward sockmap-egress-redirect → agent-light `splice` pivot + kTLS 0.5-RTT early-data drain.** (1) The OUTBOUND forward retires the agent-idle `sk_skb/stream_verdict` + `bpf_sk_redirect_map(flags=0)` redirect for an agent-light `splice(legF → legB)` into leg B's kTLS-TX — symmetric to the return/deliver/response pumps; the whole sockmap apparatus (`MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the `sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll) is DELETED. (2) Every reader leg (outbound return, inbound deliver, probe sentinel) drains `conn.reader()` of 0.5-RTT early application_data via `mtls::drain_early_plaintext` BEFORE `dangerous_extract_secrets` arms kTLS-RX (or uses a `ktls::CorkStream`-equivalent) — the extracted `rx` `rec_seq` already accounts for the over-read records, so early data left only in `conn.reader()` would otherwise be silently dropped. Mooted with it: D-MTLS-7 (sockmap-before-`TCP_ULP` invariant) + the probe's `ForwardEgressRedirect`/`ArmingOrderEinval` sub-sentinels + `ArmingOrderViolation`/`ForwardRedirectFailed` error variants. | The `sk_skb` egress redirect defers delivery to a `MSG_DONTWAIT` workqueue that `-EAGAIN`-stalls ~10–15% of records; no production system runs it; the kernel does not test it. A synchronous userspace `splice`/`write` into kTLS-TX is the correct, reliable mechanism. SHIPPED + verified 20/20 (commit `bb6489ef`). | `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`; `sockmap-strparser-engagement-race-research.md`; `spike/findings-sockmap-engagement-inkernel-enroll.md`; shipped `crates/overdrive-dataplane/src/mtls/` |
 
 ## Wave: DESIGN / [REF] Reuse Analysis (HARD GATE)
 
@@ -1517,8 +1526,10 @@ creation").
   `HostMtlsEnforcement` EXTENDS **`overdrive-dataplane`** (the established
   `adapter-host` userspace eBPF crate — `unsafe` already allowed, `aya.workspace =
   true` + BPF `build.rs` already present; every reason a new crate would give is
-  already satisfied here); the kernel-side sockops/`sk_skb`/`cgroup_connect4`-mtls
-  programs EXTEND **`overdrive-bpf`** (one shared BPF object); `SimMtlsEnforcement`
+  already satisfied here); the kernel-side `cgroup_connect4`-mtls intercept program
+  EXTENDS **`overdrive-bpf`** (one shared BPF object; the sockops/`sk_skb`
+  forward-redirect programs were retired 2026-06-13 with the sockmap, D-MTLS-13);
+  `SimMtlsEnforcement`
   stays in `overdrive-sim`. **`overdrive-host` ruled out** —
   `src/lib.rs:21` is `#![forbid(unsafe_code)]` and the proxy is irreducibly
   `unsafe`. **Revisit trigger** (not a blocker): if mTLS later needs isolation from
@@ -1652,8 +1663,8 @@ through the Sim adapter**. The answer, grounded in the spikes:
 **Bidirectional shape decision (F3 — `direction` field, NOT a sibling method).**
 The same four lifecycle phases govern both directions; the differences are
 adapter-internal mechanism (outbound: `cgroup_connect4` intercept + rustls
-*client* handshake + sockmap-egress forward; inbound: TPROXY intercept +
-`getsockname` orig-dst + rustls *server* handshake with `WebPkiClientVerifier` +
+*client* handshake + agent-light forward `splice` into kTLS-TX; inbound: TPROXY
+intercept + `getsockname` orig-dst + rustls *server* handshake with `WebPkiClientVerifier` +
 splice-to-server). The contract therefore carries a `direction: Direction
 { Outbound, Inbound }` discriminant on `InterceptedConnection`, and `enforce`
 dispatches on it — rather than a sibling `enforce_inbound` method. Rationale:
@@ -1673,24 +1684,30 @@ listener recovered, which selects the *server* SVID) are carried as a
 
 - The **setup phases collapse into ONE async drive call** (`enforce`). Phases 1–2
   (lossless handshake-window capture → rustls handshake on leg B presenting the
-  held SVID → arm kTLS on leg B → flush captured plaintext → install the forward
-  egress-redirect) are a single atomic "bring this connection to
-  steady-state-established" unit with one natural `Ok(handle)` / `Err(fail-closed)`
-  outcome. Splitting them into per-phase public methods would (a) expose ordering
-  the **arming invariant** (D-MTLS-7: SOCKMAP-before-`TCP_ULP`) makes
-  adapter-internal, not caller-sequenced — a caller that called them out of order
-  would hit `EINVAL`, exactly the invalid-state the type system should make
-  unrepresentable; and (b) leak adapter mechanism (which leg, which syscall) into
-  the port, violating "the port models WHAT, the adapter owns HOW." This mirrors
-  `Driver::start` — one call spawns the workload and returns an opaque
-  `AllocationHandle`; the caller never drives the sub-steps.
+  held SVID → drain 0.5-RTT early data → arm kTLS on leg B → flush captured
+  plaintext → start the forward `splice` pump) are a single atomic "bring this
+  connection to steady-state-established" unit with one natural `Ok(handle)` /
+  `Err(fail-closed)` outcome. Splitting them into per-phase public methods would
+  (a) expose ordering the adapter makes internal (the kTLS-arm-then-pump sequence),
+  not caller-sequenced; and (b) leak adapter mechanism (which leg, which syscall)
+  into the port, violating "the port models WHAT, the adapter owns HOW." This
+  mirrors `Driver::start` — one call spawns the workload and returns an opaque
+  `AllocationHandle`; the caller never drives the sub-steps. **(REVISED
+  2026-06-13, D-MTLS-13: the original text cited the `arming invariant`
+  (SOCKMAP-before-`TCP_ULP`) as the ordering the type system hides — that
+  invariant is now MOOT, the sockmap is gone; the adapter-internal ordering it
+  hides is the kTLS-arm → forward-`splice`-pump sequence.)**
 
-- The **forward steady state is NOT a method** — it is **agent-idle** (the kernel
-  sockmap egress-redirect drives `tcp_sendmsg_locked`, the agent issues zero
-  per-byte syscalls; `findings-egress-ktls-splice.md` 15/15). `enforce` *installs*
-  it (the `sk_skb/stream_verdict` redirect, `flags=0`); nothing in the port drives
-  it per-byte. Pinning it as a "run forward" method would invent surface the
-  mechanism does not need.
+- The **forward steady state is NOT a method** — it is the **agent-light forward
+  `splice` pump** (`splice(legF → pipe → legB)` into leg B's kTLS-TX; the kernel
+  `tls_sw_sendmsg` encrypts each record synchronously; D-MTLS-13). `enforce`
+  *starts* the adapter's own forward-pump task; nothing in the port drives it
+  per-record (`liveness`/`teardown` observe and stop it, the same as the return
+  pump). **~~Originally agent-IDLE — the kernel `sk_skb/stream_verdict` sockmap
+  egress-redirect (`flags=0`).~~ RETIRED 2026-06-13** (the redirect
+  `MSG_DONTWAIT`-stalls ~10–15% of records;
+  `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`). Pinning the forward
+  pump as a "run forward" method would invent surface the mechanism does not need.
 
 - The **return steady state IS agent-light** (the `splice(legB → pipe → legF)`
   pump, ~1 splice/record; `findings-splice-return.md`). The agent must *drive*
@@ -1724,14 +1741,15 @@ exact wire shape — it does not re-derive the mechanism.
 |---|---|---|
 | `enforce` OUTBOUND (handshake + kTLS arm) | rustls *client* `dangerous_extract_secrets` → `ktls` → `setsockopt TCP_ULP/TLS_TX/TLS_RX` on leg B | `findings.md` Increment A (WORKS) + Increment B (`ktls::KtlsStream` for control records) |
 | `enforce` OUTBOUND (transparent intercept + lossless capture) | `cgroup/connect4`-rewrite → `accept()` leg F → lossless `recv()` drain → flush | `findings-userspace-relay.md` Unknowns 1+2 |
-| `enforce` OUTBOUND (forward install, agent-idle) | `sk_skb/stream_verdict` sockmap EGRESS-redirect `flags=0` leg F→B kTLS-TX | `findings-egress-ktls-splice.md` (15/15, Assertions 1–3) |
+| `enforce` OUTBOUND (forward pump, agent-light) | `splice(legF → pipe → legB)` into leg B's kTLS-TX; kernel `tls_sw_sendmsg` encrypts each record synchronously (D-MTLS-13). ~~`sk_skb/stream_verdict` sockmap EGRESS-redirect `flags=0`~~ RETIRED — `MSG_DONTWAIT`-stall | `findings-splice-return.md`; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` (forward pivot) |
+| `enforce` (kTLS 0.5-RTT early-data drain, both directions) | drain `conn.reader()` of early application_data before `dangerous_extract_secrets` arms kTLS-RX (`rx` `rec_seq` already accounts for the over-read), forward it ahead of the splice pump (D-MTLS-13) | shipped `mtls::drain_early_plaintext` (CorkStream-equivalent userspace drain) |
 | `enforce` INBOUND (transparent intercept + orig-dst recovery) | `nft` TPROXY → `IP_TRANSPARENT` listener `accept()` leg C → `getsockname()` recovers ORIG_DST → selects server `AllocationId` | `findings-inbound-intercept.md` §1 + Mechanics #1 |
 | `enforce` INBOUND (server-side mutual-TLS + client-auth verify) | rustls *server* `ServerConfig` presents server SVID + `WebPkiClientVerifier` REQUIRE+VERIFY client SVID chains to bundle; fail-closed on `nocert`/`wrongca` | `findings-inbound-intercept.md` §2 + §4 |
 | `enforce` INBOUND (kTLS-RX arm + splice-to-server, agent-light) | arm kTLS-RX on leg C (suppress `NewSessionTicket`; read `peer_certificates` before `extract_secrets`) → `splice(legC→pipe→legS)` via `tls_sw_splice_read` | `findings-inbound-intercept.md` §3 + §5 + Mechanics #3/#6 |
-| `enforce` / `probe` (arming invariant) | SOCKMAP insert BEFORE `TCP_ULP "tls"` on leg B (reverse = `EINVAL`) | `findings.md` Increment D |
+| ~~`enforce` / `probe` (arming invariant)~~ MOOT 2026-06-13 (D-MTLS-7/13) | ~~SOCKMAP insert BEFORE `TCP_ULP "tls"` on leg B~~ — no sockmap insert on any path now | `findings.md` Increment D (historical kernel fact only) |
 | `liveness` + the return/deliver pump | `splice(legB→pipe→legF)` (outbound return) / `splice(legC→pipe→legS)` (inbound deliver) via `tls_sw_splice_read` on a plain no-psock kTLS-RX leg (~1/record) | `findings-splice-return.md` (CONFIRMED) · `findings-inbound-intercept.md` §5 |
 | (leg B / leg C no-psock precondition) | the kTLS-RX leg carries no sockmap/verdict on RX — else kTLS-RX fights it / `tls_sw_read_sock -EINVAL` | `findings-ktls-rx-splice.md` (verdict (b)) |
-| `probe` (3 substrate lies) | (1) kTLS arm round-trip; (2) forward egress-redirect emits ciphertext; (3) reverse arming order = `EINVAL` | `findings.md` A · `findings-egress-ktls-splice.md` · `findings.md` D (1:1 with `ProbeSentinel`) |
+| `probe` (1 composed sentinel, D-MTLS-13) | kTLS arm + agent-light forward `splice` round-trip on a loopback sentinel (`ProbeSentinel::KtlsArmRoundTrip`), reader leg also drains 0.5-RTT early data. ~~(2) forward egress-redirect emits ciphertext; (3) reverse arming order = `EINVAL`~~ dropped with the sockmap | `findings.md` A · `findings-splice-return.md` (1:1 with the single `ProbeSentinel` variant) |
 
 ### Newtypes (CREATE-NEW, minimal)
 
@@ -1778,7 +1796,7 @@ review's resource/identity findings require**.
    pub enum Direction {
        /// The intercepted workload is the connection's CLIENT (outbound connect()).
        /// `cgroup_connect4` intercept → rustls CLIENT handshake on leg B →
-       /// sockmap-egress forward + splice return.
+       /// agent-light forward splice (`legF → legB`) + return splice (`legB → legF`).
        Outbound,
        /// The intercepted workload is the connection's SERVER (inbound accept()).
        /// TPROXY intercept → `getsockname` orig-dst → rustls SERVER handshake on
@@ -1999,17 +2017,20 @@ connection tasks.
 //! liveness, and tear the connection down. `enforce` dispatches on
 //! `InterceptedConnection::routed` (the `Direction`):
 //! - **OUTBOUND**: lossless capture on leg F → rustls CLIENT handshake on leg B
-//!   presenting the held SVID → arm kTLS → install the forward egress-redirect →
-//!   return-splice pump (`findings-egress-ktls-splice.md` / `findings-splice-return.md`).
+//!   presenting the held SVID → arm kTLS-TX/RX → agent-light forward-splice pump
+//!   (`splice(legF → legB)`, the kernel kTLS-TX encrypts on splice-in) +
+//!   return-splice pump (`splice(legB → legF)`) — both symmetric to the inbound
+//!   deliver/response pumps (D-MTLS-13; `findings-splice-return.md`).
 //! - **INBOUND**: TPROXY-intercept → `getsockname` orig-dst → rustls SERVER
 //!   handshake on leg C (present the server SVID, REQUIRE+VERIFY the client SVID
 //!   chains to the bundle via `WebPkiClientVerifier`) → arm kTLS-RX → dial the
 //!   server workload (leg S) → splice the decrypted plaintext to it; fail-closed
 //!   on `nocert`/`wrongca` (`findings-inbound-intercept.md`).
 //!
-//! Production wires `HostMtlsEnforcement` (over sockops / sk_skb-stream_verdict /
-//! sockmap / kTLS / `splice` / `cgroup_connect4` / `nft`-TPROXY+`IP_TRANSPARENT`,
-//! consuming `IdentityRead`); simulation wires `SimMtlsEnforcement` (in-memory
+//! Production wires `HostMtlsEnforcement` (over kTLS / `splice` /
+//! `cgroup_connect4` / `nft`-TPROXY+`IP_TRANSPARENT`, consuming `IdentityRead`;
+//! the sockops/sk_skb/sockmap surface was retired with the forward sockmap-egress
+//! redirect, D-MTLS-13); simulation wires `SimMtlsEnforcement` (in-memory
 //! observable-contract mirror). The `mtls_enforcement_equivalence` DST harness
 //! drives both through the same call sequence (both directions) and asserts
 //! identical observable state (`.claude/rules/development.md` § "The DST
@@ -2051,36 +2072,41 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// connection is enforced. Composition-root invariant: wire → probe → use.
     ///
     /// # Preconditions
-    /// None. Called once at node startup, after the adapter is constructed and
-    /// its BPF objects/maps are loaded+pinned, before `enforce` is ever called.
+    /// None. Called once at node startup, after the adapter is constructed,
+    /// before `enforce` is ever called.
     ///
     /// # Postconditions on `Ok(())`
-    /// The three catalogued substrate lies the spikes surfaced have been
-    /// exercised on a loopback sentinel and round-tripped clean:
-    /// (1) **kTLS arm round-trips** — a sentinel rustls handshake on a loopback
-    ///     leg B arms kTLS and a single `tls_sw_splice_read` of one record
-    ///     returns the exact sentinel plaintext (`findings.md` A; `findings-
-    ///     splice-return.md`);
-    /// (2) **the forward egress-redirect fires** — a sentinel byte written to a
-    ///     loopback leg F emerges ENCRYPTED on leg B's wire via the sockmap
-    ///     EGRESS redirect (`flags=0`, not `BPF_F_INGRESS`;
-    ///     `findings-egress-ktls-splice.md`);
-    /// (3) **the arming invariant holds** — SOCKMAP insert precedes `TCP_ULP
-    ///     "tls"`; the reverse ordering is observed to return `EINVAL`
-    ///     (`findings.md` D / D-MTLS-7).
+    /// The substrate the proxy relies on has been exercised on a loopback
+    /// sentinel and round-tripped clean: a sentinel rustls TLS 1.3 handshake on a
+    /// loopback leg arms kTLS-TX/RX, an **agent-light forward `splice`** of one
+    /// sentinel record through the kTLS-TX leg emits the record ENCRYPTED, and the
+    /// sentinel peer's kTLS-RX reconstructs the exact sentinel plaintext via a
+    /// single `tls_sw_splice_read` (`findings.md` A / `findings-splice-return.md`).
+    /// The sentinel handshake needs a cert+key, minted as a throwaway self-signed
+    /// `rcgen` sentinel at call time (substrate-self-test crypto only —
+    /// D-MTLS-12/SD-5; #26 stays a reader, never an issuer). The reader leg ALSO
+    /// drains 0.5-RTT early application_data from `conn.reader()` before
+    /// `dangerous_extract_secrets` (D-MTLS-13 / `mtls::drain_early_plaintext`).
     /// After `Ok`, the proxy is declared usable; the node proceeds to serve.
     ///
+    /// **(REVISED 2026-06-13, D-MTLS-13.)** This is now ONE composed sentinel
+    /// (`ProbeSentinel::KtlsArmRoundTrip`). The obsolete `ForwardEgressRedirect`
+    /// (the sockmap-egress-redirect emits ciphertext) and `ArmingOrderEinval`
+    /// (SOCKMAP-after-`TCP_ULP` returns `EINVAL`) sub-sentinels were DROPPED with
+    /// the sockmap — the forward path is now an agent-light `splice`, so there is
+    /// no redirect and no sockmap-insert ordering to probe.
+    ///
     /// # Edge cases
-    /// Any sentinel round-trip failure (kTLS arm refused, the redirect produces
-    /// cleartext or no bytes, the reverse ordering does NOT return `EINVAL`)
+    /// Any sentinel round-trip failure (kTLS arm refused, the forward splice
+    /// produces cleartext or no bytes, the peer reconstructs the wrong plaintext)
     /// returns a typed `MtlsEnforcementError` and the node MUST refuse to start
     /// with a structured `health.startup.refused` event — it does NOT degrade to
     /// a cleartext path (fail-closed for confidentiality).
     ///
     /// # Observable invariants
     /// `probe` mutates no enforced connection (there are none yet) and leaks no
-    /// sentinel state — the loopback legs and pinned sentinel maps are torn down
-    /// before return regardless of outcome.
+    /// sentinel state — the loopback legs are torn down before return regardless
+    /// of outcome.
     async fn probe(&self) -> Result<()>;
 
     /// Bring `conn` to a steady-state-established mTLS session and return an
@@ -2118,14 +2144,21 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   the trust bundle). Auth-session == data-session (the rustls handshake's
     ///   extracted secrets ARE the kTLS keys on leg B). NO cleartext appears on
     ///   the peer-facing wire (`tcpdump` oracle).
-    /// - The forward steady state is AGENT-IDLE: leg F's RX is sockmap
-    ///   EGRESS-redirected (`flags=0`) into leg B's kTLS TX; the agent issues
-    ///   zero per-byte syscalls forward (`findings-egress-ktls-splice.md`).
+    /// - The forward steady state is AGENT-LIGHT (D-MTLS-13): the adapter's own
+    ///   task drives the forward pump `splice(legF → pipe → legB)`; leg B is
+    ///   kTLS-TX-armed, so the kernel `tls_sw_sendmsg` encrypts each record
+    ///   synchronously on splice-in (NOT the `MSG_DONTWAIT` sockmap-backlog path)
+    ///   — the agent does ZERO crypto and copies no plaintext in userspace. ~1
+    ///   `splice` per TLS record, symmetric to the inbound deliver pump. This
+    ///   replaced the sockmap egress redirect, which `MSG_DONTWAIT`-stalled
+    ///   ~10–15% of records
+    ///   (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
     /// - The return-splice pump is RUNNING (the adapter's own task drives
     ///   `splice(legB → pipe → legF)` on a plain — NO psock — kTLS-RX leg B;
     ///   D-MTLS-4 / D-MTLS-5). `liveness(&handle)` reports `Running`.
-    /// - The arming invariant was honoured: SOCKMAP insert preceded `TCP_ULP
-    ///   "tls"` on leg B (D-MTLS-7).
+    /// - (The 0.5-RTT early application_data the peer sent before the agent's
+    ///   first record was drained from `conn.reader()` and forwarded ahead of the
+    ///   pump — D-MTLS-13 / `mtls::drain_early_plaintext`.)
     /// - **Leg B was dialed with the intercept-exemption bypass (F5).** The
     ///   agent's own outbound leg-B `connect()` is NOT re-intercepted by the
     ///   workload `cgroup_connect4` rewrite — via a narrowly-scoped `SO_MARK`
@@ -2200,14 +2233,15 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   intercept is refused, no cleartext (F4).
     /// - The rustls handshake aborts (wrong SVID, alert, timeout) ⇒
     ///   `Err(HandshakeFailed)`; refused, legs closed.
-    /// - The kTLS arm refuses on the kTLS leg ⇒ `Err(KtlsArmFailed)`; refused,
+    /// - The kTLS arm refuses on the kTLS leg (`TCP_ULP`/`TLS_TX`/`TLS_RX`
+    ///   rejected, kernel TLS module absent) ⇒ `Err(KtlsArmFailed)`; refused,
     ///   legs closed.
-    /// - A SOCKMAP-after-`TCP_ULP` ordering violation surfaces as
-    ///   `Err(ArmingOrderViolation)` (`EINVAL`) — a structural defect the probe
-    ///   should have caught; if it reaches here the connection is refused.
+    /// - (REMOVED 2026-06-13, D-MTLS-13: the `ArmingOrderViolation`
+    ///   SOCKMAP-after-`TCP_ULP` edge case is gone — the forward path is an
+    ///   agent-light `splice` with no sockmap insert and no ordering to violate.)
     /// On ANY error, the port owns the cleanup: every owned leg is closed (OUTBOUND:
-    /// leg F + any opened leg B; INBOUND: leg C + any opened leg S), no sockmap
-    /// membership or kTLS state leaks, and NO cleartext byte reached the wire
+    /// leg F + any opened leg B; INBOUND: leg C + any opened leg S), no pump or
+    /// kTLS state leaks, and NO cleartext byte reached the wire
     /// (OUTBOUND: the peer wire; INBOUND: the server workload's leg S — nothing is
     /// spliced) — the confidentiality invariant the whole feature rests on.
     ///
@@ -2366,41 +2400,31 @@ pub enum MtlsEnforcementError {
     #[error("in-flight connection limit {limit} reached for allocation {alloc}; refusing new intercept (fail-closed)")]
     InFlightLimitExceeded { alloc: AllocationId, limit: u32 },
 
-    /// `setsockopt(TCP_ULP "tls")` / `TLS_TX` / `TLS_RX` refused on leg B after a
-    /// successful handshake — the kTLS arm itself failed (kernel rejected the
-    /// crypto_info, the ULP was already set, etc.). The extracted secrets were
+    /// `setsockopt(TCP_ULP "tls")` / `TLS_TX` / `TLS_RX` refused on the kTLS leg
+    /// (leg B outbound / leg C inbound) after a successful handshake — the kTLS
+    /// arm itself failed (kernel rejected the crypto_info, the ULP was already
+    /// set, the kernel TLS module is absent, etc.). The extracted secrets were
     /// valid (handshake completed) but the kernel would not take them. Distinct
     /// from `HandshakeFailed` per `.claude/rules/development.md` § Errors — the
     /// failing layer is the kTLS install, not the handshake.
-    #[error("kTLS arm on leg B refused by kernel: {source}")]
+    #[error("kTLS arm refused by kernel: {source}")]
     KtlsArmFailed {
         #[source]
         source: std::io::Error,
     },
 
-    /// A SOCKMAP insert was attempted AFTER `TCP_ULP "tls"` on leg B and the
-    /// kernel returned `EINVAL` (both replace `sk->sk_prot`; `findings.md` D /
-    /// D-MTLS-7). This is the arming-invariant violation — a structural defect
-    /// `probe` is designed to catch; surfacing it as its own variant lets the
-    /// composition root and the Tier-3 `tls-ULP-after-sockmap == EINVAL` test
-    /// pin it precisely rather than hiding it inside a generic load failure.
-    #[error("arming-order violation: SOCKMAP insert after TCP_ULP \"tls\" returned EINVAL on leg B")]
-    ArmingOrderViolation,
-
-    /// The forward sockmap EGRESS-redirect (`sk_skb/stream_verdict`, `flags=0`)
-    /// could not be installed on the leg-F → leg-B pair — the BPF attach/map
-    /// update for the agent-idle forward path failed. Distinct from the kTLS
-    /// arm (a different kernel subsystem) and from teardown.
-    #[error("forward egress-redirect install failed on leg F→B: {source}")]
-    ForwardRedirectFailed {
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// The Earned-Trust `probe` sentinel round-trip failed — one of the three
-    /// catalogued substrate lies (kTLS arm, forward redirect, arming order) did
-    /// NOT round-trip clean on the loopback sentinel. The node MUST refuse to
-    /// start (`health.startup.refused`); the proxy is not trustworthy. Mirrors
+    /// **(REMOVED 2026-06-13, D-MTLS-13.)** `ArmingOrderViolation` (SOCKMAP insert
+    /// after `TCP_ULP "tls"` = `EINVAL`) and `ForwardRedirectFailed` (the sockmap
+    /// egress-redirect install failed) are GONE from the shipped surface — the
+    /// forward path is now an agent-light `splice` with no sockmap insert and no
+    /// redirect to fail. There is no `sk->sk_prot`-ordering invariant and no BPF
+    /// attach on the forward path to surface as a typed variant. (Recorded here so
+    /// a reader of this design narrative does not expect the deleted variants.)
+    ///
+    /// The Earned-Trust `probe` sentinel round-trip failed — the kTLS-arm +
+    /// agent-light forward-splice substrate did NOT round-trip clean on the
+    /// loopback sentinel. The node MUST refuse to start
+    /// (`health.startup.refused`); the proxy is not trustworthy. Mirrors
     /// `DataplaneError::LocalBackendProbe` / `ReverseLocalProbe`. `which` names
     /// the sentinel that failed so the refusal is diagnosable without
     /// `Display`-grepping.
@@ -2427,16 +2451,17 @@ pub enum MtlsEnforcementError {
     Io(#[from] std::io::Error),
 }
 
-/// Which probe sentinel failed (for the refuse-to-start diagnosis). 1:1 with the
-/// three catalogued substrate lies the spikes surfaced.
+/// Which probe sentinel failed (for the refuse-to-start diagnosis). The substrate
+/// the proxy now relies on is "kTLS arm + agent-light forward splice" — a single
+/// composed round-trip sentinel (**REVISED 2026-06-13, D-MTLS-13**: the obsolete
+/// `ForwardEgressRedirect` and `ArmingOrderEinval` sockmap sentinels were dropped
+/// with the sockmap mechanism).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeSentinel {
-    /// kTLS arm + one `tls_sw_splice_read` round-trip (findings.md A).
+    /// kTLS arm on a loopback leg + an agent-light forward `splice` of one record
+    /// through it, reconstructed byte-exact by the peer's kTLS-RX
+    /// (`findings.md` A / `findings-splice-return.md`).
     KtlsArmRoundTrip,
-    /// Forward sockmap EGRESS-redirect emits ciphertext (findings-egress-ktls-splice.md).
-    ForwardEgressRedirect,
-    /// SOCKMAP-after-TCP_ULP returns EINVAL (findings.md D).
-    ArmingOrderEinval,
 }
 
 /// Liveness of a connection's agent-light splice pump (return outbound / deliver
@@ -2512,7 +2537,8 @@ pub struct SimMtlsEnforcement {
     limits: MtlsLimits,
     /// Scripted per-alloc outcomes (absent ⇒ derive outcome from `identity`):
     /// lets a scenario inject `HandshakeFailed` / `KtlsArmFailed` /
-    /// `ArmingOrderViolation` / `PeerIdentityMismatch` deterministically.
+    /// `PeerIdentityMismatch` deterministically. (`ArmingOrderViolation` was
+    /// removed 2026-06-13 with the sockmap — D-MTLS-13.)
     scripted: BTreeMap<AllocationId, ScriptedOutcome>,
     /// Observable state DST asserts on: per established connection, its liveness.
     /// `BTreeMap` for deterministic iteration (the equivalence guard walks it).
@@ -2768,9 +2794,10 @@ already satisfies every requirement the new crate was invented to provide.**
    not re-add.
 3. **A BPF `build.rs` already present.** `overdrive-dataplane`'s `build.rs` already
    carries the `overdrive_bpf.o` dependency (CLAUDE.md's bpf-build-prereq footgun is
-   about *this* crate). The new sockops/`sk_skb`/`cgroup_connect4`-mtls programs
-   compile into the same shared BPF object via `overdrive-bpf` — no new build
-   coupling to invent.
+   about *this* crate). The new `cgroup_connect4`-mtls program compiles into the
+   same shared BPF object via `overdrive-bpf` — no new build coupling to invent.
+   (The sockops/`sk_skb` forward-redirect programs were retired 2026-06-13,
+   D-MTLS-13 — the forward path is now a userspace `splice` pump.)
 4. **"The crate that talks to the kernel."** `overdrive-dataplane` already hosts
    `EbpfDataplane`; it IS the userspace↔kernel host adapter. Adding `ktls` +
    `rustls` is a modest dep bump on a crate already in the kernel-dataplane graph.
@@ -2784,10 +2811,13 @@ transport, cgroup-fs, the `RcgenCa` adapter over safe `ring`/`rcgen`, the safe
 cannot share that crate without lifting a load-bearing safety property for every
 unrelated safe module.
 
-**Kernel programs → `overdrive-bpf`.** The new sockops, `sk_skb/stream_verdict`
-(forward egress-redirect), and `cgroup_connect4`-mtls (intercept) programs live
-alongside the existing `cgroup_connect4_service.rs` / XDP programs — one shared BPF
-object, per Component Decomposition #5.
+**Kernel programs → `overdrive-bpf`.** The new `cgroup_connect4`-mtls (outbound
+intercept) program lives alongside the existing `cgroup_connect4_service.rs` / XDP
+programs — one shared BPF object, per Component Decomposition #5. **(REVISED
+2026-06-13, D-MTLS-13: the sockops `sock_ops_mtls_enroll` and the
+`sk_skb/stream_verdict` forward egress-redirect programs were RETIRED with the
+sockmap — the forward path is now a userspace `splice` pump with no kernel-side
+program.)**
 
 **Architectural-enforcement rule (ADR-0069 § Enforcement) restated for the resolved
 homes**: `overdrive-dataplane`/`overdrive-bpf` own the kernel/eBPF surface; the
@@ -2878,10 +2908,16 @@ byte-exact plaintext to the server workload, agent-light strace — grounded in
 `findings-inbound-intercept.md`); the F4/F7 resource-limit Tier-3 obligations
 (**assert the CONCRETE values** 256 KiB / 5 s / 128 / 30 s, not field existence);
 the **F6 pump-stall → teardown** obligation; the F5 intercept-exemption obligations;
-and the F1/F5 authn-only boundary (authorization is #27/#38, NOT this feature; the
-`expected_peer` SAN-match is the **#178 upgrade**, `#[ignore]`-gated, and the
-docs/tests MUST NOT call the wrong-but-valid-peer case "protected" until #178
-lands).
+the **D-MTLS-13 forward-mechanism obligations** (the OUTBOUND forward is an
+agent-light `splice(legF → legB)` into kTLS-TX — NOT a sockmap egress redirect;
+every reader leg drains 0.5-RTT early data via `mtls::drain_early_plaintext` before
+`dangerous_extract_secrets`; the `probe` is ONE composed `KtlsArmRoundTrip`
+sentinel; there is NO sockmap/`MTLS_*` map, NO `sk_skb`/`sock_ops` program, NO
+`ArmingOrderViolation`/`ForwardRedirectFailed` variant, NO arming-order Tier-3
+test); and the F1/F5 authn-only boundary (authorization is #27/#38, NOT this
+feature; the `expected_peer` SAN-match is the **#178 upgrade**, `#[ignore]`-gated,
+and the docs/tests MUST NOT call the wrong-but-valid-peer case "protected" until
+#178 lands).
 
 **Operator-tunability — tracked in [#230](https://github.com/overdrive-sh/overdrive/issues/230)
 (created 2026-06-12).** The `MtlsLimits` F7 values (256 KiB / 5 s / 128 / 30 s) are

@@ -41,7 +41,7 @@ with the workload holding no cert and no key (identity-unaware).
 
 ## OUT scope
 
-- The kTLS arm + forward agent-idle splice + return agent-light splice + wire
+- The kTLS arm + agent-light forward splice + return agent-light splice + wire
   capture → Slice 03 (outbound) / Slice 04 (inbound) (this slice ends at a
   completed handshake with extracted secrets ready; the bytes are not yet kTLS).
 - The fail-closed-on-absent/wrong-SVID negative proofs (absent SVID outbound;

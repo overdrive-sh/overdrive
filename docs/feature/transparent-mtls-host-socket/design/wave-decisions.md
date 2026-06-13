@@ -40,9 +40,14 @@ unresolved — see § "Review revisions" F2).
   source-TX-bypass RST on redirecting the live socket (`findings-lossless-hybrid.md`
   + `sockmap-redirect-live-socket-liveness-research.md`); lossless capture
   structurally requires a proxy (`findings-userspace-relay.md`).
-- **Proxy proven agent-light BOTH directions**: forward agent-IDLE sockmap-egress-
-  redirect → kTLS-TX, 15/15 (`findings-egress-ktls-splice.md`); return agent-LIGHT
-  zero-copy `splice` via `tls_sw_splice_read`, ~1/record (`findings-splice-return.md`).
+- **Proxy proven agent-light BOTH directions**: agent-LIGHT zero-copy `splice` in
+  every direction (~1/record; `findings-splice-return.md`) — the forward `splice`
+  into kTLS-TX (`tls_sw_sendmsg` encrypts on splice-in) is the symmetric mirror of
+  the return `splice` out of kTLS-RX (`tls_sw_splice_read`). **(REVISED 2026-06-13,
+  D-MTLS-13: the forward was originally agent-IDLE via a sockmap-egress-redirect,
+  15/15 in `findings-egress-ktls-splice.md`; that redirect was proven non-viable —
+  a `MSG_DONTWAIT`-backlog delivery stall — and retired; see § "Forward-mechanism
+  pivot" below.)**
 - **Basic mechanism proven**: `sockops → rustls → kTLS`, `pidfd_getfd` handoff,
   SOCKMAP-before-`TCP_ULP` ordering, control records via `ktls::KtlsStream`
   (`findings.md`).
@@ -63,14 +68,21 @@ unresolved — see § "Review revisions" F2).
 
 See the feature-delta § "Wave: DESIGN / [REF] Decisions Table" for the full table.
 Highlights: D-MTLS-3 (NEW `MtlsEnforcement` port, `Dataplane` does not fit);
-D-MTLS-4 (forward agent-idle sockmap-egress, return agent-light `splice`); D-MTLS-5
-(leg B = plain kTLS-RX, NO psock); D-MTLS-10 (in-process agent — no separate
-process, no gRPC/CSR; resolves the prior open item); D-MTLS-11 (Earned-Trust
-`probe()` mandatory); D-MTLS-12 (added 2026-06-12 during DELIVER back-propagation —
-`probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted in-process
-via `rcgen`; substrate-self-test crypto, signed by neither CA, never in the trust
-bundle, never on a real wire — #26 stays a READER, NOT an issuer; promotes `rcgen`
-to an `overdrive-dataplane` production dep; SD-5, user-approved).
+D-MTLS-4 (**REVISED 2026-06-13** — forward AND return are BOTH agent-light `splice`;
+the original agent-idle sockmap-egress was retired, see D-MTLS-13); D-MTLS-5
+(leg B = plain kTLS-RX, NO psock — now no psock on ANY leg); D-MTLS-7 (**MOOT
+2026-06-13** — sockmap-before-`TCP_ULP` invariant; no sockmap insert on any path);
+D-MTLS-10 (in-process agent — no separate process, no gRPC/CSR; resolves the prior
+open item); D-MTLS-11 (Earned-Trust `probe()` mandatory); D-MTLS-12 (added
+2026-06-12 — `probe`'s handshake sentinel uses a THROWAWAY self-signed cert minted
+in-process via `rcgen`; substrate-self-test crypto, signed by neither CA, never in
+the trust bundle, never on a real wire — #26 stays a READER, NOT an issuer;
+promotes `rcgen` to an `overdrive-dataplane` production dep; SD-5, user-approved.
+**STILL LIVE after 2026-06-13** — the shipped `probe` still does a loopback rustls
+handshake, so the rcgen-sentinel core is unchanged; only the sockmap-engagement
+sub-sentinels were mooted); **D-MTLS-13 (2026-06-13 — forward sockmap-egress →
+agent-light `splice` pivot + kTLS 0.5-RTT early-data drain; SHIPPED + verified
+20/20, commit `bb6489ef`; see § "Forward-mechanism pivot" below).**
 
 ## Reuse Analysis verdict (hard gate)
 
@@ -200,3 +212,75 @@ fields (additive); F6 adds `pump_stall_deadline` (additive); F7 pins values
 (no new fields beyond `pump_stall_deadline`); F4/F5 are scope/doc. Nothing in the
 locked decision moved. The contract is **ACCEPTED (user-approved 2026-06-12)**
 (bidirectional + F4–F7 revised).
+
+## Forward-mechanism pivot (D-MTLS-13, 2026-06-13 — back-propagation to a SHIPPED + verified change)
+
+A mechanism change has **already shipped and been verified 20/20 on the real
+kernel** (commit `bb6489ef`); this section reconciles the design artifacts to it.
+**This is NOT a re-open or a new decision the architect made** — it records a
+mechanism the user queued for back-propagation after it was implemented and
+proven. The core fold (D-MTLS-1, ADR-0069), OQ-2, SD-1…SD-4, the 4-method contract
+shape, the leg-B kTLS arm, the lossless pre-arm capture, the agent-light
+return/deliver/response splice pumps, the no-psock invariant (D-MTLS-5), and the
+fail-closed/confidentiality model are ALL UNCHANGED.
+
+**What changed.** The OUTBOUND forward (encrypt) direction retired the agent-idle
+in-kernel **sockmap egress redirect** (`sk_skb/stream_verdict` +
+`bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX) for an **agent-light
+`splice(legF → legB)`** into leg B's kTLS-TX — symmetric to the return/deliver/
+response pumps; the kernel `tls_sw_sendmsg` encrypts each spliced record
+synchronously, the agent does ZERO crypto. The whole sockmap apparatus
+(`MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the
+`sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll) is
+DELETED. A **kTLS 0.5-RTT early-data drain** was added to every reader leg: drain
+`conn.reader()` of already-decrypted early application_data before
+`dangerous_extract_secrets` arms kTLS-RX (`mtls::drain_early_plaintext`; the
+extracted `rx` `rec_seq` already accounts for the over-read records, so early data
+left only in `conn.reader()` would otherwise be silently dropped).
+
+**Why (the evidence — kernel-source-primary + a spike + the shipped code, the
+SSOT).**
+- `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`
+  (v6.6 ≡ v6.12): the `sk_skb` egress redirect ENQUEUES on leg B's psock and defers
+  delivery to a `MSG_DONTWAIT` workqueue (`sk_psock_backlog → skb_send_sock →
+  tls_sw_sendmsg`) that `-EAGAIN`-stalls ~10–15% of records (`redirect_ok` counts
+  the *enqueue*, not the *delivery*). No production system runs the pattern (Istio
+  ztunnel = userspace rustls; Cilium = network-layer IPsec/WireGuard + sockmap only
+  for *plaintext* localhost-bypass); the kernel does not test it. A synchronous
+  userspace `splice`/`write` into kTLS-TX (no `MSG_DONTWAIT`/backlog) is the
+  correct, reliable mechanism — and is exactly the return-pump shape already
+  accepted.
+- `docs/research/dataplane/sockmap-strparser-engagement-race-research.md` and
+  `spike/findings-sockmap-engagement-inkernel-enroll.md`: the in-kernel sockops
+  enroll closed the engagement race deterministically, but the redirect-delivery
+  residual above remained → the whole sockmap forward path (enroll spike included)
+  is retired.
+- The shipped `crates/overdrive-dataplane/src/mtls/` code is the SSOT for the
+  mechanism (the contract code in `crates/overdrive-core/src/traits/mtls_enforcement.rs`
+  is already aligned: `ProbeSentinel` is now only `KtlsArmRoundTrip`;
+  `ArmingOrderViolation` and `ForwardRedirectFailed` are removed; the OUTBOUND
+  `enforce` postcondition is agent-light).
+
+| Decision | Status after 2026-06-13 | Where reconciled |
+|---|---|---|
+| **D-MTLS-4** (forward/return mechanism) | **REVISED** — forward AND return are BOTH agent-light `splice`; the agent-idle sockmap-egress was retired | ADR-0069 (2026-06-13 amendment + Decision facts 3/4); feature-delta Decisions Table + the embedded contract + Traceability matrix + Tech Choices + glossary; slice-00/01/02/03/04 |
+| **D-MTLS-5** (no psock on the kTLS-RX leg) | UNCHANGED, strengthened — now no psock on ANY leg (the sockmap is gone) | ADR-0069 fact 4; feature-delta Decisions Table |
+| **D-MTLS-7** (sockmap-before-`TCP_ULP` invariant) | **MOOT / SUPERSEDED** — no sockmap insert sequenced against `TCP_ULP` on any leg; the `tls-ULP-after-sockmap == EINVAL` Tier-3 test is retired (true kernel fact, governs no code path) | ADR-0069 fact 5 + Decision fact 3 note; feature-delta Decisions Table + Traceability matrix + glossary + per-method anchor table |
+| **D-MTLS-12 / SD-5** (rcgen sentinel cert) | **STILL LIVE** — VERIFIED against the shipped probe: `run_probe_sentinels` STILL does a loopback rustls handshake for the kTLS-arm round-trip, so the throwaway-`rcgen`-sentinel core is unchanged and the `overdrive-dataplane → rcgen` production-dep edge still ships. ONLY the *sockmap-engagement / ARMED-gate* portion of the probe's substrate-lie catalogue was mooted (the `ForwardEgressRedirect`/`ArmingOrderEinval` sub-sentinels) | ADR-0069 Earned-Trust probe §; feature-delta Decisions Table D-MTLS-12 note + `ProbeSentinel` enum + `probe` doc |
+| **D-MTLS-13** (NEW) | the pivot itself + the kTLS 0.5-RTT early-data drain | this section; ADR-0069 (2026-06-13 amendment); feature-delta Decisions Table D-MTLS-13 |
+
+**Probe surface (reconciled to the shipped contract).** `ProbeSentinel` is now ONE
+variant, `KtlsArmRoundTrip` (kTLS arm + agent-light forward `splice` round-trip on
+a loopback sentinel, reader leg drains 0.5-RTT early data). The obsolete
+`ForwardEgressRedirect` and `ArmingOrderEinval` sub-sentinels, and the
+`ArmingOrderViolation` / `ForwardRedirectFailed` `MtlsEnforcementError` variants,
+are GONE — there is no redirect to fire and no sockmap-insert ordering to violate.
+
+**Code-vs-design check (no contradiction surfaced).** The shipped contract code
+(`mtls_enforcement.rs`) and the shipped mechanism (`mtls/`) AGREE with everything
+documented above — `ProbeSentinel::KtlsArmRoundTrip` only, no
+`ArmingOrderViolation`/`ForwardRedirectFailed`, agent-light forward `enforce`
+postcondition, and `mtls::drain_early_plaintext` on every reader leg. No
+design-vs-code disagreement was found; the back-propagation is a clean
+narrative-to-shipped-code reconciliation. (Per the dispatch constraint, no
+`crates/**` code was touched.)

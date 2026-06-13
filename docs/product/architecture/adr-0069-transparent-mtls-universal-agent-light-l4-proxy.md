@@ -29,6 +29,66 @@ concrete values (F7); the return/deliver pump has a teardown-on-stall supervisio
 policy (F6). The core fold decision, OQ-2, and SD-1…SD-4 are UNCHANGED — F3/F6/F7
 are additive.
 
+**Amendment (2026-06-13, OUTBOUND forward-mechanism pivot — sockmap-egress-redirect
+→ agent-light `splice`; SHIPPED + verified 20/20 on the real kernel, commit
+`bb6489ef`).** The OUTBOUND forward (encrypt) direction is **no longer an
+agent-idle in-kernel sockmap egress redirect**. That mechanism
+(`sk_skb/stream_verdict` + `bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX) was
+proven **NON-VIABLE** and is **REPLACED** by an **agent-light `splice(legF → legB)`
+pump — symmetric in EVERY direction** (it mirrors the outbound return, the inbound
+deliver, and the inbound response pumps). Leg B stays kTLS-TX-armed, so the kernel
+`tls_sw_sendmsg` encrypts each spliced record synchronously on splice-in; the agent
+does ZERO crypto and copies no plaintext in userspace. The whole sockmap apparatus
+is **DELETED** from the forward path: the `MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`
+maps, the `sk_skb/stream_verdict` verdict program, the `sock_ops_mtls_enroll`
+enroll program, the ARMED confidentiality gate, and the in-kernel
+enroll-at-establishment engagement poll all go. **The forward path is now
+agent-light, not agent-idle** — the same per-record `splice`/`ppoll` cost the
+return path already accepts.
+
+Two evidence chains drive this (the SSOT is the shipped `crates/.../mtls/` code +
+these committed docs):
+- The decisive finding —
+  `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`
+  (kernel-source-primary, v6.6 ≡ v6.12): the `sk_skb` egress redirect ENQUEUES on
+  leg B's psock and defers delivery to a workqueue (`sk_psock_backlog →
+  skb_send_sock → tls_sw_sendmsg`) under **`MSG_DONTWAIT`**, so it `-EAGAIN`-stalls
+  ~10–15% of records (bytes queued-and-counted but never delivered — `redirect_ok`
+  counts the *enqueue*, not the *delivery*). No production system runs this pattern
+  (Istio ztunnel = userspace rustls; Cilium = network-layer IPsec/WireGuard +
+  sockmap only for *plaintext* localhost-bypass); the kernel does not test it. The
+  correct mechanism is a userspace pump whose `write`/`splice` to leg B hits
+  `tls_sw_sendmsg` **synchronously** (no `MSG_DONTWAIT`/backlog fragility) — which
+  is exactly the return-pump shape this ADR already accepts.
+- The superseded engagement analysis —
+  `docs/research/dataplane/sockmap-strparser-engagement-race-research.md` and the
+  in-kernel sockops enroll spike
+  `docs/feature/transparent-mtls-host-socket/spike/findings-sockmap-engagement-inkernel-enroll.md`
+  (closed the enroll-engagement race deterministically, but the
+  redirect-delivery residual above remained → the whole sockmap forward path is
+  retired, enroll spike included).
+
+This amendment ALSO adds, to the handshake→kTLS-arm contract, a **kTLS 0.5-RTT
+early-data drain** requirement (binding on every reader leg, both directions):
+before `dangerous_extract_secrets` arms kTLS-RX, the handshake reader MUST drain
+`conn.reader()` of any already-decrypted 0.5-RTT early application_data (or use a
+`ktls::CorkStream`-equivalent that prevents the socket over-read), and forward that
+drained plaintext ahead of the splice pump. The extracted `rx` `rec_seq`
+(`= read_seq`) already accounts for the over-read records, so early data left only
+in `conn.reader()` would otherwise be silently dropped. See § Decision facts
+3/3a/4a and § Enforcement.
+
+What is UNCHANGED: the bidirectional fold (D-MTLS-1), OQ-2, SD-1…SD-4, the 4-method
+`MtlsEnforcement` contract shape, the leg-B kTLS arm, the lossless pre-arm capture,
+the agent-light return/deliver/response splice pumps, the no-psock-on-the-kTLS-RX-leg
+invariant (D-MTLS-5), and the fail-closed/confidentiality model (the encrypt is
+still kernel-side kTLS-TX; the agent never holds key material). The Earned-Trust
+`probe` keeps its loopback rustls-handshake + kTLS-arm + `splice` round-trip
+sentinel (and the throwaway-`rcgen` sentinel cert it needs, D-MTLS-12/SD-5); only
+its sockmap-egress-redirect and arming-order sub-sentinels are dropped with the
+sockmap. The forward mechanism moved from agent-idle to agent-light; nothing about
+the identity model, the wire format, or the universal-proxy decision moved.
+
 ## Context
 
 Overdrive's identity model is universal: one SPIFFE CA, one set of per-allocation
@@ -64,9 +124,9 @@ TLS 1.3. Committed under `docs/feature/transparent-mtls-host-socket/spike/` and
 `docs/research/dataplane/` at `353cdc52` (and the inbound increment-i added
 since). The findings are decision-grade. **The *mechanism* is spike-verified —
 both the primitives in isolation AND a composed real-intercept flow in one
-direction.** The primitives are each proven (forward sockmap-egress splice into
-kTLS-TX, return `splice(2)` pump on a no-psock kTLS-RX leg, kTLS arm, the
-SOCKMAP-before-`TCP_ULP` ordering invariant). And the **inbound half is proven
+direction.** The primitives are each proven (the agent-light `splice(2)` pump on a
+no-psock kTLS leg — used in EVERY direction including the OUTBOUND forward, see the
+2026-06-13 amendment — and the kTLS arm). And the **inbound half is proven
 COMPOSED end-to-end**: `findings-inbound-intercept.md` (increment-i §2, *ok*
 mode) demonstrated a real TPROXY transparent intercept → `getsockname` orig-dst
 recovery → server-side mutual-TLS (the agent presents S's SVID and
@@ -88,10 +148,13 @@ walking-skeleton scope, NOT "the mechanism is unproven":
    finding*). The two were never wired into one outbound flow.
 2. **Bidirectional steady-state round-trip** — inbound drove only C→S
    (request); outbound forward drove only F→B; neither composed the response
-   leg. (The agent-IDLE sockmap-verdict bidirectional splice has a known
-   leg-B-RX-psock vs kTLS-RX conflict — increment-f "Load-bearing mechanics" #2 —
-   so the return/deliver direction uses the proven agent-LIGHT `splice(2)` path
-   from increment-i/h, not the agent-idle redirect.)
+   leg. **EVERY direction now uses the agent-LIGHT `splice(2)` pump** (the
+   2026-06-13 amendment retired the agent-idle sockmap egress redirect from the
+   forward path after it was proven non-viable — a `MSG_DONTWAIT`-backlog
+   delivery stall; `sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
+   The leg-B-RX-psock vs kTLS-RX conflict — increment-f "Load-bearing mechanics"
+   #2 — was an independent reason a psock-on-the-kTLS-leg never works for the
+   return/deliver direction; with the sockmap gone there is no psock on any leg.
 3. **Real netns/veth topology + cgroup-isolated workloads** — every spike was
    loopback + sibling processes.
 
@@ -119,13 +182,20 @@ feature-delta DESIGN handoff). The load-bearing results:
      (`findings-userspace-relay.md`).
 
 2. **The universal agent-light L4 proxy is proven agent-light in BOTH directions
-   on 7.0**:
+   on 7.0** (the OUTBOUND forward mechanism revised by the 2026-06-13 amendment —
+   see the strikethrough note):
    - **Forward** (workload-plaintext leg F → peer-facing kTLS-TX leg B):
-     **agent-IDLE**. An in-kernel sockmap **EGRESS** redirect
-     (`bpf_sk_redirect_map`, `flags=0`) into a kTLS-armed target drives
-     `tcp_sendmsg_locked` → encrypted egress; the agent issues ZERO per-byte
-     syscalls (`findings-egress-ktls-splice.md`, 15/15 deterministic; strace
-     proof).
+     **agent-LIGHT, `splice(legF → pipe → legB)`** into a kTLS-TX-armed leg B; the
+     kernel `tls_sw_sendmsg` encrypts each spliced record **synchronously** on
+     splice-in (no `MSG_DONTWAIT`/backlog), the agent does ZERO crypto and copies
+     no plaintext in userspace (~1 `splice` + `ppoll` per record, symmetric to the
+     return/deliver pumps). **~~Originally an agent-IDLE in-kernel sockmap EGRESS
+     redirect (`bpf_sk_redirect_map`, `flags=0`).~~ RETIRED 2026-06-13: the
+     `sk_skb` egress redirect defers delivery to a `MSG_DONTWAIT` workqueue
+     (`sk_psock_backlog → skb_send_sock → tls_sw_sendmsg`) that `-EAGAIN`-stalls
+     ~10–15% of records — non-viable, replaced by the agent-light splice; SHIPPED
+     20/20 (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`, commit
+     `bb6489ef`).**
    - **Return** (peer-facing kTLS-RX-decrypt leg B → workload-plaintext leg F):
      **agent-LIGHT, zero-copy `splice(2)`**. On a **plain kTLS-RX socket (NO
      sockmap, NO psock)**, `tls_sw_splice_read` decrypts each TLS record and
@@ -133,19 +203,23 @@ feature-delta DESIGN handoff). The load-bearing results:
      GCM tag) into a pipe → leg F. The agent issues only `splice()` + `ppoll()`
      — **no per-byte userspace copy** — at ~1 splice per TLS record, kernel-paced
      and bounded (`findings-splice-return.md`; research verdict (c) →
-     **(a) CONFIRMED**).
+     **(a) CONFIRMED**). **The OUTBOUND forward is now the symmetric mirror of
+     this** (same `splice` shape, leg B kTLS-TX instead of kTLS-RX).
    - NOTE the sockmap-verdict return path was foreclosed as a return mechanism
      (`findings-ktls-rx-splice.md`: the kTLS-RX decrypted-verdict runs only inside
      `tls_sw_recvmsg`; `tls_sw_read_sock` returns `-EINVAL` on a psock → no
-     agent-idle push path). The chosen return mechanism is the **`splice(2)`
-     pump on a no-psock kTLS-RX leg**, which sidesteps that `-EINVAL` entirely.
+     agent-idle push path). With the sockmap also retired from the forward path
+     (2026-06-13), NO direction uses a psock/sockmap: **every leg is a plain
+     kTLS socket driven by an agent-light `splice` pump.**
 
 3. **The basic mechanism is proven**: `sockops → rustls handshake →
    dangerous_extract_secrets → kTLS arm`; the `pidfd_getfd` cross-process handoff;
-   the **SOCKMAP-insert-before-`TCP_ULP "tls"`** ordering invariant (reverse is
-   `EINVAL` — both replace `sk->sk_prot`); control-record handling
-   (`NewSessionTicket`/KeyUpdate → `EIO` on raw kTLS RX → favours
-   `ktls::KtlsStream` over raw `setsockopt`). All in `findings.md`.
+   control-record handling (`NewSessionTicket`/KeyUpdate → `EIO` on raw kTLS RX →
+   favours `ktls::KtlsStream` over raw `setsockopt`). All in `findings.md`. (The
+   **SOCKMAP-insert-before-`TCP_ULP "tls"`** ordering invariant proven here is
+   **MOOT for v1** — the 2026-06-13 amendment retired the sockmap from the forward
+   path, so no sockmap insert is sequenced against `TCP_ULP` on any leg; the
+   invariant remains a true kernel fact but governs no Overdrive code path.)
 
 ### The forcing question
 
@@ -167,7 +241,7 @@ decision; it does not relitigate it.
 | **Functional suitability — universality** | One mechanism that works for process, WASM, AND guest-stack (microVM/unikernel) — the user's primary driver. The proxy is the only shape that is lossless for *every* kind. |
 | **Reliability — losslessness** | No dropped pre-arm bytes, no connection RESET on client-speaks-first. The proxy buffers in userspace at the handshake window (trivially lossless); the in-band model cannot (no HOLD). |
 | **Maintainability — one mechanism, DST-testable port** | A single driven port with host + Sim adapters, exercised by a DST equivalence harness, beats two divergent kernel paths. |
-| **Performance efficiency — agent-light** | Steady state is agent-idle forward (kernel splice) + agent-light return (zero-copy `splice`, ~1/record). No userspace per-byte copy in either direction. Two sockets/connection and a per-connection handshake are the accepted cost. |
+| **Performance efficiency — agent-light** | Steady state is an agent-light zero-copy `splice` pump in EVERY direction (~1 `splice` + `ppoll` per TLS record, kernel-paced; the kernel does the crypto via kTLS, the agent never copies plaintext in userspace). **(The OUTBOUND forward was originally agent-idle via a kernel sockmap egress redirect; the 2026-06-13 amendment retired it — the redirect's `MSG_DONTWAIT` workqueue stalled ~10–15% of records — so the forward is now agent-light, the same cost as the return.)** Two sockets/connection and a per-connection handshake are the accepted cost. |
 
 The trade-off the user accepted: **uniformity + losslessness over
 restart-survival + 1-socket density**. Restart-survival becomes a post-v1
@@ -219,12 +293,17 @@ workload ──plaintext──▶ [leg F: agent-owned plaintext leg]
                               │   arm kTLS on leg B; flush captured plaintext)
                               ▼
                         [leg B: agent-owned kTLS leg] ──TLS 1.3 records──▶ real peer
-   steady state:
-     forward  F → B : in-kernel sockmap EGRESS redirect (bpf_sk_redirect_map, flags=0)
-                      → tcp_sendmsg_locked on leg B → kTLS encrypt        [AGENT-IDLE]
+   steady state (every leg is a plain kTLS socket — NO sockmap, NO psock):
+     forward  F → B : splice(legF → pipe → legB) into leg B's kTLS-TX
+                      → tls_sw_sendmsg encrypts each record SYNCHRONOUSLY  [AGENT-LIGHT]
      return   B → F : splice(legB → pipe → legF) on a plain kTLS-RX leg
                       → tls_sw_splice_read decrypts → clean plaintext      [AGENT-LIGHT]
 ```
+
+(The forward `F → B` was originally an agent-idle in-kernel sockmap EGRESS redirect
+(`bpf_sk_redirect_map`, `flags=0`); the 2026-06-13 amendment replaced it with the
+agent-light `splice` shown — symmetric to the return — after the redirect was proven
+to `MSG_DONTWAIT`-stall ~10–15% of records.)
 
 The proxy topology, per-connection — INBOUND (server side, the mirror; proven in
 `findings-inbound-intercept.md`):
@@ -292,17 +371,39 @@ The structural facts pinned by the evidence and binding on DELIVER:
    lossless), handshakes on leg B, arms kTLS, and flushes the captured bytes as
    the first application_data (rec_seq starts at 0 on TLS 1.3, proven gapless in
    `findings-lossless-hybrid.md`).
-3. **Forward steady state is agent-idle**: leg F's RX is egress-redirected into
-   leg B's kTLS TX by a hand-rolled `sk_skb/stream_verdict` (`flags=0`).
+3. **Forward steady state is agent-light** (revised 2026-06-13): the agent drives
+   a bounded `splice(legF → pipe → legB)` pump into leg B's **kTLS-TX**; the kernel
+   `tls_sw_sendmsg` encrypts each spliced record synchronously (~1 `splice` per
+   record, symmetric to the return/deliver pumps). **Originally an agent-idle
+   in-kernel `sk_skb/stream_verdict` sockmap EGRESS redirect (`flags=0`); RETIRED
+   2026-06-13** — the redirect's deferred `MSG_DONTWAIT` workqueue
+   (`sk_psock_backlog → skb_send_sock → tls_sw_sendmsg`) `-EAGAIN`-stalls ~10–15%
+   of records (`sockmap-egress-redirect-into-ktls-tx-delivery-research.md`,
+   kernel-source-primary; SHIPPED 20/20, commit `bb6489ef`). The whole sockmap
+   apparatus — `MTLS_SOCKMAP`/`MTLS_FPORT`/`MTLS_ARMED`, the verdict program, the
+   `sock_ops_mtls_enroll` enroll program, the ARMED gate, the engagement poll — is
+   DELETED with this change.
+3a. **kTLS 0.5-RTT early-data drain (every reader leg, both directions)**: before
+   `dangerous_extract_secrets` arms kTLS-RX, the handshake reader MUST drain
+   `conn.reader()` of any already-decrypted 0.5-RTT early application_data (or use
+   a `ktls::CorkStream`-equivalent), and forward that drained plaintext ahead of
+   the splice pump. The extracted `rx` `rec_seq` (`= read_seq`) already accounts
+   for the over-read records, so early data left only in `conn.reader()` would
+   otherwise be silently dropped. (SHIPPED: `mtls::drain_early_plaintext`, called
+   on every reader leg — outbound return, inbound deliver, and the probe sentinel.)
 4. **Return steady state is agent-light**: leg B is a **plain kTLS-RX socket with
    NO sockmap/psock**; the agent drives a bounded `splice(legB → pipe → legF)`
-   pump (~1 splice per record). Putting a psock verdict on leg B's RX is
-   forbidden — it both fights kTLS RX (`ConnectionAborted`) and forecloses the
-   agent-idle path (`tls_sw_read_sock` `-EINVAL`); the splice pump is the chosen
-   shape.
-5. **The SOCKMAP-insert-before-`TCP_ULP "tls"`** ordering invariant holds for
-   leg B's sockmap membership (forward direction); a Tier-3 test pins
-   `tls-ULP-after-sockmap == EINVAL`.
+   pump (~1 splice per record). With the sockmap retired from the forward path
+   (fact 3), NO leg carries a psock in any direction — a plain kTLS leg + an
+   agent-light `splice` pump is the uniform shape. (Putting a psock verdict on a
+   kTLS-RX leg was always forbidden — it fights kTLS RX, `ConnectionAborted`, and
+   `tls_sw_read_sock` returns `-EINVAL` on a psock.)
+5. **~~The SOCKMAP-insert-before-`TCP_ULP "tls"` ordering invariant~~ — MOOT for
+   v1** (revised 2026-06-13). With the sockmap retired from the forward path
+   (fact 3) there is no SOCKMAP insert sequenced against `TCP_ULP` on any leg. The
+   invariant remains a true kernel fact (both replace `sk->sk_prot`; reverse =
+   `EINVAL`) but governs no Overdrive code path; the former
+   `tls-ULP-after-sockmap == EINVAL` Tier-3 test is retired with the sockmap.
 6. **Control records** (`NewSessionTicket`, KeyUpdate, renegotiation) are handled
    by reusing `ktls::KtlsStream`'s control-message loop, not raw `setsockopt`.
 7. **The agent holds the leaf key** (read via `IdentityRead`, held by the
@@ -392,18 +493,22 @@ the crafter) carries the proxy's per-connection enforcement surface. The existin
 `Dataplane` port does **not** fit — it models map writes (policy/service/local-
 backend), not per-connection socket operations (intercept, handshake-drive,
 kTLS-arm, splice-pump). The new port has a host adapter (over
-sockops/sk_msg/sockmap/kTLS/`splice`/`cgroup_connect4`) consuming `IdentityRead`,
-and a `Sim` adapter for DST (the sim/host split, `.claude/rules/development.md` §
-"Port-trait dependencies").
+kTLS/`splice`/`cgroup_connect4`/`nft`-TPROXY consuming `IdentityRead`; the
+sockops/sk_msg/sockmap surface was retired with the forward sockmap-egress redirect,
+2026-06-13), and a `Sim` adapter for DST (the sim/host split,
+`.claude/rules/development.md` § "Port-trait dependencies").
 
 The adapter home (OQ-2, user-decided 2026-06-12): **NO new crate.** The
 `HostMtlsEnforcement` host adapter extends **`overdrive-dataplane`** (the
 established `adapter-host` userspace eBPF crate that already hosts
 `EbpfDataplane` — `unsafe` already allowed, `aya.workspace = true` already a dep,
 `build.rs` for the `overdrive_bpf.o` object already present); the new kernel-side
-sockops/`sk_skb/stream_verdict`/`cgroup_connect4`-mtls programs extend
-**`overdrive-bpf`** alongside the existing `cgroup_connect4_service`/XDP programs
-(one shared BPF object); the `Sim` adapter stays in `overdrive-sim`.
+`cgroup_connect4`-mtls intercept program extends **`overdrive-bpf`** alongside the
+existing `cgroup_connect4_service`/XDP programs (one shared BPF object). (The
+`sock_ops_mtls_enroll` and `sk_skb/stream_verdict` forward-redirect programs that
+the original design added to `overdrive-bpf` were RETIRED 2026-06-13 with the
+sockmap; the forward path is now a userspace `splice` pump with no kernel-side
+program.) The `Sim` adapter stays in `overdrive-sim`.
 **`overdrive-host` is ruled out** — `src/lib.rs:21` is
 `#![forbid(unsafe_code)]` and the proxy is irreducibly `unsafe` (raw
 `setsockopt(TCP_ULP/TLS_TX/TLS_RX)`, `splice(2)`, BPF-fd plumbing). Extending an
@@ -468,12 +573,18 @@ userspace copy loop.
   every byte of every connection — exactly the ztunnel/Istio shape Overdrive's
   thesis rejects (whitepaper §7: "No userspace proxies in the data path";
   principle 2). The agent-light splice supersedes it: the evidence proves the
-  steady-state byte movement can ride the kernel (agent-idle forward via
-  sockmap-egress-redirect → kTLS-TX; agent-light return via zero-copy `splice`),
-  so the agent leaves the per-byte path after the handshake window. The userspace
-  copy loop is retained only as the **honest fallback baseline** if a deployment
-  cannot use the kernel splice (e.g. a kernel below the splice/sockmap floor —
-  not a concern on the pinned 6.18 appliance, ADR-0068).
+  steady-state byte movement rides the kernel via **zero-copy `splice` in every
+  direction** (the agent issues only `splice`/`ppoll`, never a per-byte
+  `read`/`write` of plaintext, and the kernel does the AES-GCM in kTLS), so the
+  agent is *light*, not a per-byte userspace proxy. **(A3 vs the chosen design is
+  the `splice`-zero-copy distinction — NOT "agent-idle vs agent-light." The
+  OUTBOUND forward was briefly agent-idle via a sockmap egress redirect; the
+  2026-06-13 amendment retired that for an agent-light `splice` after the redirect
+  proved non-viable. The design is still strictly better than A3's per-byte
+  userspace copy: `splice` moves bytes page-flip, not `read`-into-a-buffer-then-
+  `write`.)** The userspace copy loop is retained only as the **honest fallback
+  baseline** if a deployment cannot use the kernel splice (e.g. a kernel below the
+  `splice`/kTLS floor — not a concern on the pinned 6.18 appliance, ADR-0068).
 
 ### A4. Cilium-style out-of-band auth + separate encryption (WireGuard/IPsec)
 
@@ -499,27 +610,33 @@ data-session).
   handshake-window capture is a userspace buffer (trivially lossless); no dropped
   pre-arm bytes, no RESET. The named server-speaks-first assumption the in-band v1
   required is **gone**.
-- **No kernel patch.** Every primitive (sockops, `cgroup_connect4`, sockmap
-  egress-redirect, kTLS, `tls_sw_splice_read`) is in-tree at the pinned 6.18
-  floor. The out-of-tree write-block patch that lossless in-band would have needed
-  is not required.
+- **No kernel patch.** Every primitive (`cgroup_connect4`, `nft`-TPROXY, kTLS,
+  `tls_sw_sendmsg`, `tls_sw_splice_read`) is in-tree at the pinned 6.18 floor. The
+  out-of-tree write-block patch that lossless in-band would have needed is not
+  required. (The sockmap egress-redirect primitive was in-tree too but is no
+  longer used — the 2026-06-13 forward-mechanism pivot retired it.)
 - **J-SEC-003 identity model preserved.** The agent presents the workload's own
   held SVID (read via `IdentityRead`, never minted/cached by this feature),
   verifies the peer against the trust bundle, auth-session == data-session
   (rustls secrets → leg B kTLS), workload holds nothing. The wire carries TLS 1.3
   records, provable by `tcpdump`.
-- **Agent-light steady state.** Forward is agent-idle (kernel splice); return is
-  agent-light zero-copy `splice` (~1/record). No userspace per-byte copy in
-  either direction — strictly better than the ztunnel baseline.
+- **Agent-light steady state.** Both directions are agent-light zero-copy `splice`
+  (~1 `splice` + `ppoll` per record); the kernel does the kTLS crypto, the agent
+  copies no plaintext in userspace — strictly better than the ztunnel per-byte
+  baseline. (The forward was originally agent-idle via the kernel sockmap redirect;
+  the 2026-06-13 amendment made it agent-light after the redirect proved non-viable.)
 
 ### Negative
 
 - **Two sockets per connection** (leg F + leg B), vs the in-band model's one. A
   density cost the user accepted.
 - **The agent does per-connection work**: a rustls handshake at connection setup
-  plus a return-direction `splice` pump (~1 splice + readiness `ppoll` per TLS
-  record) for the connection's life. The agent is *light*, not *out* — it stays
-  scheduled per-record on the return path. (Forward is genuinely idle.)
+  plus a `splice` pump in **both** directions (~1 splice + readiness `ppoll` per
+  TLS record) for the connection's life. The agent is *light*, not *out* — it
+  stays scheduled per-record on every path. (Originally the forward was genuinely
+  idle via the sockmap redirect; the 2026-06-13 pivot to the agent-light forward
+  `splice` means the agent is now scheduled per-record forward as well as on the
+  return — the accepted cost of retiring the non-viable redirect.)
 - **No restart-survival in v1.** The agent owns both legs and the kTLS state; an
   agent restart drops in-flight sessions (they re-handshake on reconnect).
   Restart-survival is the in-band model's unique win; it is **not in v1 scope**
@@ -543,13 +660,15 @@ data-session).
   What is NOT yet exercised is the **response leg** (re-encrypt the server's
   reply onto leg C's kTLS-TX); the inbound spike drove only the request
   direction (C→S) (`findings-inbound-intercept.md` § "What was NOT tested"). The
-  forward kTLS-TX primitive that leg needs is proven separately
-  (`findings-egress-ktls-splice.md`); composing it into the inbound server shape
+  kTLS-TX-encrypt-on-`splice` primitive that leg needs is the SAME agent-light
+  `splice(legS → legC)` shape the outbound forward now uses (2026-06-13 pivot) —
+  the response leg re-encrypts the server's reply onto leg C's kTLS-TX by splicing
+  into it, NOT by a sockmap redirect; composing it into the inbound server shape
   for a full round-trip is gap #2 of the Slice-00 walking-skeleton scope, not a
   doubt about the mechanism.
 - **Three narrow composition gaps remain; closing them is the walking-skeleton
   gate (NOT optional).** The mechanism is spike-verified — the primitives in
-  isolation (forward splice, return splice, kTLS arm, arming order) AND the
+  isolation (the agent-light `splice` pump used in every direction, kTLS arm) AND the
   inbound flow composed end-to-end in one direction (increment-i §2). What is NOT
   yet demonstrated is (1) the **outbound** path composed in ONE flow — increment-e
   proved outbound intercept + pre-arm capture + handshake-window flush and
@@ -603,7 +722,8 @@ data-session).
     v1).
   - **Action — teardown + fail-closed reset** (chosen, justified): on observing
     `Stalled`, the worker calls `teardown(handle)` — the connection's legs are
-    closed, both pumps stopped, kTLS/sockmap state reclaimed. The workload's
+    closed, both pumps stopped, kTLS state reclaimed (no sockmap state exists
+    post-2026-06-13 — the forward sockmap was retired). The workload's
     connection drops; a client-speaks-first / request-retry protocol
     re-handshakes on reconnect (the same recovery v1 already relies on for
     agent restart). **Why teardown, not reconnect-or-degrade**: a stranded pump
@@ -622,7 +742,8 @@ data-session).
     `splice` task while a record is pending on the RX leg), asserts
     `liveness(&handle)` transitions to `Stalled` within `pump_stall_deadline`,
     asserts the worker's supervision loop tears the connection down, and asserts
-    no fd/sockmap/kTLS leak after (re-querying `liveness` returns `Gone`). The
+    no fd/kTLS leak after (re-querying `liveness` returns `Gone`; no sockmap state
+    exists post-2026-06-13). The
     sim adapter models the same observable transition (scriptable `Stalled` →
     worker teardown → `Gone`) for the DST equivalence harness.
 - **Sensitivity point**: leg B must be a **plain kTLS-RX socket (no psock)** for
@@ -684,8 +805,9 @@ separate concern tracked in [#230](https://github.com/overdrive-sh/overdrive/iss
   (≤ `num_allocs × 128 × 3` fds), so the unbounded term is only legitimate
   established connections — the same fd pressure any L4 proxy carries.
 - **Fail-closed cleanup is total.** On any limit/deadline trip the port owns the
-  cleanup — the pre-arm buffer is dropped, the leg is reset, no sockmap/kTLS
-  state leaks, no cleartext reaches the peer wire. Backpressure is *refuse*, not
+  cleanup — the pre-arm buffer is dropped, the leg is reset, no kTLS state leaks
+  (and no sockmap state exists to leak post-2026-06-13), no cleartext reaches the
+  peer wire. Backpressure is *refuse*, not
   *queue-unbounded*.
 - **Observability.** The buffer high-water mark, deadline trips, limit refusals,
   and in-flight counts are metrics/telemetry surfaces (the operator's only window
@@ -717,21 +839,30 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
 - **Architectural rule (ArchUnit-style, Rust)**: `overdrive-dataplane` (userspace
   proxy syscalls) and `overdrive-bpf` (kernel-side programs) own the kernel/eBPF
   surface for the proxy path — consistent with `EbpfDataplane` already living in
-  `overdrive-dataplane`; sockops/sk_msg/sockmap/kTLS/`splice` syscalls for the
-  proxy appear nowhere else. The dst-lint gate (`xtask/src/dst_lint.rs`, ADR-0003)
-  keeps these off any `core`-class compile path. The port trait lives in
-  `overdrive-core` (no I/O); the `HostMtlsEnforcement` host adapter extends
-  `overdrive-dataplane` (`adapter-host`), its kernel programs extend
-  `overdrive-bpf` (per OQ-2, user-decided 2026-06-12).
+  `overdrive-dataplane`; the kTLS/`splice`/`cgroup_connect4`/`nft`-TPROXY syscalls
+  for the proxy appear nowhere else. (The sockops/sk_msg/sockmap surface was
+  retired with the forward sockmap-egress redirect, 2026-06-13.) The dst-lint gate
+  (`xtask/src/dst_lint.rs`, ADR-0003) keeps these off any `core`-class compile
+  path. The port trait lives in `overdrive-core` (no I/O); the
+  `HostMtlsEnforcement` host adapter extends `overdrive-dataplane` (`adapter-host`),
+  its kernel programs extend `overdrive-bpf` (per OQ-2, user-decided 2026-06-12).
 - **Earned-Trust probe (mandatory, principle 12)**: the host adapter ships a
   `probe()` specified in the design — at the composition root, "wire then probe
-  then use": verify the kTLS arm round-trips (a sentinel handshake + a
-  `tls_sw_splice_read` of one record on a loopback leg) and the sockmap
-  egress-redirect fires (a sentinel byte F→B emerges encrypted) BEFORE the proxy
-  is declared usable; on probe failure the node refuses to start with a structured
-  `health.startup.refused` event. This exercises the specific substrate lies the
-  spikes catalogued (sockmap-insert-before-ULP ordering; the kTLS-RX-no-psock
-  invariant; the egress-flag-not-ingress-flag invariant).
+  then use": verify the **kTLS arm + agent-light forward `splice` round-trips** —
+  a sentinel rustls TLS 1.3 handshake on a loopback leg arms kTLS-TX/RX, an
+  agent-light forward `splice` of one sentinel record through the kTLS-TX leg emits
+  the record ENCRYPTED, and the sentinel peer's kTLS-RX reconstructs the exact
+  sentinel plaintext via a single `tls_sw_splice_read` — BEFORE the proxy is
+  declared usable; on probe failure the node refuses to start with a structured
+  `health.startup.refused` event. The probe handshake needs a cert+key, minted as
+  a **throwaway self-signed `rcgen` sentinel** at call time (substrate-self-test
+  crypto only — D-MTLS-12/SD-5; #26 stays a reader, never an issuer). **This is now
+  ONE composed sentinel (`ProbeSentinel::KtlsArmRoundTrip`)** — the obsolete
+  `ForwardEgressRedirect` (sockmap-egress-redirect emits ciphertext) and
+  `ArmingOrderEinval` (SOCKMAP-after-`TCP_ULP` = `EINVAL`) sub-sentinels were
+  dropped 2026-06-13 with the sockmap. The probe's reader leg ALSO exercises the
+  kTLS 0.5-RTT early-data drain (decision fact 3a — `drain_early_plaintext` runs on
+  the sentinel reader before `dangerous_extract_secrets`).
 - **Composed walking-skeleton gate (the FIRST DELIVER slice, Slice 00,
   BLOCKING)**: a composed Tier-3 acceptance test — real `cgroup_connect4`
   intercept → workload pre-arm write → leg-B handshake → kTLS arm → **post-arm
@@ -747,11 +878,17 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   netns/veth topology with cgroup-isolated workloads (the spikes were loopback +
   sibling processes). It MUST pass before any other DELIVER slice lands. It
   supersedes the old in-band walking skeleton.
-- **Tier-3 invariants (outbound)** pinned as tests: `tls-ULP-after-sockmap ==
-  EINVAL`; forward redirect uses `flags=0` (egress) not `BPF_F_INGRESS`; leg B
-  carries no psock for the return path; `tcpdump` shows TLS 1.3 records and zero
-  cleartext on the peer-facing wire; the handshake-window capture is lossless
-  (no dropped pre-arm bytes).
+- **Tier-3 invariants (outbound)** pinned as tests: leg B carries **no psock** on
+  EITHER its RX (return splice) or its TX (forward splice) — every leg is a plain
+  kTLS socket; the forward steady state is the agent-light `splice(legF → legB)`
+  pump into leg B's kTLS-TX (`tcpdump` shows TLS 1.3 records and zero cleartext on
+  the peer-facing wire; `strace` shows the agent moves bytes via `splice`/`ppoll`,
+  not a per-byte `read`/`write` of plaintext); the handshake-window capture is
+  lossless (no dropped pre-arm bytes), INCLUDING the 0.5-RTT early application_data
+  drained from `conn.reader()` before kTLS-RX arms (decision fact 3a). **(Retired
+  2026-06-13 with the sockmap: the former `tls-ULP-after-sockmap == EINVAL` and
+  `forward redirect uses flags=0 (egress) not BPF_F_INGRESS` invariants — there is
+  no sockmap insert and no redirect on any path now.)**
 - **Tier-3 invariants (inbound — F3)** pinned as tests, grounded strictly in
   `findings-inbound-intercept.md`: (a) **orig-dst recovery** — a TPROXY-
   intercepted connection to a server workload's logical address recovers the
@@ -771,8 +908,8 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   the bounded buffer trips `BufferLimitExceeded` fail-closed (buffer dropped, leg
   reset, no cleartext); a stalled handshake trips `HandshakeTimeout`;
   over-the-per-allocation-limit concurrent intercepts are refused; and the
-  cleanup path leaks no fd/sockmap/kTLS state (re-querying `liveness` shows
-  `Gone`).
+  cleanup path leaks no fd/kTLS state (re-querying `liveness` shows `Gone`; no
+  sockmap state exists post-2026-06-13).
 - **Intercept-exemption invariants (F5) pinned as tests**: the agent's leg-B dial
   is NOT re-intercepted (no recursion); a workload CANNOT self-exempt (the
   `SO_MARK`/cgroup bypass is agent-private and unreachable from the workload's
@@ -802,15 +939,36 @@ own `connect()` MUST NOT be re-intercepted by the same `cgroup_connect4` program
   F3 inbound/passive path: TPROXY intercept + `getsockname` orig-dst recovery +
   server-side mutual-TLS + kTLS-RX decrypt + agent-light splice-to-server,
   fail-closed on `nocert`/`wrongca`).
+- **Forward-mechanism pivot (2026-06-13 amendment) — the evidence retiring the
+  sockmap egress redirect:**
+  `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`
+  (kernel-source-primary, v6.6 ≡ v6.12 — the decisive finding: the `sk_skb` egress
+  redirect defers delivery to a `MSG_DONTWAIT` workqueue that `-EAGAIN`-stalls
+  ~10–15% of records; no production system runs the pattern; the kernel does not
+  test it; the correct mechanism is a synchronous userspace `splice`/`write` into
+  kTLS-TX). The superseded engagement analysis:
+  `docs/research/dataplane/sockmap-strparser-engagement-race-research.md` and the
+  in-kernel sockops enroll spike
+  `docs/feature/transparent-mtls-host-socket/spike/findings-sockmap-engagement-inkernel-enroll.md`
+  (closed the enroll-engagement race, but the redirect-delivery residual remained
+  → the whole sockmap forward path, enroll spike included, is retired). The
+  agent-light `splice` forward mechanism + the kTLS 0.5-RTT early-data drain are
+  SHIPPED and verified 20/20 on the real kernel (commit `bb6489ef`); the SSOT for
+  the shipped mechanism is `crates/overdrive-dataplane/src/mtls/`.
 
   **Evidence durability — this decision rests on committed evidence, not
   assertion.** The committed findings docs above are the **foundation of record**:
   they survive a clean checkout and are the load-bearing source for every
   structural fact in *Decision*, every rejection in *Alternatives*, and every
-  invariant in *Enforcement* (e.g. Decision §3/§4 ← `findings-egress-ktls-splice.md`
-  / `findings-splice-return.md`; §5 ← `findings.md` Increment D; §6 ← `findings.md`
-  Increment B; Alternatives A1's three-way foreclosure ← `findings-lossless-hybrid.md`
-  / `findings-userspace-relay.md` / `findings.md` Increment C). The per-element
+  invariant in *Enforcement* (e.g. Decision §3/§4 [the agent-light `splice` pumps,
+  every direction] ← `findings-splice-return.md` +
+  `sockmap-egress-redirect-into-ktls-tx-delivery-research.md` [the forward-pivot
+  evidence]; §3a [the kTLS 0.5-RTT early-data drain] ← shipped
+  `mtls::drain_early_plaintext`; §6 ← `findings.md` Increment B; Alternatives A1's
+  three-way foreclosure ← `findings-lossless-hybrid.md` /
+  `findings-userspace-relay.md` / `findings.md` Increment C). **§5 is now MOOT
+  (the SOCKMAP-before-`TCP_ULP` ordering invariant governs no code path post-pivot;
+  it was originally ← `findings.md` Increment D).** The per-element
   map lives in the feature-delta § "Wave: DESIGN / [REF] Proven-Mechanism
   Traceability". The throwaway probe code under `spike-scratch/increment-{a..h}/`
   is **gitignored, never promoted, and NOT load-bearing** — it may not survive a

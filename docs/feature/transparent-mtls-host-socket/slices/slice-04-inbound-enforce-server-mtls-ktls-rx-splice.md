@@ -39,8 +39,9 @@ TLS `0x17` ciphertext only.
 
 ## OUT scope
 
-- The OUTBOUND (client) enforce path (kTLS-TX on leg B + forward agent-idle splice
-  + return agent-light splice) → Slice 03.
+- The OUTBOUND (client) enforce path (kTLS-TX on leg B + agent-light forward splice
+  + return agent-light splice) → Slice 03. (D-MTLS-13: forward is agent-light, not
+  the retired sockmap egress redirect.)
 - The inbound fail-closed negatives (nocert / wrongca) — the dedicated negative ACs
   → Slice 05 (the verifier REQUIRE+VERIFY is wired here; the dedicated negative
   proofs with distinct reasons are S05; the composed WS Slice 00 already touches

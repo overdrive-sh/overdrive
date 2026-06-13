@@ -47,8 +47,9 @@ recursion), with the bypass **agent-private** so a workload cannot self-exempt.
 ## OUT scope
 
 - The rustls handshake on leg B / leg C → Slice 02.
-- The kTLS arm + forward agent-idle splice + return agent-light splice + wire
-  capture → Slice 03 (outbound) / Slice 04 (inbound).
+- The kTLS arm + agent-light forward splice + return agent-light splice + wire
+  capture → Slice 03 (outbound) / Slice 04 (inbound). (D-MTLS-13: forward is
+  agent-light, not the retired sockmap egress redirect.)
 - The F5 negative tests (the agent's dial is provably not re-intercepted; the
   workload provably CANNOT self-exempt) → Slice 05 (the negatives; the MECHANISM
   is here).

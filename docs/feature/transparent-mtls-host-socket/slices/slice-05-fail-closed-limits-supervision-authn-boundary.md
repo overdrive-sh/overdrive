@@ -40,8 +40,8 @@ workload provably **cannot self-exempt**; and v1 is documented as
   - `handshake_deadline = 5 s` exceeded → `HandshakeTimeout`.
   - `max_inflight_per_alloc = 128` exceeded → `InFlightLimitExceeded` (refuse the
     new intercept; the workload's `connect()` fails, no cleartext).
-  - Cleanup leaks nothing (no fd/sockmap/kTLS state); re-querying `liveness`
-    returns `Gone`.
+  - Cleanup leaks nothing (no fd/kTLS state; no sockmap state exists post-D-MTLS-13);
+    re-querying `liveness` returns `Gone`.
 - **Pump supervision (F6)**: a return/deliver pump whose bytes-spliced counter has
   not advanced for `pump_stall_deadline = 30 s` WHILE a record is pending is
   `Stalled` → the node-agent/worker tears the connection down (teardown +
@@ -90,7 +90,7 @@ workload provably **cannot self-exempt**; and v1 is documented as
 - [ ] **Outbound fail-closed**: `IdentityRead::svid_for` `None` → `AbsentSvid` (agent refuses, no cleartext to the peer); a peer not chaining to the bundle → `PeerVerificationFailed` (no TLS app data, no cleartext). Anchor: ADR-0069 § Enforcement "Authn-only boundary"; contract `AbsentSvid` (consumes `identity_read.rs` clause 3).
 - [ ] **Inbound fail-closed, distinct reasons**: `nocert` and `wrongca` each reject with their DISTINCT reason (`peer sent no certificates` vs `invalid peer certificate: BadSignature`), BEFORE any splice; the server workload receives 0 bytes. Anchor: `findings-inbound-intercept.md` §4.
 - [ ] **Resource limits (concrete values)**: `max_prearm_bytes = 256 KiB` → `BufferLimitExceeded` (buffer dropped, leg reset, no cleartext); `handshake_deadline = 5 s` → `HandshakeTimeout`; `max_inflight_per_alloc = 128` → `InFlightLimitExceeded`; cleanup leaks no fd/sockmap/kTLS state (re-query `liveness` → `Gone`). Assert the CONCRETE values, not field existence. Anchor: feature-delta contract `MtlsLimits` (F7 defaults) + the three variants; ADR-0069 § "Resource & robustness constraints".
-- [ ] **Pump supervision (F6)**: inject a stalled pump (pause the `splice` task while a record is pending); `liveness` transitions to `Stalled` within `pump_stall_deadline = 30 s`; the worker tears the connection down; no fd/sockmap/kTLS leak (re-query → `Gone`); `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` emitted. Anchor: ADR-0069 § ATAM "Pump supervision policy (F6)".
+- [ ] **Pump supervision (F6)**: inject a stalled pump (pause the `splice` task while a record is pending); `liveness` transitions to `Stalled` within `pump_stall_deadline = 30 s`; the worker tears the connection down; no fd/kTLS leak (re-query → `Gone`; no sockmap state exists post-D-MTLS-13); `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` emitted. Anchor: ADR-0069 § ATAM "Pump supervision policy (F6)".
 - [ ] **Intercept-exemption negatives (F5)**: the agent's leg-B dial is NOT re-intercepted (no recursion); a workload that sets the bypass on its own socket is STILL intercepted (the bypass is agent-private, unreachable from the workload). Anchor: ADR-0069 § "intercept-recursion / agent-leg-B exemption" (the `cgroup_connect4_service` attach boundary).
 - [ ] **Honest authn boundary (F1)**: a test asserts v1 verifies chain-to-bundle ONLY (both directions, fail-closed on non-chaining peers); the wrong-but-valid-peer `PeerIdentityMismatch` negative test is present but `#[ignore]`-gated on #178 with a `reason` naming #178; NO AC/doc/test calls the wrong-but-valid-peer case "protected" until #178 lands. Anchor: ADR-0069 § Decision "The honest v1 security claim".
 - [ ] `cargo xtask lima run -- cargo nextest run -p <crate> --features integration-tests` green for the fail-closed + limits + supervision + exemption + boundary acceptance tests (real kernel, not `--no-run`).
