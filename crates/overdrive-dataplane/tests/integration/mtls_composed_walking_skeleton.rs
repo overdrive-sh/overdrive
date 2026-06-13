@@ -102,14 +102,24 @@ fn held_identities(pki: &TestPki) -> HeldIdentities {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn composed_bidirectional_proxy_walking_skeleton_no_rst() {
     let tag = format!("{}", std::process::id());
+    // The canonical gate runs `cargo xtask lima run -- …` as root on the real 6.18
+    // kernel, where the topology is ALWAYS supported (root + CAP_NET_ADMIN + cgroup
+    // v2 + nft_tproxy). A `TopologyError::Unsupported` here is therefore NOT a
+    // legitimate skip — it is the same "green without executing" hole a `--no-run`
+    // gate has (the criterion is "ACTUALLY EXECUTING ... on the real 6.18 kernel").
+    // Fail loud so a degraded environment cannot pass the BLOCKING gate by skipping.
     let topo = match MtlsTopology::create(&tag) {
         Ok(t) => t,
-        Err(TopologyError::Unsupported(why)) => {
-            eprintln!("SKIP composed_bidirectional_proxy_walking_skeleton_no_rst: {why}");
-            return;
-        }
+        Err(e @ TopologyError::Unsupported(_)) => panic!(
+            "composed gate MUST run on the real kernel (root + CAP_NET_ADMIN + cgroup v2 + \
+             nft_tproxy); a topology-unsupported here is a gate FAILURE, not a skip — run via \
+             `cargo xtask lima run -- cargo nextest run -p overdrive-dataplane \
+             --features integration-tests`: {e}"
+        ),
         Err(e) => panic!("topology setup failed (not a skip): {e}"),
     };
+
+    let mut topo = topo;
 
     let pki = TestPki::mint();
     let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
@@ -119,13 +129,31 @@ async fn composed_bidirectional_proxy_walking_skeleton_no_rst() {
     // substrate honours its contract before any connection is enforced.
     adapter.probe().await.expect("Earned-Trust probe must pass on the real 6.18 kernel");
 
+    // Install the inbound nft-TPROXY intercept + the GAP-3 leg-S routing ONCE, via
+    // the topology (the single source of truth — `install_tproxy` is RAII-cleaned and
+    // FAILURE-PROPAGATING; a setup failure is a hard gate failure, not silent
+    // best-effort). A FIXED agent_port lets both timing regimes re-bind the leg-C
+    // listener (SO_REUSEADDR) against the one installed rule. `expect` here is a
+    // gate-failure precondition (the real kernel always supports it).
+    let inbound_agent_port = pick_free_inbound_agent_port();
+    topo.install_tproxy(inbound_agent_port)
+        .expect("inbound TPROXY + leg-S routing must install on the real 6.18 kernel");
+
     // Run each direction under BOTH timing regimes (normal + a deliberate
     // handshake-window delay — the increment-e harness intercept-lifecycle RST is
     // the artifact to defeat).
     for handshake_delay in [Duration::ZERO, Duration::from_millis(400)] {
         drive_outbound(&adapter, &pki, &topo, handshake_delay).await;
-        drive_inbound(&adapter, &pki, &topo, handshake_delay).await;
+        drive_inbound(&adapter, &pki, &topo, inbound_agent_port, handshake_delay).await;
     }
+}
+
+/// Pick a free ephemeral port for the agent's `IP_TRANSPARENT` leg-C listener — the
+/// `tproxy to 127.0.0.1:<port>` target installed once in the topology and re-bound by
+/// both timing regimes.
+fn pick_free_inbound_agent_port() -> u16 {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("free agent port");
+    l.local_addr().expect("agent port addr").port()
 }
 
 /// GAP 1 + GAP 2 (outbound half) + GAP 3: the composed OUTBOUND flow. A
@@ -214,16 +242,21 @@ async fn drive_inbound(
     adapter: &HostMtlsEnforcement,
     pki: &TestPki,
     topo: &MtlsTopology,
+    agent_port: u16,
     handshake_delay: Duration,
 ) {
-    // The identity-unaware server workload S (plaintext, holds nothing).
-    let server = InboundServer::spawn();
+    // The identity-unaware server workload S — a CGROUP-ISOLATED NETNS SUBPROCESS
+    // (GAP 3), binding the netns veth IP; holds nothing. The agent's leg-S dial
+    // reaches it over the veth via the topology's DNAT of the verbatim orig-dst.
+    let server = InboundServer::spawn(topo);
 
-    // WORKER role (test harness): owns the IP_TRANSPARENT leg-C listener + the
-    // nft-TPROXY intercept. `InboundWorker::run` installs the TPROXY rule
-    // (VIRT:port → leg-C listener), spawns the client (presenting a valid client
-    // SVID toward the virtual addr), and `accept()`s leg C + recovers orig-dst.
-    let mut worker = roles::InboundWorker::run(topo, server.addr(), pki, handshake_delay);
+    // WORKER role (test harness): owns the IP_TRANSPARENT leg-C listener. The
+    // nft-TPROXY intercept + leg-S routing was installed once by the test via the
+    // topology (the single source of truth — F4). `InboundWorker::run` binds leg C on
+    // the agreed `agent_port`, spawns the client (presenting a valid client SVID
+    // toward the virtual addr), and `accept()`s leg C + recovers orig-dst.
+    let mut worker =
+        roles::InboundWorker::run(topo, server.addr(), pki, agent_port, handshake_delay);
     let (leg_c, orig_dst) = worker.accept_leg_c_and_orig_dst();
 
     let conn = InterceptedConnection {

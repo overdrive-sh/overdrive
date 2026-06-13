@@ -154,7 +154,32 @@ pub struct MtlsTopology {
 impl MtlsTopology {
     /// The workload's logical/virtual IPv4 the inbound client aims at (the
     /// TPROXY-intercepted destination — selects the server SVID via orig-dst).
+    /// Loopback so the host-side client's SYN traverses the host `prerouting` hook
+    /// where the `nft`-TPROXY rule fires.
     pub const VIRT_IP: &'static str = "127.0.0.2";
+
+    /// The inbound virtual port: the port the client aims at on [`Self::VIRT_IP`],
+    /// the TPROXY rule's `dport`, and the orig-dst port the agent recovers via
+    /// `getsockname` (which the production adapter dials VERBATIM via
+    /// `server_dial_addr(orig_dst)`). GAP 3: the netns-isolated server S binds this
+    /// same port on [`Self::server_netns_ip`], and the harness DNATs the agent's
+    /// marked leg-S dial (`VIRT_IP:VIRT_PORT → server_netns_ip:VIRT_PORT`) so the
+    /// verbatim orig-dst dial reaches S over the veth — closing GAP-3-inbound purely
+    /// in the harness, with NO change to the reserved `server_dial_addr` (#178).
+    pub const VIRT_PORT: u16 = 18443;
+
+    /// The netns-side veth IPv4 — where the cgroup-isolated server workload S binds
+    /// (reachable from the host over the veth). The agent's leg-S dial reaches it
+    /// after the harness DNAT rewrites the verbatim orig-dst (`VIRT_IP`) to this.
+    /// Matches the netns veth address assigned in `try_setup` (`10.66.0.2/24`).
+    pub const SERVER_NETNS_IP: &'static str = "10.66.0.2";
+
+    /// The host-side veth IPv4 — the masquerade source for the agent's DNAT'd leg-S
+    /// dial (a packet DNAT'd from a `127.0.0.2` loopback dst keeps its `127.0.0.1`
+    /// loopback src, which cannot egress the veth; masquerade rewrites it to this so
+    /// S's reply routes back and conntrack un-NATs the connection the agent dialed).
+    /// Matches the host veth address assigned in `try_setup` (`10.66.0.1/24`).
+    pub const HOST_VETH_IP: &'static str = "10.66.0.1";
 
     /// Stand up the topology, or return `Err(Unsupported)` for the SKIP path.
     ///
@@ -224,16 +249,124 @@ impl MtlsTopology {
         run(&["ip", "netns", "exec", netns, "ip", "addr", "add", "10.66.0.2/24", "dev", wl_veth])?;
         run(&["ip", "netns", "exec", netns, "ip", "link", "set", wl_veth, "up"])?;
 
+        // Relax the netns-side reverse-path filter so S's reply to the masqueraded
+        // host-veth source (the GAP-3 leg-S DNAT path) is not reverse-path-dropped.
+        // Best-effort: a kernel without these knobs still works for the common case
+        // (the standalone repro confirmed the round-trip), so do not fail setup on a
+        // missing knob.
+        run_ok(&["ip", "netns", "exec", netns, "sysctl", "-w", "net.ipv4.conf.all.rp_filter=0"]);
+        run_ok(&[
+            "ip",
+            "netns",
+            "exec",
+            netns,
+            "sysctl",
+            "-w",
+            &format!("net.ipv4.conf.{wl_veth}.rp_filter=0"),
+        ]);
+
         Ok(())
     }
 
-    /// Install the inbound nft-TPROXY intercept: a connection aimed at
-    /// `VIRT_IP:virt_port` is redirected to `127.0.0.1:agent_port` (the agent's
-    /// `IP_TRANSPARENT` leg-C listener) and marked, with the marked-packet route
-    /// to local delivery (`findings-inbound-intercept.md` §1 / Mechanics #2).
-    pub fn install_tproxy(&mut self, virt_port: u16, agent_port: u16) -> Result<(), TopologyError> {
+    /// Idempotent pre-clean of the GLOBAL inbound state (the `fwmark` rule, the
+    /// `local` route in `rt_table`, and the `nft` table). These are not netns-scoped,
+    /// so the topology RAII `Drop` does not reclaim them on a SIGKILL (nextest
+    /// slow-timeout, Bash wall-clock cap, user cancel; see `.claude/rules/testing.md`
+    /// "Leaked workload cgroups"). A prior aborted run can leave a stale `fwmark` rule
+    /// (even many duplicates) and a stale route, which would make a fresh `ip route
+    /// add ... table 100` fail with `File exists`. Draining them up front makes the
+    /// install idempotent across aborts; clean exits still tear down via `self.cleanup`.
+    fn preclean_global_inbound_state(fwmark: u32, rt_table: u32, table: &str) {
+        for _ in 0..64 {
+            let out = Command::new("ip")
+                .args([
+                    "rule",
+                    "del",
+                    "fwmark",
+                    &fwmark.to_string(),
+                    "lookup",
+                    &rt_table.to_string(),
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if !matches!(out, Ok(s) if s.success()) {
+                break; // no more matching rules
+            }
+        }
+        run_ok(&[
+            "ip",
+            "route",
+            "del",
+            "local",
+            "0.0.0.0/0",
+            "dev",
+            "lo",
+            "table",
+            &rt_table.to_string(),
+        ]);
+        run_ok(&["nft", "delete", "table", "ip", table]);
+    }
+
+    /// The GAP-3 leg-S routing prerequisites: the agent's marked leg-S dial targets a
+    /// `127.0.0.2` loopback VIP (the verbatim orig-dst), which the kernel hard-routes
+    /// to `lo` and treats as a martian destination. `route_localnet=1` lets
+    /// `127.0.0.0/8` route off `lo` so the `nat OUTPUT` DNAT can redirect the dial out
+    /// the veth; relaxed `rp_filter` lets the masqueraded reverse path (S → host-veth)
+    /// pass the reverse-path check. Without these the DNAT'd SYN never leaves `lo` and
+    /// the agent's blocking `connect` hangs (proven by the standalone leg-S DNAT repro:
+    /// with these sysctls the marked dial reaches the netns S over the veth and
+    /// round-trips byte-exact). Idempotent; host-wide tunables on the ephemeral test VM
+    /// (no RAII reset needed).
+    fn enable_leg_s_routing_sysctls(&self) -> Result<(), TopologyError> {
+        let host_veth = self.host_veth.clone();
+        for (knob, val) in [
+            ("net.ipv4.conf.all.route_localnet", "1"),
+            (&format!("net.ipv4.conf.{host_veth}.route_localnet"), "1"),
+            ("net.ipv4.conf.all.rp_filter", "0"),
+            (&format!("net.ipv4.conf.{host_veth}.rp_filter"), "0"),
+            ("net.ipv4.conf.lo.rp_filter", "0"),
+        ] {
+            run(&["sysctl", "-w", &format!("{knob}={val}")]).map_err(|e| {
+                TopologyError::Unsupported(format!("leg-S routing sysctl {knob}: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Install the inbound `nft`-TPROXY intercept + the GAP-3 leg-S routing, all
+    /// RAII-cleaned via the topology's `Drop` and FAILURE-PROPAGATING (a setup failure
+    /// surfaces as `Err`, which the gate treats as a hard failure — no silent
+    /// best-effort). Single source of truth for the inbound fixture (the duplicate
+    /// standalone `install_inbound_tproxy` in `roles.rs` is removed).
+    ///
+    /// Three things land here (`findings-inbound-intercept.md` §1 / Mechanics #2). The
+    /// TPROXY redirect sends a connection aimed at `VIRT_IP:VIRT_PORT` to
+    /// `127.0.0.1:agent_port` (the agent's `IP_TRANSPARENT` leg-C listener), marked for
+    /// the `local` route table. The leg-S exemption (F5) `accept`s the
+    /// [`MTLS_LEG_S_DIAL_MARK`]-stamped agent dial FIRST in the prerouting chain so the
+    /// agent's own dial (which targets the same virtual address the client aimed at) is
+    /// NOT re-TPROXY'd back to leg C — without it the dial recurses. The GAP-3 leg-S
+    /// DNAT + masquerade route the agent's verbatim orig-dst dial to the netns server:
+    /// S binds `SERVER_NETNS_IP:VIRT_PORT`, but the production adapter dials the orig-dst
+    /// VERBATIM (`server_dial_addr(orig_dst) == orig_dst == VIRT_IP:VIRT_PORT`, reserved
+    /// for #178, NOT touched), so the harness DNATs the marked leg-S dial
+    /// `VIRT_IP:VIRT_PORT → SERVER_NETNS_IP:VIRT_PORT` in `nat OUTPUT` and masquerades
+    /// the loopback source to the host veth on egress, so the dial reaches S over the
+    /// veth and conntrack un-NATs S's reply — the "non-trivial netns routing in the
+    /// HARNESS" that closes GAP-3-inbound with no production-surface change.
+    pub fn install_tproxy(&mut self, agent_port: u16) -> Result<(), TopologyError> {
         let fwmark = 0x1u32;
         let rt_table = 100u32;
+        let leg_s_mark = overdrive_dataplane::mtls::MTLS_LEG_S_DIAL_MARK;
+        let table = format!("overdrive_mtls_ws_{}", self.tag);
+
+        // Idempotent pre-clean of the GLOBAL rule/route/table a prior SIGKILL'd run may
+        // have leaked, then the GAP-3 leg-S routing sysctls. Factored out to keep this
+        // method readable.
+        Self::preclean_global_inbound_state(fwmark, rt_table, &table);
+        self.enable_leg_s_routing_sysctls()?;
+
         run(&[
             "ip",
             "rule",
@@ -275,18 +408,32 @@ impl MtlsTopology {
             &rt_table.to_string(),
         ]));
 
-        let table = format!("overdrive_mtls_ws_{}", self.tag);
+        // prerouting: the leg-S-dial-mark exemption (F5) MUST precede the TPROXY rule
+        // so the agent's own dial is accepted before the redirect can match it. The
+        // GAP-3 leg-S DNAT + masquerade route the agent's (marked, loopback-sourced)
+        // dial to the netns server S over the veth.
         let nft_prog = format!(
             "table ip {table} {{\n\
                chain prerouting {{\n\
                  type filter hook prerouting priority mangle; policy accept;\n\
+                 meta mark {leg_s_mark} accept;\n\
                  ip daddr {vip} tcp dport {vport} tproxy to 127.0.0.1:{aport} meta mark set {mark} accept;\n\
+               }}\n\
+               chain output {{\n\
+                 type nat hook output priority dstnat; policy accept;\n\
+                 meta mark {leg_s_mark} ip daddr {vip} tcp dport {vport} dnat to {snip}:{vport};\n\
+               }}\n\
+               chain postrouting {{\n\
+                 type nat hook postrouting priority srcnat; policy accept;\n\
+                 meta mark {leg_s_mark} oifname \"{hveth}\" masquerade;\n\
                }}\n\
              }}\n",
             vip = Self::VIRT_IP,
-            vport = virt_port,
+            vport = Self::VIRT_PORT,
             aport = agent_port,
             mark = fwmark,
+            snip = Self::SERVER_NETNS_IP,
+            hveth = self.host_veth,
         );
         apply_nft(&nft_prog)
             .map_err(|e| TopologyError::Unsupported(format!("nft_tproxy unavailable: {e}")))?;

@@ -83,7 +83,8 @@ pub(super) fn establish(
     //    sent and rustls already decrypted during the handshake window (drained from
     //    `conn.reader()` before the secrets were extracted — see
     //    `mtls::drain_early_plaintext`); it must reach leg F ahead of the return pump.
-    let (secrets, early_return) = client_handshake(leg_b, svid, bundle, limits.handshake_deadline)?;
+    let (secrets, early_return) =
+        client_handshake(leg_b, svid, bundle, alloc, limits.handshake_deadline)?;
 
     // 4. Arm kTLS-TX/RX on leg B from the extracted secrets. TX so the forward
     //    write_all encrypts; RX so the return splice decrypts. The RX `rec_seq`
@@ -136,6 +137,7 @@ fn client_handshake(
     leg_b: TcpStream,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
+    alloc: &AllocationId,
     deadline: std::time::Duration,
 ) -> Result<(ExtractedSecrets, Vec<u8>)> {
     let cfg = tls_config::client_config(svid, bundle)?;
@@ -149,7 +151,7 @@ fn client_handshake(
     let mut conn = ClientConnection::new(cfg, sni).map_err(|e| {
         MtlsEnforcementError::HandshakeFailed { reason: format!("ClientConnection: {e}") }
     })?;
-    drive_handshake_client(&mut conn, &mut tcp)?;
+    drive_handshake_client(&mut conn, &mut tcp, alloc, deadline)?;
     // Drain any early application_data rustls decrypted while finishing the handshake
     // BEFORE `dangerous_extract_secrets` consumes the connection (kTLS 0.5-RTT
     // early-data correctness — see `mtls::drain_early_plaintext`).
@@ -161,8 +163,27 @@ fn client_handshake(
     Ok((secrets, early_return))
 }
 
-fn drive_handshake_client(conn: &mut ClientConnection, tcp: &mut TcpStream) -> Result<()> {
+/// Drive the rustls CLIENT handshake to completion, bounded by an OVERALL
+/// wall-clock `deadline`. The per-read `SO_RCVTIMEO` (set by the caller) bounds
+/// each individual `read_tls`, but a stalled/silent peer that dribbles a byte just
+/// before each timeout would otherwise re-enter `read_tls` forever — there is no
+/// per-read cap on the LOOP. The `Instant::now() >= cap` check is the wall-clock
+/// bound that makes a silent peer fail-closed (`HandshakeTimeout`, F4): the
+/// contract requires the handshake-and-arm to complete within
+/// `limits.handshake_deadline` or refuse, so the stalled peer cannot pin agent
+/// resources. The caller's `enforce` error path closes the owned legs; no kTLS is
+/// armed and no cleartext egresses.
+fn drive_handshake_client(
+    conn: &mut ClientConnection,
+    tcp: &mut TcpStream,
+    alloc: &AllocationId,
+    deadline: std::time::Duration,
+) -> Result<()> {
+    let cap = std::time::Instant::now() + deadline;
     loop {
+        if std::time::Instant::now() >= cap {
+            return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
+        }
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| MtlsEnforcementError::HandshakeFailed {
                 reason: format!("write_tls: {e}"),

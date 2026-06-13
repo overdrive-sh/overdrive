@@ -49,7 +49,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::helpers::mtls_netns_topology::MtlsTopology;
+use super::super::helpers::traffic::{WireCapture, WireScan};
 use super::pki::TestPki;
+
+/// The loopback interface — where the outbound peer leg (peer binds `127.0.0.1`)
+/// and the inbound client-facing leg (client → `127.0.0.2` VIRT) physically carry
+/// their TLS records, so the AF_PACKET confidentiality oracle captures there.
+const LOOPBACK_IFACE: &str = "lo";
 
 /// A multi-record request marker — large enough that kTLS frames it into ≥1 TLS
 /// 1.3 application_data record (the forward F→B leg). The workload writes this;
@@ -110,7 +116,45 @@ pub struct OutboundPeer {
     addr: SocketAddrV4,
     handle: Option<std::thread::JoinHandle<PeerOutcome>>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
-    wire: std::sync::Arc<parking_lot::Mutex<WireObservations>>,
+    /// REAL AF_PACKET capture on `lo` filtered to the peer port — the
+    /// confidentiality oracle is derived from these captured bytes (F2), NOT from
+    /// the peer's handshake-success bookkeeping. Stopped+scanned by
+    /// `wire_observations`; the cached scan answers repeat calls.
+    wire: parking_lot::Mutex<WireCaptureState>,
+}
+
+/// Either the live capture (not yet scanned) or the cached scan result.
+enum WireCaptureState {
+    Live(WireCapture),
+    Scanned(WireScan),
+}
+
+/// Stop+scan the capture in `state` (on first call) and cache the `WireScan`; repeat
+/// calls return the cached scan. The Mutex guard is NOT held across the slow
+/// `stop_and_scan` I/O — the capture is taken out under the lock, the lock dropped,
+/// the scan run, then the result cached under a fresh lock (single-threaded from the
+/// test, so the take→cache window is uncontended).
+fn stop_scan_cached(state: &parking_lot::Mutex<WireCaptureState>, marker: &[u8]) -> WireScan {
+    // Phase 1: under the lock, either read the cached scan or take the live capture.
+    // Replace the state with a placeholder `Scanned(default)`, drop the lock, then
+    // dispatch on the prior state — so the guard's last use is the `mem::replace` and
+    // the lock is not held during the slow scan.
+    let mut guard = state.lock();
+    let prior = std::mem::replace(&mut *guard, WireCaptureState::Scanned(WireScan::default()));
+    drop(guard);
+    let taken = match prior {
+        WireCaptureState::Scanned(s) => {
+            // Was already scanned — restore the cached value and return it.
+            *state.lock() = WireCaptureState::Scanned(s);
+            return s;
+        }
+        WireCaptureState::Live(capture) => capture,
+    };
+    // Phase 2: scan WITHOUT holding the lock (the capture I/O is slow).
+    let scan = taken.stop_and_scan(marker);
+    // Phase 3: cache the real scan under a fresh lock.
+    *state.lock() = WireCaptureState::Scanned(scan);
+    scan
 }
 
 struct PeerOutcome {
@@ -121,11 +165,11 @@ struct PeerOutcome {
 
 impl OutboundPeer {
     pub fn spawn(pki: &TestPki) -> Self {
-        // Bind on loopback; the adapter's leg B dials this real addr. A pcap-style
-        // confidentiality check is done in-band: the peer's kTLS-RX path only
-        // reconstructs the request if it arrived as TLS 1.3 records (cleartext would
-        // corrupt the TLS stream). We additionally tee the raw socket to count 0x17
-        // records and confirm the cleartext marker never appears (the wire oracle).
+        // Bind on loopback; the adapter's leg B dials this real addr. The
+        // confidentiality oracle is a REAL AF_PACKET capture on `lo` (the peer leg's
+        // wire): it counts genuine TLS 1.3 `0x17` application_data records by walking
+        // the record framing and confirms the cleartext request marker never appears
+        // — derived from captured bytes, not from the peer's decrypt-success.
         let cert = pki.peer_leaf.cert_der.clone();
         let key = pki.peer_leaf.key_der.clone_key();
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("peer bind");
@@ -133,26 +177,32 @@ impl OutboundPeer {
             std::net::SocketAddr::V4(a) => a,
             std::net::SocketAddr::V6(_) => unreachable!("bound on 127.0.0.1"),
         };
+        // Start the wire capture BEFORE accepting, so the very first leg-B record is
+        // on the wire after the capture is live.
+        let capture = WireCapture::start(LOOPBACK_IFACE, addr.port());
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let wire = std::sync::Arc::new(parking_lot::Mutex::new(WireObservations {
-            app_data_records: 0,
-            plaintext_marker_hits: 0,
-        }));
-        let wire_thread = std::sync::Arc::clone(&wire);
-        let handle =
-            std::thread::spawn(move || outbound_peer_serve(&listener, cert, key, &wire_thread));
-        Self { addr, handle: Some(handle), shutdown, wire }
+        let handle = std::thread::spawn(move || outbound_peer_serve(&listener, cert, key));
+        Self {
+            addr,
+            handle: Some(handle),
+            shutdown,
+            wire: parking_lot::Mutex::new(WireCaptureState::Live(capture)),
+        }
     }
 
     pub fn addr(&self) -> SocketAddrV4 {
         self.addr
     }
 
+    /// Stop the wire capture (on first call) and scan it for the oracle. The scan is
+    /// cached so repeat calls return the same observation. Called by the test AFTER
+    /// the request/reply round-trip has completed, so every peer-leg record is on the
+    /// captured wire.
     pub fn wire_observations(&self) -> WireObservations {
-        let w = self.wire.lock();
+        let scan = stop_scan_cached(&self.wire, OUTBOUND_REQUEST);
         WireObservations {
-            app_data_records: w.app_data_records,
-            plaintext_marker_hits: w.plaintext_marker_hits,
+            app_data_records: scan.app_data_records,
+            plaintext_marker_hits: scan.plaintext_marker_hits,
         }
     }
 
@@ -172,7 +222,6 @@ fn outbound_peer_serve(
     listener: &TcpListener,
     cert: rustls::pki_types::CertificateDer<'static>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
-    wire: &parking_lot::Mutex<WireObservations>,
 ) -> PeerOutcome {
     let Some((tcp, _)) = accept_with_timeout(listener, Duration::from_secs(10)) else {
         return PeerOutcome {
@@ -238,18 +287,13 @@ fn outbound_peer_serve(
         );
     }
 
-    // Record the wire oracle IMMEDIATELY (before the reply + hold) so the test can
-    // read it as soon as the request round-trips — the workload reading the reply
-    // would otherwise return before the peer's post-reply hold writes `wire`. The
-    // request decrypted byte-exact via kTLS-RX ⇒ it arrived as TLS 1.3 app-data
-    // (cleartext could not reconstruct it). app_data_records ≥ 1; no plaintext on
-    // the peer wire.
+    // The wire oracle is NO LONGER derived from this decrypt-success bookkeeping —
+    // the REAL AF_PACKET capture on `lo` (owned by `OutboundPeer`) counts the genuine
+    // `0x17` records and confirms the cleartext marker is absent. The peer's
+    // byte-exact reconstruction still drives `forward_delivered_byte_exact` (the
+    // workload's exit code), but `app_data_records` / `plaintext_marker_hits` come
+    // from captured bytes, not from `request_byte_exact`.
     let app_data_records = u64::from(request_byte_exact);
-    {
-        let mut w = wire.lock();
-        w.app_data_records = app_data_records;
-        w.plaintext_marker_hits = 0;
-    }
 
     // Reply (the return B→F leg, GAP 2) — encrypted by kTLS-TX. Reply ONLY when the
     // request reconstructed byte-exact, so the workload's exit code reflects forward
@@ -605,80 +649,140 @@ except Exception as e:
 }
 
 // =====================================================================
-// INBOUND server S — identity-unaware plaintext listener; holds nothing.
+// INBOUND server S — the identity-unaware plaintext server WORKLOAD; holds nothing.
 //
-// Productionises increment-i `role_server`: a plain TCP listener that reads the
-// decrypted request the agent splices to it and replies (the S→C response leg).
+// GAP 3: S is a CGROUP-ISOLATED NETNS SUBPROCESS (matching the outbound workload's
+// `spawn_outbound_workload` shape — `ip netns exec` + `cgroup.procs` pre_exec), NOT
+// a host-side sibling thread. It binds the netns veth IP (`server_netns_ip:VIRT_PORT`)
+// so the agent's leg-S dial reaches it over the veth (after the harness DNATs the
+// verbatim orig-dst the production adapter dials). It reads the decrypted request
+// the agent splices to it and replies (the S→C response leg).
 // =====================================================================
 pub struct InboundServer {
     addr: SocketAddrV4,
-    handle: Option<std::thread::JoinHandle<InboundServerResult>>,
+    server: Option<Child>,
 }
 
 impl InboundServer {
-    pub fn spawn() -> Self {
-        // S binds on the VIRT_IP:VIRT_PORT-derived loopback addr so the adapter's
-        // `server_dial_addr(orig_dst) == orig_dst` reaches it (the harness arranges
-        // S's real listener == the orig-dst the inbound client aimed at).
-        let addr =
-            SocketAddrV4::new(MtlsTopology::VIRT_IP.parse().expect("VIRT_IP"), INBOUND_VIRT_PORT);
-        let listener = bind_reuse(addr);
-        let handle = std::thread::spawn(move || inbound_server_serve(&listener));
-        Self { addr, handle: Some(handle) }
+    /// Spawn S as a cgroup-isolated netns subprocess binding the netns veth IP. The
+    /// agent dials the orig-dst (`VIRT_IP:VIRT_PORT`) verbatim; the topology's DNAT
+    /// (`install_tproxy`) routes that marked dial to THIS address over the veth.
+    pub fn spawn(topo: &MtlsTopology) -> Self {
+        let netns_ip: Ipv4Addr = MtlsTopology::SERVER_NETNS_IP.parse().expect("server netns ip");
+        let addr = SocketAddrV4::new(netns_ip, MtlsTopology::VIRT_PORT);
+        let server = spawn_inbound_server_workload(topo, netns_ip, MtlsTopology::VIRT_PORT);
+        // Block until S is actually LISTENING before returning. S is a python3
+        // subprocess (interpreter startup + bind takes time); the agent's leg-S dial
+        // (inside `enforce`, which runs shortly after) would otherwise race S's bind
+        // and get ConnectionRefused. Poll the netns for the listening socket.
+        wait_netns_listening(topo.netns(), MtlsTopology::VIRT_PORT, Duration::from_secs(10));
+        Self { addr, server: Some(server) }
     }
 
-    /// S's real loopback address (leg S — the adapter dials it inside enforce).
+    /// S's real netns listener address (leg S — the agent dials the orig-dst, which
+    /// the harness DNATs here).
     pub fn addr(&self) -> SocketAddrV4 {
         self.addr
     }
 
     pub fn join(mut self) -> InboundServerResult {
-        let fail =
-            || InboundServerResult { received_request_byte_exact: false, observed_rst: true };
-        self.handle.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()))
+        self.server.take().map_or(
+            InboundServerResult { received_request_byte_exact: false, observed_rst: true },
+            |mut child| {
+                let stderr = child.stderr.take();
+                let status = wait_child_bounded(&mut child, Duration::from_secs(14));
+                if let (true, Some(mut e)) = (status != Some(0), stderr) {
+                    let mut s = String::new();
+                    let _ = e.read_to_string(&mut s);
+                    eprintln!("INBOUND-SERVER exit={status:?} stderr={}", s.trim());
+                }
+                read_inbound_server_outcome(status)
+            },
+        )
     }
 
     pub fn shutdown(&self) {}
 }
 
-/// The inbound virtual port the client aims at (TPROXY-intercepted) and S binds on.
-const INBOUND_VIRT_PORT: u16 = 18443;
+/// Parse S's subprocess exit code into its result. The python server exits 0 when it
+/// received the byte-exact request (and replied), 10 on a request mismatch, 20 on a
+/// connection reset, 30 on any other error.
+fn read_inbound_server_outcome(code: Option<i32>) -> InboundServerResult {
+    match code {
+        Some(0) => InboundServerResult { received_request_byte_exact: true, observed_rst: false },
+        Some(20) => InboundServerResult { received_request_byte_exact: false, observed_rst: true },
+        _ => InboundServerResult { received_request_byte_exact: false, observed_rst: false },
+    }
+}
 
-fn inbound_server_serve(listener: &TcpListener) -> InboundServerResult {
-    let Some((mut conn, _peer)) = accept_with_timeout(listener, Duration::from_secs(12)) else {
-        return InboundServerResult { received_request_byte_exact: false, observed_rst: false };
-    };
-    conn.set_read_timeout(Some(Duration::from_secs(6))).ok();
-    let mut got = Vec::new();
-    let mut buf = vec![0u8; 65536];
-    let deadline = std::time::Instant::now() + Duration::from_secs(6);
-    let mut observed_rst = false;
-    while got.len() < INBOUND_REQUEST.len() && std::time::Instant::now() < deadline {
-        match conn.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => got.extend_from_slice(&buf[..n]),
-            Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
-                observed_rst = true;
-                break;
-            }
-            Err(ref e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                break;
-            }
-            Err(_) => break,
-        }
+/// Spawn the cgroup-isolated inbound server workload S: a python3 process placed in
+/// the workload cgroup (`pre_exec` → `cgroup.procs`) and run inside the workload netns
+/// (`ip netns exec`). It binds `bind_ip:bind_port` on the netns veth, accepts the
+/// agent's leg-S dial, reads INBOUND_REQUEST byte-exact, and replies INBOUND_RESPONSE.
+fn spawn_inbound_server_workload(topo: &MtlsTopology, bind_ip: Ipv4Addr, bind_port: u16) -> Child {
+    let script = format!(
+        r#"
+import socket, sys, time
+request = {request}
+response = {response}
+try:
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("{bind_ip}", {bind_port}))
+    srv.listen(16)
+    srv.settimeout(14)
+    conn, _ = srv.accept()
+    conn.settimeout(8)
+    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    got = b""
+    try:
+        while len(got) < len(request):
+            b = conn.recv(65536)
+            if not b:
+                break
+            got += b
+    except ConnectionResetError:
+        sys.stderr.write("RST during recv\n")
+        sys.exit(20)
+    if got != request:
+        sys.stderr.write("request mismatch got=%d want=%d\n" % (len(got), len(request)))
+        sys.exit(10)
+    # reply over the S->C response leg (GAP 2 inbound half); the agent splices it
+    # back over leg C's kTLS.
+    conn.sendall(response)
+    time.sleep(0.6)
+    sys.exit(0)
+except (ConnectionResetError, BrokenPipeError) as e:
+    sys.stderr.write("RST: %s\n" % e)
+    sys.exit(20)
+except Exception as e:
+    sys.stderr.write("server err: %s\n" % e)
+    sys.exit(30)
+"#,
+        request = PyBytes(INBOUND_REQUEST),
+        response = PyBytes(INBOUND_RESPONSE),
+        bind_ip = bind_ip,
+        bind_port = bind_port,
+    );
+    let procs = format!("{}/cgroup.procs", topo.cgroup_path());
+    let mut cmd = Command::new("ip");
+    cmd.args(["netns", "exec", topo.netns(), "python3", "-c", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    // Place the `ip netns exec` wrapper (which execs python) into the workload cgroup
+    // before exec, so S runs cgroup-isolated (GAP 3). cgroup membership is inherited
+    // across exec.
+    // SAFETY: pre_exec runs in the forked child before exec; one write to cgroup.procs
+    // is async-signal-safe enough for this fixture.
+    unsafe {
+        cmd.pre_exec(move || {
+            let pid = std::process::id();
+            std::fs::write(&procs, pid.to_string())
+                .map_err(|e| std::io::Error::other(format!("join cgroup: {e}")))?;
+            Ok(())
+        });
     }
-    let received_request_byte_exact = got == INBOUND_REQUEST;
-    // Reply (the S→C response leg, GAP 2 inbound half) — the agent splices it back
-    // over leg C's kTLS.
-    if received_request_byte_exact {
-        let _ = (&conn).write_all(INBOUND_RESPONSE);
-        let _ = (&conn).flush();
-    }
-    std::thread::sleep(Duration::from_millis(600));
-    InboundServerResult { received_request_byte_exact, observed_rst }
+    cmd.spawn().expect("spawn inbound server workload S")
 }
 
 // =====================================================================
@@ -691,7 +795,11 @@ fn inbound_server_serve(listener: &TcpListener) -> InboundServerResult {
 pub struct InboundWorker {
     leg_c_listener: TcpListener,
     client: Option<std::thread::JoinHandle<InboundClientResult>>,
-    wire: std::sync::Arc<parking_lot::Mutex<WireObservations>>,
+    /// REAL AF_PACKET capture on `lo` filtered to the VIRT port — the
+    /// confidentiality oracle for the client-facing leg C is derived from captured
+    /// bytes (F2), NOT from the client's handshake-success. Stopped+scanned by
+    /// `client_wire_observations`.
+    wire: parking_lot::Mutex<WireCaptureState>,
     handshake_delay: Duration,
 }
 
@@ -699,53 +807,52 @@ pub struct InboundWorker {
 const IP_TRANSPARENT: libc::c_int = 19;
 
 impl InboundWorker {
+    /// `agent_port` is the agent's `IP_TRANSPARENT` leg-C listener port — the SAME
+    /// port the test installed the `nft`-TPROXY rule's `tproxy to 127.0.0.1:agent_port`
+    /// target on (via `MtlsTopology::install_tproxy`, the single source of truth; the
+    /// duplicate standalone installer is removed — F4). The worker no longer installs
+    /// TPROXY; it binds leg C on the agreed port and starts the wire capture.
     pub fn run(
         topo: &MtlsTopology,
         _server_addr: SocketAddrV4,
         pki: &TestPki,
+        agent_port: u16,
         handshake_delay: Duration,
     ) -> Self {
+        let _ = topo;
         // The agent's IP_TRANSPARENT leg-C listener (where TPROXY lands the
-        // intercepted client connection). Bind on loopback; nft-TPROXY redirects
-        // VIRT_IP:VIRT_PORT -> 127.0.0.1:agent_port.
-        let agent_port = pick_free_port();
+        // intercepted client connection). Bind on the agreed agent_port with
+        // SO_REUSEADDR so both timing regimes can re-bind it sequentially.
         let leg_c_listener = make_transparent_listener(agent_port);
 
-        // Install the inbound nft-TPROXY intercept via the topology (this needs
-        // `&mut MtlsTopology`; the harness owns it as `&topo` so we install on a
-        // freshly-derived rule set keyed on the same tag — the topology exposes
-        // install_tproxy(&mut self), so we route through a small unsafe-free shim:
-        // the topology is shared `&` here, so install via the standalone helper
-        // that mirrors install_tproxy using the same VIRT_IP + ports).
-        install_inbound_tproxy(topo, INBOUND_VIRT_PORT, agent_port);
+        // Start the REAL AF_PACKET capture on `lo` filtered to the VIRT port — the
+        // client-facing leg-C confidentiality oracle (F2). Start it BEFORE the client
+        // connects so the first record is on the captured wire.
+        let capture = WireCapture::start(LOOPBACK_IFACE, MtlsTopology::VIRT_PORT);
 
         // Spawn the inbound client: presents the CLIENT SVID, connects toward the
-        // VIRTUAL addr (TPROXY-intercepted to leg C). Runs on a thread (the client
-        // is host-side; it is the agent's leg-B-dial analogue and must NOT be in the
-        // workload cgroup — there is no outbound intercept on the inbound client).
+        // VIRTUAL addr (TPROXY-intercepted to leg C). Runs on a thread (the client is
+        // host-side — the remote-endpoint analogue of the outbound peer, which is
+        // accepted as GAP-3-closing; there is no outbound intercept on the inbound
+        // client, so it does NOT need the workload cgroup).
         let client_cert = pki.client_leaf.cert_der.clone();
         let client_key = pki.client_leaf.key_der.clone_key();
         let ca_pem = pki.ca_cert_pem().to_string();
-        let virt_addr =
-            SocketAddrV4::new(MtlsTopology::VIRT_IP.parse().expect("VIRT_IP"), INBOUND_VIRT_PORT);
-        let wire = std::sync::Arc::new(parking_lot::Mutex::new(WireObservations {
-            app_data_records: 0,
-            plaintext_marker_hits: 0,
-        }));
-        let wire_client = std::sync::Arc::clone(&wire);
+        let virt_addr = SocketAddrV4::new(
+            MtlsTopology::VIRT_IP.parse().expect("VIRT_IP"),
+            MtlsTopology::VIRT_PORT,
+        );
         let send_delay = handshake_delay.max(Duration::from_millis(400));
         let client = std::thread::spawn(move || {
-            inbound_client_run(
-                virt_addr,
-                client_cert,
-                client_key,
-                &ca_pem,
-                send_delay,
-                &wire_client,
-            )
+            inbound_client_run(virt_addr, client_cert, client_key, &ca_pem, send_delay)
         });
 
-        Self { leg_c_listener, client: Some(client), wire, handshake_delay }
+        Self {
+            leg_c_listener,
+            client: Some(client),
+            wire: parking_lot::Mutex::new(WireCaptureState::Live(capture)),
+            handshake_delay,
+        }
     }
 
     /// Accept leg C (the client-facing kTLS leg the adapter takes ownership of) and
@@ -768,11 +875,15 @@ impl InboundWorker {
         self.client.take().map_or_else(fail, |h| h.join().unwrap_or_else(|_| fail()))
     }
 
+    /// Stop the client-facing wire capture (on first call) and scan it for the leg-C
+    /// confidentiality oracle. Cached so repeat calls return the same scan. Called by
+    /// the test AFTER the request/response round-trip has completed, so every leg-C
+    /// record is on the captured wire.
     pub fn client_wire_observations(&self) -> WireObservations {
-        let w = self.wire.lock();
+        let scan = stop_scan_cached(&self.wire, INBOUND_REQUEST);
         WireObservations {
-            app_data_records: w.app_data_records,
-            plaintext_marker_hits: w.plaintext_marker_hits,
+            app_data_records: scan.app_data_records,
+            plaintext_marker_hits: scan.plaintext_marker_hits,
         }
     }
 }
@@ -790,7 +901,6 @@ fn inbound_client_run(
     key: rustls::pki_types::PrivateKeyDer<'static>,
     ca_pem: &str,
     send_delay: Duration,
-    wire: &parking_lot::Mutex<WireObservations>,
 ) -> InboundClientResult {
     use rustls::pki_types::ServerName;
     use rustls::{ClientConfig, ClientConnection};
@@ -813,14 +923,10 @@ fn inbound_client_run(
     if !drive_client_handshake(&mut conn, &mut tcp) {
         return InboundClientResult { received_response_byte_exact: false, observed_rst: true };
     }
-    // Wire oracle: the handshake completed, so leg C carries TLS 1.3 records and the
-    // subsequent app_data is encrypted (rustls frames it). Record it NOW (before the
-    // app round-trip) so the test reads it without racing the thread's completion.
-    {
-        let mut w = wire.lock();
-        w.app_data_records = 1;
-        w.plaintext_marker_hits = 0;
-    }
+    // The wire oracle is NO LONGER set here from handshake-success — the REAL
+    // AF_PACKET capture on `lo` (owned by `InboundWorker`, filtered to the VIRT port)
+    // counts the genuine `0x17` records on the client-facing leg and confirms the
+    // cleartext request marker is absent. This client only drives the app round-trip.
     // Delay the first app write so the request lands AFTER the agent arms kTLS-RX.
     std::thread::sleep(send_delay);
 
@@ -858,7 +964,7 @@ fn inbound_client_run(
         }
     }
     let received_response_byte_exact = got == INBOUND_RESPONSE;
-    // (wire oracle already recorded post-handshake, above.)
+    // (the wire oracle is the AF_PACKET capture owned by `InboundWorker`, not set here.)
     std::thread::sleep(Duration::from_millis(300));
     InboundClientResult { received_response_byte_exact, observed_rst }
 }
@@ -1006,32 +1112,6 @@ fn drive_client_handshake(conn: &mut rustls::ClientConnection, tcp: &mut TcpStre
     }
 }
 
-/// Bind a `TcpListener` with SO_REUSEADDR on a specific addr (S's virtual addr).
-fn bind_reuse(addr: SocketAddrV4) -> TcpListener {
-    // SAFETY: standard socket/setsockopt/bind/listen sequence with checked rc.
-    unsafe {
-        let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
-        assert!(fd >= 0, "socket: {}", std::io::Error::last_os_error());
-        let one: libc::c_int = 1;
-        libc::setsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_REUSEADDR,
-            std::ptr::from_ref(&one).cast(),
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-        let sa = sockaddr_in_from(addr);
-        let rc = libc::bind(
-            fd,
-            std::ptr::from_ref(&sa).cast(),
-            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-        );
-        assert!(rc == 0, "bind {addr}: {}", std::io::Error::last_os_error());
-        assert!(libc::listen(fd, 16) == 0, "listen: {}", std::io::Error::last_os_error());
-        TcpListener::from_raw_fd(fd)
-    }
-}
-
 /// Make an IP_TRANSPARENT loopback listener (accepts TPROXY-redirected conns).
 fn make_transparent_listener(port: u16) -> TcpListener {
     // SAFETY: socket + IP_TRANSPARENT/SO_REUSEADDR + bind + listen with checked rc.
@@ -1094,124 +1174,6 @@ fn getsockname_orig(fd: RawFd) -> SocketAddrV4 {
     SocketAddrV4::new(ip, port)
 }
 
-/// Pick a free ephemeral port by binding then dropping (best-effort; the agent
-/// re-binds it as the IP_TRANSPARENT listener).
-fn pick_free_port() -> u16 {
-    let l = TcpListener::bind("127.0.0.1:0").expect("free port");
-    l.local_addr().expect("free port addr").port()
-}
-
-/// Install the inbound nft-TPROXY intercept (VIRT_IP:virt_port -> 127.0.0.1:agent
-/// _port) + the ip rule/route for marked-packet local delivery. Mirrors
-/// `MtlsTopology::install_tproxy` but works on a shared `&MtlsTopology` (the harness
-/// owns the topology by `&`; the cleanup is best-effort at process teardown). The
-/// rule/route/nft state is keyed on the topology netns name suffix so parallel runs
-/// do not collide; teardown is via the topology's own Drop for the shared bits and
-/// here for the inbound-specific rules.
-fn install_inbound_tproxy(topo: &MtlsTopology, virt_port: u16, agent_port: u16) {
-    let fwmark = 0x1u32;
-    let rt_table = 100u32;
-    run_ok(&["ip", "rule", "add", "fwmark", &fwmark.to_string(), "lookup", &rt_table.to_string()]);
-    run_ok(&[
-        "ip",
-        "route",
-        "add",
-        "local",
-        "0.0.0.0/0",
-        "dev",
-        "lo",
-        "table",
-        &rt_table.to_string(),
-    ]);
-    let table = format!("overdrive_mtls_ws_in_{}", topo.netns());
-    // The rule excludes the agent's leg-S dial mark (`MTLS_LEG_S_DIAL_MARK` = 0x2)
-    // so the agent's own dial to the server workload (which targets the same virtual
-    // address the client aimed at) is NOT re-intercepted (F5 inbound
-    // intercept-recursion exemption). Only the CLIENT's connection (unmarked) is
-    // TPROXY'd to leg C.
-    let leg_s_mark = overdrive_dataplane::mtls::MTLS_LEG_S_DIAL_MARK;
-    let nft_prog = format!(
-        "table ip {table} {{\n\
-           chain prerouting {{\n\
-             type filter hook prerouting priority mangle; policy accept;\n\
-             meta mark {leg_s_mark} accept;\n\
-             ip daddr {vip} tcp dport {vport} tproxy to 127.0.0.1:{aport} meta mark set {mark} accept;\n\
-           }}\n\
-         }}\n",
-        vip = MtlsTopology::VIRT_IP,
-        vport = virt_port,
-        aport = agent_port,
-        mark = fwmark,
-    );
-    apply_nft_best_effort(&nft_prog);
-    // Register cleanup on the process: a small RAII guard removes the nft table +
-    // ip rule/route. Leak it so it lives the test's lifetime; the topology Drop +
-    // this guard tear it down. We use a thread-local registry of teardown closures
-    // run at the end of the test via the topology's own Drop is not reachable from
-    // here, so we rely on the idempotent pre-clean of subsequent runs + the
-    // best-effort teardown below scheduled on a detached observer is overkill;
-    // instead, store the cleanup commands in a leaked guard whose Drop fires at
-    // process exit. For a single-shot test process that is sufficient.
-    let cleanup = InboundTproxyCleanup { table, fwmark, rt_table };
-    // Run cleanup immediately is wrong (the rule must persist for the flow). Park
-    // it in a process-lifetime leak; the next run's idempotent pre-clean + the
-    // best-effort teardown cover residue.
-    std::mem::forget(cleanup);
-}
-
-struct InboundTproxyCleanup {
-    table: String,
-    fwmark: u32,
-    rt_table: u32,
-}
-
-impl Drop for InboundTproxyCleanup {
-    fn drop(&mut self) {
-        run_ok(&["nft", "delete", "table", "ip", &self.table]);
-        run_ok(&[
-            "ip",
-            "route",
-            "del",
-            "local",
-            "0.0.0.0/0",
-            "dev",
-            "lo",
-            "table",
-            &self.rt_table.to_string(),
-        ]);
-        run_ok(&[
-            "ip",
-            "rule",
-            "del",
-            "fwmark",
-            &self.fwmark.to_string(),
-            "lookup",
-            &self.rt_table.to_string(),
-        ]);
-    }
-}
-
-fn run_ok(argv: &[&str]) {
-    let _ =
-        Command::new(argv[0]).args(&argv[1..]).stdout(Stdio::null()).stderr(Stdio::null()).status();
-}
-
-fn apply_nft_best_effort(prog: &str) {
-    if let Ok(mut child) = Command::new("nft")
-        .arg("-f")
-        .arg("-")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(prog.as_bytes());
-        }
-        let _ = child.wait();
-    }
-}
-
 /// Accept one connection within `timeout`, or None. Bounded so a failed intercept
 /// never hangs the harness.
 fn accept_with_timeout(
@@ -1243,6 +1205,31 @@ fn accept_with_timeout(
         stream.set_nonblocking(false).ok();
     }
     result
+}
+
+/// Poll the netns for a TCP listener on `port` until it appears or `timeout`
+/// elapses. Used to gate the agent's leg-S dial behind S's bind — S is a python3
+/// subprocess whose interpreter-startup + `bind` race the agent's `connect`, and a
+/// dial that loses the race gets `ConnectionRefused` (the netns S has no listener
+/// yet). `ss -ltnH 'sport = :<port>'` inside the netns reports the listener; a
+/// non-empty line means S is ready.
+fn wait_netns_listening(netns: &str, port: u16, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    let filter = format!("sport = :{port}");
+    while std::time::Instant::now() < deadline {
+        let out = Command::new("ip")
+            .args(["netns", "exec", netns, "ss", "-ltnH", &filter])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output();
+        if out.is_ok_and(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty()) {
+            return; // S is listening
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Fall through on timeout: the leg-S dial will surface the real failure
+    // (ConnectionRefused) with a clearer test-assertion message than a silent stall.
+    eprintln!("INBOUND-SERVER: S did not reach LISTENING on port {port} within {timeout:?}");
 }
 
 /// Wait for a child within `grace`, else kill by handle and reap. Returns the exit

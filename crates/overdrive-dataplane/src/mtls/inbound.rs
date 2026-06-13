@@ -32,7 +32,7 @@ pub(super) fn establish(
     orig_dst: SocketAddrV4,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
-    _alloc: &AllocationId,
+    alloc: &AllocationId,
     limits: MtlsLimits,
 ) -> Result<ConnState> {
     let leg_c_fd = leg_c.as_raw_fd();
@@ -46,7 +46,7 @@ pub(super) fn establish(
     //    client sent and rustls already decrypted during the handshake window
     //    (drained from `conn.reader()`); it must reach leg S ahead of the deliver pump.
     let (secrets, early_deliver) =
-        server_handshake(leg_c_fd, svid, bundle, limits.handshake_deadline)?;
+        server_handshake(leg_c_fd, svid, bundle, alloc, limits.handshake_deadline)?;
 
     // 2. Arm kTLS-RX (+TX) on leg C from the extracted secrets. The RX `rec_seq`
     //    already accounts for the early records rustls decrypted in step 1, so the
@@ -108,6 +108,7 @@ fn server_handshake(
     leg_c_fd: RawFd,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
+    alloc: &AllocationId,
     deadline: std::time::Duration,
 ) -> Result<(ExtractedSecrets, Vec<u8>)> {
     let cfg = tls_config::server_config(svid, bundle)?;
@@ -118,7 +119,7 @@ fn server_handshake(
         MtlsEnforcementError::HandshakeFailed { reason: format!("ServerConnection: {e}") }
     })?;
     let result = (|| {
-        drive_handshake_server(&mut conn, &mut tcp)?;
+        drive_handshake_server(&mut conn, &mut tcp, alloc, deadline)?;
         // fail-closed guard: the client MUST have presented a verified cert.
         match conn.peer_certificates() {
             Some(certs) if !certs.is_empty() => {}
@@ -141,9 +142,28 @@ fn server_handshake(
     result
 }
 
-fn drive_handshake_server(conn: &mut ServerConnection, tcp: &mut TcpStream) -> Result<()> {
+/// Drive the rustls SERVER handshake to completion, bounded by an OVERALL
+/// wall-clock `deadline`. The per-read `SO_RCVTIMEO` bounds each individual
+/// `read_tls`, but a stalled/silent client that dribbles a byte just before each
+/// timeout would otherwise re-enter `read_tls` forever — the LOOP itself has no
+/// cap. The `Instant::now() >= cap` check is the wall-clock bound that makes a
+/// silent client fail-closed (`HandshakeTimeout`, F4): the contract requires the
+/// handshake-and-arm to complete within `limits.handshake_deadline` or refuse, so
+/// the stalled client cannot pin agent resources. `server_handshake`'s `forget`
+/// keeps leg C open; the caller's `enforce` error path closes it (and never dials
+/// leg S), so no plaintext is spliced to the server workload.
+fn drive_handshake_server(
+    conn: &mut ServerConnection,
+    tcp: &mut TcpStream,
+    alloc: &AllocationId,
+    deadline: std::time::Duration,
+) -> Result<()> {
     use std::io::ErrorKind;
+    let cap = std::time::Instant::now() + deadline;
     loop {
+        if std::time::Instant::now() >= cap {
+            return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
+        }
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| MtlsEnforcementError::HandshakeFailed {
                 reason: format!("write_tls: {e}"),
