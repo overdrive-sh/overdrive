@@ -2,11 +2,14 @@
 //!
 //! The agent owns leg F (workload-facing plaintext, `accept()`ed off the
 //! `cgroup_connect4`-rewrite intercept) and dials leg B (peer-facing kTLS). The
-//! forward path is an AGENT-LIGHT `splice(legF → legB)` pump — symmetric to the
-//! inbound deliver pump (`splice(legC → legS)`) and the return pump
-//! (`splice(legB → legF)`). leg B is kTLS-TX-armed, so the kernel `tls_sw_sendmsg`
-//! encrypts each spliced record SYNCHRONOUSLY on splice-in; the agent does ZERO
-//! crypto and copies no plaintext in userspace.
+//! forward path is an AGENT-LIGHT `read → write_all` COPY pump (`legF → legB`) —
+//! ASYMMETRIC to the splice (kTLS-RX) directions, the inbound deliver pump
+//! (`splice(legC → legS)`) and the return pump (`splice(legB → legF)`). leg B is
+//! kTLS-TX-armed, so the kernel `tls_sw_sendmsg` encrypts each written record
+//! SYNCHRONOUSLY on `write`; the agent does ZERO crypto, but it DOES copy each
+//! record's plaintext through a userspace buffer (a `read`+`write` per record). A
+//! `splice` INTO a kTLS-TX socket is NOT used — it loses records the same way the
+//! abandoned sockmap egress redirect did.
 //!
 //! This replaced the sockmap egress redirect (`sk_skb/stream_verdict` +
 //! `bpf_sk_redirect_map(flags=0)` into leg B's kTLS-TX), which enqueues on leg B's
@@ -25,8 +28,9 @@
 //!      the first application_data);
 //!   4. drain leg F's recv queue once more + flush (catches any byte the workload
 //!      wrote in the window between the last capture read and the arm);
-//!   5. spawn the FORWARD pump `splice(legF → legB)` (kTLS-TX encrypts on splice-in)
-//!      AND the RETURN pump `splice(legB → legF)` (kTLS-RX decrypts on splice-out).
+//!   5. spawn the FORWARD encrypt pump (`read → write_all` COPY `legF → legB`;
+//!      kTLS-TX encrypts each `write`) AND the RETURN pump `splice(legB → legF)`
+//!      (zero-copy out of kTLS-RX; decrypts on splice-out).
 //!
 //! Runs on a blocking task (synchronous rustls + raw setsockopt).
 
@@ -229,7 +233,7 @@ pub(super) fn run_probe_sentinels() -> Result<()> {
     // process-global crypto state is the wrong layer. The sentinel handshakes below
     // consume that installed default via the `ServerConfig::builder()` /
     // `ClientConfig::builder()` surfaces, which is the caller's responsibility.
-    probe_ktls_arm_and_forward_splice_round_trip()
+    probe_ktls_arm_and_forward_encrypt_round_trip()
 }
 
 /// A throwaway self-signed sentinel cert+key for the loopback self-test handshake
@@ -250,15 +254,16 @@ fn sentinel_cert() -> std::result::Result<
     Ok((cert_der, key_der))
 }
 
-/// The kTLS-arm + agent-light forward-splice round-trip on a loopback sentinel,
+/// The kTLS-arm + agent-light forward-encrypt round-trip on a loopback sentinel,
 /// mirroring the real OUTBOUND lifecycle: dial a loopback sentinel peer (leg B),
-/// rustls CLIENT handshake, arm kTLS-TX/RX, then `splice` a sentinel record from a
-/// plaintext source leg into leg B's kTLS-TX — the sentinel peer (kTLS-RX) MUST
-/// reconstruct the exact sentinel plaintext (proving the byte rode the agent-light
-/// forward splice → leg B's kTLS TX → the peer's kTLS-RX, ENCRYPTED on the wire).
-/// Any failure ⇒ `Probe`.
-fn probe_ktls_arm_and_forward_splice_round_trip() -> Result<()> {
-    const SENTINEL: &[u8] = b"OVERDRIVE_MTLS_PROBE_SENTINEL_ktls_arm_forward_splice_roundtrip_0001";
+/// rustls CLIENT handshake, arm kTLS-TX/RX, then `read → write_all` COPY a sentinel
+/// record from a plaintext source leg into leg B's kTLS-TX — the sentinel peer
+/// (kTLS-RX) MUST reconstruct the exact sentinel plaintext (proving the byte rode
+/// the agent-light forward encrypt pump → leg B's kTLS TX → the peer's kTLS-RX,
+/// ENCRYPTED on the wire). Any failure ⇒ `Probe`.
+fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
+    const SENTINEL: &[u8] =
+        b"OVERDRIVE_MTLS_PROBE_SENTINEL_ktls_arm_forward_encrypt_roundtrip_0001";
 
     let outcome = (|| -> std::result::Result<(), String> {
         // 1. Sentinel peer: a loopback TLS 1.3 server that arms kTLS-RX and reads
@@ -272,8 +277,8 @@ fn probe_ktls_arm_and_forward_splice_round_trip() -> Result<()> {
         });
 
         // 2. Leg F sentinel source: a self-connected loopback pair the agent owns.
-        //    f_writer's bytes appear on f_source's recv queue; the forward splice
-        //    reads from f_source.
+        //    f_writer's bytes appear on f_source's recv queue; the forward encrypt
+        //    pump reads from f_source.
         let f_listener =
             std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("legF bind: {e}"))?;
         let f_addr = f_listener.local_addr().map_err(|e| format!("legF addr: {e}"))?;
@@ -321,7 +326,7 @@ fn probe_ktls_arm_and_forward_splice_round_trip() -> Result<()> {
             Ok(())
         } else {
             Err(format!(
-                "forward-splice round-trip mismatch: peer reconstructed {} of {} sentinel bytes (forward splice produced cleartext / no bytes, or kTLS RX failed)",
+                "forward-encrypt round-trip mismatch: peer reconstructed {} of {} sentinel bytes (forward encrypt pump produced cleartext / no bytes, or kTLS RX failed)",
                 got.len(),
                 SENTINEL.len()
             ))

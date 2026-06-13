@@ -5,17 +5,26 @@
 //! Implements [`MtlsEnforcement`](overdrive_core::traits::MtlsEnforcement) over
 //! the spike-proven kernel primitives: rustls TLS 1.3 client/server handshakes
 //! (consuming [`IdentityRead`](overdrive_core::traits::IdentityRead) for the held
-//! SVID + trust bundle), kTLS arm (`setsockopt TCP_ULP/TLS_TX/TLS_RX`), and the
-//! agent-light `splice(2)` pump in EVERY direction — forward (`legF → legB` into
-//! leg B's kTLS-TX), return (`legB → legF`), deliver (`legC → legS`), response
-//! (`legS → legC`). The forward path was a sockmap egress redirect; it is now a
-//! splice pump symmetric to the others (the redirect `MSG_DONTWAIT`-stalled
-//! ~10–15% of records — see
+//! SVID + trust bundle), kTLS arm (`setsockopt TCP_ULP/TLS_TX/TLS_RX`), and two
+//! ASYMMETRIC agent-light pumps across the kTLS boundary (the two directions are
+//! NOT the same primitive — the agent does no TLS crypto either way, but it copies
+//! into a TX leg and zero-copies out of an RX leg):
+//! - **Encrypt COPY pump** — forward (`legF → legB`) + response (`legS → legC`): a
+//!   bounded userspace `read → write_all` COPY into a kTLS-TX leg; the kernel
+//!   `tls_sw_sendmsg` encrypts each `write`.
+//! - **Decrypt SPLICE pump** — return (`legB → legF`) + deliver (`legC → legS`): a
+//!   zero-copy `splice` out of a kTLS-RX leg; `tls_sw_splice_read` decrypts each
+//!   record on splice-out.
+//!
+//! The forward path was a sockmap egress redirect; it is now the `read → write_all`
+//! COPY pump above — ASYMMETRIC to the splice (RX) directions, NOT symmetric to
+//! them. The redirect `MSG_DONTWAIT`-stalled ~10–15% of records, and a `splice`
+//! INTO a kTLS-TX socket loses records the same way (see
 //! `docs/research/dataplane/sockmap-egress-redirect-into-ktls-tx-delivery-research.md`).
 //!
 //! Mechanism provenance (each method drives a spike-PROVEN syscall sequence):
 //! - OUTBOUND lossless capture — `findings-userspace-relay.md` Unknown 1+2.
-//! - splice into kTLS-TX (agent-light, forward + response) — `findings-splice-return.md`.
+//! - write_all COPY into kTLS-TX (agent-light, forward + response) — `findings-splice-return.md`.
 //! - splice out of kTLS-RX (agent-light, return + deliver) — `findings-splice-return.md`.
 //! - INBOUND server-mTLS → kTLS-RX → splice-to-S — `findings-inbound-intercept.md`.
 //!
@@ -71,15 +80,17 @@ struct ConnState {
     /// The agent-owned legs to close on teardown. OUTBOUND: leg F + leg B.
     /// INBOUND: leg C + leg S.
     legs: Vec<OwnedFd>,
-    /// The primary splice pump — the request-carrying direction `liveness`
-    /// observes. OUTBOUND: the forward pump `splice(legF → legB)` (into leg B's
-    /// kTLS-TX). INBOUND: the deliver pump `splice(legC → legS)`.
+    /// The primary pump — the request-carrying direction `liveness` observes.
+    /// OUTBOUND: the forward encrypt pump (`read → write_all` COPY of leg F into
+    /// leg B's kTLS-TX). INBOUND: the deliver pump (zero-copy `splice(legC → legS)`
+    /// out of leg C's kTLS-RX).
     pump: PumpHandle,
-    /// Auxiliary splice pumps torn down with the connection but NOT observed by
-    /// `liveness`. OUTBOUND carries the return pump `splice(legB → legF)` (the B→F
-    /// response leg; leg B's kTLS-RX decrypts the peer's reply). INBOUND carries the
-    /// response pump `splice(legS → legC)` (the S→C response leg — GAP 2 inbound
-    /// half; leg C's kTLS-TX encrypts S's reply back to the client).
+    /// Auxiliary pumps torn down with the connection but NOT observed by
+    /// `liveness`. OUTBOUND carries the return pump (zero-copy `splice(legB → legF)`
+    /// out of leg B's kTLS-RX, which decrypts the peer's reply). INBOUND carries the
+    /// response encrypt pump (`read → write_all` COPY of leg S into leg C's kTLS-TX
+    /// — the S→C response leg, GAP 2 inbound half; leg C's kTLS-TX encrypts S's
+    /// reply back to the client).
     aux_pumps: Vec<PumpHandle>,
 }
 
@@ -139,9 +150,9 @@ impl HostMtlsEnforcement {
 impl MtlsEnforcement for HostMtlsEnforcement {
     async fn probe(&self) -> Result<()> {
         // Earned-Trust: exercise the substrate the proxy relies on (kTLS arm +
-        // agent-light forward splice) on a loopback sentinel and tear the sentinel
-        // state down. Runs on a blocking task — the sentinel uses synchronous
-        // rustls + raw setsockopt + splice.
+        // agent-light forward encrypt pump) on a loopback sentinel and tear the
+        // sentinel state down. Runs on a blocking task — the sentinel uses
+        // synchronous rustls + raw setsockopt + the `read → write_all` COPY pump.
         tokio::task::spawn_blocking(outbound::run_probe_sentinels).await.map_err(|e| {
             MtlsEnforcementError::Probe {
                 which: ProbeSentinel::KtlsArmRoundTrip,
@@ -622,10 +633,12 @@ impl HostMtlsEnforcement {
 // `HostMtlsEnforcementError`).
 
 /// Construct a `ConnState` with a primary pump + auxiliary pumps — both the
-/// OUTBOUND and INBOUND sites. OUTBOUND: the primary forward pump
-/// `splice(legF → legB)` plus the return pump `splice(legB → legF)` in `aux_pumps`.
-/// INBOUND: the primary deliver pump `splice(legC → legS)` plus the response pump
-/// `splice(legS → legC)` in `aux_pumps` (the GAP-2 S→C response leg).
+/// OUTBOUND and INBOUND sites. OUTBOUND: the primary forward encrypt pump
+/// (`read → write_all` COPY of leg F into leg B's kTLS-TX) plus the return pump
+/// (zero-copy `splice(legB → legF)` out of leg B's kTLS-RX) in `aux_pumps`.
+/// INBOUND: the primary deliver pump (zero-copy `splice(legC → legS)` out of leg
+/// C's kTLS-RX) plus the response encrypt pump (`read → write_all` COPY of leg S
+/// into leg C's kTLS-TX) in `aux_pumps` (the GAP-2 S→C response leg).
 const fn new_conn_state_bidi(
     legs: Vec<OwnedFd>,
     pump: PumpHandle,

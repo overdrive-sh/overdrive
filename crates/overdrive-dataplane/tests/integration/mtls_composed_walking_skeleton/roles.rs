@@ -529,8 +529,9 @@ impl OutboundWorkload {
         // The leg-F listener binds on the host veth IP (10.66.0.1) so the workload
         // in the netns can reach it over the veth. cgroup_connect4_mtls rewrites the
         // workload's connect(fake_peer) -> (host_veth_ip, leg_f_port). Leg F is an
-        // ordinary accepted socket (the forward path is the adapter's splice pump),
-        // so no agent cgroup / sockops enroll / FPORT setup is needed.
+        // ordinary accepted socket (the forward path is the adapter's read->write_all
+        // copy pump into leg B's kTLS TX), so no agent cgroup / sockops enroll / FPORT
+        // setup is needed.
         let host_veth_ip = Ipv4Addr::new(10, 66, 0, 1);
 
         let leg_f_listener =
@@ -661,12 +662,13 @@ fn read_workload_outcome(code: Option<i32>) -> OutboundRoundTrip {
 /// writes OUTBOUND_REQUEST, then reads OUTBOUND_REPLY byte-exact.
 fn spawn_outbound_workload(topo: &MtlsTopology) -> Child {
     // The workload writes the request in TWO phases to exercise BOTH the lossless
-    // pre-arm capture AND the steady-state forward splice (GAP 1):
+    // pre-arm capture AND the steady-state forward pump (GAP 1):
     //   phase 1 (immediately on connect) — the PRE-ARM portion the agent drains
     //            losslessly during the handshake window and flushes through leg B;
     //   phase 2 (after a delay) — the STEADY-STATE portion that arrives AFTER the
-    //            agent has armed kTLS + spawned the forward splice pump, so it rides
-    //            the agent-light splice(legF → legB) into leg B's kTLS TX. The peer
+    //            agent has armed kTLS + spawned the forward encrypt pump, so it rides
+    //            the agent-light read->write_all COPY (legF → legB) into leg B's kTLS
+    //            TX (the kernel tls_sw_sendmsg encrypts each write). The peer
     //            reconstructs both, in order, byte-exact.
     let split = OUTBOUND_REQUEST.len() / 2;
     let script = format!(
@@ -683,9 +685,10 @@ try:
     # phase 1: pre-arm plaintext (drained losslessly during the handshake window)
     s.sendall(part1)
     # phase 2: steady-state bytes — written well after the agent has armed kTLS +
-    # spawned the forward splice pump (generous margin over the 400ms handshake-delay
+    # spawned the forward encrypt pump (generous margin over the 400ms handshake-delay
     # regime + the proxy's ~400ms drain/handshake/arm/settle), so they ride the
-    # agent-light splice(legF -> legB) into leg B's kTLS TX, not the pre-arm drain.
+    # agent-light read->write_all COPY (legF -> legB) into leg B's kTLS TX (NOT a
+    # splice -- a splice into kTLS-TX loses records), not the pre-arm drain.
     time.sleep(2.0)
     s.sendall(part2)
     # read the peer's reply back over the spliced return leg (B->F).

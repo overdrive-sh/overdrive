@@ -43,8 +43,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 // The SKIP path prints via `eprintln!` (nextest captures it); the role helpers
-// take `&mut self` for the shape they will need once their GREEN bodies land
-// (they mutate the spawned-child / listener state). Allowed for the RED scaffold.
+// take `&mut self` because they mutate the spawned-child / listener state they own.
 #![allow(clippy::print_stderr, clippy::needless_pass_by_ref_mut)]
 
 use std::sync::Arc;
@@ -161,7 +160,8 @@ fn pick_free_inbound_agent_port() -> u16 {
 /// the agent's leg-F listener; the worker accepts leg F and hands the adapter an
 /// `InterceptedConnection`. `enforce` drains the pre-arm plaintext losslessly,
 /// completes a rustls CLIENT handshake on leg B presenting the held client SVID,
-/// arms kTLS, installs the forward egress-redirect, and runs the return splice —
+/// arms kTLS, runs the forward read->write_all copy pump into leg B's kTLS TX, and
+/// runs the return splice out of leg B's kTLS RX —
 /// bidirectional multi-record transfer, NO RST, 0x17 on leg B.
 async fn drive_outbound(
     adapter: &HostMtlsEnforcement,

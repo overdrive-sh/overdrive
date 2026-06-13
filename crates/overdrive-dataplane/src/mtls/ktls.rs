@@ -29,9 +29,10 @@ struct CryptoInfoAes256Gcm {
 /// rustls-extracted secrets. Returns the RX record sequence (the value
 /// `liveness`/splice reasoning needs for the kTLS-RX leg). AES-256-GCM only.
 ///
-/// The leg is NOT a sockmap member (the forward path is an agent-light `splice`
-/// pump, not a sockmap egress redirect), so there is no sockmap-before-ULP
-/// ordering constraint — this helper does the ULP+crypto arm directly.
+/// The leg is NOT a sockmap member (the forward path is an agent-light
+/// `read → write_all` COPY pump into kTLS-TX, not a sockmap egress redirect), so
+/// there is no sockmap-before-ULP ordering constraint — this helper does the
+/// ULP+crypto arm directly.
 #[allow(
     clippy::needless_pass_by_value,
     reason = "ExtractedSecrets is taken by value so the negotiated key material is moved in and dropped at the end of this scope after the arm — never lingering in the caller"
