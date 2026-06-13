@@ -408,8 +408,8 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     let insns = info.verified_instruction_count().expect("kernel must report verified insns");
     eprintln!("xdp_service_map_lookup verified_instruction_count = {insns}");
 
-    // ASR-2.2-03: 20% delta vs step 09-04 baseline of 151379. The
-    // baseline history (recorded in
+    // ASR-2.2-03: 20% delta vs the current baseline. The baseline
+    // history (recorded in
     // `perf-baseline/main/verifier-budget/veristat-service-map.txt`):
     //   Slice 02: 401   — flat HashMap lookup
     //   Slice 03: 460   — HASH_OF_MAPS chained lookup
@@ -420,11 +420,21 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     //                        bounded loop (shared/csum.rs), replacing
     //                        broken `bpf_csum_diff` with variable-length
     //                        pkt data. Verifier unrolls 750-iteration
-    //                        bounded loop. JIT code is compact; the
-    //                        verifier cost is the price of CHECKSUM_PARTIAL
-    //                        correctness on veth without ethtool -K.
-    // 151379 insns = 30.3% of the 500K L1-cache-fits target.
-    const BASELINE: u32 = 151_379;
+    //                        bounded loop.
+    //   Chunked-csum refactor: 48395 — `recompute_l4_csum` rewritten to
+    //                        sum the L4 segment in fixed-size power-of-two
+    //                        chunks via `bpf_csum_diff`, each call with a
+    //                        compile-time-constant `to_size` (aya#1562
+    //                        technique). The word-by-word loop existed only
+    //                        because variable-length `bpf_csum_diff` is
+    //                        verifier-rejected; the constant-`to_size`
+    //                        chunking removes the 750-iteration unroll.
+    //                        151379 → 48395 (−68.0%). Behaviour-preserving:
+    //                        the computed checksum is byte-identical (the
+    //                        Tier-3 `real_tcp_connection_*` e2e gate proves
+    //                        it). Measured on kernel 7.0.0-22-generic.
+    // 48395 insns = 9.7% of the 500K L1-cache-fits target.
+    const BASELINE: u32 = 48_395;
     let upper_bound = BASELINE + (BASELINE / 5); // +20% per ASR-2.2-03
     assert!(
         insns <= upper_bound,

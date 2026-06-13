@@ -59,6 +59,41 @@
 #     delete in this commit (criterion #2 of step 06-05 satisfied
 #     vacuously).
 #
+#   Chunked-bpf_csum_diff refactor (this commit): verified_insns =
+#     48182. `xdp_reverse_nat_lookup` shares
+#     `crates/overdrive-bpf/src/shared/csum.rs`'s `recompute_l4_csum`
+#     with `xdp_service_map_lookup`, so the chunked-`bpf_csum_diff`
+#     rewrite (fixed-size power-of-two chunks, each with a
+#     compile-time-constant `to_size` — aya-rs/aya#1562 technique;
+#     see the companion entry in veristat-service-map.txt for the full
+#     mechanism + byte-order discussion) drops this program too. The
+#     L4 segment is no longer walked word-by-word in a 750-iteration
+#     bounded loop the verifier unrolls.
+#
+#     Behaviour-preserving: the Tier-3 `real_tcp_connection_*` e2e
+#     gate exercises BOTH the forward (`xdp_service_map_lookup`) and
+#     reverse (`xdp_reverse_nat_lookup`) paths through a real TCP
+#     handshake + payload echo, and stays green — the recomputed
+#     checksum is byte-identical to the word-by-word path's.
+#
+#     Note on the prior baseline value: this file's prose recorded the
+#     step-06-05 baseline as 148166, but the machine-parsed data line
+#     carried 156340 (a pre-existing prose-vs-data drift). The
+#     chunked-csum refactor re-measures from scratch (48182), so the
+#     drift is resolved by this re-baseline; the new data line and
+#     prose agree.
+#
+#     Delta vs the prior data-line baseline: 156340 → 48182 (−108158
+#     insns, −69.2%). 48182 / 500,000 = 9.6% of the L1-cache-fits
+#     target. The +20% gate now enforces against THIS baseline
+#     (48182): `verified_insns ≤ 57818`.
+#
+#     Recorded against kernel 7.0.0-22-generic (the dev Lima kernel;
+#     matrix row "6.18 LTS" per .claude/rules/testing.md § "Kernel
+#     matrix" — Lima's actual kernel is 7.0). aya 0.13.1
+#     ProgramInfo::verified_instruction_count. Unrelated to the
+#     transparent-mtls feature landed on the same branch.
+#
 # Recorded against:
 #   kernel:   6.8.0-111-generic   (Ubuntu 24.04 LTS lineage; matrix
 #                                   row "6.6 LTS" per
@@ -78,22 +113,21 @@
 #             per ADR-0038 §3.1)
 #
 # Budget gates (ADR-0045 § 6 / ASR-2.2-03):
-#   verified_insns ≤ 177799     ← +20% delta vs step 06-05 baseline (148166)
+#   verified_insns ≤ 57818      ← +20% delta vs the chunked-csum baseline (48182)
 #                                 — pinned by the integration test
 #                                 `verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling`
 #                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
 #                                 The test currently asserts only on the
-#                                 absolute 600k ceiling because this is
-#                                 the FIRST baseline; tightening to the
+#                                 absolute 600k ceiling; tightening to the
 #                                 +20% gate happens in slice 07's
 #                                 verifier-regress xtask integration.
 #   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling, "L1-cache fits"
 #   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
 #   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
 #
-# Recorded value (step 06-05):
-#   verified_insns = 148166
-#   148166 / 500,000 = 29.6% of the L1-cache-fits target.
+# Recorded value (chunked-csum refactor):
+#   verified_insns = 48182
+#   48182 / 500,000 = 9.6% of the L1-cache-fits target.
 #
 # Companion baseline:
 #   `xdp_service_map_lookup` is recorded at 151379 in
@@ -104,4 +138,4 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=156340
+file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=48182
