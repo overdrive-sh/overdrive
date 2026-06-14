@@ -1,17 +1,30 @@
-//! F6 pump-supervision derivation + telemetry for the transparent-mTLS proxy
-//! (ADR-0069, GH #26; step 04-01).
+//! F6 pump-liveness derivation for the transparent-mTLS proxy (ADR-0069, GH #26;
+//! step 04-01; supervision shape (C)+(B) per ADR-0070 / D-MTLS-16).
 //!
 //! The [`PumpLiveness`] derivation is extracted here as a PURE function over the
 //! pump's shared progress surface so the `Stalled` boundary (the 30 s
 //! `pump_stall_deadline` × the record-pending gate) is unit- and mutation-testable
 //! independent of the real splice/copy pump. The host adapter's
 //! `MtlsEnforcement::liveness` reads the atomics off the `PumpState` and calls
-//! [`derive_liveness`]; the worker's `MtlsSupervisor` reacts to the result.
+//! [`derive_liveness`].
 //!
-//! The two F6 telemetry events the worker emits on a stall-teardown
-//! (`mtls.pump.stalled` / `mtls.pump.teardown_on_stall`) live in
-//! `overdrive-worker::mtls_supervisor` (the policy owner, D-MTLS-10), not here —
-//! this module owns only the DERIVATION (the dataplane adapter's concern, SD-2).
+//! **Who consumes the verdict (ADR-0070 / D-MTLS-16):** there is NO central worker
+//! query in v1. Connection liveness is **(C)** kernel `TCP_USER_TIMEOUT`/keepalive on
+//! the legs (the kernel reaps the transport-death class) **+ (B)** the per-connection
+//! pump task self-tearing-down fail-closed on its own terminal exit (EOF / error /
+//! `ETIMEDOUT`). The retired central `MtlsSupervisor` (04-01, shape (A)) is deleted.
+//! `derive_liveness` + [`PumpLiveness::Stalled`] are RETAINED as (a) the SD-2 observe
+//! surface the equivalence harness re-queries for the post-teardown `Gone` no-leak
+//! assertion and (b) the RESERVED predicate for the deferred kernel-invisible
+//! progress-stall watchdog ([#232], a per-connection watchdog — NOT a central loop).
+//! They are NOT driven by a tick in v1.
+//!
+//! The two F6 telemetry events (`mtls.pump.stalled` / `mtls.pump.teardown_on_stall`)
+//! re-homed from the retired worker supervisor into the per-connection (B)
+//! self-teardown path in the host adapter ([`super::HostMtlsEnforcement`]); this
+//! module owns only the pure DERIVATION (the dataplane adapter's concern, SD-2).
+//!
+//! [#232]: https://github.com/overdrive-sh/overdrive/issues/232
 
 use std::time::Duration;
 

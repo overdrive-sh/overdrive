@@ -77,7 +77,7 @@ mod tls_config;
 pub use dataplane::{MtlsCgroupLink, MtlsDataplane, MtlsDataplaneError};
 
 use limits::InFlightLedger;
-use splice::PumpHandle;
+use splice::{PumpHandle, SelfTeardown};
 
 /// Per-connection adapter-private tracking state, keyed by
 /// [`EnforcedConnectionId`]. Holds the owned legs (closed on teardown) + the
@@ -100,13 +100,20 @@ struct ConnState {
     aux_pumps: Vec<PumpHandle>,
 }
 
+/// The per-connection tracking table, keyed by id. `liveness`/`teardown` look here,
+/// and the (B) self-teardown reaper drains an entry when its pump dies. `Arc`-shared
+/// so the connection-level self-teardown trigger (installed into each pump's
+/// `PumpState`) can drive the idempotent reclaim from a detached reaper thread
+/// without holding `&self`.
+type ConnTable = Arc<Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>>;
+
 /// The production host adapter for [`MtlsEnforcement`].
 pub struct HostMtlsEnforcement {
     identity: Arc<dyn IdentityRead>,
     limits: MtlsLimits,
     next_counter: AtomicU64,
     /// Per-connection tracking, keyed by id. `liveness`/`teardown` look here.
-    conns: Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>,
+    conns: ConnTable,
     /// Per-allocation in-flight (pre-arm) ceiling ledger (F4): a new intercept that
     /// would exceed `limits.max_inflight_per_alloc` for its alloc is refused
     /// fail-closed (`InFlightLimitExceeded`) — one workload cannot exhaust the agent
@@ -125,7 +132,7 @@ impl HostMtlsEnforcement {
             identity,
             limits,
             next_counter: AtomicU64::new(0),
-            conns: Mutex::new(std::collections::BTreeMap::new()),
+            conns: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
             inflight: InFlightLedger::new(),
         }
     }
@@ -150,12 +157,89 @@ impl HostMtlsEnforcement {
             .ok_or_else(|| MtlsEnforcementError::AbsentSvid { alloc: alloc.clone() })
     }
 
-    /// Register a steady-state-established connection in the tracking table and
-    /// return its opaque handle.
+    /// Register a steady-state-established connection in the tracking table, install
+    /// the (B) D-MTLS-16 self-teardown trigger into its PRIMARY pump, and return its
+    /// opaque handle.
+    ///
+    /// The trigger is installed ONLY into the primary (request-carrying,
+    /// `liveness`-observed) pump — OUTBOUND forward / INBOUND deliver. It fires when
+    /// that pump hits a transport-death terminal exit (a leg error / the (C)
+    /// kernel-reaped `ETIMEDOUT`) that was NOT a deliberate `teardown`, running the
+    /// same fail-closed reclaim `teardown` runs — close both legs, stop the sibling
+    /// pump, drop the kTLS state — off a DETACHED reaper thread (so the calling pump
+    /// never joins itself), re-homing the two F6 telemetry events from the retired
+    /// central `MtlsSupervisor` to this per-connection path. The auxiliary
+    /// (response-direction) pump does NOT carry the trigger: its finishing (a
+    /// completed response, a clean EOF from the responder) is a half-close of the
+    /// non-primary direction, not the connection's death — reclaiming on it would nuke
+    /// a connection whose primary request path is still live (the regression that
+    /// broke the established-connection Tier-3 tests).
     fn register(&self, id: EnforcedConnectionId, state: ConnState) -> EnforcedConnection {
+        let trigger = self.self_teardown_trigger(id.clone());
+        state.pump.state.install_self_teardown(trigger);
         self.conns.lock().insert(id.clone(), state);
         EnforcedConnection::new(id)
     }
+
+    /// Build the (B) self-teardown trigger for connection `id`: emit
+    /// `mtls.pump.stalled` for the pump that observed the terminal death, then spawn a
+    /// detached reaper that idempotently reclaims the connection (drains it from the
+    /// tracking table, stops both pumps, closes both legs) and emits
+    /// `mtls.pump.teardown_on_stall`. Idempotent end-to-end: the first pump to die
+    /// wins the `remove`; the sibling's later fire finds the entry already gone and is
+    /// a harmless no-op.
+    fn self_teardown_trigger(&self, id: EnforcedConnectionId) -> SelfTeardown {
+        let conns = Arc::clone(&self.conns);
+        Arc::new(move || {
+            let alloc = id.alloc().clone();
+            tracing::warn!(
+                name: "mtls.pump.stalled",
+                connection = %id,
+                alloc = %alloc,
+                "transparent-mTLS pump hit a transport-death exit (leg error / the (C) \
+                 kernel-reaped ETIMEDOUT); self-tearing the connection down (F6/B). A clean \
+                 EOF half-close does NOT reach here — only a connection death does."
+            );
+            let conns = Arc::clone(&conns);
+            let id = id.clone();
+            // Reclaim off a DETACHED reaper — `reclaim_connection` joins the pump
+            // threads, and the calling thread IS one of those pumps; it must not join
+            // itself.
+            std::thread::spawn(move || {
+                let torn = reclaim_connection(&conns, &id);
+                tracing::warn!(
+                    name: "mtls.pump.teardown_on_stall",
+                    connection = %id,
+                    alloc = %alloc,
+                    reclaimed = torn,
+                    "transparent-mTLS connection self-torn-down on terminal pump exit \
+                     (F6/B per-connection reaction; the retired MtlsSupervisor's role)"
+                );
+            });
+        })
+    }
+}
+
+/// Idempotently reclaim a connection: drain its [`ConnState`] from the tracking
+/// table, stop BOTH pumps (joining their threads), and close BOTH legs. Returns
+/// `true` if this call performed the reclaim, `false` if the entry was already gone
+/// (a racing `teardown` or the sibling pump's self-teardown won). Shared by the
+/// deliberate `teardown` path and the (B) self-teardown reaper so both reclaim
+/// identically.
+fn reclaim_connection(
+    conns: &Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>,
+    id: &EnforcedConnectionId,
+) -> bool {
+    let Some(mut state) = conns.lock().remove(id) else {
+        return false; // already reclaimed by a racing teardown / sibling self-teardown
+    };
+    state.pump.stop_and_join();
+    for aux in &mut state.aux_pumps {
+        aux.stop_and_join();
+    }
+    // legs drop here, closing the fds
+    drop(state.legs);
+    true
 }
 
 #[async_trait]
@@ -216,24 +300,20 @@ impl MtlsEnforcement for HostMtlsEnforcement {
     }
 
     async fn teardown(&self, handle: EnforcedConnection) -> Result<()> {
-        // Idempotent: tearing down an unknown/already-torn handle is Ok.
-        let Some(mut state) = self.conns.lock().remove(handle.id()) else {
-            return Ok(());
-        };
-        // Stop the pumps (joins their threads), then close the legs (OwnedFd drop).
-        tokio::task::spawn_blocking(move || {
-            state.pump.stop_and_join();
-            for aux in &mut state.aux_pumps {
-                aux.stop_and_join();
-            }
-            // legs drop here, closing the fds
-            drop(state.legs);
-        })
-        .await
-        .map_err(|e| MtlsEnforcementError::TeardownFailed {
-            id: handle.id().clone(),
-            source: std::io::Error::other(format!("teardown task panicked: {e}")),
-        })?;
+        // Idempotent: tearing down an unknown/already-torn handle is Ok. Shares
+        // `reclaim_connection` with the (B) self-teardown reaper — both stop the pumps
+        // (joining their threads) and close the legs identically; a connection already
+        // self-torn-down by its own dead pump is a harmless no-op here (the `remove`
+        // returns `None`). Runs on a blocking task because `stop_and_join` joins the
+        // pump threads.
+        let conns = Arc::clone(&self.conns);
+        let id = handle.id().clone();
+        tokio::task::spawn_blocking(move || reclaim_connection(&conns, &id)).await.map_err(
+            |e| MtlsEnforcementError::TeardownFailed {
+                id: handle.id().clone(),
+                source: std::io::Error::other(format!("teardown task panicked: {e}")),
+            },
+        )?;
         Ok(())
     }
 }
@@ -385,6 +465,103 @@ fn drain_early_plaintext(reader: &mut dyn Read) -> Vec<u8> {
         }
     }
     early
+}
+
+/// (C) D-MTLS-16 / ADR-0070: keepalive probe cadence for a steady-state leg. The
+/// kernel sends a keepalive probe after `idle` of silence, then a probe every
+/// `interval` until `count` consecutive probes go unacked, at which point the
+/// socket fails `ETIMEDOUT`. These are an ADAPTER concern (ADR-0070 § "Tuning the
+/// socket-option values is an adapter concern") — NOT operator-tunable in v1 and
+/// deliberately NOT an `MtlsLimits` field (that struct is the F4/F7 contract,
+/// pinned unchanged by D-MTLS-16). They detect a peer that has silently vanished
+/// without sending a FIN/RST so the kernel's `TCP_USER_TIMEOUT` deadline (derived
+/// from `pump_stall_deadline`) has a steady stream of unacked probes to time out
+/// against on an otherwise-idle connection.
+const KEEPALIVE_IDLE_SECS: libc::c_int = 10;
+const KEEPALIVE_INTERVAL_SECS: libc::c_int = 5;
+const KEEPALIVE_PROBE_COUNT: libc::c_int = 3;
+
+/// (C) D-MTLS-16 / ADR-0070: arm the kernel's transport-death reaping on an
+/// agent-owned steady-state leg, BEFORE the SD-2 pumps start. Sets
+/// `TCP_USER_TIMEOUT` (the max time the kernel keeps retransmitting unacked data —
+/// or unacked keepalive probes — before failing the socket `ETIMEDOUT`) to the
+/// connection's no-progress deadline `pump_stall_deadline`, and enables TCP
+/// keepalive so a peer that vanished without a FIN/RST still produces unacked
+/// probes for `TCP_USER_TIMEOUT` to reap against. When the kernel reaps the leg the
+/// (B) pump task observes the resulting `ETIMEDOUT`/error and self-tears-down — no
+/// userspace tick, no central enumerator (the retired `MtlsSupervisor` shape).
+///
+/// `pump_stall_deadline` is the existing `MtlsLimits` field for the connection's
+/// no-progress window; the `TCP_USER_TIMEOUT` value derives from it rather than
+/// from a new field (ADR-0070 keeps `MtlsLimits` unchanged). The literal values are
+/// an adapter concern; the acceptance test asserts the observable reaping, not the
+/// numbers.
+///
+/// **Best-effort, NOT a correctness gate.** Transport-death reaping is a kernel
+/// optimization on the TCP legs; a leg that does not support these `IPPROTO_TCP`
+/// options (an `AF_UNIX` socketpair in tests, or any non-TCP leg) returns
+/// `EOPNOTSUPP`/`ENOPROTOOPT` and is SKIPPED with a warning — the connection is NOT
+/// refused. Aborting `enforce` on an unsupported transport-death option would
+/// fail-closed a connection whose proxying is otherwise fine; the ADR scopes (C) as
+/// an adapter tuning aid, not a precondition. Any OTHER errno (a genuine setsockopt
+/// failure) still propagates fail-closed.
+fn arm_transport_death_timeouts(fd: RawFd, pump_stall_deadline: Duration) -> Result<()> {
+    // TCP_USER_TIMEOUT is milliseconds; saturate rather than wrap an over-long
+    // deadline (a >49-day deadline is nonsensical here but must not silently flip).
+    let user_timeout_ms =
+        libc::c_uint::try_from(pump_stall_deadline.as_millis()).unwrap_or(libc::c_uint::MAX);
+    set_best_effort_tcp_opt(
+        fd,
+        libc::IPPROTO_TCP,
+        libc::TCP_USER_TIMEOUT,
+        user_timeout_ms as libc::c_int,
+    )?;
+    set_best_effort_tcp_opt(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1)?;
+    set_best_effort_tcp_opt(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, KEEPALIVE_IDLE_SECS)?;
+    set_best_effort_tcp_opt(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, KEEPALIVE_INTERVAL_SECS)?;
+    set_best_effort_tcp_opt(fd, libc::IPPROTO_TCP, libc::TCP_KEEPCNT, KEEPALIVE_PROBE_COUNT)?;
+    Ok(())
+}
+
+/// `setsockopt(level, name, &(value: c_int))` on a raw fd, TOLERATING a leg that does
+/// not support the option (`EOPNOTSUPP`/`ENOPROTOOPT` ⇒ skip-with-warn, `Ok(())`).
+/// Used for the (C) transport-death options, which are a best-effort kernel-reaping
+/// aid (see [`arm_transport_death_timeouts`]) — not a correctness gate. Any other
+/// errno propagates as a genuine `Io` failure.
+fn set_best_effort_tcp_opt(
+    fd: RawFd,
+    level: libc::c_int,
+    name: libc::c_int,
+    value: libc::c_int,
+) -> Result<()> {
+    // SAFETY: each option named here takes a `c_int` argument.
+    let rc = unsafe {
+        libc::setsockopt(
+            fd,
+            level,
+            name,
+            std::ptr::from_ref(&value).cast(),
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if rc == 0 {
+        return Ok(());
+    }
+    let err = std::io::Error::last_os_error();
+    match err.raw_os_error() {
+        // The leg is not a TCP socket (AF_UNIX socketpair, etc.) — transport-death
+        // reaping does not apply; skip this option, do NOT refuse the connection.
+        Some(libc::EOPNOTSUPP | libc::ENOPROTOOPT) => {
+            tracing::warn!(
+                name: "mtls.transport_death.unsupported",
+                level,
+                option = name,
+                "leg does not support a (C) transport-death socket option; skipping (best-effort)"
+            );
+            Ok(())
+        }
+        _ => Err(MtlsEnforcementError::Io(err)),
+    }
 }
 
 /// `setsockopt(SO_RCVTIMEO)` on a raw fd.

@@ -25,11 +25,4 @@ mod acceptance {
     // `.context/01-03-structural-gap-audit.md` GAP-7.
     mod probe_runner_supervised_tick;
     mod probe_runner_tcp_outcome;
-
-    // transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F6 /
-    // D-MTLS-10 / SD-4) — the worker's pump-supervision POLICY: a
-    // reconciler-tick point-query of MtlsEnforcement liveness that tears
-    // down on Stalled (fail-closed reset → Gone), leaving Running/idle
-    // connections untouched (no false positive).
-    mod mtls_supervisor_teardown_on_stall;
 }

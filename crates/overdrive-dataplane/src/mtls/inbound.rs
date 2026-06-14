@@ -48,6 +48,14 @@ pub(super) fn establish(
     let (secrets, early_deliver) =
         server_handshake(leg_c_fd, svid, bundle, alloc, limits.handshake_deadline)?;
 
+    // 1b. (C) D-MTLS-16 / ADR-0070: arm the kernel's transport-death reaping
+    //     (`TCP_USER_TIMEOUT` = `pump_stall_deadline` + keepalive) on leg C BEFORE the
+    //     kTLS ULP is installed on it (step 2). Setting these `IPPROTO_TCP` options on
+    //     the RAW TCP socket first is load-bearing: once leg C carries the `tls` ULP,
+    //     further TCP socket-option writes route through the ULP and disrupt the kTLS
+    //     arm (the leg-C `ss -tie` `tcp-ulp-tls` observable vanishes).
+    super::arm_transport_death_timeouts(leg_c_fd, limits.pump_stall_deadline)?;
+
     // 2. Arm kTLS-RX (+TX) on leg C from the extracted secrets. The RX `rec_seq`
     //    already accounts for the early records rustls decrypted in step 1, so the
     //    deliver pump resumes at the NEXT on-wire record.
@@ -64,6 +72,17 @@ pub(super) fn establish(
     //    the nft-TPROXY rule does NOT re-intercept the agent's own dial to S.
     let leg_s = super::dial_leg_s(server_dial_addr(orig_dst), limits.handshake_deadline)?;
     let leg_s_fd = leg_s.as_raw_fd();
+
+    // 3b. (C) D-MTLS-16 / ADR-0070: arm the kernel's transport-death reaping on leg S
+    //     (the plaintext server leg — no kTLS ULP, so the ordering constraint that
+    //     governs leg C does not apply here) BEFORE the SD-2 pumps start. A server
+    //     workload that vanishes (gone, half-open, unacked past the deadline) is
+    //     reaped by the kernel with no userspace tick; the (B) pump task observes the
+    //     resulting `ETIMEDOUT`/EOF and self-tears-down. With leg C's (C) set at step
+    //     1b, both agent-owned legs now carry the transport-death timeouts. Replaces
+    //     the retired central `MtlsSupervisor` point-query for the transport-death
+    //     class.
+    super::arm_transport_death_timeouts(leg_s_fd, limits.pump_stall_deadline)?;
 
     // 4. Start the deliver decrypt pump splice(legC → pipe → legS) on the plain
     //    (no-psock) kTLS-RX leg C — the C→S request path. The kernel

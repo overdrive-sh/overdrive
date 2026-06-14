@@ -378,9 +378,11 @@ impl Default for MtlsLimits {
 }
 
 /// Liveness of a connection's agent-light primary pump (OUTBOUND forward
-/// `read → write_all` copy / INBOUND deliver `splice`). F6: the worker tears the
-/// connection down on `Stalled` (teardown + fail-closed reset; see
-/// [`MtlsEnforcement::liveness`] § "F6 supervision policy").
+/// `read → write_all` copy / INBOUND deliver `splice`). F6 supervision is (C)+(B)
+/// (ADR-0070 / D-MTLS-16): the kernel reaps transport-death via
+/// `TCP_USER_TIMEOUT`/keepalive and the per-connection pump task self-tears-down on
+/// its terminal exit; `liveness` is the observe surface, not a tick-driven query (see
+/// [`MtlsEnforcement::liveness`] § "F6 supervision shape (C)+(B)").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PumpLiveness {
     /// The pump is moving records OR idle-but-ready (no record pending) — the
@@ -389,8 +391,9 @@ pub enum PumpLiveness {
     /// The pump's bytes-moved progress metric has NOT advanced since `since`,
     /// for at least [`MtlsLimits::pump_stall_deadline`] (F7 default 30 s), WHILE a
     /// record is pending on the pump's source leg (a stranded/crashed pump — the
-    /// path is broken; ADR-0069 § ATAM reliability sensitivity). The worker's F6
-    /// policy reacts by tearing the connection down.
+    /// path is broken; ADR-0069 § ATAM reliability sensitivity). RETAINED as the
+    /// RESERVED predicate for the deferred per-connection progress-stall watchdog
+    /// (#232); NOT driven by a central tick in v1 (ADR-0070 / D-MTLS-16).
     Stalled { since: UnixInstant },
     /// No live pump for this handle — torn down or never enforced (post-teardown
     /// observable; not an error).
@@ -771,21 +774,34 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// (no pending record) is `Running`, never `Stalled` (no false positives on
     /// quiescent long-lived connections).
     ///
-    /// # F6 supervision policy (what the worker does with `Stalled`)
-    /// The worker (D-MTLS-10) point-queries this on its reconciler-tick cadence
-    /// (SD-4). On observing `Stalled`, the worker MUST `teardown(handle)` —
-    /// **teardown + fail-closed reset** (close the legs, stop the pumps, reclaim
-    /// the kTLS state). It does NOT reconnect-in-place (a foreign process
-    /// cannot resume a kTLS record sequence) and does NOT degrade to a userspace
-    /// copy loop (that re-enters the per-byte path A3 rejects). The connection
-    /// drops; request-retry protocols re-handshake on reconnect. Telemetry:
-    /// `mtls.pump.stalled` + `mtls.pump.teardown_on_stall` per allocation.
+    /// # F6 supervision shape (C)+(B) — who reacts, and to what (ADR-0070 / D-MTLS-16)
+    /// v1 supervision is **(C)** kernel `TCP_USER_TIMEOUT`/keepalive on the agent's
+    /// legs (the kernel reaps the transport-death class — peer gone, half-open,
+    /// unacked past the deadline) **+ (B)** the per-connection pump task
+    /// self-tearing-down fail-closed on its OWN terminal exit (EOF / error /
+    /// `ETIMEDOUT`): **teardown + fail-closed reset** (close the legs, stop the pumps,
+    /// reclaim the kTLS state). There is **no central point-query, no `supervise_tick`,
+    /// no tick cadence** in v1 — the retired central `MtlsSupervisor` (shape (A)) is
+    /// deleted (ADR-0070 supersedes the SD-4 point-query). The connection self-tears
+    /// (a foreign process cannot resume a kTLS record sequence; no reconnect-in-place,
+    /// no degrade to a userspace copy loop); request-retry protocols re-handshake on
+    /// reconnect. Telemetry `mtls.pump.stalled` + `mtls.pump.teardown_on_stall` is
+    /// emitted per connection on the (B) self-teardown path.
+    ///
+    /// `liveness` itself is **not driven by a tick** in v1. It is the **SD-2 observe
+    /// surface** the equivalence harness re-queries for the post-teardown `Gone`
+    /// no-leak assertion, and `Stalled` (derived from `pump_stall_deadline`) is the
+    /// **reserved predicate** for the deferred kernel-invisible progress-stall watchdog
+    /// (a per-connection watchdog, [#232]; NOT a central loop). The
+    /// SD-4 point-query-vs-stream sub-decision is moot for v1 liveness (neither runs).
     ///
     /// # Observable invariants
-    /// Read-only: `liveness` never mutates the pump or the connection. This is
-    /// the worker's supervision surface (D-MTLS-10: the agent supervises the
-    /// splice pump) — analogous to `Driver`'s exit-event observation, but a
-    /// point query rather than a stream (SD-4 surfaces the stream alternative).
+    /// Read-only: `liveness` never mutates the pump or the connection. It is an
+    /// observation surface (analogous to `Driver`'s exit-event observation), queried
+    /// by an external observer / the reserved [#232] watchdog —
+    /// not by a central worker tick in v1.
+    ///
+    /// [#232]: https://github.com/overdrive-sh/overdrive/issues/232
     fn liveness(&self, handle: &EnforcedConnection) -> PumpLiveness;
 
     /// Tear `handle` down: stop BOTH pumps (outbound: forward `legF → legB`
@@ -793,8 +809,10 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// `splice(legC → legS)` + response `legS → legC` write_all copy), drop the
     /// kTLS state, and close both legs (outbound: leg F + leg B; inbound: leg C +
     /// leg S). Phase 4 of ADR-0069.
-    /// This is also the F6 stall-recovery action (the worker calls it on
-    /// observing `PumpLiveness::Stalled`).
+    /// This is also the F6 fail-closed reclaim the (B) per-connection self-teardown
+    /// runs (ADR-0070 / D-MTLS-16) when a pump hits a terminal exit (EOF / error /
+    /// the (C) kernel-reaped `ETIMEDOUT`) — the same reclaim, triggered by the
+    /// connection's own task rather than a central worker query.
     ///
     /// # Preconditions
     /// `handle` was returned by a prior `enforce`. Idempotent: tearing down an

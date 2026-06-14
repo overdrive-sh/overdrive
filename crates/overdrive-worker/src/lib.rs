@@ -19,10 +19,6 @@
 
 pub mod cgroup_manager;
 pub mod driver;
-// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F6 / D-MTLS-10 /
-// SD-4) — the worker's pump-supervision policy: point-query MtlsEnforcement
-// liveness per reconciler tick, teardown-on-Stalled (fail-closed reset).
-pub mod mtls_supervisor;
 // transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
 // the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
 // leg-C listener, the inbound nft-TPROXY install (+ ip rule/route

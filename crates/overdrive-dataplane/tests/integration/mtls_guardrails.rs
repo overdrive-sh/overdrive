@@ -426,13 +426,14 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
         peer.shutdown();
     }
 
-    // AC4 / AC5 note: the F6 Stalled→teardown→Gone OUTCOME and the worker's
-    // supervise_tick REACTION are pinned at the unit/acceptance tier (the
-    // mtls_enforcement_equivalence harness + the worker's
-    // mtls_supervisor_teardown_on_stall acceptance test) — a 30 s real-pump stall
-    // cannot be forced on the kernel within the gate's wall-clock budget without
-    // process-global clock manipulation. The Gone-no-leak reclaim above exercises the
-    // SAME teardown path the F6 reaction calls.
+    // AC4 / AC5 note: the F6 teardown→Gone OUTCOME is pinned at the unit/acceptance
+    // tier (the mtls_enforcement_equivalence harness). Under the (C)+(B) supervision
+    // shape (ADR-0070 / D-MTLS-16) there is no central `supervise_tick` to exercise:
+    // the kernel reaps transport-death via `TCP_USER_TIMEOUT`/keepalive (C) and the
+    // per-connection pump task self-tears-down on its terminal exit (B). The
+    // Gone-no-leak reclaim above exercises the SAME teardown path the (B) self-teardown
+    // calls. The full (C)+(B) behavioural proof (peer vanishes → ETIMEDOUT →
+    // self-teardown → Gone, no leak) lands in step 06-03's e2e gate.
 
     let _ = &topo; // topology lifetime spans the inbound rejections above
 }

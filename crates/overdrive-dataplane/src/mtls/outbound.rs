@@ -90,6 +90,20 @@ pub(super) fn establish(
     let (secrets, early_return) =
         client_handshake(leg_b, svid, bundle, alloc, limits.handshake_deadline)?;
 
+    // 3b. (C) D-MTLS-16 / ADR-0070: arm the kernel's transport-death reaping
+    //     (`TCP_USER_TIMEOUT` = `pump_stall_deadline` + keepalive) on both agent-owned
+    //     legs BEFORE the kTLS ULP is installed on leg B (step 4) and BEFORE the SD-2
+    //     pumps start. Setting these `IPPROTO_TCP` options on the RAW TCP socket first
+    //     is load-bearing: once leg B carries the `tls` ULP, further TCP socket-option
+    //     writes route through the ULP and disrupt the kTLS arm (the leg-C/leg-B `ss
+    //     -tie` ULP observable vanishes). A peer or workload that vanishes (gone,
+    //     half-open, unacked past the deadline) is then reaped by the kernel with no
+    //     userspace tick; the (B) pump task observes the resulting `ETIMEDOUT`/EOF and
+    //     self-tears-down. Replaces the retired central `MtlsSupervisor` point-query
+    //     for the transport-death class.
+    super::arm_transport_death_timeouts(leg_f_fd, limits.pump_stall_deadline)?;
+    super::arm_transport_death_timeouts(leg_b_fd, limits.pump_stall_deadline)?;
+
     // 4. Arm kTLS-TX/RX on leg B from the extracted secrets. TX so the forward
     //    write_all encrypts; RX so the return splice decrypts. The RX `rec_seq`
     //    already accounts for the early records rustls decrypted in step 3, so the

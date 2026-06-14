@@ -36,13 +36,23 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::fd::{FromRawFd, RawFd};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+/// A connection-level self-teardown trigger (B) D-MTLS-16 / ADR-0070. Installed by
+/// the adapter after the connection is registered; invoked by EITHER pump thread on
+/// its own terminal exit (EOF / error / `ETIMEDOUT`) so the connection tears itself
+/// down fail-closed — close both legs, stop the sibling pump, reclaim kTLS — without
+/// a central worker query. Idempotent: the first pump to exit triggers it; the
+/// sibling's later exit is a no-op (the trigger fires once, off a detached reaper, so
+/// the calling pump thread never joins itself). The closure carries the connection's
+/// `EnforcedConnectionId` / alloc for the re-homed telemetry.
+pub(super) type SelfTeardown = Arc<dyn Fn() + Send + Sync>;
 
 /// Shared observation surface for one connection's pump. `liveness` reads
 /// `bytes_spliced` + `running`; `teardown` sets `stop`.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(super) struct PumpState {
     /// Monotonic count of plaintext bytes the pump has moved to the destination —
     /// the progress metric `liveness` watches for a stall.
@@ -58,6 +68,38 @@ pub(super) struct PumpState {
     /// Wall-clock nanos (since the process monotonic origin) of the last progress
     /// advance, for the `Stalled { since }` computation.
     pub last_progress_unix_nanos: AtomicU64,
+    /// (B) D-MTLS-16: the connection-level self-teardown trigger. The adapter installs
+    /// it post-registration; the pump invokes it ON A TERMINAL EXIT THAT WAS NOT a
+    /// deliberate `teardown` (i.e. EOF / error / `ETIMEDOUT`, NOT `stop == true`). The
+    /// `OnceLock` makes installation race-free and the read lock-free; the trigger's
+    /// own idempotency guards a double-fire from both pumps.
+    self_teardown: OnceLock<SelfTeardown>,
+}
+
+impl PumpState {
+    /// Install the (B) self-teardown trigger for this connection. Called by the
+    /// adapter exactly once, after the connection is registered. A second install is
+    /// a no-op (the first winner stands) — the trigger is connection-level, shared by
+    /// both the primary and the sibling pump's state.
+    pub(super) fn install_self_teardown(&self, trigger: SelfTeardown) {
+        // `set` returns Err if already installed; the first install wins and a
+        // duplicate is harmless (both carry the same connection's teardown).
+        let _ = self.self_teardown.set(trigger);
+    }
+
+    /// Fire the (B) self-teardown trigger IF this exit was terminal-unexpected (the
+    /// pump broke on EOF / error / `ETIMEDOUT`, not on a deliberate `teardown` that
+    /// set `stop`). A deliberate teardown is already reclaiming the connection, so
+    /// re-triggering would be redundant. The trigger itself is idempotent, so a race
+    /// between the two pumps' exits collapses to one teardown.
+    fn fire_self_teardown_if_unexpected(&self) {
+        if self.stop.load(Ordering::SeqCst) {
+            return; // a deliberate teardown is already in progress
+        }
+        if let Some(trigger) = self.self_teardown.get() {
+            trigger();
+        }
+    }
 }
 
 /// Handle the adapter holds per connection; gives `liveness`/`teardown` the
@@ -136,6 +178,93 @@ fn record_progress(state: &PumpState, n: u64) {
     state.last_progress_unix_nanos.store(now_nanos(), Ordering::SeqCst);
 }
 
+/// Why a pump thread reached its terminal exit — distinguishes a graceful close (a
+/// clean EOF, or a deliberate `teardown` that set `stop`) from a transport-death (an
+/// error / the (C) kernel-reaped `ETIMEDOUT` on a leg). Only [`PumpExit::
+/// TransportDeath`] on the PRIMARY pump fires the (B) per-connection self-teardown
+/// (the self-teardown trigger is installed ONLY into the primary pump's state — the
+/// same `liveness`-observed request-carrying direction; see
+/// [`super::HostMtlsEnforcement::register`]). An auxiliary (response-direction) pump's
+/// exit, and any graceful close, leave the connection's resources for the deliberate
+/// `teardown` (alloc-terminal, step 06-03 commit 2) to reclaim — a clean half-close
+/// or a finished response direction MUST NOT nuke a connection whose primary
+/// request path is still live.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PumpExit {
+    /// Clean EOF on a leg, or a deliberate `teardown` set `stop` — NOT a death.
+    Graceful,
+    /// A leg error / the (C) kernel-reaped `ETIMEDOUT` — the connection is dead.
+    TransportDeath,
+}
+
+/// (B) D-MTLS-16 / ADR-0070: a pump thread's single terminal exit point — mark the
+/// pump exited (`running = false`, the `liveness` `Gone` observable) and, on a
+/// [`PumpExit::TransportDeath`] (NOT a graceful close), fire the connection's
+/// self-teardown IF this pump carries the trigger (only the primary pump does). The
+/// whole connection then reclaims fail-closed off the pump's own thread (no central
+/// worker query). The order is load-bearing: clear `running` BEFORE firing so the
+/// reaper's `liveness` re-query observes `Gone`. The self-teardown trigger runs the
+/// reclaim on a detached reaper (the pump thread never joins itself).
+fn mark_exited(state: &PumpState, exit: PumpExit) {
+    state.running.store(false, Ordering::SeqCst);
+    if exit == PumpExit::TransportDeath {
+        state.fire_self_teardown_if_unexpected();
+    }
+}
+
+/// Drain `n_in` bytes from the pipe (read half `pipe_r`) into the plaintext
+/// destination socket `dst_fd`, advancing the progress counter per spliced chunk.
+/// Returns `Some(exit)` if the drain hit a terminal condition (a `dst` leg error ⇒
+/// `TransportDeath`, a clean `dst` EOF ⇒ `Graceful`) and `None` once the whole
+/// `n_in` is delivered. On a full `dst` send buffer (`EAGAIN`) it parks on
+/// `poll(dst, POLLOUT)` (bounded 40 ms) and retries, re-checking the stop flag each
+/// iteration. Extracted from `run_decrypt_pump` so the outer splice-in loop stays
+/// under the line ceiling.
+fn splice_pipe_to_dst(
+    pipe_r: RawFd,
+    dst_fd: RawFd,
+    n_in: isize,
+    flags: libc::c_uint,
+    state: &PumpState,
+) -> Option<PumpExit> {
+    let mut remaining = n_in;
+    while remaining > 0 && !state.stop.load(Ordering::SeqCst) {
+        // `remaining` is the byte count returned by the prior `splice` (always
+        // > 0 here), so the sign-loss cast to usize cannot lose sign.
+        #[allow(clippy::cast_sign_loss)]
+        let want = remaining as usize;
+        // SAFETY: splice from the pipe into the plaintext destination socket.
+        let n_out = unsafe {
+            libc::splice(pipe_r, std::ptr::null_mut(), dst_fd, std::ptr::null_mut(), want, flags)
+        };
+        if n_out < 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::EAGAIN {
+                // Destination socket send buffer is full. Wait on the REAL condition —
+                // `poll(dst, POLLOUT)` blocks until the kernel reports the socket is
+                // writable again (or the bounded timeout elapses). The next `splice`
+                // retries once `dst` drains; the stop flag is re-checked each iteration.
+                let mut pfd = libc::pollfd { fd: dst_fd, events: libc::POLLOUT, revents: 0 };
+                // SAFETY: single pollfd, bounded 40 ms timeout; advisory.
+                unsafe {
+                    libc::poll(std::ptr::from_mut(&mut pfd), 1, 40);
+                }
+                continue;
+            }
+            return Some(PumpExit::TransportDeath); // dst leg error
+        }
+        if n_out == 0 {
+            return Some(PumpExit::Graceful); // dst clean EOF
+        }
+        // `n_out` is a positive byte count from `splice`; the cast to u64 is exact
+        // and non-negative.
+        #[allow(clippy::cast_sign_loss)]
+        record_progress(state, n_out as u64);
+        remaining -= n_out;
+    }
+    None
+}
+
 /// Process-monotonic "now" in nanos (mirrors `mtls::now_unix_nanos`, duplicated
 /// here to keep the pump module self-contained).
 fn now_nanos() -> u64 {
@@ -166,7 +295,7 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
         std::mem::forget(dst);
         if wrote.is_err() {
             state.record_pending.store(false, Ordering::SeqCst);
-            state.running.store(false, Ordering::SeqCst);
+            mark_exited(state, PumpExit::TransportDeath);
             return;
         }
         record_progress(state, early.len() as u64);
@@ -176,7 +305,7 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
     let mut fds = [0 as RawFd; 2];
     // SAFETY: `pipe2` writes two fds into the 2-element array.
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK) } != 0 {
-        state.running.store(false, Ordering::SeqCst);
+        mark_exited(state, PumpExit::TransportDeath);
         return;
     }
     let pipe_r = fds[0];
@@ -184,7 +313,10 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
     let flags = (libc::SPLICE_F_MOVE | libc::SPLICE_F_NONBLOCK) as libc::c_uint;
     let chunk: usize = 65536;
 
-    while !state.stop.load(Ordering::SeqCst) {
+    let exit = loop {
+        if state.stop.load(Ordering::SeqCst) {
+            break PumpExit::Graceful; // a deliberate teardown stopped us
+        }
         let mut pfd = libc::pollfd { fd: src_fd, events: libc::POLLIN, revents: 0 };
         // SAFETY: single pollfd, bounded 40 ms timeout.
         let pr = unsafe { libc::poll(std::ptr::from_mut(&mut pfd), 1, 40) };
@@ -197,8 +329,11 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
         // source is drained before treating a hangup as terminal). Only when there
         // is NO readable data is a hangup/error terminal.
         if pfd.revents & libc::POLLIN == 0 {
-            if pfd.revents & (libc::POLLHUP | libc::POLLERR) != 0 {
-                break; // source hung up with nothing left to read — pump is done
+            if pfd.revents & libc::POLLERR != 0 {
+                break PumpExit::TransportDeath; // source error (e.g. ETIMEDOUT/RST)
+            }
+            if pfd.revents & libc::POLLHUP != 0 {
+                break PumpExit::Graceful; // source hung up with nothing left — clean EOF
             }
             state.record_pending.store(false, Ordering::SeqCst);
             continue;
@@ -214,55 +349,15 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
                 state.record_pending.store(false, Ordering::SeqCst);
                 continue;
             }
-            break;
+            break PumpExit::TransportDeath; // splice error on the source leg
         }
         if n_in == 0 {
-            break; // EOF on the source
+            break PumpExit::Graceful; // clean EOF on the source
         }
-        let mut remaining = n_in;
-        while remaining > 0 && !state.stop.load(Ordering::SeqCst) {
-            // `remaining` is the byte count returned by the prior `splice` (always
-            // > 0 here), so the sign-loss cast to usize cannot lose sign.
-            #[allow(clippy::cast_sign_loss)]
-            let want = remaining as usize;
-            // SAFETY: splice from the pipe into the plaintext destination socket.
-            let n_out = unsafe {
-                libc::splice(
-                    pipe_r,
-                    std::ptr::null_mut(),
-                    dst_fd,
-                    std::ptr::null_mut(),
-                    want,
-                    flags,
-                )
-            };
-            if n_out < 0 {
-                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-                if errno == libc::EAGAIN {
-                    // Destination socket send buffer is full. Wait on the REAL
-                    // condition — `poll(dst, POLLOUT)` blocks until the kernel
-                    // reports the socket is writable again (or the bounded timeout
-                    // elapses). The next `splice` retries once `dst` drains; the stop
-                    // flag is re-checked each iteration.
-                    let mut pfd = libc::pollfd { fd: dst_fd, events: libc::POLLOUT, revents: 0 };
-                    // SAFETY: single pollfd, bounded 40 ms timeout; advisory.
-                    unsafe {
-                        libc::poll(std::ptr::from_mut(&mut pfd), 1, 40);
-                    }
-                    continue;
-                }
-                break;
-            }
-            if n_out == 0 {
-                break;
-            }
-            // `n_out` is a positive byte count from `splice`; the cast to u64 is
-            // exact and non-negative.
-            #[allow(clippy::cast_sign_loss)]
-            record_progress(state, n_out as u64);
-            remaining -= n_out;
+        if let Some(inner) = splice_pipe_to_dst(pipe_r, dst_fd, n_in, flags, state) {
+            break inner;
         }
-    }
+    };
 
     // SAFETY: closing the pipe ends; the leg fds are owned by the adapter's
     // per-connection table, closed on teardown.
@@ -271,7 +366,7 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
         libc::close(pipe_w);
     }
     state.record_pending.store(false, Ordering::SeqCst);
-    state.running.store(false, Ordering::SeqCst);
+    mark_exited(state, exit);
 }
 
 /// The ENCRYPT pump loop: a blocking `read(src) → write_all(dst)` copy. `dst` is a
@@ -302,7 +397,7 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
             std::mem::forget(src);
             std::mem::forget(dst);
             state.record_pending.store(false, Ordering::SeqCst);
-            state.running.store(false, Ordering::SeqCst);
+            mark_exited(state, PumpExit::TransportDeath);
             return;
         }
         record_progress(state, prelude.len() as u64);
@@ -310,16 +405,19 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
     }
 
     let mut buf = vec![0u8; 65536];
-    while !state.stop.load(Ordering::SeqCst) {
+    let exit = loop {
+        if state.stop.load(Ordering::SeqCst) {
+            break PumpExit::Graceful; // a deliberate teardown stopped us
+        }
         match (&src).read(&mut buf) {
-            Ok(0) => break, // EOF — source closed
+            Ok(0) => break PumpExit::Graceful, // clean EOF — source closed gracefully
             Ok(n) => {
                 state.record_pending.store(true, Ordering::SeqCst);
                 // Blocking write_all into the kTLS-TX leg: the kernel waits for send
                 // buffer space and frames exactly one record per write (the proven
                 // kTLS-TX primitive, NOT a nonblocking splice).
                 if (&dst).write_all(&buf[..n]).and_then(|()| (&dst).flush()).is_err() {
-                    break;
+                    break PumpExit::TransportDeath; // dst leg write error
                 }
                 record_progress(state, n as u64);
                 state.record_pending.store(false, Ordering::SeqCst);
@@ -328,16 +426,119 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
                 if e.kind() == std::io::ErrorKind::WouldBlock
                     || e.kind() == std::io::ErrorKind::TimedOut =>
             {
-                // No data within the poll window — re-check stop and loop. A purely
-                // idle connection sits here, `Running` (no pending record).
+                // No data within the 40 ms `SO_RCVTIMEO` window — re-check stop and
+                // loop. A purely idle connection sits here, `Running` (no pending
+                // record). NOTE: a genuine `TCP_USER_TIMEOUT` `ETIMEDOUT` also maps to
+                // `TimedOut`; distinguishing the (C) kernel-reap from the 40 ms poll
+                // re-check (so the peer-vanishes case fires (B) promptly rather than at
+                // the next read error) is part of step 06-03 commit 2's e2e proof —
+                // the connection still self-tears-down here on the subsequent leg
+                // error/EOF, just not on this poll tick.
                 state.record_pending.store(false, Ordering::SeqCst);
             }
-            Err(_) => break,
+            Err(_) => break PumpExit::TransportDeath, // src leg read error
         }
-    }
+    };
 
     std::mem::forget(src);
     std::mem::forget(dst);
     state.record_pending.store(false, Ordering::SeqCst);
-    state.running.store(false, Ordering::SeqCst);
+    mark_exited(state, exit);
+}
+
+#[cfg(test)]
+mod tests {
+    //! Boundary unit tests for the (B) D-MTLS-16 self-teardown gate (`mark_exited` →
+    //! `fire_self_teardown_if_unexpected`) — its own driving port (a decision over the
+    //! `PumpState` atomics + the [`PumpExit`] reason, Mandate 2). Pins the load-bearing
+    //! distinctions: a `TransportDeath` exit fires the trigger; a `Graceful` exit (a
+    //! clean EOF, OR a deliberate `teardown`) does NOT — a clean half-close must not
+    //! nuke a connection whose sibling direction is still live; `running` is cleared to
+    //! `Gone` on EVERY exit; and the trigger fires at most once across both pumps.
+
+    use super::*;
+    use std::sync::atomic::AtomicU32;
+
+    fn fire_counter() -> (Arc<AtomicU32>, SelfTeardown) {
+        let fired = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&fired);
+        let trigger: SelfTeardown = Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        (fired, trigger)
+    }
+
+    /// A `TransportDeath` exit (a leg error / the (C) kernel-reaped `ETIMEDOUT`) fires
+    /// the (B) self-teardown trigger exactly once and clears `running` to the `Gone`
+    /// observable. Kills a `delete state.fire_self_teardown_if_unexpected()` mutation
+    /// (the trigger would never fire) and a `running` not-cleared mutation.
+    #[test]
+    fn transport_death_exit_fires_self_teardown_once_and_marks_gone() {
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        mark_exited(&state, PumpExit::TransportDeath);
+
+        assert_eq!(fired.load(Ordering::SeqCst), 1, "a transport-death exit fires (B)");
+        assert!(!state.running.load(Ordering::SeqCst), "running cleared ⇒ liveness Gone");
+    }
+
+    /// A `Graceful` exit (a clean EOF on one direction) does NOT fire (B) — the
+    /// connection's sibling direction may still be live, and a clean half-close is not
+    /// a connection death. Kills a `PumpExit::TransportDeath`-arm-deletion / a
+    /// `==` → `!=` mutation in `mark_exited` (either would self-tear-down a gracefully
+    /// half-closing connection, the exact regression that broke the established-
+    /// connection Tier-3 tests). `running` is STILL cleared to `Gone`.
+    #[test]
+    fn graceful_eof_exit_does_not_fire_self_teardown() {
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        mark_exited(&state, PumpExit::Graceful);
+
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a clean EOF half-close must NOT self-tear-down (sibling direction may be live)"
+        );
+        assert!(!state.running.load(Ordering::SeqCst), "running still cleared ⇒ liveness Gone");
+    }
+
+    /// A deliberate `teardown` (stop == true) does NOT re-fire (B) even on a
+    /// `TransportDeath` exit — the external teardown is already reclaiming the
+    /// connection. Kills a `delete the stop-guard` mutation (which would double-reclaim
+    /// when a leg errors during a deliberate teardown).
+    #[test]
+    fn deliberate_teardown_does_not_refire_even_on_transport_death() {
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        state.stop.store(true, Ordering::SeqCst); // a deliberate teardown set this
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        mark_exited(&state, PumpExit::TransportDeath);
+
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a deliberate teardown (stop == true) must NOT re-fire (B) self-teardown"
+        );
+        assert!(!state.running.load(Ordering::SeqCst), "running still cleared ⇒ liveness Gone");
+    }
+
+    /// No trigger installed (a pump that exits before the adapter registered the
+    /// connection) is a safe no-op — `mark_exited` still clears `running` but fires
+    /// nothing. Pins the `OnceLock::get()` None branch.
+    #[test]
+    fn transport_death_without_installed_trigger_is_a_noop() {
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        // No `install_self_teardown` — the trigger is absent.
+        mark_exited(&state, PumpExit::TransportDeath);
+        assert!(!state.running.load(Ordering::SeqCst), "running cleared even with no trigger");
+    }
 }
