@@ -50,6 +50,13 @@ mod integration {
     /// (promoted out of the per-test subdir in step 02-02 so the agent-handshake
     /// acceptance test shares ONE role harness — no parallel implementation).
     mod mtls_composed_walking_skeleton;
+    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 06-01, D-MTLS-17 item 1) —
+    /// the PRODUCTION OUTBOUND BPF integration surface `MtlsDataplane`: load +
+    /// per-alloc-attach `cgroup_connect4_mtls` + program `MTLS_REDIRECT_DEST`.
+    /// Drives the production handle; observables are REAL kernel state (`bpftool
+    /// cgroup show` per-alloc attach, `bpftool map dump` redirect entry, a real
+    /// cgroup-isolated connect rewritten onto leg-F, link-drop detach).
+    mod mtls_dataplane_outbound_install;
     /// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F1/F4/F5/F6/F7) —
     /// the guardrails AT: fail-closed cause-distinct (inbound nocert/wrongca DISTINCT
     /// reasons before any splice, server gets 0 bytes), the F4/F7 limits at their
