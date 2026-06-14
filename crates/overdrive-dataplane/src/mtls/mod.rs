@@ -62,15 +62,17 @@ use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
     MtlsEnforcementError, MtlsLimits, ProbeSentinel, PumpLiveness, Result, Routed,
 };
-use overdrive_core::wall_clock::UnixInstant;
 use parking_lot::Mutex;
 
 mod inbound;
 mod ktls;
+mod limits;
 mod outbound;
 mod splice;
+mod supervision;
 mod tls_config;
 
+use limits::InFlightLedger;
 use splice::PumpHandle;
 
 /// Per-connection adapter-private tracking state, keyed by
@@ -101,6 +103,11 @@ pub struct HostMtlsEnforcement {
     next_counter: AtomicU64,
     /// Per-connection tracking, keyed by id. `liveness`/`teardown` look here.
     conns: Mutex<std::collections::BTreeMap<EnforcedConnectionId, ConnState>>,
+    /// Per-allocation in-flight (pre-arm) ceiling ledger (F4): a new intercept that
+    /// would exceed `limits.max_inflight_per_alloc` for its alloc is refused
+    /// fail-closed (`InFlightLimitExceeded`) — one workload cannot exhaust the agent
+    /// by opening many stalled connections.
+    inflight: InFlightLedger,
 }
 
 impl HostMtlsEnforcement {
@@ -115,6 +122,7 @@ impl HostMtlsEnforcement {
             limits,
             next_counter: AtomicU64::new(0),
             conns: Mutex::new(std::collections::BTreeMap::new()),
+            inflight: InFlightLedger::new(),
         }
     }
 
@@ -162,6 +170,18 @@ impl MtlsEnforcement for HostMtlsEnforcement {
     }
 
     async fn enforce(&self, conn: InterceptedConnection) -> Result<EnforcedConnection> {
+        // F4 in-flight ceiling: claim one per-alloc pre-arm slot BEFORE establishing.
+        // The 129th concurrent pre-arm for an alloc (the one finding the count already
+        // at `max_inflight_per_alloc`) is refused fail-closed — no leg is touched, no
+        // cleartext. The guard releases the slot when this call returns (established or
+        // failed), so the ceiling counts genuinely-concurrent pre-arms.
+        let _slot = self
+            .inflight
+            .try_claim(&conn.alloc, self.limits.max_inflight_per_alloc)
+            .ok_or_else(|| MtlsEnforcementError::InFlightLimitExceeded {
+                alloc: conn.alloc.clone(),
+                limit: self.limits.max_inflight_per_alloc,
+            })?;
         match conn.routed {
             Routed::Outbound { .. } => self.enforce_outbound(conn).await,
             Routed::Inbound { .. } => self.enforce_inbound(conn).await,
@@ -178,24 +198,17 @@ impl MtlsEnforcement for HostMtlsEnforcement {
                 None => return PumpLiveness::Gone, // torn down or never enforced
             }
         };
-        if !pump.running.load(Ordering::SeqCst) {
-            return PumpLiveness::Gone;
-        }
-        // Stalled iff a record is pending AND progress has not advanced for the
-        // pump-stall deadline. A purely-idle connection (no pending record) is
-        // Running, never Stalled.
-        if pump.record_pending.load(Ordering::SeqCst) {
-            let last = pump.last_progress_unix_nanos.load(Ordering::SeqCst);
-            let stalled_for = now_unix_nanos().saturating_sub(last);
-            let deadline_nanos =
-                u64::try_from(self.limits.pump_stall_deadline.as_nanos()).unwrap_or(u64::MAX);
-            if stalled_for >= deadline_nanos {
-                return PumpLiveness::Stalled {
-                    since: UnixInstant::from_unix_duration(Duration::from_nanos(last)),
-                };
-            }
-        }
-        PumpLiveness::Running
+        // The F6 Stalled derivation is the pure `supervision::derive_liveness`
+        // (extracted so the 30 s × record-pending boundary is unit/mutation-testable):
+        // Gone if the pump exited, Running while moving OR idle-but-ready, Stalled iff
+        // a record is pending AND progress has not advanced for `pump_stall_deadline`.
+        supervision::derive_liveness(
+            pump.running.load(Ordering::SeqCst),
+            pump.record_pending.load(Ordering::SeqCst),
+            pump.last_progress_unix_nanos.load(Ordering::SeqCst),
+            now_unix_nanos(),
+            self.limits.pump_stall_deadline,
+        )
     }
 
     async fn teardown(&self, handle: EnforcedConnection) -> Result<()> {
@@ -244,7 +257,7 @@ fn drain_prearm(
                 Ok(0) => break,
                 Ok(n) => {
                     held.extend_from_slice(&buf[..n]);
-                    if held.len() > max_prearm_bytes {
+                    if limits::prearm_exceeds(held.len(), max_prearm_bytes) {
                         return Err(MtlsEnforcementError::BufferLimitExceeded {
                             alloc: alloc.clone(),
                             max_prearm_bytes,
@@ -294,7 +307,7 @@ fn drain_recv_queue_once(
             Ok(n) => {
                 held.extend_from_slice(&buf[..n]);
                 drained += n;
-                if held.len() > max_prearm_bytes {
+                if limits::prearm_exceeds(held.len(), max_prearm_bytes) {
                     return Err(MtlsEnforcementError::BufferLimitExceeded {
                         alloc: alloc.clone(),
                         max_prearm_bytes,

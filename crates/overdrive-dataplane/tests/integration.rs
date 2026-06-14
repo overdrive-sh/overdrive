@@ -50,6 +50,19 @@ mod integration {
     /// (promoted out of the per-test subdir in step 02-02 so the agent-handshake
     /// acceptance test shares ONE role harness — no parallel implementation).
     mod mtls_composed_walking_skeleton;
+    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F1/F4/F5/F6/F7) —
+    /// the guardrails AT: fail-closed cause-distinct (inbound nocert/wrongca DISTINCT
+    /// reasons before any splice, server gets 0 bytes), the F4/F7 limits at their
+    /// CONCRETE values (256 KiB+1 → BufferLimitExceeded; 5 s → HandshakeTimeout; the
+    /// 129th concurrent pre-arm → InFlightLimitExceeded), F6 pump supervision
+    /// (Stalled → worker teardown → Gone, no leak), the F5 intercept-exemption
+    /// negatives (agent dial not re-intercepted; workload cannot self-exempt), and
+    /// the honest v1 authn boundary (chain-to-bundle ONLY; the wrong-but-valid-peer
+    /// PeerIdentityMismatch case is #[ignore]-gated on #178). Drives the
+    /// `MtlsEnforcement` driving port; observables are REAL kernel/subprocess (0
+    /// cleartext bytes at the server via a real capture, the distinct reason strings,
+    /// the concrete limit values, real teardown → Gone).
+    mod mtls_guardrails;
     /// transparent-mtls-host-socket (ADR-0069, GH #26; step 03-01, F3/F5/SD-1/SD-2) —
     /// INBOUND-isolated per-direction wire/syscall observables: the deliver
     /// `splice(legC → legS)` zero-copy out of leg C's kTLS-RX (the request-carrying

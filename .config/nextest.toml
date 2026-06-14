@@ -225,6 +225,7 @@ filter = '''
         | test(agent_handshake_presents_held_svid_client_and_server_roles)
         | test(outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire)
         | test(inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server)
+        | test(guardrails_fail_closed_limits_supervision_exemption_authn_boundary)
     )
 '''
 test-group = 'mtls-shared'

@@ -183,9 +183,9 @@ fn drive_handshake_client(
     alloc: &AllocationId,
     deadline: std::time::Duration,
 ) -> Result<()> {
-    let cap = std::time::Instant::now() + deadline;
+    let start = std::time::Instant::now();
     loop {
-        if std::time::Instant::now() >= cap {
+        if super::limits::handshake_expired(start.elapsed(), deadline) {
             return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
         }
         while conn.wants_write() {

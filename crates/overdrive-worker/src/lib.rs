@@ -19,6 +19,10 @@
 
 pub mod cgroup_manager;
 pub mod driver;
+// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F6 / D-MTLS-10 /
+// SD-4) — the worker's pump-supervision policy: point-query MtlsEnforcement
+// liveness per reconciler tick, teardown-on-Stalled (fail-closed reset).
+pub mod mtls_supervisor;
 pub mod node_health;
 // SCAFFOLD: true — service-health-check-probes feature.
 // ProbeRunner subsystem per ADR-0054 §2. Lands GREEN across slices

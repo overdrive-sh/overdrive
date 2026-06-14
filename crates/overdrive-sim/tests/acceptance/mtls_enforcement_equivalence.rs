@@ -51,7 +51,7 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial, SpiffeId};
-use overdrive_sim::adapters::{SimIdentityRead, SimMtlsEnforcement};
+use overdrive_sim::adapters::{ScriptedTrip, SimIdentityRead, SimMtlsEnforcement};
 
 /// Build `SvidMaterial` for `(spiffe, not_after_secs)` from fixture cert/key bytes
 /// (the sim treats the material as opaque — no real crypto). Mirrors the
@@ -249,4 +249,156 @@ fn sim_mtls_enforcement_probe_ok_and_unknown_handle_is_gone() {
     // tracking table empty (no handle to observe as Running).
     let err = rt.block_on(sim.enforce(conn)).expect_err("no held SVID ⇒ AbsentSvid");
     assert!(matches!(err, MtlsEnforcementError::AbsentSvid { .. }));
+}
+
+/// Build a `SimMtlsEnforcement` over a held SVID + bundle for `held_alloc` (the
+/// established-path adapter the limit/stall trips drive). One per test so the
+/// per-alloc ledgers / scripts do not leak across cases.
+fn established_adapter(held_alloc: &AllocationId) -> SimMtlsEnforcement {
+    let mut held = BTreeMap::new();
+    held.insert(
+        held_alloc.clone(),
+        svid("spiffe://overdrive.local/job/j/alloc/held", 1_900_000_000),
+    );
+    let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
+    SimMtlsEnforcement::new(identity, MtlsLimits::default())
+}
+
+/// `@in-memory` — the F4/F7 CONCRETE-VALUE limit trips are the SAME cause-distinct
+/// fail-closed outcome for the sim as the host adapter trips from a REAL overflow /
+/// deadline / ceiling on the kernel (the equivalence is on the OUTCOME). Asserts the
+/// CONCRETE values the contract pins (criteria 3), not merely field existence:
+/// - `max_inflight_per_alloc == 128` ⇒ the 129th concurrent pre-arm is
+///   `InFlightLimitExceeded` (the 128th is admitted); the limit carried IS 128.
+/// - `max_prearm_bytes == 256 KiB` ⇒ `BufferLimitExceeded` carries `262_144`.
+/// - `handshake_deadline == 5 s` ⇒ `HandshakeTimeout` carries 5 s.
+///
+/// # Port-to-port
+/// Driven through the `MtlsEnforcement::enforce` driving port; the limit value is
+/// read off the returned typed error variant — never internal bookkeeping.
+#[test]
+fn sim_mtls_enforcement_limit_trips_carry_concrete_f7_values() {
+    let limits = MtlsLimits::default();
+    // The F7 defaults the contract pins — assert the VALUES so a drift in the struct
+    // default reddens here (criterion 3: assert the value, not field existence).
+    assert_eq!(limits.max_prearm_bytes, 262_144, "F7: max_prearm_bytes == 256 KiB");
+    assert_eq!(limits.handshake_deadline, Duration::from_secs(5), "F7: handshake_deadline == 5 s");
+    assert_eq!(limits.max_inflight_per_alloc, 128, "F7: max_inflight_per_alloc == 128");
+    assert_eq!(
+        limits.pump_stall_deadline,
+        Duration::from_secs(30),
+        "F7: pump_stall_deadline == 30 s"
+    );
+
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
+    // (a) In-flight ceiling: hold exactly `max` (128) concurrent pre-arms open, then
+    //     the NEXT (129th) enforce is refused `InFlightLimitExceeded` carrying 128;
+    //     holding one fewer (127) admits the 128th. The boundary IS `current >= max`.
+    let alloc_if = alloc("alloc-inflight-0");
+    let sim = established_adapter(&alloc_if);
+
+    // 127 held ⇒ the 128th is admitted (Established).
+    sim.hold_inflight(&alloc_if, limits.max_inflight_per_alloc - 1);
+    let admitted = rt
+        .block_on(sim.enforce(intercepted(Direction::Outbound, alloc_if.clone())))
+        .expect("the 128th concurrent pre-arm (count==127) is admitted, NOT refused");
+    rt.block_on(sim.teardown(admitted)).unwrap();
+
+    // 128 held ⇒ the 129th is refused, and the limit carried IS the concrete 128.
+    sim.hold_inflight(&alloc_if, limits.max_inflight_per_alloc);
+    let err = rt
+        .block_on(sim.enforce(intercepted(Direction::Outbound, alloc_if.clone())))
+        .expect_err("the 129th concurrent pre-arm (count==128) is refused InFlightLimitExceeded");
+    match err {
+        MtlsEnforcementError::InFlightLimitExceeded { ref alloc, limit } => {
+            assert_eq!(alloc, &alloc_if);
+            assert_eq!(limit, 128, "the in-flight ceiling carried IS the concrete F7 value 128");
+        }
+        other => panic!("expected InFlightLimitExceeded(128), got {other:?}"),
+    }
+
+    // (b) Pre-arm buffer cap: a scripted overflow ⇒ BufferLimitExceeded carrying the
+    //     concrete 256 KiB. (The host adapter trips this from a REAL >256 KiB+1 capture.)
+    let alloc_buf = alloc("alloc-buf-0");
+    let sim = established_adapter(&alloc_buf);
+    sim.script_trip(&alloc_buf, ScriptedTrip::BufferLimitExceeded);
+    let err = rt
+        .block_on(sim.enforce(intercepted(Direction::Inbound, alloc_buf.clone())))
+        .expect_err("a >256 KiB pre-arm overflow ⇒ BufferLimitExceeded (fail-closed)");
+    match err {
+        MtlsEnforcementError::BufferLimitExceeded { ref alloc, max_prearm_bytes } => {
+            assert_eq!(alloc, &alloc_buf);
+            assert_eq!(max_prearm_bytes, 262_144, "the buffer cap carried IS 256 KiB");
+        }
+        other => panic!("expected BufferLimitExceeded(262144), got {other:?}"),
+    }
+
+    // (c) Handshake deadline: a scripted stall ⇒ HandshakeTimeout carrying the concrete 5 s.
+    let alloc_hs = alloc("alloc-hs-0");
+    let sim = established_adapter(&alloc_hs);
+    sim.script_trip(&alloc_hs, ScriptedTrip::HandshakeTimeout);
+    let err = rt
+        .block_on(sim.enforce(intercepted(Direction::Outbound, alloc_hs.clone())))
+        .expect_err("a handshake exceeding 5 s ⇒ HandshakeTimeout (fail-closed)");
+    match err {
+        MtlsEnforcementError::HandshakeTimeout { ref alloc, deadline } => {
+            assert_eq!(alloc, &alloc_hs);
+            assert_eq!(deadline, Duration::from_secs(5), "the handshake deadline carried IS 5 s");
+        }
+        other => panic!("expected HandshakeTimeout(5s), got {other:?}"),
+    }
+}
+
+/// `@in-memory` — the F6 stall→teardown→Gone OUTCOME the worker's supervisor reacts
+/// to: an established connection is `Running`; once the pump stalls (scripted, where
+/// the host adapter derives it from the real pump's frozen progress) `liveness`
+/// reports `Stalled`; the F6 reaction `teardown` reclaims it to `Gone` with no leak
+/// (re-query liveness ⇒ Gone). A purely-idle (never-stalled) connection stays
+/// `Running`, NEVER `Stalled` — no false positive (criterion 4).
+///
+/// # Port-to-port
+/// Driven through `enforce` / `liveness` / `teardown`; the stall + reclaim are read
+/// off `PumpLiveness` returned by the port.
+#[test]
+fn sim_mtls_enforcement_f6_stall_then_teardown_reclaims_to_gone() {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let alloc_st = alloc("alloc-stall-0");
+    let sim = established_adapter(&alloc_st);
+
+    // Two established connections: one we stall, one we leave idle.
+    let stalled =
+        rt.block_on(sim.enforce(intercepted(Direction::Inbound, alloc_st.clone()))).unwrap();
+    let idle = rt.block_on(sim.enforce(intercepted(Direction::Inbound, alloc_st))).unwrap();
+    assert_eq!(sim.liveness(&stalled), PumpLiveness::Running, "freshly established ⇒ Running");
+    assert_eq!(sim.liveness(&idle), PumpLiveness::Running, "freshly established ⇒ Running");
+
+    // The pump's progress freezes WHILE a record is pending ⇒ Stalled { since }.
+    let since = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    sim.mark_stalled(&stalled, since);
+    assert_eq!(
+        sim.liveness(&stalled),
+        PumpLiveness::Stalled { since },
+        "F6: a frozen-progress pump with a record pending is Stalled"
+    );
+    // The idle connection is NEVER Stalled — no false positive on a quiescent pump.
+    assert_eq!(
+        sim.liveness(&idle),
+        PumpLiveness::Running,
+        "F6 (no false positive): an idle connection (no pending record) stays Running"
+    );
+
+    // The F6 reaction: teardown reclaims the stalled connection to Gone, no leak.
+    rt.block_on(sim.teardown(stalled.clone())).expect("teardown on stall (F6)");
+    assert_eq!(
+        sim.liveness(&stalled),
+        PumpLiveness::Gone,
+        "F6: post-teardown the stalled connection is reclaimed (Gone) — no fd/pump/kTLS leak"
+    );
+    // The idle connection survives the sibling teardown, still Running.
+    assert_eq!(
+        sim.liveness(&idle),
+        PumpLiveness::Running,
+        "the untouched idle connection survives"
+    );
 }

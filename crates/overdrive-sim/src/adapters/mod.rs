@@ -60,4 +60,4 @@ pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
-pub use mtls_enforcement::SimMtlsEnforcement;
+pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};

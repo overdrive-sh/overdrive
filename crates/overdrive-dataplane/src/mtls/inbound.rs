@@ -159,9 +159,9 @@ fn drive_handshake_server(
     deadline: std::time::Duration,
 ) -> Result<()> {
     use std::io::ErrorKind;
-    let cap = std::time::Instant::now() + deadline;
+    let start = std::time::Instant::now();
     loop {
-        if std::time::Instant::now() >= cap {
+        if super::limits::handshake_expired(start.elapsed(), deadline) {
             return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
         }
         while conn.wants_write() {
