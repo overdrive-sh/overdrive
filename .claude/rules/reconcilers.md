@@ -158,8 +158,11 @@ The shapes that signal Bar 1 is being violated:
   cgroup hierarchy setup is
   [#198](https://github.com/overdrive-sh/overdrive/issues/198); XDP
   attachment lifecycle is
-  [#199](https://github.com/overdrive-sh/overdrive/issues/199). All
-  three are Bar-1-today / Bar-2-when-drift-matters and share the same
+  [#199](https://github.com/overdrive-sh/overdrive/issues/199); the
+  inbound-TPROXY shared routing infra (fwmark `ip rule` + `local` route +
+  shared nft chain) is
+  [#234](https://github.com/overdrive-sh/overdrive/issues/234). All
+  four are Bar-1-today / Bar-2-when-drift-matters and share the same
   "host/node infrastructure reconciler" machinery; #197 is the candidate
   home for that shared model.
 

@@ -213,7 +213,11 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
 /// intercepts coexist without razing one another (kernel-canonical TPROXY /
 /// Cilium host-netns model — research
 /// `multi-workload-tproxy-interception-resource-model-research.md` F1/F5/F6/F7;
-/// converge-on-boot Bar-1 per `.claude/rules/reconcilers.md`).
+/// converge-on-boot Bar-1 per `.claude/rules/reconcilers.md`; the Bar-2
+/// ref-counted host-infra reconciler promotion — only if runtime drift of the
+/// shared rule enters the threat model — is tracked at
+/// [#234](https://github.com/overdrive-sh/overdrive/issues/234), a sibling of
+/// the #197/#198/#199 family).
 ///
 /// Redirects a connection aimed at `virt` to the agent's leg-C listener on
 /// `agent_port`. The `MTLS_LEG_S_DIAL_MARK` exemption is ordered FIRST in the
