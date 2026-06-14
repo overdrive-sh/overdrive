@@ -344,7 +344,7 @@ impl MtlsTopology {
     /// TPROXY redirect sends a connection aimed at `VIRT_IP:VIRT_PORT` to
     /// `127.0.0.1:agent_port` (the agent's `IP_TRANSPARENT` leg-C listener), marked for
     /// the `local` route table. The leg-S exemption (F5) `accept`s the
-    /// [`MTLS_LEG_S_DIAL_MARK`]-stamped agent dial FIRST in the prerouting chain so the
+    /// [`MTLS_LEG_S_DIAL_MARK`](overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK)-stamped agent dial FIRST in the prerouting chain so the
     /// agent's own dial (which targets the same virtual address the client aimed at) is
     /// NOT re-TPROXY'd back to leg C — without it the dial recurses. The GAP-3 leg-S
     /// DNAT + masquerade route the agent's verbatim orig-dst dial to the netns server:
@@ -358,7 +358,7 @@ impl MtlsTopology {
     pub fn install_tproxy(&mut self, agent_port: u16) -> Result<(), TopologyError> {
         let fwmark = 0x1u32;
         let rt_table = 100u32;
-        let leg_s_mark = overdrive_dataplane::mtls::MTLS_LEG_S_DIAL_MARK;
+        let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
         let table = format!("overdrive_mtls_ws_{}", self.tag);
 
         // Idempotent pre-clean of the GLOBAL rule/route/table a prior SIGKILL'd run may

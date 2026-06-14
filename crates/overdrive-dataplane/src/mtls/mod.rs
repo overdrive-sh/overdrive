@@ -56,6 +56,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::AllocationId;
+use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::SvidMaterial;
 use overdrive_core::traits::mtls_enforcement::{
@@ -425,20 +426,11 @@ fn dial_leg(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
     Ok(stream)
 }
 
-/// The `SO_MARK` the agent stamps on its INBOUND leg-S dial (F5 inbound
-/// intercept-recursion exemption).
-///
-/// The nft-TPROXY `prerouting` rule intercepts the server's virtual address; the
-/// agent's leg-S dial targets that same logical address the client aimed at, so
-/// without this mark the SYN would be TPROXY'd back to the agent's leg-C listener,
-/// recursing instead of reaching the server. The production nft-TPROXY rule
-/// excludes this mark; the test harness mirrors it.
-pub const MTLS_LEG_S_DIAL_MARK: u32 = 0x2;
-
 /// Dial `peer` for the agent's INBOUND leg S (the server workload), stamping
-/// [`MTLS_LEG_S_DIAL_MARK`] via `SO_MARK` so the nft-TPROXY prerouting rule skips
-/// the agent's own dial (F5 intercept-recursion exemption — the inbound analogue
-/// of the outbound leg-B cgroup-scoping exemption).
+/// [`MTLS_LEG_S_DIAL_MARK`](overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK)
+/// via `SO_MARK` so the nft-TPROXY prerouting rule skips the agent's own dial
+/// (F5 intercept-recursion exemption — the inbound analogue of the outbound
+/// leg-B cgroup-scoping exemption).
 fn dial_leg_s(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
     // Create the socket, set SO_MARK, THEN connect (the mark must be set before the
     // SYN so prerouting sees it on the outgoing packet).

@@ -21,6 +21,7 @@ pub mod backend_key;
 pub mod drop_class;
 pub mod fingerprint;
 pub mod maglev_table_size;
+pub mod mtls_mark;
 /// `ServiceFrontend` newtype (udp-service-support US-01; ADR-0060).
 /// RED scaffold — bodies `todo!()` until DELIVER lands US-01.
 pub mod service_frontend;
@@ -29,4 +30,5 @@ pub use backend_key::{BackendKey, Proto};
 pub use drop_class::{DropClass, aggregate_per_cpu};
 pub use fingerprint::{BackendSetFingerprint, fingerprint};
 pub use maglev_table_size::MaglevTableSize;
+pub use mtls_mark::MTLS_LEG_S_DIAL_MARK;
 pub use service_frontend::ServiceFrontend;

@@ -23,6 +23,12 @@ pub mod driver;
 // SD-4) — the worker's pump-supervision policy: point-query MtlsEnforcement
 // liveness per reconciler tick, teardown-on-Stalled (fail-closed reset).
 pub mod mtls_supervisor;
+// transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
+// the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
+// leg-C listener, the inbound nft-TPROXY install (+ ip rule/route
+// companions) with RAII teardown, and the outbound/inbound leg-acquire that
+// builds the `InterceptedConnection` for `MtlsEnforcement::enforce`.
+pub mod mtls_intercept;
 pub mod node_health;
 // SCAFFOLD: true — service-health-check-probes feature.
 // ProbeRunner subsystem per ADR-0054 §2. Lands GREEN across slices
