@@ -418,7 +418,7 @@ the guardrail observables (fail-closed, no leak, no evade, honest claim).
 | Slice | Stories | Learning hypothesis (disproves X if it fails) | Brief |
 |---|---|---|---|
 | 00 (**composed proxy walking skeleton — BLOCKING**) | US-MTLS-00 | the agent-light L4 proxy COMPOSES under a real transparent intercept (outbound `cgroup_connect4` / inbound TPROXY) → pre-arm capture → handshake on the agent's leg → kTLS arm → post-arm bidirectional multi-record transfer holds with NO RST, under normal AND delayed timing. **FAIL → the composition does not hold; every later slice is blocked until the RST is engineered around** | `slices/slice-00-composed-proxy-walking-skeleton.md` |
-| 01 | US-MTLS-01 | the platform transparently intercepts the workload's outbound connect (`cgroup_connect4`-rewrite to leg F) AND inbound arrival (TPROXY to leg C + `getsockname` orig-dst) to an agent-owned leg, drains the outbound pre-arm plaintext losslessly, and keeps the agent's own leg-B dial from recursing (the bypass agent-private). **(DELIVER re-home, D-MTLS-14, 2026-06-13: the lossless capture + the cgroup_connect4 rewrite + the F5 exemption mechanism shipped in DELIVER step 01-01; the production intercept INSTALL + leg-acquire — IP_TRANSPARENT listener / nft-TPROXY / accept→`InterceptedConnection` / orig-dst — is the WORKER's composition-root role and lands in step 05-01 as `overdrive-worker/src/mtls_intercept.rs` free functions, NOT a `mtls/` adapter file and NOT a trait method. The former DELIVER step 02-01 is FOLDED.)** | `slices/slice-01-transparent-intercept-and-leg-acquire.md` |
+| 01 | US-MTLS-01 | the platform transparently intercepts the workload's outbound connect (`cgroup_connect4`-rewrite to leg F) AND inbound arrival (TPROXY to leg C + `getsockname` orig-dst) to an agent-owned leg, drains the outbound pre-arm plaintext losslessly, and keeps the agent's own leg-B dial from recursing (the bypass agent-private). **(DELIVER re-home, D-MTLS-14, 2026-06-13: the lossless capture + the cgroup_connect4 rewrite + the F5 exemption mechanism shipped in DELIVER step 01-01; the production intercept INSTALL + leg-acquire — IP_TRANSPARENT listener / nft-TPROXY / accept→`InterceptedConnection` / orig-dst — is the WORKER's composition-root role and lands in step 05-01 as `overdrive-worker/src/mtls_intercept.rs` free functions, NOT a `mtls/` adapter file and NOT a trait method. The former DELIVER step 02-01 is FOLDED. **D-MTLS-15, 2026-06-14**: the per-allocation INPUTS that drive those free functions are pinned in `wave-decisions.md` § "Intercept-INPUT provenance pin (D-MTLS-15)" — needs-intercept = `DriverType::Exec` (derived; NO new `AllocationSpec` field), legs = agent-chosen ephemeral `127.0.0.1:0`, outbound `peer` = the pre-programmed `MTLS_REDIRECT_DEST[real_peer]` key, inbound orig-dst→server-real-listener DEFERRED to #178 (`mtls/inbound.rs::server_dial_addr`; AC5 is OUTBOUND-proven). The 4-method contract + the D-MTLS-14 signatures are UNCHANGED.)** | `slices/slice-01-transparent-intercept-and-leg-acquire.md` |
 | 02 | US-MTLS-02 | the agent performs the rustls TLS 1.3 handshake on its peer-facing leg presenting the HELD SVID (read via IdentityRead) and verifying the peer vs the trust bundle — as CLIENT (leg B) and as SERVER (leg C, REQUIRE+VERIFY the client SVID) — the workloads hold nothing | `slices/slice-02-agent-handshake-present-held-svid.md` |
 | 03 | US-MTLS-03 | OUTBOUND enforce: the negotiated secrets arm kTLS on the agent's leg B (auth-session == data-session), forward is agent-light (a `read → write_all` COPY into leg B's kTLS-TX — NOT a splice, NOT zero-copy) and return is agent-light zero-copy (`splice` on a plain kTLS-RX leg), and tcpdump shows TLS 1.3 records on the peer wire (ss -tie shows the ULP) | `slices/slice-03-outbound-enforce-ktls-splice-wire-capture.md` |
 | 04 | US-MTLS-04 | INBOUND enforce: orig-dst selects the server SVID → server-mTLS (REQUIRE+VERIFY the client SVID) → kTLS-RX arm on leg C → agent-light `splice` delivers byte-exact plaintext to the identity-unaware server workload, while the client-facing wire carries TLS `0x17` ciphertext only | `slices/slice-04-inbound-enforce-server-mtls-ktls-rx-splice.md` |
@@ -1083,9 +1083,11 @@ pumps, an un-evadable intercept, and an honest v1 claim.
 BEFORE any splice (S receives 0 bytes). Resource limits (F4/F7) at concrete values:
 `max_prearm_bytes = 256 KiB` → `BufferLimitExceeded`; `handshake_deadline = 5 s` →
 `HandshakeTimeout`; `max_inflight_per_alloc = 128` → `InFlightLimitExceeded` — all
-fail-closed, cleanup leaks nothing. Pump supervision (F6): a return/deliver pump stalled
-for `pump_stall_deadline = 30 s` with a record pending is `Stalled` → the worker tears
-the connection down. Intercept-exemption negatives (F5): the agent's leg-B dial is NOT
+fail-closed, cleanup leaks nothing. Pump supervision (F6, ADR-0070 / D-MTLS-16): a
+return/deliver pump stalled for `pump_stall_deadline = 30 s` with a record pending is
+`Stalled` → the connection's own enforce task self-tears-down (NO central worker tick;
+v1 = (C) kernel `TCP_USER_TIMEOUT`/keepalive + (B) per-connection self-supervision).
+Intercept-exemption negatives (F5): the agent's leg-B dial is NOT
 re-intercepted AND a workload CANNOT self-exempt. The honest authn boundary (F1): v1
 authenticates chain-to-bundle ONLY, with NO intended-peer pinning (the `PeerIdentityMismatch`
 test is `#[ignore]`-gated on #178).
@@ -1119,7 +1121,8 @@ test is `#[ignore]`-gated on #178).
    concurrent in-flight connection for one alloc → `InFlightLimitExceeded`.
 3. **Pump supervision + intercept exemption + honest boundary** — a return/deliver pump
    whose bytes-spliced counter has not advanced for 30 s with a record pending is
-   `Stalled` → the worker tears the connection down → `Gone`, no leak; the agent's leg-B
+   `Stalled` → the connection's own enforce task self-tears-down → `Gone`, no leak (no
+   central worker tick — ADR-0070); the agent's leg-B
    dial is NOT re-intercepted and a workload setting the bypass on its own socket is STILL
    intercepted; v1 verifies chain-to-bundle ONLY, the `PeerIdentityMismatch` test is
    `#[ignore]`-gated on #178 and no doc/test calls the wrong-but-valid-peer case
@@ -1149,7 +1152,7 @@ Then the workload is still intercepted (the bypass is agent-private), and the cl
 
 - [ ] Outbound fail-closed: `IdentityRead::svid_for` `None` → `AbsentSvid`; a peer not chaining to the bundle → `PeerVerificationFailed` (no TLS app data, no cleartext). Inbound fail-closed, distinct reasons: `nocert` and `wrongca` each reject with their DISTINCT reason BEFORE any splice; S receives 0 bytes.
 - [ ] Resource limits (concrete values): `max_prearm_bytes = 256 KiB` → `BufferLimitExceeded`; `handshake_deadline = 5 s` → `HandshakeTimeout`; `max_inflight_per_alloc = 128` → `InFlightLimitExceeded`; cleanup leaks no fd/pump/kTLS state (re-query `liveness` → `Gone`). Assert the CONCRETE values, not field existence.
-- [ ] Pump supervision (F6): a pump stalled for `pump_stall_deadline = 30 s` with a record pending → `Stalled` → the worker tears the connection down → `Gone`, no leak; `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` emitted.
+- [ ] Pump supervision (F6, ADR-0070 / D-MTLS-16): a pump stalled for `pump_stall_deadline = 30 s` with a record pending → `Stalled` → the connection's own enforce task self-tears-down → `Gone`, no leak; `mtls.pump.stalled` / `mtls.pump.teardown_on_stall` emitted. v1 = (C) kernel `TCP_USER_TIMEOUT`/keepalive + (B) per-connection self-supervision — NO central `MtlsSupervisor`/`supervise_tick`/tick cadence (retired).
 - [ ] Intercept-exemption negatives (F5): the agent's leg-B dial is NOT re-intercepted (no recursion); a workload that sets the bypass on its own socket is STILL intercepted (the bypass is agent-private).
 - [ ] Honest authn boundary (F1): a test asserts v1 verifies chain-to-bundle ONLY (both directions); the wrong-but-valid-peer `PeerIdentityMismatch` test is present but `#[ignore]`-gated on #178; NO AC/doc/test calls the wrong-but-valid-peer case "protected" until #178 lands.
 
@@ -1470,7 +1473,11 @@ mirroring `Dataplane`):
   copy pump →
   return `Ok` once steady-state is established (or a typed fail-closed error on
   absent/wrong SVID or handshake failure). The adapter then drives both splice
-  pumps; the worker supervises liveness.
+  pumps and sets (C) `TCP_USER_TIMEOUT`/keepalive on the legs; the per-connection
+  enforce task self-supervises (B) and self-tears-down fail-closed on
+  EOF/error/stall (NO central worker liveness loop — ADR-0070 / D-MTLS-16). The
+  worker re-queries `liveness` only for the post-`teardown` `Gone` no-leak
+  observable.
 - **A teardown method** for connection close (release legs, drop the pump).
 
 > **OQ-1 — ACCEPTED (user-approved 2026-06-12)**: the EXACT method
@@ -1999,12 +2006,16 @@ review's resource/identity findings require**.
        pub max_inflight_per_alloc: u32,
        /// F6 — the no-progress window after which a return/deliver splice pump is
        /// `PumpLiveness::Stalled`: the bytes-spliced counter has not advanced for
-       /// this long WHILE a record is pending on the kTLS-RX leg. The worker tears
-       /// the connection down on `Stalled` (teardown + fail-closed reset). A purely
-       /// idle connection (no pending record) is `Running`, never `Stalled`.
-       /// **F7 default: 30 s.** Rationale: generous enough that no healthy bursty
-       /// connection trips it, tight enough that a stranded pump is reclaimed
-       /// promptly.
+       /// this long WHILE a record is pending on the kTLS-RX leg. The (B)
+       /// per-connection enforce task tears the connection down on `Stalled`
+       /// (self-teardown + fail-closed reset; ADR-0070 / D-MTLS-16 — NO central
+       /// worker tick). A purely idle connection (no pending record) is `Running`,
+       /// never `Stalled`. **F7 default: 30 s.** Rationale: generous enough that no
+       /// healthy bursty connection trips it, tight enough that a stranded pump is
+       /// reclaimed promptly. (v1's transport-death case is reaped by the kernel —
+       /// (C) `TCP_USER_TIMEOUT`/keepalive; this threshold gates the (B)
+       /// self-supervision verdict + the deferred kernel-invisible progress-stall
+       /// watchdog, Tier-3-spike — ADR-0070, #232.)
        pub pump_stall_deadline: Duration,
    }
 
@@ -2334,21 +2345,38 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// (no pending record) is `Running`, never `Stalled` (no false positives on
     /// quiescent long-lived connections).
     ///
-    /// # F6 supervision policy (what the worker does with `Stalled`)
-    /// The worker (D-MTLS-10) point-queries this on its reconciler-tick cadence
-    /// (SD-4). On observing `Stalled`, the worker MUST `teardown(handle)` —
-    /// **teardown + fail-closed reset** (close the legs, stop the pump, reclaim
-    /// kTLS/sockmap state). It does NOT reconnect-in-place (a foreign process
-    /// cannot resume a kTLS record sequence) and does NOT degrade to a userspace
-    /// copy loop (that re-enters the per-byte path A3 rejects). The connection
-    /// drops; request-retry protocols re-handshake on reconnect. Telemetry:
-    /// `mtls.pump.stalled` + `mtls.pump.teardown_on_stall` per allocation.
+    /// # F6 supervision shape (ADR-0070 / D-MTLS-16 — supersedes the SD-4
+    /// central-point-query)
+    /// v1 supervises connection liveness with **(C) kernel `TCP_USER_TIMEOUT` +
+    /// keepalive on the legs** (the adapter sets them in `enforce`; the kernel
+    /// reaps the transport-dead class — peer gone, unacked-past-deadline,
+    /// half-open) **+ (B) per-connection self-supervision** in this connection's
+    /// own SD-2 port-owned enforce task (self-tear-down fail-closed on
+    /// EOF/error/`ETIMEDOUT` via `teardown` — close the legs, stop both pumps,
+    /// reclaim kTLS state). There is **NO central worker point-query, NO
+    /// `supervise_tick`, NO tick cadence** in v1 — the central `MtlsSupervisor`
+    /// (shape A) is retired (ADR-0070). Self-teardown does NOT reconnect-in-place
+    /// (a foreign process cannot resume a kTLS record sequence) and does NOT
+    /// degrade to a userspace copy loop (A3). Telemetry: `mtls.pump.stalled` +
+    /// `mtls.pump.teardown_on_stall` per allocation, emitted on the
+    /// per-connection self-teardown path.
+    ///
+    /// `liveness` is the **SD-2 observe surface** — its load-bearing v1 consumer
+    /// is the post-`teardown` `Gone` observable the `mtls_enforcement_equivalence`
+    /// harness + the F4 `mtls_guardrails` tests re-query to assert *no fd/kTLS
+    /// leak after teardown* — and the **reserved predicate** for the deferred
+    /// kernel-invisible progress-stall watchdog (the kTLS-spliced progress signal
+    /// is undocumented upstream; Tier-3-spike-deferred, ADR-0070, #232). The `Stalled`
+    /// variant is the (B) self-supervision verdict + that reserved hook, NOT a
+    /// central-tick reaper input.
     ///
     /// # Observable invariants
     /// Read-only: `liveness` never mutates the pump or the connection. This is
-    /// the worker's supervision surface (D-MTLS-10: the agent supervises the
-    /// splice pump) — analogous to `Driver`'s exit-event observation, but a
-    /// point query rather than a stream (SD-4 surfaces the stream alternative).
+    /// the SD-2 observe surface (the worker re-queries it post-`teardown` for the
+    /// `Gone` no-leak assertion; the per-connection enforce task consults its own
+    /// progress to self-supervise) — analogous to `Driver`'s exit-event
+    /// observation. (SD-4's point-query-vs-stream sub-decision is moot for v1
+    /// liveness — neither variant runs a central reactor; ADR-0070.)
     fn liveness(&self, handle: &EnforcedConnection) -> PumpLiveness;
 
     /// Tear `handle` down: stop BOTH pumps (outbound: forward `legF → legB`
@@ -2530,9 +2558,13 @@ pub enum ProbeSentinel {
     KtlsArmRoundTrip,
 }
 
-/// Liveness of a connection's agent-light splice pump (return outbound / deliver
-/// inbound). F6: the worker tears the connection down on `Stalled` (teardown +
-/// fail-closed reset; see `liveness` § "F6 supervision policy").
+/// Liveness of a connection's agent-light primary pump. `Gone` is the
+/// post-`teardown` no-leak observable the equivalence + F4 tests assert;
+/// `Running`/`Stalled` are the (B) per-connection self-supervision verdict +
+/// the reserved predicate for the deferred kernel-invisible progress-stall
+/// watchdog (ADR-0070 / D-MTLS-16; #232). The connection's own enforce task
+/// self-tears-down on `Stalled` (teardown + fail-closed reset); there is NO
+/// central-tick reaper in v1 — see `liveness` § "F6 supervision shape".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PumpLiveness {
     /// The pump is draining records OR idle-but-ready (no record pending) — the
@@ -2541,8 +2573,10 @@ pub enum PumpLiveness {
     /// The pump's bytes-spliced progress metric has NOT advanced since `since`,
     /// for at least `MtlsLimits::pump_stall_deadline` (F7 default 30 s), WHILE a
     /// record is pending on the kTLS-RX leg (a stranded/crashed pump — the path
-    /// is broken; ADR-0069 § ATAM reliability sensitivity). The worker's F6 policy
-    /// reacts by tearing the connection down.
+    /// is broken; ADR-0069 § ATAM reliability sensitivity). The (B) per-connection
+    /// self-supervision verdict the enforce task acts on (self-teardown); the
+    /// reserved input for the deferred progress-stall watchdog (Tier-3 spike,
+    /// ADR-0070, #232). NOT consumed by a central worker tick in v1.
     Stalled { since: UnixInstant },
     /// No live pump for this handle — torn down or never enforced (post-teardown
     /// observable; not an error).
@@ -2639,12 +2673,17 @@ additionally exercises:
   exactly 256 KiB + 1; the `HandshakeTimeout` at the 5 s deadline; the
   `InFlightLimitExceeded` at the 129th concurrent pre-arm; `pump_stall_deadline`
   == 30 s) — not merely that the fields exist.
-- the **F6 pump-stall → teardown policy**: script a pump that stops making
-  progress with a record pending → assert `liveness` transitions to
-  `Stalled { since }` within `pump_stall_deadline`, assert the worker's
-  supervision loop tears the connection down, assert `Gone` after (no leak). The
-  sim models the same observable transition; the host adapter proves it at Tier-3
-  (pause the splice task with a pending RX record).
+- the **F6 pump-stall → self-teardown policy (ADR-0070 / D-MTLS-16)**: script a
+  pump that stops making progress with a record pending → assert `liveness`
+  transitions to `Stalled { since }` within `pump_stall_deadline`, assert the
+  connection's own enforce task self-tears-down (NO central `supervise_tick` — the
+  retired shape (A); v1 = (C) kernel `TCP_USER_TIMEOUT`/keepalive + (B)
+  per-connection self-supervision), assert `Gone` after (no leak — the post-`teardown`
+  observable the harness re-queries `liveness` for). The sim models the same
+  observable transition; the host adapter proves it at Tier-3 (pause the splice task
+  with a pending RX record). (The kernel-invisible progress-stall — a pump stuck
+  while the sockets are transport-healthy — is the deferred Tier-3-spike residual,
+  ADR-0070 / #232; v1 covers transport-death via the kernel + crashed-pump via (B).)
 
 The host adapter additionally carries the Tier-3 obligations the sim cannot model
 (they are the kernel-mechanism layer, asserted at Tier 3 per ADR-0069 §
@@ -2772,7 +2811,24 @@ handshake-based sentinel #1 needs a cert source; user-approved.)
     kernel I/O (the no-blocking-in-async rule), and the composition root is already
     async. **Recommend (a)** (the trait above uses `async fn probe`).
 
-- **SD-4 — pump-liveness as a point query vs an event stream.** The worker
+- **SD-4 — pump-liveness as a point query vs an event stream. SUPERSEDED for
+  the v1 *supervision shape* by ADR-0070 / D-MTLS-16 (2026-06-14).** SD-4 framed
+  the worker as point-querying `liveness` per tick over the live-connection set
+  — shape (A), a central enumerator. Connection-supervision research
+  (`docs/research/dataplane/transparent-mtls-connection-supervision-research.md`,
+  22 sources) found NO production dataplane supervises liveness that way, and
+  `.claude/rules/reconcilers.md` disqualifies it (a stalled connection is not
+  desired-vs-actual config drift). **v1 supervision is now (C) kernel
+  `TCP_USER_TIMEOUT`/keepalive on the legs + (B) per-connection self-supervision
+  in the SD-2 port-owned enforce task — NO central worker point-query, NO tick
+  cadence; the central `MtlsSupervisor` (04-01) is retired.** `liveness` STAYS on
+  the contract (the post-`teardown` `Gone` no-leak observable + the reserved
+  deferred-watchdog predicate); the point-query-vs-stream choice below is moot
+  for v1 liveness (neither variant runs a central reactor). The original SD-4
+  reasoning is retained below as the design-time record. See § "Connection-liveness
+  supervision shape (D-MTLS-16)" in `design/wave-decisions.md` and ADR-0070.
+
+  The worker
   supervises the return pump. `liveness(&handle) -> PumpLiveness` is a point query
   (above). The alternative is a `take_pump_events() -> Receiver<PumpEvent>` stream
   (the `Driver::take_exit_receiver` shape).

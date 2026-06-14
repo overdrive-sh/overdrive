@@ -155,6 +155,202 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-13T17:09:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T03:10:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: authored focused inbound Tier-3 AT mtls_inbound_enforce.rs (scenario inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server); drives MtlsEnforcement::enforce(Inbound) port-to-port; first failed (handshake-EOF + response-byte-exact under strace), then GREEN against the pre-existing committed inbound production path (01-01); splice deliver + kTLS-RX + byte-exact-at-S observables captured from real strace/ss/server-recv. DST Inbound-equivalence already exercised both directions (mtls_enforcement_equivalence).",
+      "t": "2026-06-14T03:19:58Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: inbound orig-dst->allocation selection (svid_for via the identity port) and deliver-pump accounting are asserted through the driving port (MtlsEnforcement::enforce(Inbound)) + the DST equivalence harness per implementation_notes, no standalone predicate unit test",
+      "t": "2026-06-14T03:20:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: no dataplane production change needed \u2014 the inbound path (inbound::establish: server-mTLS + kTLS-RX + dial leg S + deliver splice pump) was committed at 01-01 (c316660e) with no todo stubs, and SimMtlsEnforcement::enforce already models Inbound identically (direction-agnostic). The 03-01 deliverable was the focused inbound Tier-3 AT + verifying the DST Inbound-equivalence. mtls_inbound_enforce AT GREEN; mtls_enforcement_equivalence (both directions) GREEN; full mtls dataplane Tier-3 suite (4 tests) GREEN serially under Lima (the tests share TPROXY route table 100, run --test-threads=1). Lima clippy -D warnings clean.",
+      "t": "2026-06-14T03:21:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 944bfda6 'feat(transparent-mtls): inbound enforce \u2014 orig-dst server-mTLS + kTLS-RX agent-light splice-to-server' (Step-ID: 03-01). 2 files, 649 insertions: new Tier-3 AT mtls_inbound_enforce.rs + module wire in tests/integration.rs. Pre-commit gates green (fmt/doctest/clippy/nextest-affected 1600 passed). No production change (inbound path pre-exists from 01-01); no new API surface. Mutation: no mutable default-lane source touched (test-only + module wire) \u2014 vacuous pass per testing.md.",
+      "t": "2026-06-14T03:22:57Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T03:23:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T03:23:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T03:23:31Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T03:58:38Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T04:21:59Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the mutation-sensitive limit-trip + Stalled-derivation predicates (prearm_exceeds/inflight_at_ceiling/handshake_expired/stall_elapsed/derive_liveness) are pinned through the MtlsEnforcement driving port via the DST equivalence harness + the Tier-3 AT; the >= vs > boundary was proven falsifiable by a mutation that reddened the equivalence test (no separate unit test needed)",
+      "t": "2026-06-14T04:21:59Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T04:21:59Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T04:26:40Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS \u2014 superseding the earlier SKIPPED: the mutation gate surfaced that the F4/F7 trip predicates (prearm_exceeds/inflight_at_ceiling/handshake_expired/stall_elapsed), the derive_liveness transition, and the InFlightLedger drop lifecycle needed focused boundary unit tests in limits.rs + supervision.rs to kill the < / <= / >= / ==-vs-!= / fn-body\u2192false mutants. Authored them; mutation kill-rate is now 100% (21/21 caught)",
+      "t": "2026-06-14T04:50:01Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T04:51:31Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T06:11:27Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC5 e2e gate + worker intercept-install inputs underspecified; only proven inbound routing (GAP-3 DNAT) is design-declared test-harness-only and east-west orig-dst->real-backend is #178/out-of-v1. Cannot author the e2e AT without inventing production routing API the design did not name (CLAUDE.md 'implement to the design \u2014 never invent API surface'; STOP-and-surface). Blocker returned to orchestrator.",
+      "t": "2026-06-14T06:12:48Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked behind RED_ACCEPTANCE \u2014 the AT shape (AC5 e2e gate) must be pinned before any unit/PBT test can target the production wiring. Design-gap blocker returned to orchestrator (production intercept routing unspecified; do not invent #178-shaped API).",
+      "t": "2026-06-14T06:12:57Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no production code written \u2014 GREEN is gated on a pinned AT (blocked). No mtls_intercept.rs / run_server / worker-lifecycle wiring authored; surfacing the design gap costs one message vs shipping a wrong contract (test-only GAP-3 routing in production OR a #178-shaped intercept-address/backend-resolution API the design did not sanction).",
+      "t": "2026-06-14T06:13:04Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing to commit \u2014 no production/test code authored. Step halted at a sanctioned design-gap blocker (CLAUDE.md 'STOP and surface the gap'). 3 questions returned to orchestrator: (1) is AC5 outbound-only for v1? (2) production source of worker intercept-install inputs? (3) if full deploy->TLS-on-wire needs #178 routing, should AC5 prove the run_server composition-root wiring under Lima instead, with TLS-on-wire carried by the green mtls_outbound/inbound_enforce adapter gates?",
+      "t": "2026-06-14T06:13:12Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T07:56:25Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T09:06:26Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC5 e2e requires a production outbound-intercept-install surface (load+attach cgroup_connect4_mtls to the workload cgroup + program MTLS_REDIRECT_DEST[peer]) that no design pin (D-MTLS-14/15) specifies and that exists only as test-harness glue; authoring the AT through the real boot path is blocked until the surface is pinned. Surfaced to orchestrator.",
+      "t": "2026-06-14T09:06:54Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T09:50:52Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T09:57:23Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T09:58:37Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T10:09:01Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T10:14:48Z"
     }
   ],
   "reviews": [
@@ -202,6 +398,148 @@
         "f5_intercept_exemption": "PASS \u2014 outbound leg-B exempt via cgroup-subtree scoping; inbound leg-S exempt via MTLS_LEG_S_DIAL_MARK SO_MARK accepted first in nft prerouting; bypass is agent-private."
       },
       "summary": "BLOCKING composed walking-skeleton gate (F2) is sound and APPROVED to unblock subsequent slices. Design implemented verbatim against the 4 pinned MtlsEnforcement methods with zero invented surface; the D-MTLS-13 sockmap->write_all pivot is fully and cleanly executed with no orphaned apparatus; the Tier-3 test genuinely executes the composed bidirectional flow over real netns/veth/cgroup with a captured-bytes confidentiality oracle under normal and delayed timing. Only two stale comments (D1 production module doc still naming the retired sockmap mechanism; D2 test allow-reason wording) \u2014 both non-blocking; fold into the next touch of those files."
+    },
+    {
+      "sid": "03-01",
+      "artifact_type": "implementation",
+      "reviewer": "nw-software-crafter-reviewer (opus) + orchestrator verification",
+      "command": "/nw-review implementation step_id=03-01",
+      "reviewed_at": "2026-06-14T03:35:00Z",
+      "verdict": "NEEDS_REVISION",
+      "blocking_issues": [
+        {
+          "id": "B1",
+          "severity": "high",
+          "dimension": "test-isolation / CI flakiness (nextest serialization group)",
+          "location": ".config/nextest.toml:217-229 (test-groups.mtls-shared filter) vs crates/overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs:148",
+          "description": "The new Tier-3 test `inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server` is NOT listed in the `mtls-shared` nextest test-group (max-threads=1). That group's profile.default.overrides filter is an exact-name allow-list of only the three prior mtls Tier-3 tests (composed_bidirectional_proxy_walking_skeleton_no_rst / agent_handshake_presents_held_svid_client_and_server_roles / outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire); the inbound test is unassigned, so nextest may schedule it concurrently with the other three. All four contend on the process-global resources the group's own comment (nextest.toml:201-216) enumerates: the shared cgroup_connect4_mtls BPF object, the process-global MTLS_REDIRECT_DEST map, the bpffs pin, and FIXED loopback constants INCLUDING 'the inbound VIRT addr', plus the leg-S nft-TPROXY + ip-rule/route table 100. That comment records adding the THIRD test (02-03) made the latent race 'fire deterministically'. The GREEN event achieved green only via a manual `--test-threads=1`; the CI `integration` job runs through the nextest test-groups, NOT a global single-thread, so the documented cross-process race ('leg-F accept ... intercept must deliver' failures) will recur in CI. Orchestrator-verified independently: `grep -c inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server .config/nextest.toml` = 0.",
+          "fix": "Append `| test(inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server)` to the profile.default.overrides filter at nextest.toml:220-229 so all four mtls Tier-3 tests share the max-threads=1 group. Land it in the 03-01 commit (in-scope: the test was added by this step). Confirm the four-test suite stays green under plain `cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --features integration-tests` (no manual --test-threads=1)."
+        }
+      ],
+      "non_blocking_findings": [
+        {
+          "id": "Q1",
+          "severity": "medium",
+          "dimension": "deferral honesty (forward-pointer precision; CLAUDE.md 'Deferrals require GitHub issues')",
+          "location": "crates/overdrive-dataplane/src/mtls/inbound.rs:91-98 (server_dial_addr const-fn identity passthrough; '#178-adjacent')",
+          "description": "server_dial_addr is a `const fn ... { orig_dst }` identity passthrough \u2014 correct walking-skeleton seam for THIS item (03-01's criteria are the deliver mechanism + SVID selection, NOT the orig-dst->server-listener routing map; 05-01 explicitly owns 'the adapter dials orig-dst verbatim'). NOT a stub masquerading as done. BUT the '#178-adjacent' phrasing is hedged: per docs/feature/.../design/wave-decisions.md and upstream-changes.md, #178 is the INTENDED-PEER-PINNING (east-west SPIFFE-ID resolution / expected-destination SAN-match) upgrade \u2014 a DIFFERENT concern from the orig-dst->server-listener ROUTING map. The '-adjacent' qualifier admits the imperfect fit; this risks the 'hand-wavy forward pointer' CLAUDE.md forbids.",
+          "fix": "Tighten inbound.rs:94 to cite the issue that actually owns the orig-dst->server-listener routing map (verify scope via `gh issue view <N> --comments`). If #178 covers only intended-peer-pinning, point at the 05-01-owning issue instead, or surface a new tracked issue to the user. Not blocking 03-01 (05-01 owns the productionisation in the roadmap)."
+        },
+        {
+          "id": "S1",
+          "severity": "low",
+          "dimension": "roadmap accuracy (will mislead the 04-01 crafter)",
+          "location": "roadmap.json 04-01 test_files names crates/overdrive-sim/tests/integration/mtls_enforcement_equivalence.rs; actual file is crates/overdrive-sim/tests/acceptance/mtls_enforcement_equivalence.rs",
+          "description": "The DST equivalence harness lives under tests/acceptance/ (correct \u2014 default-lane PBT, not real-infra integration), but roadmap 04-01 names tests/integration/. Not a 03-01 defect (the harness pre-exists; 03-01 only references it), but 04-01 is told to EXTEND this harness with fail-closed/limit-trip branches and will be misled to the wrong path.",
+          "fix": "When 04-01 is dispatched, correct its roadmap test_files path to tests/acceptance/ so a duplicate file is not created at the wrong location."
+        },
+        {
+          "id": "N1",
+          "severity": "low",
+          "dimension": "stale comment (inherited from 01-01, not introduced here)",
+          "location": "crates/overdrive-dataplane/tests/integration/helpers/mtls_netns_topology.rs:30-31",
+          "description": "Helper header still says 'the test SKIPs rather than failing' on TopologyError::Unsupported, but the inbound test correctly PANICS loud (mtls_inbound_enforce.rs:155-163), which is the right behaviour (defeats the --no-run/skip-green hole per the project memory). Pre-existing doc drift from 01-01, not introduced by 03-01.",
+          "fix": "Fold the doc fix into the next touch of the helper; align the header to the fail-loud-on-Unsupported contract."
+        },
+        {
+          "id": "N2",
+          "severity": "info",
+          "dimension": "execution-log integrity (benign)",
+          "location": "execution-log.json events for sid 03-01 (detailed PREPARE/RED_ACCEPTANCE/RED_UNIT/GREEN/COMMIT block followed by a terse RED_ACCEPTANCE/GREEN/COMMIT PASS triple with identical timestamps)",
+          "description": "Duplicate 03-01 phase entries \u2014 a re-emission (likely the DES phase-logger replaying the 3-phase canon over the legacy 5-phase entries). No contradictory or fabricated outcomes; the detailed block is the load-bearing record and is internally consistent with commit 944bfda6. Benign.",
+          "fix": "No action required for the work; optionally note to whoever maintains the log shape."
+        },
+        {
+          "id": "P1",
+          "severity": "praise",
+          "dimension": "test integrity (genuine Tier-3 observability)",
+          "location": "crates/overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs (all 5 ACs)",
+          "description": "Every one of the 5 ACs maps to a real kernel/subprocess observable, never adapter bookkeeping: AC1 server SPIFFE-SAN from the real handshake leaf; AC2 kTLS-RX via real `ss -tie rxconf:sw`; AC3 byte-exact plaintext from the server subprocess's real recv (exit-code oracle) + 0x17-only / cleartext-hits=0 from a real AF_PACKET capture; AC4 agent-light via real `strace` splice/ppoll with a sophisticated splice-source-fd isolation guard against false positives; AC5 liveness Running->Gone through the driving port. The litmus docstring states what reddens if the deliver-splice wiring is deleted \u2014 a genuine deletion-test framing.",
+          "fix": ""
+        },
+        {
+          "id": "P2",
+          "severity": "praise",
+          "dimension": "design fidelity (central adjudication)",
+          "location": "crates/overdrive-dataplane/src/mtls/mod.rs:164-169,582-628; crates/overdrive-core/src/traits/mtls_enforcement.rs; wave-decisions.md SD-1(a)",
+          "description": "'No production change' is HONEST. orig-dst->alloc resolution is upstream of the adapter BY DESIGN (SD-1(a): the worker produces InterceptedConnection{fd,routed,alloc}; the contract docstring says alloc is 'selected by Routed::Inbound{orig_dst}->AllocationId' by the caller). The adapter's correct job \u2014 alloc->SVID via the identity port (svid_or_fail -> identity.svid_for) \u2014 landed at 01-01 and is exercised here. The roadmap phrasing telescoped a cross-layer responsibility. API surface is verbatim-to-design: the MtlsEnforcement trait stays 4-method; enforce_inbound/enforce_outbound are PRIVATE delegates of the single public enforce ('no enforce_inbound' constrained the port surface, which is honoured). DST Inbound-equivalence is real and drives both directions through Established->Running->teardown->Gone; SimMtlsEnforcement is genuinely direction-agnostic with no production code shaped by the sim. Mutation vacuous-pass is correct (orchestrator-verified: 944bfda6 = exactly 2 files, test + tests/integration.rs wire, zero mutable default-lane production source).",
+          "fix": ""
+        }
+      ],
+      "summary": "NEEDS_REVISION on one blocking, in-scope, orchestrator-verified defect: the new inbound Tier-3 test is missing from the `mtls-shared` nextest serialization group (max-threads=1), so CI \u2014 which relies on the group, not the crafter's manual --test-threads=1 \u2014 will schedule it concurrently with the other three mtls Tier-3 tests and re-fire the documented cross-process race over shared TPROXY/BPF/loopback global state. One-line fix (append the test() predicate at nextest.toml:220-229), must land in the 03-01 commit. Everything else is sound and was independently verified: the 'no production change' claim is honest (SVID-via-identity-port landed at 01-01; orig-dst->alloc is the worker's job by SD-1(a)), no invented API surface (4-method trait intact; enforce_inbound/outbound are private delegates), the Tier-3 test asserts genuine kernel/subprocess observables for all 5 ACs with no theater, the DST Inbound-equivalence is real and direction-agnostic, and the mutation vacuous-pass holds (commit is test-only). Non-blocking: tighten the '#178-adjacent' forward pointer (Q1), correct the 04-01 roadmap equivalence-harness path when 04-01 is dispatched (S1), fold two stale comments (N1) and note the benign duplicate log block (N2)."
+    },
+    {
+      "sid": "04-01",
+      "artifact_type": "implementation",
+      "reviewer": "nw-software-crafter-reviewer (opus) + orchestrator verification",
+      "command": "/nw-review implementation step_id=04-01",
+      "reviewed_at": "2026-06-14T05:15:00Z",
+      "verdict": "APPROVED",
+      "blocking_issues": [],
+      "non_blocking_findings": [
+        {
+          "id": "Q1",
+          "severity": "medium",
+          "dimension": "completeness / security negative-proof coverage (F5 second negative is doc-only, not test-asserted)",
+          "location": "crates/overdrive-dataplane/tests/integration/mtls_guardrails.rs:32-39 (AC5 docstring) vs the AC5 test body :391-412",
+          "description": "Roadmap criterion 5 names TWO F5 negatives: (a) the agent's peer-facing dial is NOT re-intercepted (no recursion); (b) a workload that sets the bypass on its OWN socket is STILL intercepted (agent-private). The test body asserts ONLY (a) -- a happy outbound enforce reaching Established proves the agent's leg-B dial was not re-intercepted (mtls_guardrails.rs:391-412). Negative (b) appears only in the AC5 docstring (:34-36); NO test assertion exercises it (orchestrator-verified: grep of the AC5 body finds the no-recursion assertion at :412 and no self-exempt assertion). This is NOT theater -- the exemption is STRUCTURAL: cgroup_connect4_mtls attaches to the WORKLOAD cgroup subtree, not the agent's, so there is no per-socket bypass knob a workload could set; the workload cannot move itself out of its own cgroup. Negative (b) is therefore structurally unrepresentable as a runtime assertion at the 04-01 adapter boundary (enforce is handed an already-accepted leg; the intercept-INSTALL that scopes the cgroup attach is explicitly 05-01 scope per roadmap 05-01 implementation_notes 'the F5 NEGATIVE proofs ... are 04-01 scope -- only the mechanism + the install land [in 05-01]'). The honest state: negative (a) is asserted; negative (b) is guaranteed by the cgroup-attach boundary (proven structurally at 01-01, f5_intercept_exemption PASS) and only becomes an end-to-end runtime negative once 05-01 wires the production install. The gap is the docstring claiming AC5 covers both negatives as if both were test-asserted.",
+          "fix": "Either (1) soften the AC5 docstring (:32-39) to state explicitly that negative (b) is structurally guaranteed by the workload-subtree cgroup attach boundary (not a runtime assertion at this tier) and is exercised end-to-end at 05-01 when the production intercept-install lands; OR (2) add the runtime self-exempt negative to 05-01's mtls_production_activation.rs (a workload attempting any bypass on its own socket is still routed through the agent). Recommend (1) for 04-01 (one-line doc honesty) + ensure 05-01 carries the runtime (b) negative. Non-blocking: the security property holds structurally; the finding is doc-claim-vs-test-coverage precision, the same 'don't call it proven until it is' discipline the #178 gating already honours."
+        },
+        {
+          "id": "Q2",
+          "severity": "low",
+          "dimension": "doc precision (AC2 'distinct reason' is distinct STRINGS within one variant, not distinct variants)",
+          "location": "crates/overdrive-core/src/traits/mtls_enforcement.rs:458 (PeerVerificationFailed) + crates/overdrive-dataplane/tests/integration/mtls_guardrails.rs:336-384",
+          "description": "Roadmap criterion 2 says inbound nocert/wrongca 'each reject with their DISTINCT reason'. The implementation maps BOTH to MtlsEnforcementError::PeerVerificationFailed { reason }, distinguished by the reason STRING ('peer sent no certificates' vs the untrusted-CA chain failure), and the test asserts assert_ne! on the two reason strings (:382-384) plus server_bytes==0 for both. This is faithful to findings-inbound-intercept.md sec4 (distinct reason strings under one fail-closed class) and is NOT a catch-all collapse -- the assert_ne! proves the chain was genuinely evaluated (a constant/identical reason would redden it), so the cause-distinct intent is preserved. The nuance worth recording: 'distinct reason' is satisfied at the string level, not the enum-variant level; both are PeerVerificationFailed (orchestrator-verified: the enum at mtls_enforcement.rs:427-530 has distinct variants AbsentSvid/AbsentBundle/HandshakeFailed/PeerVerificationFailed/PeerIdentityMismatch/BufferLimitExceeded/HandshakeTimeout/InFlightLimitExceeded/KtlsArmFailed/Probe/TeardownFailed -- no catch-all Internal(String) -- but nocert and wrongca share PeerVerificationFailed). This is defensible (rustls' nocert-vs-bad-signature distinction is not a stable typed surface to embed as separate variants). No change required; recorded so a future reader does not expect two separate variants.",
+          "fix": "None required. Optionally note in the AC2 test docstring that the distinct-reason guarantee is at the reason-string level within PeerVerificationFailed (the cause-distinct contract is honoured via assert_ne!, not via two enum variants), so the wording matches the implementation shape."
+        },
+        {
+          "id": "P1",
+          "severity": "praise",
+          "dimension": "design fidelity (zero invented API surface on a security-critical contract)",
+          "location": "crates/overdrive-core/src/traits/mtls_enforcement.rs:553-814 + crates/overdrive-dataplane/src/mtls/mod.rs:159-214,597-620",
+          "description": "Orchestrator-verified: the MtlsEnforcement trait (mtls_enforcement.rs:553) exposes EXACTLY four public methods -- probe (:585), enforce (:736), liveness (:789), teardown (:814); the adapter's enforce_outbound (mod.rs:597) and enforce_inbound (mod.rs:620) are PRIVATE inherent methods (no pub), and there is no pump_once. Every MtlsEnforcementError variant traces to a named requirement (AbsentSvid/AbsentBundle fail-closed, PeerVerificationFailed authn, PeerIdentityMismatch reserved-for-#178, BufferLimitExceeded/HandshakeTimeout/InFlightLimitExceeded F4, KtlsArmFailed/Probe/TeardownFailed residual) -- no catch-all Internal(String). PumpLiveness is exactly Running/Stalled{since}/Gone. expected_peer stays Option<SpiffeId>==None in v1 and the contract docstring states verbatim the case is unreachable in v1. This is exactly the CLAUDE.md 'implement to the design, never invent API surface' discipline the feature's #1 rule demands, on the slice where a divergent contract would be most dangerous.",
+          "fix": ""
+        },
+        {
+          "id": "P2",
+          "severity": "praise",
+          "dimension": "mutation-grade boundary unit tests (the < vs <= teeth)",
+          "location": "crates/overdrive-dataplane/src/mtls/limits.rs:147-259 + crates/overdrive-dataplane/src/mtls/supervision.rs:62-143",
+          "description": "Orchestrator-verified: the F4/F7 trip predicates and the F6 derive_liveness transition are extracted as PURE functions and pinned with boundary unit tests that assert the EXACT threshold AND name the mutant each assertion kills: inflight_at_ceiling (current >= max, test asserting 127 admits the 128th / 128 refuses the 129th, 'kills >= -> >'); handshake_expired (elapsed.as_nanos() >= deadline.as_nanos(), Duration::from_secs(5) exactly-at-deadline trips); stall_elapsed (no_progress >= deadline, Duration::from_secs(30)); and the InFlightLedger Drop lifecycle (the second-claim-refused-after-one-release assertion that kills the key-removal mutant). The execution-log's claim that the mutation gate drove these in (RED_UNIT SKIPPED -> superseded EXECUTED, 21/21 caught) is corroborated by the code -- the tests genuinely pin the boundary, not field presence. This is the difference between 'a limit exists' and 'the limit trips at exactly the right byte/connection/second', which is the whole point of criteria 3/8.",
+          "fix": ""
+        },
+        {
+          "id": "P3",
+          "severity": "praise",
+          "dimension": "persist-inputs-not-derived-state + production-not-shaped-by-simulation",
+          "location": "crates/overdrive-dataplane/src/mtls/supervision.rs:38-60 + crates/overdrive-worker/src/mtls_supervisor.rs:36-44 + crates/overdrive-sim/src/adapters/mtls_enforcement.rs",
+          "description": "derive_liveness recomputes the Stalled verdict every call from INPUTS (last_progress + now + the live pump_stall_deadline policy) and carries Stalled{since: last_progress} -- the last-progress INSTANT, an input, never a persisted next_stall_at deadline. This is the development.md 'persist inputs, not derived state' rule applied correctly to a liveness derivation. The worker's MtlsSupervisor holds the injected Clock with an honest #[allow(dead_code, reason=...)] (held for cadence/telemetry; the stall DECISION reads only the adapter-derived variant, never Instant::now()). The SimMtlsEnforcement scripts the OUTCOME (sim-only test affordances, not production contract surface) while HostMtlsEnforcement trips the SAME errors from REAL buffer overflow / handshake deadline / frozen progress -- production carries NO sim-shaped contortion (real InFlightLedger::try_claim with a real RAII guard, the real prearm capture loop, the real derive_liveness over real pump atomics). The equivalence is on the outcome, not the mechanism.",
+          "fix": ""
+        },
+        {
+          "id": "P4",
+          "severity": "praise",
+          "dimension": "prior-review learning (01-01 D1/D3 forward-as-splice doc drift + 03-01 B1 nextest-group + S1 path)",
+          "location": "crates/overdrive-dataplane/src/mtls/mod.rs:12-27 + .config/nextest.toml:228 + crates/overdrive-sim/tests/acceptance/mtls_enforcement_equivalence.rs",
+          "description": "Orchestrator-verified: three prior-review findings were learned from. (1) The 01-01 D1/D3 forward-as-splice doc drift is gone: mtls/mod.rs:12-27 now describes the ASYMMETRIC write_all-COPY-into-kTLS-TX (forward/response) vs zero-copy-splice-out-of-kTLS-RX (return/deliver) model and explicitly notes 'a splice INTO a kTLS-TX socket loses records' + the retired sockmap forward path -- no remaining 'splice into TX' assertion. (2) The 03-01 B1 nextest-race is remediated: nextest.toml:228 lists guardrails_fail_closed_limits_supervision_exemption_authn_boundary in the mtls-shared max-threads=1 group, so the new Tier-3 guardrails test is serialized with the other three over the shared TPROXY/BPF/loopback global state. (3) The 03-01 S1 path correction was heeded: the DST equivalence harness was extended at tests/acceptance/ (the correct default-lane location), not duplicated at the wrong tests/integration/ path the roadmap originally named.",
+          "fix": ""
+        }
+      ],
+      "dimensions_verified": {
+        "design_fidelity_no_invented_api": "PASS (orchestrator-verified) -- the FROZEN MtlsEnforcement contract stays exactly probe/enforce/liveness/teardown (mtls_enforcement.rs:585/736/789/814); enforce_outbound/enforce_inbound are PRIVATE inherent delegates (mod.rs:597/620, no pub), NOT public methods, NO pump_once. Every MtlsEnforcementError variant + PumpLiveness::Stalled traces to a named F-requirement/ADR-0069 clause; no catch-all Internal(String). expected_peer stays None and PeerIdentityMismatch is reserved-but-never-produced in v1 per the contract docstring verbatim. 04-01 FINALISED the cause-distinct variants + Stalled (roadmap-sanctioned scope), inventing no surface to pass a test. This is the slice's #1 dimension and it holds.",
+        "fail_closed_cause_distinct": "PASS -- OUTBOUND: AbsentSvid vs AbsentBundle vs PeerVerificationFailed are DISTINCT variants, asserted at Tier-3 with the peer leg never armed. INBOUND: nocert vs wrongca both map to PeerVerificationFailed but the test asserts assert_ne! on the reason strings (mtls_guardrails.rs:382-384) AND server_bytes==0 for both -- the chain is genuinely evaluated, not collapsed to a catch-all (see Q2 for the variant-vs-string nuance). No cleartext / 0 bytes to the server on every fail-closed path.",
+        "resource_limits_concrete_values": "PASS (orchestrator-verified) -- the limits are asserted at their CONCRETE F7 values, not field existence: max_inflight_per_alloc==128 with the boundary test asserting 127 admits the 128th / 128 refuses the 129th (limits.rs:179-182, 'kills >= -> >'); handshake_deadline==5s and pump_stall_deadline==30s asserted as Duration values in the boundary tests (limits.rs:186-207); max_prearm_bytes==262144 with a REAL 256 KiB+1 overflow through a real socketpair tripping BufferLimitExceeded at exactly cap+1 (mtls_guardrails.rs:209-262). The pure predicates carry boundary unit tests naming the < / <= / >= / == mutant each kills.",
+        "pump_supervision_f6": "PASS -- derive_liveness is a PURE transition (supervision.rs:38-60) pinned by boundary unit tests, recomputing from INPUTS (last_progress + now + live policy) and carrying the last-progress INSTANT not a persisted deadline (persist-inputs rule honoured). The worker tears down ONLY Stalled -> Gone (no leak), leaves Running untouched (no false positive), emits mtls.pump.stalled + mtls.pump.teardown_on_stall -- proven via the worker acceptance test through the liveness port (mtls_supervisor_teardown_on_stall.rs). The 30s real-pump stall is correctly pinned at unit/acceptance tier (wall-clock budget) with the Tier-3 Gone-no-leak exercising the SAME teardown path -- honest tier allocation.",
+        "intercept_exemption_f5": "PARTIAL-PASS (non-blocking Q1) -- negative (a) no-recursion is ASSERTED at Tier-3 (a happy outbound enforce reaching Established proves the agent's leg-B dial was not re-intercepted, mtls_guardrails.rs:391-412). Negative (b) workload-cannot-self-exempt is STRUCTURALLY guaranteed (cgroup_connect4_mtls attaches to the workload subtree, not the agent's -- no per-socket bypass knob exists for a workload to set) and proven structurally at 01-01, but is NOT a runtime test assertion at 04-01 (the intercept-install that scopes the attach is 05-01 scope). The AC5 docstring claims both negatives as if both were test-asserted -- see Q1 for the doc-honesty fix + the recommendation that 05-01 carry the runtime (b) negative.",
+        "honest_authn_boundary_f1": "PASS (orchestrator-verified) -- v1 verifies chain-to-bundle ONLY in both directions; expected_peer stays None at every call site (mtls_guardrails.rs:159/179/246/291/308/409/505); SAN-match is NOT wired. PeerIdentityMismatch is present but the wrong-but-valid-peer negative test is #[ignore = \"gated on #178 supplying expected_peer\"] (mtls_guardrails.rs:691) with a RED-scaffold panic body. NOTHING (contract docstring mtls_enforcement.rs:69-76, test, or comment) calls the wrong-but-valid-peer case 'protected'. The #178 forward pointer is real and consistently cited.",
+        "out_of_scope_discipline": "PASS -- the proxy embeds NO policy engine and reads NO policy_verdicts (authorization is #27/#38, named in the contract as a SEPARATE subsystem the port MUST NOT duplicate). Operator-tunability of MtlsLimits (#230) is correctly NOT implemented -- limits are construction-time pinned. No GH issue was created by this slice. The #178/#27/#38 citations are honest forward pointers.",
+        "mutation_gate_80pct": "PASS (plausibility-assessed; cargo-mutants not re-run at review time) -- the execution-log claims 100% (21/21) after the RED_UNIT SKIPPED -> EXECUTED supersession. Reading the asserts: the limits.rs + supervision.rs boundary tests assert the EXACT < / <= / >= / == boundary AND the InFlightLedger Drop decrement (the second-claim-refused-after-one-release assertion kills the key-removal mutant), so the < vs <= / >= vs > / fn-body-to-Default mutants on 256KiB/128/5s/30s would demonstrably die. The claim is corroborated by the code, not merely asserted.",
+        "evidence_honesty": "PASS -- the Tier-3 guardrails test is a live #[tokio::test(multi_thread)] that PANICS (gate failure, NOT skip) on topology-unsupported, defeating the --no-run hole; it asserts REAL observables (error variants + concrete values from real enforce, server 0 bytes from a real subprocess recv, liveness Running/Gone through the port, distinct reason strings from a genuinely-evaluated chain). The only #[ignore] is the #178-gated PeerIdentityMismatch scaffold. The DST equivalence harness drives BOTH adapters through both directions + fail-closed + concrete-value limit trips + F6 stall -> teardown -> Gone. No testing theater, no fully-mocked SUT (Sim is a behavior-complete port-boundary fake), no fixture theater (production limits.rs/supervision.rs/mtls_supervisor.rs + contract all changed; 1776 lines / 16 files).",
+        "rust_discipline": "PASS (orchestrator-verified) -- no .expect()/.unwrap() in production library code (the only .expect() hits are inside #[cfg(test)] boundary tests, limits.rs:231-257). The in-flight ceiling is a claim-shaped counter with atomic check-and-act + RAII release (InFlightLedger::try_claim returns a guard whose Drop decrements). thiserror typed errors with cause-distinct variants. No clippy deferrals surfaced.",
+        "tdd_phase_and_test_integrity_g9": "PASS -- PREPARE/RED_ACCEPTANCE/GREEN/COMMIT EXECUTED PASS; RED_UNIT SKIPPED (NOT_APPLICABLE) then SUPERSEDED EXECUTED PASS when the mutation gate surfaced the need for boundary unit tests. The supersession ADDED tests (strengthening), never weakened/deleted/skipped an existing assertion -- no G9 violation. The supersession is honest: the boundary unit tests genuinely exist in limits.rs + supervision.rs as claimed. No escalation needed (the crafter strengthened rather than weakened)."
+      },
+      "summary": "APPROVED (reviewer opus + orchestrator independent verification of every load-bearing claim). On the security-critical slice where a divergent contract would be most dangerous, the implementation holds the #1 rule (CLAUDE.md 'implement to the design, never invent API surface') exactly: the MtlsEnforcement trait stays 4-method probe/enforce/liveness/teardown with enforce_outbound/inbound as PRIVATE delegates, every error variant + PumpLiveness::Stalled traces to a named requirement, no catch-all, expected_peer==None and PeerIdentityMismatch reserved-but-never-produced in v1 (the #178 gate honoured, nothing called 'protected'). Fail-closed is cause-distinct (AbsentSvid/AbsentBundle/PeerVerificationFailed distinct variants; nocert/wrongca distinct reason strings with assert_ne! + server 0 bytes). The F4/F7 limits trip at CONCRETE values (real 256 KiB+1 overflow -> BufferLimitExceeded; 128-real-concurrent-pre-arm 129th -> InFlightLimitExceeded) with mutation-grade boundary unit tests naming the </<=/>=/== mutant each kills (the RED_UNIT SKIPPED -> EXECUTED supersession is honest -- the tests exist, additive, no G9 violation). F6 supervision recomputes Stalled from inputs (persist-inputs rule), the worker tears down only Stalled -> Gone with no false positive and both telemetry events, production carries no sim-shaped contortion. The Tier-3 gate genuinely executes (panics-not-skips on unsupported, defeating the --no-run hole) and is correctly in the mtls-shared max-threads=1 nextest group (the 03-01 B1 remediation), and all three prior-review findings (01-01 forward-as-splice doc drift, 03-01 B1 group, 03-01 S1 path) were learned from. Two NON-blocking findings: Q1 -- the F5 SECOND negative (workload-cannot-self-exempt) is structurally guaranteed by the workload-subtree cgroup attach (no per-socket bypass knob exists) and proven structurally at 01-01, but is doc-claimed in the AC5 docstring as if test-asserted while only the no-recursion negative is asserted at 04-01 (the runtime self-exempt negative is only representable once 05-01 wires the production intercept-install); soften the docstring + ensure 05-01 carries the runtime (b) negative. Q2 -- 'distinct reason' for nocert/wrongca is satisfied at the reason-STRING level within one PeerVerificationFailed variant (defensible: rustls' distinction is not a stable typed surface), recorded so a future reader does not expect two variants. Neither blocks: both are doc-claim-vs-coverage precision, not a security or correctness defect. RECOMMENDATION: 04-01 is APPROVED to unblock 05-01; fold Q1 (docstring softening) into the next touch of mtls_guardrails.rs and ensure 05-01 carries the runtime self-exempt negative + the end-to-end external-validity gate."
     }
   ]
 }
