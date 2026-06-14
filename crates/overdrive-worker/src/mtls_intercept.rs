@@ -33,7 +33,6 @@
     reason = "raw libc syscall glue: struct-size -> socklen_t (compile-time constant) and AF_INET -> sa_family_t casts are FFI-width conversions on bounded values; cannot truncate or wrap. Mirrors the module-level allow on the sibling overdrive_dataplane::mtls adapter."
 )]
 
-use std::io::Write as _;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd, RawFd};
 use std::process::{Command, Stdio};
@@ -46,16 +45,32 @@ use overdrive_core::traits::mtls_enforcement::{InterceptedConnection, Routed};
 const IP_TRANSPARENT: libc::c_int = 19;
 
 /// The stable production nft table name for the inbound TPROXY intercept.
-/// Single table for the worker's inbound mTLS intercept; the guard's `Drop`
-/// removes it whole.
+///
+/// This table + its `prerouting` chain are SHARED node-global converge-on-boot
+/// infrastructure (kernel-canonical TPROXY / Cilium host-netns model — research
+/// `multi-workload-tproxy-interception-resource-model-research.md` F1/F5/F6/F7).
+/// The table is ensured idempotently (created-if-missing) and is NEVER torn
+/// down per-workload; each `install_inbound_tproxy` APPENDS one per-virt rule to
+/// the shared `prerouting` chain, and the guard's `Drop` removes ONLY that one
+/// rule by handle. Multiple concurrent inbound intercepts coexist in one chain.
 const NFT_TABLE: &str = "overdrive-mtls";
 
+/// The shared `prerouting` chain inside [`NFT_TABLE`] that holds the F5
+/// leg-S-dial exemption (once, at the head) followed by every per-virt TPROXY
+/// rule.
+const NFT_CHAIN: &str = "prerouting";
+
 /// The fwmark the TPROXY rule stamps and the `ip rule` companion matches so
-/// the redirected connection is routed via the `local` route table.
+/// the redirected connection is routed via the `local` route table. A SINGLE
+/// shared fwmark suffices for N destinations: TPROXY preserves daddr, so the
+/// agent recovers orig-dst per-flow via `getsockname` — there is nothing
+/// per-virt to distinguish in the routing layer (research caveat
+/// "single-fwmark sufficiency", F1/F5).
 const TPROXY_FWMARK: u32 = 0x1;
 
 /// The routing-policy table number the `ip rule fwmark` companion looks up
-/// and the `ip route local … table` companion populates.
+/// and the `ip route local … table` companion populates. Shared and fixed
+/// across all inbound intercepts (kernel-canonical table 100).
 const TPROXY_RT_TABLE: u32 = 100;
 
 /// Typed error surface for the worker's intercept-install + leg-acquire role.
@@ -186,12 +201,25 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
     }
 }
 
-/// Install the inbound nft-TPROXY prerouting intercept.
+/// Install the inbound nft-TPROXY prerouting intercept for ONE `virt`.
 ///
-/// Adds the `ip rule fwmark` / `ip route local … table` companions and
-/// redirects a connection aimed at `virt` to the agent's leg-C listener on
-/// `agent_port`, with the `MTLS_LEG_S_DIAL_MARK` exemption ordered first (F5
-/// inbound). Returns a guard whose `Drop` removes the rule/route/table.
+/// Appends exactly one per-virt TPROXY rule to a SHARED `prerouting` chain;
+/// the returned guard's `Drop` removes ONLY that rule by its kernel-assigned
+/// handle. The shared routing infrastructure — the `ip rule fwmark` policy
+/// rule, the `ip route local … table` loopback route, the nft table + chain,
+/// and the F5 `MTLS_LEG_S_DIAL_MARK` exemption at the chain head — is
+/// node-global converge-on-boot state ensured idempotently here (created
+/// once, NEVER torn down per-workload) so multiple concurrent inbound
+/// intercepts coexist without razing one another (kernel-canonical TPROXY /
+/// Cilium host-netns model — research
+/// `multi-workload-tproxy-interception-resource-model-research.md` F1/F5/F6/F7;
+/// converge-on-boot Bar-1 per `.claude/rules/reconcilers.md`).
+///
+/// Redirects a connection aimed at `virt` to the agent's leg-C listener on
+/// `agent_port`. The `MTLS_LEG_S_DIAL_MARK` exemption is ordered FIRST in the
+/// chain (F5 inbound) so the agent's own marked leg-S dial is accepted before
+/// any per-virt TPROXY rule can match it (otherwise the dial recurses back
+/// onto leg C).
 ///
 /// Productionises the PRODUCTION HALF of
 /// `mtls_netns_topology.rs::install_tproxy` ONLY — the GAP-3 netns
@@ -200,80 +228,273 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
 ///
 /// # Errors
 ///
-/// Returns [`InterceptError::TproxyInstall`] if any of the `ip rule add`,
-/// `ip route add`, or `nft -f` commands fails.
+/// Returns [`InterceptError::TproxyInstall`] if ensuring the shared infra
+/// (`ip rule`, `ip route`, nft table/chain/exemption) fails for a reason other
+/// than "already present", if appending the per-virt TPROXY rule fails, or if
+/// the rule's handle cannot be recovered from the post-append chain dump.
 pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<TproxyInterceptGuard> {
-    // Idempotent pre-clean of the GLOBAL rule/route/table a prior aborted run
-    // (SIGKILL between install and Drop) may have leaked — global inbound
-    // state is NOT netns-scoped and survives. Mirrors the reference
-    // `preclean_global_inbound_state` discipline.
-    preclean_global_inbound_state();
+    // (1) Ensure the SHARED, node-global routing infra idempotently. These are
+    // add-if-missing converges (NOT a destructive preclean): a pre-existing
+    // shared rule/route/table is the success case, left untouched. None of
+    // these is removed on per-workload Drop.
+    ensure_shared_routing_infra()?;
 
-    // The reverse-cleanup argv set the guard runs on Drop, populated as each
-    // forward step lands so a mid-install failure still tears down what was
-    // already added.
-    let mut cleanup: Vec<Vec<String>> = Vec::new();
-
-    // ip rule: route fwmark-stamped (redirected) packets via the local table.
-    let fwmark = TPROXY_FWMARK.to_string();
-    let rt_table = TPROXY_RT_TABLE.to_string();
-    run_ip(&["rule", "add", "fwmark", &fwmark, "lookup", &rt_table])?;
-    cleanup.push(svec(&["ip", "rule", "del", "fwmark", &fwmark, "lookup", &rt_table]));
-
-    // ip route: the local route table sends the redirected packet to a local
-    // socket (leg C) rather than forwarding it.
-    run_ip(&["route", "add", "local", "0.0.0.0/0", "dev", "lo", "table", &rt_table])?;
-    cleanup.push(svec(&[
+    // (2) Append exactly ONE per-virt TPROXY rule to the shared chain, after
+    // the F5 exemption. TPROXY preserves daddr → the agent recovers orig-dst
+    // per-flow via getsockname, so a single shared fwmark routes every virt.
+    run_nft(&[
+        "add",
+        "rule",
         "ip",
-        "route",
-        "del",
-        "local",
-        "0.0.0.0/0",
-        "dev",
-        "lo",
-        "table",
-        &rt_table,
-    ]));
+        NFT_TABLE,
+        NFT_CHAIN,
+        "ip",
+        "daddr",
+        &virt.ip().to_string(),
+        "tcp",
+        "dport",
+        &virt.port().to_string(),
+        "tproxy",
+        "to",
+        &format!("127.0.0.1:{agent_port}"),
+        "meta",
+        "mark",
+        "set",
+        &format!("{TPROXY_FWMARK:#x}"),
+        "accept",
+    ])?;
 
-    // nft prerouting: the leg-S-dial-mark exemption (F5 inbound) MUST precede
-    // the TPROXY rule so the agent's own marked dial is accepted before the
-    // redirect can match it (otherwise the dial recurses back onto leg C).
-    let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
-    let nft_prog = format!(
-        "table ip {table} {{\n\
-           chain prerouting {{\n\
-             type filter hook prerouting priority mangle; policy accept;\n\
-             meta mark {leg_s_mark} accept;\n\
-             ip daddr {vip} tcp dport {vport} tproxy to 127.0.0.1:{aport} meta mark set {mark} accept;\n\
-           }}\n\
-         }}\n",
-        table = NFT_TABLE,
-        vip = virt.ip(),
-        vport = virt.port(),
-        aport = agent_port,
-        mark = TPROXY_FWMARK,
-    );
-    // Push the table cleanup BEFORE applying so a failed `nft -f` (which may
-    // have partially created the table) is still torn down by the guard.
-    cleanup.push(svec(&["nft", "delete", "table", "ip", NFT_TABLE]));
-    let guard = TproxyInterceptGuard { cleanup };
-    apply_nft(&nft_prog)?;
-    Ok(guard)
+    // (3) Recover the kernel-assigned handle of the rule we just appended so
+    // Drop can delete EXACTLY that rule (siblings, the exemption, and the
+    // shared infra all untouched) — research F7c, the nft-canonical per-rule
+    // teardown.
+    let handle = find_virt_rule_handle(virt, agent_port)?;
+    Ok(TproxyInterceptGuard { handle })
 }
 
-/// RAII guard removing the nft-TPROXY table + `ip rule` / `ip route` on `Drop`.
+/// Ensure the SHARED node-global TPROXY routing infrastructure exists,
+/// idempotently (add-if-missing). Converge-on-boot Bar-1: a pre-existing
+/// component is the success case, not an error — so two concurrent installs
+/// (and a re-install after a prior run) both leave exactly one of each shared
+/// resource, never a stacked pile.
+///
+/// Components (all node-global, none removed on per-workload Drop):
+///   - `ip rule fwmark 0x1 lookup 100` — routes fwmark-stamped packets via the
+///     local table.
+///   - `ip route local 0.0.0.0/0 dev lo table 100` — delivers them to a local
+///     socket (leg C) instead of forwarding.
+///   - nft table `overdrive-mtls` + `prerouting` chain.
+///   - the F5 `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption, inserted at
+///     the chain HEAD exactly once (must precede all per-virt tproxy rules).
+fn ensure_shared_routing_infra() -> Result<()> {
+    let fwmark = format!("{TPROXY_FWMARK:#x}");
+    let rt_table = TPROXY_RT_TABLE.to_string();
+
+    // ip rule: add only if not already present (add-if-missing — `ip rule add`
+    // would stack a duplicate on every install otherwise).
+    if !ip_rule_fwmark_present(TPROXY_FWMARK, TPROXY_RT_TABLE) {
+        run_ip(&["rule", "add", "fwmark", &fwmark, "lookup", &rt_table])?;
+    }
+
+    // ip route: `ip route add` returns EEXIST (exit 2) when already present —
+    // tolerate that one case, propagate any other failure.
+    ensure_ip_route_local()?;
+
+    // nft table + chain: `nft add table` / `nft add chain` are idempotent
+    // create-if-missing for table/chain, so re-running is a no-op.
+    run_nft(&["add", "table", "ip", NFT_TABLE])?;
+    run_nft(&[
+        "add",
+        "chain",
+        "ip",
+        NFT_TABLE,
+        NFT_CHAIN,
+        "{",
+        "type",
+        "filter",
+        "hook",
+        "prerouting",
+        "priority",
+        "mangle;",
+        "policy",
+        "accept;",
+        "}",
+    ])?;
+
+    // F5 exemption at the chain head — insert ONCE. `nft insert` prepends, so
+    // guarding against a duplicate add keeps it exactly once at the head ahead
+    // of every per-virt tproxy rule.
+    if !chain_has_leg_s_exemption()? {
+        let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+        run_nft(&[
+            "insert",
+            "rule",
+            "ip",
+            NFT_TABLE,
+            NFT_CHAIN,
+            "meta",
+            "mark",
+            &format!("{leg_s_mark:#x}"),
+            "accept",
+        ])?;
+    }
+    Ok(())
+}
+
+/// `ip route add local 0.0.0.0/0 dev lo table 100`, tolerating an EEXIST
+/// (`ip` exits 2, stderr "File exists") as the already-converged success case.
+fn ensure_ip_route_local() -> Result<()> {
+    let rt_table = TPROXY_RT_TABLE.to_string();
+    let out = Command::new("ip")
+        .args(["route", "add", "local", "0.0.0.0/0", "dev", "lo", "table", &rt_table])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| InterceptError::TproxyInstall {
+            reason: format!("spawn ip route add: {e}"),
+        })?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("File exists") {
+        // Already converged — the shared route is node-global and persists.
+        return Ok(());
+    }
+    Err(InterceptError::TproxyInstall {
+        reason: format!(
+            "ip route add local … table {rt_table} exited {:?}: {}",
+            out.status.code(),
+            stderr.trim()
+        ),
+    })
+}
+
+/// True iff an `ip rule` line for `fwmark <mark>` lookup `<table>` already
+/// exists — used so [`ensure_shared_routing_infra`] adds the rule only when
+/// missing (idempotent ensure; `ip rule add` would otherwise stack a
+/// duplicate per install).
+fn ip_rule_fwmark_present(mark: u32, table: u32) -> bool {
+    let Ok(out) = Command::new("ip")
+        .args(["rule", "show"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let needle_hex = format!("fwmark {mark:#x}");
+    let needle_dec = format!("fwmark {mark}");
+    let lookup = format!("lookup {table}");
+    text.lines()
+        .any(|l| (l.contains(&needle_hex) || l.contains(&needle_dec)) && l.contains(&lookup))
+}
+
+/// True iff the shared `prerouting` chain already carries the F5
+/// `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption — used so the exemption
+/// is inserted exactly once at the chain head (otherwise every install would
+/// prepend another duplicate).
+fn chain_has_leg_s_exemption() -> Result<bool> {
+    Ok(dump_has_leg_s_exemption(&list_chain()?))
+}
+
+/// True iff a `nft -a list chain` dump carries a `meta mark
+/// <MTLS_LEG_S_DIAL_MARK> accept` line. nft renders the mark as a zero-padded
+/// 8-hex-digit value (e.g. `0x00000002`), NOT `0x2` or decimal `2`, so the
+/// match must canonicalise to nft's rendering — matching `0x2` would never
+/// fire and the exemption would be re-inserted on every install. Pure so a
+/// unit test can pin the parse against captured nft output.
+fn dump_has_leg_s_exemption(dump: &str) -> bool {
+    let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+    // nft's canonical rendering: `meta mark 0x00000002 accept`.
+    let nft_rendered = format!("meta mark {leg_s_mark:#010x} accept");
+    dump.lines().any(|l| l.trim().contains(&nft_rendered))
+}
+
+/// `nft -a list chain ip <table> <chain>` (with handles). Returns the dump on
+/// success; maps a spawn / non-zero exit to [`InterceptError::TproxyInstall`].
+fn list_chain() -> Result<String> {
+    let out = Command::new("nft")
+        .args(["-a", "list", "chain", "ip", NFT_TABLE, NFT_CHAIN])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| InterceptError::TproxyInstall {
+            reason: format!("spawn nft list chain: {e}"),
+        })?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(InterceptError::TproxyInstall {
+            reason: format!(
+                "nft -a list chain ip {NFT_TABLE} {NFT_CHAIN} exited {:?}: {}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        })
+    }
+}
+
+/// Recover this virt's TPROXY rule handle from the `nft -a list chain` dump.
+///
+/// Parses the kernel-assigned handle of the per-virt rule matching `virt`'s
+/// daddr/dport and the agent redirect target. nft renders an appended rule
+/// with a trailing `# handle <N>`; we match the line carrying this virt's
+/// `ip daddr <vip>` + `tcp dport <vport>` + the
+/// `tproxy to 127.0.0.1:<agent_port>` redirect so two installs for distinct
+/// virts capture distinct handles.
+fn find_virt_rule_handle(virt: SocketAddrV4, agent_port: u16) -> Result<u64> {
+    let dump = list_chain()?;
+    let vip = virt.ip().to_string();
+    let vport = virt.port().to_string();
+    let daddr = format!("ip daddr {vip}");
+    let dport = format!("tcp dport {vport}");
+    let redirect = format!("tproxy to 127.0.0.1:{agent_port}");
+    for line in dump.lines() {
+        if line.contains(&daddr)
+            && line.contains(&dport)
+            && line.contains(&redirect)
+            && line.contains("# handle ")
+            && let Some(handle) = parse_handle(line)
+        {
+            return Ok(handle);
+        }
+    }
+    Err(InterceptError::TproxyInstall {
+        reason: format!(
+            "could not recover nft rule handle for virt {vip}:{vport} → 127.0.0.1:{agent_port} in chain dump:\n{dump}"
+        ),
+    })
+}
+
+/// Extract the `<N>` from a trailing `# handle <N>` on an `nft -a` rule line.
+fn parse_handle(line: &str) -> Option<u64> {
+    let (_, after) = line.rsplit_once("# handle ")?;
+    after.split_whitespace().next()?.parse::<u64>().ok()
+}
+
+/// RAII guard removing ONLY this virt's per-virt TPROXY rule on `Drop`.
+///
+/// Deletes the rule by its kernel-assigned handle. The shared routing infra —
+/// `ip rule`, `ip route`, nft table/chain, and the F5 exemption — is
+/// node-global and is NOT removed here; sibling intercepts' rules are
+/// untouched.
 pub struct TproxyInterceptGuard {
-    /// The reverse-cleanup argv set, run best-effort on `Drop`.
-    cleanup: Vec<Vec<String>>,
+    /// The kernel-assigned handle of this virt's TPROXY rule in the shared
+    /// `prerouting` chain. Drop deletes exactly this one rule.
+    handle: u64,
 }
 
 impl Drop for TproxyInterceptGuard {
     fn drop(&mut self) {
-        // Run in reverse-construction order: nft table first, then route,
-        // then rule.
-        for argv in self.cleanup.iter().rev() {
-            let _ = run_best_effort(argv);
-        }
+        // Delete ONLY this virt's rule by handle (research F7c). `.output()`
+        // (not `.status()`) drains the child reliably under the nextest
+        // harness — see the D5 root-cause note on `run_best_effort`.
+        let handle = self.handle.to_string();
+        let _ = run_best_effort(&svec(&[
+            "nft", "delete", "rule", "ip", NFT_TABLE, NFT_CHAIN, "handle", &handle,
+        ]));
     }
 }
 
@@ -390,70 +611,133 @@ fn run_ip(args: &[&str]) -> Result<()> {
     }
 }
 
-/// Apply an nft program via `nft -f -`; map a non-zero exit (or spawn / write
-/// failure) to [`InterceptError::TproxyInstall`].
-fn apply_nft(prog: &str) -> Result<()> {
-    let mut child = Command::new("nft")
-        .arg("-f")
-        .arg("-")
-        .stdin(Stdio::piped())
+/// Run `nft <args>`; map a non-zero exit (or spawn failure) to
+/// [`InterceptError::TproxyInstall`] with the command + stderr as the cause.
+///
+/// Used for the idempotent `add table` / `add chain` / `insert rule` /
+/// `add rule` operations. `add table`/`add chain` are create-if-missing
+/// (re-running is a no-op); the callers guard `add rule`/`insert rule` against
+/// duplicates via the chain dump.
+fn run_nft(args: &[&str]) -> Result<()> {
+    let out = Command::new("nft")
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| InterceptError::TproxyInstall { reason: format!("nft not available: {e}") })?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| InterceptError::TproxyInstall { reason: "nft stdin missing".into() })?
-        .write_all(prog.as_bytes())
-        .map_err(|e| InterceptError::TproxyInstall { reason: format!("nft write: {e}") })?;
-    let out = child
-        .wait_with_output()
-        .map_err(|e| InterceptError::TproxyInstall { reason: format!("nft wait: {e}") })?;
+        .output()
+        .map_err(|e| InterceptError::TproxyInstall {
+            reason: format!("spawn nft {args:?}: {e}"),
+        })?;
     if out.status.success() {
         Ok(())
     } else {
         Err(InterceptError::TproxyInstall {
-            reason: format!("nft -f failed: {}", String::from_utf8_lossy(&out.stderr).trim()),
+            reason: format!(
+                "nft {args:?} exited {:?}: {}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
         })
     }
 }
 
-/// Idempotent pre-clean of the GLOBAL inbound state (fwmark rule, local
-/// route, nft table) a prior aborted run may have leaked. Best-effort: a
-/// failing command is the "nothing to clean" signal.
-fn preclean_global_inbound_state() {
-    let fwmark = TPROXY_FWMARK.to_string();
-    let rt_table = TPROXY_RT_TABLE.to_string();
-    // Up to 64 stacked fwmark rules from repeated aborted runs.
-    for _ in 0..64 {
-        let status =
-            run_best_effort(&svec(&["ip", "rule", "del", "fwmark", &fwmark, "lookup", &rt_table]));
-        if !matches!(status, Ok(s) if s.success()) {
-            break;
-        }
-    }
-    let _ = run_best_effort(&svec(&[
-        "ip",
-        "route",
-        "del",
-        "local",
-        "0.0.0.0/0",
-        "dev",
-        "lo",
-        "table",
-        &rt_table,
-    ]));
-    let _ = run_best_effort(&svec(&["nft", "delete", "table", "ip", NFT_TABLE]));
-}
-
-/// Best-effort `Command` run used by cleanup paths — a missing rule / route /
-/// table is the "already gone" signal, not an error.
-fn run_best_effort(argv: &[String]) -> std::io::Result<std::process::ExitStatus> {
-    Command::new(&argv[0]).args(&argv[1..]).stdout(Stdio::null()).stderr(Stdio::null()).status()
+/// Best-effort `Command` run used by the guard's per-rule teardown.
+///
+/// A missing rule is the "already gone" signal, not an error.
+/// Uses `.output()` (not `.status()`): D5 root-cause — under the nextest test
+/// harness a bare `Command::status()` (which calls `wait()` directly on the
+/// child) can race the harness's own child handling and report a spurious
+/// non-success / `ECHILD`, whereas `.output()` (→ `wait_with_output()`) reads
+/// the child's piped stdout/stderr to EOF before reaping, which drains
+/// reliably. The old drain loop that broke on the first non-success is gone
+/// (the shared infra is no longer drained per-install under the (b) model), so
+/// this is the only remaining shell-out on the teardown path; `.output()` is
+/// what makes the by-handle delete actually fire under the gate.
+fn run_best_effort(argv: &[String]) -> std::io::Result<std::process::Output> {
+    debug_assert!(!argv.is_empty(), "run_best_effort requires a non-empty argv (program name)");
+    Command::new(&argv[0]).args(&argv[1..]).stdout(Stdio::piped()).stderr(Stdio::piped()).output()
 }
 
 /// `&[&str]` → `Vec<String>` for the owned cleanup argv set.
 fn svec(args: &[&str]) -> Vec<String> {
     args.iter().map(|s| (*s).to_string()).collect()
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "unit-test bodies: a failed precondition must panic with an informative message"
+)]
+mod tests {
+    //! Pure-logic unit tests for the nft-dump parse helpers. These pin the
+    //! exact `nft -a list chain` rendering against which the production
+    //! idempotent-ensure (exemption dedup) and by-handle teardown operate — the
+    //! rendering the integration AT exercises end-to-end but cannot isolate.
+    //! The fixture is a verbatim capture of real `nft -a` output (zero-padded
+    //! 8-hex marks, trailing `# handle <N>`), so a drift in nft's format OR a
+    //! regression in the parse is caught here without a kernel.
+
+    use super::{dump_has_leg_s_exemption, parse_handle};
+
+    /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
+    /// with the F5 exemption (rendered `0x00000002`) at the head followed by
+    /// two per-virt tproxy rules, each carrying a trailing `# handle <N>`.
+    const CHAIN_DUMP: &str = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t\tip daddr 127.0.0.6 tcp dport 18666 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 9
+\t}
+}";
+
+    #[test]
+    fn exemption_detected_against_nft_zero_padded_rendering() {
+        // The exact bug the (b)-refined model first hit: nft renders the mark
+        // `0x00000002`, NOT `0x2`/`2`. The dedup check MUST recognise nft's
+        // canonical form, else the exemption stacks on every install.
+        assert!(
+            dump_has_leg_s_exemption(CHAIN_DUMP),
+            "the F5 `meta mark 0x00000002 accept` exemption must be detected in nft's canonical rendering"
+        );
+    }
+
+    #[test]
+    fn exemption_absent_when_chain_has_only_tproxy_rules() {
+        let no_exemption = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t}
+}";
+        assert!(
+            !dump_has_leg_s_exemption(no_exemption),
+            "a chain with only tproxy rules (set-mark, not match-mark) must NOT be read as carrying the exemption"
+        );
+    }
+
+    #[test]
+    fn handle_parsed_from_trailing_handle_marker() {
+        // Each per-virt rule line is matched by its daddr/dport in production;
+        // here we pin that the trailing `# handle <N>` yields the right N for
+        // distinct rules so two installs capture distinct handles.
+        let line_a = CHAIN_DUMP
+            .lines()
+            .find(|l| l.contains("127.0.0.5") && l.contains("18555"))
+            .expect("virt_a rule line present");
+        let line_b = CHAIN_DUMP
+            .lines()
+            .find(|l| l.contains("127.0.0.6") && l.contains("18666"))
+            .expect("virt_b rule line present");
+        assert_eq!(parse_handle(line_a), Some(3), "virt_a rule handle must parse to 3");
+        assert_eq!(parse_handle(line_b), Some(9), "virt_b rule handle must parse to 9");
+    }
+
+    #[test]
+    fn handle_parse_rejects_a_line_with_no_handle_marker() {
+        let header = "\t\ttype filter hook prerouting priority mangle; policy accept;";
+        assert_eq!(parse_handle(header), None, "a line with no `# handle` marker yields None");
+    }
 }
