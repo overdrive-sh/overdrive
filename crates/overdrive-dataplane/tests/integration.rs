@@ -50,6 +50,15 @@ mod integration {
     /// (promoted out of the per-test subdir in step 02-02 so the agent-handshake
     /// acceptance test shares ONE role harness — no parallel implementation).
     mod mtls_composed_walking_skeleton;
+    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 03-01, F3/F5/SD-1/SD-2) —
+    /// INBOUND-isolated per-direction wire/syscall observables: the deliver
+    /// `splice(legC → legS)` zero-copy out of leg C's kTLS-RX (the request-carrying
+    /// INBOUND primary) + the orig-dst → server-SVID selection via the identity port.
+    /// Drives `HostMtlsEnforcement::enforce(Inbound)` and asserts kTLS-RX armed
+    /// (`ss -tie rxconf:sw`), byte-exact plaintext at the server S, client-leg
+    /// 0x17-only (cleartext-hits=0), and splice-only deliver (strace), through the
+    /// `MtlsEnforcement` driving port.
+    mod mtls_inbound_enforce;
     /// transparent-mtls-host-socket (ADR-0069, GH #26; step 02-03, F3/F5/D-MTLS-13) —
     /// OUTBOUND-isolated per-direction wire/syscall observables: the forward
     /// `read→write_all` COPY into leg B's kTLS-TX vs the return zero-copy `splice` out
