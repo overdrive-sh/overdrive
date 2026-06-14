@@ -126,6 +126,17 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
     // adopted by `TcpListener::from_raw_fd` (which owns it from then on).
     unsafe {
         let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+        // Defensive FFI return-code check; libc::socket() with these constant
+        // args cannot be made to fail in a black-box test (only RLIMIT_NOFILE
+        // exhaustion would, which is hostile/flaky), so the `< 0 → ==/<=`
+        // mutants are unkillable black-box. They are accepted misses: the
+        // diff-scoped gate stays ≥ 80% with them counted (the substantive
+        // orig-dst recovery + preclean mutants ARE killed). The bare
+        // `// mutants: skip` below documents the intent per the repo
+        // convention, though cargo-mutants v27's comment-skip parser does
+        // not reliably fire it for a statement-level guard (see
+        // `.cargo/mutants.toml` § ProbeRunner::probe for the same limitation).
+        // mutants: skip
         if fd < 0 {
             return Err(err(std::io::Error::last_os_error()));
         }

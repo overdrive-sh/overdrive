@@ -100,19 +100,48 @@ fn nft_list_table(name: &str) -> Result<String, String> {
 
 /// True iff an `ip rule` line for `fwmark <mark>` lookup `<table>` exists.
 fn ip_rule_fwmark_present(mark: u32, table: u32) -> bool {
+    ip_rule_fwmark_count(mark, table) > 0
+}
+
+/// Count of `ip rule` lines matching `fwmark <mark>` lookup `<table>`. Each
+/// `ip rule add fwmark … lookup …` stacks a distinct rule, so repeated adds
+/// (from aborted runs) accumulate; this counts them so a hygiene test can
+/// assert the install left EXACTLY ONE.
+fn ip_rule_fwmark_count(mark: u32, table: u32) -> usize {
     let out = Command::new("ip")
         .args(["rule", "show"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output();
-    let Ok(out) = out else { return false };
+    let Ok(out) = out else { return 0 };
     let text = String::from_utf8_lossy(&out.stdout);
     let needle_mark = format!("fwmark {mark:#x}");
     let needle_mark_dec = format!("fwmark {mark}");
-    text.lines().any(|l| {
-        (l.contains(&needle_mark) || l.contains(&needle_mark_dec))
-            && l.contains(&format!("lookup {table}"))
-    })
+    text.lines()
+        .filter(|l| {
+            (l.contains(&needle_mark) || l.contains(&needle_mark_dec))
+                && l.contains(&format!("lookup {table}"))
+        })
+        .count()
+}
+
+/// Stack `n` extra `ip rule add fwmark <mark> lookup <table>` rules, mimicking
+/// the GLOBAL state a prior SIGKILL'd run leaks (the inbound state is not
+/// netns-scoped, so the guard's `Drop` never reclaimed it). Returns the number
+/// successfully added so the test can assert the leak actually took.
+fn leak_stale_fwmark_rules(mark: u32, table: u32, n: usize) -> usize {
+    let mut added = 0;
+    for _ in 0..n {
+        let status = Command::new("ip")
+            .args(["rule", "add", "fwmark", &format!("{mark:#x}"), "lookup", &table.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            added += 1;
+        }
+    }
+    added
 }
 
 /// Bounded blocking accept hand-off via a connecting client thread is done in
@@ -249,8 +278,38 @@ fn worker_intercept_install_leg_acquire_inbound() {
     // rule redirects a connection to `virt` onto leg C on `agent_port`.
     let virt = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 5), 18555);
 
-    let guard = install_inbound_tproxy(virt, agent_port)
-        .expect("install_inbound_tproxy must install the nft-TPROXY + ip rule/route");
+    // AC2 (hygiene): `install_inbound_tproxy` precleans leaked GLOBAL state
+    // before adding its own rule. Global inbound state (the fwmark rule, the
+    // local route, the nft table) is NOT netns-scoped, so a prior SIGKILL'd run
+    // (nextest slow-timeout, Bash cap, user cancel) leaves it behind — the
+    // guard's `Drop` never ran. Leak TWO duplicate fwmark rules here, mimicking
+    // two such aborted runs, then let `install_inbound_tproxy` (which opens with
+    // `preclean_global_inbound_state`) run. We assert EXACTLY ONE fwmark rule
+    // survives:
+    //   - preclean intact  → drains the two stale rules, install adds one → 1.
+    //   - preclean → `()`  → two stale rules survive, install stacks a third → 3 ≠ 1.
+    //   - drain-loop `!` deleted (break on first success) → one stale survives,
+    //     install stacks another → 2 ≠ 1.
+    // Either preclean mutant flips this count off 1 and is CAUGHT.
+    let leaked = leak_stale_fwmark_rules(0x1, 100, 2);
+    assert_eq!(leaked, 2, "precondition: two stale fwmark rules must be leaked pre-install");
+    assert_eq!(
+        ip_rule_fwmark_count(0x1, 100),
+        2,
+        "precondition: exactly the two leaked fwmark rules are present pre-install"
+    );
+
+    let guard = install_inbound_tproxy(virt, agent_port).expect(
+        "install_inbound_tproxy must preclean leaked state then install nft-TPROXY + ip rule/route",
+    );
+
+    // AC2 (preclean): the install's preclean drained the two leaked duplicates
+    // so it left EXACTLY ONE fwmark rule, not a stacked pile.
+    assert_eq!(
+        ip_rule_fwmark_count(0x1, 100),
+        1,
+        "preclean must drain the leaked duplicates so install leaves EXACTLY ONE fwmark rule"
+    );
 
     // AC2 (present): the production table shows the tproxy rule; the ip rule
     // fwmark companion + ip route local table companion are present.
