@@ -16,7 +16,8 @@
 //!    `unprogram_redirect(real_peer)`, the entry is gone.
 //! 3. A cgroup-isolated workload `connect(real_peer)` under the attached scope
 //!    lands on the agent's leg-F listener (the rewrite fires); a `connect` to an
-//!    un-programmed dest passes through unchanged (map MISS → pass).
+//!    un-programmed dest passes through UNCHANGED — it reaches its real, reachable
+//!    second sink (NOT leg-F), proving no rewrite occurred (map MISS → pass).
 //! 4. Dropping the `MtlsCgroupLink` detaches the program (`bpftool cgroup show
 //!    <scope>` no longer lists it).
 //!
@@ -26,7 +27,15 @@
 // `expect_used` / `unwrap_used` are workspace-wide `warn` per
 // `.claude/rules/development.md` § Errors. Tier 3 tests use `.expect(...)` to
 // surface fail-fast at the assertion site, matching sibling integration tests.
-#![allow(clippy::expect_used, clippy::unwrap_used, clippy::missing_panics_doc)]
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::missing_panics_doc,
+    // SKIP paths print a one-line reason to stderr (matching the existing
+    // `skip_if_unsupported!` macro idiom) so a skipped Tier-3 run is visible in the
+    // nextest log — the same shape every sibling integration test uses.
+    clippy::print_stderr
+)]
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
@@ -34,19 +43,25 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use overdrive_dataplane::maps::ServiceKey;
+use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 use overdrive_dataplane::mtls::MtlsDataplane;
 
 use super::helpers::mtls_netns_topology::{MtlsTopology, TopologyError};
+
+/// Mirror of the crate-private `SERVICE_MAP_NAME` (lib.rs) — the bpffs pin basename
+/// the shared `HoM` is pinned under and the name `bpftool map show pinned` resolves.
+const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
+/// Mirror of the crate-private `SERVICE_MAP_OUTER_CAPACITY` (lib.rs).
+const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
+/// Mirror of the crate-private `SERVICE_MAP_INNER_CAPACITY` (lib.rs) — bound to the
+/// same Maglev-table SSOT so the pre-pinned prototype matches production exactly.
+const SERVICE_MAP_INNER_CAPACITY: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
 
 /// The real peer the workload aims `connect()` at. Distinct from the leg-F
 /// listener — the rewrite redirects `real_peer → leg_f`.
 const REAL_PEER_IP: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 7);
 const REAL_PEER_PORT: u16 = 8443;
-
-/// An un-programmed destination the second workload aims at — proving the map
-/// MISS → pass-through path (no rewrite, connect proceeds to the real dest).
-const UNPROGRAMMED_IP: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 99);
-const UNPROGRAMMED_PORT: u16 = 9443;
 
 /// Skip-or-panic gate: Tier-3 needs root + cgroup v2 delegation + bpffs.
 macro_rules! skip_if_unsupported {
@@ -88,6 +103,18 @@ fn mtls_dataplane_load_attach_per_alloc_program_redirect() {
         std::net::SocketAddr::V6(v6) => panic!("leg-F bound non-v4: {v6}"),
     };
 
+    // The REAL un-programmed destination — a SECOND real accepted socket on the host
+    // veth IP, on a DISTINCT ephemeral port from leg-F. The cgroup-isolated workload
+    // in the netns can route to it over the veth. Because no redirect is programmed
+    // for this dest, the workload's connect MUST reach it UNCHANGED (proving
+    // pass-through), NOT be rewritten onto leg-F.
+    let second_sink_listener =
+        TcpListener::bind((host_veth_ip, 0)).expect("second-sink listener bind on host veth");
+    let unprogrammed = match second_sink_listener.local_addr().expect("second-sink addr") {
+        std::net::SocketAddr::V4(v4) => v4,
+        std::net::SocketAddr::V6(v6) => panic!("second sink bound non-v4: {v6}"),
+    };
+
     let real_peer = SocketAddrV4::new(REAL_PEER_IP, REAL_PEER_PORT);
 
     // --- AC 1: attach to THIS alloc's `.scope` (F5-exempt per-alloc attach). ---
@@ -116,18 +143,24 @@ fn mtls_dataplane_load_attach_per_alloc_program_redirect() {
     );
 
     // --- AC 3: a cgroup-isolated workload connect(real_peer) lands on leg-F. ---
-    let rewrite_landed = workload_connect_lands_on_leg_f(&topo, &leg_f_listener, real_peer);
+    let rewrite_landed = workload_connect_lands_on(&topo, &leg_f_listener, real_peer);
     assert!(
         rewrite_landed,
         "cgroup-isolated connect(real_peer) must be rewritten onto the agent's leg-F listener",
     );
 
-    // AC 3b: a connect to an un-programmed dest passes through (map MISS → pass).
-    // The un-programmed dest is unreachable, so the connect FAILS to land on leg-F
-    // (no rewrite). We assert leg-F sees NO new connection within a short window.
-    let unprogrammed = SocketAddrV4::new(UNPROGRAMMED_IP, UNPROGRAMMED_PORT);
+    // AC 3b: a connect to an un-programmed dest passes through UNCHANGED (map MISS →
+    // pass). The un-programmed dest is a REAL, reachable second sink. With no redirect
+    // programmed, the kernel program leaves the connect untouched, so it must reach the
+    // SECOND SINK (round-trips a probe/reply) — proving pass-through-unchanged — and
+    // must NOT land on leg-F (no rewrite occurred).
     assert!(
-        !workload_connect_lands_on_leg_f(&topo, &leg_f_listener, unprogrammed),
+        workload_connect_lands_on(&topo, &second_sink_listener, unprogrammed),
+        "connect to an un-programmed dest must pass through UNCHANGED to its real \
+         second sink (map MISS → no rewrite)",
+    );
+    assert!(
+        !workload_connect_lands_on(&topo, &leg_f_listener, unprogrammed),
         "connect to an un-programmed dest must NOT be rewritten onto leg-F (map MISS → pass-through)",
     );
 
@@ -148,6 +181,100 @@ fn mtls_dataplane_load_attach_per_alloc_program_redirect() {
         !cgroup_lists_program(topo.cgroup_path(), "cgroup_connect4_mtls"),
         "dropping MtlsCgroupLink must detach cgroup_connect4_mtls from the .scope",
     );
+}
+
+/// D1 structural defense: `MtlsDataplane::load` must REUSE an already-pinned
+/// `SERVICE_MAP` (via `BPF_OBJ_GET`), NEVER unlink + recreate it.
+///
+/// In production `EbpfDataplane` (`run_server`) pins the LIVE `SERVICE_MAP` — the
+/// kernel LB program is bound to it by name — BEFORE `MtlsDataplane::load` runs. A
+/// `load()` that unlinked that pin and created a divergent empty `HoM` over it would
+/// silently corrupt cross-ownership (the kernel program orphaned;
+/// `EbpfDataplane::Drop` later unlinking a pin now owned by `MtlsDataplane`). This
+/// test simulates `EbpfDataplane` being the first owner (pre-pin + `mem::forget`),
+/// records the pinned outer map's kernel id, calls `load()`, and asserts the id is
+/// UNCHANGED — proving reuse, not recreate. (The other test exercises the
+/// `ENOENT`/first-pin branch; here the `BPF_OBJ_GET` branch is the one under test.)
+///
+/// Narrower than the full AC test: it needs only root + bpffs, NOT the netns
+/// topology. Self-skips (matching the sibling) when root/bpffs is unavailable.
+#[test]
+fn mtls_dataplane_load_reuses_prepinned_service_map() {
+    if !is_root() {
+        eprintln!("SKIP mtls_dataplane load-reuses-prepinned Tier-3: not root (need bpffs pin)");
+        return;
+    }
+
+    let pin_dir = std::path::PathBuf::from(format!(
+        "/sys/fs/bpf/overdrive-mtls-reuse-{}",
+        std::process::id()
+    ));
+    if std::fs::create_dir_all(&pin_dir).is_err() {
+        eprintln!("SKIP mtls_dataplane load-reuses-prepinned Tier-3: cannot create bpffs pin dir");
+        return;
+    }
+    let _pin_guard = PinDirGuard(pin_dir.clone());
+
+    // Simulate EbpfDataplane being the FIRST owner: pin the shared SERVICE_MAP HoM by
+    // name, then leak the userspace handle so the bpffs pin persists (mirrors
+    // `EbpfDataplane::new_with_pin_dir` / production ownership).
+    let owner = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+        SERVICE_MAP_NAME,
+        SERVICE_MAP_OUTER_CAPACITY,
+        SERVICE_MAP_INNER_CAPACITY,
+        &pin_dir,
+    )
+    .expect("pre-pin SERVICE_MAP as the simulated first owner (EbpfDataplane)");
+    std::mem::forget(owner);
+
+    let pin_path = pin_dir.join(SERVICE_MAP_NAME);
+    let id_before =
+        pinned_map_id(&pin_path).expect("pre-pinned SERVICE_MAP must have a kernel id before load");
+
+    // --- AC drive: load() must take the BPF_OBJ_GET reuse branch, never unlink. ---
+    let _dataplane =
+        MtlsDataplane::load(&pin_dir).expect("MtlsDataplane::load over a pre-pinned map");
+
+    let id_after = pinned_map_id(&pin_path)
+        .expect("SERVICE_MAP pin must still exist after load (not unlinked)");
+
+    // The kernel map id is monotonic and unique per BPF_MAP_CREATE. An unchanged id is
+    // proof `load()` REUSED the existing pinned map; a changed id would mean it
+    // unlinked + recreated (the clobber bug).
+    assert_eq!(
+        id_before, id_after,
+        "MtlsDataplane::load must REUSE the pre-pinned SERVICE_MAP (id {id_before}), \
+         not unlink + recreate it (would yield a new id {id_after}) — cross-ownership clobber",
+    );
+}
+
+/// Cheap root probe (`id -u` == 0) for the narrower D1 reuse test, which needs bpffs
+/// but not the full netns topology's privilege surface.
+fn is_root() -> bool {
+    Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+}
+
+/// Read the kernel id of the map pinned at `pin_path` via
+/// `bpftool map show pinned <path> -j` (the `"id"` field). `None` if bpftool fails or
+/// the pin is absent — which, for the post-load read, IS the clobber signal (the test
+/// asserts the pin still resolves).
+fn pinned_map_id(pin_path: &std::path::Path) -> Option<u64> {
+    let out = Command::new("bpftool")
+        .args(["map", "show", "pinned"])
+        .arg(pin_path)
+        .args(["-j"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    json.get("id").and_then(serde_json::Value::as_u64)
 }
 
 /// RAII cleanup of the per-test bpffs pin dir (unlink the `SERVICE_MAP` pin + rmdir).
@@ -262,14 +389,17 @@ fn hex_byte_array(v: Option<&serde_json::Value>) -> Vec<u8> {
 }
 
 /// Spawn a cgroup-isolated workload in the netns that `connect()`s to `dest`,
-/// writes a probe byte, and reads a reply. Returns true iff the leg-F listener
-/// accepted a connection (the rewrite fired) and the round-trip completed.
-fn workload_connect_lands_on_leg_f(
+/// writes a probe byte, and reads a reply. Returns true iff `sink_listener`
+/// accepted a connection AND the probe/reply round-trip completed. Sink-agnostic:
+/// point it at leg-F to prove the rewrite fired, or at a real un-programmed second
+/// sink to prove pass-through-unchanged (the connect reached its real dest, no
+/// rewrite).
+fn workload_connect_lands_on(
     topo: &MtlsTopology,
-    leg_f_listener: &TcpListener,
+    sink_listener: &TcpListener,
     dest: SocketAddrV4,
 ) -> bool {
-    leg_f_listener.set_nonblocking(false).expect("blocking leg-F listener");
+    sink_listener.set_nonblocking(false).expect("blocking sink listener");
 
     let probe = b"06-01-probe";
     let reply = b"06-01-reply";
@@ -311,13 +441,13 @@ except Exception as e:
     }
     let mut child = cmd.spawn().expect("spawn workload");
 
-    // Accept the (possibly rewritten) connection on leg-F within a window. If the
-    // rewrite fired, the connect lands here; if it was a MISS pass-through to an
-    // unreachable real dest, nothing arrives and accept times out.
-    leg_f_listener.set_nonblocking(true).expect("nonblocking leg-F accept");
+    // Accept the connection on this sink within a window. For leg-F: lands iff the
+    // rewrite fired. For the real second sink: lands iff the connect passed through
+    // unchanged to its real dest (no rewrite). If neither, accept times out.
+    sink_listener.set_nonblocking(true).expect("nonblocking sink accept");
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     let landed = loop {
-        match leg_f_listener.accept() {
+        match sink_listener.accept() {
             Ok((mut conn, _)) => {
                 let mut buf = [0u8; 64];
                 let n = conn.read(&mut buf).unwrap_or(0);

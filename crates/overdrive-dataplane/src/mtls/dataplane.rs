@@ -188,24 +188,51 @@ impl MtlsDataplane {
     /// [`MtlsDataplaneError::ProgramLoad`] if the verifier rejects the program.
     pub fn load(pin_dir: &Path) -> Result<Self> {
         // The shared `overdrive_bpf.o` carries the phase-2 SERVICE_MAP HASH_OF_MAPS,
-        // which aya 0.13.x cannot create from the ELF alone. Pre-pin it by name into
-        // `pin_dir` and load with `map_pin_path` so aya reuses the pinned outer FD
+        // which aya 0.13.x cannot create from the ELF alone. It must be pinned by name
+        // into `pin_dir` so aya reuses the pinned outer FD via `map_pin_path`
         // (`.claude/rules/development.md` § "Sharing the outer HoM … `pinning =
-        // ByName`"). Mirrors `EbpfDataplane::new_with_pin_dir` (lib.rs:446-501).
+        // ByName`").
+        //
+        // Reuse-or-first-pin the shared SERVICE_MAP HoM; NEVER unlink. In production
+        // `EbpfDataplane` (run_server) pins SERVICE_MAP before `MtlsDataplane::load`
+        // runs, so the `BPF_OBJ_GET` branch is taken and this surface NEVER touches the
+        // live pin (D-MTLS-17:1006-1013) — unlinking it would orphan the kernel LB
+        // program bound to that pin by name and hand its bpffs path to a divergent empty
+        // HoM (silent cross-ownership corruption). The create branch fires ONLY when no
+        // prior owner pinned it (the standalone Tier-3 test) — first-pinner, not
+        // re-pinner.
         let pin_path = pin_dir.join(SERVICE_MAP_NAME);
-        let _ = std::fs::remove_file(&pin_path); // clear any stale pin
-        let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
-            SERVICE_MAP_NAME,
-            SERVICE_MAP_OUTER_CAPACITY,
-            SERVICE_MAP_INNER_CAPACITY,
-            pin_dir,
-        )
-        .map_err(|e| MtlsDataplaneError::Load { reason: format!("SERVICE_MAP pin: {e}") })?;
-        // Keep the pin alive for the process lifetime — the loaded ELF holds the
-        // pinned outer FD by name; dropping the handle would unpin it. The pinned
-        // outer map outlives this handle (bpffs pins persist), so leaking the userspace
-        // handle is the canonical shape (mirrors `load_workload_bpf` in the test glue).
-        std::mem::forget(service_map);
+        match crate::sys::bpf::bpf_obj_get(&pin_path) {
+            Ok(_existing) => {
+                // Pin already present (production: EbpfDataplane owns it). Drop the
+                // probe FD; the bpffs pin persists and aya's loader BPF_OBJ_GETs it
+                // again via `map_pin_path` below. We never recreate or unlink it.
+            }
+            Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
+                // No prior owner — become the first pinner (standalone test path).
+                let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+                    SERVICE_MAP_NAME,
+                    SERVICE_MAP_OUTER_CAPACITY,
+                    SERVICE_MAP_INNER_CAPACITY,
+                    pin_dir,
+                )
+                .map_err(|e| MtlsDataplaneError::Load {
+                    reason: format!("SERVICE_MAP pin: {e}"),
+                })?;
+                // Keep the pin alive for the process lifetime — the loaded ELF holds the
+                // pinned outer FD by name; dropping the handle would unpin it. The pinned
+                // outer map outlives this handle (bpffs pins persist), so leaking the
+                // userspace handle is the canonical shape (mirrors `load_workload_bpf`).
+                std::mem::forget(service_map);
+            }
+            Err(e) => {
+                // A real probe failure (EACCES on bpffs, EIO, …) — surface it
+                // cause-distinct rather than absorbing it into a recreate.
+                return Err(MtlsDataplaneError::Load {
+                    reason: format!("SERVICE_MAP pin probe ({}): {e}", pin_path.display()),
+                });
+            }
+        }
 
         // Materialise the embedded object to a temp file (NOT under `pin_dir`, which
         // is a bpffs mount that rejects regular file writes), then load + remove.
@@ -331,21 +358,23 @@ impl MtlsDataplane {
     /// reason other than the key being absent.
     pub fn unprogram_redirect(&self, real_peer: SocketAddrV4) -> Result<()> {
         let key = MtlsDestKey::from_peer(real_peer);
-        let removed = self.redirect_dest.lock().remove(&key);
-        match removed {
-            Ok(()) => Ok(()),
-            // Absent key → Ok (idempotent remove). The kernel returns ENOENT when
-            // deleting a key that is not present; every OTHER io error is a real
-            // syscall failure surfaced as `MapProgram`.
-            Err(e) => {
-                let io = map_io_error(e);
-                if io.raw_os_error() == Some(libc::ENOENT) {
-                    Ok(())
-                } else {
-                    Err(MtlsDataplaneError::MapProgram { op: "remove", source: io })
-                }
-            }
-        }
+        let removed = self.redirect_dest.lock().remove(&key).map_err(map_io_error);
+        classify_remove(removed)
+    }
+}
+
+/// Classify a `MTLS_REDIRECT_DEST` remove outcome: an absent key (`ENOENT`) is the
+/// idempotent-remove success; every other io error is a real `MapProgram` failure.
+/// Pure — proptested over the errno space so the ENOENT-vs-real branch and the
+/// preserved `source` field are both pinned.
+fn classify_remove(removed: std::result::Result<(), std::io::Error>) -> Result<()> {
+    match removed {
+        Ok(()) => Ok(()),
+        // Absent key → Ok (idempotent remove). The kernel returns ENOENT when
+        // deleting a key that is not present; every OTHER io error is a real
+        // syscall failure surfaced as `MapProgram`.
+        Err(io) if io.raw_os_error() == Some(libc::ENOENT) => Ok(()),
+        Err(io) => Err(MtlsDataplaneError::MapProgram { op: "remove", source: io }),
     }
 }
 
@@ -374,7 +403,7 @@ mod tests {
 
     use proptest::prelude::*;
 
-    use super::{MtlsAddrPort, MtlsDestKey};
+    use super::{MtlsAddrPort, MtlsDataplaneError, MtlsDestKey, classify_remove, map_io_error};
 
     /// The exact 8-byte host-order wire layout the kernel hashes: `ip_host` (4
     /// host-order bytes) ++ `port_host` (2 host-order bytes) ++ `_pad = 0` (2
@@ -419,5 +448,87 @@ mod tests {
             let val = MtlsAddrPort::from_leg_f(leg_f);
             prop_assert_eq!(pod_bytes(&val), expected_wire_bytes(u32::from(*leg_f.ip()), leg_f.port()));
         }
+
+        /// `classify_remove` is the idempotent-remove classifier `unprogram_redirect`
+        /// branches on. Over the whole errno space (excluding ENOENT) a real remove
+        /// failure MUST surface as `MapProgram { op: "remove", source }` with the
+        /// ORIGINATING errno preserved — proving the ENOENT-vs-real split, the `op`
+        /// field, and the `source` passthrough all hold for every non-absent failure.
+        #[test]
+        fn classify_remove_maps_non_enoent_errno_to_map_program(
+            // Exclude ENOENT (2) — that errno is the success branch, asserted
+            // separately below. Stay within the portable errno range.
+            errno in (1i32..=133).prop_filter("not ENOENT", |&e| e != libc::ENOENT),
+        ) {
+            let io = std::io::Error::from_raw_os_error(errno);
+            match classify_remove(Err(io)) {
+                Err(MtlsDataplaneError::MapProgram { op, source }) => {
+                    prop_assert_eq!(op, "remove");
+                    prop_assert_eq!(source.raw_os_error(), Some(errno));
+                }
+                other => prop_assert!(
+                    false,
+                    "non-ENOENT errno {} must map to MapProgram, got {:?}",
+                    errno,
+                    other
+                ),
+            }
+        }
+    }
+
+    /// `classify_remove(Ok(()))` is the trivial success — a real remove that hit a
+    /// present key.
+    #[test]
+    fn classify_remove_ok_is_ok() {
+        assert!(classify_remove(Ok(())).is_ok());
+    }
+
+    /// `classify_remove(Err(ENOENT))` is the idempotent-remove success: deleting an
+    /// absent key returns `Ok`, NOT a `MapProgram` failure.
+    #[test]
+    fn classify_remove_enoent_is_idempotent_ok() {
+        let absent = std::io::Error::from_raw_os_error(libc::ENOENT);
+        assert!(
+            classify_remove(Err(absent)).is_ok(),
+            "ENOENT (absent key) is the idempotent-remove success branch"
+        );
+    }
+
+    /// `map_io_error` projects an aya `MapError::SyscallError` onto its ORIGINATING
+    /// `io_error` — the cause-distinct signal `classify_remove` branches on. A
+    /// mutation that returns a synthetic io error instead of the carried one would
+    /// lose the errno (ENOENT-vs-real would misclassify), so pin the passthrough by
+    /// errno.
+    #[test]
+    fn map_io_error_passes_through_syscall_io_error() {
+        let inner = std::io::Error::from_raw_os_error(libc::EPERM);
+        let map_err = aya::maps::MapError::SyscallError(aya::sys::SyscallError {
+            call: "bpf_map_delete_elem",
+            io_error: inner,
+        });
+        let io = map_io_error(map_err);
+        assert_eq!(
+            io.raw_os_error(),
+            Some(libc::EPERM),
+            "SyscallError's carried io_error errno must pass through verbatim"
+        );
+    }
+
+    /// A non-`SyscallError` aya `MapError` (here `KeyNotFound`) flattens to an
+    /// `io::Error` of kind `Other` preserving the `Display`. Such a variant carries
+    /// no `raw_os_error`, so `classify_remove` treats it as a real failure (not the
+    /// ENOENT success) — which is the correct conservative behaviour.
+    #[test]
+    fn map_io_error_flattens_non_syscall_to_other_kind() {
+        let map_err = aya::maps::MapError::KeyNotFound;
+        let display = map_err.to_string();
+        let io = map_io_error(map_err);
+        assert_eq!(io.kind(), std::io::ErrorKind::Other);
+        assert_eq!(io.to_string(), display, "Display must be preserved in the flattened io error");
+        assert_eq!(
+            io.raw_os_error(),
+            None,
+            "a flattened non-syscall error carries no errno, so classify_remove sees a real failure"
+        );
     }
 }
