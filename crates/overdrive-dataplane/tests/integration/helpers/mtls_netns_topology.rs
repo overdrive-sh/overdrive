@@ -16,7 +16,8 @@
 //!   workload cgroup  (/sys/fs/cgroup/overdrive.slice/mtls-ws-<tag>.scope)
 //!     │  cgroup_connect4_mtls attaches HERE (workload subtree only — F5 exemption)
 //!     ▼
-//!   veth pair  wl-<tag> (host) <──> wlp-<tag> (workload netns mtls-wl-<tag>)
+//!   veth pair  wl-<h> (host) <──> wlp-<h> (workload netns mtls-wl-<tag>)
+//!     (<h> = a bounded 8-hex hash of <tag> so the veth names fit IFNAMSIZ)
 //!     │  the cgroup-isolated workload runs in the netns; its egress crosses veth
 //!     ▼
 //!   AGENT (host)  — leg-F listener (outbound) / IP_TRANSPARENT leg-C listener
@@ -116,6 +117,18 @@ fn apply_nft(prog: &str) -> Result<(), TopologyError> {
 
 /// Detect whether the current process can stand up the topology (root +
 /// `CAP_NET_ADMIN`-shaped privileges). Returns the SKIP reason if not.
+/// Bounded, deterministic 8-hex iface suffix derived from a topology `tag`, so
+/// the `wlp-<suffix>` peer veth name fits IFNAMSIZ (15). The low 32 bits of a
+/// stable (non-`RandomState`) hash are masked and zero-padded to 8 hex chars;
+/// `wlp-<8hex>` = 12 ≤ 15 for any tag / pid width. See `.claude/rules/
+/// development.md` § "size a derived id to its grammar's ceiling".
+fn iface_suffix(tag: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    tag.hash(&mut h);
+    format!("{:08x}", h.finish() & 0xFFFF_FFFF)
+}
+
 fn check_privileges() -> Result<(), TopologyError> {
     // `id -u` == 0 is the cheap root probe; the canonical inner loop runs the
     // Tier-3 suite as root via `cargo xtask lima run --`. A non-root run cannot
@@ -199,8 +212,16 @@ impl MtlsTopology {
         let cgroup_root = "/sys/fs/cgroup/overdrive.slice";
         let cgroup_path = format!("{cgroup_root}/mtls-ws-{tag}.scope");
         let netns = format!("mtls-wl-{tag}");
-        let host_veth = format!("wl-{tag}");
-        let wl_veth = format!("wlp-{tag}");
+        // Veth iface names are IFNAMSIZ-bound (15 usable chars). The `wlp-` peer
+        // prefix is the binding constraint, so the suffix must be ≤ 11 chars:
+        // `wlp-dpoi-<7-digit-pid>` = 16 overflows ("not a valid ifname"). Derive
+        // a bounded, deterministic 8-hex iface suffix from the full tag (which
+        // still names the IFNAMSIZ-free cgroup/netns), per `.claude/rules/
+        // development.md` § "size a derived id to its grammar's ceiling" —
+        // `wlp-<8hex>` = 12 ≤ 15 for any tag / pid width.
+        let iface = iface_suffix(tag);
+        let host_veth = format!("wl-{iface}");
+        let wl_veth = format!("wlp-{iface}");
 
         // Idempotent pre-clean of any leftover state from an aborted run.
         run_ok(&["ip", "netns", "del", &netns]);
