@@ -1007,10 +1007,20 @@ map state on the shared maps:
   (`pinning = ByName`); the `MtlsDataplane` load passes the same `pin_dir`
   and `allow_unsupported_maps()`, so aya reuses the already-pinned outer FD
   via `BPF_OBJ_GET` rather than creating a second one — exactly the
-  pin-by-name reuse the `EbpfDataplane` load relies on. `MtlsDataplane`
-  pre-pins SERVICE_MAP defensively in `load()` only to satisfy aya's loader
-  walk; it `std::mem::forget`s the handle (the bpffs pin persists) and never
-  touches SERVICE_MAP through this surface.
+  pin-by-name reuse the `EbpfDataplane` load relies on. `load()` does a
+  `BPF_OBJ_GET`-or-first-pin match and **NEVER unlinks** the pin. In
+  production `EbpfDataplane` (constructed in `run_server` before `IdentityMgr`,
+  `lib.rs:450`) is the FIRST pinner of the live SERVICE_MAP, so by the time
+  `MtlsDataplane::load` runs (post-`IdentityMgr`, item 3) the `BPF_OBJ_GET`
+  reuse branch is taken: it reuses the existing pin and **never creates or
+  unlinks** it. The defensive first-pin (`HashOfMapsHandle` pin +
+  `std::mem::forget` so the bpffs pin persists) fires **only** when no prior
+  owner has pinned SERVICE_MAP — i.e. the standalone Tier-3 test path
+  (`BPF_OBJ_GET` → `ENOENT` → become the first pinner). Either way the
+  `MtlsDataplane` surface never touches SERVICE_MAP through this map; and
+  because `load()` never unlinks, it cannot clobber `EbpfDataplane`'s live pin
+  (an earlier `remove_file` the design never sanctioned would have orphaned
+  the kernel LB program bound to that pin by name).
 - **The duplicated cost is bounded to the mTLS load's own programs/maps.**
   `MtlsDataplane` recovers and verifier-loads ONLY `cgroup_connect4_mtls` +
   takes ONLY `MTLS_REDIRECT_DEST`; it does NOT attach the service XDP/cgroup
