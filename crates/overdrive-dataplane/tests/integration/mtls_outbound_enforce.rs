@@ -630,3 +630,326 @@ impl SsUlp {
         Self { has_ktls_tls_ulp, tx_sw, rx_sw, raw: relevant }
     }
 }
+
+// =====================================================================
+// criteria[4] — OUTBOUND idle-peer-vanish self-teardown ((C)+(B) D-MTLS-16 / ADR-0070)
+//
+// The leak this gate proves against: for an OUTBOUND connection whose workload is
+// IDLE (sends nothing after pre-arm) and whose PEER's transport dies (RST), the ONLY
+// pump that observes leg-B's death is the AUX return pump (`splice(legB → legF)`) —
+// the primary forward pump reads the idle leg F and is blind to leg B until the
+// workload next writes. Before the fix the (B) self-teardown trigger was installed
+// ONLY into the primary pump, so the aux return pump's `fire_self_teardown_if_
+// unexpected` was a permanent no-op: the connection (conns entry + both legs + kTLS
+// state) leaked until the workload wrote or the agent shut down. After the fix
+// `register` installs the trigger into EVERY pump, so the aux return pump observes the
+// RST (`POLLERR` on its `poll(legB)`) → `PumpExit::TransportDeath` → fires (B) →
+// reclaims the connection → `liveness == Gone`.
+//
+// Deterministic, NOT a wall-clock stall: the RST is an immediate transport error
+// (POLLERR), independent of the 30 s `pump_stall_deadline`. The observation is a
+// BOUNDED retry loop polling `liveness(&handle)` through the driving port until it
+// returns `Gone` — no fixed `sleep` for the deadline, just a short poll until the
+// detached reaper has run.
+// =====================================================================
+
+/// criteria[4]: an OUTBOUND connection with an IDLE workload whose PEER vanishes via
+/// TRANSPORT DEATH (RST) self-tears-down — `liveness` reaches `Gone` and the conns
+/// entry is reclaimed (a follow-up `teardown` is a no-op). RED before the fix
+/// (`register` wired only the primary pump, so the aux return pump — the sole observer
+/// of leg-B death — never fired (B); the connection stayed `Running` and the entry
+/// leaked); GREEN after `register` installs the trigger into every pump.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn outbound_idle_workload_peer_transport_death_self_tears_down_to_gone() {
+    // The agent's leg-B dial is host-side (not workload-cgroup-scoped), so this gate
+    // needs no netns/cgroup topology — leg F is a plain idle socketpair end the agent
+    // owns, and the peer is a real loopback TLS 1.3 server that handshakes then RSTs.
+    // It DOES need a real kernel for kTLS arm + the splice pump + SO_LINGER RST, so it
+    // runs only under `cargo xtask lima run --` on the 6.18+ kernel (a `--no-run` gate
+    // is green even when the kTLS arm refuses).
+    //
+    // Install the process-default rustls `CryptoProvider` (the composition root's job;
+    // the adapter no longer installs it). The sibling topology-driven gate in this file
+    // installs it via `MtlsTopology::create`; this gate skips the topology, so it
+    // installs the SAME `ring` provider directly. Idempotent — a second install returns
+    // `Err`, ignored (the first install, by whichever test ran first, stands).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let pki = TestPki::mint();
+    let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
+    let adapter = HostMtlsEnforcement::new(identity, MtlsLimits::default());
+
+    adapter
+        .probe()
+        .await
+        .expect("Earned-Trust probe must pass on the real kernel before any enforce");
+
+    // The idle-then-RST peer: completes the rustls SERVER handshake (REQUIRE+VERIFY
+    // the client SVID, present [peer_leaf, intermediate] so the agent's root-anchor
+    // leg-B client verifier builds the chain), then VANISHES via transport death —
+    // SO_LINGER {1, 0} + close() makes the kernel send a RST. It never arms kTLS and
+    // never replies; the agent's aux return pump sees the RST as POLLERR on leg B.
+    let peer = IdleThenRstPeer::spawn(&pki);
+
+    // Leg F: a plain connected AF_UNIX socketpair end the agent owns. The workload end
+    // stays IDLE (we never write to it) — this is load-bearing: a workload write would
+    // let the primary forward pump observe leg B and mask the bug. Held alive for the
+    // duration so leg F does not EOF (an EOF on leg F is a Graceful exit that would NOT
+    // exercise the peer-transport-death path under audit).
+    let (agent_leg_f, _idle_workload_end) = real_unix_pair();
+
+    let conn = InterceptedConnection {
+        leg: agent_leg_f,
+        routed: Routed::Outbound { peer: peer.addr() },
+        alloc: pki.client_alloc.clone(),
+        expected_peer: None, // v1 authn-only
+    };
+    assert_eq!(conn.routed.direction(), Direction::Outbound);
+
+    let handle = adapter
+        .enforce(conn)
+        .await
+        .expect("outbound enforce must reach steady-state-established against the idle-RST peer");
+
+    // The connection is established and Running BEFORE the peer vanishes.
+    assert_eq!(
+        adapter.liveness(&handle),
+        PumpLiveness::Running,
+        "criteria[4] precondition: after enforce(Outbound) the connection is Running"
+    );
+
+    // Make the peer vanish via TRANSPORT DEATH (RST). The agent's aux return pump,
+    // polling leg B (the peer-facing kTLS-RX leg), observes POLLERR.
+    peer.vanish_with_rst();
+
+    // DETERMINISTIC observation: poll `liveness` through the driving port until it
+    // reaches `Gone` (the aux return pump fired (B) → detached reaper reclaimed the
+    // connection). NOT a fixed wall-clock sleep for a stall deadline — the RST is an
+    // immediate transport error, so the reclaim happens within a few pump poll ticks
+    // (the pump's `poll` timeout is 40 ms). Bounded so a regression (stays Running)
+    // fails loud rather than hanging.
+    let reached_gone = poll_until_gone(&adapter, &handle, Duration::from_secs(8));
+    assert!(
+        reached_gone,
+        "criteria[4]: an OUTBOUND idle-workload connection whose PEER suffers transport death \
+         (RST) MUST self-tear-down to liveness == Gone. The aux return pump (splice(legB → legF)) \
+         is the SOLE observer of leg-B death while the workload is idle; if it does not carry the \
+         (B) self-teardown trigger (the primary-only install bug) the connection stays Running and \
+         leaks. Final liveness: {:?}",
+        adapter.liveness(&handle)
+    );
+
+    // The conns entry was reclaimed: a follow-up teardown is a harmless no-op (the
+    // `remove` returns `None`), and liveness stays `Gone`. This is the "conns emptied"
+    // observation through the driving port — `liveness` returns `Gone` precisely when
+    // the tracking-table entry is absent.
+    adapter
+        .teardown(handle.clone())
+        .await
+        .expect("teardown of an already-self-torn-down connection is an idempotent no-op");
+    assert_eq!(
+        adapter.liveness(&handle),
+        PumpLiveness::Gone,
+        "criteria[4]: the connection stays reclaimed (Gone) — the self-teardown drained the conns \
+         entry, both legs are closed, kTLS state dropped"
+    );
+}
+
+/// Poll `adapter.liveness(handle)` through the driving port until it returns `Gone`,
+/// bounded by `budget`. Returns `true` if `Gone` was reached. The poll interval is
+/// short (25 ms) so the detached reaper's reclaim is observed promptly; this is a
+/// bounded retry, NOT a fixed `sleep(budget)` — it returns the instant `Gone` is seen.
+fn poll_until_gone(
+    adapter: &HostMtlsEnforcement,
+    handle: &overdrive_core::traits::mtls_enforcement::EnforcedConnection,
+    budget: Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + budget;
+    while std::time::Instant::now() < deadline {
+        if adapter.liveness(handle) == PumpLiveness::Gone {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    adapter.liveness(handle) == PumpLiveness::Gone
+}
+
+/// A real connected `(agent_end, workload_end)` AF_UNIX stream pair — the agent owns
+/// `agent_end` (leg F); the workload end is returned to the caller and kept IDLE
+/// (never written) so the primary forward pump never observes leg B (the bug-masking
+/// write the criteria[4] scenario must avoid).
+fn real_unix_pair() -> (std::os::fd::OwnedFd, std::os::unix::net::UnixStream) {
+    let (agent, workload) = std::os::unix::net::UnixStream::pair().expect("socketpair");
+    (std::os::fd::OwnedFd::from(agent), workload)
+}
+
+// =====================================================================
+// IdleThenRstPeer — the criteria[4] peer: a real loopback TLS 1.3 server that
+// completes the mTLS handshake the agent's leg B drives (so enforce reaches
+// Established), then VANISHES via transport death (SO_LINGER {1,0} + close → RST).
+// It never arms kTLS and never replies — the agent's aux return pump sees the RST as
+// POLLERR on leg B. Distinct from `OutboundPeer` (which arms kTLS-RX and REPLIES):
+// this peer must NOT reply (a reply would feed the aux return pump and could mask the
+// idle-peer-death path); the RST is the whole point.
+// =====================================================================
+
+/// The criteria[4] idle-then-RST peer handle. Owns the accepted leg-B socket (the
+/// agent's peer-facing leg's far end); `vanish_with_rst` makes the kernel RST it.
+struct IdleThenRstPeer {
+    addr: std::net::SocketAddrV4,
+    /// The accepted peer-side TCP socket, handed back from the serve thread once the
+    /// handshake completes. `vanish_with_rst` sets SO_LINGER {1,0} and closes it → RST.
+    accepted: std::sync::mpsc::Receiver<std::net::TcpStream>,
+}
+
+impl IdleThenRstPeer {
+    fn spawn(pki: &TestPki) -> Self {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("idle-rst peer bind");
+        let addr = match listener.local_addr().expect("peer addr") {
+            std::net::SocketAddr::V4(a) => a,
+            std::net::SocketAddr::V6(_) => unreachable!("bound on 127.0.0.1"),
+        };
+        let cert = pki.peer_leaf.cert_der.clone();
+        let key = pki.peer_leaf.key_der.clone_key();
+        let intermediate = pki.intermediate_cert_der();
+        let ca_pem = pki.ca_cert_pem().to_string();
+        let (tx, accepted) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            idle_rst_peer_serve(&listener, cert, intermediate, key, &ca_pem, &tx);
+        });
+        Self { addr, accepted }
+    }
+
+    const fn addr(&self) -> std::net::SocketAddrV4 {
+        self.addr
+    }
+
+    /// Make the peer vanish via TRANSPORT DEATH: set `SO_LINGER {l_onoff: 1,
+    /// l_linger: 0}` on the accepted socket, then `close()` it. A zero-linger close
+    /// sends a RST instead of a graceful FIN — the agent's aux return pump's
+    /// `poll(legB, POLLIN)` then surfaces `POLLERR` (not `POLLHUP`), classified as
+    /// `PumpExit::TransportDeath`. Blocks briefly for the handshake to have produced
+    /// the accepted socket.
+    fn vanish_with_rst(&self) {
+        let sock = self
+            .accepted
+            .recv_timeout(Duration::from_secs(10))
+            .expect("idle-rst peer must have accepted + handshaked leg B before vanishing");
+        let fd = {
+            use std::os::fd::AsRawFd as _;
+            sock.as_raw_fd()
+        };
+        // SO_LINGER {l_onoff: 1, l_linger: 0} → close() sends a RST (transport death),
+        // NOT a graceful FIN. This is the criteria[4] trigger: a FIN is a Graceful
+        // half-close that must NOT self-tear-down; only a transport death does.
+        let linger = libc::linger { l_onoff: 1, l_linger: 0 };
+        let len = libc::socklen_t::try_from(std::mem::size_of::<libc::linger>())
+            .expect("sizeof(linger) fits socklen_t");
+        // SAFETY: SO_LINGER takes a `struct linger` on a connected fd.
+        let rc = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_LINGER,
+                std::ptr::from_ref(&linger).cast(),
+                len,
+            )
+        };
+        assert_eq!(
+            rc,
+            0,
+            "SO_LINGER {{1,0}} on the peer socket: {}",
+            std::io::Error::last_os_error()
+        );
+        // Dropping `sock` closes the fd; with SO_LINGER {1,0} the close sends a RST.
+        drop(sock);
+    }
+}
+
+/// The idle-then-RST peer serve loop: accept leg B, complete the rustls SERVER
+/// handshake (REQUIRE+VERIFY the client SVID against the CA root, present
+/// [peer_leaf, intermediate] for the chain), then hand the accepted RAW TCP socket
+/// back to the test thread via `tx` and EXIT — leaving the socket open and idle until
+/// the test RSTs it. Does NOT arm kTLS and does NOT reply (the agent's aux return pump
+/// must see a transport death, not a record).
+fn idle_rst_peer_serve(
+    listener: &std::net::TcpListener,
+    cert: rustls::pki_types::CertificateDer<'static>,
+    intermediate: rustls::pki_types::CertificateDer<'static>,
+    key: rustls::pki_types::PrivateKeyDer<'static>,
+    ca_pem: &str,
+    tx: &std::sync::mpsc::Sender<std::net::TcpStream>,
+) {
+    use rustls::server::WebPkiClientVerifier;
+
+    let Ok((mut tcp, _)) = listener.accept() else {
+        return;
+    };
+    tcp.set_nodelay(true).ok();
+    tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
+
+    // REQUIRE+VERIFY the client SVID against the CA root (the agent's leg B presents
+    // it) — mirrors `OutboundPeer`. Present [leaf, intermediate] so the agent's
+    // root-anchor-only client verifier builds leaf → intermediate → root.
+    let mut roots = rustls::RootCertStore::empty();
+    let mut rd = std::io::BufReader::new(ca_pem.as_bytes());
+    for c in rustls_pemfile::certs(&mut rd) {
+        roots.add(c.expect("ca cert")).expect("add ca cert");
+    }
+    let client_verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+        .build()
+        .expect("idle-rst peer client-cert verifier");
+    let mut cfg = rustls::ServerConfig::builder()
+        .with_client_cert_verifier(client_verifier)
+        .with_single_cert(vec![cert, intermediate], key)
+        .expect("idle-rst peer server config");
+    cfg.enable_secret_extraction = true;
+    cfg.send_tls13_tickets = 0;
+
+    let Ok(mut conn) = rustls::ServerConnection::new(Arc::new(cfg)) else {
+        return;
+    };
+    if !drive_idle_rst_server_handshake(&mut conn, &mut tcp) {
+        return;
+    }
+    // Handshake complete: hand the raw accepted socket back to the test thread, which
+    // owns the RST. The peer does NOT arm kTLS and does NOT read/reply — it leaves the
+    // socket idle. The agent's leg B is kTLS-RX-armed and its aux return pump polls it;
+    // it sees nothing until the test RSTs the socket (transport death → POLLERR).
+    let _ = tx.send(tcp);
+}
+
+/// Drive a rustls SERVER handshake to completion (synchronous); false on failure.
+/// Local to this fixture so the idle-RST peer is self-contained (it does NOT reuse the
+/// reply-server `OutboundPeer` machinery — a reply would mask the peer-death path).
+fn drive_idle_rst_server_handshake(
+    conn: &mut rustls::ServerConnection,
+    tcp: &mut std::net::TcpStream,
+) -> bool {
+    use std::io::ErrorKind;
+    loop {
+        while conn.wants_write() {
+            if conn.write_tls(tcp).is_err() {
+                return false;
+            }
+        }
+        if !conn.is_handshaking() {
+            while conn.wants_write() {
+                if conn.write_tls(tcp).is_err() {
+                    return false;
+                }
+            }
+            return true;
+        }
+        match conn.read_tls(tcp) {
+            Ok(0) => return false,
+            Ok(_) => {
+                if conn.process_new_packets().is_err() {
+                    return false;
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+            Err(_) => return false,
+        }
+    }
+}

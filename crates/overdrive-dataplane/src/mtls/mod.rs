@@ -158,25 +158,41 @@ impl HostMtlsEnforcement {
     }
 
     /// Register a steady-state-established connection in the tracking table, install
-    /// the (B) D-MTLS-16 self-teardown trigger into its PRIMARY pump, and return its
-    /// opaque handle.
+    /// the (B) D-MTLS-16 self-teardown trigger into EVERY pump (primary + each aux),
+    /// and return its opaque handle.
     ///
-    /// The trigger is installed ONLY into the primary (request-carrying,
-    /// `liveness`-observed) pump — OUTBOUND forward / INBOUND deliver. It fires when
-    /// that pump hits a transport-death terminal exit (a leg error / the (C)
-    /// kernel-reaped `ETIMEDOUT`) that was NOT a deliberate `teardown`, running the
-    /// same fail-closed reclaim `teardown` runs — close both legs, stop the sibling
-    /// pump, drop the kTLS state — off a DETACHED reaper thread (so the calling pump
-    /// never joins itself), re-homing the two F6 telemetry events from the retired
-    /// central `MtlsSupervisor` to this per-connection path. The auxiliary
-    /// (response-direction) pump does NOT carry the trigger: its finishing (a
-    /// completed response, a clean EOF from the responder) is a half-close of the
-    /// non-primary direction, not the connection's death — reclaiming on it would nuke
-    /// a connection whose primary request path is still live (the regression that
-    /// broke the established-connection Tier-3 tests).
+    /// The same connection-level trigger is installed into every pump's `PumpState` —
+    /// the primary (request-carrying, `liveness`-observed: OUTBOUND forward / INBOUND
+    /// deliver) AND each auxiliary (response-direction) pump. `mark_exited` fires the
+    /// trigger ONLY on a [`PumpExit::TransportDeath`](splice) (a leg error / the (C)
+    /// kernel-reaped `ETIMEDOUT`) that was NOT a deliberate `teardown`, so a clean
+    /// half-close ([`PumpExit::Graceful`](splice) — a completed response, a clean EOF
+    /// from either direction) on ANY pump does NOT reclaim, while a genuine transport
+    /// death on whichever pump FIRST observes it self-tears the connection down. The
+    /// `PumpExit::Graceful` gate — not a primary-only install — is what preserves the
+    /// D-MTLS-16 intent that a clean half-close must NOT nuke a connection whose
+    /// request path is still live.
+    ///
+    /// Installing into every pump closes the OUTBOUND idle-peer leak: for an outbound
+    /// connection whose workload is idle, the AUX return pump (`splice(legB → legF)`)
+    /// is the SOLE observer of leg-B's death (the primary forward pump reads the idle
+    /// leg F and is blind to leg B until the workload next writes). An aux pump
+    /// WITHOUT the trigger is a permanent self-teardown no-op, so a peer transport
+    /// death (RST / keepalive-`ETIMEDOUT`) leaks the connection (conns entry + both
+    /// legs + kTLS state) until the workload writes or the agent shuts down.
+    ///
+    /// The reclaim runs the same fail-closed path `teardown` runs — close both legs,
+    /// stop the sibling pumps, drop the kTLS state — off a DETACHED reaper thread (so
+    /// the calling pump never joins itself), re-homing the two F6 telemetry events
+    /// from the retired central `MtlsSupervisor` to this per-connection path. The
+    /// trigger is idempotent: the first pump to die wins the `remove`; the sibling's
+    /// later fire finds the entry already gone and is a harmless no-op.
     fn register(&self, id: EnforcedConnectionId, state: ConnState) -> EnforcedConnection {
         let trigger = self.self_teardown_trigger(id.clone());
-        state.pump.state.install_self_teardown(trigger);
+        state.pump.state.install_self_teardown(trigger.clone());
+        for aux in &state.aux_pumps {
+            aux.state.install_self_teardown(trigger.clone());
+        }
         self.conns.lock().insert(id.clone(), state);
         EnforcedConnection::new(id)
     }
@@ -830,4 +846,126 @@ const fn new_conn_state_bidi(
     aux_pumps: Vec<PumpHandle>,
 ) -> ConnState {
     ConnState { legs, pump, aux_pumps }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::similar_names,
+    reason = "standard test idiom: expect-with-message is the right failure for a precondition; leg_f/leg_b/leg_f_peer/leg_b_peer are the ADR-0069 leg-name contract vocabulary"
+)]
+mod tests {
+    //! `register` is the driving port for the (B) D-MTLS-16 self-teardown wiring: it
+    //! is the SOLE site that installs the connection-level trigger into the pumps'
+    //! `PumpState`s. The load-bearing behaviour the OUTBOUND idle-peer-vanish leak
+    //! turns on is that EVERY pump (primary + each aux) carries the trigger — for an
+    //! outbound connection the aux RETURN pump (`splice(legB → legF)`) is the SOLE
+    //! observer of leg-B's death while the workload is idle, so an aux pump WITHOUT the
+    //! trigger is a permanent self-teardown no-op and the connection leaks until the
+    //! workload next writes. This is the unit-level proof that drives the fix; the
+    //! Tier-3 `mtls_outbound_enforce` idle-peer-vanish gate is the e2e proof.
+
+    use std::os::fd::{AsRawFd, OwnedFd};
+    use std::sync::Arc;
+
+    use overdrive_core::AllocationId;
+    use overdrive_core::traits::IdentityRead;
+    use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
+    use overdrive_core::traits::mtls_enforcement::MtlsLimits;
+
+    use super::splice::PumpHandle;
+    use super::{ConnState, HostMtlsEnforcement, new_conn_state_bidi, now_unix_nanos};
+
+    /// A held-identity store that holds NOTHING — `register` never reads it (the test
+    /// hand-builds the `ConnState` rather than going through `enforce`), so the
+    /// always-absent shape is exactly right and keeps the unit hermetic (no PKI).
+    struct EmptyIdentities;
+
+    impl IdentityRead for EmptyIdentities {
+        fn svid_for(&self, _alloc: &AllocationId) -> Option<SvidMaterial> {
+            None
+        }
+        fn current_bundle(&self) -> Option<TrustBundle> {
+            None
+        }
+    }
+
+    /// Build a real connected AF_UNIX `socketpair` and hand back BOTH ends as
+    /// `OwnedFd`s — idle plaintext sockets that keep a pump Running (no handshake,
+    /// no kTLS arm needed; the pump just needs live fds to `poll`/`read`). The
+    /// `ConnState` owns them, so they close (and the pumps self-exit) on reclaim.
+    fn socketpair_legs() -> (OwnedFd, OwnedFd) {
+        let (a, b) = std::os::unix::net::UnixStream::pair().expect("socketpair");
+        (OwnedFd::from(a), OwnedFd::from(b))
+    }
+
+    /// Build a `ConnState` mirroring the OUTBOUND shape — a PRIMARY forward encrypt
+    /// pump plus an AUX return decrypt pump — over idle socketpair-backed fds. The
+    /// pumps are real (`spawn_encrypt`/`spawn_decrypt`); idle sockets keep them
+    /// Running. The `ConnState` owns the legs so reclaim closes them.
+    fn outbound_shaped_conn_state() -> ConnState {
+        let (leg_f, leg_f_peer) = socketpair_legs();
+        let (leg_b, leg_b_peer) = socketpair_legs();
+        let now = now_unix_nanos();
+        // PRIMARY: forward encrypt pump (reads leg F's peer end, "writes" leg B's
+        // peer end — plaintext sockets, no kTLS; it just has to exist + stay Running).
+        let primary = PumpHandle::spawn_encrypt(
+            leg_f_peer.as_raw_fd(),
+            leg_b_peer.as_raw_fd(),
+            Vec::new(),
+            now,
+        );
+        // AUX: return decrypt pump — the OUTBOUND sole observer of leg-B death.
+        let aux = PumpHandle::spawn_decrypt(
+            leg_b_peer.as_raw_fd(),
+            leg_f_peer.as_raw_fd(),
+            Vec::new(),
+            now,
+        );
+        // The peer ends are owned by the legs vec so the pumps' fds stay live for the
+        // connection's lifetime and close on reclaim.
+        new_conn_state_bidi(vec![leg_f, leg_b, leg_f_peer, leg_b_peer], primary, vec![aux])
+    }
+
+    /// `register` installs the (B) self-teardown trigger into EVERY pump — the primary
+    /// AND every aux. RED against a primary-only `register`: the aux pump's
+    /// `has_self_teardown()` is `false`, so the connection's sole leg-B-death observer
+    /// (the OUTBOUND return pump) can never self-tear-down and the connection leaks
+    /// while the workload is idle. GREEN once `register` clones the trigger into every
+    /// aux pump's `PumpState`.
+    #[test]
+    fn register_installs_self_teardown_trigger_into_every_pump() {
+        let adapter = HostMtlsEnforcement::new(Arc::new(EmptyIdentities), MtlsLimits::default());
+        let alloc = AllocationId::new("alloc-register-wires-every-pump").expect("valid alloc");
+        let id = adapter.next_id(alloc);
+
+        let state = outbound_shaped_conn_state();
+        let handle = adapter.register(id, state);
+
+        // Read the registered ConnState back out of the tracking table and assert
+        // EVERY pump carries the trigger — the primary AND every aux. The aux clause is
+        // the one that is RED against the primary-only install.
+        let guard = adapter.conns.lock();
+        let cs = guard.get(handle.id()).expect("register inserted the ConnState");
+        let primary_armed = cs.pump.state.has_self_teardown();
+        let every_aux_armed = cs.aux_pumps.iter().all(|a| a.state.has_self_teardown());
+        let aux_count = cs.aux_pumps.len();
+        drop(guard);
+
+        // Reclaim before asserting so a failed assertion still tears the pumps down
+        // (the legs close, the pump threads self-exit) — no leaked threads/fds across
+        // test runs regardless of the verdict.
+        let _torn = super::reclaim_connection(&adapter.conns, handle.id());
+
+        assert!(primary_armed, "the primary pump must carry the (B) self-teardown trigger");
+        assert!(aux_count >= 1, "the OUTBOUND shape has at least one aux (return) pump");
+        assert!(
+            every_aux_armed,
+            "every aux pump must carry the (B) self-teardown trigger — the OUTBOUND aux \
+             return pump (splice(legB → legF)) is the SOLE observer of leg-B death while the \
+             workload is idle; an aux without the trigger is a permanent self-teardown no-op \
+             and the connection leaks (conns entry + both legs + kTLS) until the workload \
+             next writes"
+        );
+    }
 }

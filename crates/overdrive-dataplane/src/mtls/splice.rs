@@ -87,6 +87,16 @@ impl PumpState {
         let _ = self.self_teardown.set(trigger);
     }
 
+    /// `true` iff the (B) self-teardown trigger has been installed on this pump's
+    /// state. Test-only observable for the `register`-wires-every-pump unit test
+    /// (`mod.rs`): a pump whose trigger is absent is a permanent self-teardown no-op
+    /// (`fire_self_teardown_if_unexpected` finds `None`), which is exactly the
+    /// per-connection-leak this proves against.
+    #[cfg(test)]
+    pub(super) fn has_self_teardown(&self) -> bool {
+        self.self_teardown.get().is_some()
+    }
+
     /// Fire the (B) self-teardown trigger IF this exit was terminal-unexpected (the
     /// pump broke on EOF / error / `ETIMEDOUT`, not on a deliberate `teardown` that
     /// set `stop`). A deliberate teardown is already reclaiming the connection, so
@@ -180,15 +190,16 @@ fn record_progress(state: &PumpState, n: u64) {
 
 /// Why a pump thread reached its terminal exit — distinguishes a graceful close (a
 /// clean EOF, or a deliberate `teardown` that set `stop`) from a transport-death (an
-/// error / the (C) kernel-reaped `ETIMEDOUT` on a leg). Only [`PumpExit::
-/// TransportDeath`] on the PRIMARY pump fires the (B) per-connection self-teardown
-/// (the self-teardown trigger is installed ONLY into the primary pump's state — the
-/// same `liveness`-observed request-carrying direction; see
-/// [`super::HostMtlsEnforcement::register`]). An auxiliary (response-direction) pump's
-/// exit, and any graceful close, leave the connection's resources for the deliberate
-/// `teardown` (alloc-terminal, step 06-03 commit 2) to reclaim — a clean half-close
-/// or a finished response direction MUST NOT nuke a connection whose primary
-/// request path is still live.
+/// error / the (C) kernel-reaped `ETIMEDOUT` on a leg). A [`PumpExit::TransportDeath`]
+/// on ANY pump that carries the (B) trigger fires the per-connection self-teardown;
+/// the trigger is installed into EVERY pump (primary + each aux) by
+/// [`super::HostMtlsEnforcement::register`], so whichever pump FIRST observes a
+/// transport death self-tears the connection down — notably the OUTBOUND aux return
+/// pump (`splice(legB → legF)`), the sole observer of leg-B death while the workload
+/// is idle. A [`PumpExit::Graceful`] close (a clean EOF, or a finished response
+/// direction) on ANY pump does NOT reclaim — the `PumpExit::Graceful` gate (NOT a
+/// primary-only install) is what preserves the D-MTLS-16 intent that a clean
+/// half-close MUST NOT nuke a connection whose request path is still live.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum PumpExit {
     /// Clean EOF on a leg, or a deliberate `teardown` set `stop` — NOT a death.
@@ -200,11 +211,14 @@ enum PumpExit {
 /// (B) D-MTLS-16 / ADR-0070: a pump thread's single terminal exit point — mark the
 /// pump exited (`running = false`, the `liveness` `Gone` observable) and, on a
 /// [`PumpExit::TransportDeath`] (NOT a graceful close), fire the connection's
-/// self-teardown IF this pump carries the trigger (only the primary pump does). The
-/// whole connection then reclaims fail-closed off the pump's own thread (no central
-/// worker query). The order is load-bearing: clear `running` BEFORE firing so the
-/// reaper's `liveness` re-query observes `Gone`. The self-teardown trigger runs the
-/// reclaim on a detached reaper (the pump thread never joins itself).
+/// self-teardown. Every pump (primary + each aux) carries the trigger (installed by
+/// [`super::HostMtlsEnforcement::register`]), so whichever pump first observes a
+/// transport death drives the reclaim; the trigger's own idempotency collapses a race
+/// between the two pumps to one teardown. The whole connection then reclaims
+/// fail-closed off the pump's own thread (no central worker query). The order is
+/// load-bearing: clear `running` BEFORE firing so the reaper's `liveness` re-query
+/// observes `Gone`. The self-teardown trigger runs the reclaim on a detached reaper
+/// (the pump thread never joins itself).
 fn mark_exited(state: &PumpState, exit: PumpExit) {
     state.running.store(false, Ordering::SeqCst);
     if exit == PumpExit::TransportDeath {
@@ -424,16 +438,23 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
             }
             Err(ref e)
                 if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
+                    || e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::Interrupted =>
             {
-                // No data within the 40 ms `SO_RCVTIMEO` window — re-check stop and
-                // loop. A purely idle connection sits here, `Running` (no pending
-                // record). NOTE: a genuine `TCP_USER_TIMEOUT` `ETIMEDOUT` also maps to
-                // `TimedOut`; distinguishing the (C) kernel-reap from the 40 ms poll
-                // re-check (so the peer-vanishes case fires (B) promptly rather than at
-                // the next read error) is part of step 06-03 commit 2's e2e proof —
-                // the connection still self-tears-down here on the subsequent leg
-                // error/EOF, just not on this poll tick.
+                // No data within the 40 ms `SO_RCVTIMEO` window (`WouldBlock`/`TimedOut`),
+                // OR the blocking read was interrupted by a signal (`Interrupted` ==
+                // `EINTR`) — re-check stop and loop. A purely idle connection sits here,
+                // `Running` (no pending record). `EINTR` is a BENIGN interruption (a
+                // signal delivered to this thread mid-`read` — e.g. a debugger PTRACE
+                // attach, a timer, a `SIGCHLD`), NOT a transport death: retrying the
+                // read is the only correct response (the POSIX contract). Misclassifying
+                // it as `TransportDeath` would spuriously self-tear-down a healthy
+                // connection now that every pump carries the (B) trigger. NOTE: a genuine
+                // `TCP_USER_TIMEOUT` `ETIMEDOUT` also maps to `TimedOut`; distinguishing
+                // the (C) kernel-reap from the 40 ms poll re-check (so the peer-vanishes
+                // case fires (B) promptly rather than at the next read error) is part of
+                // step 06-03 commit 2's e2e proof — the connection still self-tears-down
+                // here on the subsequent leg error/EOF, just not on this poll tick.
                 state.record_pending.store(false, Ordering::SeqCst);
             }
             Err(_) => break PumpExit::TransportDeath, // src leg read error
@@ -487,10 +508,17 @@ mod tests {
 
     /// A `Graceful` exit (a clean EOF on one direction) does NOT fire (B) — the
     /// connection's sibling direction may still be live, and a clean half-close is not
-    /// a connection death. Kills a `PumpExit::TransportDeath`-arm-deletion / a
-    /// `==` → `!=` mutation in `mark_exited` (either would self-tear-down a gracefully
-    /// half-closing connection, the exact regression that broke the established-
-    /// connection Tier-3 tests). `running` is STILL cleared to `Gone`.
+    /// a connection death. This is the orthogonal-safety gate that lets the (B) trigger
+    /// be installed into EVERY pump (primary + each aux, per
+    /// [`super::HostMtlsEnforcement::register`]) WITHOUT a clean half-close on any of
+    /// them nuking a live connection: `mark_exited` keys the fire on
+    /// `PumpExit::TransportDeath` ONLY, not on which pump (primary vs aux) the state
+    /// belongs to — `PumpState` carries no primary/aux distinction, so this case
+    /// covers every pump uniformly. Kills a `PumpExit::TransportDeath`-arm-deletion /
+    /// a `==` → `!=` mutation in `mark_exited` (either would self-tear-down a
+    /// gracefully half-closing connection — the exact half-close hazard the
+    /// `PumpExit::Graceful` gate exists to prevent). `running` is STILL cleared to
+    /// `Gone`.
     #[test]
     fn graceful_eof_exit_does_not_fire_self_teardown() {
         let state = PumpState::default();
