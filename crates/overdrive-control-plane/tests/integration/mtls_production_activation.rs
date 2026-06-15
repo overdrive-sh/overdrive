@@ -379,6 +379,342 @@ async fn deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_b
     );
 }
 
+/// `criteria[2]` — the production boot's per-alloc mTLS lifecycle ATTACHES
+/// `cgroup_connect4_mtls` to the alloc's `.scope` and DETACHES + purges the
+/// redirect on `stop_alloc`.
+///
+/// Boots `run_server` (real `EbpfDataplane` LB + real `MtlsDataplane` mTLS
+/// worker), deploys an exec workload via the production HTTPS submit path,
+/// waits for Running (so `on_alloc_running` → `start_alloc` attached the
+/// cgroup program + recorded leg-F), and programs the declared-peer redirect.
+///
+/// Asserts on OBSERVABLE kernel state (`.claude/rules/testing.md` § Tier 3 —
+/// `bpftool cgroup show`, not program internals):
+///   1. While the alloc is Running + redirected, `bpftool cgroup show
+///      <alloc .scope>` lists a `cgroup_inet4_connect` (`cgroup_connect4_mtls`)
+///      program attached to THAT scope (the production `start_alloc` attach),
+///      AND `MTLS_REDIRECT_DEST` carries the programmed `peer_addr` entry.
+///   2. After `stop_alloc`, the same `bpftool cgroup show` lists NO connect4
+///      program on that scope (the `MtlsCgroupLink` `Drop` detached it), the
+///      `MTLS_REDIRECT_DEST[peer_addr]` entry is gone, and the inbound
+///      nft-TPROXY rule for the alloc's leg-C was removed (the
+///      `TproxyInterceptGuard` `Drop`).
+///
+/// This formalises into asserting tests the live probes a prior 06-03 session
+/// already observed (`no connect4 attachments` / `no mtls_redirect map` after
+/// stop). The workload here is a long-lived `sleep` (no peer round-trip needed):
+/// the gate is the attach/detach lifecycle, not the wire.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_boot_attaches_then_detaches_alloc_mtls_intercept() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Start-of-test hygiene: clear any stale per-virt TPROXY rule a sibling
+    // serialized test left in the shared `overdrive-mtls` chain, so this gate's
+    // tproxy present→absent delta is measured against a clean baseline.
+    clean_mtls_tproxy_chain();
+
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("conf dir");
+
+    let alloc = AllocationId::new(&format!("alloc-{JOB_ID}-0")).expect("alloc id");
+    let test_pki = TestPki::mint(alloc.clone());
+    let scope_path = std::path::PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+        .join(format!("{alloc}.scope"));
+    let _cleanup = WorkloadScopeReaper { scope: scope_path.clone() };
+
+    // The redirect's declared peer — a loopback addr the workload never has to
+    // actually dial for THIS gate (we assert map presence, not the wire). Use a
+    // bound-but-unconnected addr so `program_declared_peer_redirect` has a real
+    // key to program.
+    let peer_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("peer placeholder bind");
+    let peer_addr: SocketAddrV4 = match peer_listener.local_addr().expect("peer addr") {
+        std::net::SocketAddr::V4(a) => a,
+        std::net::SocketAddr::V6(_) => unreachable!("bound on 127.0.0.1"),
+    };
+
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("bind addr"),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
+        mtls_identity_override: Some(Arc::new(test_pki.held_identities())),
+        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+    };
+
+    let handle = match run_server(config, Arc::new(RealCgroupFs::new())).await {
+        Ok(h) => h,
+        Err(ControlPlaneError::MtlsBoot(MtlsBootError::Load { source })) => {
+            eprintln!(
+                "SKIP criteria[2]: mTLS dataplane load refused (no CAP_BPF / bpffs): {source}"
+            );
+            return;
+        }
+        Err(ControlPlaneError::DataplaneBoot(cause)) => {
+            eprintln!("SKIP criteria[2]: LB dataplane boot refused before the mTLS layer: {cause}");
+            return;
+        }
+        Err(other) => panic!("run_server boot failed unexpectedly: {other:?}"),
+    };
+
+    let worker = handle
+        .mtls_worker()
+        .expect("real-dataplane boot must compose the (β) mTLS worker (mtls_worker = Some)");
+    let bound = handle.local_addr().await.expect("server bound addr");
+    let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
+    let client = client_trusting(&ca_pem);
+
+    // A long-lived workload: it only has to reach Running so `start_alloc`
+    // attaches the intercept. No peer dial is needed for the attach/detach gate.
+    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let spec = JobSpecInput {
+        id: JOB_ID.to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/sleep".to_owned(),
+            args: vec!["120".to_owned()],
+        }),
+    };
+    let resp = client
+        .post(&submit_url)
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
+        .send()
+        .await
+        .expect("POST /v1/jobs");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "submit must return 200");
+
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job={JOB_ID}", bound.port());
+    let running_alloc =
+        wait_for_running(&client, &allocs_url, Duration::from_secs(45)).await.unwrap_or_else(
+            || panic!("deployed workload never reached Running within 45s via the production boot"),
+        );
+
+    worker
+        .program_declared_peer_redirect(&running_alloc, peer_addr)
+        .expect("program declared-peer redirect for the Running alloc");
+
+    // ---- CAPTURE (1): attached + redirect programmed (while Running) ----
+    // Capture every observable BEFORE teardown, and never `assert!` between boot
+    // and shutdown: a panic here would skip `stop_alloc` + `shutdown`, leaving the
+    // booted server's accept loops + the `/bin/sleep` workload alive and hanging
+    // the test binary (the criteria[1] post-PASS-hang shape). Capture → tear down →
+    // assert is the leak-safe ordering.
+    let attached_while_running = cgroup_connect4_attached(&scope_path);
+    let redirect_present_while_running = mtls_redirect_map_has_entries();
+    let tproxy_present_while_running = mtls_tproxy_rule_present();
+
+    // ---- Production teardown: the action-shim `on_alloc_terminal` path ----
+    // `stop_alloc` drops the alloc's `MtlsCgroupLink` (detach the connect4 program
+    // from the .scope) and the `TproxyInterceptGuard` (remove the inbound nft rule),
+    // both synchronously. It does NOT un-program `MTLS_REDIRECT_DEST`: in production
+    // `start_alloc` never PROGRAMS the redirect (v1 has no east-west peer
+    // enumeration — #178; the redirect entry here is the test-only #178 stand-in),
+    // so production `stop_alloc` has no per-alloc redirect to unprogram. The
+    // `MTLS_REDIRECT_DEST` table + the connect4 program are reclaimed wholesale when
+    // the `MtlsDataplane` drops at server shutdown (BPF object unload) — asserted
+    // after `shutdown` below, not after `stop_alloc`.
+    worker.stop_alloc(&running_alloc);
+    // Detach is synchronous in `stop_alloc`; give the kernel a beat to settle the
+    // link removal before re-probing.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // ---- CAPTURE (2): detached + nft rule removed (after stop_alloc) ----
+    // These two ARE the per-alloc `stop_alloc` guarantees: the `MtlsCgroupLink` Drop
+    // detaches the connect4 program from the .scope, and the `TproxyInterceptGuard`
+    // Drop removes the inbound nft rule. The `MTLS_REDIRECT_DEST` entry is NOT a
+    // `stop_alloc` concern (production `start_alloc` never programs it — #178; the
+    // entry here is the test-only stand-in, reclaimed only when the BPF object
+    // unloads, which the test's own held `worker` Arc keeps alive — so we do NOT
+    // assert map-gone here: that would assert a test artifact, not production
+    // behaviour. The redirect-PROGRAMMED-while-Running capture above is the honest
+    // half of the redirect observable).
+    let attached_after_stop = cgroup_connect4_attached(&scope_path);
+    let tproxy_present_after_stop = mtls_tproxy_rule_present();
+
+    handle.shutdown(Duration::from_secs(2)).await;
+    drop(peer_listener);
+
+    // ---- ASSERT (post-teardown — safe to panic now) ----
+    assert!(
+        attached_while_running,
+        "while Running + redirected, `bpftool cgroup show {}` MUST list a connect4 program \
+         (the production `start_alloc` attached `cgroup_connect4_mtls` to the alloc's own \
+         .scope); saw none",
+        scope_path.display(),
+    );
+    assert!(
+        redirect_present_while_running,
+        "MTLS_REDIRECT_DEST MUST carry the programmed declared-peer entry while the alloc is \
+         redirected; the map showed no entries",
+    );
+    assert!(
+        tproxy_present_while_running,
+        "while Running, the inbound mTLS nft-TPROXY rule MUST be installed (the production \
+         `start_alloc` inbound path); the `ip overdrive-mtls` prerouting chain had no tproxy rule",
+    );
+    assert!(
+        !attached_after_stop,
+        "after `stop_alloc`, `bpftool cgroup show {}` MUST list NO connect4 program (the \
+         `MtlsCgroupLink` Drop detached it); a program is still attached",
+        scope_path.display(),
+    );
+    assert!(
+        !tproxy_present_after_stop,
+        "after `stop_alloc`, the inbound mTLS nft-TPROXY rule MUST be removed (the \
+         `TproxyInterceptGuard` Drop); a TPROXY rule remains in the overdrive-mtls table",
+    );
+    eprintln!(
+        "PASS criteria[2]: connect4 attached (while Running) → detached (stop_alloc) on {}; \
+         nft-TPROXY installed→removed (stop_alloc); MTLS_REDIRECT_DEST programmed while Running",
+        scope_path.display(),
+    );
+}
+
+/// `criteria[3]` — F5 runtime self-exempt negative: a workload that sets the
+/// agent's bypass `SO_MARK` (`MTLS_LEG_S_DIAL_MARK`) on its OWN socket and dials
+/// the declared peer is STILL intercepted.
+///
+/// The OUTBOUND intercept's F5 exemption is **cgroup-subtree scoping**, NOT an
+/// `SO_MARK` check: `cgroup_connect4_mtls` attaches to the WORKLOAD's own
+/// `.scope` cgroup and keys solely on `(dst_ip, dst_port)` against
+/// `MTLS_REDIRECT_DEST` — it reads no socket mark (the OUTBOUND program in
+/// `crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs` has no mark
+/// branch). `MTLS_LEG_S_DIAL_MARK` is the INBOUND nft-TPROXY exemption (the
+/// agent's leg-S dial), reachable only by the agent process on the host —
+/// UNREACHABLE from inside the workload's cgroup. So a workload that stamps that
+/// mark on its outbound socket changes NOTHING: the cgroup hook fires regardless
+/// because the workload IS in the workload subtree the program is attached to.
+///
+/// Reuses the criteria[1] flow with a mark-setting dialer, and asserts the SAME
+/// observable: TLS 1.3 `0x17` application_data STILL appears on the peer-facing
+/// leg (the marked dial was rewritten → leg-F → enforce → mTLS), with zero
+/// cleartext markers. The self-exemption attempt did not bypass interception.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn marked_workload_dial_is_still_intercepted_f5_self_exempt_negative() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Start-of-test hygiene: clear any stale per-virt TPROXY rule from a sibling
+    // serialized test in the shared `overdrive-mtls` chain.
+    clean_mtls_tproxy_chain();
+
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("conf dir");
+
+    let alloc = AllocationId::new(&format!("alloc-{JOB_ID}-0")).expect("alloc id");
+    let test_pki = TestPki::mint(alloc.clone());
+    let _cleanup = WorkloadScopeReaper {
+        scope: std::path::PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+            .join(format!("{alloc}.scope")),
+    };
+
+    let mut peer = OutboundPeer::spawn(&test_pki);
+    let peer_addr: SocketAddrV4 = peer.addr();
+
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("bind addr"),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
+        mtls_identity_override: Some(Arc::new(test_pki.held_identities())),
+        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+    };
+
+    let handle = match run_server(config, Arc::new(RealCgroupFs::new())).await {
+        Ok(h) => h,
+        Err(ControlPlaneError::MtlsBoot(MtlsBootError::Load { source })) => {
+            eprintln!(
+                "SKIP criteria[3]: mTLS dataplane load refused (no CAP_BPF / bpffs): {source}"
+            );
+            return;
+        }
+        Err(ControlPlaneError::DataplaneBoot(cause)) => {
+            eprintln!("SKIP criteria[3]: LB dataplane boot refused before the mTLS layer: {cause}");
+            return;
+        }
+        Err(other) => panic!("run_server boot failed unexpectedly: {other:?}"),
+    };
+
+    let worker = handle
+        .mtls_worker()
+        .expect("real-dataplane boot must compose the (β) mTLS worker (mtls_worker = Some)");
+    let bound = handle.local_addr().await.expect("server bound addr");
+    let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
+    let client = client_trusting(&ca_pem);
+
+    // The workload dials peer_addr with SO_MARK = MTLS_LEG_S_DIAL_MARK set on its
+    // OWN socket — the self-exemption attempt. The OUTBOUND cgroup hook ignores
+    // the mark, so the dial is STILL rewritten → leg-F → enforce → mTLS.
+    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let script = marked_workload_dial_script(peer_addr);
+    let spec = JobSpecInput {
+        id: JOB_ID.to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/usr/bin/python3".to_owned(),
+            args: vec!["-c".to_owned(), script],
+        }),
+    };
+    let resp = client
+        .post(&submit_url)
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
+        .send()
+        .await
+        .expect("POST /v1/jobs");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "submit must return 200");
+
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job={JOB_ID}", bound.port());
+    let running_alloc =
+        wait_for_running(&client, &allocs_url, Duration::from_secs(45)).await.unwrap_or_else(
+            || panic!("deployed workload never reached Running within 45s via the production boot"),
+        );
+
+    worker
+        .program_declared_peer_redirect(&running_alloc, peer_addr)
+        .expect("program declared-peer redirect for the Running alloc");
+
+    let request_byte_exact = peer.wait_outcome();
+    let wire = peer.wire_observations();
+    let presented_spiffe = peer.presented_client_spiffe();
+
+    worker.stop_alloc(&running_alloc);
+    handle.shutdown(Duration::from_secs(2)).await;
+
+    // ---- Observable: the marked dial was STILL intercepted (mTLS on the wire) ----
+    assert!(
+        wire.records_request_dir >= 1,
+        "the SO_MARK-self-exempting workload dial MUST still be intercepted → TLS 1.3 0x17 \
+         on the peer leg (the OUTBOUND cgroup hook ignores SO_MARK; the F5 exemption is \
+         cgroup-scoping, unreachable from the workload's cgroup); captured {} records",
+        wire.records_request_dir,
+    );
+    assert_eq!(
+        wire.plaintext_marker_hits, 0,
+        "no cleartext marker may appear on the peer wire — the marked dial did NOT bypass \
+         interception to reach the peer as plaintext; saw {} plaintext hits",
+        wire.plaintext_marker_hits,
+    );
+    assert!(
+        request_byte_exact,
+        "the peer reconstructed the marked workload's request byte-exact after kTLS decrypt \
+         (the dial WAS intercepted and proxied, not passed through)",
+    );
+    assert!(
+        presented_spiffe.is_some(),
+        "the peer verified the agent's client SVID on the intercepted (marked) dial's leg-B \
+         handshake — mutual auth held despite the self-exemption attempt",
+    );
+    let _ = OUTBOUND_REPLY;
+    eprintln!(
+        "PASS criteria[3]: SO_MARK self-exempt dial STILL intercepted — {} 0x17 records on the \
+         peer leg, 0 plaintext, client SPIFFE = {:?}",
+        wire.records_request_dir,
+        presented_spiffe.map(|s| s.to_string()),
+    );
+}
+
 /// Build the cgroup-isolated workload's `python3 -c` body: retry-`connect`
 /// `peer_addr` until one round-trip succeeds byte-exact (request out, reply
 /// back), then `exit(0)`. Mirrors the dataplane reference workload's two-phase
@@ -443,6 +779,164 @@ sys.exit(40)
         ip = peer_addr.ip(),
         port = peer_addr.port(),
     )
+}
+
+/// criteria[3] workload body: the criteria[1] dial, but stamping
+/// `SO_MARK = MTLS_LEG_S_DIAL_MARK` on the socket BEFORE `connect` — the
+/// self-exemption attempt. The OUTBOUND `cgroup_connect4_mtls` hook reads no
+/// socket mark (it keys only on `(dst_ip, dst_port)`), so the marked dial is
+/// rewritten → leg-F → enforce → mTLS exactly like the unmarked one: the
+/// workload CANNOT self-exempt from interception by replicating the agent's
+/// (inbound) bypass mark.
+fn marked_workload_dial_script(peer_addr: SocketAddrV4) -> String {
+    let split = OUTBOUND_REQUEST.len() / 2;
+    let mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+    format!(
+        r#"
+import socket, sys, time
+part1 = {part1}
+part2 = {part2}
+reply = {reply}
+time.sleep(8)
+deadline = time.time() + 40
+while time.time() < deadline:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # The self-exemption attempt: stamp the agent's bypass SO_MARK on our
+        # OWN socket before connect. SO_MARK needs CAP_NET_ADMIN; the workload
+        # runs with it here, which is the GENEROUS case — even so the OUTBOUND
+        # cgroup hook ignores the mark and intercepts the dial regardless.
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_MARK, {mark})
+        except (PermissionError, OSError):
+            pass  # no CAP_NET_ADMIN → mark not set; the dial is intercepted anyway
+        s.settimeout(12)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        s.connect(("{ip}", {port}))
+        s.sendall(part1)
+        time.sleep(2.0)
+        s.sendall(part2)
+        got = b""
+        s.settimeout(8)
+        while len(got) < len(reply):
+            b = s.recv(4096)
+            if not b:
+                break
+            got += b
+        s.close()
+        if got == reply:
+            sys.exit(0)
+    except Exception:
+        pass
+    time.sleep(0.5)
+sys.exit(40)
+"#,
+        part1 = py_bytes(&OUTBOUND_REQUEST[..split]),
+        part2 = py_bytes(&OUTBOUND_REQUEST[split..]),
+        reply = py_bytes(OUTBOUND_REPLY),
+        mark = mark,
+        ip = peer_addr.ip(),
+        port = peer_addr.port(),
+    )
+}
+
+/// criteria[2] observable: `bpftool cgroup show <scope>` lists a
+/// `cgroup_inet4_connect` (the `cgroup_connect4_mtls`) program attached to the
+/// alloc's own `.scope` cgroup. Returns `true` iff such an attachment is present.
+/// This is the production `start_alloc` attach made observable in kernel state
+/// (NOT a program-internal read — `.claude/rules/testing.md` § Tier 3).
+fn cgroup_connect4_attached(scope: &std::path::Path) -> bool {
+    let out = std::process::Command::new("bpftool").args(["cgroup", "show"]).arg(scope).output();
+    match out {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            // `bpftool cgroup show` lists one row per attached program with its
+            // attach type; the cgroup connect4 attach type renders as
+            // `cgroup_inet4_connect` (older bpftool) / `connect4`. Match either.
+            text.contains("cgroup_inet4_connect") || text.contains("connect4")
+        }
+        Err(e) => {
+            eprintln!("bpftool cgroup show {} failed: {e}", scope.display());
+            false
+        }
+    }
+}
+
+/// The kernel-visible name of the `MTLS_REDIRECT_DEST` map. The kernel truncates
+/// BPF object names to `BPF_OBJ_NAME_LEN - 1 = 15` chars, so the 18-char
+/// `MTLS_REDIRECT_DEST` shows in `bpftool` as `MTLS_REDIRECT_D`. Dumping by the
+/// full name returns nothing (the "wrong surface" inspection trap,
+/// `.claude/rules/debugging.md` § 11) — the truncated name is the real one.
+const MTLS_REDIRECT_MAP_KERNEL_NAME: &str = "MTLS_REDIRECT_D";
+
+/// criteria[2] observable: `MTLS_REDIRECT_DEST` carries ≥1 entry. Returns `true`
+/// iff `bpftool map dump name <kernel-truncated name>` shows at least one
+/// key/value. Used to assert the per-alloc redirect was programmed (and, after
+/// stop, purged).
+fn mtls_redirect_map_has_entries() -> bool {
+    let out = std::process::Command::new("bpftool")
+        .args(["map", "dump", "name", MTLS_REDIRECT_MAP_KERNEL_NAME])
+        .output();
+    match out {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            // A populated dump lists `key:`/`value:` lines; an empty map prints
+            // `Found 0 elements`. Treat the presence of a `key` token as "has
+            // entries". Print on the (diagnostic) empty case so a wrong-name /
+            // wrong-surface regression is visible rather than silently false.
+            let has = text.contains("key") || text.contains("\"key\"");
+            if !has {
+                eprintln!(
+                    "MTLS_REDIRECT_DEST dump ({MTLS_REDIRECT_MAP_KERNEL_NAME}) shows no entries: \
+                     stdout={text:?} stderr={:?}",
+                    String::from_utf8_lossy(&o.stderr),
+                );
+            }
+            has
+        }
+        Err(e) => {
+            eprintln!("bpftool map dump name {MTLS_REDIRECT_MAP_KERNEL_NAME} failed: {e}");
+            false
+        }
+    }
+}
+
+/// Hygiene: flush the SHARED `ip overdrive-mtls` prerouting chain so a stale
+/// per-virt TPROXY rule left by a SIBLING serialized test (the chain is
+/// node-global converge-on-boot infra NEVER torn down per-workload — see
+/// `mtls_intercept::ensure_shared_routing_infra`) does not contaminate THIS
+/// test's "tproxy present while Running → absent after stop" delta. Flushing the
+/// chain removes the per-virt rules AND the F5 exemption; the production
+/// `start_alloc` re-`ensure`s the exemption + installs this alloc's own rule, so
+/// flushing-then-boot is safe (the boot reconstructs everything it needs). A
+/// missing table (`nft` non-zero) is the clean case — nothing to flush.
+/// Called at the START of the attach/detach and self-exempt gates per the
+/// `.claude/rules/debugging.md` § leftover-state hygiene (start AND end).
+fn clean_mtls_tproxy_chain() {
+    let _ = std::process::Command::new("nft")
+        .args(["flush", "chain", "ip", "overdrive-mtls", "prerouting"])
+        .status();
+}
+
+/// criteria[2] observable: an inbound mTLS nft-TPROXY redirect rule is present in
+/// the production `ip overdrive-mtls` table's `prerouting` chain. Returns `true`
+/// iff that chain carries a `tproxy` statement. Scoped to the production table
+/// (NOT a ruleset-wide grep) so an unrelated `tproxy` rule elsewhere cannot
+/// false-positive. Used to assert the per-alloc inbound TPROXY rule was removed
+/// after stop (the `TproxyInterceptGuard` Drop).
+fn mtls_tproxy_rule_present() -> bool {
+    let out =
+        std::process::Command::new("nft").args(["list", "table", "ip", "overdrive-mtls"]).output();
+    match out {
+        // The table exists only while an alloc's inbound intercept is installed;
+        // a missing table (`nft` exits non-zero) means no rule is present.
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).contains("tproxy"),
+        Ok(_) => false,
+        Err(e) => {
+            eprintln!("nft list table ip overdrive-mtls failed: {e}");
+            false
+        }
+    }
 }
 
 /// Drop guard that mass-kills + reaps the deployed workload's cgroup scope

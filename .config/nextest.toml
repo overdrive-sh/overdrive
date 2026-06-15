@@ -226,6 +226,10 @@ filter = '''
         | test(outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire)
         | test(inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server)
         | test(guardrails_fail_closed_limits_supervision_exemption_authn_boundary)
+        | test(mtls_probe_activation_fault_refuses_boot)
+        | test(deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_boot_path)
+        | test(production_boot_attaches_then_detaches_alloc_mtls_intercept)
+        | test(marked_workload_dial_is_still_intercepted_f5_self_exempt_negative)
     )
 '''
 test-group = 'mtls-shared'
