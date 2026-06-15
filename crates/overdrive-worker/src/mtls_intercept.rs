@@ -377,7 +377,9 @@ fn ensure_ip_route_local() -> Result<()> {
 /// True iff an `ip rule` line for `fwmark <mark>` lookup `<table>` already
 /// exists — used so [`ensure_shared_routing_infra`] adds the rule only when
 /// missing (idempotent ensure; `ip rule add` would otherwise stack a
-/// duplicate per install).
+/// duplicate per install). Thin shell-out shim over [`ip_rule_dump_has_fwmark`];
+/// the predicate logic is unit-tested there.
+// mutants: skip
 fn ip_rule_fwmark_present(mark: u32, table: u32) -> bool {
     let Ok(out) = Command::new("ip")
         .args(["rule", "show"])
@@ -388,17 +390,32 @@ fn ip_rule_fwmark_present(mark: u32, table: u32) -> bool {
         return false;
     };
     let text = String::from_utf8_lossy(&out.stdout);
+    ip_rule_dump_has_fwmark(&text, mark, table)
+}
+
+/// True iff an `ip rule show` dump carries a line that BOTH marks on
+/// `fwmark <mark>` (rendered either hex `fwmark 0x1` or decimal `fwmark 1`)
+/// AND routes via `lookup <table>`. Both conjuncts must hold on the SAME
+/// line: a rule that fwmark-matches but routes elsewhere, or one that looks
+/// up `<table>` for a different mark, is NOT the rule we ensure — treating
+/// either as present would skip the `ip rule add` and leave the fwmark
+/// unrouted. Pure so a unit test can pin the conjunction against captured
+/// `ip rule show` output.
+fn ip_rule_dump_has_fwmark(dump: &str, mark: u32, table: u32) -> bool {
     let needle_hex = format!("fwmark {mark:#x}");
     let needle_dec = format!("fwmark {mark}");
     let lookup = format!("lookup {table}");
-    text.lines()
+    dump.lines()
         .any(|l| (l.contains(&needle_hex) || l.contains(&needle_dec)) && l.contains(&lookup))
 }
 
 /// True iff the shared `prerouting` chain already carries the F5
 /// `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption — used so the exemption
 /// is inserted exactly once at the chain head (otherwise every install would
-/// prepend another duplicate).
+/// prepend another duplicate). Thin shell-out shim over
+/// [`dump_has_leg_s_exemption`] (`nft` via [`list_chain`]); the predicate
+/// logic is unit-tested there.
+// mutants: skip
 fn chain_has_leg_s_exemption() -> Result<bool> {
     Ok(dump_has_leg_s_exemption(&list_chain()?))
 }
@@ -681,7 +698,73 @@ mod tests {
     //! 8-hex marks, trailing `# handle <N>`), so a drift in nft's format OR a
     //! regression in the parse is caught here without a kernel.
 
-    use super::{dump_has_leg_s_exemption, parse_handle};
+    use super::{dump_has_leg_s_exemption, ip_rule_dump_has_fwmark, parse_handle};
+
+    // --- `ip rule show` fwmark-routing predicate (extracted from the
+    // `ip`-shelling shim so the conjunction is unit-killable; mirrors the
+    // `dump_has_leg_s_exemption` split out of the `nft` path) ---
+
+    #[test]
+    fn ip_rule_fwmark_detected_against_hex_rendered_dump() {
+        // `ip rule show` renders the fwmark in hex on a modern iproute2. The
+        // rule that BOTH marks on the fwmark AND looks up our table is the one
+        // we ensure — it must be detected so the idempotent `add` is skipped.
+        let dump = "\
+0:\tfrom all lookup local
+32765:\tfrom all fwmark 0x1 lookup 100
+32766:\tfrom all lookup main
+32767:\tfrom all lookup default";
+        assert!(
+            ip_rule_dump_has_fwmark(dump, 1, 100),
+            "a `fwmark 0x1 ... lookup 100` rule must be detected (hex rendering)"
+        );
+    }
+
+    #[test]
+    fn ip_rule_fwmark_detected_against_decimal_rendered_dump() {
+        // Older iproute2 renders the mark in decimal (`fwmark 1`); the
+        // predicate must canonicalise across both renderings.
+        let dump = "32765:\tfrom all fwmark 1 lookup 100";
+        assert!(
+            ip_rule_dump_has_fwmark(dump, 1, 100),
+            "a `fwmark 1 ... lookup 100` rule must be detected (decimal rendering)"
+        );
+    }
+
+    #[test]
+    fn ip_rule_fwmark_requires_both_conjuncts_on_the_same_line() {
+        // Discriminating case that KILLS the `&& -> ||` mutant on the
+        // extracted predicate. NO single line both fwmark-matches AND looks up
+        // our table: line A marks on our fwmark but routes to a DIFFERENT
+        // table (200, not 100); line B looks up table 100 but for a DIFFERENT
+        // fwmark (0x2, not 0x1). Under `&&` neither line qualifies -> false
+        // (correct: our rule is absent, so `ip rule add` must still fire).
+        // Under the `||` mutant, line A satisfies the fwmark conjunct and line
+        // B satisfies the lookup conjunct -> the mutant wrongly returns true,
+        // skipping the add and leaving the fwmark unrouted.
+        let dump = "\
+32764:\tfrom all fwmark 0x1 lookup 200
+32765:\tfrom all fwmark 0x2 lookup 100";
+        assert!(
+            !ip_rule_dump_has_fwmark(dump, 1, 100),
+            "neither line both marks on fwmark 0x1 AND looks up table 100; the \
+             rule is absent and the predicate must return false (the `||` \
+             mutant would wrongly report it present)"
+        );
+    }
+
+    #[test]
+    fn ip_rule_fwmark_absent_from_a_dump_with_no_matching_rule() {
+        // True-negative: a vanilla policy table with none of our fwmark rules.
+        let dump = "\
+0:\tfrom all lookup local
+32766:\tfrom all lookup main
+32767:\tfrom all lookup default";
+        assert!(
+            !ip_rule_dump_has_fwmark(dump, 1, 100),
+            "a dump carrying no `fwmark 0x1 ... lookup 100` rule must read as absent"
+        );
+    }
 
     /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
     /// with the F5 exemption (rendered `0x00000002`) at the head followed by
