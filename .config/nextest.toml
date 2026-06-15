@@ -103,46 +103,75 @@ max-threads = 1
 filter = '(binary(compile_fail) | binary(compile_pass)) & (test(compile_fail_cases) | test(compile_pass_cases))'
 test-group = 'trybuild'
 
-# Test group for any test that touches the on-disk BPF artifact at
-# `target/bpf/overdrive_bpf.o` — load it via `EbpfLoader::load_file`,
-# create veth + attach an XDP program built from it, or (in the case
-# of `build_rs_emits_diagnostic_when_artifact_missing`) deliberately
-# remove-and-restore it to exercise the build.rs diagnostic. Two
-# distinct concerns are served by the single group:
+# Unified serialization domain for EVERY test that touches shared,
+# process-global real-kernel state. A single `max-threads = 1` group
+# (`host-kernel-shared`) guarantees that no two such tests ever run
+# concurrently — anywhere in the workspace, under any profile.
 #
-# 1. **Artifact mutation**. The `build_rs_artifact_check` test deletes
-#    `target/bpf/overdrive_bpf.o`, runs `cargo check` as a subprocess,
-#    and restores the file. The subprocess is unbounded — cold-cache
-#    cargo on a CI runner regularly takes >10s. Any test that opens
-#    the artifact concurrently sees the missing file and panics. The
-#    sole correct fix is mutual exclusion between the deleter and
-#    every loader.
+# This group was unified from three previously-separate `max-threads = 1`
+# groups (`bpf-artifact-shared`, `cgroup-workload-shared`, `mtls-shared`).
+# Each serialized its own members internally, but the three ran
+# CONCURRENTLY with one another — and they share the SAME process-global
+# kernel resources, so cross-group concurrency clobbered them:
 #
-# 2. **veth/FIB/ARP/bpffs state.** Slice 05-04+ added `bpf_fib_lookup`
-#    to the production XDP program, which made the veth-based Tier 3
-#    tests dependent on FIB+ARP context (route, neighbour entry, IP
-#    forwarding sysctl). The supporting state lives at the netns layer
-#    (global routing table, global ARP cache) and parallel test
-#    processes corrupt each other's state — packets emitted by Test A
-#    can be redirected via Test B's iface when Test A's destination IP
-#    overlaps Test B's on-link prefix. The fully-isolated S-2.2-17 /
-#    S-2.2-20 tests use a per-test netns (ThreeIfaceTopology /
-#    E2eTopology) but still share the bpffs pin namespace
-#    (`/sys/fs/bpf/overdrive/...`); a sibling's pin-by-name dance can
-#    still collide.
+#   * the on-disk BPF artifact `target/bpf/overdrive_bpf.o` (loaded by both
+#     the XDP and the mtls tests via `EbpfLoader::load_file`),
+#   * the `/sys/fs/bpf/overdrive/` bpffs pin namespace (the per-test pin dir
+#     isolates only the SERVICE_MAP pin, NOT the by-name program/map surface),
+#   * the by-name `cgroup_connect4` / `cgroup_connect4_mtls` programs and the
+#     `MTLS_REDIRECT_DEST` map (observed system-wide via `bpftool`),
+#   * the per-allocation cgroup hierarchy under
+#     `/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`,
+#   * the netns-layer FIB/ARP/sysctl + veth state used by the Tier-3 XDP
+#     tests, and the FIXED loopback constants + leg-S nft-TPROXY +
+#     ip-rule/route global state used by the mtls Tier-3 tests.
 #
-# Solution: serialize at the nextest layer with `max-threads = 1`.
-# Each test gets clean artifact / ARP / sysctl / iface / bpffs state.
+# Symptom of the cross-group race: the mtls 06-01 test
+# `mtls_dataplane_load_attach_per_alloc_program_redirect` panicked at ~0.09s
+# ("MTLS_REDIRECT_DEST must show the entry after program_redirect") whenever
+# a `bpf-artifact-shared` XDP test ran in parallel and reloaded the same
+# `overdrive_bpf.o` / reprogrammed the by-name surface. The suite passes
+# fully serial (`--test-threads 1`) but failed under default concurrency.
 #
-# Why `max-threads = 1` and not the in-source `serial_test::serial`
-# attribute: nextest spawns each test in its own process, and
-# `serial_test` only synchronises within a single process. The
-# nextest test-group mechanism is the only correct level to enforce
-# the cross-process single-writer constraint. Existing `#[serial(env)]`
-# annotations on these tests are kept for any same-process collision
-# they may still defend against, but the test-group is what makes the
-# guarantee load-bearing.
-[test-groups.bpf-artifact-shared]
+# The three concerns the merged group serves, preserved from the original
+# group rationale:
+#
+# 1. **Artifact mutation.** `build_rs_emits_diagnostic_when_artifact_missing`
+#    deletes `target/bpf/overdrive_bpf.o`, runs `cargo check` as an unbounded
+#    subprocess, and restores the file. Any test that opens the artifact
+#    concurrently sees the missing file and panics — mutual exclusion between
+#    the deleter and every loader is the only correct fix.
+#
+# 2. **veth/FIB/ARP/bpffs state.** Slice 05-04+ added `bpf_fib_lookup` to the
+#    production XDP program, making the veth-based Tier-3 tests dependent on
+#    FIB+ARP context (route, neighbour entry, IP-forwarding sysctl). That
+#    state lives at the netns layer (global routing table, global ARP cache);
+#    parallel test processes corrupt each other's state. The fully-isolated
+#    S-2.2-17 / S-2.2-20 tests use a per-test netns but still share the bpffs
+#    pin namespace, where a sibling's pin-by-name dance can still collide.
+#
+# 3. **cgroup hierarchy + by-name mtls program/map.** The `ExecDriver` cgroup
+#    scope hierarchy is process-global (parallel processes race on `mkdir` /
+#    `cgroup.kill` and on exit-observer pickup). The mtls tests `MtlsDataplane::load`
+#    the shared `overdrive_bpf.o`, attach `cgroup_connect4_mtls`, and observe
+#    `MTLS_REDIRECT_DEST` / `cgroup_connect4` BY NAME (a system-wide
+#    enumeration) — a concurrent sibling's load/attach/reprogram corrupts the
+#    redirect lookup. The program name and the fixed `overdrive.slice` path
+#    are not parameterizable per-test without changing production, so
+#    serialization is the correct fix.
+#
+# Why `max-threads = 1` and not in-source `serial_test::serial`: nextest
+# spawns each test in its own PROCESS, and `serial_test` only synchronises
+# within a single process. The nextest test-group is the only level that can
+# enforce the cross-process single-writer constraint. The existing
+# `#[serial(env)]` annotations on these tests are kept for same-process
+# collisions they may still defend against; this test-group is what makes the
+# cross-process guarantee load-bearing.
+#
+# `trybuild` is deliberately NOT merged here — it is a cargo target-dir lock
+# concern, unrelated to kernel state, and is excluded from the mutants run by
+# this file's `profile.mutants` default-filter.
+[test-groups.host-kernel-shared]
 max-threads = 1
 
 [[profile.default.overrides]]
@@ -162,78 +191,14 @@ filter = '''
         | test(maglev_real_distribution_under_xdp_trafficgen)
         | test(real_tcp_connection_completes_through_vip_with_payload_echo)
         | test(removing_backend_purges_reverse_nat_entry_no_stale_rewrite)
-    )
-'''
-test-group = 'bpf-artifact-shared'
-
-# Test group for any test that spawns workloads via the production
-# `ExecDriver` against the per-allocation cgroup hierarchy at
-# `/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`.
-#
-# Per `.claude/rules/testing.md` § "Leaked workload cgroups across
-# runs": the cgroup scope hierarchy is a process-global resource —
-# parallel test PROCESSES creating allocs with overlapping ids can
-# race on `mkdir` / `cgroup.kill` semantics, and a workload's exit
-# under one test can be picked up by another test's exit observer
-# subscriber. `serial_test::serial(...)` annotations within each
-# binary are kept for same-process collision defence, but the
-# nextest layer is the only place that can enforce the cross-process
-# single-writer constraint — same rationale as `bpf-artifact-shared`
-# above.
-[test-groups.cgroup-workload-shared]
-max-threads = 1
-
-[[profile.default.overrides]]
-filter = '''
-    binary(integration)
-    & (
-        test(s_02_01_job_exits_zero_reports_succeeded)
+        | test(s_02_01_job_exits_zero_reports_succeeded)
         | test(s_02_02_job_exits_nonzero_reports_failed_with_attempts)
         | test(s_02_03_intermediate_attempt_failure_does_not_close_stream)
         | test(s_02_04_third_attempt_zero_reports_succeeded)
         | test(s_02_05_anti_scenario_no_is_running_with)
         | test(s_02_06_submit_echo_names_kind_upfront)
         | test(s_02_09_k1_honesty_100_trials)
-    )
-'''
-test-group = 'cgroup-workload-shared'
-
-# Test group for the transparent-mTLS Tier-3 acceptance tests (ADR-0069,
-# GH #26). Each one stands up a real netns/veth + cgroup-isolated workload
-# topology AND loads the shared `cgroup_connect4_mtls` BPF object, programs
-# the process-global `MTLS_REDIRECT_DEST` map, and binds FIXED loopback
-# constants (`OUTBOUND_FAKE_PEER` 127.0.0.200:9443, the inbound VIRT addr,
-# the leg-S nft-TPROXY + ip-rule/route global state) — all of which are
-# process-global resources two concurrent test PROCESSES corrupt for each
-# other (a sibling's redirect-dest reprogram / bpffs pin / accept window
-# collides, surfacing as "leg-F accept ... intercept must deliver" failures).
-# Per `.claude/rules/testing.md` § "Leaked workload cgroups / Leftover XDP
-# attachments across runs", the nextest test-group is the only level that can
-# enforce the cross-process single-writer constraint (same rationale as
-# `bpf-artifact-shared` / `cgroup-workload-shared` above — `serial_test` only
-# synchronises within one process). Without it, adding the third mtls Tier-3
-# test (02-03 `mtls_outbound_enforce`) made the latent two-test race fire
-# deterministically.
-#
-# The two `mtls_dataplane_outbound_install` tests (06-01) belong to the SAME
-# group: both `MtlsDataplane::load` the shared `overdrive_bpf.o`, attach the
-# `cgroup_connect4_mtls` program, and observe `MTLS_REDIRECT_DEST` /
-# `cgroup_connect4` BY NAME via `bpftool` (a system-wide enumeration, not the
-# per-test pin dir) — so a concurrent sibling's load/attach/reprogram of the
-# same-named program+map corrupts the redirect lookup, surfacing as the AC-3
-# "cgroup-isolated connect(real_peer) must be rewritten onto the agent's leg-F
-# listener" failure. The per-test bpffs pin dir isolates only the SERVICE_MAP
-# pin, NOT the by-name program/map surface, so serialization is the correct
-# fix here (the program name and global `overdrive.slice` path are fixed; they
-# are not parameterizable per-test without changing production).
-[test-groups.mtls-shared]
-max-threads = 1
-
-[[profile.default.overrides]]
-filter = '''
-    binary(integration)
-    & (
-        test(composed_bidirectional_proxy_walking_skeleton_no_rst)
+        | test(composed_bidirectional_proxy_walking_skeleton_no_rst)
         | test(agent_handshake_presents_held_svid_client_and_server_roles)
         | test(outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire)
         | test(inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server)
@@ -246,7 +211,7 @@ filter = '''
         | test(mtls_dataplane_load_reuses_prepinned_service_map)
     )
 '''
-test-group = 'mtls-shared'
+test-group = 'host-kernel-shared'
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
@@ -301,3 +266,37 @@ path = "junit.xml"
 # cargo-mutants regardless. The signal is not lost; only the wait is.
 [profile.mutants]
 default-filter = '!(binary(compile_pass) | binary(compile_fail))'
+
+# The `mutants` profile carries NO per-test overrides of its own. It
+# inherits everything it needs from `profile.default`:
+#
+#   * the `host-kernel-shared` test-group ASSIGNMENT (the cross-process
+#     single-writer serialization for every shared real-kernel-state test),
+#   * the cold-scratch `slow-timeout` extensions (the store-local snapshot
+#     proptest, the control-plane describe round-trip proptest, and the
+#     S-02-09 K1 100-trial test).
+#
+# This was VERIFIED EMPIRICALLY (nextest 0.9.137, 2026-06-15): with the
+# `host-kernel-shared` assignment declared on `profile.default` ONLY,
+# `cargo nextest show-config test-groups --profile mutants` resolves the
+# identical 20 dataplane tests into `host-kernel-shared`, labelling the
+# match `* override for default profile` — i.e. nextest layers a named
+# profile on top of `default` and applies `default`'s `[[overrides]]`
+# unless the named profile defines its own. (An earlier comment here
+# claimed overrides are NOT inherited; that was wrong and the duplicated
+# `[[profile.mutants.overrides]]` block it justified has been removed —
+# the assignment lived in two places saying the same thing.)
+#
+# `cargo xtask mutants` runs nextest under `NEXTEST_PROFILE=mutants`; the
+# inherited `host-kernel-shared` group is what keeps the unmutated baseline
+# from running the shared-resource Tier-3 tests concurrently and colliding
+# on process-global kernel state (the bpffs-pinned `MTLS_REDIRECT_DEST`
+# map, the by-name `cgroup_connect4` program, the per-alloc cgroup
+# hierarchy, the shared `target/bpf/overdrive_bpf.o` + veth/FIB/ARP state)
+# — the 0.09s "MTLS_REDIRECT_DEST must show the entry after
+# program_redirect" failure that previously aborted the whole mutation run
+# before any mutant was tested.
+#
+# trybuild binaries are excluded entirely by this profile's `default-filter`
+# above, so `profile.default`'s trybuild serialization + slow-timeout
+# overrides simply never apply here (the matched tests are not in the run).
