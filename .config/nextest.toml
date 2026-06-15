@@ -214,6 +214,18 @@ test-group = 'cgroup-workload-shared'
 # synchronises within one process). Without it, adding the third mtls Tier-3
 # test (02-03 `mtls_outbound_enforce`) made the latent two-test race fire
 # deterministically.
+#
+# The two `mtls_dataplane_outbound_install` tests (06-01) belong to the SAME
+# group: both `MtlsDataplane::load` the shared `overdrive_bpf.o`, attach the
+# `cgroup_connect4_mtls` program, and observe `MTLS_REDIRECT_DEST` /
+# `cgroup_connect4` BY NAME via `bpftool` (a system-wide enumeration, not the
+# per-test pin dir) — so a concurrent sibling's load/attach/reprogram of the
+# same-named program+map corrupts the redirect lookup, surfacing as the AC-3
+# "cgroup-isolated connect(real_peer) must be rewritten onto the agent's leg-F
+# listener" failure. The per-test bpffs pin dir isolates only the SERVICE_MAP
+# pin, NOT the by-name program/map surface, so serialization is the correct
+# fix here (the program name and global `overdrive.slice` path are fixed; they
+# are not parameterizable per-test without changing production).
 [test-groups.mtls-shared]
 max-threads = 1
 
@@ -230,6 +242,8 @@ filter = '''
         | test(deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_boot_path)
         | test(production_boot_attaches_then_detaches_alloc_mtls_intercept)
         | test(marked_workload_dial_is_still_intercepted_f5_self_exempt_negative)
+        | test(mtls_dataplane_load_attach_per_alloc_program_redirect)
+        | test(mtls_dataplane_load_reuses_prepinned_service_map)
     )
 '''
 test-group = 'mtls-shared'
