@@ -4156,6 +4156,50 @@ GH #40 + #215. Evolution record:
 > integration-tested, but the black-box operator-CLI capture needs a disposable
 > full-system VM ([#227](https://github.com/overdrive-sh/overdrive/issues/227)).
 
+### Shipped — Component Inventory (FINALIZE 2026-06-16) — transparent-mtls-host-socket
+
+Kernel-mediated **transparent mTLS** for host-socket mesh workloads (GH #26 /
+J-SEC-003): the on-the-wire ENFORCEMENT peer that completes the mint (#28) →
+hold (#35) → **enforce (#26)** chain. The workload holds nothing; a node-agent
+agent-light L4 proxy (ADR-0069) terminates/originates TLS 1.3 on its own
+peer-facing leg and hands steady state to the kernel (outbound
+`cgroup_connect4` rewrite → kTLS-TX write_all forward + zero-copy splice return;
+inbound nft-TPROXY + `IP_TRANSPARENT` → server-mTLS → kTLS-RX splice deliver).
+Supervision is per-connection self-teardown (ADR-0070, central `MtlsSupervisor`
+deleted). DELIVER complete (9 steps 01-01…06-03 all COMMIT/PASS); supersedes the
+decomposed Phase-05 (D-MTLS-17). Evolution record:
+`docs/evolution/2026-06-16-transparent-mtls-host-socket.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `MtlsEnforcement` port (4 methods — probe/enforce/liveness/teardown; `enforce` dispatches on `Direction`; cause-distinct error variants; `PumpLiveness`) | `crates/overdrive-core/src/traits/mtls_enforcement.rs` | NEW |
+| `HostMtlsEnforcement` adapter (handshake / kTLS arm / outbound / inbound / pumps / limits / supervision) | `crates/overdrive-dataplane/src/mtls/{mod,handshake,ktls,outbound,inbound,splice,limits,supervision}.rs` | NEW |
+| `MtlsDataplane` + `MtlsCgroupLink` RAII (second `EbpfLoader`; per-alloc cgroup attach; typed `MTLS_REDIRECT_DEST` programming; SERVICE_MAP HoM reused by-name) | `crates/overdrive-dataplane/src/mtls/dataplane.rs` | NEW |
+| `cgroup_connect4_mtls` outbound-intercept program (extends `cgroup_connect4_service`) | `crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs` | NEW |
+| `MTLS_REDIRECT_DEST` kernel map (plain `BPF_MAP_TYPE_HASH`) | `crates/overdrive-bpf/src/maps/` | NEW |
+| Worker intercept-install + leg-acquire free fns (D-MTLS-14: `make_transparent_listener` / `install_inbound_tproxy` + `TproxyInterceptGuard` / `accept_outbound_leg` / `accept_inbound_leg`) | `crates/overdrive-worker/src/mtls_intercept.rs` | NEW |
+| `MtlsInterceptWorker` per-alloc lifecycle component (mechanism (B); mandatory `Arc<dyn MtlsEnforcement>` + `MtlsDataplane`; `on_alloc_running`/`on_alloc_terminal`; `ExecDriver::new` unchanged) | `crates/overdrive-worker/src/` | NEW |
+| `MTLS_LEG_S_DIAL_MARK` const (hoisted to core to break the worker→dataplane edge) | `crates/overdrive-core/src/` | NEW |
+| `EnforcedConnectionId` newtype + `mtls_mark` | `crates/overdrive-core/src/` | NEW |
+| `run_server` composition-root: construct + `probe()` `MtlsDataplane` + `HostMtlsEnforcement` AFTER `IdentityMgr`, fail-closed `health.startup.refused`; inject into `MtlsInterceptWorker` | `crates/overdrive-control-plane/src/lib.rs` | EXTEND |
+| Central `MtlsSupervisor` + its tests (ADR-0070 / D-MTLS-16) | `crates/overdrive-worker/src/mtls_supervisor.rs`, `tests/acceptance/mtls_supervisor_teardown_on_stall.rs` | DELETE (single-cut) |
+| `SimMtlsEnforcement` double + `mtls_enforcement_equivalence` DST harness | `crates/overdrive-sim/src/adapters/`, `crates/overdrive-sim/tests/acceptance/mtls_enforcement_equivalence.rs` | NEW |
+
+> **v1 boundary (DESIGN NOTE for DEVOPS / future phases):** v1 is process/exec
+> only, single-node, **chain-to-bundle authn only** — a valid-but-unintended
+> peer SVID is NOT prevented and nothing is called "protected" until intended-peer
+> pinning lands ([#178](https://github.com/overdrive-sh/overdrive/issues/178);
+> VIP path [#61](https://github.com/overdrive-sh/overdrive/issues/61)). Authz
+> (allow/deny) is the separate BPF-LSM `socket_connect` subsystem
+> ([#27](https://github.com/overdrive-sh/overdrive/issues/27)/[#38](https://github.com/overdrive-sh/overdrive/issues/38))
+> — the proxy MUST NOT embed a policy engine. Other tracked deferrals:
+> guest-stack adapter [#222](https://github.com/overdrive-sh/overdrive/issues/222),
+> in-place rekey [#229](https://github.com/overdrive-sh/overdrive/issues/229),
+> operator-tunable `MtlsLimits` [#230](https://github.com/overdrive-sh/overdrive/issues/230),
+> restart-survival / 1-socket density (the accepted proxy trade) [#231](https://github.com/overdrive-sh/overdrive/issues/231),
+> kernel-invisible progress-stall watchdog [#232](https://github.com/overdrive-sh/overdrive/issues/232),
+> inbound-TPROXY shared-routing Bar-2 reconciler [#234](https://github.com/overdrive-sh/overdrive/issues/234).
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)
