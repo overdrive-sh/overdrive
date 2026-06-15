@@ -401,6 +401,17 @@ fn stop_scan_cached(
 /// The synchronous rustls + raw-kTLS peer serve loop: accept leg B, complete
 /// the rustls SERVER handshake (REQUIRE+VERIFY client auth), arm kTLS-TX+RX,
 /// read the workload's request (decrypted by kTLS-RX), reply.
+///
+/// MULTI-ACCEPT (06-03): the deployed workload's retry loop dials the real
+/// peer addr from spawn — INCLUDING the dials that land BEFORE the test
+/// programs the `MTLS_REDIRECT_DEST` redirect. Those pre-redirect dials reach
+/// the peer DIRECTLY as PLAINTEXT (the workload speaks no TLS), so the rustls
+/// server handshake fails on them. The peer MUST NOT give up on the first such
+/// failure (that would close the listener and make the later genuine leg-B
+/// dial — `enforce` → `dial_leg(real_peer)` — hit `ECONNREFUSED`). Instead it
+/// loops, discarding each non-TLS/failed-handshake connection, until ONE
+/// completes the genuine mTLS leg-B handshake (the agent's `enforce` dial) or
+/// an overall wall-clock deadline expires.
 fn outbound_peer_serve(
     listener: &TcpListener,
     cert: CertificateDer<'static>,
@@ -409,26 +420,56 @@ fn outbound_peer_serve(
     client_verifier: Arc<dyn rustls::server::danger::ClientCertVerifier>,
     spiffe_slot: &parking_lot::Mutex<Option<SpiffeId>>,
 ) -> PeerOutcome {
-    let Some(tcp) = accept_with_timeout(listener, Duration::from_secs(20)) else {
-        return PeerOutcome { request_byte_exact: false };
+    let cfg = {
+        let mut cfg = rustls::ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(vec![cert, intermediate], key)
+            .expect("peer server config");
+        cfg.enable_secret_extraction = true;
+        cfg.send_tls13_tickets = 0;
+        Arc::new(cfg)
     };
-    tcp.set_nodelay(true).ok();
-    let fd = tcp.as_raw_fd();
-    let mut cfg = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(client_verifier)
-        .with_single_cert(vec![cert, intermediate], key)
-        .expect("peer server config");
-    cfg.enable_secret_extraction = true;
-    cfg.send_tls13_tickets = 0;
-    let mut tcp = tcp;
-    tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
-    let mut conn = rustls::ServerConnection::new(Arc::new(cfg)).expect("peer ServerConnection");
-    if !drive_server_handshake(&mut conn, &mut tcp) {
-        return PeerOutcome { request_byte_exact: false };
+    // Overall deadline spanning the pre-redirect plaintext dials + the genuine
+    // leg-B handshake. Each accept gets the remaining budget.
+    let overall_deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        let remaining = overall_deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            eprintln!("OUTBOUND-PEER: no genuine leg-B handshake before the 45s deadline");
+            return PeerOutcome { request_byte_exact: false };
+        }
+        let Some(tcp) = accept_with_timeout(listener, remaining) else {
+            return PeerOutcome { request_byte_exact: false };
+        };
+        tcp.set_nodelay(true).ok();
+        let fd = tcp.as_raw_fd();
+        let mut tcp = tcp;
+        tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        let mut conn =
+            rustls::ServerConnection::new(Arc::clone(&cfg)).expect("peer ServerConnection");
+        if drive_server_handshake(&mut conn, &mut tcp) {
+            // Genuine leg-B mTLS handshake completed — proceed to the kTLS
+            // read/reply path with THIS connection.
+            if let Some(spiffe) = peer_presented_leaf_spiffe(conn.peer_certificates()) {
+                *spiffe_slot.lock() = Some(spiffe);
+            }
+            return finish_outbound_peer(conn, tcp, fd);
+        }
+        // Handshake failed (a pre-redirect plaintext dial, or a RST): drop this
+        // connection and accept the next. `tcp` drops here → the socket closes.
+        drop(tcp);
     }
-    if let Some(spiffe) = peer_presented_leaf_spiffe(conn.peer_certificates()) {
-        *spiffe_slot.lock() = Some(spiffe);
-    }
+}
+
+/// Finish the OUTBOUND peer's serve after a genuine leg-B mTLS handshake:
+/// extract secrets, arm raw kTLS, read the workload's request (kTLS-RX
+/// decrypted), reply on the return leg. Split out of [`outbound_peer_serve`]
+/// so the multi-accept loop body stays the handshake-retry concern only.
+fn finish_outbound_peer(
+    mut conn: rustls::ServerConnection,
+    tcp: TcpStream,
+    fd: RawFd,
+) -> PeerOutcome {
     let mut got = drain_early_plaintext(&mut conn.reader());
     let secrets = conn.dangerous_extract_secrets().expect("peer extract secrets");
     arm_ktls_raw(fd, &secrets);

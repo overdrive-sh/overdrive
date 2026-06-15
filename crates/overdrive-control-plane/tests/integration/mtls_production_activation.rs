@@ -178,58 +178,30 @@ const JOB_ID: &str = "mtls-e2e";
 /// the peer reconstructed the workload's request byte-exact (kTLS decrypt
 /// proof) + extracted the agent's client SPIFFE (mutual auth proof).
 ///
-/// # BLOCKED — empirically proven (step 06-03, 2026-06-15)
+/// # GREEN — the declared-peer dial-target fix (step 06-03, 2026-06-15)
 ///
-/// This complete, runnable e2e drives the FULL production boot path and was
-/// executed under Lima (`run_server` boots `Ok` with the real `EbpfDataplane`
-/// LB + real `MtlsDataplane` worker; the workload reaches Running; the
-/// redirect is programmed). It captures **zero** `0x17` records on the
-/// `OutboundPeer` wire — NOT a PKI/SNI gap (the `mtls_identity_override`
-/// PKI-SEAM closes that), but a distinct **east-west peer-resolution gap**:
+/// This e2e was empirically RED under Lima before the fix (`captured 0`
+/// `0x17` records on the `OutboundPeer` wire) for a PROVEN production bug:
+/// the worker's OUTBOUND `accept_loop` built `Routed::Outbound { peer:
+/// leg_f_addr }` — it passed the agent's OWN leg-F addr as the routing
+/// `peer`, so `enforce_outbound` → `dial_leg(peer)` SELF-LOOPED back to
+/// leg-F and never dialed the real `OutboundPeer`. The kernel redirect
+/// fired (`connect(peer_addr)` → leg-F) but the agent never dialed the
+/// peer → no leg-B handshake → no `0x17` on the peer wire.
 ///
-///   The production worker's OUTBOUND `accept_loop`
-///   (`MtlsInterceptWorker::accept_loop` →
-///   `mtls_intercept::accept_outbound_leg`) builds
-///   `Routed::Outbound { peer: leg_f_addr }` — it passes the agent's OWN
-///   leg-F listener addr as the routing `peer`, because v1 has NO mechanism
-///   to recover the original destination after `cgroup_connect4_mtls`
-///   rewrites `connect(real_peer)` → `connect(leg_f)` in place (unlike
-///   inbound TPROXY, whose `getsockname` recovers orig-dst). `enforce_outbound`
-///   then dials `peer = leg_f_addr` (`mtls/mod.rs` → `outbound::establish`,
-///   `dial_leg(peer)`) — a SELF-LOOP back to the agent's own leg-F, NEVER the
-///   real `OutboundPeer`. So the workload's `connect(peer_addr)` IS intercepted
-///   to leg-F (the kernel redirect fires), but the agent never dials the peer
-///   → no leg-B handshake → no `0x17` on the peer wire.
-///
-/// The `program_declared_peer_redirect` seam programs the kernel
-/// `MTLS_REDIRECT_DEST[real_peer] = leg_f` correctly, but supplies the worker
-/// NO channel to learn `real_peer` for the leg-B dial. Resolving "the address
-/// the agent dials on leg B" against the original destination is exactly
-/// native east-west SPIFFE-ID resolution —
-/// [#178](https://github.com/overdrive-sh/overdrive/issues/178), DEFERRED.
-/// The dataplane `mtls_composed_walking_skeleton` reference sidesteps this by
-/// having its `MtlsTopology` harness thread the REAL peer addr directly into
-/// `enforce` as the `Routed::Outbound { peer }` fact — a role the v1 production
-/// worker does not (and per #178 cannot yet) fill.
-///
-/// Closing criteria[1] needs a production mechanism for the worker to dial the
-/// original `real_peer` on leg B (the #178 east-west-resolution primitive, or
-/// a narrower seam that records `real_peer` alongside leg-F when the redirect
-/// is programmed and threads it into `accept_outbound_leg`). Both are
-/// production-API decisions BEYOND the two authorized 06-03 seams — surfaced to
-/// the orchestrator, NOT improvised here (CLAUDE.md "STOP and surface the gap";
-/// the 06-03 boundary forbids touching `accept_outbound_leg` / `Routed::Outbound`
-/// / `server_dial_addr` / the `MtlsEnforcement` signatures).
-///
-/// `#[ignore]` (NOT deleted): the body is a complete, correct Tier-3 e2e — the
-/// exact GREEN target. Un-ignore it the moment the worker dials the real peer;
-/// it asserts the full observable `0x17` / byte-exact / mutual-auth contract.
+/// The fix (the #178 declared-peer stand-in supplying the dial target,
+/// NOT general east-west resolution): the worker records the SINGLE
+/// declared `real_peer` it ALREADY receives in
+/// `program_declared_peer_redirect` into a shared per-alloc slot, and the
+/// OUTBOUND accept loop reads that slot to build `Routed::Outbound { peer:
+/// real_peer }`. `enforce` now dials the REAL peer; the leg-B handshake
+/// runs; TLS 1.3 `0x17` records appear on the peer wire. General
+/// per-connection multi-peer orig-dst recovery remains
+/// [#178](https://github.com/overdrive-sh/overdrive/issues/178); the single
+/// declared peer is the ratified D-MTLS-15 scope.
 ///
 /// [`MtlsInterceptWorker::program_declared_peer_redirect`]:
 ///     overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::program_declared_peer_redirect
-#[ignore = "blocked on #178 — v1 production worker has no east-west peer resolution: \
-            outbound enforce dials leg-F (self-loop), never the real peer, so 0 0x17 on \
-            the peer wire (empirically proven under Lima, step 06-03)"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_boot_path() {
     // Install the process-default rustls `CryptoProvider` once for this test
@@ -359,6 +331,17 @@ async fn deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_b
     let wire = peer.wire_observations();
     let presented_spiffe = peer.presented_client_spiffe();
 
+    // Tear down the alloc's mTLS intercept BEFORE shutting the server down:
+    // `stop_alloc` signals the worker's blocking accept loops (which run on
+    // `spawn_blocking` threads and cannot be `abort()`ed mid-syscall) to exit
+    // cooperatively, and drops the cgroup link + TPROXY guard. Without this the
+    // accept loops outlive the test and block the tokio runtime drop forever
+    // (the post-PASS hang). This is the production `on_alloc_terminal` →
+    // `stop_alloc` path the action-shim fires; the test drives it directly
+    // because the workload here is a one-shot e2e fixture, not a converging
+    // alloc the reconciler would stop.
+    worker.stop_alloc(&running_alloc);
+
     handle.shutdown(Duration::from_secs(2)).await;
 
     // ---- Observable assertions (the criteria[1] PASS condition) ----
@@ -401,6 +384,23 @@ async fn deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_b
 /// back), then `exit(0)`. Mirrors the dataplane reference workload's two-phase
 /// write (pre-arm + steady-state) so the agent exercises BOTH the lossless
 /// pre-arm capture AND the forward encrypt pump.
+///
+/// PRE-DIAL SETTLE (06-03): the redirect (`MTLS_REDIRECT_DEST[peer_addr] =
+/// leg_f`) can only be programmed by the test AFTER the alloc reaches Running
+/// (its leg-F is recorded by `start_alloc` at `on_alloc_running`), and the
+/// workload reaches Running the moment `ExecDriver::start` spawns it — so the
+/// workload starts at almost exactly the instant the redirect becomes
+/// programmable. If the workload dialed `peer_addr` IMMEDIATELY, the first
+/// dial(s) would race AHEAD of the redirect and reach the real peer DIRECTLY
+/// as plaintext (the workload speaks no TLS) — leaking a cleartext request
+/// chunk onto the peer-facing wire (the confidentiality oracle would see it).
+/// The settle gives the test's `wait_for_running` → `program_declared_peer_redirect`
+/// path (sub-second in practice) ample headroom to land the redirect BEFORE
+/// the first dial, so every dial is intercepted → leg-F → enforce → mTLS, and
+/// no cleartext ever reaches the peer port. The retry loop still tolerates a
+/// late redirect (a pre-redirect dial that slips through hits the real peer's
+/// multi-accept loop, which discards the failed-handshake plaintext connection
+/// without serving it).
 fn workload_dial_script(peer_addr: SocketAddrV4) -> String {
     let split = OUTBOUND_REQUEST.len() / 2;
     format!(
@@ -409,6 +409,9 @@ import socket, sys, time
 part1 = {part1}
 part2 = {part2}
 reply = {reply}
+# Pre-dial settle: let the test program the redirect before the first dial,
+# so no cleartext ever reaches the real peer port (see fn docstring).
+time.sleep(8)
 deadline = time.time() + 40
 while time.time() < deadline:
     try:
