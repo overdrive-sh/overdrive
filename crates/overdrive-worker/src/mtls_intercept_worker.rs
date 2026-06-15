@@ -129,6 +129,13 @@ struct AllocIntercept {
     /// the dial target — while the SINGLE declared peer is the ratified
     /// D-MTLS-15 scope. General per-connection multi-peer orig-dst recovery
     /// remains [#178](https://github.com/overdrive-sh/overdrive/issues/178).
+    ///
+    /// Read back from the struct ONLY by the `integration-tests`-gated
+    /// `program_declared_peer_redirect` seam (the `AcceptLeg::Outbound`
+    /// loop reads a SEPARATE `Arc` clone, not this field). In a production
+    /// build the field is recorded but never read — the same shape as
+    /// `leg_f_addr` above (#178), so the `dead_code` allow is correct.
+    #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
     real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
 }
 
