@@ -86,6 +86,18 @@ struct AllocIntercept {
     /// per-alloc `Mutex` so the spawned accept task can push as it
     /// `enforce`s.
     enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
+    /// The agent's leg-F (outbound) listener address for this alloc —
+    /// the kernel-redirect target `cgroup_connect4_mtls` rewrites a
+    /// declared-peer `connect()` to. Recorded so the #178 declared-peer
+    /// stand-in seam can resolve THIS alloc's own leg-F when it programs
+    /// `MTLS_REDIRECT_DEST[real_peer] = leg_f` (the test never has to
+    /// supply — or even observe — the worker-chosen ephemeral port).
+    /// Read ONLY by the `integration-tests`-gated
+    /// `program_declared_peer_redirect` seam — in a production build the
+    /// field is recorded but never read (v1 production has no east-west
+    /// peer enumeration; #178), so the `dead_code` allow is correct.
+    #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
+    leg_f_addr: SocketAddrV4,
 }
 
 /// The worker-side mTLS intercept-and-enforce lifecycle component.
@@ -200,6 +212,15 @@ impl MtlsInterceptWorker {
                 return;
             }
         };
+        // The agent's chosen leg-F address — the kernel-redirect target a
+        // declared-peer `connect()` is rewritten to. Recorded in the
+        // per-alloc bookkeeping so the #178 declared-peer stand-in seam can
+        // resolve THIS alloc's own leg-F when it programs the redirect.
+        let leg_f_addr = leg_f_listener
+            .local_addr()
+            .ok()
+            .and_then(socketaddr_v4)
+            .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
 
         // INBOUND install: the agent's leg-C IP_TRANSPARENT listener +
         // the nft-TPROXY redirect aimed at it. `virt` is the server
@@ -220,7 +241,13 @@ impl MtlsInterceptWorker {
                     // Outbound is already attached; keep it. Record the
                     // alloc with no inbound guard so stop_alloc still
                     // detaches the cgroup program.
-                    self.record_intercept(spec.alloc.clone(), cgroup_link, None, Vec::new());
+                    self.record_intercept(
+                        spec.alloc.clone(),
+                        cgroup_link,
+                        None,
+                        Vec::new(),
+                        leg_f_addr,
+                    );
                     return;
                 }
             };
@@ -246,11 +273,6 @@ impl MtlsInterceptWorker {
         };
 
         let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
-        let leg_f_addr = leg_f_listener
-            .local_addr()
-            .ok()
-            .and_then(socketaddr_v4)
-            .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
 
         let outbound_task = self.spawn_accept_loop(
             spec.alloc.clone(),
@@ -269,6 +291,7 @@ impl MtlsInterceptWorker {
             tproxy_guard,
             vec![outbound_task, inbound_task],
             enforced,
+            leg_f_addr,
         );
     }
 
@@ -316,24 +339,45 @@ impl MtlsInterceptWorker {
     }
 
     /// Test-only (#178 stand-in): program the single declared-peer
-    /// `MTLS_REDIRECT_DEST[real_peer] = leg_f` entry into THIS worker's
-    /// own `MtlsDataplane`, so the e2e activation gate can drive a
-    /// workload that dials a KNOWN declared peer through the production
-    /// boot path. NOT a production surface — v1 production has no
-    /// east-west peer enumeration (that is #178); `start_alloc` never
-    /// programs the redirect itself.
+    /// `MTLS_REDIRECT_DEST[real_peer] = <alloc's own leg-F>` entry into
+    /// THIS worker's own `MtlsDataplane`, so the e2e activation gate can
+    /// drive a workload that dials a KNOWN declared peer through the
+    /// production boot path. The leg-F target is resolved from the alloc's
+    /// OWN per-alloc bookkeeping (recorded by `start_alloc`) — the test
+    /// never supplies (nor needs to observe) the worker-chosen ephemeral
+    /// leg-F port, so the redirect always lands on the worker's real
+    /// accept→`enforce` listener (a test-chosen leg-F would bypass the
+    /// accept loop, never reach `enforce`, and produce no TLS on the
+    /// peer wire).
+    ///
+    /// NOT a production surface — v1 production has no east-west peer
+    /// enumeration (that is #178); `start_alloc` never programs the
+    /// redirect itself. `alloc` MUST have been `start_alloc`-ed first
+    /// (so its leg-F is recorded); a redirect for an unknown alloc
+    /// returns [`MtlsInterceptError::UnknownAlloc`].
     ///
     /// # Errors
     ///
-    /// Surfaces [`overdrive_dataplane::mtls::MtlsDataplaneError`] when the
-    /// `MTLS_REDIRECT_DEST` update syscall fails.
+    /// [`MtlsInterceptError::UnknownAlloc`] when `alloc` has no recorded
+    /// intercept (it was never `start_alloc`-ed, or was already stopped);
+    /// [`MtlsInterceptError::Dataplane`] when the `MTLS_REDIRECT_DEST`
+    /// update syscall fails.
     #[cfg(feature = "integration-tests")]
     pub fn program_declared_peer_redirect(
         &self,
+        alloc: &AllocationId,
         real_peer: SocketAddrV4,
-        leg_f: SocketAddrV4,
-    ) -> Result<(), overdrive_dataplane::mtls::MtlsDataplaneError> {
-        self.dataplane.lock().program_redirect(real_peer, leg_f)
+    ) -> Result<(), MtlsInterceptError> {
+        let leg_f = self
+            .intercepts
+            .lock()
+            .get(alloc)
+            .map(|intercept| intercept.leg_f_addr)
+            .ok_or_else(|| MtlsInterceptError::UnknownAlloc { alloc: alloc.clone() })?;
+        self.dataplane
+            .lock()
+            .program_redirect(real_peer, leg_f)
+            .map_err(|source| MtlsInterceptError::Dataplane { source })
     }
 
     /// Spawn the accept→`enforce` loop for one leg. Each accepted
@@ -430,6 +474,7 @@ impl MtlsInterceptWorker {
         tproxy_guard: Option<TproxyInterceptGuard>,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
         enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
+        leg_f_addr: SocketAddrV4,
     ) {
         self.intercepts.lock().insert(
             alloc,
@@ -438,6 +483,7 @@ impl MtlsInterceptWorker {
                 _tproxy_guard: tproxy_guard,
                 accept_tasks,
                 enforced,
+                leg_f_addr,
             },
         );
     }
@@ -449,6 +495,7 @@ impl MtlsInterceptWorker {
         cgroup_link: MtlsCgroupLink,
         tproxy_guard: Option<TproxyInterceptGuard>,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
+        leg_f_addr: SocketAddrV4,
     ) {
         self.record_intercept_full(
             alloc,
@@ -456,8 +503,31 @@ impl MtlsInterceptWorker {
             tproxy_guard,
             accept_tasks,
             Arc::new(Mutex::new(Vec::new())),
+            leg_f_addr,
         );
     }
+}
+
+/// Test-only error for the #178 declared-peer stand-in seam.
+///
+/// Returned by [`MtlsInterceptWorker::program_declared_peer_redirect`].
+/// Gated out of production builds entirely — the production worker never
+/// programs the redirect (v1 has no east-west peer enumeration), so this
+/// error has no production call site.
+#[cfg(feature = "integration-tests")]
+#[derive(Debug, thiserror::Error)]
+pub enum MtlsInterceptError {
+    /// `program_declared_peer_redirect` was called for an alloc with no
+    /// recorded intercept (never `start_alloc`-ed, or already stopped),
+    /// so its leg-F target cannot be resolved.
+    #[error("no recorded mTLS intercept for alloc {alloc} (start_alloc must run first)")]
+    UnknownAlloc { alloc: AllocationId },
+    /// The underlying `MTLS_REDIRECT_DEST` map-update syscall failed.
+    #[error("mTLS redirect program failed: {source}")]
+    Dataplane {
+        #[source]
+        source: overdrive_dataplane::mtls::MtlsDataplaneError,
+    },
 }
 
 /// Which leg an accept loop is draining.

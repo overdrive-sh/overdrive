@@ -857,9 +857,16 @@ impl ServerConfig {
 /// drain in-flight requests, stop the convergence-loop spawn, and
 /// close the listener. The server task runs until the handle is shut
 /// down or the process exits.
-#[derive(Debug)]
 pub struct ServerHandle {
     inner: AxumHandle,
+    /// The booted (β) transparent-mTLS intercept worker, surfaced for the
+    /// Tier-3 production-activation e2e (transparent-mtls-host-socket,
+    /// step 06-03). `Some` only on a real-dataplane boot that composed the
+    /// mTLS layer; `None` otherwise. Test-gated — production callers never
+    /// reach for it (the action-shim reaches `state.mtls_worker` directly,
+    /// not through the handle). Exposed via [`ServerHandle::mtls_worker`].
+    #[cfg(feature = "integration-tests")]
+    mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
     /// the `EvaluationBroker` and dispatches actions through the
@@ -911,6 +918,16 @@ pub struct ServerHandle {
     emit_drain_shutdown: CancellationToken,
 }
 
+impl std::fmt::Debug for ServerHandle {
+    /// Manual `Debug` (the derive was dropped when the test-gated
+    /// `mtls_worker` field — `Option<Arc<MtlsInterceptWorker>>`, not
+    /// `Debug` — was added; step 06-03). Elides the task handles and the
+    /// worker, mirroring the prior derived shape's information value.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerHandle").finish_non_exhaustive()
+    }
+}
+
 impl ServerHandle {
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
@@ -918,6 +935,27 @@ impl ServerHandle {
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
+    }
+
+    /// The booted (β) transparent-mTLS intercept worker, if the boot
+    /// composed the mTLS layer (`Some` on a real-dataplane boot;
+    /// `None` otherwise).
+    ///
+    /// Test-only (transparent-mtls-host-socket, step 06-03 criteria[1]):
+    /// the Tier-3 production-activation e2e reaches the booted worker
+    /// through this accessor to drive the #178 declared-peer stand-in
+    /// ([`MtlsInterceptWorker::program_declared_peer_redirect`]). The
+    /// production action-shim reads `AppState.mtls_worker` directly —
+    /// it never needs the handle.
+    ///
+    /// [`MtlsInterceptWorker::program_declared_peer_redirect`]:
+    ///     overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::program_declared_peer_redirect
+    #[cfg(feature = "integration-tests")]
+    #[must_use]
+    pub fn mtls_worker(
+        &self,
+    ) -> Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> {
+        self.mtls_worker.clone()
     }
 
     /// Trigger graceful shutdown with a drain deadline. In-flight
@@ -1910,6 +1948,13 @@ pub async fn run_server_with_obs_and_driver(
     let emit_drain_task =
         spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
+    // Capture the booted (β) mTLS worker handle for the Tier-3 e2e
+    // (step 06-03) BEFORE `.with_state(state)` moves `state` into the
+    // router. Test-gated; the action-shim still reads `state.mtls_worker`
+    // through the router state, this is a parallel clone for the handle.
+    #[cfg(feature = "integration-tests")]
+    let mtls_worker_for_handle = state.mtls_worker.clone();
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -1958,6 +2003,11 @@ pub async fn run_server_with_obs_and_driver(
 
     Ok(ServerHandle {
         inner: axum_handle,
+        // Surface the booted (β) mTLS worker for the Tier-3 e2e
+        // (step 06-03). Captured from `AppState` before the router move;
+        // `None` on a non-mTLS boot. Test-gated.
+        #[cfg(feature = "integration-tests")]
+        mtls_worker: mtls_worker_for_handle,
         server_task,
         convergence_task,
         exit_observer_task,
