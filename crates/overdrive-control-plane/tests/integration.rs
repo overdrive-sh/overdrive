@@ -75,6 +75,11 @@ mod integration {
     // worker (real dataplane → post-`IdentityMgr` compose →
     // `AppState.mtls_worker` → action-shim `start_alloc`/`stop_alloc`)
     // and refuses to boot fail-closed on an injected probe fault.
+    /// Focused control-plane-local mTLS e2e helpers (TestPki +
+    /// HeldIdentities `IdentityRead` double + the real `OutboundPeer`
+    /// mTLS server + AF_PACKET `0x17` wire oracle) consumed by
+    /// `mtls_production_activation` criteria[1].
+    pub mod mtls_e2e_helpers;
     mod mtls_production_activation;
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;

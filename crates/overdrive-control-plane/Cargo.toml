@@ -32,7 +32,17 @@ path = "src/bin/openapi.rs"
 # so `cargo nextest run --workspace` stays under the 60s slow-test
 # budget; CI exercises the gate in a dedicated `integration` job. See
 # `.claude/rules/testing.md` §"Integration vs unit gating".
-integration-tests = ["overdrive-dataplane/integration-tests"]
+#
+# Forwards to `overdrive-worker/integration-tests` so the worker's
+# `#[cfg(feature = "integration-tests")]` #178 declared-peer redirect
+# stand-in seam (`MtlsInterceptWorker::program_declared_peer_redirect`)
+# is compiled IN when the control-plane Tier-3 production-activation gate
+# (transparent-mtls-host-socket step 06-03 criteria[1]) drives it through
+# the booted `ServerHandle::mtls_worker()` accessor.
+integration-tests = [
+    "overdrive-dataplane/integration-tests",
+    "overdrive-worker/integration-tests",
+]
 
 [dependencies]
 overdrive-core.workspace           = true

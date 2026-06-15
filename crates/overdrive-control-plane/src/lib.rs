@@ -740,6 +740,29 @@ pub struct ServerConfig {
     /// use site so production builds compile it out entirely.
     #[cfg(feature = "integration-tests")]
     pub mtls_probe_fault: Option<String>,
+
+    /// Test-only PKI-injection seam for the transparent-mTLS layer
+    /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
+    /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
+    /// `IdentityRead` instead of the production `IdentityMgr` — so the
+    /// agent's leg-B client SVID (`svid_for`) AND the leg-B
+    /// `TrustBundle` (`current_bundle`) both come from a shared
+    /// `TestPki` the e2e also roots its `OutboundPeer` server cert on.
+    /// Without this seam the production `IdentityMgr` owns a fresh
+    /// ephemeral workload-CA root, and the test peer cannot present a
+    /// server cert the agent's leg-B verifier (root anchor + SNI
+    /// `peer.overdrive.local`) accepts, so the handshake never completes
+    /// and no `0x17` reaches the peer wire.
+    ///
+    /// Sibling to the existing `SimKek::for_boot()` boot injection (the
+    /// criteria[0] test uses that); gated behind
+    /// `#[cfg(feature = "integration-tests")]` on both the field and its
+    /// single use site so production builds compile it out entirely and
+    /// the production `IdentityMgr` is the only reachable identity
+    /// source. This is the WORKLOAD-identity path (`RcgenCa` /
+    /// `IdentityMgr`), NOT the operator HTTPS CA.
+    #[cfg(feature = "integration-tests")]
+    pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -767,6 +790,11 @@ impl std::fmt::Debug for ServerConfig {
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field(
+            "mtls_identity_override",
+            &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
+        );
         dbg.finish()
     }
 }
@@ -847,6 +875,12 @@ impl ServerConfig {
             // fail-closed branch.
             #[cfg(feature = "integration-tests")]
             mtls_probe_fault: None,
+            // transparent-mtls-host-socket step 06-03: default no
+            // identity override; the criteria[1] e2e sets `Some(..)`
+            // to a `TestPki`-rooted `IdentityRead` so the agent's
+            // leg-B trusts the test peer's server cert.
+            #[cfg(feature = "integration-tests")]
+            mtls_identity_override: None,
         }
     }
 }
@@ -1808,9 +1842,27 @@ pub async fn run_server_with_obs_and_driver(
 
             // (2) construct the enforcement port over the held identity +
             // the F7 limits. `IdentityMgr` impls `IdentityRead`.
+            //
+            // PKI-SEAM (transparent-mtls-host-socket step 06-03,
+            // criteria[1]): when the test-only `mtls_identity_override`
+            // is `Some`, the agent reads its leg-B SVID + `TrustBundle`
+            // from THAT `IdentityRead` (a `TestPki`-rooted double the
+            // e2e also roots its `OutboundPeer` server cert on) instead
+            // of the production `IdentityMgr`, so the leg-B handshake
+            // against the test peer completes. Production builds compile
+            // the override out (the field is `cfg`-gated), so the
+            // production `IdentityMgr` is the only reachable source.
+            #[cfg(feature = "integration-tests")]
+            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+                config.mtls_identity_override.clone().unwrap_or_else(|| {
+                    Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>
+                });
+            #[cfg(not(feature = "integration-tests"))]
+            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+                Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>;
             let enforcement: Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> =
                 Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcement::new(
-                    Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>,
+                    mtls_identity,
                     overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
                 ));
 
