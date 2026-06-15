@@ -270,6 +270,8 @@ async fn dispatch_release(
         Arc::clone(&allocator),
         &test_broker,
         None,
+        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
+        None,
     )
     .await
     .expect("dispatch must succeed");

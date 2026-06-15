@@ -351,6 +351,104 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-14T10:14:48Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T12:59:40Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AT authored + wired (tests/integration/mtls_intercept_install.rs) but cannot run RED-for-right-reason \u2014 crate does not compile due to design gap: install_inbound_tproxy needs MTLS_LEG_S_DIAL_MARK whose sole SSOT is overdrive_dataplane::mtls, and overdrive-worker has no dep edge to overdrive-dataplane (adding it drags the aya/BPF build chain). Design names the const + file location but not the worker import source. Resolution (core-hoist or new crate edge) touches files outside the 4-file scope; surfaced to orchestrator.",
+      "t": "2026-06-14T13:07:19Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: blocked upstream by the RED_ACCEPTANCE compile gap (MTLS_LEG_S_DIAL_MARK import source). Note: even once unblocked, RED_UNIT is expected NOT_APPLICABLE \u2014 orig-dst recovery + routing-fact construction need a real socket (getsockname) and are fully exercised by the Tier-3 AT; no pure unit test reaches GREEN that the AT does not.",
+      "t": "2026-06-14T13:07:26Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: all 4 D-MTLS-14 free fns + TproxyInterceptGuard + InterceptError implemented verbatim to pinned signatures (no invented surface; contract types constructed-not-extended) and lib.rs wired; Lima compile-check is clean EXCEPT the single E0433 at mtls_intercept.rs:210 (MTLS_LEG_S_DIAL_MARK source). Cannot run the suite actually-executing until the const-source design gap is pinned. NOT logging EXECUTED \u2014 suite did not run green.",
+      "t": "2026-06-14T13:07:32Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no commit \u2014 GREEN not reached (crate does not compile pending the MTLS_LEG_S_DIAL_MARK import-source design gap). Committing a non-compiling crate would violate the 100%-green-bar gate. Awaiting orchestrator/architect resolution of where the worker reads MTLS_LEG_S_DIAL_MARK from (recommended: hoist the const into overdrive-core; both adapters read it there).",
+      "t": "2026-06-14T13:07:39Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T13:17:50Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: routing-fact construction (InterceptedConnection/Routed) + getsockname orig-dst recovery are fully exercised by the Tier-3 AT through the public mtls_intercept module surface; every fn's core behaviour (IP_TRANSPARENT sockopt, nft/ip-rule install+Drop, getsockname on a TPROXY-redirected socket) is inherently real-kernel and needs a real socket \u2014 a focused unit test would duplicate the AT or test internal structure (Mandate M1/M2 violation).",
+      "t": "2026-06-14T13:18:02Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T13:22:35Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T13:26:08Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T16:57:47Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T16:57:56Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T16:57:56Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T17:00:21Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-14T17:33:53Z"
     }
   ],
   "reviews": [
@@ -540,6 +638,176 @@
         "tdd_phase_and_test_integrity_g9": "PASS -- PREPARE/RED_ACCEPTANCE/GREEN/COMMIT EXECUTED PASS; RED_UNIT SKIPPED (NOT_APPLICABLE) then SUPERSEDED EXECUTED PASS when the mutation gate surfaced the need for boundary unit tests. The supersession ADDED tests (strengthening), never weakened/deleted/skipped an existing assertion -- no G9 violation. The supersession is honest: the boundary unit tests genuinely exist in limits.rs + supervision.rs as claimed. No escalation needed (the crafter strengthened rather than weakened)."
       },
       "summary": "APPROVED (reviewer opus + orchestrator independent verification of every load-bearing claim). On the security-critical slice where a divergent contract would be most dangerous, the implementation holds the #1 rule (CLAUDE.md 'implement to the design, never invent API surface') exactly: the MtlsEnforcement trait stays 4-method probe/enforce/liveness/teardown with enforce_outbound/inbound as PRIVATE delegates, every error variant + PumpLiveness::Stalled traces to a named requirement, no catch-all, expected_peer==None and PeerIdentityMismatch reserved-but-never-produced in v1 (the #178 gate honoured, nothing called 'protected'). Fail-closed is cause-distinct (AbsentSvid/AbsentBundle/PeerVerificationFailed distinct variants; nocert/wrongca distinct reason strings with assert_ne! + server 0 bytes). The F4/F7 limits trip at CONCRETE values (real 256 KiB+1 overflow -> BufferLimitExceeded; 128-real-concurrent-pre-arm 129th -> InFlightLimitExceeded) with mutation-grade boundary unit tests naming the </<=/>=/== mutant each kills (the RED_UNIT SKIPPED -> EXECUTED supersession is honest -- the tests exist, additive, no G9 violation). F6 supervision recomputes Stalled from inputs (persist-inputs rule), the worker tears down only Stalled -> Gone with no false positive and both telemetry events, production carries no sim-shaped contortion. The Tier-3 gate genuinely executes (panics-not-skips on unsupported, defeating the --no-run hole) and is correctly in the mtls-shared max-threads=1 nextest group (the 03-01 B1 remediation), and all three prior-review findings (01-01 forward-as-splice doc drift, 03-01 B1 group, 03-01 S1 path) were learned from. Two NON-blocking findings: Q1 -- the F5 SECOND negative (workload-cannot-self-exempt) is structurally guaranteed by the workload-subtree cgroup attach (no per-socket bypass knob exists) and proven structurally at 01-01, but is doc-claimed in the AC5 docstring as if test-asserted while only the no-recursion negative is asserted at 04-01 (the runtime self-exempt negative is only representable once 05-01 wires the production intercept-install); soften the docstring + ensure 05-01 carries the runtime (b) negative. Q2 -- 'distinct reason' for nocert/wrongca is satisfied at the reason-STRING level within one PeerVerificationFailed variant (defensible: rustls' distinction is not a stable typed surface), recorded so a future reader does not expect two variants. Neither blocks: both are doc-claim-vs-coverage precision, not a security or correctness defect. RECOMMENDATION: 04-01 is APPROVED to unblock 05-01; fold Q1 (docstring softening) into the next touch of mtls_guardrails.rs and ensure 05-01 carries the runtime self-exempt negative + the end-to-end external-validity gate."
+    },
+    {
+      "sid": "06-01",
+      "artifact_type": "implementation",
+      "reviewer": "nw-software-crafter-reviewer (opus) + orchestrator verification (Lima ground-truth run)",
+      "command": "/nw-review @nw-software-crafter implementation step_id=06-01 (adversarial)",
+      "reviewed_at": "2026-06-14T11:39:46Z",
+      "verdict": "NEEDS_REVISION",
+      "blocking_issues": [
+        {
+          "id": "D1",
+          "severity": "blocking",
+          "dimension": "design-fidelity + deferral-discipline (false production doc + untracked shared-resource hazard)",
+          "location": "crates/overdrive-dataplane/src/mtls/dataplane.rs:189-208 (load); :192-194 (misleading comment); :196 (destructive discard). Cross-ref hash_of_maps.rs new_with_inner (fresh BPF_MAP_CREATE, no BPF_OBJ_GET); lib.rs:432-443 / :1451-1462 (EbpfDataplane pins+unlinks SERVICE_MAP at the SAME pin_dir); wave-decisions.md:1006-1013 (the reuse contract).",
+          "description": "MtlsDataplane::load does `remove_file(pin_dir/SERVICE_MAP)` then `new_pinned_with_array_inner(...)` -- which (verified by tracing new_with_array_inner -> new_with_inner) does a FRESH BPF_MAP_CREATE for both inner-prototype and outer-HoM, then bpf_obj_pin's the freshly-created outer fd. There is NO BPF_OBJ_GET reuse path anywhere in that constructor. This is the INVERSE of the design's load-bearing Load-model claim (wave-decisions.md:1006-1013: 'reuses the already-pinned outer FD via BPF_OBJ_GET rather than creating a second one ... never touches SERVICE_MAP through this surface'). The inline comment at dataplane.rs:192-194 ('so aya reuses the pinned outer FD') documents behaviour the code does not perform (development.md No-aspirational-docs violation). In this STANDALONE step the divergence is MASKED -- the AT uses a per-test isolated pin dir (/sys/fs/bpf/overdrive-mtls-dpoi-<pid>) where no EbpfDataplane ever pinned -- so all 06-01 ACs pass. But D-MTLS-17 item 3 wires load() into run_server at the PRODUCTION pin_dir /sys/fs/bpf/overdrive where EbpfDataplane has ALREADY pinned a live SERVICE_MAP the kernel LB service program is bound to by name. There, load()'s remove_file unlinks the live LB pin and new_pinned_with_array_inner creates a divergent EMPTY outer HoM pinned over it: any later by-name BPF_OBJ_GET (reconciler re-resolve, restart, operator bpftool) resolves the wrong map, and EbpfDataplane::Drop (lib.rs:1451-1462) removes a pin that now belongs to MtlsDataplane (silent cross-ownership). The hazard is NEITHER surfaced (the comment claims the opposite) NOR tracked (no issue, no // HAZARD/TODO(06-03) marker) -- violating CLAUDE.md 'implement to the design, never invent API surface' AND the deferral discipline ('deferred hazards must be explicitly surfaced and tracked').",
+          "fix": "Preferred: implement the design as written -- recover the EXISTING pin via bpf_obj_get(pin_path) + std::mem::forget; never remove_file+fresh-create on a path a production map may own. If aya 0.13.x makes BPF_OBJ_GET-reuse genuinely infeasible, the design's reuse claim is unsatisfiable and must be corrected via architect dispatch, AND load() must (a) replace `let _ = remove_file` at :196 with the discriminating NotFound-vs-real ErrorKind match EbpfDataplane::new already uses (lib.rs:437-443), and (b) carry an issue-tracked // HAZARD(06-03) marker naming the shared-pin cross-ownership risk + the required two-load sequencing, surfaced to the user for issue creation BEFORE 06-03 lands. Independent of the chosen path, fix the misleading :192-194 comment. NOTE: 06-01's own standalone ACs are met and the AT genuinely passes -- this blocks on the production-correctness / design-contract grounds and the untracked-hazard-into-06-03 grounds, not on a standalone-behaviour failure."
+        }
+      ],
+      "non_blocking_findings": [
+        {
+          "id": "D2",
+          "severity": "high",
+          "dimension": "documentation (stale roadmap note superseded by revised design) -- praise on the code",
+          "location": "docs/feature/transparent-mtls-host-socket/deliver/roadmap.json:257-258 vs crates/overdrive-dataplane/src/mtls/dataplane.rs:219-228",
+          "description": "roadmap implementation_notes + reference_implementation still say 'The load is fold-into-the-existing-single-ELF (NOT a second EbpfLoader) ... Mirror EbpfDataplane::new_with_pin_dir's ... single-ELF load.' The code does its OWN EbpfLoader::new()...load_file() (a second load). This is CORRECT: wave-decisions.md:951-1031 was revised 2026-06-14 to bless the separate load with a sound aya-0.13.x single-owner justification (per-alloc attach needs ongoing &mut Ebpf; EbpfDataplane's Ebpf is Arc<dyn Dataplane>-erased post-composition; sharing would force Arc<Mutex<Ebpf>> taxing the LB hot path). The crafter correctly followed the REVISED SSOT over the stale roadmap note. The defect is the stale roadmap note, not the code.",
+          "fix": "Reconcile roadmap.json:257-258 to the revised D-MTLS-17 separate-load model (architect dispatch -- roadmap edits are design artifacts). Non-blocking: the SSOT (wave-decisions.md) is correct and the code follows it."
+        },
+        {
+          "id": "D3",
+          "severity": "high",
+          "dimension": "mutation coverage gap (non-ENOENT branch + map_io_error discrimination unkilled)",
+          "location": "crates/overdrive-dataplane/src/mtls/dataplane.rs:332-349 (unprogram_redirect) + :357-362 (map_io_error)",
+          "description": "implementation_notes promise mutation >=80% on 'the program/unprogram branch'. The POD conversions ARE covered by default-lane proptests (:404-422). But program_redirect/unprogram_redirect need a loaded map (Tier-3). The Tier-3 AT exercises the happy remove (:135) and the ENOENT/idempotent-remove path (:141-143) but NEVER induces a non-ENOENT map error, so a mutation collapsing unprogram_redirect to always-Ok(()), or making map_io_error always return an ENOENT-shaped error, likely SURVIVES even on the Lima mutation path. Inducing a real EPERM/EFAULT map-delete against a live kernel map is genuinely awkward, hence high not blocking.",
+          "fix": "Extract the ENOENT-vs-real discrimination into a pure default-lane fn -- e.g. classify_remove(&io::Error) -> {Idempotent | Surface} -- and proptest it over raw_os_error in {ENOENT, EPERM, EFAULT, EINVAL, None}, asserting ENOENT->Idempotent and all else->Surface. Kills the == Some(ENOENT) flip and the always-Ok collapse on the LOGIC without needing a failing kernel syscall. Mirrors the supervision::derive_liveness extraction precedent."
+        },
+        {
+          "id": "D4",
+          "severity": "medium",
+          "dimension": "errors (silent absorb of a fallible boundary read -- one site, folds into D1)",
+          "location": "crates/overdrive-dataplane/src/mtls/dataplane.rs:196 (SERVICE_MAP pin clear) -- and :227 assessed benign",
+          "description": ":227 (`let _ = remove_file(&bpf_temp_path)` of a /tmp scratch file) is LEGITIMATE best-effort cleanup with no correctness consequence and mirrors EbpfDataplane::new (lib.rs:500) -- no change. :196 (`let _ = remove_file(&pin_path)` on the SERVICE_MAP pin) is a development.md Errors violation AND load-bearing: at composition this path holds a LIVE production map (D1); a swallowed EPERM/EBUSY/EACCES here lets the code proceed to fresh-create believing the path is clear, masking the cross-ownership state. EbpfDataplane::new does this correctly with a discriminating match (lib.rs:437-443).",
+          "fix": "Folded into D1 fix (b)(a): replace the :196 discard with the discriminating NotFound-vs-real ErrorKind match. Leave :227 as-is."
+        },
+        {
+          "id": "D5",
+          "severity": "medium",
+          "dimension": "test strength (MISS assertion proves 'not rewritten', not 'passes through unchanged')",
+          "location": "crates/overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs:125-132 + :316-338",
+          "description": "AC wording is 'a connect to an un-programmed dest passes through unchanged (map MISS -> pass)'. The test asserts !lands_on_leg_f(unprogrammed) -- the connect does NOT arrive on leg-F within the 3s window. This proves 'not rewritten onto leg-F' (necessary) but NOT 'passes through unchanged' (sufficient): a kernel-side bug that DROPPED the connect on miss would produce the same observable (nothing on leg-F) and the test would still pass. The kernel miss-behaviour is owned by a prior step (the cgroup_connect4_mtls program already shipped) and the rewrite-fires POSITIVE (AC3a) carries the load, hence medium.",
+          "fix": "Strengthen the negative: point the 'un-programmed' dest at a SECOND reachable listener (a real sink on the host veth) and assert the connect lands THERE unchanged, not on leg-F. Converts 'absence on leg-F' into 'presence at the intended dest', which a drop-on-miss bug would fail. Not blocking (kernel miss-path is out of this step's production scope)."
+        },
+        {
+          "id": "D6",
+          "severity": "praise",
+          "dimension": "evidence honesty (green-on-skip assessed acceptable)",
+          "location": "crates/overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs:52-63",
+          "description": "skip_if_unsupported! returns GREEN on TopologyError::Unsupported (unlike 01-01's fail-loud AT) -- assessed LOW/acceptable: the macro is DISCRIMINATING (skips only on Unsupported = no root / no cgroup-v2 delegation / no bpffs; panics on every other TopologyError, :60), the canonical CI lane runs Tier-3 as root where Unsupported does not fire, and the orchestrator GROUND-TRUTH ran the AT under Lima: PASS in 3.21s (a skip returns ~0s; 3.2s = the real AC3b 3s-deadline MISS wait + setup), proving non-vacuous execution and confirming AC5 'ACTUALLY EXECUTING (NOT --no-run)'. Residual non-root-CI green-on-skip is the standard Tier-3 skip contract, not a regression introduced here."
+        },
+        {
+          "id": "D7",
+          "severity": "praise",
+          "dimension": "POD layout lockstep defense adequate despite duplication (no Tier-2 backstop)",
+          "location": "crates/overdrive-dataplane/src/mtls/dataplane.rs:84-136 vs crates/overdrive-bpf/src/maps/mtls_redirect_dest.rs:28-58",
+          "description": "userspace + kernel-side MtlsDestKey/MtlsAddrPort are byte-identical #[repr(C)] {ip_host:u32, port_host:u16, _pad:u16}, both with const _: () = assert!(size_of==8) guards, but DUPLICATED (no shared crate). Given cgroup_sock_addr has no BPF_PROG_TEST_RUN (no Tier-2), the defense is genuinely three-layered and sufficient: (1) size_of==8 compile guards on BOTH sides catch width/field-count drift; (2) default-lane proptests (:404-422) pin the exact 8-byte host-order wire layout (ip.to_ne ++ port.to_ne ++ 0u16) -- kills endianness/transpose/non-zero-pad mutations; (3) the Tier-3 map_has_redirect_entry oracle dumps the REAL kernel map via bpftool and matches the host-order key/value bytes -- a byte oracle against the actual kernel, which catches even a field-order swap that keeps size_of==8 true. Optional future hardening (NOT required for this step): a shared no_std-compatible #[repr(C)] POD would make drift unrepresentable rather than caught -- worth a follow-up only if a third consumer appears."
+        }
+      ],
+      "dimensions_verified": {
+        "design_fidelity_api_surface": "PASS -- the 06-01 commit (d6452d09) touched ONLY mtls/dataplane.rs (NEW), mtls/mod.rs (+3: pub mod dataplane + re-export of MtlsCgroupLink/MtlsDataplane/MtlsDataplaneError), tests/integration.rs (+7), and the NEW AT. NO Dataplane trait method, NO MtlsEnforcement::intercept, NO change to the 4-method probe/enforce/liveness/teardown contract, NO lib.rs change (orchestrator-verified via git show --stat). The public surface is EXACTLY D-MTLS-17 item 1's named shape: MtlsDataplane{load,attach_alloc,program_redirect,unprogram_redirect}, MtlsCgroupLink RAII, MtlsDataplaneError, MtlsDestKey/MtlsAddrPort PODs. No invented surface.",
+        "load_model_separate_ebpf": "PASS (matches REVISED design) -- own EbpfLoader load justified by aya 0.13.x single-owner model (wave-decisions.md:951-1031). The roadmap's stale 'NOT a second EbpfLoader' note is D2 (doc reconciliation), not a code divergence.",
+        "service_map_pin_reuse_contract": "FAIL (D1, blocking) -- load() does remove_file + fresh new_pinned_with_array_inner (verified fresh BPF_MAP_CREATE, no BPF_OBJ_GET); the INVERSE of the design's reuse claim; masked standalone, a cross-ownership landmine for 06-03; untracked + falsely-documented.",
+        "endianness_pod_lockstep": "PASS (D7) -- userspace PODs byte-identical to kernel-side, size_of==8 guards both sides, default-lane proptest pins host-order wire layout, Tier-3 bpftool byte oracle cross-checks against the real kernel map.",
+        "error_discipline": "PASS -- MtlsDataplaneError is cause-distinct typed (Load/ProgramLoad/Attach/MapProgram), NO Internal(String) catch-all, every Display names the kernel/privilege remediation. attach_alloc returning Load (not Attach) on program-recover failure (:279-285) is acceptable (a missing program post-load IS a load/embed regression). One discard violation at :196 (D4, folds into D1); :227 discard benign.",
+        "evidence_honesty": "PASS (orchestrator GROUND-TRUTH) -- the Tier-3 AT imports the PRODUCTION entry point overdrive_dataplane::mtls::MtlsDataplane (NOT helpers::mtls_roles glue), drives load->attach_alloc->program_redirect->real cgroup-isolated python connect->unprogram->link drop, asserts REAL kernel state (bpftool cgroup show per-alloc attach + absent on global slice; bpftool map dump host-order entry present/gone; real connect rewritten onto leg-F vs MISS pass-through; link-drop detach). Orchestrator ran it under Lima: PASS in 3.21s (skip=~0s), confirming AC5 ACTUALLY-EXECUTING. No testing/fixture theater (production dataplane.rs +423 in the diff; deletion test: revert it and the AT cannot pass). MISS assertion is weaker than the AC wording (D5).",
+        "mutation_gate_80pct": "PARTIAL (D3) -- POD conversions covered by default-lane proptests; program_redirect insert + unprogram_redirect ENOENT/idempotent path covered by the Lima AT; but the non-ENOENT unprogram branch + map_io_error discrimination are unkilled (no test induces a non-ENOENT map error). Extract+proptest classify_remove to close.",
+        "test_integrity_g9": "PASS -- NEW test file; no pre-existing assertion weakened/deleted/skipped. No #[ignore]/#[should_panic] theater. The only skip path (skip_if_unsupported!) is discriminating and proven non-vacuous by the 3.21s ground-truth run (D6)."
+      },
+      "summary": "NEEDS_REVISION (reviewer opus + orchestrator independent verification incl. a Lima ground-truth run of the AT). 06-01 is well-crafted at the unit level and on its OWN standalone scope is correct and green: exact-design public API surface (no invented Dataplane method, no intercept(), the 4-method MtlsEnforcement contract + lib.rs untouched -- CLAUDE.md 'implement to the design' satisfied on the surface), cause-distinct typed errors whose Display names the kernel/privilege remediation, byte-identical userspace/kernel POD lockstep defended three ways (compile guard + default-lane proptest + Tier-3 bpftool byte oracle), and an HONEST Tier-3 AT that drives the production entry point through real bpftool + a real cgroup-isolated connect -- orchestrator-confirmed ACTUALLY-EXECUTING at 3.21s under Lima (a skip is ~0s), with zero testing/fixture theater. ONE BLOCKING defect (D1): MtlsDataplane::load's `remove_file(SERVICE_MAP pin)` + fresh new_pinned_with_array_inner is the INVERSE of the design's load-bearing BPF_OBJ_GET-reuse claim (wave-decisions.md:1006-1013) -- traced through new_with_inner: it is a fresh BPF_MAP_CREATE, there is no reuse path; the inline comment at :192-194 asserts the reuse the code does not perform (false production doc); and the destructive remove_file lands on the SHARED production pin path (/sys/fs/bpf/overdrive) that EbpfDataplane owns at the composition point D-MTLS-17 item 3 wires next -- an undocumented, untracked cross-ownership landmine (EbpfDataplane::Drop would later unlink a pin now owned by MtlsDataplane) that violates BOTH 'implement to the design' and 'deferred hazards must be surfaced + tracked'. The standalone ACs pass only because the AT uses a per-test isolated pin dir that masks it. Plus two HIGH non-blocking (D2 stale roadmap 'NOT a second EbpfLoader' note -- code correctly follows the REVISED separate-load design, reconcile the note via architect; D3 mutation gap on the non-ENOENT unprogram branch + map_io_error -- extract a pure classify_remove and proptest it) and two MEDIUM (D4 the :196 discard, folds into D1; D5 the MISS assertion proves 'not rewritten' not 'passes through unchanged' -- strengthen by landing the un-programmed connect on a real second sink). D6 (green-on-skip) and D7 (POD duplication) assessed and PRAISED -- no action. RECOMMENDATION: resolve D1 before 06-03 wires the composition (design-faithful BPF_OBJ_GET recovery, OR correct-the-design + discriminating-unlink + tracked // HAZARD(06-03) marker + user-approved issue + fix the misleading comment); fold D3/D4 into the next touch of dataplane.rs; reconcile D2 via architect dispatch; optionally strengthen D5. Iteration 1 of max 2."
+    },
+    {
+      "sid": "06-02",
+      "artifact_type": "implementation",
+      "reviewer": "nw-software-crafter-reviewer (x2 adversarial verifiers) + orchestrator deep review + Lima ground-truth run (gate reproduced FAIL 3x)",
+      "command": "/nw-review @nw-software-crafter implementation step_id=06-02 (adversarial)",
+      "reviewed_at": "2026-06-14T14:45:00Z",
+      "verdict": "NEEDS_REVISION",
+      "blocking_issues": [
+        {
+          "id": "D1",
+          "severity": "blocking",
+          "dimension": "test-integrity / gate-not-green (COMMIT EXECUTED PASS contradicted by a reproduced gate failure)",
+          "location": "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs:308 (worker_intercept_install_leg_acquire_inbound, the AC2 preclean-hygiene assertion); mechanism in crates/overdrive-worker/src/mtls_intercept.rs:425-448 (preclean_global_inbound_state) + :429-435 (the drain loop). Roadmap AC5 (criteria[4]): gate green ACTUALLY EXECUTING.",
+          "description": "The committed inbound acceptance test FAILS DETERMINISTICALLY under the exact gate command the roadmap AC5 names. Orchestrator ground-truth: after verifying a clean kernel (fwmark=0, nft=0, route=0), `cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests -E 'test(worker_intercept_install_leg_acquire_inbound)'` panics at :308 -- `assertion left == right failed: preclean must drain the leaked duplicates so install leaves EXACTLY ONE fwmark rule; left: 3, right: 1`. Reproduced 3x via nextest on verified-clean kernels (NOT leftover-state contamination -- the kernel was confirmed clean pre-run each time, and the test's own line-268 preclean + line-296 'exactly 2 leaked' assertion both pass, so there are exactly 2 rules at install time; install adds 1 and drains 0 -> 3). Root cause of the false-green: the failing hygiene block (test :281-312, the leak + assert-exactly-1) was added in the LATER mutation-gap-closure commit 93ca1eab (2026-06-14T13:50Z), AFTER the execution-log GREEN/COMMIT phases were logged (13:22-13:26Z, against the feat commit 4bfa49e6 whose test had no such assertion). The gated suite was NEVER re-run green after the assertion landed, so 06-02's COMMIT EXECUTED PASS log entry is contradicted by the actual committed state. CONSEQUENCE BEYOND THE HYGIENE ASSERT: the test aborts at :308 BEFORE reaching the AC3 orig-dst-recovery assertions (:350-358) -- so the gate currently provides ZERO executed evidence for the step's PRIMARY deliverable (inbound getsockname orig-dst == virt). AC5 ('gate green, ACTUALLY EXECUTING -- NOT --no-run') is not met.",
+          "fix": "(1) Make the test pass under the gate, then RE-RUN the exact gate command to green and update the execution-log GREEN/COMMIT evidence. (2) Fix the preclean so it actually drains (see D5 -- the drain loop breaks on the first non-success `.status()`; under the gated build that first `ip rule del` reports non-success and the loop drains nothing). (3) Verify the test reaches and passes AC3 (orig-dst recovery) under the gate, not just AC1/AC4. Do NOT re-log COMMIT EXECUTED PASS until the gate is reproduced green on a clean kernel."
+        },
+        {
+          "id": "D2",
+          "severity": "blocking",
+          "dimension": "concurrent-resource safety (global shared kernel state) -- forward landmine for 06-03 per-alloc lifecycle; SAME defect class as 06-01 D1",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:48-59 (NFT_TABLE='overdrive-mtls', TPROXY_FWMARK=0x1, TPROXY_RT_TABLE=100 -- all fixed constants), :205-262 (install_inbound_tproxy), :210 + :425-448 (unconditional preclean_global_inbound_state). Contrast the reference harness which keys the table per-context: mtls_netns_topology.rs:362 (overdrive_mtls_ws_{tag}).",
+          "description": "install_inbound_tproxy(virt, agent_port) is a PER-ALLOCATION free function (06-03 drives it on the per-alloc lifecycle), but the nft table name, fwmark, and routing-table number are all FIXED global constants, and the function OPENS with preclean_global_inbound_state() which unconditionally deletes table ip overdrive-mtls and drains the fwmark rules. Two adversarial verifiers CONFIRMED: a second server allocation's install precleans away the first allocation's live inbound intercept (table + ip rule), silently breaking the first server's mTLS interception. The function as written supports EXACTLY ONE concurrent inbound intercept per node. This is masked in 06-02 because the AT installs only one. It is the SAME structural defect class as 06-01's blocking D1 (a global shared kernel resource whose standalone test masks the collision via isolation, becoming a composition landmine for the next step) -- a recurring pattern in this production-integration phase that adversarial review exists to catch before 06-03 builds on it.",
+          "fix": "Resolve before 06-03 wires per-alloc inbound. EITHER (a) confirm + DOCUMENT that single-concurrent-inbound-intercept is the v1 scope (inbound server-resolution is #178-deferred; AC5 is OUTBOUND-proven) with a tracked // HAZARD(06-03) marker naming the constraint, OR (b) key the table name (and scope the preclean) per-virt WITHIN the pinned signature -- the table can derive from `virt` with NO signature change, mirroring the harness's per-context overdrive_mtls_ws_{tag}; the unconditional 'delete the whole table' preclean must become a scope-to-this-virt removal so it cannot destroy a sibling's intercept. This touches the pinned D-MTLS-14 surface's BEHAVIOUR, not its signature -- surface as a design question to the user/architect; do NOT let a crafter invent a signature change."
+        }
+      ],
+      "non_blocking_findings": [
+        {
+          "id": "D3",
+          "severity": "high",
+          "dimension": "test coverage gap on a security-relevant line (F5 leg-S exemption) -- CONFIRMED by adversarial verifier",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:241-247 (the `meta mark {leg_s_mark} accept` exemption, ordered before the tproxy rule) vs tests/integration/mtls_intercept_install.rs:316-329 (nft-dump assertions).",
+          "description": "The production nft prerouting program ships the F5 leg-S no-recursion exemption (`meta mark <MTLS_LEG_S_DIAL_MARK> accept` first), which prevents the agent's own leg-S dial from being TPROXY'd back onto leg C (an infinite-recursion / bypass hazard). The test asserts the dump contains the tproxy line and the virt daddr/dport, but NEVER asserts the exemption line is present, and there is no recursion scenario (no agent-marked dial that should bypass the redirect). A grep for `meta mark.*accept` in the test file returns zero matches. The no-recursion BEHAVIOUR is proven at 01-01 (composed walking skeleton) and the line byte-matches the proven harness's production half, hence HIGH not blocking -- but a security-relevant line ships with no assertion in the step that introduces it.",
+          "fix": "When repairing the test (D1), add `assert!(table_dump.contains(&format!(\"meta mark {} accept\", MTLS_LEG_S_DIAL_MARK)))` and assert it appears BEFORE the tproxy line; optionally add a scenario that dials with the MTLS_LEG_S_DIAL_MARK SO_MARK set and asserts it is NOT redirected to leg C."
+        },
+        {
+          "id": "D4",
+          "severity": "high",
+          "dimension": "mutation discipline -- the >=80% claim is invalid AND unevidenced",
+          "location": "commit 93ca1eab ('close 06-02 diff-scoped mutation gap to >=80%'); execution-log events for sid 06-02 (no MUTATION phase); no tracked target/xtask/mutants-summary.json.",
+          "description": "The roadmap implementation_notes require 'Mutation >=80% diff-scoped on the orig-dst recovery / routing-fact construction'. Two problems: (1) the kill-rate is unevidenced in committed artifacts -- no mutation phase in the execution log, no committed summary (NOTE: the disk-space mutation crashes in session memory, obs 44573-44576 ~10:10Z, belong to 06-01, not 06-02; 06-02's dedicated closure commit at 13:50Z indicates a run was performed). (2) MORE IMPORTANTLY, the commit that CLAIMS >=80% (93ca1eab) is the SAME commit that introduced the failing hygiene assertion (D1). A kill-rate measured against a test suite that does not itself pass under the gate is not a valid >=80% signal -- the mutation gate's premise (a green suite to mutate against) is violated.",
+          "fix": "After D1 is fixed and the suite is green under the gate, RE-RUN the diff-scoped mutation gate (cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-worker --file crates/overdrive-worker/src/mtls_intercept.rs) and confirm >=80% from target/xtask/mutants-summary.json (parse the summary, not the commit message)."
+        },
+        {
+          "id": "D5",
+          "severity": "medium",
+          "dimension": "robustness -- fragile preclean drain loop (mechanism behind D1; root cause not fully isolated)",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:429-435 (drain loop) + :452-454 (run_best_effort).",
+          "description": "preclean's drain loop is `for _ in 0..64 { if !matches!(run_best_effort(del), Ok(s) if s.success()) { break; } }`. It BREAKS on the first `ip rule del` whose `.status()` is not Ok(success). Orchestrator investigation: calling the production install_inbound_tproxy directly drains correctly (install=1) in some build configs but drains 0 (install=3) under the gated nextest/example build -- deterministically. A raw `.output()`-based del and an inline copy of run_best_effort BOTH drain correctly in the gated build, and the dependency tree is byte-identical with/without the feature (no reaper crate pulled in), so the exact root cause of the in-process `.status()` non-success under the gated build is NOT yet isolated and warrants a focused debugging pass (per .claude/rules/debugging.md). Regardless of root cause, the break-on-first-non-success drain loop is the fragile surface: a single spurious/transient non-success silently leaves stale rules.",
+          "fix": "Harden the drain: do NOT break the loop on the first non-success -- either iterate the full bounded count regardless, or use `.output()` (which drained reliably in repro) instead of `.status()`+null stdio, or distinguish the legitimate 'no such rule' stop (RTNETLINK ENOENT/exit 2) from a spurious wait error. AND complete the root-cause investigation of why the in-process `.status()` reports non-success under the gated build before closing D1."
+        },
+        {
+          "id": "D6",
+          "severity": "nitpick",
+          "dimension": "defensive indexing",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:452-454 (run_best_effort), :457-459 (svec).",
+          "description": "run_best_effort indexes argv[0] / argv[1..] directly -- panics on an empty argv. All internal callers pass non-empty svec literals, so it is not reachable today; flagged as defensive only (the repo's safe-slice-access discipline).",
+          "fix": "Optional: a debug_assert!(!argv.is_empty()) or a typed (program, args) param shape. Not blocking."
+        },
+        {
+          "id": "D7",
+          "severity": "praise",
+          "dimension": "design fidelity -- EXACT (CLAUDE.md 'implement to the design')",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:69-460 vs design/wave-decisions.md:378-465 (D-MTLS-14 signature pin).",
+          "description": "Textbook implement-to-the-design. The four free-fn signatures (make_transparent_listener / install_inbound_tproxy(+TproxyInterceptGuard) / accept_outbound_leg / accept_inbound_leg) match the D-MTLS-14 pin VERBATIM; InterceptError matches the pinned error surface field-for-field including the `addr` field on TransparentListener; InterceptedConnection / Routed::{Outbound{peer}, Inbound{orig_dst}} are CONSTRUCTED not extended; expected_peer: None per v1 authn-only (#178). No invented surface; the 4-method MtlsEnforcement trait is untouched. AC1 (make_transparent_listener IP_TRANSPARENT) and AC4 (outbound leg-acquire) genuinely PASS under the gate (2 passed in the ground-truth run)."
+        },
+        {
+          "id": "D8",
+          "severity": "praise",
+          "dimension": "blocker discipline + clean single-cut migration",
+          "location": "execution-log 06-02 RED_ACCEPTANCE SKIPPED (first attempt); commit 4bfa49e6 (const hoist); crates/overdrive-core/src/dataplane/mtls_mark.rs (NEW); crates/overdrive-dataplane/src/mtls/mod.rs (-old def).",
+          "description": "The MTLS_LEG_S_DIAL_MARK import-source gap (worker cannot depend on overdrive-dataplane without dragging the BPF build chain) was correctly SURFACED as a scoped blocker (RED_ACCEPTANCE SKIPPED naming the exact E0433 site) rather than invented past -- exactly the CLAUDE.md 'STOP and surface the gap' discipline. Resolved as a clean single-cut migration: the const hoisted to overdrive-core/dataplane (on the same footing as maglev_table_size/drop_class), old def DELETED, all sites repointed, no stub/re-export shim -- per the single-cut-greenfield-migration + no-rename-stubs rules. Scope expansion beyond the 4-file implementation_scope was the surfaced+approved blocker resolution, not a unilateral divergence."
+        },
+        {
+          "id": "D9",
+          "severity": "praise",
+          "dimension": "careful RAII + faithful productionisation",
+          "location": "crates/overdrive-worker/src/mtls_intercept.rs:256-261 (cleanup-pushed-before-apply), :270-278 (Drop reverse-order); :238-255 vs mtls_netns_topology.rs:447-460.",
+          "description": "Two genuinely careful pieces: (1) the guard's cleanup argv is pushed BEFORE apply_nft, so a failing `nft -f` that partially created the table is still torn down by the guard's Drop on the `?` early-return path -- correct partial-failure RAII. (2) The production nft prerouting chain BYTE-MATCHES the harness production half and correctly OMITS the GAP-3 DNAT/masquerade (test-only) per D-MTLS-15(3) and the module docstring -- faithful productionisation, not a copy-paste of test scaffolding. Mark namespace is also clean: TPROXY_FWMARK=0x1 and MTLS_LEG_S_DIAL_MARK=0x2 are distinct (no collision), exemption ordered before the tproxy rule."
+        }
+      ],
+      "dimensions_verified": {
+        "design_fidelity_api_surface": "PASS (D7) -- D-MTLS-14 signatures verbatim, InterceptError matches the pinned surface field-for-field, InterceptedConnection/Routed constructed-not-extended, expected_peer None per v1; 4-method MtlsEnforcement contract untouched; const-hoist scope expansion surfaced+approved+single-cut.",
+        "nft_production_half_fidelity": "PASS (D9) -- prerouting chain byte-matches the harness production half; GAP-3 DNAT/masquerade correctly omitted (test-only) per D-MTLS-15(3); leg-S exemption ordered before tproxy.",
+        "byte_order_lockstep": "PASS -- getsockname_orig (from_be read) is the inverse of sockaddr_in_from (from_ne_bytes addr / to_be port write); logic verified by inspection (gate could not confirm AC3 at runtime -- see test_executes_under_gate).",
+        "raii_teardown": "PASS (D9) -- guard cleanup reverse-order, pushed-before-apply for partial-failure teardown.",
+        "concurrent_resource_safety": "FAIL (D2, blocking) -- fixed global table/fwmark/rt_table + unconditional preclean => exactly-one-concurrent-inbound-intercept; second per-alloc install destroys the first. Same class as 06-01 D1.",
+        "test_executes_under_gate": "FAIL (D1, blocking) -- the committed inbound AT FAILS deterministically under the exact gate command on a verified-clean kernel (got 3, expected 1 at :308), reproduced 3x. AC5 'gate green ACTUALLY EXECUTING' NOT met. The failure aborts before AC3 (orig-dst recovery), so the gate gives ZERO executed evidence for the step's primary deliverable. False-green explained by commit ordering (hygiene assert added post-COMMIT-phase, never re-verified).",
+        "mutation_gate_80pct": "FAIL (D4) -- claim unevidenced (no committed summary, no mutation phase) AND invalid (the closing commit 93ca1eab introduced the failing assertion; kill-rate measured against a non-passing suite). Re-run after D1.",
+        "error_discipline": "PASS -- InterceptError is cause-distinct typed (TransparentListener/TproxyInstall/Accept/OrigDst), no Internal(String) catch-all, Display names the CAP_NET_ADMIN/kernel-feature remediation. (set_nodelay(true).ok() discard is benign -- a perf hint, not a fallible boundary read.)",
+        "f5_exemption_coverage": "GAP (D3, high non-blocking) -- the security-relevant `meta mark {leg_s_mark} accept` line ships but is not asserted by the test and no recursion scenario exists; behaviour proven at 01-01, line verbatim-from-harness."
+      },
+      "summary": "NEEDS_REVISION (orchestrator deep review + 2 adversarial verifiers + Lima ground-truth run). The PRODUCTION code is high-quality and design-faithful: D-MTLS-14 signatures verbatim, InterceptError matching the pinned surface field-for-field, InterceptedConnection/Routed constructed-not-extended (expected_peer None per v1/#178), the 4-method MtlsEnforcement contract untouched (D7); the const-hoist blocker correctly surfaced and resolved as a clean single-cut migration (D8); careful cleanup-before-apply RAII and a prerouting chain that byte-matches the proven harness while faithfully omitting the test-only GAP-3 (D9); AC1/AC4 genuinely green under the gate. TWO BLOCKING defects. D1 (test-integrity / gate-not-green): the committed inbound AT FAILS DETERMINISTICALLY under the exact gate command roadmap AC5 names -- ground-truth on a verified-clean kernel (fwmark=0/nft=0/route=0) panics at :308 'got 3, expected 1', reproduced 3x; the failing preclean-hygiene assertion was added in the LATER mutation-closure commit 93ca1eab (13:50Z) AFTER the logged GREEN/COMMIT phases (13:22-13:26Z) and the gated suite was never re-run green, so 06-02's COMMIT EXECUTED PASS is contradicted by the committed state -- AND the failure aborts before AC3, so the gate gives ZERO executed proof of the step's primary deliverable (inbound orig-dst recovery). D2 (concurrent-resource safety): install_inbound_tproxy uses a FIXED global nft table + fwmark + rt_table and an unconditional preclean that deletes the whole table, so it supports exactly ONE concurrent inbound intercept -- a second per-alloc install (06-03's job) silently destroys the first; the SAME defect class as 06-01's blocking D1 (global shared kernel resource masked by single-intercept isolation). Plus HIGH non-blocking D3 (the F5 leg-S exemption line ships unasserted, no recursion scenario) and D4 (mutation >=80% both unevidenced and invalid -- measured against a suite that does not pass the gate); MEDIUM D5 (the preclean drain loop breaks on the first non-success .status() and drains nothing under the gated build -- exact root cause not yet isolated, harden the loop + finish the debugging pass); nitpick D6 (run_best_effort argv[0] index). RECOMMENDATION: (1) fix the preclean so the test passes, RE-RUN the exact gate command to green on a clean kernel, and confirm AC3 (orig-dst) executes -- do NOT re-log COMMIT EXECUTED PASS until then; (2) resolve/scope D2 before 06-03 wires per-alloc inbound (per-virt table keying within the pinned signature, OR a tracked HAZARD marker + documented single-intercept v1 scope -- surface to user/architect); (3) add the F5 exemption assertion (D3); (4) re-run the diff-scoped mutation gate after the suite is green (D4). Iteration 1 of max 2."
     }
   ]
 }

@@ -22,10 +22,20 @@ crate_class = "adapter-host"
 # uniformly under per-package scoping. Slice 2's real-process /
 # real-cgroup tests live behind this gate. See
 # `.claude/rules/testing.md` § Workspace convention.
-integration-tests = []
+#
+# Forwards to `overdrive-dataplane/integration-tests` so the worker's
+# mTLS intercept component (`mtls_intercept_worker`) compiles its
+# `#[cfg(feature = "integration-tests")]` #178 redirect-stand-in seam
+# in lock-step with the dataplane surface it drives (step 06-03).
+integration-tests = ["overdrive-dataplane/integration-tests"]
 
 [dependencies]
 overdrive-core.workspace = true
+# transparent-mtls-host-socket (D-MTLS-17, GH #26; step 06-03) — the
+# `MtlsInterceptWorker` drives `overdrive_dataplane::mtls::MtlsDataplane`
+# (load/attach_alloc/program_redirect) per allocation. No cycle:
+# `overdrive-dataplane` does NOT depend on `overdrive-worker`.
+overdrive-dataplane.path = "../overdrive-dataplane"
 async-trait.workspace    = true
 hostname.workspace       = true
 parking_lot.workspace    = true

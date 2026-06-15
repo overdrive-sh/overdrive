@@ -181,6 +181,9 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         Arc::clone(&engine),
+        // No transparent-mTLS layer in the workflow e2e (no real
+        // dataplane to intercept on) — step 06-03 `Option` field.
+        None,
     );
 
     // --- The fixture trigger reconciler emits StartWorkflow. The

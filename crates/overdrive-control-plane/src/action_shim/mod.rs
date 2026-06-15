@@ -40,6 +40,9 @@ use crate::api::{AllocStateWire, TransitionSource};
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
 use crate::workflow_runtime::WorkflowEngine;
+// transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
+// (β) lifecycle component the shim fires alongside the driver hooks.
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 /// Per-arm dispatch for `Action::DataplaneUpdateService`. See
 /// module docstring of [`dataplane_update_service`] for the
@@ -410,6 +413,7 @@ pub async fn dispatch(
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
@@ -428,6 +432,7 @@ pub async fn dispatch(
             &allocator,
             broker,
             workflow_engine,
+            mtls_worker,
         )
         .await;
         if let Err(err) = result {
@@ -585,6 +590,7 @@ pub async fn dispatch_with_workflow_intent(
         std::sync::Arc::clone(&state.allocator),
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
+        state.mtls_worker.as_ref(),
     )
     .await;
 
@@ -615,6 +621,7 @@ async fn dispatch_single(
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop) and the Phase 3 HttpCall placeholder are
@@ -770,6 +777,13 @@ async fn dispatch_single(
             // lifetime is cleaned up. Default no-op when no
             // ProbeRunner is wired.
             driver.on_alloc_terminal(&row.alloc_id);
+            // transparent-mtls-host-socket (step 06-03): tear down the
+            // alloc's mTLS intercept (detach the cgroup program, remove
+            // the TPROXY rule, drain the per-connection teardown set
+            // fail-closed). Idempotent for an alloc with no intercept.
+            if let Some(worker) = mtls_worker {
+                worker.stop_alloc(&row.alloc_id);
+            }
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -876,6 +890,19 @@ async fn dispatch_single(
                 // no-op for SimDriver and any driver wired without
                 // a probe runner.
                 driver.on_alloc_running(&spec);
+                // transparent-mtls-host-socket (D-MTLS-15/16/17, step
+                // 06-03): fire the (β) mTLS intercept-and-enforce
+                // lifecycle alongside the driver hook. `Some` only on the
+                // production boot (real `EbpfDataplane` + `MtlsDataplane`
+                // composed post-`IdentityMgr`); `None` for the non-mTLS
+                // fixture surface. Every exec alloc is intercepted
+                // (D-MTLS-15: the predicate is `DriverType::Exec`, true on
+                // the worker's exec path) — `start_alloc` installs the
+                // intercept but does NOT program `MTLS_REDIRECT_DEST`
+                // (#178-deferred). `ExecDriver` is UNTOUCHED.
+                if let Some(worker) = mtls_worker {
+                    worker.start_alloc(&spec);
+                }
             }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
@@ -1002,6 +1029,14 @@ async fn dispatch_single(
                 // Service-health-check-probes step 01-03d / ADR-0054
                 // § 2: symmetric with the StartAllocation arm above.
                 driver.on_alloc_running(&spec);
+                // transparent-mtls-host-socket (step 06-03): re-install
+                // the mTLS intercept for the restarted alloc (reuses the
+                // alloc id). `start_alloc` is idempotent — it tears the
+                // prior intercept down first. Symmetric with the
+                // StartAllocation arm above.
+                if let Some(worker) = mtls_worker {
+                    worker.start_alloc(&spec);
+                }
             }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
@@ -1077,6 +1112,12 @@ async fn dispatch_single(
             // than the moved `alloc_id` binding because the latter
             // was consumed by `build_alloc_status_row` above.
             driver.on_alloc_terminal(&row.alloc_id);
+            // transparent-mtls-host-socket (step 06-03): tear down the
+            // alloc's mTLS intercept on Stop — symmetric with the
+            // FinalizeFailed arm above. Idempotent.
+            if let Some(worker) = mtls_worker {
+                worker.stop_alloc(&row.alloc_id);
+            }
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }

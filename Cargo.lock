@@ -2119,6 +2119,7 @@ dependencies = [
  "libc",
  "nix",
  "overdrive-core",
+ "overdrive-dataplane",
  "overdrive-host",
  "overdrive-sim",
  "parking_lot",

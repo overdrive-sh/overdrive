@@ -273,6 +273,9 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         Arc::clone(&engine),
+        // No transparent-mTLS layer in the workflow e2e (no real
+        // dataplane to intercept on) — step 06-03 `Option` field.
+        None,
     );
 
     // === Spawn the PRODUCTION emit-drain task — the genuine mechanism
