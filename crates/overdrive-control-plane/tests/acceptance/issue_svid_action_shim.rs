@@ -141,6 +141,7 @@ async fn issue_svid_executor_audits_before_hold() {
         allocator,
         &broker,
         None,
+        None,
     )
     .await
     .expect("IssueSvid dispatch succeeds");
@@ -209,6 +210,7 @@ async fn audit_write_failure_refuses_hold() {
         &issuing_node(),
         allocator,
         &broker,
+        None,
         None,
     )
     .await;

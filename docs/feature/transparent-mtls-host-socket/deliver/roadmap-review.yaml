@@ -1,0 +1,156 @@
+review_id: roadmap_rev_20260612_transparent_mtls_host_socket
+reviewer: nw-roadmap-review-checks
+artifact: docs/feature/transparent-mtls-host-socket/deliver/roadmap.json
+review_date: "2026-06-12"
+iteration: 1
+
+approval_status: revisions_needed
+approval_recommendation: REVISIONS_NEEDED
+blocker_issues_count: 3
+high_issues_count: 2
+medium_issues_count: 0
+low_issues_count: 0
+
+executive_summary: |
+  The target behavior is coherent and strongly evidence-backed, but the roadmap is
+  not DELIVER-ready under the mandatory roadmap review checks. It embeds too much
+  design and implementation procedure in the roadmap ACs, exceeds the concision
+  budget by nearly 3x, and does not include an explicit production composition-root
+  wiring step that makes transparent mTLS active for real host-socket workloads.
+
+  Keep the six-slice shape. Revise the roadmap by moving mechanism detail back to
+  feature-delta / ADR / spike references, rewriting ACs as observable outcomes,
+  and adding one production-invocation step for node startup / workload lifecycle
+  wiring.
+
+quantitative_checks:
+  total_steps: 6
+  total_criteria: 41
+  roadmap_word_count_approx: 4360
+  word_budget_for_4_to_8_steps: 1500
+  unique_production_files: 12
+  step_decomposition_ratio: 0.5
+
+mandatory_checks:
+  external_validity:
+    status: FAILED
+    issue: |
+      The roadmap builds the `MtlsEnforcement` port, host adapter, BPF programs,
+      and integration tests, but no step explicitly wires the adapter into the
+      production node / worker composition root so real host-socket workload
+      traffic is intercepted after `overdrive serve` starts. The global scope lists
+      `overdrive-worker/src/` and dataplane modules, but not the startup path that
+      constructs `HostMtlsEnforcement`, calls `probe()`, starts the listeners, and
+      attaches the cgroup / TPROXY machinery for live allocations.
+    evidence:
+      - "roadmap.json:211-217 lists source directories, but no control-plane/node startup composition root."
+      - "roadmap.json:198 adds a worker supervisor, but only for liveness/teardown after a handle exists."
+      - "feature-delta.md:2048-2072 says probe is a node-startup invariant; the roadmap has no matching production-wiring step."
+    consequence: |
+      DELIVER could pass adapter-level Tier-3 tests while production remains
+      unenforced, repeating the prior class of "dataplane exists but production
+      boot path never uses it" failure.
+    required_action: |
+      Add a step that wires `HostMtlsEnforcement` into the production node/worker
+      composition root: construct it with `IdentityRead` + limits, run `probe()` at
+      startup and fail closed on error, install/attach the cgroup and TPROXY
+      intercepts for live host-socket allocations, and prove via a driving-port or
+      end-to-end test that a normal exec workload invocation produces TLS records
+      on the peer-facing leg.
+
+  ac_implementation_coupling:
+    status: FAILED
+    severity: HIGH
+    issue: |
+      Many ACs prescribe internal method names, struct literals, specific helper
+      choices, or module-level mechanics instead of only describing observable
+      behavior. This locks the crafter into design text during GREEN/REFACTOR and
+      makes the roadmap harder to execute safely.
+    evidence:
+      - "roadmap.json:59 requires an exact `InterceptedConnection { ... }` shape inside AC."
+      - "roadmap.json:84 and roadmap.json:88 name `IdentityRead::svid_for`, `current_bundle`, `peer_certificates`, and `dangerous_extract_secrets` in AC."
+      - "roadmap.json:152 requires `Direction::Inbound`, forbids `enforce_inbound`, and specifies adapter-internal leg-S ownership in AC."
+      - "roadmap.json:185-187 assert internal liveness and ignored-test mechanics in AC rather than only the security outcomes."
+    required_action: |
+      Rewrite ACs to observable behavior and keep exact API/contract details in the
+      DESIGN artifact. Example: replace the struct-literal AC with "an intercepted
+      outbound or inbound connection is accepted, associated with the correct
+      allocation, and enforceable through the mTLS port without re-deriving routing
+      from an unsafe socket tuple."
+
+  step_decomposition_ratio:
+    status: PASSED
+    calculation: "6 implementation steps / 12 unique production files = 0.5"
+    note: |
+      The number of steps is not the problem. The issue is density inside each
+      step, not excessive step count.
+
+  implementation_code_in_roadmap:
+    status: FAILED
+    severity: BLOCKER
+    issue: |
+      The roadmap contains implementation procedure and code-shaped text in
+      descriptions, criteria, and notes. Roadmap ACs should define what must be
+      observable, not the exact branch structure, low-level call sequence, or
+      socket programming recipe.
+    evidence:
+      - "roadmap.json:53 describes the outbound/inbound implementation algorithm and bypass mechanism."
+      - "roadmap.json:59 embeds a Rust struct literal in an AC."
+      - "roadmap.json:97-98 bind the production files to rustls config internals and constructor shape."
+      - "roadmap.json:126-129 prescribe the kTLS/sockmap module split and control-record handling."
+      - "roadmap.json:146 and roadmap.json:161 describe the inbound splice and leg-S dial procedure."
+    required_action: |
+      Move call sequences, module splits, and socket recipes to implementation
+      notes in the design artifact or slice files. Roadmap steps should retain the
+      behavioral gate, test file, scenario name, dependency, and concise file
+      ownership.
+
+  concision_and_precision:
+    status: FAILED
+    severity: BLOCKER
+    issue: |
+      The roadmap is about 4,360 words against a 1,500-word budget for 4-8 steps.
+      Every step description is over the 50-word limit, several ACs exceed the
+      30-word limit, and most steps exceed the max-5-AC target.
+    evidence:
+      - "roadmap.json total string word count: approximately 4,360."
+      - "Step description word counts: 01-01=189, 02-01=155, 02-02=184, 02-03=171, 03-01=153, 04-01=215."
+      - "Top AC word counts include 88, 56, 52, 52, and 51 words."
+      - "Steps 01-01 and 02-03 each have 8 ACs; 04-01 has 7 ACs."
+    required_action: |
+      Compress each step to a 1-2 sentence intent, no more than five ACs, and
+      short references to ADR/spike anchors. Put deep rationale, timing regimes,
+      rejected alternatives, and implementation caveats in linked design/slice
+      artifacts.
+
+  unit_test_boundary_validation:
+    status: FAILED
+    severity: HIGH
+    issue: |
+      The roadmap asks for low-level unit/property tests of contract newtypes and
+      internal predicates alongside the acceptance tests. Those tests risk checking
+      shape rather than behavior and do not consistently invoke through the
+      feature's driving boundary.
+    evidence:
+      - "roadmap.json:73-74 calls for `mtls_enforcement_newtypes.rs` roundtrip tests of Direction/Routed/InterceptedConnection-bearing values."
+      - "roadmap.json:77 targets local_port routing and SO_MARK/cgroup bypass predicates directly."
+      - "roadmap.json:104 targets cert-resolver selection logic and verifier wiring directly."
+      - "roadmap.json:135 targets arming-order sequencing logic and splice-pump accounting directly."
+    required_action: |
+      Keep unit tests only where they cover a stable public serialization or value
+      contract. Otherwise express tests through `MtlsEnforcement::probe`,
+      `enforce`, `liveness`, `teardown`, the production driving workflow, or the
+      DST equivalence harness.
+
+required_revision_set:
+  - "Add a production-invocation/composition-root wiring step."
+  - "Reduce roadmap to <= 1,500 words or document an explicit waiver before handoff."
+  - "Rewrite ACs as observable outcomes; move method names and socket recipes out of AC."
+  - "Remove code-shaped ACs such as Rust struct literals and exact internal call sequences."
+  - "Re-scope low-level unit/property tests to public behavior or driving-port tests."
+
+handoff_confidence: medium
+next_review_focus: |
+  Re-run the six roadmap review checks after revision. The main pass/fail points
+  should be external validity and whether the rewritten ACs are both concise and
+  still strong enough to preserve the security observables.

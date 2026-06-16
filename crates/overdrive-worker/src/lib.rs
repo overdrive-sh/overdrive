@@ -19,6 +19,17 @@
 
 pub mod cgroup_manager;
 pub mod driver;
+// transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
+// the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
+// leg-C listener, the inbound nft-TPROXY install (+ ip rule/route
+// companions) with RAII teardown, and the outbound/inbound leg-acquire that
+// builds the `InterceptedConnection` for `MtlsEnforcement::enforce`.
+pub mod mtls_intercept;
+// transparent-mtls-host-socket (D-MTLS-16 / D-MTLS-17, GH #26; step 06-03) —
+// the (β) worker-side mTLS intercept-and-enforce lifecycle component the
+// action-shim fires alongside the driver hooks. Held by `AppState` as
+// `Option<Arc<MtlsInterceptWorker>>`; `ExecDriver` is UNTOUCHED.
+pub mod mtls_intercept_worker;
 pub mod node_health;
 // SCAFFOLD: true — service-health-check-probes feature.
 // ProbeRunner subsystem per ADR-0054 §2. Lands GREEN across slices

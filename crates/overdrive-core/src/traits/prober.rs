@@ -181,7 +181,10 @@ pub trait HttpProber: Send + Sync + 'static {
 ///   namespace via cgroup placement per C7 / ADR-0059. Sim adapter
 ///   does NOT assert cgroup membership — that's a Tier 3 concern.
 /// - SIGKILL on timeout uses `cgroup.kill` (Linux 5.14+) per
-///   ADR-0059 § 3; PID-loop fallback for 5.10–5.13.
+///   ADR-0059 § 3 — always available on the pinned 6.18 appliance
+///   kernel (ADR-0068). (The `child.kill()` / process-group SIGKILL
+///   reaps are belt-and-braces handle/grandchild cleanup, not a
+///   kernel-version fallback.)
 /// - The probe's stdout / stderr are discarded by default. (Phase 2+
 ///   may add capture; not in Phase 1.)
 ///

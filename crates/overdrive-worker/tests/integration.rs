@@ -66,6 +66,19 @@ mod integration {
         mod write_to_readonly_cgroup_file;
     }
 
+    // transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02) —
+    // Tier 3 acceptance test for the worker's intercept-install +
+    // leg-acquire role (`overdrive_worker::mtls_intercept`): IP_TRANSPARENT
+    // leg-C listener, inbound nft-TPROXY install + RAII teardown, and the
+    // outbound/inbound leg-acquire → `InterceptedConnection` build.
+    mod mtls_intercept_install;
+
+    // fix-mtls-intercept-fail-open (D-MTLS-18) — Tier 3 regression gate that
+    // `MtlsInterceptWorker::start_alloc` fails CLOSED (returns `Err`) when an
+    // install step fails, rather than swallowing the failure and leaving the
+    // alloc running with cleartext egress.
+    mod mtls_intercept_fail_closed;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.

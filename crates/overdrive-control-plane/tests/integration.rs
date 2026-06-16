@@ -70,6 +70,17 @@ mod integration {
     /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
     /// in `run_server_with_obs_and_driver` writes the row. See
     /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
+    // transparent-mtls-host-socket (GH #26; step 06-03) — Tier-3
+    // production-activation gate: `run_server` composes the (β) mTLS
+    // worker (real dataplane → post-`IdentityMgr` compose →
+    // `AppState.mtls_worker` → action-shim `start_alloc`/`stop_alloc`)
+    // and refuses to boot fail-closed on an injected probe fault.
+    /// Focused control-plane-local mTLS e2e helpers (TestPki +
+    /// HeldIdentities `IdentityRead` double + the real `OutboundPeer`
+    /// mTLS server + AF_PACKET `0x17` wire oracle) consumed by
+    /// `mtls_production_activation` criteria[1].
+    pub mod mtls_e2e_helpers;
+    mod mtls_production_activation;
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of

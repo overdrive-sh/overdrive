@@ -25,6 +25,9 @@ tarpaulin-report.html
 # Local-only conductor scratch
 .context/
 
+# nw-spike throwaway probe (transparent-mtls-host-socket, GH #26)
+spike-scratch/
+
 # Lefthook — per-dev overrides
 lefthook-local.yml
 .lefthook-local.yml

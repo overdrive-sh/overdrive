@@ -1192,17 +1192,24 @@ Each eBPF program ships three companions in `crates/overdrive-bpf/tests/`:
 
 ### Kernel matrix
 
-Every merge runs against:
+Overdrive ships its own immutable appliance OS and **pins the kernel it
+boots** (ADR-0068); it is not an agent that must run on operator-supplied
+kernels. The matrix is the one shipped kernel plus a single early-warning
+canary, not a range. Every merge runs against:
 
-- 5.10 LTS (floor — BPF LSM + kTLS + sockops jointly stable)
-- 5.15 LTS (Ubuntu 22.04, Debian 12 backports, RHEL 9)
-- 6.1 LTS (Debian 13)
-- 6.6 LTS (Ubuntu 24.04)
-- Current LTS
-- `bpf-next` (soft-fail; nightly gate)
+- 6.18 LTS — **the pinned appliance kernel.** The latest LTS that meets
+  the feature floor (released 2025-11-30, EOL Dec 2028); guarantees
+  in-kernel TLS 1.3 TX+RX (≥6.0) and `CONFIG_NET_HANDSHAKE` (≥6.5). This
+  is the merge-blocking Tier-3/Tier-4 signal. Per ADR-0068 the pin tracks
+  the latest qualifying LTS (not a frozen number, and never non-LTS
+  mainline) — advanced deliberately at image rebuilds.
+- `bpf-next` (soft-fail; nightly gate) — early warning for upstream
+  verifier / BPF-subsystem changes before a future pin bump adopts them.
 
-Adding a kernel is one line of YAML against `little-vm-helper`. Dropping a
-kernel requires an ADR.
+Adding a kernel is one line of YAML against `little-vm-helper`. **Dropping
+a kernel requires an ADR** — ADR-0068 is the record for collapsing the
+former `5.10 / 5.15 / 6.1 / 6.6 / current-LTS` matrix to the pinned-LTS +
+bpf-next model. Advancing the pin is a deliberate, tested image change.
 
 ### Harness
 

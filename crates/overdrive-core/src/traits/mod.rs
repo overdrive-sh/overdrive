@@ -22,6 +22,13 @@ pub mod entropy;
 pub mod identity_read;
 pub mod intent_store;
 pub mod llm;
+// transparent-mtls-host-socket (ADR-0069, GH #26). The per-connection
+// transparent-mTLS enforcement port + its supporting types (the accepted
+// MtlsEnforcement contract). Pure trait + `#[async_trait]` boundary (a
+// declarative macro, no runtime — off the `core` I/O surface, exactly as
+// `Dataplane`). `HostMtlsEnforcement` extends `overdrive-dataplane`;
+// `SimMtlsEnforcement` will extend `overdrive-sim`.
+pub mod mtls_enforcement;
 pub mod observation_store;
 // SCAFFOLD: true — service-health-check-probes feature.
 // Three port traits (`TcpProber` / `HttpProber` / `ExecProber`) per
@@ -41,5 +48,10 @@ pub use entropy::Entropy;
 pub use identity_read::IdentityRead;
 pub use intent_store::IntentStore;
 pub use llm::Llm;
+pub use mtls_enforcement::{
+    Direction, EnforcedConnection, EnforcedConnectionId, EnforcedConnectionIdParseError,
+    InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, MtlsLimits, ProbeSentinel,
+    PumpLiveness, Routed,
+};
 pub use observation_store::ObservationStore;
 pub use transport::Transport;

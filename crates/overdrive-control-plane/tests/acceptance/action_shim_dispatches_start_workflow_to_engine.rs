@@ -141,6 +141,8 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
         Arc::clone(&allocator),
         &broker,
         Some(&engine),
+        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
+        None,
     )
     .await
     .expect("StartWorkflow dispatch must succeed");

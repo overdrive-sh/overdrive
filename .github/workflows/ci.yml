@@ -294,7 +294,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -315,7 +315,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -432,7 +432,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -820,7 +820,7 @@ jobs:
 #             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
 #             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
 #             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-#             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+#             bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
 #                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
 #                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
 #                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -978,7 +978,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -1003,7 +1003,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -1126,7 +1126,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -1251,7 +1251,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
@@ -1358,7 +1358,7 @@ jobs:
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
-            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+            bash -lc 'sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \

@@ -969,6 +969,8 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         std::sync::Arc::clone(&state.allocator),
         &test_broker,
         None,
+        // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
+        None,
     )
     .await
     .expect("dispatch succeeds");

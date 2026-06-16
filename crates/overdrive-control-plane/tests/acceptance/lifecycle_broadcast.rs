@@ -270,7 +270,7 @@ proptest! {
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-                &tx, &tick, &writer_node, allocator, &test_broker, None)
+                &tx, &tick, &writer_node, allocator, &test_broker, None, None)
                 .await
                 .expect("dispatch must succeed");
 
@@ -346,6 +346,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         &writer_node,
         allocator,
         &test_broker,
+        None,
         None,
     )
     .await
@@ -496,6 +497,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         &writer_node,
         allocator,
         &test_broker,
+        None,
         None,
     )
     .await

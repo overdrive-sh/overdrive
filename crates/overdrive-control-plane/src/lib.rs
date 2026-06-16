@@ -302,6 +302,20 @@ pub struct AppState {
     /// `actual`. Ephemeral runtime state — neither intent nor observation —
     /// rebuilt on restart by re-issuing for every still-Running alloc.
     pub identity: Arc<IdentityMgr>,
+    /// The (β) transparent-mTLS intercept-and-enforce lifecycle component
+    /// (transparent-mtls-host-socket, D-MTLS-16/17, GH #26; step 06-03).
+    /// The action-shim fires it alongside the driver hooks
+    /// (`on_alloc_running` → `start_alloc`, `on_alloc_terminal` →
+    /// `stop_alloc`); `ExecDriver` is UNTOUCHED.
+    ///
+    /// `Option` (the sanctioned `ProbeRunner` shape, NOT a port-trait
+    /// dodge): `Some(worker)` ONLY on the production `run_server` boot
+    /// (and the Tier-3 e2e), where a REAL `EbpfDataplane` +
+    /// `HostMtlsEnforcement` + `MtlsDataplane` are composed AFTER
+    /// `IdentityMgr`; `None` for every non-mTLS fixture and the
+    /// `SimDataplane`-override boot (no real BPF to intercept on). The
+    /// action-shim reads `state.mtls_worker` and fires `if let Some`.
+    pub mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -448,6 +462,11 @@ impl AppState {
         // shim) while the convenience constructor stays
         // ripple-free for the fixture surface.
         let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
+        // The broad fixture surface has no transparent-mTLS layer (no real
+        // `EbpfDataplane` to intercept on) — `None` mirrors the
+        // empty-registry `WorkflowEngine` default above. The PRODUCTION
+        // boot path (`run_server`) and the Tier-3 e2e use
+        // [`Self::new_with_workflow_engine`] to inject `Some(worker)`.
         Self::new_with_workflow_engine(
             store,
             intent_redb_path,
@@ -463,6 +482,7 @@ impl AppState {
             listener_facts,
             host_ipv4,
             workflow_engine,
+            None,
         )
     }
 
@@ -492,6 +512,7 @@ impl AppState {
         listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
         host_ipv4: std::net::Ipv4Addr,
         workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
+        mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -511,6 +532,7 @@ impl AppState {
             workflow_engine,
             ca,
             identity,
+            mtls_worker,
         }
     }
 }
@@ -705,6 +727,42 @@ pub struct ServerConfig {
     /// `set_probe_fault` on the dataplane dep.
     #[cfg(feature = "integration-tests")]
     pub dataplane_probe_fault: Option<String>,
+
+    /// Test-only fault-injection seam for the transparent-mTLS proxy
+    /// Earned-Trust probe (transparent-mtls-host-socket, step 06-03,
+    /// criteria[0]). When `Some(msg)`, the boot path forces
+    /// `MtlsEnforcement::probe()` to fail with the carried message BEFORE
+    /// the mTLS layer is declared usable, so the
+    /// `MtlsBootError::Probe`/`health.startup.refused` fail-closed branch
+    /// is exercised without needing a real kernel substrate failure.
+    /// Mirrors `dataplane_probe_fault` above; gated behind
+    /// `#[cfg(feature = "integration-tests")]` on both the field and its
+    /// use site so production builds compile it out entirely.
+    #[cfg(feature = "integration-tests")]
+    pub mtls_probe_fault: Option<String>,
+
+    /// Test-only PKI-injection seam for the transparent-mTLS layer
+    /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
+    /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
+    /// `IdentityRead` instead of the production `IdentityMgr` — so the
+    /// agent's leg-B client SVID (`svid_for`) AND the leg-B
+    /// `TrustBundle` (`current_bundle`) both come from a shared
+    /// `TestPki` the e2e also roots its `OutboundPeer` server cert on.
+    /// Without this seam the production `IdentityMgr` owns a fresh
+    /// ephemeral workload-CA root, and the test peer cannot present a
+    /// server cert the agent's leg-B verifier (root anchor + SNI
+    /// `peer.overdrive.local`) accepts, so the handshake never completes
+    /// and no `0x17` reaches the peer wire.
+    ///
+    /// Sibling to the existing `SimKek::for_boot()` boot injection (the
+    /// criteria[0] test uses that); gated behind
+    /// `#[cfg(feature = "integration-tests")]` on both the field and its
+    /// single use site so production builds compile it out entirely and
+    /// the production `IdentityMgr` is the only reachable identity
+    /// source. This is the WORKLOAD-identity path (`RcgenCa` /
+    /// `IdentityMgr`), NOT the operator HTTPS CA.
+    #[cfg(feature = "integration-tests")]
+    pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -730,6 +788,13 @@ impl std::fmt::Debug for ServerConfig {
             );
         #[cfg(feature = "integration-tests")]
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field(
+            "mtls_identity_override",
+            &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
+        );
         dbg.finish()
     }
 }
@@ -804,6 +869,18 @@ impl ServerConfig {
             // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
             #[cfg(feature = "integration-tests")]
             dataplane_probe_fault: None,
+            // transparent-mtls-host-socket step 06-03: default no
+            // mTLS-probe fault; the e2e criteria[0] test sets
+            // `Some(..)` to exercise the `MtlsBootError::Probe`
+            // fail-closed branch.
+            #[cfg(feature = "integration-tests")]
+            mtls_probe_fault: None,
+            // transparent-mtls-host-socket step 06-03: default no
+            // identity override; the criteria[1] e2e sets `Some(..)`
+            // to a `TestPki`-rooted `IdentityRead` so the agent's
+            // leg-B trusts the test peer's server cert.
+            #[cfg(feature = "integration-tests")]
+            mtls_identity_override: None,
         }
     }
 }
@@ -814,9 +891,16 @@ impl ServerConfig {
 /// drain in-flight requests, stop the convergence-loop spawn, and
 /// close the listener. The server task runs until the handle is shut
 /// down or the process exits.
-#[derive(Debug)]
 pub struct ServerHandle {
     inner: AxumHandle,
+    /// The booted (β) transparent-mTLS intercept worker, surfaced for the
+    /// Tier-3 production-activation e2e (transparent-mtls-host-socket,
+    /// step 06-03). `Some` only on a real-dataplane boot that composed the
+    /// mTLS layer; `None` otherwise. Test-gated — production callers never
+    /// reach for it (the action-shim reaches `state.mtls_worker` directly,
+    /// not through the handle). Exposed via [`ServerHandle::mtls_worker`].
+    #[cfg(feature = "integration-tests")]
+    mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
     /// the `EvaluationBroker` and dispatches actions through the
@@ -868,6 +952,16 @@ pub struct ServerHandle {
     emit_drain_shutdown: CancellationToken,
 }
 
+impl std::fmt::Debug for ServerHandle {
+    /// Manual `Debug` (the derive was dropped when the test-gated
+    /// `mtls_worker` field — `Option<Arc<MtlsInterceptWorker>>`, not
+    /// `Debug` — was added; step 06-03). Elides the task handles and the
+    /// worker, mirroring the prior derived shape's information value.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerHandle").finish_non_exhaustive()
+    }
+}
+
 impl ServerHandle {
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
@@ -875,6 +969,27 @@ impl ServerHandle {
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
+    }
+
+    /// The booted (β) transparent-mTLS intercept worker, if the boot
+    /// composed the mTLS layer (`Some` on a real-dataplane boot;
+    /// `None` otherwise).
+    ///
+    /// Test-only (transparent-mtls-host-socket, step 06-03 criteria[1]):
+    /// the Tier-3 production-activation e2e reaches the booted worker
+    /// through this accessor to drive the #178 declared-peer stand-in
+    /// ([`MtlsInterceptWorker::program_declared_peer_redirect`]). The
+    /// production action-shim reads `AppState.mtls_worker` directly —
+    /// it never needs the handle.
+    ///
+    /// [`MtlsInterceptWorker::program_declared_peer_redirect`]:
+    ///     overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::program_declared_peer_redirect
+    #[cfg(feature = "integration-tests")]
+    #[must_use]
+    pub fn mtls_worker(
+        &self,
+    ) -> Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> {
+        self.mtls_worker.clone()
     }
 
     /// Trigger graceful shutdown with a drain deadline. In-flight
@@ -1672,6 +1787,141 @@ pub async fn run_server_with_obs_and_driver(
     let bundle = ca.trust_bundle()?;
     let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
 
+    // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) —
+    // compose the production transparent-mTLS layer HERE, AFTER
+    // `IdentityMgr` (so `HostMtlsEnforcement` can read the held identity)
+    // and BEFORE `AppState`. This is the (3a) resequencing: the mTLS port
+    // is NOT a `compose_production_driver` param (that runs before
+    // `IdentityMgr`); instead a separate `MtlsInterceptWorker` is
+    // constructed here with both ports as REQUIRED params and threaded
+    // into `AppState` as the `Option` field the action-shim fires.
+    //
+    // GATED: `Some(worker)` on the production boot
+    // (`dataplane_override.is_none()` — a real `EbpfDataplane` was
+    // constructed above) OR, under `integration-tests`, when the test-only
+    // `mtls_probe_fault` seam opts in. The mTLS BPF load is INDEPENDENT of
+    // the LB `EbpfDataplane` (D-MTLS-17 item 1 — its OWN `aya::Ebpf`), so a
+    // Tier-3 gate test MAY inject `SimDataplane` for the LB path (dodging
+    // the `lo` XDP attach that DRV_MODE rejects under virtio) while STILL
+    // composing the real `MtlsDataplane` to exercise the fail-closed
+    // refusal. The 42 non-mTLS fixtures call `AppState::new` directly
+    // (bypassing this boot path) and are unaffected either way.
+    //
+    // wire → probe → use (fail-closed): `MtlsDataplane::load` +
+    // `HostMtlsEnforcement::probe()`. On either failure the node REFUSES
+    // to boot with `health.startup.refused` — it does NOT degrade to a
+    // cleartext path (the confidentiality invariant the feature rests on).
+    #[cfg(feature = "integration-tests")]
+    let compose_mtls = config.dataplane_override.is_none() || config.mtls_probe_fault.is_some();
+    #[cfg(not(feature = "integration-tests"))]
+    let compose_mtls = config.dataplane_override.is_none();
+    let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
+        if compose_mtls {
+            let pin_dir: std::path::PathBuf = config
+                .dataplane_pin_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from(overdrive_dataplane::DEFAULT_PIN_DIR));
+
+            // (1) load — its own `aya::Ebpf` (D-MTLS-17 item 1): recover
+            // `cgroup_connect4_mtls` + `MTLS_REDIRECT_DEST`, reuse the
+            // pinned-by-name SERVICE_MAP. Fail-closed on load failure.
+            let mtls_dataplane = match overdrive_dataplane::mtls::MtlsDataplane::load(&pin_dir) {
+                Ok(dp) => dp,
+                Err(source) => {
+                    tracing::warn!(
+                        name: "health.startup.refused",
+                        reason = "dataplane.mtls",
+                        error = %source,
+                        "transparent-mTLS dataplane load failed; refusing to boot (no cleartext fallback)"
+                    );
+                    return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Load {
+                        source,
+                    }));
+                }
+            };
+
+            // (2) construct the enforcement port over the held identity +
+            // the F7 limits. `IdentityMgr` impls `IdentityRead`.
+            //
+            // PKI-SEAM (transparent-mtls-host-socket step 06-03,
+            // criteria[1]): when the test-only `mtls_identity_override`
+            // is `Some`, the agent reads its leg-B SVID + `TrustBundle`
+            // from THAT `IdentityRead` (a `TestPki`-rooted double the
+            // e2e also roots its `OutboundPeer` server cert on) instead
+            // of the production `IdentityMgr`, so the leg-B handshake
+            // against the test peer completes. Production builds compile
+            // the override out (the field is `cfg`-gated), so the
+            // production `IdentityMgr` is the only reachable source.
+            #[cfg(feature = "integration-tests")]
+            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+                config.mtls_identity_override.clone().unwrap_or_else(|| {
+                    Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>
+                });
+            #[cfg(not(feature = "integration-tests"))]
+            let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
+                Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>;
+            let enforcement: Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> =
+                Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcement::new(
+                    mtls_identity,
+                    overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+                ));
+
+            // (3) probe (Earned Trust): the test-only `mtls_probe_fault` seam
+            // forces a probe failure so criteria[0] exercises the fail-closed
+            // refusal without a real substrate fault; otherwise the real
+            // `probe()` runs. Either failure → refuse to boot.
+            #[cfg(feature = "integration-tests")]
+            let forced_probe_fault = config.mtls_probe_fault.clone();
+            #[cfg(not(feature = "integration-tests"))]
+            let forced_probe_fault: Option<String> = None;
+
+            if let Some(message) = forced_probe_fault {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.probe",
+                    error = %message,
+                    "transparent-mTLS proxy probe failed (injected fault); \
+                     refusing to boot (no cleartext fallback)"
+                );
+                return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
+                source:
+                    overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::Probe {
+                        which:
+                            overdrive_core::traits::mtls_enforcement::ProbeSentinel::KtlsArmRoundTrip,
+                        message,
+                    },
+            }));
+            }
+            if let Err(source) = enforcement.probe().await {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.probe",
+                    error = %source,
+                    "transparent-mTLS proxy probe failed; refusing to boot (no cleartext fallback)"
+                );
+                return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
+                    source,
+                }));
+            }
+
+            // (4) construct the worker with both ports as REQUIRED params
+            // (mandatory `new()`, no builder) and the shared cgroup root. The
+            // root is the same `DEFAULT_CGROUP_ROOT` the driver-composition
+            // and the workloads-slice bootstrap use above — re-derived here
+            // (rather than threaded through the intervening dataplane block)
+            // so the mTLS worker resolves per-alloc `.scope` paths under the
+            // identical root.
+            let mtls_cgroup_root = std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT);
+            Some(Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+                enforcement,
+                mtls_dataplane,
+                mtls_cgroup_root,
+                config.clock.clone(),
+            )))
+        } else {
+            None
+        };
+
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
@@ -1687,6 +1937,10 @@ pub async fn run_server_with_obs_and_driver(
         listener_facts,
         host_ipv4,
         workflow_engine,
+        // transparent-mtls-host-socket step 06-03: `Some(worker)` on the
+        // production / Tier-3 boot (real dataplane), `None` under a
+        // `SimDataplane` override.
+        mtls_worker,
     );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -1746,6 +2000,13 @@ pub async fn run_server_with_obs_and_driver(
     let emit_drain_task =
         spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
+    // Capture the booted (β) mTLS worker handle for the Tier-3 e2e
+    // (step 06-03) BEFORE `.with_state(state)` moves `state` into the
+    // router. Test-gated; the action-shim still reads `state.mtls_worker`
+    // through the router state, this is a parallel clone for the handle.
+    #[cfg(feature = "integration-tests")]
+    let mtls_worker_for_handle = state.mtls_worker.clone();
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -1794,6 +2055,11 @@ pub async fn run_server_with_obs_and_driver(
 
     Ok(ServerHandle {
         inner: axum_handle,
+        // Surface the booted (β) mTLS worker for the Tier-3 e2e
+        // (step 06-03). Captured from `AppState` before the router move;
+        // `None` on a non-mTLS boot. Test-gated.
+        #[cfg(feature = "integration-tests")]
+        mtls_worker: mtls_worker_for_handle,
         server_task,
         convergence_task,
         exit_observer_task,

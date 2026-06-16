@@ -101,7 +101,7 @@ ADR-0030):
 | Factor | (a) `clone3 + CLONE_INTO_CGROUP` | (b) `cgroup.procs` write (CHOSEN) |
 |---|---|---|
 | Atomicity | Strictly atomic; child born in target | Transient parent-cgroup membership (microseconds) |
-| Kernel compatibility | Linux ≥ 5.7 | Any cgroup v2 kernel (Phase 1 floor: 5.10 per `testing.md`) |
+| Kernel compatibility | Linux ≥ 5.7 | Any cgroup v2 kernel (pinned appliance floor: 6.18 per ADR-0068) |
 | Rust ergonomics | Requires raw `clone3` syscall via `libc`; no stable wrapper in `nix` 0.27 | `tokio::process::Command` + cgroup write; standard ergonomics |
 | Code reuse with `ExecDriver` | Different spawn path (raw syscall vs `Command`) | Same `Command` + cgroup-manager primitives |
 | Testability | `clone3` cannot run in DST sim envelope | Plain `Command` works in sim envelope (per `SimExecProber`) |
@@ -167,11 +167,13 @@ When the probe times out, the child may have forked descendants
 direct child does not reap the descendants; they linger in the
 workload's cgroup as orphans.
 
-The cleanup mechanism is `cgroup.kill` (Linux 5.14+; Phase 1 floor
-is 5.10 per `testing.md`). For kernels 5.10–5.13, the cleanup
-fallback writes PIDs from `cgroup.procs` via a `kill(-PID, SIGKILL)`
-loop (slower; race-prone). Per `testing.md` § Tier 3 kernel matrix
-the floor is 5.10; the fallback is per-probe overhead, ~ ms.
+The cleanup mechanism is `cgroup.kill` (Linux 5.14+). Overdrive's
+pinned appliance-kernel floor is **6.18 LTS** (ADR-0068), so `cgroup.kill`
+is **always available** on every kernel Overdrive ships — the former
+5.10–5.13 `kill(-PID, SIGKILL)` PID-loop fallback no longer has a target
+kernel under the pin (it was written for the pre-ADR-0068 5.10 floor).
+The PID-loop remains documented below as the historical fallback shape;
+on the pinned 6.18 kernel it is unreachable.
 
 Phase 1 ship: **prefer `cgroup.kill`; fall back to PID-loop on
 ENOENT**. The cgroup-manager already implements this fallback per
@@ -281,7 +283,7 @@ language" goal (US-03); requires workload cooperation.
 - `feature-delta.md` C7, P1-Q2
 - `.claude/rules/development.md` § "Production code is not shaped
   by simulation"
-- `.claude/rules/testing.md` § Tier 3 kernel matrix (floor 5.10)
+- `.claude/rules/testing.md` § Tier 3 kernel matrix (pinned 6.18 floor — ADR-0068)
 
 ## Changelog
 

@@ -1,0 +1,354 @@
+{
+  "roadmap": {
+    "project_id": "transparent-mtls-host-socket",
+    "created_at": "2026-06-12T14:15:23Z",
+    "total_steps": 9
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Composed proxy walking skeleton (BLOCKING integration gate)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Composed bidirectional proxy walking skeleton over real netns/veth with NO RST",
+          "description": "The BLOCKING first DELIVER slice (F2). Compose the spike-proven primitives into ONE bidirectional walking skeleton over real netns/veth with cgroup-isolated workloads, closing the three gaps the spikes left open. This is an integration gate, not a prove-the-mechanism gate. It MUST pass before any other slice lands.",
+          "criteria": [
+            "GAP 1 -- outbound composed in ONE flow: a workload's intercepted connect() drains pre-arm plaintext losslessly, completes the agent's TLS 1.3 client handshake presenting the held SVID, and the steady-state forward leg (agent-light read -> write_all COPY into leg B's kTLS-TX; NOT a sockmap redirect, NOT a splice into TX) carries the bytes with NO RST [anchor: findings-userspace-relay.md (lossless capture) + crates/overdrive-dataplane/src/mtls/splice.rs (the shipped forward write_all primitive) + sockmap-egress-redirect-into-ktls-tx-delivery-research.md (why the redirect was retired); ADR-0069 'Composed walking-skeleton gate']",
+            "GAP 2 -- bidirectional steady-state round-trip: post-arm transfer is multi-record in BOTH directions (outbound forward + return, inbound request + the S->C response leg the spikes never composed), NO RST [anchor: findings-inbound-intercept.md 'What was NOT tested' + findings-splice-return.md]",
+            "GAP 3 -- real topology: the composed flow runs over real netns/veth with cgroup-isolated workloads (NOT loopback + sibling processes); the intercepts and splices all hold [anchor: findings-inbound-intercept.md 'What was NOT tested']",
+            "The peer-facing leg shows TLS 1.3 records (tcpdump 0x17) in both directions; the workload's plaintext appears ONLY on the host-internal leg, never on the peer leg [anchor: findings-egress-ktls-splice.md Assertion 1 / findings-inbound-intercept.md §3]",
+            "Gate: cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --features integration-tests is green for the composed acceptance test on the real 6.18 kernel, ACTUALLY EXECUTING (NOT --no-run)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton.rs",
+          "scenario_name": "composed_bidirectional_proxy_walking_skeleton_no_rst",
+          "effort_hours": 12,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/traits/mtls_enforcement.rs (the accepted MtlsEnforcement port contract verbatim, minimal stub bodies sufficient to compose the skeleton)",
+              "crates/overdrive-dataplane/src/mtls/mod.rs (HostMtlsEnforcement adapter skeleton; the forward/return/deliver/response pumps live in mtls/splice.rs -- the forward + response are read -> write_all COPY pumps into kTLS-TX, the return + deliver are zero-copy splice pumps out of kTLS-RX; D-MTLS-13)",
+              "crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs (outbound intercept, extends cgroup_connect4_service)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton.rs",
+              "crates/overdrive-dataplane/tests/integration/helpers/mtls_netns_topology.rs (real netns/veth + cgroup-isolated workload fixtures; promote to overdrive-testing if a second consumer appears)"
+            ]
+          },
+          "implementation_notes": "Tier 3 ONLY for the gate: a composed acceptance test on the real 6.18 Lima/LVH kernel -- sockops/cgroup_connect4/TPROXY/kTLS have NO meaningful BPF_PROG_TEST_RUN, so there is no Tier-2 backstop and the firing-scope can only be settled at Tier 3 (per .claude/rules/testing.md). Run via `cargo xtask lima run -- cargo nextest run ... --features integration-tests`; a --no-run gate is green even when every fixture refuses at boot, so the composed intercept lifecycle MUST actually execute. The increment-e harness intercept-lifecycle RST is a throwaway-harness artifact, NOT a kernel finding -- defeated by the production intercept lifecycle (findings-userspace-relay.md Crux 2). The agent reads SVID + bundle ONLY via IdentityRead (a reader, #35), and kTLS arms on the agent's leg, never the workload's socket; expected_peer is None in v1. IMPLEMENT TO THE ACCEPTED CONTRACT (feature-delta MtlsEnforcement section) verbatim -- do NOT invent public API; if composing appears to need an unnamed primitive, that is a BLOCKER to surface, not surface to add (CLAUDE.md 'Implement to the design'). Mutation testing is not meaningful for a Tier-3-only composition gate (no default-lane logic surface yet); contract types and pure helpers get mutation coverage as 02-01 onward exercises them. RED scaffold (#[should_panic(expected = \"RED scaffold\")]) only if landing the test ahead of the adapter wiring. Integration tests gated behind the `integration-tests` feature per workspace convention.",
+          "reference_implementation": "The SSOT for the SHIPPED forward/return/deliver/response pump mechanism is crates/overdrive-dataplane/src/mtls/splice.rs (forward + inbound-response = read -> write_all COPY into kTLS-TX; return + inbound-deliver = zero-copy splice out of kTLS-RX), already landed at commit bb6489ef. Gitignored spike-scratch DELIVER reference (retained 2026-06-11) for the non-forward syscall sequences: spike-scratch/increment-e-userspace-relay/ (cgroup_connect4 intercept + lossless pre-arm capture + handshake-window flush; relay/src/{main,agent}.rs, bpf/src/main.rs); spike-scratch/increment-h-splice-return/agent/src/main.rs (return agent-light zero-copy splice(2) out of kTLS-RX); spike-scratch/increment-i-inbound-intercept/agent/src/main.rs (composed inbound flow). NOTE: spike-scratch/increment-f-egress-ktls-splice/ proved the ABANDONED sockmap egress-redirect forward mechanism (RETIRED 2026-06-13, D-MTLS-13 -- MSG_DONTWAIT-stall, sockmap-egress-redirect-into-ktls-tx-delivery-research.md); do NOT use it for the forward path -- the shipped forward is the splice.rs write_all copy. The step productionises the composition in real netns/veth."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Productionised happy path: handshake, outbound enforce",
+      "steps": [
+        {
+          "id": "02-02",
+          "name": "Agent mutual-TLS handshake presenting the held SVID (client leg B + server leg C)",
+          "description": "On the agent-acquired leg, the agent completes a TLS 1.3 mutual handshake presenting the workload's own held SVID (read via IdentityRead) and verifying the peer chains to the trust bundle -- client role outbound, REQUIRE+VERIFY server role inbound. Both workloads remain identity-unaware (no cert, no key). This slice ends at a completed handshake with secrets ready; the bytes are not yet kTLS.",
+          "criteria": [
+            "Outbound (client): the agent completes a TLS 1.3 client handshake on the peer-facing leg presenting the held SVID and verifying the peer's server cert chains to the trust bundle [anchor: findings.md A]",
+            "Inbound (server): the agent completes a TLS 1.3 server handshake on the client-facing leg presenting the server SVID and requiring-and-verifying the client's SVID chains to the bundle (REQUIRE+VERIFY); a valid client cert -> handshake succeeds [anchor: findings-inbound-intercept.md §2]",
+            "The presented leaf chains to the root and its SAN is the workload's SPIFFE URI (spiffe://overdrive.local/job/<name>/alloc/<id>) -- provable from the captured handshake at the test tier",
+            "Both workloads hold no cert and no key -- the leaf material stays with the agent (read via the identity port); the workloads are identity-unaware",
+            "The enforcement adapter takes the identity read-port as a REQUIRED constructor parameter (never defaulted, never a builder override), per port-trait discipline [anchor: findings-inbound-intercept.md Mechanics #3/#6 for the server-config mechanics]"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_agent_handshake.rs",
+          "scenario_name": "agent_handshake_presents_held_svid_client_and_server_roles",
+          "effort_hours": 6,
+          "dependencies": [
+            "01-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-dataplane/src/mtls/handshake.rs (rustls client/server config backed by an identity-read cert resolver; REQUIRE+VERIFY against the trust bundle; the two pinned server-config mechanics)",
+              "crates/overdrive-dataplane/src/mtls/mod.rs (HostMtlsEnforcement holds the identity read-port + limits as REQUIRED constructor params; the enforce handshake phase, dispatching on Direction)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_agent_handshake.rs"
+            ]
+          },
+          "implementation_notes": "Tier 3 for the real mutual-TLS handshake on the real kernel (client + server roles; captured handshake proving leaf-chains-to-root + SPIFFE-SAN). The identity read is the shipped-port integration seam (#35); None is the fail-closed signal (exercised in detail in 04-01). Tier 1 DST: the SimMtlsEnforcement double models the handshake OUTCOME (Established vs fail-closed reason) driven by a preloaded SimIdentityRead; the equivalence harness drives both adapters through the same sequence for BOTH directions. Express the cert-resolver selection and the constructor-param plumbing through the driving boundary (the handshake acceptance test + the equivalence harness), NOT as standalone unit tests of the selection predicate. Mutation testing >=80% on the default-lane logic the handshake phase introduces. The two server-config mechanics (NewSessionTicket suppression; read peer certificates BEFORE consuming the connection's secrets) are pinned by findings-inbound-intercept.md Mechanics #3/#6, not improvised. IMPLEMENT TO THE ACCEPTED CONTRACT -- the identity port is a REQUIRED constructor param (never defaulted, never a with_identity builder). Do NOT mint/re-issue/cache the SVID -- #26 is a READER. RED scaffold convention; integration-tests feature gate.",
+          "reference_implementation": "Gitignored spike-scratch reference: spike-scratch/increment-f-egress-ktls-splice/agent/src/main.rs (rustls ClientConfig + secret extraction, client leg) and spike-scratch/increment-i-inbound-intercept/agent/src/main.rs (rustls ServerConfig + client-auth verifier REQUIRE+VERIFY, server leg; ticket suppression); spike-scratch/increment-a/src/main.rs for the minimal rustls->kTLS arm. Working handshake + secret-extraction code."
+        },
+        {
+          "id": "02-03",
+          "name": "OUTBOUND enforce: kTLS-TX arm, forward agent-light write_all copy + return agent-light zero-copy splice, TLS 1.3 on the wire",
+          "description": "After the outbound handshake, the agent installs the extracted secrets into kTLS on its peer-facing leg and hands steady state to the kernel: the forward direction is agent-light (a port-owned bounded read -> write_all COPY into leg B's kTLS-TX -- the kernel tls_sw_sendmsg encrypts each blocking write; the agent does NO crypto but DOES copy each record's plaintext through a userspace buffer and issues a read+write per record -- NOT agent-idle, NOT zero-copy, NOT zero-syscall), the return direction is agent-light zero-copy (a port-owned bounded splice pump out of leg B's kTLS-RX). A splice INTO kTLS-TX loses records (the same MSG_DONTWAIT loss class the abandoned sockmap egress redirect suffered -- D-MTLS-13), so the forward is a synchronous blocking write_all, not a splice. The peer wire carries TLS 1.3 records (0x17). The pump is port-owned (SD-2).",
+          "criteria": [
+            "The agent installs the handshake's extracted secrets into kTLS on the peer-facing leg -- the auth session IS the data session, not a separately negotiated one [anchor: findings.md A]",
+            "Forward agent-light (NOT agent-idle): tcpdump on the peer wire shows TLS 1.3 records (0x17) and strace shows the agent moves the forward path via a per-record read(legF)+write(legB) into leg B's kTLS-TX (the kernel tls_sw_sendmsg encrypts each write; the agent does NO crypto but DOES copy plaintext through a userspace buffer) -- NOT zero-copy, NOT splice/ppoll-only. A splice into kTLS-TX is NOT used (it loses records) [anchor: crates/overdrive-dataplane/src/mtls/splice.rs (the shipped write_all forward primitive) + sockmap-egress-redirect-into-ktls-tx-delivery-research.md (why the redirect/splice-into-TX was retired); SHIPPED 20/20 commit bb6489ef]",
+            "Return agent-light zero-copy: strace shows ONLY splice/ppoll (zero payload read/write of plaintext), byte-exact plaintext on the host-internal leg, ~1 splice per TLS record, einval_on_B=0 [anchor: findings-splice-return.md]",
+            "ss -tie shows the kTLS ULP on the peer-facing leg (tcp-ulp-tls 1.3 aes-gcm-256 rxconf:sw txconf:sw) -- NOT ss -K [anchor: findings.md A]; the peer wire NEVER carries cleartext (cleartext count on that leg = 0), the K1 North-Star observable -- UNCHANGED by the forward-mechanism pivot (the encrypt is still kernel-side kTLS-TX) [anchor: findings-splice-return.md / crates/overdrive-dataplane/src/mtls/splice.rs]",
+            "(Tier-3 invariant) leg B carries NO psock on EITHER its TX (forward write_all copy) or its RX (return splice) -- every leg is a plain kTLS socket; enforce returns with liveness == Running and the return pump is PORT-OWNED (SD-2). (RETIRED 2026-06-13, D-MTLS-7/13: the former 'SOCKMAP insert AFTER TCP_ULP tls returns EINVAL -> ArmingOrderViolation' invariant -- there is no sockmap insert on any path now, so it is no longer tested) [anchor: ADR-0069 fact 5 (MOOT) / D-MTLS-5]"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs",
+          "scenario_name": "outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire",
+          "effort_hours": 6,
+          "dependencies": [
+            "02-02"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-dataplane/src/mtls/ktls.rs (extracted-secrets -> kTLS-TX/RX install on the peer leg; control-record handling via ktls::KtlsStream)",
+              "crates/overdrive-dataplane/src/mtls/splice.rs (port-owned pumps: the FORWARD read -> write_all COPY pump into leg B's kTLS-TX AND the RETURN zero-copy splice pump out of a plain no-psock kTLS-RX leg B; shared bytes-moved progress counter for liveness)",
+              "crates/overdrive-dataplane/src/mtls/outbound.rs (the OUTBOUND establish sequence: pre-arm capture -> dial leg B -> client handshake -> kTLS-TX/RX arm -> spawn forward write_all pump + return splice pump)",
+              "crates/overdrive-dataplane/src/mtls/mod.rs (HostMtlsEnforcement::enforce Outbound steady-state install + liveness + teardown)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs"
+            ]
+          },
+          "implementation_notes": "Tier 3 (the forward path is now a userspace pump with NO kernel-side BPF program, so the Tier-4 verifier-budget baseline the original sockmap step needed is GONE -- D-MTLS-13). Tier 3: kTLS-TX/RX arm + the forward read -> write_all COPY pump + the return zero-copy splice pump on the real kernel; wire observables (tcpdump 0x17, ss -tie ULP, strace: forward = per-record read+write into kTLS-TX, return = splice/ppoll-only). Tier 2 has NO meaningful BPF_PROG_TEST_RUN for the cgroup_connect4 intercept -> Tier 3. Tier 1 DST: SimMtlsEnforcement models the steady-state OUTCOME + liveness==Running; the equivalence harness asserts the observable trajectory. Express the pump progress accounting through the driving boundary (the Tier-3 wire/cost-tier observables + the liveness surface + the equivalence harness), NOT as standalone unit tests of the predicates. Mutation testing >=80% on the default-lane logic (the liveness derivation, any pure accounting helpers). Control records (NewSessionTicket/KeyUpdate -> EIO on raw kTLS RX) handled via ktls::KtlsStream's control-message loop, NOT raw setsockopt (D-MTLS-8); the return leg carries NO psock on RX (D-MTLS-5) -- the plain-kTLS-RX invariant the splice depends on; the forward leg's TX likewise carries no psock (the sockmap is gone). The forward is a synchronous blocking write_all, NOT a splice into kTLS-TX (which loses records -- sockmap-egress-redirect-into-ktls-tx-delivery-research.md). IMPLEMENT TO THE ACCEPTED CONTRACT -- the pump is PORT-OWNED (SD-2 (a)), no pump_once method; enforce dispatches on Direction (one method), no enforce_outbound. RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "The SSOT is the SHIPPED crates/overdrive-dataplane/src/mtls/{outbound,splice,ktls}.rs (commit bb6489ef): outbound.rs::establish wires the forward write_all pump (PumpHandle::spawn_encrypt) + the return splice pump (PumpHandle::spawn_decrypt); splice.rs::{run_encrypt_pump,run_decrypt_pump} are the two primitives. Gitignored spike-scratch reference: spike-scratch/increment-h-splice-return/agent/src/main.rs (return agent-light zero-copy splice(2) out of kTLS-RX). NOTE: spike-scratch/increment-f-egress-ktls-splice/ proved the ABANDONED sockmap egress-redirect forward mechanism (RETIRED 2026-06-13, D-MTLS-13 -- MSG_DONTWAIT-stall); do NOT use it for the forward path. The shipped forward is the splice.rs write_all copy into kTLS-TX, not a sockmap redirect and not a splice into TX."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "INBOUND enforce (the second direction)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "INBOUND enforce: orig-dst -> server-mTLS -> kTLS-RX -> agent-light splice-to-server",
+          "description": "After the inbound intercept selects the server workload's identity from the recovered original destination, the agent completes the server-side mutual-TLS handshake, arms kTLS-RX on its client-facing leg, and splices the decrypted plaintext to the identity-unaware server workload (agent-light) -- the server reads the byte-exact request while the client wire carries ciphertext only. The deliver pump is the same port-owned splice primitive the outbound return uses. The loopback-only spike is re-proven in real netns/veth.",
+          "criteria": [
+            "Orig-dst -> identity: the recovered original destination selects the server workload's allocation and its held SVID via the identity port [anchor: findings-inbound-intercept.md §1 + 'Design implications' #3]",
+            "Server-mTLS: the agent presents the server SVID and REQUIRE+VERIFY the client's SVID chains to the bundle; a valid client cert -> handshake succeeds, kTLS-RX armed (ss -tie rxconf:sw) [anchor: findings-inbound-intercept.md §2/§3]",
+            "Byte-exact plaintext to the server: the server reads the byte-exact request as plaintext; the client-facing leg carries 0x17 app_data only (cleartext-hits on the client leg = 0); decrypted plaintext appears ONLY on the agent->server leg [anchor: findings-inbound-intercept.md §3 (PLAINTEXT_EXACT; client leg 0x17 records=2, cleartext-hits=0)]",
+            "Agent-light: strace shows the agent moves the inbound payload via splice/ppoll only -- zero per-byte read/write/recv/send; the client-facing leg carries no psock on RX (the same plain-kTLS-RX invariant) [anchor: findings-inbound-intercept.md §5 (splice_in=1 splice_out=1)]",
+            "The adapter owns the server-facing leg end-to-end -- the worker is never handed a TLS or server-side fd; the enforced connection reports liveness == Running and tears down to Gone; the loopback spike topology is re-proven in the real netns/veth shape [anchor: findings-inbound-intercept.md 'What was NOT tested']"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs",
+          "scenario_name": "inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server",
+          "effort_hours": 6,
+          "dependencies": [
+            "02-02",
+            "01-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-dataplane/src/mtls/inbound.rs (orig-dst -> allocation -> SVID selection via the identity port; the agent-opened leg to the server workload inside enforce; the deliver-splice pump)",
+              "crates/overdrive-dataplane/src/mtls/ktls_arm.rs (kTLS-RX arm on the client-facing leg, reused/extended from 02-03)",
+              "crates/overdrive-dataplane/src/mtls/mod.rs (HostMtlsEnforcement::enforce Inbound branch dispatching on Direction::Inbound)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_inbound_enforce.rs"
+            ]
+          },
+          "implementation_notes": "Tier 3 for the full inbound path on the real kernel (TPROXY orig-dst + server-mTLS + kTLS-RX + agent-light splice-to-server; byte-exact plaintext at the server; client-leg 0x17-only; strace splice-only). The whole mechanism is proven end-to-end in findings-inbound-intercept.md §1-§5 (increment-i, kernel 7.0) -- the cost here is productionising the identity-selection lookup (orig-dst -> allocation -> SVID via the identity port, which the spike hardcoded) and re-proving the loopback spike topology in the real netns/veth shape. No BPF_PROG_TEST_RUN for TPROXY/cgroup_sock_addr/kTLS -> Tier 3 only. Tier 1 DST: SimMtlsEnforcement models the Inbound outcome identically to Outbound; the equivalence harness exercises enforce(Inbound, present alloc) -> Running -> teardown -> Gone. Express the orig-dst -> allocation selection and the deliver-pump accounting through the driving boundary + equivalence harness, NOT as standalone predicate unit tests. Mutation testing >=80% on the default-lane logic introduced. IMPLEMENT TO THE ACCEPTED CONTRACT -- the server leg is adapter-internal (opened inside enforce, per SD-1); enforce dispatches on Direction::Inbound, no enforce_inbound; the deliver pump is PORT-OWNED (SD-2). The inbound fail-closed NEGATIVES (nocert/wrongca distinct-reason proofs) are 04-01 scope -- the verifier REQUIRE+VERIFY is wired here. RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "Gitignored spike-scratch reference: spike-scratch/increment-i-inbound-intercept/agent/src/main.rs (the entire proven inbound path — TPROXY intercept, getsockname orig-dst, server-mTLS, kTLS-RX arm, agent-light splice-to-server; run-full.sh MODE=ok drives it) plus spike-scratch/increment-g-ktls-rx-splice/agent/src/main.rs for the kTLS-RX decrypt mechanics. The proven composed inbound implementation to productionise."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Guardrails: fail-closed, limits, supervision, intercept-exemption, honest authn boundary",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Fail-closed (cause-distinct) + resource limits (F4/F7) + pump supervision (F6) + intercept-exemption negatives (F5) + honest authn boundary (F1)",
+          "description": "The security teeth: the encryption guarantee cannot be bypassed and its boundary is honest. Fail-closed cause-distinct (both directions), the F4/F7 resource limits and F6 pump supervision hold at their concrete values with no leak, the intercept cannot be self-exempted (F5), and v1 is exactly chain-to-bundle authn with NO intended-peer pinning. Authorization is #27/#38, out of scope.",
+          "criteria": [
+            "Outbound fail-closed: an absent SVID -> AbsentSvid (the agent refuses, no cleartext reaches the peer, the peer leg is never armed); a peer not chaining to the bundle -> PeerVerificationFailed (no TLS app data, no cleartext) [anchor: ADR-0069 'Authn-only boundary']",
+            "Inbound fail-closed, distinct reasons: nocert (\"peer sent no certificates\") and wrongca (\"invalid peer certificate: BadSignature\") each reject with their DISTINCT reason BEFORE any splice; the server workload receives 0 bytes [anchor: findings-inbound-intercept.md §4]",
+            "Resource limits at their CONCRETE values (assert the value, not field existence): max_prearm_bytes=256 KiB -> BufferLimitExceeded (buffer dropped, leg reset, no cleartext); handshake_deadline=5 s -> HandshakeTimeout; max_inflight_per_alloc=128 -> InFlightLimitExceeded; cleanup leaks no fd/pump/kTLS state -- no sockmap state exists to leak post-2026-06-13 (re-query liveness -> Gone) [anchor: feature-delta MtlsLimits (F7 defaults); ADR-0069 'Resource & robustness constraints']",
+            "Pump supervision (F6): a pump whose bytes-moved counter has not advanced for pump_stall_deadline=30 s while a record is pending transitions to Stalled; the worker tears the connection down (-> Gone, no fd/pump/kTLS leak; no sockmap state exists post-2026-06-13) and emits mtls.pump.stalled / mtls.pump.teardown_on_stall [anchor: ADR-0069 ATAM 'Pump supervision policy (F6)']",
+            "Intercept-exemption negatives (F5): the agent's peer-facing dial is NOT re-intercepted (no recursion); a workload that sets the bypass on its OWN socket is STILL intercepted (agent-private, unreachable from the workload). Honest authn boundary (F1): v1 verifies chain-to-bundle ONLY (both directions); the wrong-but-valid-peer PeerIdentityMismatch negative is present but #[ignore]-gated on #178 and NOTHING calls that case 'protected' until #178 lands [anchor: ADR-0069 'intercept-recursion / agent-leg-B exemption' + Decision 'The honest v1 security claim']"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_guardrails.rs",
+          "scenario_name": "guardrails_fail_closed_limits_supervision_exemption_authn_boundary",
+          "effort_hours": 12,
+          "dependencies": [
+            "02-03",
+            "03-01",
+            "02-02",
+            "01-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-dataplane/src/mtls/limits.rs (MtlsLimits enforcement: pre-arm buffer cap -> BufferLimitExceeded; handshake deadline -> HandshakeTimeout; per-alloc in-flight ceiling -> InFlightLimitExceeded; fail-closed cleanup, no leak)",
+              "crates/overdrive-dataplane/src/mtls/supervision.rs (liveness Stalled derivation from the bytes-spliced progress metric + pending-record check; the stall telemetry)",
+              "crates/overdrive-worker/src/mtls_supervisor.rs (worker reconciler-tick point-query of liveness; teardown-on-Stalled policy -- D-MTLS-10 / SD-4)",
+              "crates/overdrive-core/src/traits/mtls_enforcement.rs (the cause-distinct MtlsEnforcementError variants + PumpLiveness::Stalled finalised)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_guardrails.rs",
+              "crates/overdrive-sim/tests/acceptance/mtls_enforcement_equivalence.rs (DST equivalence harness: both adapters, both directions, fail-closed branches, the F4/F7 concrete-value limit trips, F6 stall->teardown->Gone)"
+            ]
+          },
+          "implementation_notes": "Mixed-tier; Tier 1 DST is heavily load-bearing. The SimMtlsEnforcement double + the mtls_enforcement_equivalence harness drive BOTH adapters through the fail-closed branches (AbsentSvid via a preloaded SimIdentityRead WITHOUT the alloc; scripted HandshakeFailed/PeerVerificationFailed), the F4/F7 concrete-value limit trips (BufferLimitExceeded fires at exactly 256 KiB+1; HandshakeTimeout at 5 s; InFlightLimitExceeded at the 129th concurrent pre-arm; pump_stall_deadline==30 s -- NOT merely field existence), and the F6 stall -> worker-teardown -> Gone policy (scriptable Running->Stalled). Tier 3 for the kernel-mechanism guardrails: inbound nocert/wrongca distinct reasons (findings-inbound-intercept.md §4); a deliberately-exceeded pre-arm buffer; a stalled handshake; a paused splice pump with a pending RX record (Stalled within 30 s -> teardown -> no leak); the F5 negatives. Mutation testing >=80% on EVERY limit-trip predicate, the Stalled derivation, the cause-distinct error mapping, and the fail-closed cleanup path -- a < vs <= mutation on the 256 KiB / 128 / 30 s thresholds MUST be killed. The PeerIdentityMismatch wrong-but-valid-peer negative is present but #[ignore = \"gated on #178 supplying expected_peer\"] -- do NOT wire SAN-match in v1 (expected_peer stays None), and no doc/test calls that case 'protected'. Authorization (allow/deny) is #27/#38 -- the proxy MUST NOT embed a policy engine / read policy_verdicts. Operator-tunability of MtlsLimits is #230 -- surface as a blocker if it arises, create NO GH issue. IMPLEMENT TO THE ACCEPTED CONTRACT -- all error variants + PumpLiveness::Stalled are pinned; do NOT add variants. RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "Gitignored spike-scratch reference: spike-scratch/increment-i-inbound-intercept/ (agent/src/main.rs = fail-closed nocert/wrongca rejection with distinct reasons; run-full.sh MODE=nocert|wrongca drives the negatives). MtlsLimits + pump-supervision values are design-pinned (no spike) — enforce per the accepted contract."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "[SUPERSEDED 2026-06-14 -- decomposed into phase 06 per docs/feature/transparent-mtls-host-socket/deliver/decomposition-proposal-05.md + D-MTLS-17; 05-01 was never completed -- halted at the unbuilt production mTLS dataplane-integration layer it silently assumed] Production activation (composition-root wiring; BLOCKING external-validity gate)",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "[SUPERSEDED -> 06-01 / 06-02 / 06-03] Wire HostMtlsEnforcement into the production node/worker boot path; probe-then-use, fail closed; productionise the intercept install + leg-acquire for live allocations",
+          "description": "The external-validity step AND the home for the production intercept install + leg-acquire (the former 02-01 scope, folded here per D-MTLS-14): the production node/worker composition root constructs HostMtlsEnforcement, runs probe() at startup and FAILS CLOSED on error (no silent boot without enforcement), and -- as the WORKER's role, not adapter API -- creates the IP_TRANSPARENT leg-C listener, installs the nft-TPROXY intercept, accepts the redirected/rewritten workload leg, recovers the inbound original destination via getsockname, and hands the owned leg + direction-tagged routing fact INTO the MtlsEnforcement port (SD-1(a)) for live host-socket allocations -- so a workload deployed via `overdrive deploy` is actually enforced. Without this, adapter Tier-3 tests pass while production never enables mTLS (the built-in-ca 02-02 cold-boot regression class). The lossless pre-arm capture and the F5 intercept-exemption mechanism already shipped in 01-01; the agent-private bypass scoping is structural in cgroup_connect4_mtls.rs.",
+          "criteria": [
+            "The node/worker boot path constructs HostMtlsEnforcement with the identity read-port + MtlsLimits and runs probe() at startup, BEFORE serving any allocation traffic (the wire->probe->use composition-root invariant) [anchor: feature-delta MtlsEnforcement probe doc; ADR-0069 § Enforcement; D-MTLS-11]",
+            "A failed probe() refuses to start with a structured health.startup.refused event and the node does NOT degrade to a cleartext path -- fail-closed for confidentiality (mirroring the existing ebpf_dataplane.probe() refusal in run_server)",
+            "For a live host-socket allocation, the boot path creates the agent's IP_TRANSPARENT leg-C listener and installs the nft-TPROXY intercept (and the outbound cgroup_connect4 leg-F redirect), under the agent's CAP_NET_ADMIN, so the workload's connections are routed through the agent's legs once it reaches Running; the workload is unprivileged and holds nothing [anchor: findings-inbound-intercept.md §1 / Mechanics #1; ADR-0069 'intercept-recursion / agent-leg-B exemption'; D-MTLS-14]",
+            "An intercepted connection (either direction) is accepted by the worker, associated with the correct allocation, its inbound original destination recovered via getsockname (NOT SO_ORIGINAL_DST), and handed to the MtlsEnforcement port as an owned leg + direction-tagged routing fact -- enforceable without re-deriving routing from an unsafe socket tuple (SD-1(a): no pidfd, no 4-tuple re-derivation) [anchor: findings-inbound-intercept.md §1; feature-delta SD-1(a); D-MTLS-14]",
+            "END-TO-END acceptance (the load-bearing gate): a normal exec workload deployed via `overdrive deploy <SPEC>` produces TLS 1.3 records (tcpdump 0x17) on its peer-facing leg with zero payload cleartext, and the peer reads byte-exact plaintext -- proven by a driving-port / end-to-end Tier-3 test that ACTUALLY RUNS under Lima (cargo xtask lima run -- ...), NOT a compile-check / --no-run",
+            "The workload holds no SVID material (identity-unaware) and the CLI verb is `overdrive deploy <SPEC>` (NOT `job submit`); the e2e test exercises the real boot path, not the adapter in isolation"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs",
+          "scenario_name": "deployed_exec_workload_peer_leg_carries_tls13_via_production_boot_path",
+          "effort_hours": 8,
+          "dependencies": [
+            "02-03",
+            "03-01",
+            "04-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-control-plane/src/lib.rs (run_server composition root: construct HostMtlsEnforcement with the identity read-port + MtlsLimits, probe()-then-use with health.startup.refused on failure, mirroring the existing ebpf_dataplane.probe() refusal)",
+              "crates/overdrive-worker/src/mtls_intercept.rs (the worker's intercept-install + leg-acquire role -- the composition-root side of SD-1(a), folded from 02-01 per D-MTLS-14: make_transparent_listener / install_inbound_tproxy(+RAII guard) / accept_outbound_leg / accept_inbound_leg(getsockname orig-dst). Free functions producing InterceptedConnection for enforce; NOT a mtls/ adapter file and NOT a MtlsEnforcement method. Exact signatures pinned in feature-delta D-MTLS-14 / wave-decisions.md.)",
+              "crates/overdrive-worker/src/ (node/worker startup + allocation lifecycle: create the listeners + install the intercepts via mtls_intercept.rs and hand the owned leg into enforce for live host-socket allocations once an alloc reaches Running; supervise enforced connections)"
+            ],
+            "test_files": [
+              "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs (end-to-end: deploy an exec workload via the real boot path and assert TLS 1.3 on its peer-facing leg)"
+            ]
+          },
+          "implementation_notes": "Tier 3 end-to-end through the REAL production boot path. This step also OWNS the production intercept install + leg-acquire (folded from the former 02-01 per D-MTLS-14): the IP_TRANSPARENT leg-C listener creation, the nft-TPROXY install, the accept()->InterceptedConnection, and the getsockname orig-dst recovery are the WORKER's composition-root role -- NOT adapter API and NOT a new MtlsEnforcement method (the trait stays probe/enforce/liveness/teardown). Productionise the proven 01-01 test-harness primitives verbatim (roles.rs::{make_transparent_listener, getsockname_orig, accept_leg_f, accept_leg_c_and_orig_dst}; mtls_netns_topology.rs::install_tproxy production half) as the free functions pinned in feature-delta D-MTLS-14. The lossless pre-arm capture (mod.rs::drain_prearm), the outbound cgroup_connect4_mtls rewrite, and the F5 exemption (structural cgroup-subtree scoping + the inbound dial_leg_s SO_MARK / MTLS_LEG_S_DIAL_MARK) ALREADY shipped in 01-01 -- do NOT re-create them; the harness GAP-3 netns DNAT/masquerade is test-only and does NOT productionise (the adapter dials orig-dst verbatim, #178). This is the step that closes the external-validity gap the review flagged (BLOCKER): no prior step wires HostMtlsEnforcement into run_server / the worker allocation lifecycle, so adapter Tier-3 tests could be green while `overdrive serve` never enables mTLS for real host-socket workloads. The acceptance gate MUST actually run under Lima (cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests); a --no-run / compile-check is explicitly insufficient -- 'a --no-run gate is green even when every fixture refuses at boot' is precisely the regression this step exists to prevent (the built-in-ca-operator-composition 02-02 cold-boot precedent). The composition root follows wire->probe->use: construct the adapter (BPF objects/maps loaded+pinned), call probe(), and refuse to start on Err with a structured health.startup.refused event -- reusing the exact precedent already in run_server for ebpf_dataplane.probe(). The probe is fail-closed for confidentiality: a node that cannot honor the encryption contract MUST NOT boot serving cleartext. The worker (D-MTLS-10, in-process node agent) creates the listeners, installs the intercepts, accepts the leg, builds InterceptedConnection, calls enforce, and supervises the enforced connections via the liveness point-query (SD-4). IMPLEMENT TO THE ACCEPTED CONTRACT -- probe/enforce/liveness/teardown only; do NOT add a mtls/intercept.rs adapter file, do NOT add an intercept() trait method, do NOT invent wiring surface beyond the MtlsEnforcement port + the mtls_intercept.rs free functions + the existing run_server/worker startup shape. The operator verb is `overdrive deploy <SPEC>`; do NOT invent a CLI verb (encryption is automatic and undisableable, no driving CLI surface). The F5 no-recursion negative (agent dial provably not re-intercepted) is 04-01 scope and already proven. The F5 self-exempt RUNTIME negative (a workload that sets the bypass on its OWN socket is STILL intercepted) lands HERE, NOT in 04-01: it requires the production cgroup_connect4 intercept-install that this step adds, so 04-01 can only guarantee it STRUCTURALLY (there is no per-socket bypass knob; the exemption is agent-private cgroup-subtree scoping + SO_MARK). Carry a runtime self-exempt negative in mtls_production_activation.rs, AND tighten the 04-01 AT docstring (mtls_guardrails.rs AC5 bullet) to mark the self-exempt case as structural-until-this-step rather than exercised in 04-01 (04-01 review Q1). Separately (04-01 review Q2): the inbound nocert/wrongca cause-distinct rejection legitimately shares the single PeerVerificationFailed variant -- the distinction is reason-string only (rustls' nocert-vs-BadSignature is not a stable typed surface), so do NOT add a second variant. Mutation testing >=80% diff-scoped on any default-lane wiring logic (the probe-result branch, the allocation-attach predicate, the orig-dst recovery / routing-fact construction). RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "The intercept install + leg-acquire primitives to productionise are the PROVEN 01-01 test-harness functions (the SSOT for the mechanism): crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton/roles.rs::{make_transparent_listener (IP_TRANSPARENT leg-C listener), getsockname_orig (orig-dst recovery), accept_leg_f / accept_leg_c_and_orig_dst (accept -> owned leg + routing fact)} + helpers/mtls_netns_topology.rs::install_tproxy (the production nft-TPROXY half; the GAP-3 netns DNAT/masquerade is test-only). Move these into crates/overdrive-worker/src/mtls_intercept.rs as the free functions pinned in feature-delta D-MTLS-14. The composition-root wiring itself is NEW: codebase precedent to mirror is overdrive-control-plane/src/lib.rs run_server's ebpf_dataplane.probe() -> health.startup.refused fail-closed-on-boot pattern (apply the same wire->probe->use shape for HostMtlsEnforcement::probe at startup). The lossless pre-arm capture + F5 exemption + cgroup_connect4_mtls rewrite are already production (01-01) -- reuse, do not re-create."
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Production mTLS dataplane integration (replaces superseded 05-01; D-MTLS-17 / decomposition-proposal-05.md)",
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "Production OUTBOUND BPF integration: load + per-alloc attach cgroup_connect4_mtls, typed MTLS_REDIRECT_DEST programming (MtlsDataplane surface)",
+          "description": "Add the MtlsDataplane surface on overdrive-dataplane (mtls/dataplane.rs, D-MTLS-17 item 1): load the shared overdrive_bpf.o once, recover the cgroup_connect4_mtls program handle + the MTLS_REDIRECT_DEST typed aya HashMap handle, run the program verifier-load once, and expose attach_alloc(alloc_scope) (per-alloc cgroup attach, F5-exempt subtree) + program_redirect/unprogram_redirect + MtlsCgroupLink RAII. Productionises the test-only MtlsDestKey/MtlsAddrPort PODs + program_redirect_dest glue into src. Closes the unbuilt production-loader layer the superseded 05-01 silently assumed.",
+          "criteria": [
+            "After MtlsDataplane::load(...) + attach_alloc(scope), `bpftool cgroup show <alloc-scope>` lists a cgroup_inet4_connect program cgroup_connect4_mtls attached to THAT alloc's .scope -- and `bpftool cgroup show <workloads.slice>` does NOT (proving the F5-exempt per-alloc scope, distinct from the service program's global-ancestor attach)",
+            "After program_redirect(real_peer, leg_f), `bpftool map dump name MTLS_REDIRECT_DEST` shows the (real_peer)->(leg_f) host-order entry; after unprogram_redirect(real_peer), the entry is gone",
+            "A cgroup-isolated workload connect(real_peer) under the attached scope lands on the agent's leg-F listener (the rewrite fires); a connect to an un-programmed dest passes through unchanged (map MISS -> pass)",
+            "Dropping the MtlsCgroupLink detaches the program (`bpftool cgroup show <scope>` no longer lists it)",
+            "Gate: cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --features integration-tests green for the new test, ACTUALLY EXECUTING (NOT --no-run)"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs",
+          "scenario_name": "mtls_dataplane_load_attach_per_alloc_program_redirect",
+          "effort_hours": 8,
+          "dependencies": [
+            "01-01",
+            "02-03"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-dataplane/src/mtls/dataplane.rs (NEW -- MtlsDataplane, MtlsCgroupLink, MtlsDataplaneError, the MtlsDestKey/MtlsAddrPort PODs)",
+              "crates/overdrive-dataplane/src/mtls/mod.rs (pub mod dataplane; + re-export)"
+            ],
+            "test_files": [
+              "crates/overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs (NEW)"
+            ]
+          },
+          "implementation_notes": "Tier-3 ONLY (no BPF_PROG_TEST_RUN for cgroup_sock_addr). The load is a SECOND EbpfLoader -- MtlsDataplane owns its OWN aya::Ebpf, loaded by its own EbpfLoader::new().map_pin_path(pin_dir).allow_unsupported_maps().load_file(...) (D-MTLS-17 item 1 'Load model'). The separate load is justified by aya 0.13.x's single-owner model: a per-alloc &mut Ebpf consumer cannot share EbpfDataplane's Ebpf, which is moved into Arc<dyn Dataplane> at composition (after which &mut on its inner Ebpf is structurally unreachable); sharing one Ebpf would force Arc<Mutex<Ebpf>> and tax the hot LB path. Recover the cgroup_connect4_mtls program + the MTLS_REDIRECT_DEST handle from THAT (its own) object -- mirroring the recover-from-the-loaded-ELF shape of EbpfDataplane's existing recovery (crates/overdrive-dataplane/src/lib.rs:386-765), not folding into it. The shared SERVICE_MAP HoM is NOT duplicated -- it is reused by-name (pinning = ByName) via the same pin_dir + allow_unsupported_maps(), so aya BPF_OBJ_GETs the already-pinned outer FD rather than creating a second one. MTLS_REDIRECT_DEST is a plain BPF_MAP_TYPE_HASH (native aya HashMap, NO HoM pinning=ByName dance). attach_alloc attaches to the per-alloc cgroup .scope (the F5 exemption made structural), NOT the global workloads.slice the service program uses. IMPLEMENT TO D-MTLS-17 item 1 verbatim -- do NOT add Dataplane trait methods, do NOT add an intercept() MtlsEnforcement method, do NOT touch the 4-method contract. Prior 05-01 AC3 (outbound cgroup_connect4 leg-F redirect install) maps here. Mutation >=80% diff-scoped on the default-lane logic (host-order key/value POD conversions; the program/unprogram branch). RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "Productionise the test-only glue: crates/overdrive-dataplane/tests/integration/helpers/mtls_roles.rs::{load_workload_bpf (the cgroup_connect4_mtls program_mut/load/attach at :582-589), program_redirect_dest} + the MtlsDestKey/MtlsAddrPort PODs. Mirror EbpfDataplane::new_with_pin_dir's load+recover shape for the single-ELF load + program/map-handle recovery; attach per-alloc cgroup scope, not the global slice."
+        },
+        {
+          "id": "06-02",
+          "name": "Worker per-alloc intercept-install + leg-acquire (productionise the D-MTLS-14 free functions) + inbound nft-TPROXY",
+          "description": "Land the D-MTLS-14 composition-root free functions in overdrive-worker/src/mtls_intercept.rs (make_transparent_listener, install_inbound_tproxy + TproxyInterceptGuard, accept_outbound_leg, accept_inbound_leg), productionising the proven 01-01 harness primitives (mtls_roles.rs::{make_transparent_listener, getsockname_orig, accept_*} + mtls_netns_topology.rs::install_tproxy production half). These produce the InterceptedConnection for enforce; the inbound path rides nft-TPROXY + IP_TRANSPARENT (no BPF loader change -- D-MTLS-17 item 2).",
+          "criteria": [
+            "make_transparent_listener(127.0.0.1:0) returns a listener whose socket has IP_TRANSPARENT set (getsockopt(SOL_IP, IP_TRANSPARENT) == 1) -- proven by a real bind on the production code path",
+            "install_inbound_tproxy(virt, agent_port) installs the nft-TPROXY rule (the production table shows the tproxy to :<agent_port> rule + the ip rule fwmark / ip route local table companions); dropping TproxyInterceptGuard removes them (nft list empty, ip rule companion gone)",
+            "accept_inbound_leg on a TPROXY-redirected connection recovers the orig-dst via getsockname (NOT SO_ORIGINAL_DST) and builds an InterceptedConnection { routed: Inbound { orig_dst }, .. } whose orig_dst equals the client's intended virt",
+            "accept_outbound_leg on a leg-F-redirected connection builds InterceptedConnection { routed: Outbound { peer }, .. } with the pre-programmed peer; the owned leg is handed by value",
+            "Gate: cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests green, ACTUALLY EXECUTING (NOT --no-run)"
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs",
+          "scenario_name": "worker_intercept_install_leg_acquire_outbound_and_inbound",
+          "effort_hours": 6,
+          "dependencies": [
+            "06-01",
+            "03-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-worker/src/mtls_intercept.rs (NEW -- the D-MTLS-14 free fns + TproxyInterceptGuard + InterceptError; NOT a mtls/ adapter file, NOT a MtlsEnforcement method)",
+              "crates/overdrive-worker/src/lib.rs (pub mod mtls_intercept;)"
+            ],
+            "test_files": [
+              "crates/overdrive-worker/tests/integration/mtls_intercept_install.rs (NEW)"
+            ]
+          },
+          "implementation_notes": "IMPLEMENT the D-MTLS-14 signatures VERBATIM (make_transparent_listener(addr) / install_inbound_tproxy(virt, agent_port) -> TproxyInterceptGuard / accept_outbound_leg(listener, alloc, peer) / accept_inbound_leg(listener, alloc)); construct InterceptedConnection / Routed (existing pinned types), never extend them; expected_peer is None in v1. Productionise the proven 01-01 harness primitives (mtls_roles.rs + install_tproxy production half). The harness GAP-3 netns DNAT/masquerade is test-only and does NOT productionise (install_inbound_tproxy productionises ONLY the TPROXY-prerouting + ip rule/ip route half; the adapter dials orig-dst verbatim -- server_dial_addr is the #178-deferred site, do NOT touch it). Prior 05-01 AC2 (IP_TRANSPARENT listener + getsockname orig-dst) and AC4 (CAP_NET_ADMIN intercept/listener setup) map here. Mutation >=80% diff-scoped on the orig-dst recovery / routing-fact construction. RED scaffold convention; integration-tests gate.",
+          "reference_implementation": "crates/overdrive-dataplane/tests/integration/helpers/mtls_roles.rs (make_transparent_listener ~L1294, getsockname_orig ~L1341, accept_leg_f, accept_leg_c_and_orig_dst) + helpers/mtls_netns_topology.rs::install_tproxy ~L358 (the PRODUCTION nft-TPROXY half; GAP-3 DNAT/masquerade is test-only)."
+        },
+        {
+          "id": "06-03",
+          "name": "Composition-root activation: construct + probe HostMtlsEnforcement + MtlsDataplane AFTER IdentityMgr; per-alloc lifecycle; (C)+(B) supervision; delete MtlsSupervisor; end-to-end deploy gate",
+          "description": "The external-validity gate. In run_server, AFTER IdentityMgr::new (lib.rs:1673, D-MTLS-17 item 3 / decision 3a): construct MtlsDataplane::load + HostMtlsEnforcement::new(identity_as_IdentityRead, MtlsLimits::default()), run probe() fail-closed (health.startup.refused, mirroring the :1467 ebpf_dataplane.probe() precedent), and inject both ports into a NEW worker MtlsInterceptWorker lifecycle component (mechanism (B) -- a separate worker-owned component holding the mandatory dyn-port + per-alloc teardown set; ExecDriver untouched; on_alloc_running/on_alloc_terminal delegate to it, mirroring ProbeRunner). Wire the per-alloc lifecycle (D-MTLS-17 item 4): install -> enforce -> (C) TCP_USER_TIMEOUT/keepalive + (B) per-connection self-teardown. Delete the central MtlsSupervisor + its tests (ADR-0070/D-MTLS-16 -- delete, not refactor). End-to-end: a normal exec workload deployed via `overdrive deploy <SPEC>` dialing a DECLARED mesh peer produces TLS 1.3 (0x17) on its peer-facing leg via the real production boot path.",
+          "criteria": [
+            "run_server constructs HostMtlsEnforcement + MtlsDataplane AFTER IdentityMgr and runs probe() BEFORE serving allocation traffic (wire->probe->use); a failed probe() emits health.startup.refused and the node refuses to boot (does NOT degrade to cleartext) -- asserted by a fault-injected probe failure (mirroring the ebpf_dataplane set_probe_fault seam)",
+            "END-TO-END (the load-bearing gate): an exec workload deployed via `overdrive deploy <SPEC>` that dials a DECLARED mesh peer produces TLS 1.3 records (tcpdump 0x17) on its peer-facing leg with zero payload cleartext, and the peer reads byte-exact plaintext -- proven by a driving-port Tier-3 test that ACTUALLY RUNS under Lima (cargo xtask lima run -- ...), NOT --no-run. (AC5 is the ratified declared-mesh-peer OUTBOUND gate, D-MTLS-15; arbitrary-peer auto-intercept is #178/#61-deferred -- the deploy fixture names the destination.)",
+            "bpftool cgroup show on the deployed alloc's .scope shows cgroup_connect4_mtls attached via the PRODUCTION boot path (not a test harness); on on_alloc_terminal the link is detached and the MTLS_REDIRECT_DEST entry + the nft-TPROXY rule are removed",
+            "F5 runtime self-exempt negative: a workload that sets the bypass on its OWN socket is STILL intercepted (the exemption is agent-private cgroup-subtree scoping; unreachable from the workload) -- proven against the production intercept-install this step adds",
+            "(C)+(B) supervision: a connection whose peer vanishes is reaped by the kernel TCP_USER_TIMEOUT/keepalive -> the per-connection task self-tears-down -> liveness reports Gone, no fd/kTLS leak; NO central supervise_tick runs (grep proves MtlsSupervisor is deleted)",
+            "Gate: cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests green for the e2e test, ACTUALLY EXECUTING (NOT --no-run)"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs",
+          "scenario_name": "deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_boot_path",
+          "effort_hours": 10,
+          "dependencies": [
+            "06-01",
+            "06-02",
+            "04-01"
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-control-plane/src/lib.rs (run_server: post-IdentityMgr construct + probe HostMtlsEnforcement + MtlsDataplane, fail-closed; resequence per D-MTLS-17 (3a); inject into the MtlsInterceptWorker)",
+              "crates/overdrive-worker/src/ (NEW MtlsInterceptWorker lifecycle component (mechanism B, pinned) holding the mandatory Arc<dyn MtlsEnforcement> + MtlsDataplane + the per-alloc teardown set; on_alloc_running/on_alloc_terminal delegate per-alloc install->enforce->teardown; ExecDriver constructor UNCHANGED)",
+              "crates/overdrive-worker/src/lib.rs (remove pub mod mtls_supervisor; add the mtls intercept-worker module)",
+              "crates/overdrive-core/src/traits/mtls_enforcement.rs (docstring-only reframe of liveness's F6 block per D-MTLS-16 item 1 -- NO signature change)"
+            ],
+            "test_files": [
+              "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs (NEW -- the e2e deploy gate)",
+              "crates/overdrive-worker/src/mtls_supervisor.rs (DELETE -- ADR-0070/D-MTLS-16, with its tests, same commit)",
+              "crates/overdrive-worker/tests/acceptance/mtls_supervisor_teardown_on_stall.rs (DELETE -- with the production code, same commit)"
+            ]
+          },
+          "implementation_notes": "Tier-3 end-to-end through the REAL boot path. A --no-run gate is green even when every fixture refuses at boot (the built-in-ca 02-02 cold-boot regression class) -- this MUST actually run under Lima. WORKER-INJECTION MECHANISM IS PINNED AS (B) (user-ratified 2026-06-14): a separate MtlsInterceptWorker lifecycle component holds the mandatory Arc<dyn MtlsEnforcement> dyn-port (required new() param, per development.md Port-trait-dependencies) + the MtlsDataplane handle + a per-alloc teardown set; ExecDriver holds it and delegates on_alloc_running/on_alloc_terminal to it, mirroring ProbeRunner -- ExecDriver::new's signature does NOT change. Do NOT improvise a builder/Option to dodge the mandatory-dyn-port-param rule. (C)+(B) supervision per ADR-0070/D-MTLS-16: the adapter sets TCP_USER_TIMEOUT/keepalive in enforce before the pumps start (C); the SD-2 port-owned pump task self-tears-down fail-closed on EOF/error/ETIMEDOUT (B); re-home the telemetry events (mtls.pump.stalled / mtls.pump.teardown_on_stall) from the deleted MtlsSupervisor to the per-connection self-teardown path; RETAIN supervision.rs::derive_liveness + PumpLiveness + pump_stall_deadline (the (B) verdict + #232 reserved hook). DELETE the central MtlsSupervisor + its tests in the SAME commit (deletion discipline -- no gate/salvage/stub). Do NOT build the #232 kernel-invisible progress-stall watchdog; do NOT resurrect a central liveness loop; do NOT touch server_dial_addr (#178-deferred). IMPLEMENT TO THE ACCEPTED CONTRACT -- probe/enforce/liveness/teardown only; no mtls/intercept.rs adapter file, no intercept() trait method, no new AllocationSpec field. Prior 05-01 AC1/AC5/AC6 + the D-MTLS-16 MtlsSupervisor deletion + per-alloc bookkeeping map here. Mutation >=80% diff-scoped on the default-lane wiring logic (the probe-result branch, the alloc-attach DriverType::Exec predicate, the per-connection self-teardown trigger). RED scaffold convention; integration-tests gate. MAY split into two commits both carrying Step-ID 06-03 (commit 1: the (C)+(B) reshape + MtlsSupervisor deletion + docstring reframe; commit 2: the activation + lifecycle + e2e).",
+          "reference_implementation": "Probe precedent: crates/overdrive-control-plane/src/lib.rs:1467 (ebpf_dataplane.probe().await -> health.startup.refused); IdentityMgr construction :1673; the ProbeRunner inject+delegate pattern (with_probe_runner / on_alloc_running -> start_alloc / on_alloc_terminal -> stop_alloc) is the structural model for MtlsInterceptWorker (but the dyn-port is a required new() param, not a builder). (C)+(B): ADR-0070 / D-MTLS-16; the (B) verdict logic stays in crates/overdrive-dataplane/src/mtls/supervision.rs."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-dataplane/src/mtls/",
+      "crates/overdrive-bpf/src/programs/",
+      "crates/overdrive-sim/src/adapters/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-dataplane/tests/integration/",
+      "crates/overdrive-sim/tests/integration/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-core/tests/"
+    ],
+    "excluded_patterns": [
+      "**/target/**",
+      "**/*.rs.bk"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "solution-architect-reviewer",
+    "approved_at": "pending"
+  }
+}
