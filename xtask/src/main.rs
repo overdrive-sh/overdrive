@@ -239,7 +239,7 @@ enum LimaAction {
     /// Run a one-off command inside the VM (remaining args forwarded).
     ///
     /// Default behaviour wraps the command in
-    /// `sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" ...`
+    /// `sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" ...`
     /// so the test process runs as root — the same permission surface
     /// CI's LVH VM sees. Pass `--no-sudo` to run as the unprivileged
     /// `lima` user instead.
@@ -577,14 +577,24 @@ fn lima(action: LimaAction) -> Result<()> {
                 // Default: run the test process as root inside the VM
                 // so cgroup writes and other privileged ops succeed —
                 // the same permission shape CI's LVH harness uses.
-                // `sudo -E` preserves env; `env "PATH=$PATH"
-                // "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"` re-injects the
-                // two vars sudo's `secure_path` would otherwise scrub
-                // so cargo and its target dir resolve under the
-                // `lima` user's home (where rustup is installed).
+                //
+                // `env "HOME=$HOME" "PATH=$PATH"
+                // "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"` re-injects these
+                // explicitly so cargo, rustup, and the target dir all
+                // resolve under the `lima` user's home — where rustup,
+                // the `nightly` toolchain, and the cargo registry cache
+                // live. `HOME` is load-bearing and must NOT be left to
+                // `sudo -E`: Ubuntu 26.04's sudoers refuses `-E`
+                // ("preserving the entire environment is not supported,
+                // '-E' is ignored"), so without the explicit
+                // `HOME=$HOME` a root rustup resolves
+                // `RUSTUP_HOME=/root/.rustup` and `rustup run nightly`
+                // fails "toolchain not installed". `-E` is kept for the
+                // older-sudo case where it still works; the explicit
+                // `env` vars are the load-bearing path.
                 let joined = args.iter().map(|a| sh_escape(a)).collect::<Vec<_>>().join(" ");
                 let inner = format!(
-                    r#"sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" {joined}"#
+                    r#"sudo -E env "HOME=$HOME" "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" {joined}"#
                 );
                 cmd.args(["shell", LIMA_INSTANCE, "bash", "-lc", &inner]);
             }

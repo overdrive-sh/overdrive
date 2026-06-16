@@ -333,6 +333,23 @@ probes:
         || [ -x "$HOME/.cargo/bin/rustup" ]; do sleep 2; done'
     hint: "Rustup did not install within 5 minutes."
 
+  # The bpf-build / bpf-clippy jobs run `rustup run nightly cargo ...`
+  # (the bpfel-unknown-none target needs `-Z build-std=core`, nightly-only).
+  # The user-mode install above is `... || true`, and the "rustup installed"
+  # probe only checks the rustup *binary* — so a swallowed nightly-install
+  # failure would otherwise stay invisible until `rustup run nightly` fails
+  # three CI steps later with a confusing "toolchain 'nightly' is not
+  # installed". Gate readiness on the toolchain actually being present so a
+  # failed install fails provisioning loudly, at the source.
+  - description: "nightly toolchain installed (bpf-build needs +nightly)"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      export PATH="$HOME/.cargo/bin:$PATH"
+      timeout 300 bash -c 'until rustup toolchain list 2>/dev/null \
+        | grep -q "^nightly"; do sleep 2; done'
+    hint: "nightly toolchain missing — `rustup toolchain install nightly` failed during user-mode provisioning (see the `mode: user` script)."
+
   - description: "cloud-hypervisor installed"
     script: |
       #!/usr/bin/env bash
