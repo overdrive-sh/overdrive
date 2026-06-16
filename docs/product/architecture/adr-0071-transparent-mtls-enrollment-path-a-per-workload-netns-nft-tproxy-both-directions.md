@@ -1,0 +1,537 @@
+# ADR-0071: Transparent-mTLS enrollment (Path A) — per-workload netns+veth + nft-TPROXY both directions; retire `cgroup/connect4`-rewrite outbound recovery
+
+## Status
+
+**Accepted** (2026-06-16). Decision-maker: Morgan (solution-architecture);
+**ratified by the user** — Q1–Q4 ratified and Q5a (fold the DNS name-layer
+*integration* into this design) chosen. The four prior open sub-decisions are
+now baked into the Decision section below (§ "Ratified sub-decisions (Q1–Q4)");
+the name-layer integration + the DNS-return decision are recorded in §
+"Name-layer integration (Q5a)". One recommendation remains open for sign-off —
+the DNS-return shape (headless, recommended) — and adds no new v1 dependency, so
+it is not a blocker. Tags: phase-2, dataplane, mtls, ktls, tproxy, netns,
+enrollment, dns, name-layer, #236.
+
+**Amends ADR-0069** ("Transparent mTLS via a universal agent-light L4 proxy")
+on exactly one axis: the **OUTBOUND interception + original-destination
+recovery mechanism**. ADR-0069 framed the outbound active side as a
+`cgroup/connect4`-rewrite to the agent's leg-F listener (Decision fact 1
+OUTBOUND; the outbound topology diagram; § "intercept-recursion / agent-leg-B
+exemption"; the Enforcement outbound invariants). **This ADR replaces that
+framing with Path A**: per-workload **netns + veth** + **nft-TPROXY +
+`IP_TRANSPARENT` + `getsockname` for BOTH directions** (the active-side mirror
+of the already-shipped, already-proven inbound passive side).
+
+**What this ADR does NOT touch — the locked core of ADR-0069/0070 is
+UNCHANGED**: the universal agent-light L4 proxy model, the fold of #222 into
+#26, the 4-method `MtlsEnforcement` contract (`probe`/`enforce`/`liveness`/
+`teardown`), the agent-light asymmetry (zero-copy `splice` decrypt / `write_all`
+copy encrypt; `mtls/splice.rs`), the no-psock invariant, the F4/F7 resource
+limits, the kTLS-arm probe sentinel, the (C)+(B) supervision shape (ADR-0070),
+and the **authn-only v1 boundary** (chain-to-bundle authn + encryption, no
+intended-peer pinning; #178 upgrade). The `Routed::Outbound { peer }` input to
+`enforce` is UNCHANGED — only how the worker *obtains* `peer` changes
+(`getsockname`, not a declared-peer slot). **No new `MtlsEnforcement` method or
+variant is added.**
+
+## Context
+
+ADR-0069 left the OUTBOUND original-destination recovery as an OPEN,
+spike-gated question. The shipped outbound path is *documented-lossy*: the
+`cgroup_connect4_mtls` program rewrites `connect(real_peer) → connect(leg_F)`
+in place, and the original destination is **NOT recoverable** from the accepted
+leg-F socket. Production never armed the per-destination `MTLS_REDIRECT_DEST`
+map (an empty map = cleartext passthrough); a test-only
+`program_declared_peer_redirect` seam *supplied* `real_peer` as the #178
+stand-in. The enrollment model (#236) requires the agent to *learn* the dialed
+destination per-connection with no pre-programmed entry.
+
+### The spike settled the recovery mechanism (DOESN'T-WORK → PIVOT)
+
+`docs/feature/transparent-mtls-enrollment/spike/` (Probe A, real-kernel Lima
+7.0, gitignored `spike-scratch/increment-a/`, zero `crates/` touch):
+
+- **Probe A verdict: DOESN'T-WORK.** A `cgroup/connect4` redirect + kernel-side
+  stash + `cgroup/getsockopt(SO_ORIGINAL_DST)` cannot recover the workload's
+  original outbound destination on the agent's accepted leg-F socket. Three
+  independent fatal walls, any one sufficient:
+  1. `connect4` fires BEFORE the ephemeral source port binds → no 4-tuple key
+     the accept side can reconstruct.
+  2. A `connect4` sockaddr rewrite is NOT a netfilter DNAT → conntrack holds no
+     original tuple → `SO_ORIGINAL_DST` = `ENOENT` (errno 2, measured).
+  3. `cgroup/getsockopt` fires only for tasks INSIDE the attached cgroup; the
+     agent runs OUTSIDE the workload cgroup (the F5 exemption), and
+     `bpf_get_socket_cookie` is verifier-forbidden in `cgroup/getsockopt`.
+- **Cilium reconciliation** (read-only, Cilium `main @ dac977e678`,
+  v1.20.0-dev): ZERO `cgroup/getsockopt` and ZERO `SO_ORIGINAL_DST` in
+  Cilium's BPF tree. Its mediating-proxy path is **TPROXY via `bpf_sk_assign` +
+  fwmark → `IP_TRANSPARENT` listener → `getsockname`** — independently
+  confirming the pivot to TPROXY+`getsockname`, not `connect4`+`getsockopt`.
+
+(The prior research doc
+`transparent-mtls-interception-mechanism-2026-research.md` *recommended* Probe
+A as the cleaner mechanism; the real-kernel spike falsified it on the appliance
+kernel. The research's stated **fallback — Probe B, TPROXY-outbound — IS Path
+A.** The research's *model* verdict — enrollment capture-and-resolve — stands.)
+
+### The lever and the constraint
+
+ADR-0068 pins kernel 6.18 (prod) / 7.0 (dev Lima). TPROXY / `IP_TRANSPARENT` /
+`getsockname` are ancient (pre-3.0) — far under any floor. **The
+`cgroup_sock_addr`/`cgroup_sockopt` hook families have NO `BPF_PROG_TEST_RUN`
+backstop** (`ENOTSUPP`), so any kernel-interception change is Tier-3-validated
+on a real connect under Lima; a `--no-run`/compile-only gate is not an honest
+signal. Path A *removes* the `cgroup_sock_addr` outbound hook entirely — but the
+NEW egress nft-TPROXY-on-a-per-workload-veth wiring is itself UNVALIDATED on our
+topology (Cilium proves the model; our wiring is unproven), so it is a Tier-3
+obligation (see § Open sub-decisions Q1).
+
+### Quality attributes driving the decision (ISO 25010)
+
+| Attribute | Why it dominates |
+|---|---|
+| **Security — confidentiality** | The enrollment model removes the silent-cleartext-on-miss footgun of the per-destination map: a captured connection either reaches a resolved mesh peer over mTLS or fail-closes; non-mesh egress is classified and passed through, never silently leaked. |
+| **Functional suitability — one mechanism** | nft-TPROXY+`getsockname` already runs inbound; Path A unifies BOTH directions on it (no `bpf_sk_assign`, no `connect4`, no per-destination map). |
+| **Reliability** | TPROXY+`getsockname` recovery has no conntrack dependency, no cross-socket correlation, no cgroup-scope mismatch — the three failure classes that killed Probe A. |
+| **Maintainability** | Deletes the `cgroup_connect4_mtls` program, the `MTLS_REDIRECT_DEST`/`MtlsDataplane` outbound surface, and the declared-peer stand-in. Net deletion. |
+
+## Decision
+
+**Adopt Path A: give each exec workload its own network namespace + veth pair,
+and intercept BOTH directions with nft-TPROXY + `IP_TRANSPARENT` +
+`getsockname`. Resolve the captured connection's original destination →
+backend + expected identity per-connection (enrollment), via a new
+`MtlsResolve` driven port.**
+
+The structural facts, binding on DELIVER:
+
+1. **Per-workload netns+veth topology.** Each exec allocation is born into its
+   own netns (the `ExecDriver` `setns(CLONE_NEWNET)` hook — `driver.rs:181-198`
+   — ENTERS an already-created netns; CNI-aligned). Its sole egress/ingress is
+   a veth pair whose host-side end is where nft-TPROXY PREROUTING applies. v1
+   single-node therefore moves OFF the host netns
+   (`veth_provisioner.rs:36-37`) — see § "Changed assumption". The provisioner
+   creates+converges the netns/veth (idempotent converge-on-boot, the existing
+   `veth_provisioner` shape); the driver enters it. **Netns-creation call site
+   PINNED (C3; DESIGN-review handoff condition):** the provisioner runs at the
+   action-shim **`on_alloc_running`** hook (alloc → Running), **BEFORE
+   `MtlsInterceptWorker::start_alloc` and BEFORE `start_alloc` / `Driver::start`**
+   — i.e. the netns+veth exists before the workload process is spawned into it
+   (the `ExecDriver` `setns` seam enters the already-created netns; the
+   provisioner creates it). Teardown is at `on_alloc_terminal`. Lifecycle shape =
+   extend `veth_provisioner` (Q2 RATIFIED); a per-alloc network reconciler is the
+   Bar-2 promotion when runtime drift matters (#197/#234 family).
+
+2. **OUTBOUND interception = nft-TPROXY at the host-side veth (the active-side
+   mirror of inbound).** The workload's outbound `connect()` leaves its netns
+   via the veth, ingresses the host-side veth, and is nft-TPROXY-redirected to
+   the agent's leg-F `IP_TRANSPARENT` listener. The agent recovers the original
+   destination via `getsockname()` on the accepted leg-F socket — IDENTICAL to
+   the inbound leg-C recovery (`accept_inbound_leg`). This REPLACES the
+   `cgroup/connect4`-rewrite framing of ADR-0069 Decision fact 1 OUTBOUND.
+
+3. **INBOUND interception = nft-TPROXY (UNCHANGED, ADR-0069 fact 1 INBOUND).**
+   Already shipped + proven (increment-i; `install_inbound_tproxy`). Path A's
+   egress rule joins the SAME shared `prerouting` chain + fwmark + table + F5
+   exemption (#234 shared routing infra).
+
+4. **Enrollment per-connection resolve replaces the per-destination map.** On
+   each captured connection, after `getsockname`, the agent calls the new
+   `MtlsResolve` port: `orig_dst → MtlsResolution`, a **3-variant sum type** (NOT
+   a binary `Option`), filtered to `running` (read from `service_backends`):
+   - **`Mesh(ResolvedBackend)` → ENFORCE** — `orig_dst` mapped to a `running`
+     mesh backend. The worker sets `Routed::Outbound { peer: backend.addr }`
+     (+ `expected_peer` when #178's join supplies it) and calls `enforce`.
+   - **`NonMesh` → PASS-THROUGH** — the dialed dst is genuinely not a mesh peer;
+     egress proceeds in cleartext, by design (the classification arm, not an
+     error).
+   - **`MeshUnreachable` → FAIL-CLOSED** — `orig_dst` should be a mesh peer but
+     cannot be resolved/reached/validated; the worker refuses the connection,
+     NO cleartext.
+
+   A binary `Option` cannot distinguish `NonMesh` (non-mesh pass-through) from
+   `MeshUnreachable` (should-be-mesh fail-closed) — the 3-variant type makes the
+   Q3 "fail-closed, not silent-cleartext" decision structural (CLAUDE.md §
+   "Type-driven design — sum types over sentinels"). See § "The new driven port"
+   below for the pinned shape. This RETIRES `MTLS_REDIRECT_DEST`,
+   `MtlsDataplane::{attach_alloc,program_redirect}`, and
+   `program_declared_peer_redirect`.
+
+5. **F5 intercept-recursion exemption, restated for Path A.** The agent's own
+   leg-B (outbound) / leg-S (inbound) dials carry the `SO_MARK`
+   (`MTLS_LEG_S_DIAL_MARK`) the shared chain's head-exemption accepts — so the
+   agent's dials are NOT re-captured by the egress/ingress nft-TPROXY rules
+   (the same agent-private bypass ADR-0069 F5 names, now governing the nft rule
+   rather than the retired `cgroup_connect4` program). Two Tier-3 obligations
+   (UNCHANGED): the agent's dial is not re-intercepted, AND a workload cannot
+   self-exempt (the mark is agent-private, unreachable from the workload).
+
+6. **The `cgroup_connect4_mtls` kernel-side program is RETIRED.** It was the
+   last outbound kernel-side program; Path A adds NO kernel-side program (nft
+   rules are `nft`/`ip` userspace installs). The `overdrive-bpf` outbound mTLS
+   surface is deleted.
+
+7. **The `MtlsEnforcement` port is UNCHANGED.** `enforce` still takes
+   `Routed::Outbound { peer }`; Path A changes the worker's obtain-`peer` path
+   (`getsockname` instead of the declared-peer slot). No new method, no new
+   variant. (Designing a NEW port — `MtlsResolve` — for the resolve concern is
+   the correct move; smuggling resolve into `MtlsEnforcement` is forbidden.)
+
+### The new driven port — `MtlsResolve` (the #178 anti-corruption boundary)
+
+A new driven port in `overdrive-core/src/traits/` carries the enrollment
+resolve. The existing `MtlsEnforcement` does NOT fit (it is the per-connection
+crypto/socket contract, frozen at 4 methods); the existing `Dataplane` does NOT
+fit (map writes, not a resolve query).
+
+**Shape — PINNED for DELIVER (C1 + C2; DESIGN-review handoff conditions, now
+baked into the contract so a crafter implements-to-design and does not invent
+the classification mapping or the struct shape).** The return is a **3-variant
+sum type**, NOT a binary `Option` — a binary `Option<ResolvedBackend>` cannot
+distinguish "non-mesh pass-through" from "unreachable-mesh fail-closed," which
+is exactly the Q3 ambiguity the enrollment model removes (CLAUDE.md §
+"Type-driven design — sum types over sentinels / make invalid states
+unrepresentable"). Canonical names chosen for this design:
+
+```rust
+resolve(orig_dst: SocketAddrV4) -> Result<MtlsResolution>
+
+pub enum MtlsResolution {
+    Mesh(ResolvedBackend), // mesh        → ENFORCE
+    NonMesh,               // non-mesh    → PASS-THROUGH (cleartext, by design)
+    MeshUnreachable,       // should-be-mesh, unreachable/invalid → FAIL-CLOSED (no cleartext)
+}
+
+pub struct ResolvedBackend {           // bounded to EXACTLY two fields
+    pub addr: SocketAddrV4,
+    pub expected_svid: Option<SpiffeId>, // v1 adapter returns None (join = #178)
+}
+```
+
+**C1 — the three arms (each rustdoc-pinned with its enforce/pass-through/
+fail-closed semantic; reproduced verbatim on the trait method's rustdoc):**
+- **`Mesh(ResolvedBackend)` → ENFORCE** — a `running` mesh backend resolved.
+  The worker sets `Routed::Outbound { peer: backend.addr }` (+ `expected_peer`
+  when #178 supplies it) and calls `enforce`. The only arm that drives a
+  handshake.
+- **`NonMesh` → PASS-THROUGH** — `orig_dst` is genuinely not a mesh peer; egress
+  proceeds in cleartext, by design. The classification arm — not an error, not a
+  fail-closed.
+- **`MeshUnreachable` → FAIL-CLOSED** — `orig_dst` should be a mesh peer but
+  cannot be resolved/reached, or its identity cannot be validated. The worker
+  refuses; NO cleartext fallback. This is the silent-cleartext footgun the
+  enrollment model exists to remove.
+
+**C2 — `ResolvedBackend` bounded to exactly `{ addr, expected_svid }`:** no
+third field. **The v1 `ServiceBackendsResolve` adapter returns
+`expected_svid: None`** for every `running` backend — it is a SHELL that reads
+`service_backends` filtered to `running` and does NOT join identity facts. The
+expected-SVID join is **#178**; filling it in this feature's adapter is boundary
+divergence across the anti-corruption boundary (consistent with Q4 / authn-only
+v1). The field exists so the SAN-pin wires the moment #178 supplies the join.
+
+- **This feature owns**: the port trait + the 3-variant `MtlsResolution` type +
+  the 2-field `ResolvedBackend`, a v1 host adapter (`ServiceBackendsResolve`)
+  reading `service_backends` via `ObservationStore`, a sim adapter, and the
+  fail-closed semantic + Earned-Trust probe (a resolve adapter that cannot read
+  the store refuses boot with `health.startup.refused` — it does NOT silently
+  return empty / `NonMesh`, which would re-introduce the silent-cleartext
+  footgun). The adapter classifies the store-read outcome into the type: a
+  no-`running`-mesh-backend lookup is `NonMesh`; a store-read failure at resolve
+  time, or a present-but-unreachable mesh backend, is `MeshUnreachable`.
+- **#178 owns** (NOT designed here): the expected-SVID join (`service_backends`
+  × identity facts), the multi-backend candidate-set + LB-pick policy, the
+  SAN-match wiring of `expected_peer` (so v1 returns `expected_svid = None`,
+  authn-only, consistent with ADR-0069).
+- **#61 owns** (NOT designed here): the VIP/DNS name → virt resolution upstream
+  of `orig_dst` (the responder *daemon*); this ADR designs only the *integration*
+  of that responder into the per-workload netns (Q5a, next section).
+
+### Name-layer integration (Q5a) — node-local DNS responder injected into the per-workload netns
+
+Q5a folds the **integration** of the DNS name layer into this design (NOT the
+#61 daemon implementation, NOT the #167 VIP allocator). Path A's per-workload
+netns (Q2) IS the injection point.
+
+8. **Injection mechanism = resolv.conf injection (the Fly.io `fdaa::3` model).**
+   When the Q2 provisioner creates a per-workload netns, it writes the
+   **node-local DNS responder's address** into that netns's own `/etc/resolv.conf`
+   (a per-netns mount, the stock `ip netns` convention). The workload's libc
+   `getaddrinfo("<job>.svc.overdrive.local")` then reaches the node-local
+   responder with **zero app config** — Fly.io's documented model ("we inject the
+   IP of that DNS server into your `resolv.conf` … always `fdaa::3`"). Overdrive
+   ships its own appliance OS (ADR-0068), so it can do this for every workload
+   netns sidecarlessly. **THIS feature owns** the injection step (one idempotent
+   converge step on the Q2 provisioner). **#61 owns** the responder daemon.
+
+9. **DNS-return shape = HEADLESS for v1 (recommended; the single open item).**
+   What the responder returns IS the `orig_dst` that `MtlsResolve.resolve` later
+   recognizes (fact 4) — the two contracts MUST be consistent. v1 returns a
+   **`running` backend addr straight from `service_backends`** (headless /
+   endpoint-set, K8s-headless + Fly.io-`.internal` shaped), NOT a per-service VIP.
+   Consequences that make this the v1 choice:
+   - **Single source, two readers.** DNS reads `service_backends`; `MtlsResolve`
+     reads `service_backends`. `orig_dst` is byte-consistent by construction — no
+     translation layer between name and resolve.
+   - **No new v1 dependency.** Headless needs no VIP allocator. A VIP return
+     would pull **#167** (allocate `fdc2::/16` virts) into v1 PLUS the VIP×
+     intercept ordering hazard (research §3.3 R5 / §3.5 Q1).
+   - **Keeps `MtlsResolve` v1 honest with the #178-deferred LB boundary.** v1
+     resolve is an identity-only lookup (addr → expected_svid; `expected_svid =
+     None` until #178). A VIP return would force the resolve port to own a
+     VIP→backend LB-pick — the multi-backend policy this ADR explicitly defers to
+     #178 (Q4).
+   - **Single-node v1 makes VIP indirection valueless** (all backends local —
+     research §1.6).
+   - **Forward-compatible.** Multi-node can add a VIP shape *alongside* headless
+     (K8s ships both); `MtlsResolve` later gains a VIP-recognizing arm fed by #167
+     + the XDP `SERVICE_MAP` LB without reworking the v1 enforce path. Headless is
+     not a dead end.
+
+   **Sign-off note:** headless adds nothing new and is the zero-new-dependency
+   default. Choosing **VIP** instead would add #167 to v1 scope and needs explicit
+   user sign-off — flagged, not assumed.
+
+10. **End-to-end coherence (name → resolve → enforce), v1 headless.** The flow
+    `workload getaddrinfo("<job>.svc.overdrive.local") → DNS-in-netns (returns a
+    running service_backends addr B) → connect(B) → veth-egress → host-veth
+    ingress → nft-TPROXY → leg-F → getsockname(orig_dst = B) → MtlsResolve(B) →
+    enforce mTLS to B` is coherent: B is recognized by `MtlsResolve` precisely
+    because DNS returned the same `service_backends` addr. The C4 Container
+    diagram (brief.md §35) shows this end-to-end. **Scope boundary kept**: the
+    responder daemon (#61) and the VIP allocator (#167) are named dependencies,
+    not builds in this feature — only the injection + the return-shape contract
+    alignment + the `MtlsResolve` composition live here.
+
+## Alternatives Considered
+
+### A1. `cgroup/connect4` cookie-stash + `cgroup/getsockopt(SO_ORIGINAL_DST)`-revert
+
+The smallest-delta-to-existing-code mechanism the research recommended (reuse
+the existing outbound hook; stash orig-dst in `bpf_sk_storage`; answer it on
+`getsockopt`). **Rejected**: the spike proved it DOESN'T-WORK on the appliance
+kernel — three independent fatal walls (connect-before-bind; non-DNAT rewrite →
+conntrack `ENOENT`; getsockopt-hook scoped to the in-cgroup caller, not the
+out-of-cgroup agent). Confirmed against Cilium's production tree (zero
+`SO_ORIGINAL_DST`). This is the decisive evidence; it is not a preference.
+
+### A2. `bpf_sk_assign` TPROXY (Cilium's exact mediating-proxy primitive)
+
+Cilium's mediating proxy uses `bpf_sk_assign` + fwmark → `IP_TRANSPARENT` →
+`getsockname`. **Rejected for us**: it adds a new BPF program surface we have no
+in-tree precedent for. nft-TPROXY beats `bpf_sk_assign` *for Overdrive* not
+because the kernel primitive is better, but because we ALREADY run nft-TPROXY
+inbound — Path A unifies both directions on the one mechanism we have already
+proven and shipped. (The recovery primitive — `getsockname` — is identical
+either way.)
+
+### A3. Keep the per-destination `MTLS_REDIRECT_DEST` map (the single-node bridge)
+
+The shipped single-node shape: a `cgroup/connect4` rewrite gated on a
+programmed per-destination map. **Rejected**: its miss = silent cleartext (the
+footgun the enrollment model exists to remove), it has a cardinality cost at
+mesh scale, and its recovery half is the now-falsified Probe A. The research
+correctly classed it as a single-node bridge only.
+
+### A4. netkit-device redirect
+
+A veth-replacement datapath device (kernel ≥6.7). **Rejected as the
+interception answer**: netkit is a *datapath performance* device, not an
+interceptor — it does not rewrite `connect()` nor recover orig-dst for an
+L7-terminating proxy (research §3.2; Cilium docs verbatim "concentrates on
+datapath performance, not traffic interception"). It is an ORTHOGONAL, additive
+win Overdrive may adopt for its veths independently — NOT this feature.
+
+### A5. DNS returns a per-service VIP (the ClusterIP / #61-#167 shape) — rejected FOR v1
+
+For the name-layer integration (Q5a), the alternative to headless: the node-local
+responder returns a stable per-service VIP (`<job>.svc.overdrive.local →
+fdc2:…::N`), and `MtlsResolve` (or the XDP `SERVICE_MAP`) LB-picks a backend.
+**Rejected for v1** (not rejected forever): it pulls **#167 (VIP allocator)** into
+v1 scope as a NEW hard dependency, plus the VIP×agent-light-intercept ordering
+hazard (research §3.3 R5 / §3.5 Q1 — the trickiest wiring, needing its own Tier-3
+ordering spike); it forces the v1 resolve port to own a VIP→backend LB-pick that
+Q4 explicitly defers to #178; and single-node v1 (all backends local) gets zero
+value from VIP indirection. VIP is the cleaner **multi-node** stable-handle UX
+and can be added alongside headless later (K8s ships both) without reworking the
+v1 enforce path. (See § "Name-layer integration (Q5a)" fact 9.)
+
+## Consequences
+
+### Positive
+
+- **One proven interception mechanism, both directions.** Outbound mirrors the
+  shipped+proven inbound nft-TPROXY+`getsockname`. No `connect4`, no
+  `bpf_sk_assign`, no per-destination map.
+- **No silent-cleartext-on-miss.** The enrollment resolve classifies each
+  connection into the 3-variant `MtlsResolution` (C1): `Mesh` → mTLS, `NonMesh`
+  → pass-through, `MeshUnreachable` → fail-closed. The empty-map cleartext
+  footgun is gone, and the distinction is structural in the type — a binary
+  `Option` could not carry it.
+- **Net deletion of kernel surface.** The `cgroup_connect4_mtls` program, the
+  `MTLS_REDIRECT_DEST` map, the `MtlsDataplane` outbound attach/program surface,
+  and the `program_declared_peer_redirect` stand-in are all removed.
+- **The enforcement contract is untouched.** 4-method `MtlsEnforcement`,
+  agent-light pumps, kTLS substrate, probe sentinel, supervision (ADR-0070) all
+  carry forward verbatim.
+- **CNI-aligned topology** sets up the multi-node / guest-stack future without a
+  second mechanism (the workload-in-netns shape the industry converged on).
+- **The name layer composes for free at the same injection point.** The
+  per-workload netns (needed for Path A interception) is ALSO the DNS injection
+  point — one topology, two wins. The headless v1 return shape (a
+  `service_backends` addr) keeps DNS and `MtlsResolve` on one source with no
+  translation, and pulls NO new v1 dependency (no VIP allocator). Any unmodified
+  workload reaches `<job>.svc.overdrive.local` encrypted, zero app changes.
+
+### Negative
+
+- **Per-workload netns+veth is new lifecycle surface.** v1 single-node gains a
+  per-alloc netns+veth provisioner (vs today's single host-netns veth). Shape =
+  extend `veth_provisioner` (Q2 ratified); the converge-on-boot template exists.
+- **Egress-on-per-workload-veth nft-TPROXY is UNVALIDATED on our topology.** No
+  Tier-2 backstop → Tier-3 only. The novel risk is an egress route / `ip rule`
+  / F5-exemption collision (the research's Probe B falsification path). Q1
+  ratified: validate via a thin Tier-3 spike (`increment-b/`) NOW, before DELIVER.
+- **One per-connection resolve lookup** added to the capture path (in-RAM
+  `service_backends`; negligible per research §4.1, but a new dependency on the
+  resolve port's availability — mitigated by the resolve probe refusing boot on
+  an unreadable store).
+- **Back-propagation to ADR-0069 and `veth_provisioner.rs`.** See § Changed
+  assumption. The architect amends ADR-0069's outbound framing via this ADR;
+  `jobs.yaml` re-grounding (if any) is flagged for the product-owner, not
+  edited here.
+- **The name-layer integration depends on an unbuilt responder daemon (#61).**
+  This ADR designs the injection + the return-shape contract, but the process
+  that answers `<job>.svc.overdrive.local` by reading `service_backends` is the
+  #61 build. v1 enforcement (resolve port + interception) does NOT block on #61 —
+  `MtlsResolve` works against any `orig_dst` the workload connects to (responder,
+  hard-coded addr, or future VIP); the name layer is the ergonomic front-end, not
+  a correctness dependency.
+- **One open recommendation remains (DNS-return shape).** The headless-vs-VIP
+  call (§ Name-layer fact 9) is recommended-headless and adds no new v1
+  dependency, so it is not a blocker; a VIP choice would add #167 and needs
+  explicit sign-off.
+
+### Changed assumption (back-propagation)
+
+**Quoted original** (`veth_provisioner.rs:36-37`): "Single-node runs entirely in
+the host netns — there is no netns machinery here." **New**: per-workload
+netns+veth. **Rationale**: TPROXY+`getsockname` (the only proven recovery) needs
+the workload's egress to traverse an agent-controlled routing point — a
+per-workload netns+veth. **Affected**: ADR-0069 OUTBOUND framing (amended by
+this ADR); the `cgroup_connect4_mtls` program (retired); the F5 exemption (now
+governs the nft egress rule, not the `cgroup_connect4` program). **Name-layer
+corollary (Q5a)**: the same per-workload netns becomes the DNS injection point
+(resolv.conf injection), so the host-netns retirement also unlocks per-workload
+node-local DNS — a corollary win, not a new assumption.
+
+## Ratified sub-decisions (Q1–Q4)
+
+The four prior open sub-decisions are RATIFIED (user, 2026-06-16) and are now
+part of the Decision. The feature-delta § "Resolved sub-decisions" carries the
+full rationale.
+
+- **Q1 (RATIFIED) = thin Tier-3 spike NOW (`increment-b/`)**. Validate Path A
+  egress nft-TPROXY + `getsockname` orig-dst recovery on our exact topology
+  *before* DELIVER. It is the single novel, no-Tier-2-backstop piece; the
+  cheapest place to find an `ip rule`/route/F5-exemption collision (the
+  research's Probe B falsification path). The spike is gitignored
+  (`spike-scratch/increment-b/`), zero `crates/` touch, real-kernel Lima.
+- **Q2 (RATIFIED) = extend `veth_provisioner`** for per-workload netns+veth
+  (parameterize the existing pure-derive + idempotent converge-on-boot shape
+  per-alloc; add a netns-create step; lifecycle driven by the action-shim —
+  **provision at `on_alloc_running`, BEFORE `MtlsInterceptWorker::start_alloc`
+  and BEFORE `start_alloc`/`Driver::start`** (call site PINNED, C3), teardown on
+  terminal). A per-alloc network reconciler is the **Bar-2 promotion when runtime
+  drift matters** (the #197/#234 host-infra-reconciler family — `reconcilers.md`).
+  Driver-creates is REJECTED: the `ExecDriver` setns hook ENTERS an existing
+  netns, never creates one (CNI-aligned, `driver.rs:190-197`).
+- **Q3 (RATIFIED) = `MtlsResolve` port in `overdrive-core` + a v1
+  `service_backends`-reading host adapter**; **fail-closed (not silent)** at the
+  boundary. A resolve adapter that cannot read the store refuses boot
+  (`health.startup.refused`); it does NOT silently return empty (silent-empty =
+  the silent-cleartext footgun the enrollment model exists to remove). #178 owns
+  the expected-SVID join + multi-backend LB-pick; #61 owns the name layer.
+- **Q4 (RATIFIED) = BOTH directions in v1**; intended-peer SVID pinning
+  (`expected_peer`/`PeerIdentityMismatch`) **deferred to #178** (v1 = authn-only,
+  chain-to-bundle). Path A's point is symmetry on one mechanism; the inbound
+  nft-TPROXY install is the proven template the outbound mirrors. The resolve
+  port carries `expected_svid` so the pin wires the moment #178 supplies the
+  join; docs/tests MUST NOT call the wrong-but-valid-peer case "protected" until
+  #178.
+
+## Enforcement
+
+- **Architectural rule (ArchUnit-style, Rust)**: the nft-TPROXY / `ip` install
+  surface lives in `overdrive-worker/src/mtls_intercept.rs` (both directions);
+  the netns+veth provisioning AND the resolv.conf injection in
+  `overdrive-control-plane/src/veth_provisioner.rs` (Q2 ratified — extend the
+  existing provisioner); the resolve port in `overdrive-core` (no I/O), its host
+  adapter in an `adapter-host` crate, its sim adapter in `overdrive-sim`.
+  `dst-lint` keeps all of it off any `core`-class compile path.
+- **Earned-Trust probes (principle 12, mandatory)**:
+  - `MtlsEnforcement::probe` (kTLS-arm forward-encrypt round-trip) — UNCHANGED
+    (ADR-0069).
+  - `MtlsResolve::probe` (NEW) — reads the `service_backends` surface and
+    refuses boot (`health.startup.refused`) on an unreadable store; NEVER
+    silently returns empty (silent-empty = the silent-cleartext footgun).
+  - The netns+veth provisioner's converge-on-boot refuses boot on non-benign
+    failure (the existing `veth_provisioner` precedent) — that IS its probe. The
+    resolv.conf injection step (Q5a) is part of the same converge — a netns whose
+    resolv.conf cannot be written refuses on the same boot path.
+- **Tier-3 obligations (no Tier-2 backstop for the interception path)**:
+  - OUTBOUND egress nft-TPROXY on a per-workload veth recovers orig-dst via
+    `getsockname` (the Q1 validation; Cilium proves the model, our wiring is
+    unproven).
+  - F5: the agent's leg-B dial is NOT re-captured by the egress rule; a workload
+    cannot self-exempt.
+  - The composed bidirectional walking skeleton in the real netns/veth topology
+    (ADR-0069 Slice 00, now on the Path-A mechanism — no RST post-arm, both
+    directions, normal + traced timing).
+  - Enrollment: a captured connection resolving to a `running` mesh backend
+    drives mTLS to that backend; a connection resolving to no mesh peer is
+    classified (pass-through/fail-closed per Q3, fail-closed ratified); NEVER
+    silent cleartext to a should-be-mesh peer.
+  - Name→resolve→enforce consistency (Q5a, DELIVER — needs the #61 responder or a
+    test stand-in): a workload `getaddrinfo("<job>.svc.overdrive.local")` against
+    the injected resolv.conf returns a `running` `service_backends` addr B
+    (headless), and `MtlsResolve.resolve(getsockname-recovered B)` returns
+    `Some{B, …}` — i.e. the DNS-returned addr IS the addr the resolve port
+    recognizes (the single-source invariant). Until #61's responder lands, this
+    is exercised with the DNS step stubbed (the workload connects to a known
+    `service_backends` addr directly) so the resolve-recognizes-orig_dst half is
+    validated independently of the responder.
+- **Authn-only v1 boundary (UNCHANGED, F1/F5/#178)**: chain-to-bundle authn +
+  encryption; `expected_peer` stays `None` until #178's join supplies it; docs
+  and tests MUST NOT call the wrong-but-valid-peer case "protected" until #178.
+
+## References
+
+- Spike: `docs/feature/transparent-mtls-enrollment/spike/{wave-decisions,findings}.md`
+  (Probe A DOESN'T-WORK; Path A; Cilium `main @ dac977e678`).
+- Research: `docs/research/networking/transparent-mtls-interception-mechanism-2026-research.md`
+  (enrollment model confirmed; Probe B = Path A);
+  `docs/research/networking/stable-service-naming-and-transparent-mtls-comprehensive-research.md`
+  (name/resolve/enforce; `service_backends`; the `{addr, expected_svid}`-filtered-to-`running` resolve contract;
+  **§1.5 name layer / no-DNS-responder gap; §2.5 K8s ClusterIP-VIP vs headless fork; §2.7 Fly.io `fdaa::3` resolv.conf-injection model; §3.3 R3/R4/R5 DNS-responder placement; §3.5 Q1 VIP×intercept ordering — the Q5a name-layer-integration inputs**).
+- Amends ADR-0069 (universal agent-light L4 proxy — outbound framing).
+  Refined by ADR-0070 (liveness, UNCHANGED). Built on ADR-0068 (pinned 6.18 kernel).
+- Code anchors: `overdrive-worker/src/mtls_intercept.rs` (inbound TPROXY +
+  `getsockname`, the EXTEND base), `mtls_intercept_worker.rs` (per-alloc
+  lifecycle; declared-peer seam to retire), `overdrive-dataplane/src/mtls/inbound.rs`,
+  `overdrive-control-plane/src/veth_provisioner.rs:36-37` (host-netns claim
+  superseded), `overdrive-worker/src/driver.rs:181-198` (setns hook),
+  `overdrive-core/src/traits/mtls_enforcement.rs` (4-method port, unchanged).
+- Named dependencies (NOT designed here):
+  [#178](https://github.com/overdrive-sh/overdrive/issues/178) (east-west
+  SPIFFE-ID resolution — the expected-SVID join + SAN-match),
+  [#61](https://github.com/overdrive-sh/overdrive/issues/61) (VIP/DNS name layer
+  — the **DNS responder daemon**; Q5a integrates its injection + return shape, it
+  does not build the daemon),
+  [#167](https://github.com/overdrive-sh/overdrive/issues/167) (VIP allocator —
+  NOT a v1 dependency under the headless return shape; enters only with the
+  multi-node VIP evolution / a VIP return choice),
+  [#234](https://github.com/overdrive-sh/overdrive/issues/234) (shared TPROXY
+  routing infra Bar-2 reconciler), [#236](https://github.com/overdrive-sh/overdrive/issues/236)
+  (this feature), [#26](https://github.com/overdrive-sh/overdrive/issues/26)
+  (transparent kernel mTLS).
