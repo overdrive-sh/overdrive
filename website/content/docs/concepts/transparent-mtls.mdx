@@ -1,0 +1,181 @@
+---
+title: Transparent mTLS
+description: How Overdrive encrypts traffic between workloads with each workload's own SPIFFE identity — a node-agent-owned L4 proxy that runs the TLS 1.3 handshake and hands steady-state crypto to the kernel, while the workload holds no key and opens an ordinary socket. The outbound enforcement path ships and is provable with tcpdump.
+---
+
+This is the layer that finally puts identity on the wire. The
+[built-in CA](/docs/concepts/identity) mints a SPIFFE SVID for every workload;
+the [lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) holds it
+in-process and drops it on stop. Neither one encrypts a packet. This subsystem
+does: it terminates and originates TLS 1.3 on the workload's behalf, presenting
+the held SVID, so two workloads that opened plain sockets end up talking
+ciphertext authenticated to the platform's trust bundle. The outbound path runs
+in `overdrive serve` today, and a packet capture proves it — TLS 1.3 records on
+the wire, zero plaintext.
+
+<Callout title="Outbound ships; inbound is staged">
+	The outbound enforcement path — a workload connecting to a declared mesh peer —
+	is live end-to-end in `overdrive serve` and proven by a wire capture. The
+	inbound path is designed and spike-proven on a real kernel, but its production
+	rule install is staged behind resolving which workload a connection targets, so
+	inbound traffic
+	is not yet intercepted in a running deploy. v1 covers process workloads on a
+	single node, with chain-to-bundle authentication. See
+	[Where it stands](#where-it-stands).
+</Callout>
+
+## The workload holds nothing
+
+A workload under transparent mTLS holds no certificate and no private key, and it
+runs no TLS code. It opens an ordinary TCP socket to an ordinary address. There is
+no sidecar to intercept the call and no library to link. This is the same
+sidecarless stance the rest of the platform takes (see the
+[architecture overview](/docs/concepts/architecture)): the credential's only
+holder is the node agent, never the workload.
+
+The node agent owns the identity and does the cryptography. When a workload
+connects to a mesh peer, the kernel redirects the connection to a proxy leg the
+agent owns; the agent runs the mutual-TLS handshake there, presenting the
+workload's held SVID; and the kernel encrypts the steady-state byte stream. The
+workload sees a normal socket the whole time. A compromised workload cannot turn
+this off, downgrade it, or read the key, because it never had the key and the
+enforcement lives outside its address space.
+
+## One proxy, both directions
+
+The enforcement mechanism is a single **agent-light L4 proxy**, the same shape
+for the outbound (client) and inbound (server) halves. An earlier design split
+this into two mechanisms — an in-band kernel path for process workloads and a
+separate tap proxy for sealed VMs. Six real-kernel spikes settled the question
+empirically: one universal proxy is lossless, needs no kernel patch, and has no
+engagement race, so the two-mechanism framing was collapsed into one.
+
+<Mermaid chart={`
+flowchart LR
+  wl["Workload<br/>plain TCP · no SVID"]
+  cg["cgroup connect4<br/>BPF redirect"]
+  leg["Agent proxy leg<br/>rustls TLS 1.3 · held SVID"]
+  k["kTLS<br/>in-kernel crypto"]
+  peer["Peer agent →<br/>peer workload"]
+  wl --> cg --> leg --> k --> peer
+`} />
+
+"Agent-light" is a precise claim, and it is easy to overstate. It means the agent
+runs no TLS cryptography in userspace — the kernel's kTLS engine encrypts and
+decrypts every record. It does **not** mean the agent is idle or that every byte
+is zero-copy. The two directions across a kTLS leg are not symmetric:
+
+- **Decrypt (the receive side)** is a genuine zero-copy `splice` out of a plain
+  kTLS-RX leg. The kernel decrypts on the splice, and the agent issues only the
+  splice call — no per-byte copy, no syscall per record.
+- **Encrypt (the send side)** is a bounded `read` then `write_all` that copies
+  each record's plaintext through a userspace buffer into a kTLS-TX leg, where the
+  kernel encrypts it synchronously. This pays a copy and a syscall per record.
+
+The send side is a copy rather than a `splice` for a concrete reason: a `splice`
+into a kTLS-TX leg reports success but silently drops records under
+`MSG_DONTWAIT`, so the blocking `write_all` is the only primitive that delivers
+every record. Naming that loss class is what retired the original in-kernel
+redirect design.
+
+## Outbound: connect, handshake, encrypt
+
+The outbound path turns a workload's plain `connect()` into an authenticated,
+encrypted stream:
+
+1. A `cgroup_connect4` BPF program rewrites the workload's connection to a proxy
+   leg the agent owns. The workload's `connect()` returns as if it reached its
+   peer directly.
+2. The agent runs a rustls **TLS 1.3 client** handshake to the peer's agent,
+   presenting the workload's held SVID as the client certificate.
+3. The negotiated session keys install into kTLS on the peer-facing leg.
+4. Forward traffic — the workload's plaintext — is copied into the kTLS-TX leg
+   and encrypted in the kernel. Return traffic is spliced zero-copy out of the
+   kTLS-RX leg back to the workload.
+
+The workload's identity rides the handshake. The peer verifies the presented SVID
+against the shared trust bundle, so the connection is authenticated to a platform
+identity, not merely encrypted.
+
+## Inbound: intercept, verify, deliver
+
+The inbound half mirrors the outbound one, with the agent acting as the TLS
+server. A TPROXY rule and an `IP_TRANSPARENT` listener intercept traffic aimed at
+the server workload; the agent recovers the original destination with
+`getsockname`, runs a server-side mutual-TLS handshake that **requires and
+verifies** a client certificate against the trust bundle, arms kTLS-RX, and
+splices byte-exact plaintext to the identity-unaware server. The client that
+cannot present a valid chain never reaches the workload.
+
+The agent's transparent listener and accept loop stand up per allocation in
+`serve` today. What is staged is the production rule that aims real client traffic
+at that listener: its match key is the address a client dials, and a single-node
+process deploy has no source for that address yet — the same gap in resolving
+which workload a connection targets that scopes the outbound peer set. Until that lands,
+inbound interception is exercised by the integration tests, not by a running
+deploy.
+
+## Fail closed, never cleartext
+
+Encryption that silently degrades to plaintext is worse than none, because it
+reads as protection while providing none. Overdrive refuses that trade at two
+points.
+
+At boot, `overdrive serve` constructs the mTLS dataplane and probes it **after**
+the identity manager is live. A failed probe emits a `health.startup.refused`
+event and the node refuses to start. It does not boot into a degraded,
+cleartext mode.
+
+Per allocation, if the agent cannot install a workload's interception — the
+cgroup attach, the outbound leg, or the inbound listener — the allocation is
+driven to a terminal `Failed` state rather than left `Running` with unencrypted
+traffic. The boot path refuses the node; the per-allocation path refuses the
+workload. Neither falls back to cleartext.
+
+## How we know
+
+The honest proof is a kernel side-effect, not a log line. A raw `AF_PACKET`
+capture on the peer-facing wire during an outbound deploy shows TLS 1.3
+application-data records — `0x17` content type — in both directions, and a scan of
+the same capture finds zero plaintext bytes from the workload's payload. The
+kernel's TLS upper-layer protocol state is visible in `ss -tie`, and the cgroup
+attachment is visible in `bpftool cgroup show`. The handshake-rejection and
+boot-refusal cases are proven by their negatives: a client without a valid chain
+is refused, and a node with an injected probe fault refuses to boot.
+
+These run as real-kernel integration tests under the project's Lima harness —
+the canonical path for anything that touches kTLS, BPF attachment, or the cgroup
+hierarchy.
+
+## Where it stands
+
+Transparent mTLS enforcement is wired into `serve`, with a clear line between
+what runs in a deploy and what is staged:
+
+- **Live in serve:** the outbound path. A process workload connecting to a
+  declared mesh peer is intercepted, handshaked with its held SVID, and encrypted
+  with TLS 1.3 over kTLS — proven end-to-end by the wire capture above. Boot-time
+  and per-allocation enforcement both fail closed.
+- **Staged:** the inbound production data path. The agent's server-side listener
+  and handshake stand up per allocation, but the rule that routes real client
+  traffic to them waits on resolving which workload a connection targets — the same gap that scopes
+  the outbound peer set to declared peers.
+- **v1 scope:** process workloads only, on a single node, with chain-to-bundle
+  authentication — a presented SVID is verified against the trust bundle, but the
+  caller does not yet pin which specific peer identity it expects. Sealed-VM and
+  unikernel workloads, intended-peer identity pinning, and the service-VIP path
+  are designed and tracked, not shipped.
+- **No operator verb:** encryption is automatic. There is no command to enable or
+  disable it; `overdrive deploy <SPEC>` is the only workload verb, and a deployed
+  mesh workload is encrypted without further configuration.
+
+## Where to go next
+
+- The CA that mints the identity this layer presents:
+  [the built-in CA](/docs/concepts/identity).
+- How each identity is held in-process for the proxy to read, and dropped on stop:
+  [the workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
+- Where the dataplane sits in the running system:
+  [the architecture overview](/docs/concepts/architecture).
+- Why the kernel-side crypto and BPF attachment replay deterministically under
+  test: [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).

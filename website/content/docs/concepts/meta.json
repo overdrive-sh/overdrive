@@ -1,4 +1,4 @@
 {
 	"title": "Concepts",
-	"pages": ["architecture", "intent-observation", "reconcilers", "workflows", "reconcilers-and-workflows", "identity", "workload-identity-lifecycle", "deterministic-simulation-testing"]
+	"pages": ["architecture", "intent-observation", "reconcilers", "workflows", "reconcilers-and-workflows", "identity", "workload-identity-lifecycle", "transparent-mtls", "deterministic-simulation-testing"]
 }

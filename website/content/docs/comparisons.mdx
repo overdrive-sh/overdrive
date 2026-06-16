@@ -32,7 +32,7 @@ maturity claim.
 | Workload types | exec · microVM · VM · unikernel · WASM | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
 | Load balancing | eBPF XDP, in-kernel | CNI; eBPF via Cilium | basic; LB via Consul | fly-proxy (userspace, Rust) |
 | Service mesh | Sidecarless, in the binary | Add-on: sidecar or sidecarless | Consul Connect (add-on) | Not a per-workload mesh |
-| East-west mTLS | Kernel kTLS, per-workload SPIFFE | Mesh add-on | Consul Connect (add-on) | WireGuard (machine-level) |
+| Workload-to-workload mTLS | Kernel kTLS, per-workload SPIFFE | Mesh add-on | Consul Connect (add-on) | WireGuard (machine-level) |
 | Intent store | Raft (per region) | etcd | Raft (in servers) | managed |
 | Observation store | Corrosion CRDT gossip | etcd (one store for all) | Raft state | Corrosion CRDT gossip |
 | Identity | Built-in CA, SPIFFE, default mTLS | SPIRE / mesh add-on | Vault + Consul (add-ons) | WireGuard keys |
@@ -130,7 +130,7 @@ draw the binary's boundary in different places.
   holds for the full stack, not just the scheduler.
 - **Identity is structural.** On Nomad, workload mTLS is something you add by
   wiring in Consul Connect. On Overdrive, every workload gets a short-lived SPIFFE
-  certificate and east-west traffic is encrypted at the socket layer by default —
+  certificate and traffic between workloads is encrypted at the socket layer by default —
   it cannot be turned off.
 - **Correctness is tested by simulation.** Overdrive's nondeterminism — clock,
   network, randomness, storage — sits behind injectable traits, so partition,
@@ -168,13 +168,14 @@ for its observation store, and it arrives at the same topology Fly runs in
 production — per-region strong consistency for intent, global gossip for observed
 state. It diverges on two axes.
 
-- **The dataplane is in the kernel, not userspace.** Fly routes east-west traffic
+- **The dataplane is in the kernel, not userspace.** Fly routes traffic between workloads
   through `fly-proxy` and the WireGuard mesh. Overdrive uses XDP for load balancing
-  and sockops with kTLS for encryption — the work happens in the kernel, and
-  same-host delivery skips the network stack entirely via a cgroup socket hook.
+  and a node-agent L4 proxy that pushes steady-state encryption into the kernel with
+  kTLS — the agent runs the TLS handshake, the kernel does the crypto, and same-host
+  delivery skips the network stack via a cgroup socket hook.
 - **Identity is per-workload, not per-machine.** Fly's documented trust model is
   machine-level WireGuard keys plus TLS termination at the edge proxy. Overdrive
-  binds a SPIFFE identity to each workload and carries it on every east-west packet.
+  binds a SPIFFE identity to each workload and uses it to encrypt traffic between workloads.
   (Fly does not document a built-in per-workload mTLS identity; this is the absence
   of a documented feature, not a claim that Fly cannot do it.)
 - **You run it.** This is the largest difference, and it cuts both ways. Fly is a

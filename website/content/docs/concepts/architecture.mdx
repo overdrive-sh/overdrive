@@ -31,7 +31,7 @@ flowchart TB
       exec["ExecDriver<br/>process in cgroup"]
       probes["Probe runner<br/>TCP · HTTP · Exec"]
     end
-    dp["eBPF dataplane<br/>XDP + cgroup sockops"]
+    dp["eBPF dataplane<br/>XDP + cgroup hooks"]
   end
 
   wl["Workload process"]
@@ -246,8 +246,9 @@ operator a client leaf, and binds a rustls listener. It writes the endpoint, the
 CA pin, and the operator certificate to `~/.overdrive/config` as one unit — the
 "trust triple" every CLI command reads. The connection is mutually
 authenticated; there is no flag to turn that off. These are standard X.509
-certificates. (SPIFFE identifiers appear in the data model — every allocation
-carries one — but they do not yet drive the TLS handshake.)
+certificates. (SPIFFE identifiers also appear in the data model — every allocation
+carries one — and they now drive a separate, transparent handshake for traffic
+between workloads; see [transparent mTLS](/docs/concepts/transparent-mtls).)
 
 ## Why it is built on a swappable seam
 
@@ -277,13 +278,14 @@ not describe them as present until there is:
   drivers are named in the trait but unimplemented.
 - **The ingress gateway, the policy engine, native telemetry, and the LLM
   self-healing agent.** Each is part of the design; none is wired into `serve`.
-- **Presenting workload identity on the wire.** The built-in certificate authority
-  issues, holds, and audits a SPIFFE SVID for every running allocation — that path
-  is wired into `serve`, and `alloc status` reports the result. What is not built is
-  the layer that *presents* it: the sockops/kTLS mTLS path, the gateway, and the
-  telemetry sink that would read a held SVID and put it on a connection. Identity is
-  minted and provable, not yet carried on a packet. See the
-  [identity model](/docs/concepts/identity) and the
+- **Presenting workload identity on every path.** The built-in certificate
+  authority issues, holds, and audits a SPIFFE SVID for every running allocation,
+  and the outbound enforcement path now presents it on the wire — a node-agent L4
+  proxy encrypts connections between workloads with TLS 1.3 (see
+  [transparent mTLS](/docs/concepts/transparent-mtls)). What is not here yet is the
+  rest of that surface: the inbound production data path is staged, and the ingress
+  gateway and the telemetry sink that would also read a held SVID are unbuilt. See
+  the [identity model](/docs/concepts/identity) and the
   [workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
 - **Cross-host load balancing.** Service traffic reaches same-host backends
   through the cgroup `connect4` path. The XDP `SERVICE_MAP` / `REVERSE_NAT_MAP`

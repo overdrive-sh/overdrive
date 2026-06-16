@@ -10,15 +10,17 @@ it without a network round trip. Overdrive's [built-in CA](/docs/concepts/identi
 mints; this subsystem holds, reads, and drops. It is a reconciler that converges
 the set of held identities against the set of running allocations.
 
-<Callout title="Wired into serve, backed by the persistent CA, not yet presented">
+<Callout title="Wired into serve, backed by the persistent CA, now read on the wire">
 	The lifecycle runs in `overdrive serve` today: the reconciler is registered, and
 	every running allocation gets an SVID issued, held, audited, re-issued near
 	expiry, and dropped on stop. It is backed by the
 	[built-in CA](/docs/concepts/identity)'s **persistent**, envelope-encrypted root
-	— adopted at boot, the same root across restarts. One boundary remains: nothing
-	**reads** a held SVID to present it on a connection yet. The sockops/kTLS mTLS
-	layer, the gateway, and the telemetry sink are unbuilt. Identity is held and
-	provable, but no connection carries it yet. See [Where it stands](#where-it-stands).
+	— adopted at boot, the same root across restarts. A production consumer now
+	**reads** a held SVID to present it on a connection:
+	[transparent mTLS](/docs/concepts/transparent-mtls) reads it through the port
+	below to run the outbound mesh handshake. The ingress gateway and the telemetry
+	sink are still unbuilt, and the inbound path is staged. See
+	[Where it stands](#where-it-stands).
 </Callout>
 
 ## The CA mints; nothing held what it minted
@@ -31,9 +33,13 @@ neither, so the credential's lifecycle has only one place it can come from: the
 allocation lifecycle the control plane already tracks.
 
 Without a holder, "every packet carries cryptographic workload identity" is true
-only in principle. The CA can mint a flawless SVID that no layer ever presents,
-that no consumer can read, and that lingers in memory after its workload is gone.
-This subsystem makes the principle operationally true for the running set.
+only in principle. A CA can mint a flawless SVID, but if nothing holds it for the
+workload's life, no consumer can read it on the connection hot path and it lingers
+in memory after its workload is gone. This subsystem makes the principle
+operationally true for the running set: it holds each identity for exactly its
+workload's life and serves it to the
+[transparent mTLS](/docs/concepts/transparent-mtls) proxy that presents it on the
+wire.
 
 ## A reconciler binds identity to the running set
 
@@ -114,10 +120,12 @@ double:
   dropped, reading it returns `None` — the read surface reflects the drop, so a
   consumer can never read back a credential the lifecycle has already removed.
 
-No production consumer binds this port yet. The port, its test double, and a test
-consumer that takes it as a required constructor parameter prove the contract is
-sound and mockable; the real consumers — sockops/kTLS, the gateway, telemetry —
-will bind it when they are built.
+A production consumer now binds this port: the
+[transparent mTLS](/docs/concepts/transparent-mtls) proxy reads the held SVID
+through it to run the outbound mesh handshake, and takes the read port as a
+required constructor parameter, so it cannot be wired without one. The remaining
+consumers — the ingress gateway and the telemetry sink — will bind the same port
+when they are built.
 
 ## Surviving a restart
 
@@ -147,11 +155,10 @@ fails to drop — fails the invariant. The check has teeth.
 
 There is a window between an allocation reaching Running and its `IssueSvid`
 executing, bounded to one reconcile tick. That window is **fail-closed, not a
-race**. A workload with no held identity cannot present one, so a future mTLS
-consumer fails closed during the gap rather than presenting something wrong. In
-this phase there is no consumer at all, so the window is doubly inert. Identity
-availability is eventually consistent for the running set, with the bound a
-single tick — never "never."
+race**. A workload with no held identity cannot present one, so the mTLS proxy
+reads `None` for it and refuses the handshake during the gap rather than
+presenting something wrong. Identity availability is eventually consistent for the
+running set, with the bound a single tick — never "never."
 
 Every issuance is audited on the same path the [built-in CA](/docs/concepts/identity)
 already uses: a row recording the serial, the SPIFFE identity, the issuer, and
@@ -192,10 +199,12 @@ honest boundary:
   under the operator KEK — the same root across restarts. A certificate issued
   today verifies under the same anchor after a restart; the held set is rebuilt by
   re-issuing, but the root that signs it does not change.
-- **No consumer presents it:** the read port is proven against a test consumer,
-  but the sockops/kTLS mTLS layer, the gateway, and the telemetry sink that would
-  read a held SVID and present it on a connection are unbuilt. Identity is held
-  and readable; it is not yet on the wire.
+- **A consumer now presents it:** the [transparent mTLS](/docs/concepts/transparent-mtls)
+  proxy reads a held SVID through the port and presents it on outbound mesh
+  connections, encrypting them with TLS 1.3 — proven by a packet capture. The
+  ingress gateway and the telemetry sink that would also read the held SVID are
+  unbuilt, and the inbound data path is staged, so identity is read and presented
+  on the outbound path but not yet on every path.
 - **One inspection verb, no issue verb:** holding and dropping identity is an
   internal mechanism with no operator command to mint one. `overdrive alloc status`
   does report the current certificate for each running allocation — serial, SPIFFE
@@ -205,6 +214,8 @@ honest boundary:
 
 - The CA that mints what this subsystem holds:
   [the built-in CA](/docs/concepts/identity).
+- What reads the held identity and presents it on the wire:
+  [transparent mTLS](/docs/concepts/transparent-mtls).
 - The primitive the lifecycle is built on:
   [reconcilers](/docs/concepts/reconcilers).
 - Where the held credential sits in the state model:
