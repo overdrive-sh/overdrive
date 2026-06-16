@@ -60,14 +60,90 @@ use overdrive_core::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::mtls_enforcement::{EnforcedConnection, MtlsEnforcement};
-use overdrive_dataplane::mtls::{MtlsCgroupLink, MtlsDataplane};
+use overdrive_dataplane::mtls::{MtlsCgroupLink, MtlsDataplane, MtlsDataplaneError};
 use parking_lot::Mutex;
 
 use crate::cgroup_manager::CgroupPath;
 use crate::mtls_intercept::{
-    self, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_leg, install_inbound_tproxy,
-    make_transparent_listener,
+    self, InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_leg,
+    install_inbound_tproxy, make_transparent_listener,
 };
+
+/// Per-alloc transparent-mTLS intercept-install failure (D-MTLS-18).
+///
+/// Returned by [`MtlsInterceptWorker::start_alloc`] when any of the four
+/// install steps fails. The install is a **fail-closed security control**,
+/// not a best-effort observability hook: an alloc whose intercept cannot be
+/// installed MUST NOT run with cleartext egress/ingress, so the failure is
+/// SURFACED to the action-shim (which drives the alloc to terminal `Failed`),
+/// not swallowed in a `warn!`.
+///
+/// This enum invents NO new lower-level error surface — it wraps the typed
+/// errors the install steps already produce
+/// ([`MtlsDataplaneError`] for the cgroup attach, [`InterceptError`] for the
+/// leg-C transparent listener and the inbound TPROXY install) which the
+/// worker previously discarded. Each source `Display` names the privilege /
+/// kernel-feature remediation an operator acts on.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MtlsInterceptInstallError {
+    /// OUTBOUND `cgroup_connect4_mtls` attach to the alloc `.scope` failed
+    /// (site 1). Source `Display` names the `CAP_BPF` / `CAP_NET_ADMIN` /
+    /// missing-scope remediation.
+    #[error("mTLS outbound cgroup attach failed: {0}")]
+    OutboundAttach(#[from] MtlsDataplaneError),
+
+    /// leg-F (outbound, workload-facing plaintext) listener bind failed
+    /// (site 2). `#[source]` (not `#[from]`): a bare `io::Error` from-impl
+    /// would be too greedy, and a named constructor keeps the site-2 cause
+    /// distinct in `Display`.
+    #[error("mTLS leg-F listener bind failed: {0}")]
+    LegFBind(#[source] std::io::Error),
+
+    /// INBOUND leg-C transparent listener (site 3,
+    /// [`InterceptError::TransparentListener`]) OR inbound TPROXY install
+    /// (site 4, [`InterceptError::TproxyInstall`]) failed. Source `Display`
+    /// names the privilege / kernel-feature remediation.
+    #[error("mTLS inbound intercept install failed: {0}")]
+    Inbound(#[from] InterceptError),
+}
+
+impl MtlsInterceptInstallError {
+    /// Associated constructor for the site-2 leg-F bind failure, per the
+    /// project's "associated constructor per variant" convention. The
+    /// `#[source]` wrap (not `#[from]`) means there is no auto-conversion, so
+    /// the call site names this constructor explicitly.
+    #[must_use]
+    const fn leg_f_bind(source: std::io::Error) -> Self {
+        Self::LegFBind(source)
+    }
+
+    /// The closed-vocabulary install-stage label for the
+    /// [`TransitionReason::MtlsInterceptInstallFailed`] cause-class the shim
+    /// writes. Maps the 3-variant error (and, for [`Self::Inbound`], the
+    /// inner [`InterceptError`] variant) to the four pinned stage strings:
+    /// `"outbound_attach"`, `"leg_f_bind"`, `"leg_c_transparent_listener"`,
+    /// `"inbound_tproxy"`. Internal mapping helper — NOT new contract
+    /// surface.
+    ///
+    /// [`TransitionReason::MtlsInterceptInstallFailed`]:
+    ///     overdrive_core::transition_reason::TransitionReason::MtlsInterceptInstallFailed
+    #[must_use]
+    pub const fn stage(&self) -> &'static str {
+        match self {
+            Self::OutboundAttach(_) => "outbound_attach",
+            Self::LegFBind(_) => "leg_f_bind",
+            Self::Inbound(InterceptError::TransparentListener { .. }) => {
+                "leg_c_transparent_listener"
+            }
+            // Every other `InterceptError` reaching the install path is the
+            // site-4 TPROXY install (`TproxyInstall`); the accept/orig-dst
+            // variants arise only on the per-connection accept loop, never on
+            // `start_alloc`'s install path, so they cannot reach here.
+            Self::Inbound(_) => "inbound_tproxy",
+        }
+    }
+}
 
 /// Per-allocation intercept state held for the alloc's lifetime and
 /// torn down on `stop_alloc`. This is lifecycle bookkeeping keyed by
@@ -201,11 +277,42 @@ impl MtlsInterceptWorker {
     ///
     /// Idempotent: a re-fire for an alloc already intercepted (a Restart
     /// reusing the same alloc id) tears the prior intercept down first.
-    /// Failures are logged (NOT propagated) — the alloc is already Running
-    /// and the lifecycle hook is fire-and-forget, mirroring
-    /// `ProbeRunner::start_alloc`; a structured `health.*` warn names the
-    /// cause so an intercept-install failure is observable.
-    pub fn start_alloc(self: &Arc<Self>, spec: &AllocationSpec) {
+    ///
+    /// **Fail-closed (D-MTLS-18, amends D-MTLS-17 item 4).** The per-alloc
+    /// install is a security control, NOT a best-effort observability hook:
+    /// an alloc whose intercept cannot be installed MUST NOT run with
+    /// cleartext egress/ingress. On any of the four install-step failures
+    /// (OUTBOUND `cgroup_connect4_mtls` attach; leg-F bind; leg-C transparent
+    /// listener; inbound TPROXY) `start_alloc` returns the typed
+    /// [`MtlsInterceptInstallError`] — surfacing the cause the worker
+    /// previously discarded — and the action-shim drives the alloc to
+    /// terminal `Failed`. The `ProbeRunner::start_alloc` fire-and-forget
+    /// `()` contract does NOT transfer: a probe failure is itself an
+    /// observation the reconciler consumes; an mTLS-install failure produces
+    /// no such feedback loop, so "log and continue" would silently leave the
+    /// confidentiality guarantee broken.
+    ///
+    /// **Partial-teardown on the `Err` path.** Every guard acquired before
+    /// the failing step (the [`MtlsCgroupLink`], the leg-F / leg-C listeners,
+    /// the [`TproxyInterceptGuard`]) is still a LOCAL at each failure point —
+    /// it has not yet been handed to `spawn_legs_and_record`, so `stop_alloc`
+    /// cannot find it in `self.intercepts`. Returning `Err` before recording
+    /// drops those
+    /// locals, and their `Drop` detaches the cgroup program / closes the
+    /// listeners / removes the nft rule. The worker leaks NO half-installed
+    /// intercept.
+    ///
+    /// # Errors
+    ///
+    /// [`MtlsInterceptInstallError::OutboundAttach`] (site 1),
+    /// [`MtlsInterceptInstallError::LegFBind`] (site 2), or
+    /// [`MtlsInterceptInstallError::Inbound`] (sites 3 & 4) when the
+    /// corresponding install step fails. Each source `Display` names the
+    /// privilege / kernel-feature remediation an operator acts on.
+    pub fn start_alloc(
+        self: &Arc<Self>,
+        spec: &AllocationSpec,
+    ) -> Result<(), MtlsInterceptInstallError> {
         // Re-fire safety: drop any prior intercept for this alloc first
         // (Restart reuses the alloc id).
         self.stop_alloc(&spec.alloc);
@@ -219,37 +326,19 @@ impl MtlsInterceptWorker {
         // the module DECLARED-PEER note.
         // Take the lock into a `let` so the guard drops before the match
         // body runs (clippy `significant_drop_in_scrutinee`).
-        let attach_result = self.dataplane.lock().attach_alloc(&scope_path);
-        let cgroup_link = match attach_result {
-            Ok(link) => link,
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.mtls.intercept_install_failed",
-                    reason = "cgroup_connect4_mtls.attach",
-                    alloc = %spec.alloc,
-                    scope = %scope_path.display(),
-                    error = %source,
-                    "mTLS outbound intercept attach failed; alloc runs without transparent mTLS"
-                );
-                return;
-            }
-        };
+        // Fail-closed (D-MTLS-18 site 1): `?` surfaces the typed
+        // `MtlsDataplaneError` via `#[from]` as `OutboundAttach` — nothing is
+        // acquired yet, so there is nothing to tear down.
+        let cgroup_link = self.dataplane.lock().attach_alloc(&scope_path)?;
 
         // The agent's leg-F (outbound, workload-facing plaintext) listener
         // — agent-chosen ephemeral loopback (D-MTLS-15). Leg F needs no
         // IP_TRANSPARENT; a plain bound listener suffices.
+        // Fail-closed (D-MTLS-18 site 2): on bind failure, return `Err`;
+        // `cgroup_link` (the only guard acquired so far) drops here → detach.
         let leg_f_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
             Ok(l) => l,
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.mtls.intercept_install_failed",
-                    reason = "leg_f.bind",
-                    alloc = %spec.alloc,
-                    error = %source,
-                    "mTLS leg-F listener bind failed; alloc runs without transparent mTLS"
-                );
-                return;
-            }
+            Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
         };
         // The agent's chosen leg-F address — the kernel-redirect target a
         // declared-peer `connect()` is rewritten to. Recorded in the
@@ -265,62 +354,39 @@ impl MtlsInterceptWorker {
         // the nft-TPROXY redirect aimed at it. `virt` is the server
         // workload's logical loopback addr; in single-node v1 the
         // orig-dst recovered via getsockname IS this addr.
+        // Fail-closed (D-MTLS-18 site 3): a server workload with no leg-C
+        // inbound listener accepts cleartext client connections — a
+        // confidentiality breach symmetric to the outbound one. Return `Err`
+        // (the inbound carve-out is REJECTED per D-MTLS-18 P2); `cgroup_link`
+        // + `leg_f_listener` (the guards acquired so far) drop here → detach
+        // the cgroup program / close the leg-F listener.
         let inbound_listener =
             match make_transparent_listener(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)) {
                 Ok(l) => l,
-                Err(source) => {
-                    tracing::warn!(
-                        name: "health.mtls.intercept_install_failed",
-                        reason = "leg_c.transparent_listener",
-                        alloc = %spec.alloc,
-                        error = %source,
-                        "mTLS leg-C IP_TRANSPARENT listener setup failed; \
-                         alloc runs without inbound transparent mTLS"
-                    );
-                    // Outbound is already attached; keep it. Record the
-                    // alloc with no inbound guard so stop_alloc still
-                    // detaches the cgroup program.
-                    self.record_intercept(
-                        spec.alloc.clone(),
-                        cgroup_link,
-                        None,
-                        Vec::new(),
-                        leg_f_addr,
-                        Arc::new(Mutex::new(None)),
-                        Arc::new(AtomicBool::new(false)),
-                    );
-                    return;
-                }
+                Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
             };
 
         let agent_port = inbound_listener.local_addr().map(|a| a.port()).unwrap_or_default();
         // The inbound TPROXY redirect for this workload's virtual addr.
-        // In single-node v1 the virt is the alloc's loopback server addr;
-        // a failure here leaves outbound intact (inbound is best-effort
-        // for the alloc, surfaced as a warn).
+        // In single-node v1 the virt is the alloc's loopback server addr.
+        // Fail-closed (D-MTLS-18 site 4): without the redirect, inbound
+        // connections reach the workload directly as cleartext, so a failure
+        // here MUST fail the alloc — return `Err` (was: continue with
+        // `tproxy_guard = None`). `cgroup_link`, `leg_f_listener`, and
+        // `inbound_listener` all drop here → detach / close.
         let virt = SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, agent_port);
-        let tproxy_guard = match install_inbound_tproxy(virt, agent_port) {
-            Ok(guard) => Some(guard),
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.mtls.intercept_install_failed",
-                    reason = "inbound.tproxy_install",
-                    alloc = %spec.alloc,
-                    error = %source,
-                    "mTLS inbound TPROXY install failed; alloc runs without inbound transparent mTLS"
-                );
-                None
-            }
-        };
+        let tproxy_guard =
+            install_inbound_tproxy(virt, agent_port).map_err(MtlsInterceptInstallError::Inbound)?;
 
         self.spawn_legs_and_record(
             spec,
             cgroup_link,
-            tproxy_guard,
+            Some(tproxy_guard),
             leg_f_listener,
             leg_f_addr,
             inbound_listener,
         );
+        Ok(())
     }
 
     /// Spawn the outbound + inbound accept loops for an alloc and record the
@@ -643,30 +709,6 @@ impl MtlsInterceptWorker {
                 leg_f_addr,
                 real_peer,
             },
-        );
-    }
-
-    /// Record an outbound-only intercept (inbound listener setup failed).
-    #[allow(clippy::too_many_arguments)]
-    fn record_intercept(
-        &self,
-        alloc: AllocationId,
-        cgroup_link: MtlsCgroupLink,
-        tproxy_guard: Option<TproxyInterceptGuard>,
-        accept_tasks: Vec<tokio::task::JoinHandle<()>>,
-        leg_f_addr: SocketAddrV4,
-        real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
-        stop: Arc<AtomicBool>,
-    ) {
-        self.record_intercept_full(
-            alloc,
-            cgroup_link,
-            tproxy_guard,
-            accept_tasks,
-            Arc::new(Mutex::new(Vec::new())),
-            leg_f_addr,
-            real_peer,
-            stop,
         );
     }
 }

@@ -181,6 +181,16 @@ pub enum TransitionReason {
         signal: Option<u8>,
         stderr_tail: Option<String>,
     },
+    /// The per-alloc transparent-mTLS intercept could not be installed, so the
+    /// alloc is failed fail-closed rather than run with cleartext (D-MTLS-18).
+    /// `stage` is one of `"outbound_attach"`, `"leg_f_bind"`,
+    /// `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
+    /// that failed; `detail` is the verbatim `Display` of the underlying
+    /// `MtlsInterceptInstallError` (which names the privilege / kernel-feature
+    /// remediation an operator acts on). Mirrors the `CgroupSetupFailed {
+    /// kind, source }` cause-class shape — `stage` is a `String` carrying a
+    /// closed vocabulary, NOT a sub-enum.
+    MtlsInterceptInstallFailed { stage: String, detail: String },
 }
 
 /// Initiator of a `Stopped` transition.
@@ -761,6 +771,9 @@ impl TransitionReason {
             Self::WorkloadCrashedImmediately { exit_code, signal, .. } => {
                 format!("crashed (exit {exit_code:?}, signal {signal:?})")
             }
+            Self::MtlsInterceptInstallFailed { stage, detail } => {
+                format!("mTLS intercept install failed ({stage}): {detail}")
+            }
         }
     }
 
@@ -792,7 +805,8 @@ impl TransitionReason {
             | Self::Cancelled { .. }
             | Self::NoCapacity { .. }
             | Self::OutOfMemory { .. }
-            | Self::WorkloadCrashedImmediately { .. } => true,
+            | Self::WorkloadCrashedImmediately { .. }
+            | Self::MtlsInterceptInstallFailed { .. } => true,
         }
     }
 }

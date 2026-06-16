@@ -2377,6 +2377,45 @@ components:
             type: string
             enum:
             - workload_crashed_immediately
+      - type: object
+        description: |-
+          The per-alloc transparent-mTLS intercept could not be installed, so the
+          alloc is failed fail-closed rather than run with cleartext (D-MTLS-18).
+          `stage` is one of `"outbound_attach"`, `"leg_f_bind"`,
+          `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
+          that failed; `detail` is the verbatim `Display` of the underlying
+          `MtlsInterceptInstallError` (which names the privilege / kernel-feature
+          remediation an operator acts on). Mirrors the `CgroupSetupFailed {
+          kind, source }` cause-class shape — `stage` is a `String` carrying a
+          closed vocabulary, NOT a sub-enum.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The per-alloc transparent-mTLS intercept could not be installed, so the
+              alloc is failed fail-closed rather than run with cleartext (D-MTLS-18).
+              `stage` is one of `"outbound_attach"`, `"leg_f_bind"`,
+              `"leg_c_transparent_listener"`, `"inbound_tproxy"` — the install step
+              that failed; `detail` is the verbatim `Display` of the underlying
+              `MtlsInterceptInstallError` (which names the privilege / kernel-feature
+              remediation an operator acts on). Mirrors the `CgroupSetupFailed {
+              kind, source }` cause-class shape — `stage` is a `String` carrying a
+              closed vocabulary, NOT a sub-enum.
+            required:
+            - stage
+            - detail
+            properties:
+              detail:
+                type: string
+              stage:
+                type: string
+          kind:
+            type: string
+            enum:
+            - mtls_intercept_install_failed
       description: |-
         Structured reason for a lifecycle transition.
 
