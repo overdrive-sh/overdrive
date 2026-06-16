@@ -1,0 +1,410 @@
+{
+  "roadmap": {
+    "project_id": "transparent-mtls-enrollment",
+    "created_at": "2026-06-16T12:58:40Z",
+    "total_steps": 15
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "MtlsResolve port + sim adapter + ServiceBackendsResolve host adapter (the #178 anti-corruption boundary)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Define the MtlsResolve driven port: 3-variant MtlsResolution + 2-field ResolvedBackend (C1 + C2)",
+          "criteria": [
+            "New file crates/overdrive-core/src/traits/mtls_resolve.rs declares `pub trait MtlsResolve` with exactly one resolve method whose signature is `async fn resolve(&self, orig_dst: SocketAddrV4) -> Result<MtlsResolution, MtlsResolveError>` plus a `probe` method (Earned-Trust, principle 12) — no other public methods on the trait.",
+            "C1: `pub enum MtlsResolution { Mesh(ResolvedBackend), NonMesh, MeshUnreachable }` — EXACTLY these three variants, names fixed. The per-arm enforce/pass-through/fail-closed rustdoc semantics from ADR-0071 § 'The new driven port' (C1) and feature-delta § 'MtlsResolve port contract' are reproduced VERBATIM on the variant rustdoc: Mesh->ENFORCE (only handshake arm), NonMesh->PASS-THROUGH (cleartext by design, classification arm, not an error), MeshUnreachable->FAIL-CLOSED (no cleartext, the footgun the enrollment model removes).",
+            "C2: `pub struct ResolvedBackend { pub addr: SocketAddrV4, pub expected_svid: Option<SpiffeId> }` — bounded to EXACTLY two fields, no third. Rustdoc states v1 adapters return `expected_svid: None` (the join is #178; filling it is boundary divergence).",
+            "`MtlsResolveError` is a thiserror enum with a distinct variant per failure mode (store-unreadable at resolve time, etc.) per development.md § Errors; no `Internal(String)` catch-all.",
+            "Trait + types re-exported from crates/overdrive-core/src/traits/mod.rs alongside the existing `pub use mtls_enforcement::{...}` block; `pub mod mtls_resolve;` added in module-list order.",
+            "Default-lane proptest: a roundtrip/exhaustiveness proptest target `mtls_resolution_classification_is_total` asserting every (addr-present, addr-absent, store-fail) classification input maps to exactly one of the three arms (no panic, no fourth state). trybuild not required here (no compile-time substitutability invariant).",
+            "dst-lint clean: the port adds no I/O to a core-class crate (trait + `#[async_trait]` only, mirroring mtls_enforcement)."
+          ],
+          "test_file": "crates/overdrive-core/src/traits/mtls_resolve.rs",
+          "scenario_name": "mtls_resolution_classification_is_total",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/mtls_resolve.rs",
+            "crates/overdrive-core/src/traits/mod.rs"
+          ],
+          "implementation_notes": "Implements C1 (3-variant MtlsResolution sum type, NOT Option) and C2 (2-field ResolvedBackend) PINNED in ADR-0071 § 'The new driven port' and feature-delta § 'MtlsResolve port contract'. SpiffeId is at overdrive-core/src/id.rs:240 (re-exported from crate root). Model on the existing mtls_enforcement.rs trait shape (pure trait + #[async_trait], off the core I/O surface; dst-lint scans core-class crates). CLAUDE.md § 'Implement to the design — never invent API surface': do NOT add a fourth variant, a third ResolvedBackend field, or a second resolve method. CLAUDE.md § 'Trait definitions specify behavior, not just signature': the per-arm rustdoc IS the contract the DST equivalence test (05-02) exercises — write it verbatim from the ADR. Test tier: default-lane proptest (pure classification). No external integration (intra-cluster observation-store boundary)."
+        },
+        {
+          "id": "01-02",
+          "name": "SimMtlsResolve scriptable sim adapter (overdrive-sim) + DST controllability",
+          "criteria": [
+            "New `SimMtlsResolve` in overdrive-sim implements `MtlsResolve`; constructor takes a scripted `BTreeMap<SocketAddrV4, MtlsResolution>` (or equivalent deterministic table) so a DST test can pin each orig_dst to a chosen arm.",
+            "`resolve(orig_dst)` returns the scripted arm for a known addr and a configurable default (`NonMesh`) for an unknown addr; a separate scripted-fault mode returns `MeshUnreachable` / a typed store-fail error to exercise the fail-closed and probe-refusal paths.",
+            "`probe()` is scriptable to succeed or to return `health.startup.refused`-shaped failure so 04-* and 05-* can exercise wire-then-probe-then-use.",
+            "Iteration order is `BTreeMap`-deterministic per development.md § Ordered-collection choice (the table is iterated/observed under DST).",
+            "Default-lane unit tests cover: known-addr->scripted arm, unknown-addr->NonMesh default, fault-mode->MeshUnreachable, probe success + probe refusal.",
+            "Declared in overdrive-sim under the `adapter-sim` class; `integration-tests = []` feature present per workspace convention."
+          ],
+          "test_file": "crates/overdrive-sim/src/adapters/mtls_resolve.rs",
+          "scenario_name": "sim_mtls_resolve_returns_scripted_arm_per_orig_dst",
+          "agent": "nw-software-crafter",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/mtls_resolve.rs",
+            "crates/overdrive-sim/src/adapters/mod.rs"
+          ],
+          "implementation_notes": "Driven ports table (feature-delta): SimMtlsResolve lives in overdrive-sim (adapter-sim). Model on the existing SimObservationStore adapter (crates/overdrive-sim/src/adapters/observation_store.rs:215 — BTreeMap rationale precedent). This is the DST-controllable counterpart that keeps the per-connection resolve injectable so the worker (04-02) and the walking skeleton (05-*) can pin classification deterministically. development.md § 'Production code is not shaped by simulation': production must not carry logic to make the sim behave; the sim must model the real classification faithfully. Test tier: default-lane unit."
+        },
+        {
+          "id": "01-03",
+          "name": "ServiceBackendsResolve host adapter (reads service_backends ∩ running; expected_svid: None) + Earned-Trust probe",
+          "criteria": [
+            "New `ServiceBackendsResolve` host adapter implements `MtlsResolve` by reading `service_backends` via `ObservationStore::service_backends_rows` and filtering to `running` backends; an orig_dst that matches a `running` mesh backend -> `Mesh(ResolvedBackend { addr, expected_svid: None })`.",
+            "C2 ENFORCED: `expected_svid` is `None` for EVERY backend — the adapter does NOT thread `IdentityRead` and does NOT join identity facts (the join is #178; doing it here is a boundary-divergence rejection per CLAUDE.md § 'Implement to the design').",
+            "Classification is in the adapter, never inferred by the worker: orig_dst with no `running` mesh backend -> `NonMesh`; a store read that FAILS at resolve time, OR a mesh backend present but unreachable/identity-facts-absent -> `MeshUnreachable`. Each path has a distinct typed error/branch (development.md § 'Distinct failure modes get distinct error variants').",
+            "Earned-Trust `probe()`: demonstrates it can read the `service_backends` surface; on an unreadable store it returns a structured `health.startup.refused` event and refuses — it NEVER silently returns empty/`NonMesh` (silent-empty = the silent-cleartext footgun). Probe spec carries an explicit fault-injection scenario (store-read error) it must survive by refusing.",
+            "Default-lane DST/unit tests against a tiny `SimObservationStore` dataset: running-backend-hit->Mesh{addr,None}; no-mesh-backend->NonMesh; store-fail->MeshUnreachable; probe-on-unreadable-store->refuses (health.startup.refused), probe-on-readable-store->ok.",
+            "Mutation kill-rate >= 80% on the classification + filter-to-running logic (the running filter `>`/`>=`/match-arm mutations are the canonical bug shape).",
+            "Adapter home justified in a module-level rustdoc (see implementation_notes)."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/mtls_resolve_adapter.rs",
+          "scenario_name": "service_backends_resolve_classifies_orig_dst_into_three_arms",
+          "agent": "nw-software-crafter",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/mtls_resolve_adapter.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "implementation_notes": "ADAPTER HOME DECISION: overdrive-control-plane (adapter-host). Rationale: (a) the ObservationStore read surface `service_backends_rows` (overdrive-core/src/traits/observation_store.rs:1383) is consumed adapter-host-side; overdrive-control-plane already wires ObservationStore-backed adapters (veth_provisioner, action_shim) and is the boot composition site where the resolve probe must refuse. (b) overdrive-dataplane is the kTLS/map executor (wrong concern — map writes, not a resolve query). (c) a NEW crate is rejected per Reuse Analysis (prefer EXTEND an existing adapter-host crate). Implements Q3/D-TME-6 + the C1 classification mapping + the Earned-Trust probe from ADR-0071 § Enforcement. ServiceBackendRowV1 fields: service_id, vip, backends: Vec<Backend>, updated_at (observation_store.rs:945). The `running` filter is the adapter's responsibility — confirm the running-intersection source (alloc_status running set) during implementation; if the precise `running` join surface is ambiguous, STOP and surface the gap (do not invent a running-set reader). C2 shell discipline: NO IdentityRead, expected_svid always None. Test tier: default-lane DST/unit + mutation."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Per-workload netns+veth provisioner (extend veth_provisioner) + converge-on-boot host prereqs + resolv.conf injection",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Per-alloc netns+veth derivation + converge_steps (pure, default-lane) — parameterize veth_provisioner per-allocation",
+          "criteria": [
+            "EXTEND veth_provisioner.rs: a pure `derive_workload_netns_plan(alloc_id, responder_addr, ...) -> WorkloadNetnsPlan` computing the per-alloc netns name, the veth pair names (`ovd-wl-<alloc>` in-netns end, `ovd-hv-<alloc>` host-side end), in-netns + host-side addresses, default route, and the host routing prereqs. Pure derivation, default lane, compiles on every platform; never persisted (development.md § 'Persist inputs, not derived state').",
+            "EXTEND `converge_steps` (or a sibling per-alloc converger): maps an `ObservedVeth`-equivalent snapshot of actual netns/veth kernel state to the minimal ordered step set converging to the desired complete shape — create netns, create veth pair, move in-netns end into the netns, address both ends, host-side end up, default route in-netns, AND the four spike-proven host prereqs as steps: `ip_forward=1`, `rp_filter` relaxation on the host-side (ingress) veth + `all` + `lo`, and `tx off` (csum invariant, bpf.md Rule 2) on both ends.",
+            "Idempotent converge-on-boot semantics preserved per ADR-0061 / reconcilers.md Bar-1: complete pair -> all-noop; half-provisioned -> completed in place; corrupted (netns present, veth absent) -> recreated; never tears down a usable pair.",
+            "Pure-function default-lane proptest/unit: `workload_netns_converge_steps_are_minimal_and_idempotent` — observed==desired yields empty step set; each partial observation yields exactly the missing steps; re-applying the step set is a no-op.",
+            "Mutation kill-rate >= 80% on `derive_*` + `converge_steps` (the converge diff is the canonical reconciler-logic mutation target).",
+            "No Tier-3 in THIS step (pure derivation only); the real `ip netns`/`ip link` execution is 02-02."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/veth_provisioner.rs",
+          "scenario_name": "workload_netns_converge_steps_are_minimal_and_idempotent",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/veth_provisioner.rs"
+          ],
+          "implementation_notes": "Q2/D-TME-2: EXTEND veth_provisioner (proven pure-derive + converge-on-boot shape), parameterized per-alloc + a netns-create step. Mirror the existing derive_veth_plan / converge_steps / VethStep / ObservedVeth shapes (veth_provisioner.rs:71+). The four converge-on-boot host prereqs are from spike findings-egress-tproxy.md § 'Design implications' point 4 + § 'Edge cases': netns+veth, ip_forward=1, rp_filter relax on ingress veth/all/lo, leg-dial SO_MARK (the SO_MARK belongs to the agent dial in 03-03, not the provisioner; the provisioner owns netns+veth+ip_forward+rp_filter+tx off). reconcilers.md Bar-1: converge, don't apply-once. Per-alloc network reconciler (Bar-2) is the deferred #197/#234 promotion — do NOT build a full Reconciler trait impl here. Test tier: default-lane proptest + mutation (pure logic only)."
+        },
+        {
+          "id": "02-02",
+          "name": "Real netns+veth provision execution (Tier-3 Lima) — idempotent ip netns/ip link converge against a real kernel",
+          "criteria": [
+            "EXTEND `provision` (or a per-alloc `provision_workload_netns`) — the real `ip(8)` / `ip netns` shell-out, `#[cfg(target_os = \"linux\")]` production: OBSERVE actual netns/veth kernel state, compute the 02-01 converge steps, EXECUTE each idempotently (swallow EEXIST / 'File exists' on netns/link/addr/route add), refuse boot on a non-benign failure (the veth_provisioner converge-on-boot precedent — that IS its probe).",
+            "Tier-3 real-kernel acceptance (gated `integration-tests`, run via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`): provisioning a fresh alloc creates the netns + veth pair with the in-netns end inside the netns, host-side end up, addresses + default route present; re-running provision is all-noop (idempotent); a half-provisioned netns (veth absent) is completed; teardown removes the netns + veth leaving zero residue (no netns, no link, no leftover route) per spike teardown evidence.",
+            "Tier-3 assertions are on observable kernel side effects (`ip netns list`, `ip -n <ns> addr`, `ip -n <ns> route`, `ethtool -k` for tx off) — never on internal reachability (testing.md Tier-3 assertion rules).",
+            "Spike-proven host prereqs verified present after provision: `ip_forward=1`, `rp_filter` relaxed on host-side veth/all/lo, `tx off` on both ends.",
+            "Test lives at crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs, wired through tests/integration.rs; uses tempdir/per-alloc names to avoid cross-test collision (testing.md leaked-resource discipline); RAII teardown.",
+            "NO `--no-run` gate — the fixtures must actually RUN under Lima (testing.md: a --no-run gate is green even when every fixture refuses at boot)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs",
+          "scenario_name": "provision_creates_and_idempotently_converges_per_workload_netns",
+          "agent": "nw-software-crafter",
+          "deps": ["02-01"],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/veth_provisioner.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "implementation_notes": "Tier-3 MANDATORY: no Tier-2 backstop for netns/veth (spike.md + testing.md). Run under Lima as root (cargo xtask lima run --). Mirror the increment-b spike recipe (spike-scratch/increment-b/ — the PROVEN Rust + ip/nft egress harness) for the ip netns / veth / ip_forward / rp_filter recipe; do NOT copy it into crates/ (copy the recipe, write fresh production code). Reuse overdrive-testing fixtures (NetNs/ThreeIfaceTopology) where they fit (dev-dep, adapter-host). reconcilers.md: 'an error whose remediation names a manual fix on an appliance OS with no operator shell' is a symptom — the system must self-heal via converge-on-boot. Test tier: Tier-3 real-kernel under Lima."
+        },
+        {
+          "id": "02-03",
+          "name": "resolv.conf injection into the per-workload netns (Q5a name-layer integration) — one converge step on the provisioner",
+          "criteria": [
+            "EXTEND the provisioner with an idempotent converge step that writes the node-local DNS responder address into the per-workload netns's own `/etc/resolv.conf` (per-netns mount, the stock `ip netns` convention) — the Fly.io `fdaa::3` injection model.",
+            "The responder address is an INPUT to the provisioner (derived/configured), not hardcoded; the injection is part of the same converge-on-boot pass, so a netns whose resolv.conf cannot be written refuses on the same boot path as the netns/veth provisioning (ADR-0071 § Enforcement: 'a netns whose resolv.conf cannot be written refuses on the same boot path').",
+            "SCOPE GUARDRAIL: this step wires ONLY the injection. It does NOT build the #61 DNS responder daemon and does NOT build the #167 VIP allocator (named dependencies; building either is scope creep).",
+            "Tier-3 acceptance: after provision, `ip netns exec <ns> cat /etc/resolv.conf` shows the injected responder address; re-running is a no-op; the file is per-netns (host /etc/resolv.conf unaffected).",
+            "Default-lane unit covers the pure 'what should resolv.conf contain' derivation; the real per-netns write is the Tier-3 assertion.",
+            "Test added to crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs (same scenario file as 02-02)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs",
+          "scenario_name": "provision_injects_node_local_responder_into_netns_resolv_conf",
+          "agent": "nw-software-crafter",
+          "deps": ["02-02"],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/veth_provisioner.rs",
+            "crates/overdrive-control-plane/tests/integration/workload_netns_provision.rs"
+          ],
+          "implementation_notes": "Q5a / D-TME-9 + ADR-0071 fact 8. resolv.conf injection is an EXTEND of the netns provisioner (zero new CREATE-NEW per Reuse Analysis). The returned DNS shape is HEADLESS v1 (D-TME-10): the responder returns a running service_backends addr — but that responder daemon is #61 and is NOT built here. The single-source invariant (DNS returns a service_backends addr; MtlsResolve reads a service_backends addr) is exercised in 05-02, not here. Test tier: default-lane unit (derivation) + Tier-3 (real per-netns write)."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Egress nft-TPROXY install + accept_outbound getsockname orig-dst + F5 leg-dial SO_MARK (Tier-3 egress capture)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "install_outbound_tproxy — egress nft-TPROXY on the host-side veth, sibling of install_inbound_tproxy (shared routing infra)",
+          "criteria": [
+            "EXTEND mtls_intercept.rs with `install_outbound_tproxy(host_veth, agent_leg_f_port) -> Result<TproxyInterceptGuard>` — an nft PREROUTING rule on the per-workload host-side veth matching the workload's egress (ingressing the host veth) and redirecting to the agent's leg-F `IP_TRANSPARENT` listener.",
+            "REUSE verbatim: `ensure_shared_routing_infra` (the shared NFT_TABLE `overdrive-mtls` + `prerouting` NFT_CHAIN + TPROXY_FWMARK 0x1 + TPROXY_RT_TABLE 100 + the F5 `MTLS_LEG_S_DIAL_MARK` head-exemption), the by-handle RAII `TproxyInterceptGuard` Drop (removes only its one rule), the idempotent ensure, and the canonical zero-padded-mark dump-parse dedup logic. The egress rule is one MORE per-virt rule appended to the SAME shared chain (could share the inbound chain).",
+            "Default-lane unit: dump-parse tests for the egress rule shape (mirror the existing inbound dump-parse unit tests); idempotent re-install appends no duplicate; guard Drop removes exactly its rule by handle.",
+            "PREROUTING `priority mangle` is the hook (same as inbound) — NO OUTPUT chain, NO separate egress hook (spike findings § 'priority mangle PREROUTING is the correct hook').",
+            "The real egress capture (does it fire for netns egress at the veth ingress) is the Tier-3 03-03 assertion; this step proves the install/teardown/dedup shape default-lane.",
+            "Mutation >= 80% on any pure rule-construction / dedup-parse helper added."
+          ],
+          "test_file": "crates/overdrive-worker/src/mtls_intercept.rs",
+          "scenario_name": "install_outbound_tproxy_appends_one_egress_rule_to_shared_chain",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/mtls_intercept.rs"
+          ],
+          "implementation_notes": "EXTEND base: mtls_intercept.rs (install_inbound_tproxy at :239, ensure_shared_routing_infra at :293, NFT_TABLE/NFT_CHAIN/TPROXY_FWMARK/TPROXY_RT_TABLE consts :56-74, TproxyInterceptGuard :504, MTLS_LEG_S_DIAL_MARK via overdrive_core::dataplane). Spike findings-egress-tproxy.md: the egress rule is a LITERAL mirror of install_inbound_tproxy applied to egress — PREROUTING nft-TPROXY on the host-side veth -> fwmark -> ip rule -> local route table -> IP_TRANSPARENT leg-F -> getsockname. Reuse over novelty (Reuse Analysis: EXTEND). Test tier: default-lane unit (dump-parse) here; Tier-3 fire-test in 03-03."
+        },
+        {
+          "id": "03-02",
+          "name": "accept_outbound_leg recovers orig-dst via getsockname (symmetric with inbound); build Routed::Outbound { peer }",
+          "criteria": [
+            "EXTEND `accept_outbound_leg` to recover the real peer via `getsockname_orig` on the TPROXY-intercepted leg-F socket (the exact `getsockname` mechanism already proven for inbound `accept_inbound_leg`), building `Routed::Outbound { peer }` from the recovered orig-dst — NOT from a declared-peer slot.",
+            "The `MtlsEnforcement` 4-method port is UNTOUCHED: `enforce` still takes `Routed::Outbound { peer }`; only how the worker obtains `peer` changes (getsockname). NO new method, NO new variant on the port (frozen).",
+            "The accepted-socket peer is the workload's veth address; `getsockname` returns the dialed orig-dst (NOT leg-F) — the correctness oracle per spike evidence.",
+            "Typed-error propagation on getsockname failure via the existing `InterceptError::OrigDst` variant (reused; the OrigDst variant rustdoc already covers accept_outbound_leg per mtls_intercept.rs:113).",
+            "Tier-3 in 03-03 proves the real getsockname==dialed-dst recovery on a live connect; this step wires the recovery into the outbound accept path and is unit-covered where the socket plumbing is testable.",
+            "No deletion in this step (the declared-peer slot deletion is folded into 04-02 where the resolve consumer orphans it)."
+          ],
+          "test_file": "crates/overdrive-worker/src/mtls_intercept.rs",
+          "scenario_name": "accept_outbound_leg_recovers_orig_dst_via_getsockname",
+          "agent": "nw-software-crafter",
+          "deps": ["03-01"],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/mtls_intercept.rs"
+          ],
+          "implementation_notes": "D-TME-4: accept_outbound_leg (mtls_intercept.rs:531) recovers peer via getsockname_orig (:584) — pure reuse of the inbound mechanism (accept_inbound_leg :562 already calls getsockname_orig :572). C-contract: MtlsEnforcement FROZEN — enforce still takes Routed::Outbound { peer }; do NOT add a method/variant. The declared-peer slot (real_peer) is still present at this step; its DELETION is sequenced into 04-02 (the resolve consumer is what orphans it). Test tier: default-lane unit + Tier-3 (03-03)."
+        },
+        {
+          "id": "03-03",
+          "name": "Tier-3 egress capture walking proof: workload connect -> egress nft-TPROXY -> leg-F -> getsockname==dialed-dst + F5 anti-loop SO_MARK",
+          "criteria": [
+            "Tier-3 real-kernel acceptance (Lima, gated `integration-tests`): a workload in its own netns `connect()`s a real backend; the packet egresses the netns via the veth, ingresses the host-side veth, nft-TPROXY at PREROUTING fires and redirects to the agent leg-F IP_TRANSPARENT listener; `getsockname(leg-F-accepted)` == the dialed `(ip,port)` (ADR-0071 Tier-3 obligation (a): egress nft-TPROXY on a per-workload veth recovers orig-dst via getsockname).",
+            "F5 (ADR-0071 Tier-3 obligation (b), spike-proven MANDATORY by the negative control): the agent's leg-B/leg-S orig-dst dial carries the leg-dial `SO_MARK` (MTLS_LEG_S_DIAL_MARK), so the chain-head `meta mark accept` exemption short-circuits it and the agent's dial reaches the real backend directly (NOT re-captured into leg-F); AND a workload cannot self-exempt (the mark is agent-private, unreachable from the workload netns).",
+            "Negative control included: with the F5 exemption removed, the marked dial IS captured (proving the exemption is load-bearing, mirroring the spike's negative control) — OR the test documents the positive+self-exempt-impossible pair if the negative control is too destructive for the shared VM.",
+            "with-TPROXY vs without-TPROXY population comparison (debugging.md § 5/§11): without any egress rule the connect reaches the backend directly; with the rule it is redirected to leg-F — isolating 'fired' from 'passed through'.",
+            "Assertions on observable kernel/socket side effects only (getsockname return, accepted-socket peer, backend-vs-leg-F delivery), never on program-internal reachability.",
+            "Test at crates/overdrive-worker/tests/integration/egress_tproxy_capture.rs (or overdrive-control-plane if the netns provisioner + worker must compose); run via cargo xtask lima run --; NO --no-run.",
+            "Records uname -r in the findings/test output (spike.md discipline: verdict pinned to a kernel)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/egress_tproxy_capture.rs",
+          "scenario_name": "workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst",
+          "agent": "nw-software-crafter",
+          "deps": ["02-02", "03-01", "03-02"],
+          "files_to_modify": [
+            "crates/overdrive-worker/tests/integration/egress_tproxy_capture.rs",
+            "crates/overdrive-worker/tests/integration.rs"
+          ],
+          "implementation_notes": "Tier-3 MANDATORY (no Tier-2 backstop). This is the egress half of the ADR-0071 § Enforcement Tier-3 obligations (a)+(b). The mechanism is PROVEN by increment-b (spike findings-egress-tproxy.md: VERDICT WORKS, getsockname==dialed real-backend, F5 positive+negative controls). Mirror that recipe (real-backend on host lo, workload routes via gateway so egress genuinely ingresses the host veth — not loopback-to-self). The leg-dial SO_MARK is the agent's responsibility (overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK, identical to inbound, non-optional — proven by the negative control). Depends on 02-02 (real netns) + 03-01 (install) + 03-02 (getsockname recovery). Test tier: Tier-3 real-kernel under Lima; correctness oracle = getsockname orig-dst == dialed dst."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Worker rewire: start_alloc swaps to nft-TPROXY (DELETE cgroup surface) + resolve consumer (DELETE declared-peer surface) + action-shim netns C3 wiring",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "start_alloc installs BOTH nft-TPROXY rules (outbound on host-veth + inbound) — DELETE the cgroup-attach surface in the SAME commit",
+          "criteria": [
+            "EXTEND `MtlsInterceptWorker::start_alloc`: install BOTH nft-TPROXY rules (the new outbound `install_outbound_tproxy` on the host-side veth + the existing `install_inbound_tproxy`), stand up the leg-F + leg-C IP_TRANSPARENT listeners, spawn the accept->enforce loops. The cgroup-attach path is removed from the install.",
+            "DELETION (single-cut, SAME commit — clippy -D warnings makes orphaned code fail the gate): DELETE `cgroup_connect4_mtls` kernel-side program (crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs + its programs/mod.rs wiring), the `MTLS_REDIRECT_DEST` map (crates/overdrive-bpf/src/maps/mtls_redirect_dest.rs + maps/mod.rs + the userspace handle), and the `MtlsDataplane` outbound attach surface (`attach_alloc`, `program_redirect`, `unprogram_redirect`, the `cgroup_program` field, `MtlsCgroupLink` in overdrive-dataplane/src/mtls/dataplane.rs) — AND every test defending them (grep `cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, `attach_alloc`, `program_redirect`, `MtlsCgroupLink` across crates and delete the orphaned tests too; NO #[allow(dead_code)], NO stubs, NO deprecation — removed is removed per CLAUDE.md + single-cut greenfield).",
+            "The step that orphans the cgroup path (this swap) IS the step that deletes it — the deletion coincides with the last caller removal (dispatch sequencing rule).",
+            "Compile-check clean Lima-routed (cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests); clippy -D warnings clean (no dead_code, no unused_imports left by the deletion).",
+            "Tier-3: start_alloc on a real exec alloc installs both rules and both listeners; existing inbound behaviour is preserved (no regression in the inbound capture path).",
+            "COMPOSITION-ROOT REWIRE (lib.rs run_server): DELETE the whole `MtlsDataplane::load(&pin_dir)` block (lib.rs:1820-1841 — the load + the MtlsBootError::Load fail-closed arm) AND drop the `dataplane`/`cgroup_root` args from the `MtlsInterceptWorker::new(...)` call (lib.rs:1915-1920 — the worker no longer takes a dataplane or a cgroup root). The SERVICE_MAP fate is RESOLVED — DELETE the whole `MtlsDataplane` struct (see implementation_notes for the file:line evidence): EbpfDataplane pins SERVICE_MAP independently and EARLIER, so nothing in production depends on MtlsDataplane::load. Re-RUN the boot fixtures under Lima (`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`), NOT `--no-run` — this swap touches the composition root, so a compile-check is necessary-but-NOT-sufficient (project lesson: a --no-run gate is green even when every fixture refuses at boot).",
+            "DELETE the orphaned typed-error variants in the SAME commit (clippy -D warnings will flag them as dead): `MtlsBootError::Load { #[from] MtlsDataplaneError }` (error.rs:362-380) AND its `MtlsDataplaneError`-carrying siblings `InterceptError::OutboundAttach(#[from] MtlsDataplaneError)` (mtls_intercept_worker.rs:108) + `MtlsInterceptError::Dataplane { source: MtlsDataplaneError }` (mtls_intercept_worker.rs:763) — all die with the cgroup/MtlsDataplane surface. Drop/repurpose, never leave a `#[allow(dead_code)]` stub. (`MtlsBootError::Probe` STAYS — it wraps the UNCHANGED `MtlsEnforcement::probe`.)",
+            "WORKER new() PARAM-DROP + field/struct deletion (mtls_intercept_worker.rs): drop the `dataplane: MtlsDataplane` (:276) and `cgroup_root: PathBuf` (:277) params from `MtlsInterceptWorker::new` (:274); delete the `dataplane: Mutex<MtlsDataplane>` (:253) and `cgroup_root: PathBuf` (:256) struct fields; delete the `_cgroup_link: MtlsCgroupLink` field on `AllocIntercept` (:172) and the `attach_alloc` call in `start_alloc` (:354). Update EVERY `MtlsInterceptWorker::new(...)` call site (the only production one is lib.rs:1915; verify the worker test files do not construct it with the old shape — `mtls_intercept_fail_closed.rs` does at :104 and dies with this surface, `mtls_intercept_install.rs` does NOT construct it).",
+            "Grep the WHOLE workspace for `MtlsDataplane`, `cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, `attach_alloc`, `program_redirect`, `unprogram_redirect`, `MtlsCgroupLink`, `MtlsDestKey`, `MtlsAddrPort`, `OutboundAttach`, `MtlsBootError::Load` and delete/rewire EVERY reference (src + tests + the BOTH `pub use` re-exports in overdrive-dataplane/src/mtls/mod.rs:77) in this commit — no orphan may survive the swap (clippy -D warnings catches any miss). The two false positives to NOT touch: `cgroup_connect4_service` (the LB service program, a DIFFERENT program) in local_backend_proto_connect.rs and backend_discovery_bridge/walking_skeleton.rs are NOT this surface.",
+            "DELETE the superseded OLD-mechanism test files whole (deletion discipline: do NOT salvage-by-rewrite; the new mechanism's coverage is written FRESH in 03-03 + 05-01 + 05-03): `overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs` (defends MtlsDataplane load+attach+program_redirect) and `mtls_composed_walking_skeleton.rs` (the OLD cgroup-mechanism composed test, superseded by the new 05-01 Tier-3 walking skeleton); `overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs` (asserts the OUTBOUND per-direction agent-light enforce-substrate asymmetry — forward `write_all` COPY / return `splice` — BUT its connection SETUP is the deleted cgroup-rewrite `OutboundWorkload`/`program_redirect_dest` mechanism; per CLAUDE.md deletion discipline a test coupled to a deleted production surface is DELETED, NOT salvaged-by-rewrite. Its enforce-substrate asymmetry is load-bearing coverage and is RE-ESTABLISHED FRESH on the Path-A egress nft-TPROXY mechanism in the new step 05-03 — NOT a rewrite of this file); `overdrive-worker/tests/integration/mtls_intercept_fail_closed.rs` (defends the OutboundAttach cgroup-attach failure path); `overdrive-control-plane/tests/integration/mtls_production_activation.rs` + `mtls_e2e_helpers.rs` (the OLD cgroup + declared-peer activation e2e — references the whole deleted surface). Remove their `mod` declarations from the three `tests/integration.rs` entrypoints (overdrive-dataplane:52,59 + the `mtls_outbound_enforce` mod line; overdrive-worker:80; overdrive-control-plane).",
+            "PRUNE (not delete) the shared helper `overdrive-dataplane/tests/integration/helpers/mtls_roles.rs`: the file is SHARED by SURVIVING tests (mtls_agent_handshake, mtls_inbound_enforce, mtls_guardrails consume `MtlsTopology`/`mtls_roles`), so DO NOT delete it. Remove ONLY the orphaned cgroup-outbound harness within it — `OutboundWorkload`, `OutboundPeer`, `spawn_outbound_workload`, `OutboundWorkload::run`, and `program_redirect_dest` (:528-606, which attach `cgroup_connect4_mtls` + program `MTLS_REDIRECT_DEST`). This prune is UNBLOCKED: the only consumer of the cgroup-outbound harness was `mtls_outbound_enforce.rs`, which is now DELETED whole (above) — so `OutboundWorkload`/`OutboundPeer`/`spawn_outbound_workload`/`program_redirect_dest` are orphaned and MUST be pruned (clippy -D warnings / dead_code makes leaving them fail the gate). Verify the surviving consumers (mtls_agent_handshake, mtls_inbound_enforce, mtls_guardrails) reference ONLY the inbound/shared helpers and leave those intact. `helpers/mtls_netns_topology.rs` is consumed by 4 surviving tests → do NOT touch it.",
+            "A test file shrinking is the correct shape of this deletion (CLAUDE.md § Deletion discipline: a deletion PR that adds tests on net is suspect)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/start_alloc_installs_both_tproxy.rs",
+          "scenario_name": "start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup",
+          "agent": "nw-software-crafter",
+          "deps": ["03-01", "03-02"],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-bpf/src/programs/cgroup_connect4_mtls.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "crates/overdrive-bpf/src/maps/mtls_redirect_dest.rs",
+            "crates/overdrive-bpf/src/maps/mod.rs",
+            "crates/overdrive-dataplane/src/mtls/dataplane.rs",
+            "crates/overdrive-dataplane/src/mtls/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/error.rs",
+            "crates/overdrive-dataplane/tests/integration/mtls_dataplane_outbound_install.rs",
+            "crates/overdrive-dataplane/tests/integration/mtls_composed_walking_skeleton.rs",
+            "crates/overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs",
+            "crates/overdrive-dataplane/tests/integration/helpers/mtls_roles.rs",
+            "crates/overdrive-dataplane/tests/integration.rs",
+            "crates/overdrive-worker/tests/integration/mtls_intercept_fail_closed.rs",
+            "crates/overdrive-worker/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/mtls_production_activation.rs",
+            "crates/overdrive-control-plane/tests/integration/mtls_e2e_helpers.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-worker/tests/integration/start_alloc_installs_both_tproxy.rs"
+          ],
+          "implementation_notes": "ADR-0071 fact 6 + Consequences/Net deletion. DELETIONS sequenced per dispatch: the step that swaps start_alloc to nft-TPROXY (orphaning the cgroup path) DELETES the cgroup-attach surface in the SAME commit. MtlsInterceptWorker::start_alloc at mtls_intercept_worker.rs:334; the cgroup install + MTLS_REDIRECT_DEST narrative is in the module rustdoc :41-42 and start_alloc :406-415. bpf.md: cgroup_connect4_mtls is the last outbound kernel-side program; Path A adds NO kernel-side program. CLAUDE.md § Deletion discipline + feedback memory 'Delete unused code AND its tests': dead_code warning = MORE to delete, not a gate to add. development.md § 'src/ is production code': delete, don't gate. Grep ALL tests across crates before committing. Test tier: Tier-3 (both rules install on a real alloc) + compile/clippy gate.\n\nMtlsDataplane::load SERVICE_MAP FATE — RESOLVED BY CODE INVESTIGATION (delete the whole MtlsDataplane struct). MtlsDataplane::load (overdrive-dataplane/src/mtls/dataplane.rs:189) does TWO things: (1) recover cgroup_connect4_mtls + MTLS_REDIRECT_DEST (Path A orphans this), AND (2) a reuse-or-first-pin of the phase-2 SERVICE_MAP HoM (dataplane.rs:204-235). The SERVICE_MAP work is REDUNDANT in production: EbpfDataplane::new_with_pin_dir INDEPENDENTLY pre-creates + pre-pins SERVICE_MAP via HashOfMapsHandle::new_pinned_with_array_inner (overdrive-dataplane/src/lib.rs:446-461), and in run_server that runs at lib.rs:1519-1544 — BEFORE MtlsDataplane::load runs at lib.rs:1828. dataplane.rs's own comment at :196-203 states this verbatim: 'In production EbpfDataplane (run_server) pins SERVICE_MAP before MtlsDataplane::load runs, so the BPF_OBJ_GET branch is taken and this surface NEVER touches the live pin... The create branch fires ONLY when no prior owner pinned it (the standalone Tier-3 test).' Verified: EbpfDataplane is the independent+earlier pinner; the MtlsDataplane SERVICE_MAP block is a first-pinner fallback for the standalone Tier-3 test path ONLY, which dies with mtls_dataplane_outbound_install.rs. CONCLUSION: SERVICE_MAP pinning is NOT owned by MtlsDataplane::load — DELETE the WHOLE MtlsDataplane struct + load() + the redirect_dest map + MtlsDestKey/MtlsAddrPort PODs + attach_alloc/program_redirect/unprogram_redirect/MtlsCgroupLink (dataplane.rs entire file) + the `pub use dataplane::{MtlsCgroupLink, MtlsDataplane, MtlsDataplaneError}` re-export (mtls/mod.rs:77) + `pub mod dataplane;` (mtls/mod.rs:68). NO SERVICE_MAP relocation is needed (EbpfDataplane already owns it). The pin_dir arg threaded into the MtlsDataplane::load call (lib.rs:1820-1823) dies with the load block."
+        },
+        {
+          "id": "04-02",
+          "name": "Per-connection resolve consumer in the outbound accept loop — DELETE the declared-peer surface in the SAME commit",
+          "criteria": [
+            "EXTEND the outbound accept loop: after `getsockname` recovers orig_dst, call the injected `MtlsResolve` port. `Mesh(b)` -> set `Routed::Outbound { peer: b.addr }` (expected_peer stays None until #178) and call `enforce`; `NonMesh` -> pass-through (cleartext, by design); `MeshUnreachable` -> fail-closed (refuse, NO cleartext). The per-arm decision is driven by the variant, never inferred from a sentinel (C1).",
+            "DELETION (single-cut, SAME commit): DELETE `program_declared_peer_redirect` (the test-only #178 stand-in, mtls_intercept_worker.rs:547) + its `MtlsInterceptError` return type (the `UnknownAlloc`/`Dataplane` enum at :753 — note `MtlsInterceptError::Dataplane`'s `MtlsDataplaneError` source already dies in 04-01), the `real_peer` and `leg_f_addr` declared-peer slots on `AllocIntercept` (:202/:233) and on the `AcceptLeg::Outbound` arm (:616/:778), the `AcceptOutcome::Dropped` no-declared-peer arm (:645/:789) and `accept_drop_outbound` (:850) — AND every test defending them. The declared-peer TESTS live in `mtls_intercept_worker.rs`'s OWN inline `#[cfg(test)]` module (already in files_to_modify) — there is NO separate worker integration test file defending this surface (verified: `overdrive-worker/tests/integration/mtls_intercept_install.rs` does NOT reference `program_declared_peer_redirect`/`real_peer` — it tests the SURVIVING inbound nft-TPROXY + leg-acquire free functions; do NOT delete it). NO #[allow(dead_code)], NO stubs.",
+            "FIX the broken rustdoc intra-doc link: `overdrive-control-plane/src/lib.rs` carries an intra-doc reference to `MtlsInterceptWorker::program_declared_peer_redirect` (lib.rs:981-986, on the `#[cfg(integration-tests)] mtls_worker(...)` accessor) — it goes dead when the method is deleted (clippy/rustdoc broken-intra-doc-link fails the gate). Fix the doc link in this commit (re-point to the surviving accessor purpose, or drop the dangling `[...]` reference). The `mtls_production_activation.rs`/`mtls_e2e_helpers.rs` that ALSO drove `program_declared_peer_redirect` are DELETED whole in 04-01 (they reference the cgroup surface too), so they are not re-listed here.",
+            "The step that adds the resolve consumer (orphaning the declared-peer slots) IS the step that deletes them (dispatch sequencing rule).",
+            "`MtlsResolve` is injected as a mandatory constructor parameter on the worker (Arc<dyn MtlsResolve>), NOT defaulted/builder-optional (development.md § Port-trait dependencies: required-not-defaulted, no builder override) — tests pass SimMtlsResolve, production passes ServiceBackendsResolve.",
+            "Default-lane DST: drive the accept loop against SimMtlsResolve scripted to each arm; assert Mesh->enforce-called-with-peer==b.addr, NonMesh->cleartext-pass-through, MeshUnreachable->refused-no-cleartext. Authn-only boundary: the test MUST NOT call the wrong-but-valid-peer case 'protected' (expected_peer is None until #178).",
+            "Mutation >= 80% on the 3-arm decision logic (the arm-match mutations are the canonical bug shape — a dropped MeshUnreachable arm = silent cleartext).",
+            "Compile-check + clippy -D warnings clean after the deletion (Lima-routed)."
+          ],
+          "test_file": "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+          "scenario_name": "outbound_resolve_consumer_drives_enforce_passthrough_failclosed_per_arm",
+          "agent": "nw-software-crafter",
+          "deps": ["01-02", "03-02", "04-01"],
+          "files_to_modify": [
+            "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+            "crates/overdrive-worker/src/mtls_intercept.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "implementation_notes": "ADR-0071 fact 4 (enrollment per-connection resolve replaces the per-destination map) + C1 (the 3-arm decision IS the variant). DELETIONS sequenced per dispatch: the step that adds the resolve consumer (orphaning the declared-peer slots) DELETES the declared-peer surface in the SAME commit. Declared-peer surface: program_declared_peer_redirect (mtls_intercept_worker.rs:547), real_peer Arc<Mutex<Option<SocketAddrV4>>> (:233), leg_f_addr/real_peer on AllocIntercept + AcceptLeg::Outbound, AcceptOutcome::Dropped (:789) + accept_drop_outbound (:850). development.md § Port-trait dependencies: MtlsResolve is a MANDATORY new() param (no builder, no default — tests forget builders). Q4/D-TME-8 authn-only: expected_peer None until #178; do NOT thread IdentityRead, do NOT call wrong-valid-peer 'protected'. CLAUDE.md § Deletion discipline. Test tier: default-lane DST + mutation; the composed real-kernel proof is 05-01. CROSS-STEP NOTE (dep on 04-01): 04-01 already deletes the cgroup/MtlsDataplane surface AND the production_activation/e2e_helpers test files that drove BOTH the cgroup path and program_declared_peer_redirect; `MtlsInterceptError::Dataplane`'s MtlsDataplaneError source also dies in 04-01. So 04-02's remaining declared-peer deletion is the in-worker-src surface (program_declared_peer_redirect, real_peer/leg_f_addr slots, AcceptOutcome::Dropped, accept_drop_outbound, the MtlsInterceptError enum) + its inline tests + the lib.rs:981-986 broken doc link. VERIFIED CORRECTION: the dispatch's reference to `overdrive-worker/tests/integration/mtls_intercept_install.rs` defending program_declared_peer_redirect/real_peer is WRONG — that file does NOT reference the declared-peer surface (it tests the surviving inbound nft-TPROXY + leg-acquire free functions); it is NOT a deletion target. COMPOSITION-ROOT ORDERING REQUIREMENT (GH #237, from 01-03 C4): the production ServiceBackendsResolve adapter (mtls_resolve_adapter.rs) builds its in-RAM addr→Backend index from a FORWARD-ONLY ObservationStore::subscribe_all() subscription — there is NO service_backends bulk-load/replay (the addr→service enumerate surface was deliberately NOT added; C4 hard constraint). The subscription opens lazily on first probe/resolve and only sees rows written AFTER it opens. Therefore when wiring ServiceBackendsResolve into the worker in lib.rs run_server, the adapter MUST be constructed AND its probe()/subscription opened at boot BEFORE any service_backends write (subscribe-before-first-write) — i.e. before the action-shim/BackendDiscoveryBridge can emit WriteServiceBackendRow. Otherwise a control-plane restart (store already holds gossiped/persisted service_backends rows) leaves the index empty until BackendDiscoveryBridge re-converges, and during that window a should-be-mesh peer classifies as NonMesh → cleartext (a miss is NonMesh by design, never fail-closed). v1-accepted (single-node; consistent with ADR-0071 C4/D-TME-11 convergence scoping + #236 fail-toward-handshake hardening); the restart-window edge is tracked in #237, not closed here. The probe is the Earned-Trust gate: an adapter that cannot read service_backends at boot refuses with health.startup.refused (principle 12, wire→probe→use)."
+        },
+        {
+          "id": "04-03",
+          "name": "Action-shim C3 wiring: provision the per-workload netns at on_alloc_running, BEFORE Driver::start AND start_alloc; teardown at on_alloc_terminal",
+          "criteria": [
+            "C3 ENFORCED: the per-workload netns+veth provisioner (02-*) is invoked from the action-shim StartAllocation arm BEFORE `driver.start(&spec)` (the netns must exist before the ExecDriver `setns(CLONE_NEWNET)` seam enters it — driver.rs:198) AND therefore before `worker.start_alloc`. Teardown of the netns is wired at `on_alloc_terminal` (alongside the existing `worker.stop_alloc` / `driver.on_alloc_terminal`).",
+            "The driver's `netns_path: Option<PathBuf>` (driver.rs:198) is wired to the per-alloc netns the provisioner created, so `Driver::start` enters it via the existing pre_exec setns hook (reuse the seam as-is; CNI-aligned — driver ENTERS, never creates).",
+            "Fail-closed ordering preserved: if netns provisioning fails, the alloc MUST NOT run (the provisioner refuses; the StartAllocation arm surfaces a Failed row, mirroring the existing fail_closed_on_mtls_install precedent at action_shim/mod.rs:982) — no cleartext, no never-converged netns.",
+            "Composition-root invariant (wire-then-probe-then-use, principle 12): the resolve adapter probe + the provisioner converge both gate boot/alloc-start; an adapter/provisioner that fails its probe refuses with health.startup.refused.",
+            "Tier-3 acceptance: a real exec alloc reaching Running has its netns+veth provisioned (with resolv.conf injected) before the workload process is spawned into the netns; on terminal the netns is torn down with zero residue.",
+            "Default-lane DST around the shim ordering where injectable (SimDriver + a sim provisioner seam): provision-before-start ordering is asserted; provision-failure -> Failed-row, never Running-with-no-netns."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/alloc_netns_lifecycle.rs",
+          "scenario_name": "netns_provisioned_before_driver_start_torn_down_on_terminal",
+          "agent": "nw-software-crafter",
+          "deps": ["02-02", "02-03", "04-01"],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/tests/integration/alloc_netns_lifecycle.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "implementation_notes": "C3 PINNED (ADR-0071 fact 1 + § 'Driving ports' + DESIGN-review suggestion 3). The action-shim StartAllocation arm (action_shim/mod.rs:866) currently calls driver.start (:887) BEFORE worker.start_alloc (:980) BEFORE driver.on_alloc_running (:1002). The NEW netns-provision call must be inserted BEFORE driver.start (:887) — this is a design-coherent insertion point (the netns must pre-exist the setns seam), NOT an invented surface; the provisioner from 02-* is the callee. Teardown wires alongside the existing on_alloc_terminal arms (:851/:857, :1227/:1232). FLAGGED GAP (see report): C3 says 'on_alloc_running hook' but the current shim provisions/starts within the StartAllocation arm and only FIRES driver.on_alloc_running AFTER start — the netns provision is therefore an in-arm pre-driver.start step, not literally hung off the on_alloc_running callback. If the crafter finds the intended hook is genuinely the post-start on_alloc_running callback (which would be too late for setns), STOP and surface — do not relocate the seam. Fail-closed mirrors fail_closed_on_mtls_install (:982). Test tier: Tier-3 + default-lane DST on ordering."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Composed bidirectional Tier-3 walking skeleton + name->resolve->enforce consistency (DNS stubbed until #61)",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "Composed bidirectional walking skeleton (Tier-3): getsockname->resolve->enforce mTLS both directions, 0x17 wire capture, no RST",
+          "criteria": [
+            "Tier-3 real-kernel walking skeleton (Lima, gated integration-tests) in the real netns/veth topology on the Path-A mechanism (ADR-0071 § Enforcement Tier-3 obligation (c)): a workload in its netns connects to a running mesh backend; the connection is captured (egress nft-TPROXY -> leg-F -> getsockname), resolved (Mesh), and enforced (mTLS to the backend); the server side is captured inbound (nft-TPROXY -> leg-C -> getsockname -> server SVID handshake). BOTH directions complete a round-trip.",
+            "Correctness oracle 1 (orig-dst): getsockname-recovered orig_dst == dialed dst on both legs.",
+            "Correctness oracle 2 (encryption on the wire): a tcpdump/wire capture on the veth shows a TLS 1.3 application-data record (0x17 record type) — proving the bytes are encrypted, not cleartext, end to end.",
+            "No RST post-arm: the connection is NOT reset after the intercept arms; normal AND traced (slow) timing both complete without RST/corruption (ADR-0069 Slice 00 obligation, now on the Path-A mechanism).",
+            "Enrollment correctness (obligation (d)): a captured connection resolving to a running mesh backend drives mTLS to that backend; a connection resolving to no mesh peer is classified (NonMesh pass-through / MeshUnreachable fail-closed per Q3); NEVER silent cleartext to a should-be-mesh peer. Exercise all three arms end-to-end.",
+            "F5 holds in the composed flow: the agent's leg-B/leg-S dials are not re-captured; a workload cannot self-exempt (obligation (b), composed).",
+            "Test at crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs (or overdrive-control-plane if full boot composition is needed); run via cargo xtask lima run --; NO --no-run; records uname -r.",
+            "Authn-only boundary respected: the test asserts encryption + correct-backend authn, and MUST NOT assert intended-peer 'protection' (expected_peer None until #178)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs",
+          "scenario_name": "composed_bidirectional_mtls_completes_no_rst_with_tls13_wire_capture",
+          "agent": "nw-software-crafter",
+          "deps": ["02-03", "03-03", "04-02", "04-03"],
+          "files_to_modify": [
+            "crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs",
+            "crates/overdrive-worker/tests/integration.rs"
+          ],
+          "implementation_notes": "THE WALKING SKELETON (ADR-0071 § Enforcement Tier-3 obligations (b)+(c)+(d)). Composes everything: 02 (netns+veth+resolv.conf), 03 (egress capture+getsockname), 04 (start_alloc both rules + resolve consumer + C3 netns wiring). Correctness oracle per dispatch: getsockname orig-dst == dialed dst AND a 0x17 TLS 1.3 application-data record on the wire. ADR-0069 enforcement substrate (kTLS/rustls/agent-light splice) is UNCHANGED — reuse it. Q4 authn-only: encryption + chain-to-bundle authn only; NOT intended-peer pinning (that is #178). Tier-3 assertion rules (testing.md): observable kernel/wire side effects (tcpdump 0x17, getsockname, no RST), never program-internal reachability. Test tier: Tier-3 real-kernel under Lima."
+        },
+        {
+          "id": "05-02",
+          "name": "name->resolve->enforce consistency (Tier-3, DNS stubbed until #61): DNS-returned service_backends addr IS the addr MtlsResolve recognizes (single-source invariant)",
+          "criteria": [
+            "Tier-3 acceptance (ADR-0071 § Enforcement Tier-3 obligation (e), Q5a): the single-source invariant — a running service_backends addr B is what DNS would return (headless, D-TME-10) AND `MtlsResolve.resolve(getsockname-recovered B)` returns `Mesh(ResolvedBackend { addr: B, .. })`. The DNS-returned addr IS the addr the resolve port recognizes, because both read the same service_backends source (one source, two readers, byte-consistent).",
+            "DNS STUBBED (the #61 responder daemon is NOT built here): the workload connects to a KNOWN service_backends addr directly (the responder step is stubbed), so the resolve-recognizes-orig_dst half is validated independently of the responder. ADR-0071 § Enforcement obligation (e): 'Until #61's responder lands, this is exercised with the DNS step stubbed.'",
+            "The resolv.conf injection (02-03) is asserted present in the netns (the injection mechanism this feature OWNS), even though the responder it points at is the #61 stub — proving the injection wires correctly without building the daemon.",
+            "Optionally, if a minimal test-only DNS stub responder is stood up (reading the same service_backends test dataset), the full getaddrinfo->connect(B)->capture->resolve(B)->enforce flow is exercised end-to-end with the stub standing in for #61 — but the daemon itself is NOT productionised (scope guardrail).",
+            "SCOPE GUARDRAIL re-asserted: this step builds NO #61 daemon, NO #167 VIP allocator. Headless v1 only.",
+            "Test at crates/overdrive-worker/tests/integration/name_resolve_enforce_consistency.rs; run via cargo xtask lima run --; NO --no-run.",
+            "Default-lane DST companion: SimMtlsResolve scripted with addr B + the same B fed as orig_dst asserts the single-source recognition without a real kernel (the cheap reproduction; Tier-3 is the trust signal)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/name_resolve_enforce_consistency.rs",
+          "scenario_name": "dns_returned_service_backends_addr_is_recognized_by_mtls_resolve",
+          "agent": "nw-software-crafter",
+          "deps": ["02-03", "05-01"],
+          "files_to_modify": [
+            "crates/overdrive-worker/tests/integration/name_resolve_enforce_consistency.rs",
+            "crates/overdrive-worker/tests/integration.rs"
+          ],
+          "implementation_notes": "ADR-0071 fact 10 + § Enforcement obligation (e) + Q5a/D-TME-9/D-TME-10. The single-source invariant: DNS returns a service_backends addr; MtlsResolve reads a service_backends addr; no translation. HEADLESS v1 (D-TME-10) — DNS returns a running backend addr, NOT a VIP. SCOPE GUARDRAIL (dispatch): the #61 DNS responder daemon and the #167 VIP allocator are named dependencies, NOT built here — DNS is STUBBED (workload connects to a known service_backends addr directly). Building a productionised responder = scope creep. The injection MECHANISM (resolv.conf) IS this feature's (02-03); the responder it points at is #61. Test tier: Tier-3 (real netns, stubbed DNS) + default-lane DST companion (cheap reproduction)."
+        },
+        {
+          "id": "05-03",
+          "name": "Outbound enforce-substrate per-direction agent-light asymmetry (Tier-3) — re-establish FRESH on the Path-A egress nft-TPROXY mechanism",
+          "criteria": [
+            "Tier-3 real-kernel acceptance (Lima, gated `integration-tests`): on a Path-A egress-captured OUTBOUND connection (workload in its netns -> egress nft-TPROXY -> leg-F -> getsockname -> resolve(Mesh) -> enforce), assert the agent-light enforce substrate's per-direction asymmetry is UNCHANGED from ADR-0069: the forward direction (plaintext workload -> ciphertext backend) uses a `write_all` COPY, and the return direction (ciphertext backend -> plaintext workload) uses `splice`. The asymmetry is the ADR-0069 substrate carried forward VERBATIM by Path A — this step proves it survives the mechanism swap, on the new egress path.",
+            "FRESH against the new mechanism: the connection SETUP is the Path-A egress nft-TPROXY harness (real netns/veth + egress capture), NOT the deleted cgroup-rewrite `OutboundWorkload`/`program_redirect_dest`. This is a NEW test, NOT a rewrite of the deleted `mtls_outbound_enforce.rs` — do NOT reference `OutboundWorkload`, `OutboundPeer`, `spawn_outbound_workload`, or `program_redirect_dest`. Symmetric in structure with the SURVIVING `mtls_inbound_enforce.rs`.",
+            "Assertions on observable syscall/wire side effects only (the substrate's directional copy strategy is observable via the enforce path's behaviour / wire capture / syscall trace), never on program-internal reachability (testing.md Tier-3 assertion rules).",
+            "Authn-only boundary (Q4) respected: assert encryption + the substrate asymmetry, NOT intended-peer 'protection' (expected_peer is None until #178).",
+            "Test at crates/overdrive-worker/tests/integration/outbound_enforce_substrate_asymmetry.rs, wired through tests/integration.rs; run via `cargo xtask lima run --`; NO `--no-run`; records uname -r (spike.md: verdict pinned to a kernel).",
+            "ADR-0069 enforcement substrate (kTLS/rustls/agent-light splice) is UNCHANGED — reuse it; this step does NOT modify the substrate, only re-establishes its directional-asymmetry coverage on the Path-A capture path."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/outbound_enforce_substrate_asymmetry.rs",
+          "scenario_name": "outbound_enforce_substrate_forward_copy_return_splice_asymmetry",
+          "agent": "nw-software-crafter",
+          "deps": ["04-02", "03-03"],
+          "files_to_modify": [
+            "crates/overdrive-worker/tests/integration/outbound_enforce_substrate_asymmetry.rs",
+            "crates/overdrive-worker/tests/integration.rs"
+          ],
+          "implementation_notes": "RE-ESTABLISHES FRESH the enforce-substrate coverage that the DELETED `overdrive-dataplane/tests/integration/mtls_outbound_enforce.rs` (deleted whole in 04-01) provided. WHY FRESH, NOT SALVAGED: the old test's connection SETUP was the deleted cgroup-rewrite `OutboundWorkload`/`program_redirect_dest` mechanism; per CLAUDE.md § Deletion discipline a test coupled to a deleted production surface is deleted, not salvaged-by-rewrite. The ASSERTION it carried — the OUTBOUND per-direction agent-light asymmetry (forward `write_all` COPY / return `splice`) — is load-bearing ADR-0069 substrate coverage UNCHANGED by Path A (ADR-0069 carries forward verbatim), and MUST NOT be lost. So this step re-writes that assertion FRESH against the new Path-A egress nft-TPROXY setup, symmetric with the surviving `mtls_inbound_enforce.rs`. Deps: 04-02 (the resolve consumer driving enforce on the outbound accept loop) + 03-03 (the real egress capture / getsockname recovery the setup builds on). Q4 authn-only: encryption + substrate asymmetry only; NOT intended-peer pinning (#178). Test tier: Tier-3 real-kernel under Lima."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-sim/src/adapters/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-dataplane/src/mtls/",
+      "crates/overdrive-bpf/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-worker/tests/integration/"
+    ],
+    "excluded_patterns": [
+      "spike-scratch/**",
+      "target/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer (adversarial) + nw-solution-architect (Morgan); conditions resolved 2026-06-16",
+    "approved_at": "2026-06-16"
+  }
+}

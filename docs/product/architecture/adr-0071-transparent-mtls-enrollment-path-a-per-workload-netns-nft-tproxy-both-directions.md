@@ -230,6 +230,108 @@ expected-SVID join is **#178**; filling it in this feature's adapter is boundary
 divergence across the anti-corruption boundary (consistent with Q4 / authn-only
 v1). The field exists so the SAN-pin wires the moment #178 supplies the join.
 
+**C4 — resolve READ MECHANISM: an in-RAM, address-keyed reverse index, NOT a
+per-`ServiceId` point query.** ADR-0071 (and the feature-delta) pinned the
+classification *model* (the 3 arms, C1) and the `ResolvedBackend` *shape* (C2)
+but left the *read mechanism* — how the v1 `ServiceBackendsResolve` adapter maps
+an arbitrary `orig_dst` to a backend — underspecified. The gap is concrete: the
+only `ObservationStore` read surface for backends is keyed by `ServiceId`
+(`service_backends_rows(service_id)`), while `MtlsResolve::resolve(orig_dst:
+SocketAddrV4)` is handed an *arbitrary address* and holds **no `ServiceId`**.
+There is no addr→service reverse index, no enumerate-all-services method, and no
+`service_backends_by_addr`. A crafter left to improvise would either stall or
+invent new `ObservationStore` trait API — a boundary-divergence rejection
+(CLAUDE.md § "Implement to the design — never invent API surface"). This
+sub-decision closes that gap and is pinned for DELIVER:
+
+- **`ServiceBackendsResolve` resolves against an in-RAM, address-keyed
+  projection** (an `addr → Backend` view) of the `running` `service_backends`
+  set, built and refreshed from the EXISTING `ObservationStore` observation
+  surface (the `subscribe_all()` / bulk-load-then-observe path the reconciler
+  runtime already uses). `resolve()` is then a **point-lookup into the in-RAM
+  index** — NOT a per-`ServiceId` store query.
+- **It uses ONLY existing `ObservationStore` surface and MUST NOT add a new
+  trait method** — no `all_service_backends_rows`, no `service_backends_by_addr`,
+  no `list_services`. The `ServiceId`-keyed `service_backends_rows` point query
+  is the WRONG surface for an arbitrary `orig_dst` (the adapter holds no
+  `ServiceId`). The read mechanism is **adapter-internal**: the in-RAM index is a
+  private detail of `ServiceBackendsResolve`; the **PUBLIC `MtlsResolve` contract
+  is UNCHANGED** (the trait signature, the 3-variant `MtlsResolution`, the
+  `ResolvedBackend` shape, and the probe all stand exactly as C1/C2 pin them).
+- **Classification maps onto the index** consistently with C1 and the shipped
+  01-01 port rustdoc (`crates/overdrive-core/src/traits/mtls_resolve.rs`) — this
+  decision ADDS the read mechanism, it does NOT re-classify:
+  - `orig_dst` **hits** a `running` mesh backend in the index →
+    `Mesh(ResolvedBackend { addr, expected_svid: None })` (v1 `expected_svid` is
+    `None` for every backend — the identity join is #178; C2).
+  - `orig_dst` **misses** (no `running` mesh backend), index readable → `NonMesh`
+    (cleartext pass-through, by design). **A miss is `NonMesh`, NOT
+    `MeshUnreachable`.**
+  - A matched backend is **present-but-unreachable** / its required identity
+    facts are absent → `MeshUnreachable` (fail-closed, no cleartext). A
+    **store-layer read fault** (poisoned handle, corrupt table, errored
+    subscription) surfaces per the shipped 01-01 error split — `Err(MtlsResolveError::StoreUnreadable)`
+    for a store-layer fault that is NOT a per-connection classification; the
+    per-connection should-be-mesh-but-can't outcome is `MeshUnreachable`. (This
+    preserves the 01-01 rustdoc's asymmetry verbatim; C4 does not alter it.)
+- **v1 `orig_dst == backend addr` (no VIP→backend translation).** In headless v1
+  (D-TME-10) the addr DNS returns IS the backend addr, so the in-RAM index is
+  keyed by the backend addr **directly** — there is NO VIP→backend translation
+  in the resolve path (that is #167/#61, out of scope here; one source, two
+  readers — the DNS-returned `service_backends` addr is the same addr the index
+  is keyed by).
+
+**C4 — miss-classification scoping note (the load-bearing new contract clause).**
+A pure `running`-backends reverse index cannot, *on a miss*, distinguish a
+"genuinely external addr" (→ `NonMesh`, correct) from a "should-be-mesh addr the
+index has not yet converged on" (→ would-be `MeshUnreachable`). **v1
+deliberately classifies a miss as `NonMesh`.** The resulting bounded cleartext
+edge is acceptable for v1 because the headless **single-source / two-readers
+invariant** (D-TME-10) makes a miss-to-a-real-mesh-addr vanishingly likely:
+`orig_dst` is an addr DNS returned from the *same* `service_backends` set the
+resolve reads, so a hit is overwhelmingly likely; the only miss-to-a-real-mesh-
+addr window is a backend that died between DNS-resolve and `connect()`, where
+the cleartext connection itself fails anyway (the backend is gone). The richer
+**fail-toward-handshake** miss semantic (treat an un-converged miss as
+`MeshUnreachable` rather than `NonMesh`) is **multi-node hardening, tracked in
+[#236](https://github.com/overdrive-sh/overdrive/issues/236)**. An implementer
+**MUST NOT** make a miss fail-closed in v1 — that would break legitimate
+external / non-mesh egress, which is the entire purpose of the `NonMesh` arm.
+
+The v1 `ServiceBackendsResolve` implementation realizes this convergence-window
+edge specifically as a **forward-only `ObservationStore::subscribe_all()` index
+with no `service_backends` bulk-load/replay** (the `addr→service` enumerate
+surface C4 deliberately forbids), so on a control-plane restart the index starts
+empty until `BackendDiscoveryBridge` re-converges and a should-be-mesh peer
+classifies as `NonMesh` (cleartext) in that window. This **restart-window
+instance is v1-accepted and tracked in
+[#237](https://github.com/overdrive-sh/overdrive/issues/237)** (not closed here);
+its bound is that the 04-02 composition root MUST open the adapter's
+subscription/`probe()` **before any `service_backends` write**
+(subscribe-before-first-write). #236 remains the named hardening direction;
+#237 is the specific tracked instance of the C4 convergence-window edge.
+
+**Evidence (this read mechanism is the industry-canonical shape, not a
+convenience):**
+- **Cilium is the canonical implementation of exactly this pattern.** Its
+  `ipcache` (`pkg/ipcache/ipcache.go` `ipToIdentityCache`; `LookupSecIDByIP`) is
+  an in-RAM, **address-keyed reverse index** from IP → identity, populated by
+  *subscribing* to endpoint/CIDR/node/FQDN allocation events (not by
+  point-querying a service store per connection) and mirrored to a read-only BPF
+  LPM trie consulted inline per connection. Cilium also splits
+  `addr→identity` (ipcache) from `identity→peer-material` (auth map / SVID
+  store) — which independently validates v1's `expected_svid: None` two-stage
+  deferral of the identity join to #178.
+- **Our own interception research already states this in words.**
+  `docs/research/networking/transparent-mtls-interception-mechanism-2026-research.md`
+  §4.1 (refuting the "per-connection resolve is a bottleneck" attack): the
+  resolve is "a local in-memory `service_backends` lookup (Corrosion-gossiped,
+  already in RAM per the reconciler-runtime bulk-load model) — no xDS round-trip,
+  no network hop." That is an in-RAM lookup, NOT a per-service point query.
+- `docs/research/networking/stable-service-naming-and-transparent-mtls-comprehensive-research.md`
+  (resolve-then-pin pattern; SPIFFE identity / naming split) corroborates the
+  two-stage shape (addr→backend, then backend→identity at #178).
+
 - **This feature owns**: the port trait + the 3-variant `MtlsResolution` type +
   the 2-field `ResolvedBackend`, a v1 host adapter (`ServiceBackendsResolve`)
   reading `service_backends` via `ObservationStore`, a sim adapter, and the
