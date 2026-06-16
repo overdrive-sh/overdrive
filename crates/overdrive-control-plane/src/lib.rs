@@ -85,6 +85,15 @@ pub mod journal;
 // projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)
 // per-tick cluster scan with an O(1) keyed read off a maintained view.
 pub mod listener_facts;
+// transparent-mtls-enrollment step 01-03 (ADR-0071, GH #178) —
+// `ServiceBackendsResolve`, the v1 host `MtlsResolve` adapter. Resolves
+// `orig_dst` against an in-RAM `addr → Backend` reverse index of the `running`
+// `service_backends` set (C4), built from the existing `ObservationStore`
+// `subscribe_all` surface; classifies into the 3-variant `MtlsResolution`
+// (Mesh / NonMesh / MeshUnreachable). v1 SHELL: `expected_svid: None`, no
+// `IdentityRead` (the identity join is #178). Earned-Trust `probe` refuses on
+// an unreadable store. Composition-root probe wiring lands in step 04-02.
+pub mod mtls_resolve_adapter;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
 // + drift detection. Paired with the `openapi` binary in `src/bin/`.
