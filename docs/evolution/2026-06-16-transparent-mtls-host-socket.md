@@ -71,7 +71,7 @@ inbound-TPROXY shared-routing Bar-2 reconciler (#234).
 | ADR-0069 | ONE universal agent-light L4 proxy for all workload kinds, bidirectional | Collapsed the prior "one identity, two mechanisms" framing; folded #222 from a separate mechanism into a staged adapter of the one proxy. Settled empirically (verdict: proxy, lossless, no kernel patch, no race window) on the pinned 6.18 kernel by 6 committed Tier-3 spikes. |
 | D-MTLS-13 | Forward = `read → write_all` COPY into kTLS-TX; the sockmap egress-redirect is RETIRED | A `splice` into kTLS-TX (and the sockmap redirect) loses records under `MSG_DONTWAIT`. Eliminating the BPF forward program also removed the Tier-4 verifier-budget baseline the original step needed. |
 | D-MTLS-14 / SD-1(a) | Intercept-install + leg-acquire is the WORKER's role (`mtls_intercept.rs` free functions), NOT adapter API | The 4-method `MtlsEnforcement` contract has no home for an `intercept()` method. Crafter correctly STOPPED-and-surfaced rather than invent surface (twice — 02-01, 05-01). Resolved by re-homing to the worker; the former 02-01 step was folded. |
-| D-MTLS-15 | Intercept INPUT provenance pinned | needs-intercept = `DriverType::Exec` (derived, no new spec field); legs = ephemeral `127.0.0.1:0`; outbound peer = `MTLS_REDIRECT_DEST[real_peer]`; inbound orig-dst→real-listener DEFERRED to #178 (AC5 is the declared-mesh-peer OUTBOUND gate). |
+| D-MTLS-15 | Intercept INPUT provenance pinned | needs-intercept = `DriverType::Exec` (derived, no new spec field); legs = ephemeral `127.0.0.1:0`; outbound peer = `MTLS_REDIRECT_DEST[real_peer]`; inbound orig-dst→real-listener DEFERRED to #178 (AC5 is the declared-mesh-peer OUTBOUND gate). **Post-finalize (D-MTLS-19, commit `ce2671b5`): the inbound nft-TPROXY *rule install* is also #178-deferred in production — see the post-finalize correction below.** |
 | D-MTLS-17 | Phase 05 superseded → decomposed into Phase 06 (3 steps) | 05-01 silently assumed an unbuilt production mTLS dataplane-integration layer (the loader/attach surface existed only as test glue). Decomposed: 06-01 (MtlsDataplane outbound BPF), 06-02 (worker intercept free fns + inbound TPROXY), 06-03 (composition-root activation + e2e). |
 | ADR-0070 / D-MTLS-16 | Per-connection self-teardown ((C)+(B)); DELETE the central `MtlsSupervisor` | A central liveness loop cannot see kernel-invisible stalls and duplicates what `TCP_USER_TIMEOUT` + a self-tearing pump already provide. Deleted production + tests in the same commit (deletion discipline — no gate/salvage/stub); `derive_liveness` + `PumpLiveness` retained as the (B) verdict + #232 hook. |
 | MTLS_LEG_S_DIAL_MARK hoist | const hoisted to `overdrive-core` | `overdrive-worker` had no dep edge to `overdrive-dataplane` (adding it drags the aya/BPF chain). Hoisting the shared const to core lets both adapters read it without a circular/heavy edge. |
@@ -187,3 +187,55 @@ Tier-3-covered.
 - **SSOT update:** Component Inventory appended to
   `docs/product/architecture/brief.md` (FINALIZE 2026-06-16).
 - **Feature workspace (preserved):** `docs/feature/transparent-mtls-host-socket/`
+
+## Post-finalize corrections
+
+Two security-disposition fixes landed AFTER this doc was finalized (2026-06-16).
+Both are recorded here so "what ships" stays honest — the same established pattern
+this feature already used for the stale 06-03 checkpoint note above. The
+authoritative records live in `design/wave-decisions.md` (D-MTLS-18, D-MTLS-19); the
+summary below is the lasting "what does it actually do, and how do we know" pointer.
+
+### Inbound transparent-mTLS data path is NOT live in v1 — inbound TPROXY rule install is #178-DEFERRED (D-MTLS-19, commit `ce2671b5`)
+
+The **Inbound** mechanism described in the Feature summary above
+(nft-TPROXY + `IP_TRANSPARENT` listener → `getsockname` orig-dst → server-mTLS) is
+**partially deferred in production.** Commit `ce2671b5`
+(`fix(mtls): defer inbound TPROXY install to #178`) changed
+`MtlsInterceptWorker::start_alloc` to install **no inbound nft-TPROXY rule** in
+production (it records `tproxy_guard = None`):
+
+- **What stays production:** the agent's leg-C `IP_TRANSPARENT` transparent listener
+  and the inbound accept loop stand up per alloc, exactly as the summary describes.
+- **What is #178-deferred:** the nft-TPROXY *rule* that would aim real client traffic
+  at that listener. Its match key (`virt` — the server workload's logical loopback
+  addr clients dial) has **no v1 production source** (`AllocationSpec` carries no
+  listen-addr; the workload binds its own socket) — the SAME east-west
+  service-resolution gap ([#178](https://github.com/overdrive-sh/overdrive/issues/178))
+  that already defers the outbound peer set (D-MTLS-15). The prior code synthesised
+  `virt` from the agent's own ephemeral leg-C port, producing a self-referential rule
+  that intercepted no real traffic — inert in production while reading as "installed."
+- **The honest v1 state:** inbound transparent mTLS is **not live end-to-end in
+  production**; the leg-C scaffold + the `install_inbound_tproxy` free fn exist, and
+  the production rule install awaits #178. `install_inbound_tproxy` stays the named
+  #178 production-install site, exercised today only by the worker integration tests
+  (real, distinct virt) — symmetric with the outbound `program_declared_peer_redirect`
+  seam. The OUTBOUND path is proven live e2e (the AC5 declared-peer deploy gate, 0x17
+  on the peer wire); the inbound production data path is the tracked v1 gap.
+
+Full RCA: `docs/analysis/root-cause-analysis-inbound-tproxy-virt-intercepts-no-traffic.md`.
+
+### Per-alloc intercept-install is fail-closed (D-MTLS-18, commit `5d7fbae0`)
+
+A separate post-finalize fix (`5d7fbae0`, `fix(mtls): fail closed when
+transparent-mTLS intercept install fails`) closed a fail-OPEN gap: an alloc whose
+per-alloc intercept could not install was left `Running` with cleartext.
+`MtlsInterceptWorker::start_alloc` now returns `Result<(), MtlsInterceptInstallError>`
+and the action-shim drives the alloc to terminal `Failed` (typed
+`TransitionReason::MtlsInterceptInstallFailed`) on any install-step failure — the
+per-alloc layer's counterpart to the boot-path "refuse to start, no cleartext
+fallback." After the `ce2671b5` defer (D-MTLS-19) the production install path has
+**three** fail-closed sites (outbound cgroup attach, leg-F bind, leg-C transparent
+listener); the former fourth site (inbound TPROXY rule install) is no longer a
+production install step. See D-MTLS-18 in `design/wave-decisions.md` for the full
+disposition.
