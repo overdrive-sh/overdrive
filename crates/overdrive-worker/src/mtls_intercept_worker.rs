@@ -12,11 +12,12 @@
 //!   own `.scope` cgroup (the F5-exempt per-workload subtree,
 //!   [`MtlsDataplane::attach_alloc`]), stands up the agent's leg-F
 //!   (outbound, plaintext) + leg-C (inbound, `IP_TRANSPARENT`) listeners,
-//!   installs the inbound nft-TPROXY redirect, and spawns the
-//!   accept→`enforce` tasks. It does **NOT** program `MTLS_REDIRECT_DEST`
-//!   — v1 has no production east-west peer enumeration (that is
-//!   [#178](https://github.com/overdrive-sh/overdrive/issues/178); see the
-//!   module-level "DECLARED-PEER" note below).
+//!   and spawns the accept→`enforce` tasks. It programs **NEITHER** of the
+//!   two east-west service-resolution facts v1 has no production source for:
+//!   not the OUTBOUND `MTLS_REDIRECT_DEST` redirect, and not the INBOUND
+//!   nft-TPROXY rule (whose match key is the server workload's logical virt
+//!   address). Both are [#178](https://github.com/overdrive-sh/overdrive/issues/178)
+//!   — see the module-level "DECLARED-PEER" note below.
 //! - [`stop_alloc`](MtlsInterceptWorker::stop_alloc) — fired at the
 //!   action-shim's `on_alloc_terminal` site. Drains the alloc's
 //!   per-connection teardown set (`enforcement.teardown`), aborts the
@@ -47,8 +48,17 @@
 //! So `start_alloc` does NOT program the redirect; the per-alloc
 //! [`MtlsDataplane`] handle is exposed (under `integration-tests`) so the
 //! e2e activation gate can program the single declared-peer entry as the
-//! #178 stand-in. Everything else (load + attach + the inbound TPROXY
-//! install + `enforce` + the wire) is production.
+//! #178 stand-in.
+//!
+//! The INBOUND nft-TPROXY rule is deferred **symmetrically**: its match key
+//! is the server workload's logical (virt) address — the loopback addr/port
+//! clients dial — which is the same #178 east-west fact with no v1 production
+//! source. So `start_alloc` installs NO inbound TPROXY rule (it records
+//! `tproxy_guard = None`); the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
+//! free function stays the named #178 production-install site, exercised today
+//! only by the worker integration tests (which supply a real, distinct virt).
+//! Everything else (load + attach + leg-F + leg-C listeners + both accept
+//! loops + `enforce` + the wire) is production.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
@@ -66,12 +76,12 @@ use parking_lot::Mutex;
 use crate::cgroup_manager::CgroupPath;
 use crate::mtls_intercept::{
     self, InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_leg,
-    install_inbound_tproxy, make_transparent_listener,
+    make_transparent_listener,
 };
 
 /// Per-alloc transparent-mTLS intercept-install failure (D-MTLS-18).
 ///
-/// Returned by [`MtlsInterceptWorker::start_alloc`] when any of the four
+/// Returned by [`MtlsInterceptWorker::start_alloc`] when any of the three
 /// install steps fails. The install is a **fail-closed security control**,
 /// not a best-effort observability hook: an alloc whose intercept cannot be
 /// installed MUST NOT run with cleartext egress/ingress, so the failure is
@@ -81,9 +91,13 @@ use crate::mtls_intercept::{
 /// This enum invents NO new lower-level error surface — it wraps the typed
 /// errors the install steps already produce
 /// ([`MtlsDataplaneError`] for the cgroup attach, [`InterceptError`] for the
-/// leg-C transparent listener and the inbound TPROXY install) which the
-/// worker previously discarded. Each source `Display` names the privilege /
-/// kernel-feature remediation an operator acts on.
+/// leg-C transparent listener) which the worker previously discarded. Each
+/// source `Display` names the privilege / kernel-feature remediation an
+/// operator acts on. (The inbound nft-TPROXY rule install is #178-deferred —
+/// see the module DECLARED-PEER note — so it is not an install step and has no
+/// failure site here; the [`InterceptError::TproxyInstall`] variant still
+/// flows through `Inbound` from the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
+/// free function's own callers.)
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MtlsInterceptInstallError {
@@ -100,10 +114,14 @@ pub enum MtlsInterceptInstallError {
     #[error("mTLS leg-F listener bind failed: {0}")]
     LegFBind(#[source] std::io::Error),
 
-    /// INBOUND leg-C transparent listener (site 3,
-    /// [`InterceptError::TransparentListener`]) OR inbound TPROXY install
-    /// (site 4, [`InterceptError::TproxyInstall`]) failed. Source `Display`
-    /// names the privilege / kernel-feature remediation.
+    /// INBOUND leg-C transparent listener bind failed (site 3,
+    /// [`InterceptError::TransparentListener`]). Source `Display` names the
+    /// privilege / kernel-feature remediation. (The inbound nft-TPROXY rule
+    /// install is #178-deferred and not performed by `start_alloc`, so
+    /// [`InterceptError::TproxyInstall`] does not reach this variant from the
+    /// production path — it flows only from the
+    /// [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
+    /// free function's test callers.)
     #[error("mTLS inbound intercept install failed: {0}")]
     Inbound(#[from] InterceptError),
 }
@@ -281,20 +299,22 @@ impl MtlsInterceptWorker {
     /// **Fail-closed (D-MTLS-18, amends D-MTLS-17 item 4).** The per-alloc
     /// install is a security control, NOT a best-effort observability hook:
     /// an alloc whose intercept cannot be installed MUST NOT run with
-    /// cleartext egress/ingress. On any of the four install-step failures
+    /// cleartext egress/ingress. On any of the three install-step failures
     /// (OUTBOUND `cgroup_connect4_mtls` attach; leg-F bind; leg-C transparent
-    /// listener; inbound TPROXY) `start_alloc` returns the typed
+    /// listener) `start_alloc` returns the typed
     /// [`MtlsInterceptInstallError`] — surfacing the cause the worker
     /// previously discarded — and the action-shim drives the alloc to
     /// terminal `Failed`. The `ProbeRunner::start_alloc` fire-and-forget
     /// `()` contract does NOT transfer: a probe failure is itself an
     /// observation the reconciler consumes; an mTLS-install failure produces
     /// no such feedback loop, so "log and continue" would silently leave the
-    /// confidentiality guarantee broken.
+    /// confidentiality guarantee broken. (The INBOUND nft-TPROXY rule install
+    /// is #178-deferred — see the module DECLARED-PEER note — so it is not an
+    /// install step here and has no fail-closed site.)
     ///
     /// **Partial-teardown on the `Err` path.** Every guard acquired before
-    /// the failing step (the [`MtlsCgroupLink`], the leg-F / leg-C listeners,
-    /// the [`TproxyInterceptGuard`]) is still a LOCAL at each failure point —
+    /// the failing step (the [`MtlsCgroupLink`], the leg-F / leg-C listeners)
+    /// is still a LOCAL at each failure point —
     /// it has not yet been handed to `spawn_legs_and_record`, so `stop_alloc`
     /// cannot find it in `self.intercepts`. Returning `Err` before recording
     /// drops those
@@ -306,9 +326,11 @@ impl MtlsInterceptWorker {
     ///
     /// [`MtlsInterceptInstallError::OutboundAttach`] (site 1),
     /// [`MtlsInterceptInstallError::LegFBind`] (site 2), or
-    /// [`MtlsInterceptInstallError::Inbound`] (sites 3 & 4) when the
-    /// corresponding install step fails. Each source `Display` names the
-    /// privilege / kernel-feature remediation an operator acts on.
+    /// [`MtlsInterceptInstallError::Inbound`] (site 3 — the leg-C transparent
+    /// listener) when the corresponding install step fails. Each source
+    /// `Display` names the privilege / kernel-feature remediation an operator
+    /// acts on. (The inbound nft-TPROXY rule is #178-deferred; it is not
+    /// installed here, so there is no site-4 failure.)
     pub fn start_alloc(
         self: &Arc<Self>,
         spec: &AllocationSpec,
@@ -350,10 +372,10 @@ impl MtlsInterceptWorker {
             .and_then(socketaddr_v4)
             .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
 
-        // INBOUND install: the agent's leg-C IP_TRANSPARENT listener +
-        // the nft-TPROXY redirect aimed at it. `virt` is the server
-        // workload's logical loopback addr; in single-node v1 the
-        // orig-dst recovered via getsockname IS this addr.
+        // INBOUND install: the agent's leg-C IP_TRANSPARENT listener. The
+        // accompanying nft-TPROXY redirect that would aim real client traffic
+        // at this listener is #178-DEFERRED (see below) — production stands up
+        // the listener + accept loop, but installs NO production TPROXY rule.
         // Fail-closed (D-MTLS-18 site 3): a server workload with no leg-C
         // inbound listener accepts cleartext client connections — a
         // confidentiality breach symmetric to the outbound one. Return `Err`
@@ -366,22 +388,29 @@ impl MtlsInterceptWorker {
                 Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
             };
 
-        let agent_port = inbound_listener.local_addr().map(|a| a.port()).unwrap_or_default();
-        // The inbound TPROXY redirect for this workload's virtual addr.
-        // In single-node v1 the virt is the alloc's loopback server addr.
-        // Fail-closed (D-MTLS-18 site 4): without the redirect, inbound
-        // connections reach the workload directly as cleartext, so a failure
-        // here MUST fail the alloc — return `Err` (was: continue with
-        // `tproxy_guard = None`). `cgroup_link`, `leg_f_listener`, and
-        // `inbound_listener` all drop here → detach / close.
-        let virt = SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, agent_port);
-        let tproxy_guard =
-            install_inbound_tproxy(virt, agent_port).map_err(MtlsInterceptInstallError::Inbound)?;
-
+        // The inbound nft-TPROXY rule install is #178-DEFERRED, symmetric with
+        // the OUTBOUND `MTLS_REDIRECT_DEST` redirect above. The rule's match
+        // key is the server workload's logical (virt) address — the loopback
+        // addr/port clients actually dial — and v1 has NO production source for
+        // that value: `AllocationSpec` carries no listen-addr field and the
+        // workload binds its own socket at runtime (the same east-west
+        // service-resolution gap that defers the outbound peer set;
+        // [#178](https://github.com/overdrive-sh/overdrive/issues/178), whose
+        // thread names the inbound orig-dst→real-backend resolution and the
+        // `server_dial_addr` / D-MTLS-15 replacement site as #178's job).
+        // So `start_alloc` records `tproxy_guard = None` and installs no rule;
+        // the [`install_inbound_tproxy`] free function stays the named #178
+        // production-install site, exercised today only by the worker
+        // integration tests (which supply a real, distinct virt) — the SAME
+        // "only test callers until #178" shape as the outbound
+        // `program_declared_peer_redirect` seam. A `virt` synthesised from the
+        // agent's own ephemeral leg-C port (the prior shape) installed a
+        // self-referential rule that matched no real inbound connection —
+        // inert in production while reading as "inbound mTLS works".
         self.spawn_legs_and_record(
             spec,
             cgroup_link,
-            Some(tproxy_guard),
+            None,
             leg_f_listener,
             leg_f_addr,
             inbound_listener,

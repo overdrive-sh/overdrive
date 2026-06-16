@@ -395,10 +395,21 @@ async fn deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_b
 ///      program attached to THAT scope (the production `start_alloc` attach),
 ///      AND `MTLS_REDIRECT_DEST` carries the programmed `peer_addr` entry.
 ///   2. After `stop_alloc`, the same `bpftool cgroup show` lists NO connect4
-///      program on that scope (the `MtlsCgroupLink` `Drop` detached it), the
-///      `MTLS_REDIRECT_DEST[peer_addr]` entry is gone, and the inbound
-///      nft-TPROXY rule for the alloc's leg-C was removed (the
-///      `TproxyInterceptGuard` `Drop`).
+///      program on that scope (the `MtlsCgroupLink` `Drop` detached it).
+///
+/// The inbound nft-TPROXY rule is NOT asserted here: production `start_alloc`
+/// installs no inbound TPROXY rule — its match key is the server workload's
+/// logical (virt) address, an east-west service-resolution fact v1 has no
+/// production source for, so the install is #178-deferred symmetric with the
+/// OUTBOUND `MTLS_REDIRECT_DEST` redirect (which `start_alloc` also does not
+/// program; the test-only `program_declared_peer_redirect` seam stands in).
+/// The prior shape installed a rule whose virt was synthesised from the
+/// agent's own ephemeral leg-C port — a self-referential rule that matched no
+/// real inbound connection (the inert-virt bug, RCA
+/// `docs/analysis/root-cause-analysis-inbound-tproxy-virt-intercepts-no-traffic.md`;
+/// [#178](https://github.com/overdrive-sh/overdrive/issues/178)). The absence
+/// of that inert rule is asserted by the sibling
+/// `production_boot_installs_no_self_referential_inbound_tproxy_rule`.
 ///
 /// This formalises into asserting tests the live probes a prior 06-03 session
 /// already observed (`no connect4 attachments` / `no mtls_redirect map` after
@@ -502,7 +513,6 @@ async fn production_boot_attaches_then_detaches_alloc_mtls_intercept() {
     // assert is the leak-safe ordering.
     let attached_while_running = cgroup_connect4_attached(&scope_path);
     let redirect_present_while_running = mtls_redirect_map_has_entries();
-    let tproxy_present_while_running = mtls_tproxy_rule_present();
 
     // ---- Production teardown: the action-shim `on_alloc_terminal` path ----
     // `stop_alloc` drops the alloc's `MtlsCgroupLink` (detach the connect4 program
@@ -530,7 +540,6 @@ async fn production_boot_attaches_then_detaches_alloc_mtls_intercept() {
     // behaviour. The redirect-PROGRAMMED-while-Running capture above is the honest
     // half of the redirect observable).
     let attached_after_stop = cgroup_connect4_attached(&scope_path);
-    let tproxy_present_after_stop = mtls_tproxy_rule_present();
 
     handle.shutdown(Duration::from_secs(2)).await;
     drop(peer_listener);
@@ -549,25 +558,162 @@ async fn production_boot_attaches_then_detaches_alloc_mtls_intercept() {
          redirected; the map showed no entries",
     );
     assert!(
-        tproxy_present_while_running,
-        "while Running, the inbound mTLS nft-TPROXY rule MUST be installed (the production \
-         `start_alloc` inbound path); the `ip overdrive-mtls` prerouting chain had no tproxy rule",
-    );
-    assert!(
         !attached_after_stop,
         "after `stop_alloc`, `bpftool cgroup show {}` MUST list NO connect4 program (the \
          `MtlsCgroupLink` Drop detached it); a program is still attached",
         scope_path.display(),
     );
-    assert!(
-        !tproxy_present_after_stop,
-        "after `stop_alloc`, the inbound mTLS nft-TPROXY rule MUST be removed (the \
-         `TproxyInterceptGuard` Drop); a TPROXY rule remains in the overdrive-mtls table",
-    );
     eprintln!(
         "PASS criteria[2]: connect4 attached (while Running) → detached (stop_alloc) on {}; \
-         nft-TPROXY installed→removed (stop_alloc); MTLS_REDIRECT_DEST programmed while Running",
+         MTLS_REDIRECT_DEST programmed while Running (inbound nft-TPROXY is #178-deferred — no \
+         production rule installed; see sibling self-referential-absence gate)",
         scope_path.display(),
+    );
+}
+
+/// Regression gate (inert-virt RCA, 2026-06-16) — the production boot path
+/// installs NO self-referential / inert inbound nft-TPROXY rule.
+///
+/// RCA `docs/analysis/root-cause-analysis-inbound-tproxy-virt-intercepts-no-traffic.md`:
+/// the prior `start_alloc` synthesised the inbound TPROXY rule's match key
+/// (`virt`) from the agent's OWN leg-C ephemeral listener port, so the rule it
+/// installed was `ip daddr 127.0.0.1 tcp dport <P> tproxy to 127.0.0.1:<P>` —
+/// a self-referential rule (match port == redirect-target port) that matches no
+/// real inbound workload connection (clients dial the workload's address, never
+/// the agent's random ephemeral port). Inbound transparent mTLS was inert in
+/// production while reading as "installed". The fix defers the inbound TPROXY
+/// install symmetric with the OUTBOUND redirect deferral
+/// ([#178](https://github.com/overdrive-sh/overdrive/issues/178)): production
+/// `start_alloc` installs NO inbound rule.
+///
+/// Boots `run_server` via the SAME production path as criteria[2], deploys an
+/// exec workload to Running (so `on_alloc_running` → `start_alloc` ran its full
+/// inbound path), programs the declared-peer redirect (so the worker did all the
+/// per-alloc install work it does in production), then scans the production
+/// `ip overdrive-mtls` prerouting chain. Asserts: NO rule whose `daddr` is
+/// `127.0.0.1` AND whose `tcp dport` equals its own `tproxy to 127.0.0.1:<port>`
+/// target (the self-referential silhouette). RED against the pre-fix code (the
+/// inert rule is installed by `start_alloc`); GREEN after (no rule installed).
+///
+/// Skip-on-no-capability (CAP_BPF / CAP_NET_ADMIN) via the same boot-error
+/// branches as the sibling gates.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_boot_installs_no_self_referential_inbound_tproxy_rule() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Start clean so a stale per-virt rule from a sibling serialized test does
+    // not false-positive the self-referential scan against THIS boot's chain.
+    clean_mtls_tproxy_chain();
+
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("conf dir");
+
+    let alloc = AllocationId::new(&format!("alloc-{JOB_ID}-0")).expect("alloc id");
+    let test_pki = TestPki::mint(alloc.clone());
+    let scope_path = std::path::PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+        .join(format!("{alloc}.scope"));
+    let _cleanup = WorkloadScopeReaper { scope: scope_path.clone() };
+
+    // A bound-but-unconnected declared peer so the redirect has a real key — the
+    // workload never has to dial it for this gate (we assert chain state, not the
+    // wire).
+    let peer_listener = std::net::TcpListener::bind("127.0.0.1:0").expect("peer placeholder bind");
+    let peer_addr: SocketAddrV4 = match peer_listener.local_addr().expect("peer addr") {
+        std::net::SocketAddr::V4(a) => a,
+        std::net::SocketAddr::V6(_) => unreachable!("bound on 127.0.0.1"),
+    };
+
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("bind addr"),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
+        mtls_identity_override: Some(Arc::new(test_pki.held_identities())),
+        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+    };
+
+    let handle = match run_server(config, Arc::new(RealCgroupFs::new())).await {
+        Ok(h) => h,
+        Err(ControlPlaneError::MtlsBoot(MtlsBootError::Load { source })) => {
+            eprintln!(
+                "SKIP inert-virt regression: mTLS dataplane load refused (no CAP_BPF / bpffs): \
+                 {source}"
+            );
+            return;
+        }
+        Err(ControlPlaneError::DataplaneBoot(cause)) => {
+            eprintln!(
+                "SKIP inert-virt regression: LB dataplane boot refused before the mTLS layer: \
+                 {cause}"
+            );
+            return;
+        }
+        Err(other) => panic!("run_server boot failed unexpectedly: {other:?}"),
+    };
+
+    let worker = handle
+        .mtls_worker()
+        .expect("real-dataplane boot must compose the (β) mTLS worker (mtls_worker = Some)");
+    let bound = handle.local_addr().await.expect("server bound addr");
+    let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
+    let client = client_trusting(&ca_pem);
+
+    // Long-lived workload: only has to reach Running so `start_alloc` runs its
+    // full per-alloc install path (the path that, pre-fix, installed the inert
+    // inbound rule).
+    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let spec = JobSpecInput {
+        id: JOB_ID.to_owned(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/sleep".to_owned(),
+            args: vec!["120".to_owned()],
+        }),
+    };
+    let resp = client
+        .post(&submit_url)
+        .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
+        .send()
+        .await
+        .expect("POST /v1/jobs");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "submit must return 200");
+
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job={JOB_ID}", bound.port());
+    let running_alloc =
+        wait_for_running(&client, &allocs_url, Duration::from_secs(45)).await.unwrap_or_else(
+            || panic!("deployed workload never reached Running within 45s via the production boot"),
+        );
+
+    // Program the declared-peer redirect so the worker performed ALL the per-alloc
+    // install work it does in production for a Running alloc.
+    worker
+        .program_declared_peer_redirect(&running_alloc, peer_addr)
+        .expect("program declared-peer redirect for the Running alloc");
+
+    // ---- CAPTURE before teardown (leak-safe ordering: capture → stop → assert) ----
+    let self_referential_present = mtls_self_referential_tproxy_rule_present();
+
+    worker.stop_alloc(&running_alloc);
+    handle.shutdown(Duration::from_secs(2)).await;
+    drop(peer_listener);
+    clean_mtls_tproxy_chain();
+
+    // ---- ASSERT (post-teardown — safe to panic now) ----
+    assert!(
+        !self_referential_present,
+        "production `start_alloc` MUST NOT install a self-referential inbound nft-TPROXY rule \
+         (one whose `ip daddr 127.0.0.1` + `tcp dport <P>` matches its own \
+         `tproxy to 127.0.0.1:<P>` target) — such a rule matches no real inbound workload \
+         connection (clients dial the workload's address, never the agent's ephemeral leg-C \
+         port). The inbound TPROXY install is #178-deferred (no production virt source); the \
+         inert rule found here is the pre-fix bug (RCA \
+         root-cause-analysis-inbound-tproxy-virt-intercepts-no-traffic.md)",
+    );
+    eprintln!(
+        "PASS inert-virt regression: production boot installed NO self-referential inbound \
+         TPROXY rule (inbound install #178-deferred)"
     );
 }
 
@@ -918,25 +1064,60 @@ fn clean_mtls_tproxy_chain() {
         .status();
 }
 
-/// criteria[2] observable: an inbound mTLS nft-TPROXY redirect rule is present in
-/// the production `ip overdrive-mtls` table's `prerouting` chain. Returns `true`
-/// iff that chain carries a `tproxy` statement. Scoped to the production table
-/// (NOT a ruleset-wide grep) so an unrelated `tproxy` rule elsewhere cannot
-/// false-positive. Used to assert the per-alloc inbound TPROXY rule was removed
-/// after stop (the `TproxyInterceptGuard` Drop).
-fn mtls_tproxy_rule_present() -> bool {
+/// Inert-virt regression observable: a SELF-REFERENTIAL inbound nft-TPROXY rule
+/// is present in the production `ip overdrive-mtls` table's `prerouting` chain.
+/// Returns `true` iff some rule line has `ip daddr 127.0.0.1`, a `tcp dport <P>`,
+/// AND a `tproxy to 127.0.0.1:<P>` target with the SAME port `<P>` — the inert
+/// silhouette the inert-virt bug produced (the rule's match key was the agent's
+/// own ephemeral leg-C port, so daddr/dport == redirect target). Scoped to the
+/// production table (NOT a ruleset-wide grep) so an unrelated rule elsewhere
+/// cannot false-positive.
+fn mtls_self_referential_tproxy_rule_present() -> bool {
     let out =
         std::process::Command::new("nft").args(["list", "table", "ip", "overdrive-mtls"]).output();
-    match out {
+    let dump = match out {
         // The table exists only while an alloc's inbound intercept is installed;
-        // a missing table (`nft` exits non-zero) means no rule is present.
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).contains("tproxy"),
-        Ok(_) => false,
+        // a missing table (`nft` exits non-zero) means no rule — not self-ref.
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Ok(_) => return false,
         Err(e) => {
             eprintln!("nft list table ip overdrive-mtls failed: {e}");
-            false
+            return false;
         }
+    };
+    dump.lines().any(rule_line_is_self_referential)
+}
+
+/// True iff a single nft rule line matches `127.0.0.1` on `daddr`, carries a
+/// `tcp dport <P>`, AND a `tproxy to 127.0.0.1:<P>` whose port equals that
+/// `dport` — i.e. the match port and the redirect-target port are the same.
+/// nft renders the rule as one line, e.g.
+/// `ip daddr 127.0.0.1 tcp dport 41234 tproxy to 127.0.0.1:41234 meta mark ... accept`.
+fn rule_line_is_self_referential(line: &str) -> bool {
+    if !line.contains("ip daddr 127.0.0.1") {
+        return false;
     }
+    let dport = token_after(line, &["tcp", "dport"]);
+    let tproxy_port = line
+        .split_whitespace()
+        .skip_while(|t| *t != "to")
+        .nth(1)
+        .and_then(|to| to.strip_prefix("127.0.0.1:"))
+        .map(str::to_owned);
+    match (dport, tproxy_port) {
+        (Some(d), Some(t)) => d == t,
+        _ => false,
+    }
+}
+
+/// Return the whitespace token immediately following the ordered `needles`
+/// subsequence in `line` (e.g. the `<P>` after `tcp dport`). `None` if the
+/// subsequence (followed by one more token) is absent.
+fn token_after(line: &str, needles: &[&str]) -> Option<String> {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    tokens
+        .windows(needles.len() + 1)
+        .find_map(|w| (w[..needles.len()] == *needles).then(|| w[needles.len()].to_owned()))
 }
 
 /// Drop guard that mass-kills + reaps the deployed workload's cgroup scope
