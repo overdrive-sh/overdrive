@@ -557,6 +557,185 @@ pub fn resolv_conf_contents(responder_addr: Ipv4Addr) -> String {
     format!("nameserver {responder_addr}\n")
 }
 
+// --- Per-host NetSlot allocator (step 02-04, D-TME-12 "Slot-allocator home") ---
+//
+// The STATEFUL companion to the PURE [`derive_workload_netns_plan`] derivation:
+// that function takes a [`NetSlot`] as an input; this allocator is what hands
+// the slot out. It is a single-node, per-host free-list — assign the
+// smallest-free slot on alloc start, release it on alloc terminal — NOT
+// distributed IPAM and NOT the #167 VIP allocator.
+//
+// The pure assign/release DECISION ([`smallest_free_slot`]) is separated from
+// the stateful held-map WRAPPER ([`NetSlotAllocator`]) precisely so the
+// assign-smallest-free / release / double-release / exhaustion behaviour is
+// default-lane unit + mutation testable without touching the real kernel
+// (criterion 1 / 5). The held slot↔alloc map is the allocator's state.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
+
+use overdrive_core::AllocationId;
+use parking_lot::Mutex;
+
+/// The error returned when every [`NetSlot`] in `0..=NET_SLOT_MAX` is already
+/// held, so a NEW allocation cannot be assigned a collision-free slot.
+///
+/// Exhaustion REFUSES the alloc (criterion 4) — it is NEVER a panic and NEVER a
+/// silent reuse of a held slot. A reused slot would collide two live allocs
+/// onto one veth/subnet, the exact B1 collision the slot model exists to
+/// prevent. The caller (the C3 `on_alloc_running` hook) maps this into the
+/// fail-the-alloc path so the workload is refused rather than dropped onto a
+/// shared veth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "no free network slot: all {capacity} slots (0..={max}) are held",
+    max = capacity - 1
+)]
+pub struct NetSlotExhausted {
+    /// The total slot-space capacity (`NET_SLOT_MAX + 1`) — every one of which
+    /// is held when this error is returned.
+    pub capacity: u32,
+}
+
+/// PURE decision: the smallest [`NetSlot`] in `0..=NET_SLOT_MAX` that is NOT in
+/// `held`.
+///
+/// Total over the bounded slot space, deterministic (same `held` → same slot),
+/// performs no I/O. This is the assign-smallest-free contract (criterion 1):
+/// the lowest GAP, not the next-monotonic value — so a slot freed by a release
+/// is re-used by the next assign.
+///
+/// # Errors
+///
+/// Returns [`NetSlotExhausted`] when every slot `0..=NET_SLOT_MAX` is in `held`
+/// — never a (reused) slot (criterion 4).
+fn smallest_free_slot(held: &BTreeSet<NetSlot>) -> Result<NetSlot, NetSlotExhausted> {
+    // Scan ascending for the first slot not in the held set. `held` is ordered,
+    // but a linear scan over the bounded `0..=NET_SLOT_MAX` space is trivially
+    // fast and obviously correct (single-node Phase 1).
+    for candidate in 0..=NET_SLOT_MAX {
+        let slot = NetSlot::new(candidate)
+            .unwrap_or_else(|_| unreachable!("0..=NET_SLOT_MAX is in range by construction"));
+        if !held.contains(&slot) {
+            return Ok(slot);
+        }
+    }
+    Err(NetSlotExhausted { capacity: u32::from(NET_SLOT_MAX) + 1 })
+}
+
+/// Per-host stateful [`NetSlot`] free-list (D-TME-12 "Slot-allocator home").
+///
+/// Hands out the host-unique, collision-free-BY-CONSTRUCTION [`NetSlot`] each
+/// live allocation's netns/veth/subnet is keyed from (B3). The held
+/// `AllocationId → NetSlot` map is the allocator's state — the alloc id's HOME
+/// (the netns/veth/subnet are slot-keyed, NOT alloc-keyed; the alloc id lives
+/// ONLY here, mirroring Cilium's `cilium endpoint list`).
+///
+/// Held-state shape mirrors [`crate::identity_mgr::IdentityMgr`]'s
+/// `Arc<RwLock<BTreeMap<AllocationId, ...>>>` in-RAM held snapshot: ephemeral
+/// runtime state, NEVER persisted, rebuilt on restart by re-assigning for every
+/// still-Running alloc (single-node Phase 1; no cross-restart slot persistence
+/// — criterion 6). `BTreeMap` (not `HashMap`) for deterministic iteration order
+/// (§ "Ordered-collection choice"); `parking_lot::Mutex` (not `tokio::sync`)
+/// because the only critical section is a point smallest-free-scan + insert /
+/// remove that never crosses an `.await`.
+///
+/// # Atomicity (criterion 2)
+///
+/// [`assign`](Self::assign) takes the lock ONCE and performs the smallest-free
+/// scan AND the insert in that single critical section — there is no
+/// contains-then-insert TOCTOU window (`development.md` § "Check-and-act must be
+/// atomic"). A `ClaimSet` does not fit: it claims a KEY with no value, whereas
+/// the allocator must scan for the smallest-free slot AND bind it to the alloc
+/// id, so the held map IS a `BTreeMap<AllocationId, NetSlot>` whose scan+insert
+/// is the one locked op.
+#[derive(Clone, Debug, Default)]
+pub struct NetSlotAllocator {
+    /// `AllocationId → NetSlot` binding for every currently-held allocation.
+    /// `Arc<Mutex<…>>` so a clone shares the same held map (the allocator is
+    /// composed once at boot and shared across the action-shim dispatch path).
+    held: Arc<Mutex<BTreeMap<AllocationId, NetSlot>>>,
+}
+
+impl NetSlotAllocator {
+    /// Construct an empty allocator. On a fresh process boot nothing is held —
+    /// every still-Running alloc is re-assigned on its next `on_alloc_running`
+    /// (the restart rebuild, criterion 6).
+    #[must_use]
+    pub fn new() -> Self {
+        Self { held: Arc::new(Mutex::new(BTreeMap::new())) }
+    }
+
+    /// Assign the smallest-free [`NetSlot`] to `alloc`, recording the
+    /// `alloc → slot` binding, and return it.
+    ///
+    /// **Idempotent re-entry (criterion 2):** if `alloc` is ALREADY held its
+    /// EXISTING slot is returned unchanged and no new slot is consumed — a
+    /// re-fire of `on_alloc_running` for the same alloc must not allocate a
+    /// second slot. The held check, the smallest-free scan, and the insert are
+    /// ONE locked critical section — no contains-then-insert TOCTOU.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetSlotExhausted`] when `alloc` is NOT already held and every
+    /// slot `0..=NET_SLOT_MAX` is taken — refusing the alloc rather than reusing
+    /// a held slot (criterion 4). An already-held alloc re-assigns successfully
+    /// even at full capacity (re-entry is never starved by exhaustion).
+    ///
+    /// # Atomicity
+    ///
+    /// One `self.held.lock()`; the guard is dropped within the call (never
+    /// across an `.await`; § "Concurrency & async").
+    pub fn assign(&self, alloc: AllocationId) -> Result<NetSlot, NetSlotExhausted> {
+        // ONE locked critical section: the held check, the smallest-free scan,
+        // and the insert all happen under a single guard — no contains-then-
+        // insert TOCTOU window. The guard is scoped to this block so it drops
+        // before the function returns (clippy::significant_drop_tightening),
+        // while still spanning the whole check-and-act.
+        let mut held = self.held.lock();
+        // Idempotent re-entry: an already-held alloc returns its existing slot,
+        // consuming no new slot. There is no window for a racer between "is
+        // alloc held?" and "claim a slot for alloc" — both are under `held`.
+        if let Some(existing) = held.get(&alloc) {
+            return Ok(*existing);
+        }
+        // Smallest-free scan over the values currently bound — then bind it to
+        // `alloc` in the SAME critical section.
+        let taken: BTreeSet<NetSlot> = held.values().copied().collect();
+        let slot = smallest_free_slot(&taken)?;
+        held.insert(alloc, slot);
+        drop(held);
+        Ok(slot)
+    }
+
+    /// Release `alloc`'s held slot, freeing it for the next assign's
+    /// smallest-free scan.
+    ///
+    /// **Idempotent teardown (criterion 2):** releasing an alloc that is not
+    /// held is a benign no-op (`BTreeMap::remove` of an absent key), so a
+    /// double-release or a release for an alloc that never reached Running does
+    /// not panic and does not disturb the held set. The released slot becomes
+    /// the smallest-free candidate again iff it is the lowest free value.
+    pub fn release(&self, alloc: &AllocationId) {
+        // Lock → remove → drop the guard within the call. `remove` returning
+        // `None` (the alloc was not held) is the idempotent no-op — exactly the
+        // teardown-of-an-unheld-alloc case.
+        self.held.lock().remove(alloc);
+    }
+
+    /// Snapshot the currently-held `alloc → slot` bindings.
+    ///
+    /// A point-in-time clone for read-only observers (e.g. a future restart
+    /// rebuild or a status surface), decoupled from the live map. Iteration
+    /// order is `Ord` on [`AllocationId`], deterministic across processes and
+    /// seeds (§ "Ordered-collection choice"). Mirrors
+    /// [`crate::identity_mgr::IdentityMgr::held_snapshot`].
+    #[must_use]
+    pub fn snapshot(&self) -> BTreeMap<AllocationId, NetSlot> {
+        self.held.lock().clone()
+    }
+}
+
 /// Observed actual kernel state of one allocation's netns + veth pair — the
 /// input to the pure [`workload_converge_steps`] diff. Each field is a single
 /// observable fact a thin observer reads from the kernel (`ip netns list`,
@@ -2060,15 +2239,23 @@ fn netns_absent(stderr: &str) -> bool {
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod tests {
     use super::{
-        NET_SLOT_MAX, NetSlot, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
-        WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
-        derive_veth_plan, derive_workload_netns_plan, link_absent, resolv_conf_contents,
-        tx_checksumming_on, tx_offload_benign, workload_converge_steps,
+        NET_SLOT_MAX, NetSlot, NetSlotAllocator, NetSlotExhausted, ObservedVeth,
+        ObservedWorkloadVeth, VethProvisionPlan, VethStep, WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan,
+        WorkloadVethStep, converge_steps, derive_veth_plan, derive_workload_netns_plan,
+        link_absent, resolv_conf_contents, smallest_free_slot, tx_checksumming_on,
+        tx_offload_benign, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
+    use overdrive_core::AllocationId;
     use proptest::prelude::*;
+    use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
     use std::str::FromStr;
+
+    /// Build an [`AllocationId`] for the allocator tests.
+    fn alloc(id: &str) -> AllocationId {
+        AllocationId::new(id).expect("valid AllocationId")
+    }
 
     /// A complete (all-present, both-up, offload-OFF) observation — the
     /// baseline the converge tests mutate one field at a time. "Complete"
@@ -3308,5 +3495,261 @@ mod tests {
                 reapplied
             );
         }
+    }
+
+    // --- NetSlot allocator (step 02-04, D-TME-12 "Slot-allocator home") -------
+    //
+    // The STATEFUL companion to 02-01's PURE slot-keyed derivation: 02-01 takes
+    // `slot` as an input; the allocator is what hands out the slot. These tests
+    // exercise the PURE assign/release decision logic (`smallest_free_slot`) and
+    // the held-map wrapper (`NetSlotAllocator`) — default-lane, no kernel. The
+    // C3 wiring's real `provision_workload_netns` call is Tier-3-covered by
+    // 02-02; it is NOT re-proved here (criterion 5).
+    //
+    // Every assertion is load-bearing (mutation-killable): the
+    // assign-smallest-free, idempotent-re-assign, release-frees,
+    // double-release-noop, and exhaustion predicates each FAIL if the decision
+    // logic is mutated (the 02-02-vacuous-assertion lesson).
+
+    /// PURE decision — `smallest_free_slot` over an empty held set yields slot
+    /// 0 (the smallest of `0..=NET_SLOT_MAX`). The canonical assign-from-empty
+    /// case; kills a "return NET_SLOT_MAX" / "return held.len()" mutant.
+    #[test]
+    fn smallest_free_slot_of_empty_held_set_is_zero() {
+        let held: BTreeSet<NetSlot> = BTreeSet::new();
+        assert_eq!(
+            smallest_free_slot(&held).expect("an empty held set always has a free slot"),
+            NetSlot::new(0).expect("0 is in range"),
+            "the smallest free slot of an empty held set is 0"
+        );
+    }
+
+    /// PURE decision — `smallest_free_slot` returns the smallest GAP, not the
+    /// next-monotonic value. With {0, 1, 3} held it returns 2 (the hole), NOT 4
+    /// (max+1). This is the assign-smallest-free contract (criterion 1): after a
+    /// release frees a low slot, the next assign re-uses it. Kills a
+    /// "return max_held + 1" monotonic mutant.
+    #[test]
+    fn smallest_free_slot_returns_the_lowest_gap_not_the_next_monotonic() {
+        let held: BTreeSet<NetSlot> =
+            [0u16, 1, 3].into_iter().map(|s| NetSlot::new(s).expect("in range")).collect();
+        assert_eq!(
+            smallest_free_slot(&held).expect("a sparse held set has a free slot"),
+            NetSlot::new(2).expect("2 is in range"),
+            "smallest_free_slot fills the lowest gap (2), not the next-monotonic slot (4)"
+        );
+    }
+
+    /// PURE decision — a fully-held space (`0..=NET_SLOT_MAX` all held) yields
+    /// the typed [`NetSlotExhausted`] error, NEVER a slot. Exhaustion is the
+    /// criterion-4 refuse-the-alloc path: typed error, no panic, no reuse.
+    #[test]
+    fn smallest_free_slot_of_full_space_is_exhausted_error() {
+        let held: BTreeSet<NetSlot> =
+            (0..=NET_SLOT_MAX).map(|s| NetSlot::new(s).expect("in range")).collect();
+        assert_eq!(
+            smallest_free_slot(&held),
+            Err(NetSlotExhausted { capacity: u32::from(NET_SLOT_MAX) + 1 }),
+            "a fully-held slot space returns the typed exhaustion error, never a (reused) slot"
+        );
+    }
+
+    // PROPERTY — for ANY held set with at least one free slot, the returned
+    // slot is (a) NOT already held and (b) the minimum free value (no smaller
+    // free slot exists). Generalises the gap example over the whole input
+    // space; kills off-by-one and "return any free" mutants.
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
+
+        #[test]
+        fn smallest_free_slot_returns_an_unheld_minimum(
+            // A small held set drawn from a small universe so a free slot
+            // (and a low gap) is reliably present. `0..=20` keeps the search
+            // cheap while still exercising gap-filling.
+            held_raw in prop::collection::btree_set(0u16..=20, 0..=18)
+        ) {
+            let held: BTreeSet<NetSlot> =
+                held_raw.iter().map(|&s| NetSlot::new(s).expect("in range")).collect();
+
+            let chosen = smallest_free_slot(&held).expect("0..=20 minus <=18 entries has a free slot");
+
+            prop_assert!(!held.contains(&chosen), "the chosen slot must not already be held: {chosen}");
+            // No smaller slot is free: every value strictly below the chosen
+            // one must be held (else the chosen one was not the minimum).
+            // Compare via NetSlot's Ord rather than the inner u16 (no public
+            // accessor is added for the inner value).
+            for lower in 0u16..=20 {
+                let lower_slot = NetSlot::new(lower).expect("in range");
+                if lower_slot < chosen {
+                    prop_assert!(
+                        held.contains(&lower_slot),
+                        "every slot below the chosen one must be held; {lower_slot} was free yet {chosen} was chosen"
+                    );
+                }
+            }
+        }
+    }
+
+    /// WRAPPER — a fresh allocator assigns slot 0 to the first alloc and slot 1
+    /// to a second distinct alloc (smallest-free, ascending). The canonical
+    /// assign-two-distinct case; kills a "always return 0" mutant on the second
+    /// assign.
+    #[test]
+    fn allocator_assigns_ascending_smallest_free_to_distinct_allocs() {
+        let allocator = NetSlotAllocator::new();
+        let first = allocator.assign(alloc("alloc-aaa-0")).expect("first assign succeeds");
+        let second = allocator.assign(alloc("alloc-bbb-0")).expect("second assign succeeds");
+
+        assert_eq!(first, NetSlot::new(0).expect("0 in range"), "first alloc gets slot 0");
+        assert_eq!(
+            second,
+            NetSlot::new(1).expect("1 in range"),
+            "second distinct alloc gets slot 1"
+        );
+        assert_ne!(
+            first, second,
+            "distinct live allocs never share a slot (the B1 collision the model prevents)"
+        );
+    }
+
+    /// WRAPPER — re-assigning an already-held alloc returns its EXISTING slot
+    /// (idempotent re-entry of `on_alloc_running`, criterion 2), and does NOT
+    /// consume a second slot — a subsequent distinct alloc still gets slot 1.
+    /// Kills a "re-assign allocates a fresh slot" mutant.
+    #[test]
+    fn allocator_re_assign_of_held_alloc_returns_existing_slot_idempotently() {
+        let allocator = NetSlotAllocator::new();
+        let a = alloc("alloc-aaa-0");
+        let first = allocator.assign(a.clone()).expect("first assign");
+        let again = allocator.assign(a).expect("re-assign of held alloc");
+
+        assert_eq!(
+            first, again,
+            "re-assigning a held alloc returns its existing slot (idempotent)"
+        );
+        // The re-assign must NOT have consumed slot 1 — a fresh distinct alloc
+        // claims slot 1, proving the re-assign was a no-op claim.
+        let other = allocator.assign(alloc("alloc-bbb-0")).expect("distinct assign");
+        assert_eq!(
+            other,
+            NetSlot::new(1).expect("1 in range"),
+            "idempotent re-assign consumed no slot — the next distinct alloc still gets slot 1"
+        );
+    }
+
+    /// WRAPPER — releasing a held alloc frees its slot for the smallest-free
+    /// scan: after releasing the slot-0 holder, a NEW alloc re-uses slot 0
+    /// (smallest-free, not next-monotonic). Kills a "release is a no-op" mutant
+    /// (which would push the new alloc to slot 2).
+    #[test]
+    fn allocator_release_frees_the_slot_for_reuse() {
+        let allocator = NetSlotAllocator::new();
+        let a = alloc("alloc-aaa-0");
+        let b = alloc("alloc-bbb-0");
+        let zero = allocator.assign(a.clone()).expect("a gets 0");
+        let one = allocator.assign(b).expect("b gets 1");
+        assert_eq!(zero, NetSlot::new(0).expect("0"), "a holds slot 0");
+        assert_eq!(one, NetSlot::new(1).expect("1"), "b holds slot 1");
+
+        allocator.release(&a);
+
+        let reused = allocator.assign(alloc("alloc-ccc-0")).expect("c assign after release");
+        assert_eq!(
+            reused,
+            NetSlot::new(0).expect("0 in range"),
+            "after releasing slot 0, a new alloc re-uses the freed slot 0 (smallest-free)"
+        );
+    }
+
+    /// WRAPPER — release of an UNHELD alloc is a no-op (idempotent teardown,
+    /// criterion 2): it does not disturb the held set. Double-release (release
+    /// the same alloc twice) is likewise benign. Kills a "release of unheld
+    /// panics / clears the map" mutant.
+    #[test]
+    fn allocator_release_of_unheld_and_double_release_are_noops() {
+        let allocator = NetSlotAllocator::new();
+        let a = alloc("alloc-aaa-0");
+        let held_slot = allocator.assign(a.clone()).expect("a gets a slot");
+
+        // Releasing an alloc that was never held must not disturb the held set:
+        // `a` still holds its slot, so re-assigning `a` returns the SAME slot.
+        allocator.release(&alloc("alloc-never-held-0"));
+        assert_eq!(
+            allocator.assign(a.clone()).expect("a still held"),
+            held_slot,
+            "release of an unheld alloc is a no-op — the held alloc keeps its slot"
+        );
+
+        // Double-release of `a`: the first frees it, the second is a benign
+        // no-op (not a panic). After both, slot 0 is free again.
+        allocator.release(&a);
+        allocator.release(&a);
+        assert_eq!(
+            allocator.assign(alloc("alloc-bbb-0")).expect("assign after double-release"),
+            NetSlot::new(0).expect("0 in range"),
+            "double-release is benign; the slot is freed exactly once and re-usable"
+        );
+    }
+
+    /// WRAPPER — when every slot `0..=NET_SLOT_MAX` is held, `assign` for a NEW
+    /// alloc returns the typed exhaustion error (criterion 4: refuse the alloc,
+    /// no panic, no silent reuse of a held slot). Modelled by pre-filling the
+    /// allocator's whole capacity, then asserting one more distinct alloc is
+    /// refused — AND that an already-held alloc still re-assigns idempotently
+    /// even at capacity (re-entry must not be starved by exhaustion).
+    #[test]
+    fn allocator_assign_at_capacity_refuses_new_alloc_with_typed_error() {
+        let allocator = NetSlotAllocator::new();
+        // Fill the entire slot space with distinct allocs.
+        for slot in 0..=NET_SLOT_MAX {
+            let assigned = allocator
+                .assign(alloc(&format!("alloc-fill-{slot}")))
+                .expect("each fill assign within capacity succeeds");
+            assert_eq!(
+                assigned,
+                NetSlot::new(slot).expect("in range"),
+                "the free-list assigns ascending slots while filling"
+            );
+        }
+
+        // A NEW distinct alloc at capacity is refused with the typed error —
+        // NOT a panic, NOT a reused (collision) slot.
+        assert_eq!(
+            allocator.assign(alloc("alloc-overflow-0")),
+            Err(NetSlotExhausted { capacity: u32::from(NET_SLOT_MAX) + 1 }),
+            "a new alloc at full capacity is refused with NetSlotExhausted, never a reused slot"
+        );
+
+        // An ALREADY-HELD alloc still re-assigns at capacity (idempotent
+        // re-entry returns its existing slot — exhaustion gates only NEW claims).
+        assert_eq!(
+            allocator.assign(alloc("alloc-fill-0")).expect("held alloc re-assigns at capacity"),
+            NetSlot::new(0).expect("0 in range"),
+            "an already-held alloc re-assigns idempotently even when the space is full"
+        );
+    }
+
+    /// WRAPPER — `snapshot` reflects the live `alloc → slot` bindings (the
+    /// restart-rebuild / status read surface, criterion 6). After two assigns
+    /// and one release, the snapshot contains exactly the still-held alloc with
+    /// its slot. Kills a "snapshot -> BTreeMap::new()" mutant (which would make
+    /// the restart rebuild see nothing held).
+    #[test]
+    fn snapshot_reflects_the_live_alloc_to_slot_bindings() {
+        let allocator = NetSlotAllocator::new();
+        let a = alloc("alloc-aaa-0");
+        let b = alloc("alloc-bbb-0");
+        let a_slot = allocator.assign(a.clone()).expect("a assign");
+        let _b_slot = allocator.assign(b.clone()).expect("b assign");
+        allocator.release(&b);
+
+        let snap = allocator.snapshot();
+        assert_eq!(
+            snap.get(&a).copied(),
+            Some(a_slot),
+            "snapshot reflects the still-held alloc's slot binding (not an empty map)"
+        );
+        assert!(!snap.contains_key(&b), "a released alloc is absent from the snapshot");
+        assert_eq!(snap.len(), 1, "snapshot contains exactly the one still-held alloc");
     }
 }
