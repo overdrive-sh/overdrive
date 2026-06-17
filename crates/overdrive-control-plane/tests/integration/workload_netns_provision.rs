@@ -202,11 +202,39 @@ fn tx_checksumming_on(args: &[&str]) -> Option<bool> {
     })
 }
 
+/// `ip netns exec <netns> cat /etc/resolv.conf` stdout — the per-netns
+/// resolv.conf as the WORKLOAD sees it (the `ip netns` per-netns bind-mount
+/// of `/etc/netns/<netns>/resolv.conf` over `/etc/resolv.conf` inside the
+/// namespace). `None` when the exec/cat fails (no per-netns file → the
+/// bind-mount does not apply and the host file is read; we read the per-netns
+/// host path directly in the assertion to keep the "what the workload sees"
+/// vs "host file" distinction sharp).
+fn netns_resolv_conf(netns: &str) -> Option<String> {
+    let out = Command::new("ip")
+        .args(["netns", "exec", netns, "cat", "/etc/resolv.conf"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The HOST's own `/etc/resolv.conf` (read directly, NOT through any netns).
+/// Used to assert the per-netns injection never touched the host file
+/// (criterion 4). `None` when the host has no `/etc/resolv.conf`.
+fn host_resolv_conf() -> Option<String> {
+    std::fs::read_to_string("/etc/resolv.conf").ok()
+}
+
 /// Sweep any pre-existing residue for this test's plan so a crashed prior
-/// run cannot poison the fresh-provision / zero-residue assertions.
+/// run cannot poison the fresh-provision / zero-residue assertions. Also
+/// sweeps the per-netns resolv.conf dir (`ip netns del` does NOT remove
+/// `/etc/netns/<ns>/`, so a crashed prior run can leave it behind).
 fn sweep(plan: &WorkloadNetnsPlan) {
     let _ = Command::new("ip").args(["netns", "del", &plan.netns]).output();
     let _ = Command::new("ip").args(["link", "del", &plan.host_veth]).output();
+    let _ = std::fs::remove_dir_all(format!("/etc/netns/{}", plan.netns));
 }
 
 /// THE Tier-3 acceptance scenario (criteria 2–4): one provision/idempotency/
@@ -377,5 +405,107 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
     teardown_workload_netns(p).expect("teardown must be idempotent (absent is benign)");
 
     // Drop runs the guard's teardown again — also a benign no-op.
+    drop(guard);
+}
+
+/// THE Tier-3 acceptance scenario for step 02-03 (criteria 1, 2, 4): the
+/// node-local DNS responder address is injected into the per-workload netns's
+/// OWN `/etc/resolv.conf` (the stock `ip netns` per-netns convention — a
+/// bind-mount of `/etc/netns/<ns>/resolv.conf` over `/etc/resolv.conf` inside
+/// the namespace), the injection is part of the SAME converge-on-boot pass,
+/// re-provision is a no-op, and the HOST's own `/etc/resolv.conf` is never
+/// touched.
+///
+/// `provision_injects_node_local_responder_into_netns_resolv_conf`:
+///
+/// 1. FRESH provision injects `nameserver <responder_addr>` into the netns's
+///    own resolv.conf — `ip netns exec <ns> cat /etc/resolv.conf` shows the
+///    EXACT injected line.
+/// 2. The HOST's `/etc/resolv.conf` does NOT contain the injected responder
+///    line (per-netns, host-unaffected — criterion 4). The plan's responder
+///    addr (`10.99.255.x`) is a non-routable test address that would never
+///    already be a host nameserver, so this assertion is non-vacuous.
+/// 3. RE-running provision is an all-noop idempotent converge — the per-netns
+///    resolv.conf still shows EXACTLY the injected line (content stable).
+/// 4. Teardown removes the per-netns resolv.conf leaving ZERO residue.
+#[test]
+fn provision_injects_node_local_responder_into_netns_resolv_conf() {
+    let plan = plan();
+    sweep(&plan);
+    assert!(!netns_present(&plan.netns), "precondition: netns must be absent");
+
+    // The injected line we expect, derived from the plan's responder INPUT.
+    let responder = plan.responder_addr;
+    let want_line = format!("nameserver {responder}");
+
+    // Precondition: the responder addr is NOT already a host nameserver, so
+    // the host-unaffected assertion below cannot pass vacuously.
+    if let Some(host_before) = host_resolv_conf() {
+        assert!(
+            !host_before.contains(&want_line),
+            "precondition: responder {responder} must not already be in the host resolv.conf \
+             (else the host-unaffected assertion would be vacuous); host file was:\n{host_before}",
+        );
+    }
+
+    let guard = NetnsGuard { plan };
+    let p = &guard.plan;
+
+    // --- 1. FRESH provision injects the responder into the netns resolv.conf ---
+    match provision_workload_netns(p) {
+        Ok(()) => {}
+        Err(err) if is_cap_skip(&err) => {
+            eprintln!(
+                "SKIP provision_injects_node_local_responder_into_netns_resolv_conf: \
+                 CAP_NET_ADMIN required ({err})"
+            );
+            return;
+        }
+        Err(err) => panic!("fresh provision failed for a non-privilege reason: {err}"),
+    }
+
+    // LOAD-BEARING: the workload (via the netns bind-mount) sees the EXACT
+    // injected `nameserver <responder>` line. If the WriteResolvConf step did
+    // not run, the netns would have no per-netns resolv.conf and this would
+    // show the host file (which the precondition above proved does NOT carry
+    // the line) → assertion FAILS.
+    let injected = netns_resolv_conf(&p.netns)
+        .expect("the per-workload netns must have a resolv.conf after provision");
+    assert!(
+        injected.lines().any(|l| l.trim() == want_line),
+        "netns resolv.conf must contain the exact injected line {want_line:?}, got:\n{injected}",
+    );
+
+    // --- 2. The HOST's own resolv.conf is UNAFFECTED (criterion 4) ---
+    // The injection is per-netns; the host file must not carry the responder
+    // line. Non-vacuous: the precondition proved the line was absent before.
+    if let Some(host_after) = host_resolv_conf() {
+        assert!(
+            !host_after.contains(&want_line),
+            "host /etc/resolv.conf must NOT contain the injected responder line {want_line:?} \
+             (the injection is per-netns); host file was:\n{host_after}",
+        );
+    }
+
+    // --- 3. RE-run provision: idempotent no-op, content stable ---
+    provision_workload_netns(p)
+        .expect("second provision over a complete netns must converge silently");
+    let reinjected = netns_resolv_conf(&p.netns)
+        .expect("the per-workload netns resolv.conf must still exist after re-converge");
+    assert!(
+        reinjected.lines().any(|l| l.trim() == want_line),
+        "netns resolv.conf must still contain the exact injected line after re-converge, got:\n{reinjected}",
+    );
+
+    // --- 4. Teardown leaves ZERO resolv.conf residue ---
+    teardown_workload_netns(p).expect("teardown must succeed");
+    assert!(!netns_present(&p.netns), "netns must be gone after teardown");
+    // `ip netns del` does NOT reap `/etc/netns/<ns>/`; the production teardown
+    // must remove it so a re-provision under the same slot starts clean.
+    assert!(
+        !std::path::Path::new(&format!("/etc/netns/{}/resolv.conf", p.netns)).exists(),
+        "per-netns resolv.conf must be gone after teardown (zero residue)",
+    );
+
     drop(guard);
 }

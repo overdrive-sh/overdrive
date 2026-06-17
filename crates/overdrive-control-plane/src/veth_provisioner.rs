@@ -186,6 +186,16 @@ pub enum VethProvisionError {
     /// drops the workload's packets.
     #[error("`sysctl -w {key}={value}` failed (status={status:?}): {stderr}")]
     SysctlSetFailed { key: String, value: String, stderr: String, status: Option<i32> },
+    /// Writing the per-netns `/etc/netns/<netns>/resolv.conf` (the stock
+    /// `ip netns` per-netns convention — bind-mounted over `/etc/resolv.conf`
+    /// inside the namespace; the D-TME-9 / Q5a node-local DNS responder
+    /// injection) failed — creating the `/etc/netns/<netns>/` directory or
+    /// writing the file. Per ADR-0071 § Enforcement the injection is part of
+    /// the SAME converge-on-boot pass, so a netns whose resolv.conf cannot be
+    /// written refuses the boot rather than silently shipping a workload that
+    /// resolves names against the wrong (host) nameserver.
+    #[error("writing per-netns resolv.conf `{path}` failed: {source}")]
+    ResolvConfWriteFailed { path: String, source: std::io::Error },
 }
 
 /// Derive the [`VethProvisionPlan`] for the single-node veth pair from
@@ -524,6 +534,20 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
     }
 }
 
+/// The desired body of a per-workload netns's `/etc/resolv.conf`: a single
+/// `nameserver <responder_addr>` line with a trailing newline (D-TME-9 / Q5a,
+/// the Fly.io `fdaa::3` injection model). This is the stock single-`nameserver`
+/// shape the `ip netns` per-netns convention bind-mounts over
+/// `/etc/resolv.conf` inside the namespace.
+///
+/// Pure — performs no I/O, deterministic (same `responder_addr` → same body).
+/// The responder address is a plan INPUT (`WorkloadNetnsPlan::responder_addr`),
+/// never derived state; this function only formats it.
+#[must_use]
+pub fn resolv_conf_contents(responder_addr: Ipv4Addr) -> String {
+    format!("nameserver {responder_addr}\n")
+}
+
 /// Observed actual kernel state of one allocation's netns + veth pair — the
 /// input to the pure [`workload_converge_steps`] diff. Each field is a single
 /// observable fact a thin observer reads from the kernel (`ip netns list`,
@@ -534,11 +558,12 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "fifteen independent observed kernel facts (netns presence, host-veth/workload-veth \
+    reason = "sixteen independent observed kernel facts (netns presence, host-veth/workload-veth \
               presence, in-netns move, per-end addr, host-end up, in-netns-end up, netns lo up, \
               default route, per-end tx-offload, ip_forward, global rp_filter, host-veth \
-              rp_filter); a flag-per-fact value object is the clearest model of the converge input \
-              and mirrors the host-netns ObservedVeth shape ADR-0061 § 3.1 prescribes"
+              rp_filter, per-netns resolv.conf injected); a flag-per-fact value object is the \
+              clearest model of the converge input and mirrors the host-netns ObservedVeth shape \
+              ADR-0061 § 3.1 prescribes"
 )]
 pub struct ObservedWorkloadVeth {
     /// The per-alloc netns (`ovd-ns-<4hex-slot>`) exists.
@@ -583,6 +608,13 @@ pub struct ObservedWorkloadVeth {
     /// so a rebuilt pair always re-needs this (independent of the global
     /// relaxation above — S3, the lossy single bool is replaced by these two).
     pub host_veth_rp_filter_relaxed: bool,
+    /// The per-netns `/etc/netns/<netns>/resolv.conf` already carries the
+    /// desired `nameserver <responder_addr>` line (D-TME-9 / Q5a). Read by the
+    /// observer from the host-side per-netns file; when `false` the converge
+    /// emits [`WorkloadVethStep::WriteResolvConf`]. A fresh netns
+    /// (`!netns_present`) always re-needs the write — the per-netns dir is
+    /// recreated with the netns.
+    pub resolv_conf_injected: bool,
 }
 
 /// A single idempotent convergence action the executor applies (via `ip
@@ -620,6 +652,15 @@ pub enum WorkloadVethStep {
     SetLoopbackUp,
     /// `ip -n <netns> route add default via <gateway> dev <workload_veth>`.
     AddDefaultRoute,
+    /// Write `/etc/netns/<netns>/resolv.conf` (creating `/etc/netns/<netns>/`
+    /// first) with `nameserver <responder_addr>` — the stock `ip netns`
+    /// per-netns convention, bind-mounted over `/etc/resolv.conf` inside the
+    /// namespace (the Fly.io `fdaa::3` node-local DNS injection model, D-TME-9
+    /// / Q5a). Needs only the netns to exist; the responder address is a plan
+    /// INPUT (`plan.responder_addr`), not derived state. Per ADR-0071 §
+    /// Enforcement this write is part of the same converge-on-boot pass — a
+    /// netns whose resolv.conf cannot be written refuses the boot.
+    WriteResolvConf,
     /// `sysctl -w net.ipv4.ip_forward=1` — the spike-proven egress-routing
     /// prerequisite.
     EnableIpForward,
@@ -663,9 +704,12 @@ pub enum WorkloadVethStep {
 ///   `AddHostAddr` / `AddWorkloadAddr` when an address is absent,
 ///   `SetHostVethUp` when the host end is down, `SetWorkloadVethUp` when the
 ///   in-netns end is down (B2), `SetLoopbackUp` when the netns `lo` is down
-///   (B2), `AddDefaultRoute` when the in-netns default route is absent. The
-///   two up-steps are ordered AFTER `MoveWorkloadEndIntoNetns` — a netns
-///   provisioned from the plan must be able to carry a packet.
+///   (B2), `AddDefaultRoute` when the in-netns default route is absent,
+///   `WriteResolvConf` when the per-netns resolv.conf is not yet injected (or
+///   the netns was freshly created — the per-netns dir drops with the old
+///   namespace; D-TME-9 / Q5a). The two up-steps are ordered AFTER
+///   `MoveWorkloadEndIntoNetns` — a netns provisioned from the plan must be
+///   able to carry a packet.
 /// - **Host prerequisites** → `EnableIpForward` when `ip_forward` is off,
 ///   `RelaxGlobalRpFilter` when the GLOBAL `rp_filter` relaxation is missing
 ///   (host-global; survives a veth rebuild), `RelaxHostVethRpFilter` when the
@@ -739,6 +783,16 @@ pub fn workload_converge_steps(
     // In-netns default route: needed when freshly (re)built OR when absent.
     if pair_rebuilt || !observed.default_route_present {
         steps.push(WorkloadVethStep::AddDefaultRoute);
+    }
+    // Per-netns resolv.conf injection (D-TME-9 / Q5a): write the node-local
+    // DNS responder into `/etc/netns/<netns>/resolv.conf`. A fresh netns
+    // (CreateNetns) drops the per-netns dir with the old namespace, so it
+    // always re-needs the write (mirrors SetLoopbackUp keying on
+    // `!netns_present`); otherwise emit only when the desired line is not yet
+    // injected. Keyed on the observed `resolv_conf_injected` fact so the pure
+    // diff stays observed-only and a converged netns re-emits nothing.
+    if !observed.netns_present || !observed.resolv_conf_injected {
+        steps.push(WorkloadVethStep::WriteResolvConf);
     }
 
     // Spike-proven host prerequisites. ip_forward + the GLOBAL rp_filter are
@@ -1396,22 +1450,31 @@ pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProv
 /// `ip netns del <netns>` reaps the in-netns veth end (it dies with the
 /// netns); a follow-up idempotent `ip link del <host_veth>` reaps the
 /// host-side end if it survived (it should die with its peer, but the del is
-/// belt-and-suspenders for a corrupted half-pair). Idempotent — an absent
-/// netns / link is benign (the teardown success case), so a second teardown
-/// is a silent no-op.
+/// belt-and-suspenders for a corrupted half-pair). The per-netns resolv.conf
+/// dir (`/etc/netns/<netns>/`) is NOT reaped by `ip netns del`, so it is
+/// removed explicitly — otherwise a re-provision under the same slot would
+/// adopt a stale responder line. Idempotent — an absent netns / link /
+/// resolv.conf dir is benign (the teardown success case), so a second
+/// teardown is a silent no-op.
 ///
 /// # Errors
 ///
 /// Returns [`VethProvisionError::NetnsDelFailed`] / [`VethProvisionError::LinkDelFailed`]
 /// only on a NON-benign failure (e.g. permission denied); "absent" is
-/// swallowed.
+/// swallowed. A failure removing the per-netns resolv.conf dir surfaces as
+/// [`VethProvisionError::ResolvConfWriteFailed`] (an absent dir is benign).
 pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
     // `ip netns del <netns>` reaps the in-netns veth end with the namespace.
     netns_del(&plan.netns)?;
     // Belt-and-suspenders: reap the host-side end if it survived (it should
     // die with its peer, but a corrupted half-pair may leave it). `link_del`
     // swallows "absent", so this is a no-op in the common case.
-    link_del(&plan.host_veth)
+    link_del(&plan.host_veth)?;
+    // `ip netns del` does NOT remove `/etc/netns/<netns>/`; reap it so a
+    // re-provision under the same slot starts clean (zero residue). An absent
+    // dir is benign (NotFound swallowed); any other io::Error is fatal so a
+    // permission failure does not silently leave stale DNS config behind.
+    resolv_conf_dir_remove(&plan.netns)
 }
 
 /// Read the actual kernel state of one allocation's netns + veth pair into
@@ -1474,6 +1537,13 @@ fn observe_workload_netns(
     let host_veth_rp_filter_relaxed = host_veth_present
         && sysctl_rp_filter_relaxed(&format!("net.ipv4.conf.{}.rp_filter", plan.host_veth));
 
+    // Per-netns resolv.conf injection: the desired `nameserver <responder>`
+    // line is already present in `/etc/netns/<netns>/resolv.conf`. Only
+    // meaningful once the netns exists (the per-netns dir drops with the
+    // namespace). Read directly from the host-side per-netns file — the same
+    // path the executor writes, so observer and consumer agree on "injected".
+    let resolv_conf_injected = netns_present && resolv_conf_has_responder(plan);
+
     Ok(ObservedWorkloadVeth {
         netns_present,
         host_veth_present,
@@ -1490,6 +1560,7 @@ fn observe_workload_netns(
         ip_forward_enabled,
         rp_filter_global_relaxed,
         host_veth_rp_filter_relaxed,
+        resolv_conf_injected,
     })
 }
 
@@ -1532,6 +1603,7 @@ fn execute_workload_step(
         WorkloadVethStep::SetWorkloadVethUp => netns_link_up(&plan.netns, &plan.workload_veth),
         WorkloadVethStep::SetLoopbackUp => netns_link_up(&plan.netns, "lo"),
         WorkloadVethStep::AddDefaultRoute => netns_default_route_add(&plan.netns, plan.gateway),
+        WorkloadVethStep::WriteResolvConf => resolv_conf_write(plan),
         WorkloadVethStep::EnableIpForward => sysctl_set("net.ipv4.ip_forward", "1"),
         WorkloadVethStep::RelaxGlobalRpFilter => {
             sysctl_set("net.ipv4.conf.all.rp_filter", "0")?;
@@ -1751,6 +1823,70 @@ fn netns_tx_offload_off(netns: &str, iface: &str) -> Result<(), VethProvisionErr
     })
 }
 
+/// The host-side directory the `ip netns` per-netns convention bind-mounts
+/// `resolv.conf` from: `/etc/netns/<netns>/`.
+fn resolv_conf_dir(netns: &str) -> String {
+    format!("/etc/netns/{netns}")
+}
+
+/// The host-side per-netns resolv.conf path: `/etc/netns/<netns>/resolv.conf`.
+/// `ip netns exec <netns> …` bind-mounts THIS file over `/etc/resolv.conf`
+/// inside the namespace iff it exists.
+fn resolv_conf_path(netns: &str) -> String {
+    format!("{}/resolv.conf", resolv_conf_dir(netns))
+}
+
+/// Write the per-netns `/etc/netns/<netns>/resolv.conf` with the node-local
+/// DNS responder (`nameserver <responder_addr>`), creating `/etc/netns/<netns>/`
+/// first (idempotent, `mkdir -p`-shaped). Overwrite-to-desired-content, so a
+/// re-apply over an already-injected file is safe (the converge gate only
+/// emits this step when not yet injected, so a converged netns re-emits
+/// nothing). A write failure refuses the boot per ADR-0071 § Enforcement (a
+/// netns that resolves names against the wrong nameserver is a silent
+/// correctness landmine), surfacing as
+/// [`VethProvisionError::ResolvConfWriteFailed`] with the offending path and
+/// the originating `io::Error` (distinct failure mode per `.claude/rules/
+/// development.md` § Errors — never an `unwrap_or_default()` on a fallible
+/// write). Sync `std::fs` is correct here: the provisioner is a synchronous
+/// boot-time one-shot, NOT an `async fn` (the no-blocking-fs-in-async rule
+/// does not apply).
+fn resolv_conf_write(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+    let dir = resolv_conf_dir(&plan.netns);
+    std::fs::create_dir_all(&dir).map_err(|source| VethProvisionError::ResolvConfWriteFailed {
+        path: dir.clone(),
+        source,
+    })?;
+    let path = resolv_conf_path(&plan.netns);
+    std::fs::write(&path, resolv_conf_contents(plan.responder_addr))
+        .map_err(|source| VethProvisionError::ResolvConfWriteFailed { path, source })
+}
+
+/// True iff `/etc/netns/<netns>/resolv.conf` already carries the desired
+/// `nameserver <responder_addr>` line. Conservative on a read failure
+/// (missing file, unreadable) → `false`, so the converge re-emits the write
+/// (the safe default). An unreadable-for-another-reason file (e.g. permission
+/// denied) also reads `false` here; the subsequent write then surfaces the
+/// real `io::Error` via [`resolv_conf_write`], so the failure is not silently
+/// swallowed — it is deferred to the write that refuses the boot.
+fn resolv_conf_has_responder(plan: &WorkloadNetnsPlan) -> bool {
+    let want = resolv_conf_contents(plan.responder_addr);
+    matches!(std::fs::read_to_string(resolv_conf_path(&plan.netns)), Ok(body) if body == want)
+}
+
+/// Remove the per-netns resolv.conf dir `/etc/netns/<netns>/` (teardown). An
+/// absent dir is benign (`NotFound` swallowed — the teardown success case);
+/// any other `io::Error` (e.g. permission denied) is fatal so a teardown does
+/// not silently leave stale DNS config behind under a slot a later provision
+/// may reuse.
+fn resolv_conf_dir_remove(netns: &str) -> Result<(), VethProvisionError> {
+    let dir = resolv_conf_dir(netns);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(VethProvisionError::ResolvConfWriteFailed { path: dir, source }),
+    }
+}
+
 /// `sysctl -w <key>=<value>`. The `ip_forward` / `rp_filter` knobs are
 /// load-bearing for egress routing + asymmetric-ingress survival, so a
 /// failure is fatal (refuse the boot rather than ship a path that drops the
@@ -1897,8 +2033,8 @@ mod tests {
     use super::{
         NET_SLOT_MAX, NetSlot, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
         WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
-        derive_veth_plan, derive_workload_netns_plan, link_absent, tx_checksumming_on,
-        tx_offload_benign, workload_converge_steps,
+        derive_veth_plan, derive_workload_netns_plan, link_absent, resolv_conf_contents,
+        tx_checksumming_on, tx_offload_benign, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use proptest::prelude::*;
@@ -2419,6 +2555,7 @@ mod tests {
             ip_forward_enabled: true,
             rp_filter_global_relaxed: true,
             host_veth_rp_filter_relaxed: true,
+            resolv_conf_injected: true,
         }
     }
 
@@ -2442,6 +2579,7 @@ mod tests {
             WorkloadVethStep::SetWorkloadVethUp,
             WorkloadVethStep::SetLoopbackUp,
             WorkloadVethStep::AddDefaultRoute,
+            WorkloadVethStep::WriteResolvConf,
             WorkloadVethStep::EnableIpForward,
             WorkloadVethStep::RelaxGlobalRpFilter,
             WorkloadVethStep::RelaxHostVethRpFilter,
@@ -2682,6 +2820,7 @@ mod tests {
             ip_forward_enabled: false,
             rp_filter_global_relaxed: false,
             host_veth_rp_filter_relaxed: false,
+            resolv_conf_injected: false,
         };
 
         let steps = workload_converge_steps(&plan, &observed);
@@ -2767,6 +2906,11 @@ mod tests {
             ip_forward_enabled: true,
             rp_filter_global_relaxed: true,
             host_veth_rp_filter_relaxed: true,
+            // The per-netns resolv.conf is per-NETNS, not per-pair — it
+            // survives a veth-pair rebuild (the netns is not torn down), so the
+            // injected line is still present and WriteResolvConf is NOT
+            // re-emitted (mirrors lo_up surviving the rebuild).
+            resolv_conf_injected: true,
         };
 
         let steps = workload_converge_steps(&plan, &observed);
@@ -2951,6 +3095,56 @@ mod tests {
         );
     }
 
+    /// Default-lane unit (criterion 5): the PURE "what should resolv.conf
+    /// contain" derivation. Given the node-local DNS responder INPUT, the
+    /// per-netns resolv.conf body is exactly `nameserver <addr>\n` — the stock
+    /// single-`nameserver` shape `ip netns` bind-mounts into the namespace
+    /// (the Fly.io `fdaa::3` injection model, D-TME-9 / Q5a). Input variations
+    /// of one derivation behaviour (Mandate 5) — one parametrised assertion.
+    #[test]
+    fn resolv_conf_contents_is_a_single_nameserver_line() {
+        let cases = [
+            Ipv4Addr::new(10, 99, 255, 1),
+            Ipv4Addr::new(169, 254, 0, 53),
+            Ipv4Addr::new(127, 0, 0, 53),
+        ];
+        for addr in cases {
+            assert_eq!(
+                resolv_conf_contents(addr),
+                format!("nameserver {addr}\n"),
+                "resolv.conf body for responder {addr} must be exactly one trailing-newline \
+                 `nameserver <addr>` line",
+            );
+        }
+    }
+
+    /// Converge rule (criterion 1, 5): `WriteResolvConf` is emitted IFF the
+    /// per-netns resolv.conf is not yet injected — present (injected) ⇒ no
+    /// step (idempotent no-op), absent (not injected) ⇒ exactly
+    /// `WriteResolvConf`. Keyed on its own observed fact, on a present,
+    /// otherwise-complete netns+pair (so no other step fires).
+    #[test]
+    fn workload_converge_writes_resolv_conf_only_when_not_injected() {
+        let plan = workload_plan();
+
+        // Already injected (the complete baseline) → no WriteResolvConf.
+        let injected = complete_workload_observed();
+        assert!(
+            !workload_converge_steps(&plan, &injected).contains(&WorkloadVethStep::WriteResolvConf),
+            "an already-injected netns must NOT re-emit WriteResolvConf (idempotent no-op)",
+        );
+
+        // Not yet injected (on a present, complete pair) → exactly
+        // WriteResolvConf and nothing else.
+        let not_injected =
+            ObservedWorkloadVeth { resolv_conf_injected: false, ..complete_workload_observed() };
+        assert_eq!(
+            workload_converge_steps(&plan, &not_injected),
+            vec![WorkloadVethStep::WriteResolvConf],
+            "a netns whose resolv.conf is not injected must emit exactly WriteResolvConf",
+        );
+    }
+
     proptest! {
         /// The named scenario. Property: over the full present-netns,
         /// present-pair partial-state space (each converge-relevant fact
@@ -2987,6 +3181,7 @@ mod tests {
             host_veth_rp in any::<bool>(),
             host_tx_on in any::<bool>(),
             workload_tx_on in any::<bool>(),
+            resolv_injected in any::<bool>(),
         ) {
             let plan = workload_plan();
             let observed = ObservedWorkloadVeth {
@@ -3005,6 +3200,7 @@ mod tests {
                 ip_forward_enabled: ip_forward,
                 rp_filter_global_relaxed: global_rp,
                 host_veth_rp_filter_relaxed: host_veth_rp,
+                resolv_conf_injected: resolv_injected,
             };
 
             let steps = workload_converge_steps(&plan, &observed);
@@ -3032,11 +3228,15 @@ mod tests {
                 steps.contains(&WorkloadVethStep::DisableWorkloadTxOffload),
                 workload_tx_on
             );
+            prop_assert_eq!(
+                steps.contains(&WorkloadVethStep::WriteResolvConf),
+                !resolv_injected
+            );
 
             // (a) complete ⇒ empty.
             let all_satisfied = moved && host_addr && workload_addr && host_up && workload_up
                 && lo_up && route && ip_forward && global_rp && host_veth_rp
-                && !host_tx_on && !workload_tx_on;
+                && !host_tx_on && !workload_tx_on && resolv_injected;
             if all_satisfied {
                 prop_assert!(
                     steps.is_empty(),
@@ -3065,6 +3265,7 @@ mod tests {
                     }
                     WorkloadVethStep::DisableHostTxOffload => after.host_tx_offload_on = false,
                     WorkloadVethStep::DisableWorkloadTxOffload => after.workload_tx_offload_on = false,
+                    WorkloadVethStep::WriteResolvConf => after.resolv_conf_injected = true,
                     WorkloadVethStep::CreateNetns
                     | WorkloadVethStep::CreateVethPair => {
                         prop_assert!(false, "unexpected (re)create over a present netns+pair: {:?}", steps);
