@@ -438,13 +438,21 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
     let responder = plan.responder_addr;
     let want_line = format!("nameserver {responder}");
 
+    // Capture the host resolv.conf BEFORE provision so the criterion-4
+    // host-unaffected assertion below is UNCONDITIONAL (no silent skip when
+    // the host has no /etc/resolv.conf — the 02-02 vacuity shape) AND proves
+    // full content stability, not just line-absence.
+    let host_before = host_resolv_conf();
+
     // Precondition: the responder addr is NOT already a host nameserver, so
-    // the host-unaffected assertion below cannot pass vacuously.
-    if let Some(host_before) = host_resolv_conf() {
+    // the host-unaffected assertion below cannot pass vacuously. A missing
+    // host file trivially cannot carry the line, so this guard is fine to be
+    // conditional.
+    if let Some(host) = &host_before {
         assert!(
-            !host_before.contains(&want_line),
+            !host.contains(&want_line),
             "precondition: responder {responder} must not already be in the host resolv.conf \
-             (else the host-unaffected assertion would be vacuous); host file was:\n{host_before}",
+             (else the host-unaffected assertion would be vacuous); host file was:\n{host}",
         );
     }
 
@@ -477,15 +485,18 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
     );
 
     // --- 2. The HOST's own resolv.conf is UNAFFECTED (criterion 4) ---
-    // The injection is per-netns; the host file must not carry the responder
-    // line. Non-vacuous: the precondition proved the line was absent before.
-    if let Some(host_after) = host_resolv_conf() {
-        assert!(
-            !host_after.contains(&want_line),
-            "host /etc/resolv.conf must NOT contain the injected responder line {want_line:?} \
-             (the injection is per-netns); host file was:\n{host_after}",
-        );
-    }
+    // UNCONDITIONAL (no silent skip): the per-netns injection wrote
+    // /etc/netns/<ns>/resolv.conf, NOT the host /etc/resolv.conf, so the host
+    // file must be byte-identical to its pre-provision state. None-before vs
+    // Some-after would catch an injection that wrongly created the host file;
+    // Some-before with a changed body would catch a host clobber. Strictly
+    // stronger than the prior line-absence check, and it always runs.
+    assert_eq!(
+        host_resolv_conf(),
+        host_before,
+        "host /etc/resolv.conf must be byte-identical after the per-netns injection \
+         (criterion 4 — the injection is per-netns and must not touch the host file)",
+    );
 
     // --- 3. RE-run provision: the injected line is content-stable ---
     // This asserts content STABILITY across a re-converge, not no-op-ness: the
