@@ -125,6 +125,14 @@ mod integration {
     /// `veth_provisioner::provision`: creates-when-absent +
     /// adopts-pre-existing-without-recreating.
     mod veth_provision_idempotent;
+    /// transparent-mtls-enrollment step 02-02 (Path A / ADR-0071) — Tier-3
+    /// per-allocation netns + veth provision. Drives real `ip netns` /
+    /// `ip -n <ns>` / `sysctl` / `ethtool` through
+    /// `veth_provisioner::provision_workload_netns` + `teardown_workload_netns`:
+    /// fresh-create (netns + pair, all three up-states, addresses, default
+    /// route, ip_forward, rp_filter, tx-off) + idempotent re-converge +
+    /// half-provisioned heal + zero-residue teardown.
+    mod workload_netns_provision;
     /// workflow-primitive DISTILL (GH #39, J-PLAT-005) — `@real-io`
     /// journal-persistence scenario S-WP-01-04 (US-WP-2 AC1/AC2, K5/O6).
     /// Exercises a REAL `RedbJournalStore` (real redb file) per

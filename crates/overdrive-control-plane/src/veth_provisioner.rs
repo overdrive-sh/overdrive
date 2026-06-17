@@ -152,6 +152,40 @@ pub enum VethProvisionError {
     /// Spawning `ip(8)` itself failed (binary missing, etc.).
     #[error("spawning `ip(8)` failed: {0}")]
     Spawn(#[from] std::io::Error),
+
+    // --- Per-allocation netns + veth sites (step 02-02) -------------------
+    // Distinct variant per `ip netns` / `ip -n <ns>` / `sysctl`
+    // shell-out site that the host-netns variants above do not cover, per
+    // `.claude/rules/development.md` § Errors (one variant per failing
+    // boundary; never an `Internal(String)` catch-all). The shared sites
+    // (`ip link add`, `ip addr add`, `ip link set up`, `ip route add`,
+    // `ethtool -K`) REUSE the variants above — the executor maps the netns
+    // steps onto them so the operator gets a cause-specific message.
+    /// `ip netns add <netns>` failed (and not because the netns already
+    /// exists — that is swallowed as the idempotent converge success).
+    #[error("`ip netns add {netns}` failed (status={status:?}): {stderr}")]
+    NetnsAddFailed { netns: String, stderr: String, status: Option<i32> },
+    /// `ip netns list` / `ip -n <netns> link show` (the observer's read of
+    /// actual netns/veth state) failed for a reason that is neither
+    /// "present" nor "absent" (e.g. permission denied).
+    #[error("`ip {operation}` failed (status={status:?}): {stderr}")]
+    NetnsObserveFailed { operation: String, stderr: String, status: Option<i32> },
+    /// `ip link set <workload_veth> netns <netns>` (moving the in-netns end
+    /// into the workload netns) failed.
+    #[error("`ip link set {iface} netns {netns}` failed (status={status:?}): {stderr}")]
+    NetnsMoveFailed { iface: String, netns: String, stderr: String, status: Option<i32> },
+    /// `ip netns del <netns>` (teardown) failed for a non-benign reason. An
+    /// "absent" failure is benign (already gone) and is swallowed before
+    /// this surfaces.
+    #[error("`ip netns del {netns}` failed (status={status:?}): {stderr}")]
+    NetnsDelFailed { netns: String, stderr: String, status: Option<i32> },
+    /// `sysctl -w <key>=<value>` (an `ip_forward` / `rp_filter` host
+    /// prerequisite) failed. The knob is load-bearing for egress routing
+    /// (`ip_forward`) and asymmetric-ingress survival (`rp_filter`), so a
+    /// failure refuses the boot rather than silently shipping a path that
+    /// drops the workload's packets.
+    #[error("`sysctl -w {key}={value}` failed (status={status:?}): {stderr}")]
+    SysctlSetFailed { key: String, value: String, stderr: String, status: Option<i32> },
 }
 
 /// Derive the [`VethProvisionPlan`] for the single-node veth pair from
@@ -1315,6 +1349,546 @@ fn tx_offload_benign(stderr: &str) -> bool {
 /// iproute2.
 fn link_absent(stderr: &str) -> bool {
     stderr.contains("does not exist") || stderr.contains("Cannot find device")
+}
+
+// =============================================================================
+// Per-allocation netns + veth real-execution path (step 02-02)
+// =============================================================================
+//
+// The real `ip netns` / `ip -n <ns>` / `sysctl` / `ethtool` execution path
+// for the per-allocation surface, mirroring the host-netns `provision` /
+// `observe` / `execute_step` shape above but operating across a per-alloc
+// network namespace. The pure derivation (`derive_workload_netns_plan`) and
+// the pure converge diff (`workload_converge_steps`) are 02-01; this is the
+// thin impure observer + executor + driver + teardown that applies them.
+
+/// Provision one allocation's netns + veth pair from `plan`.
+///
+/// **Idempotent converge-on-boot** (ADR-0061 § 3.1, per-allocation parallel
+/// of [`provision`]): OBSERVE the actual kernel netns/veth state
+/// ([`observe_workload_netns`]), compute the per-resource diff
+/// ([`workload_converge_steps`]), then EXECUTE each step idempotently
+/// (swallowing `EEXIST` / `File exists` on netns/link/addr/route add). A
+/// complete netns converges to an all-noop; a half-provisioned netns (the
+/// netns survives but the veth is absent — the crash-mid-provision case) is
+/// COMPLETED in place. The provisioner tolerates being interrupted at any
+/// point and re-run from the top (research R7 self-heal — the appliance OS
+/// has no operator shell, so the system must self-heal).
+///
+/// Synchronous (`std::process::Command`) — provisioning is a per-alloc
+/// one-shot at lifecycle-start, matching the host-netns `provision` shape
+/// and keeping the `ip` shell-out out of an `async fn`.
+///
+/// # Errors
+///
+/// Returns a distinct [`VethProvisionError`] variant per failing `ip` /
+/// `sysctl` / `ethtool` step so the caller can branch on which step failed.
+pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+    let observed = observe_workload_netns(plan)?;
+    for step in workload_converge_steps(plan, &observed) {
+        execute_workload_step(plan, step)?;
+    }
+    Ok(())
+}
+
+/// Tear down one allocation's netns + veth pair, leaving ZERO residue.
+///
+/// `ip netns del <netns>` reaps the in-netns veth end (it dies with the
+/// netns); a follow-up idempotent `ip link del <host_veth>` reaps the
+/// host-side end if it survived (it should die with its peer, but the del is
+/// belt-and-suspenders for a corrupted half-pair). Idempotent — an absent
+/// netns / link is benign (the teardown success case), so a second teardown
+/// is a silent no-op.
+///
+/// # Errors
+///
+/// Returns [`VethProvisionError::NetnsDelFailed`] / [`VethProvisionError::LinkDelFailed`]
+/// only on a NON-benign failure (e.g. permission denied); "absent" is
+/// swallowed.
+pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+    // `ip netns del <netns>` reaps the in-netns veth end with the namespace.
+    netns_del(&plan.netns)?;
+    // Belt-and-suspenders: reap the host-side end if it survived (it should
+    // die with its peer, but a corrupted half-pair may leave it). `link_del`
+    // swallows "absent", so this is a no-op in the common case.
+    link_del(&plan.host_veth)
+}
+
+/// Read the actual kernel state of one allocation's netns + veth pair into
+/// an [`ObservedWorkloadVeth`] — the input to the pure
+/// [`workload_converge_steps`] diff (the per-allocation parallel of
+/// [`observe`]).
+///
+/// Each field is one observable fact read via `ip netns list`,
+/// `ip [-n <ns>] link show`, `ip -n <ns> addr/route show`, `sysctl -n`, and
+/// `ethtool -k` (host) / `ip netns exec <ns> ethtool -k` (in-netns). The
+/// observer is a thin impure shim; the KILLABLE decision logic lives in the
+/// pure `workload_converge_steps` (02-01-covered).
+fn observe_workload_netns(
+    plan: &WorkloadNetnsPlan,
+) -> Result<ObservedWorkloadVeth, VethProvisionError> {
+    let netns_present = netns_exists(&plan.netns)?;
+
+    // Host-side end presence + up-state (always in the host netns).
+    let (host_veth_present, host_veth_up) = host_link_state(&plan.host_veth)?;
+
+    // The in-netns end is present iff it is found in EITHER the host netns
+    // (not yet moved) or the workload netns (moved). "in netns" is the
+    // narrower fact: present specifically inside the workload netns.
+    let workload_in_host = host_link_state(&plan.workload_veth)?.0;
+    let (workload_in_ns, workload_veth_up) = if netns_present {
+        netns_link_state(&plan.netns, &plan.workload_veth)?
+    } else {
+        (false, false)
+    };
+    let workload_veth_present = workload_in_host || workload_in_ns;
+    let workload_veth_in_netns = workload_in_ns;
+
+    // Host-side address presence (host netns getifaddrs walk).
+    let host_addr_present = host_veth_present && iface_has_addr(&plan.host_veth, plan.host_addr);
+    // In-netns address presence + default route + lo up — only meaningful
+    // once the end is inside the netns.
+    let workload_addr_present = netns_present
+        && workload_in_ns
+        && netns_iface_has_addr(&plan.netns, &plan.workload_veth, plan.workload_addr)?;
+    let lo_up = netns_present && netns_link_state(&plan.netns, "lo")?.1;
+    let default_route_present =
+        netns_present && netns_default_route_present(&plan.netns, plan.gateway)?;
+
+    // TX-offload: only meaningful for a present end. An absent end reads
+    // `false`; the converge `pair_rebuilt` path re-emits the disable after a
+    // fresh create regardless, so the false never suppresses a needed step.
+    // (Same end-state-insensitive impure-shim class as `observe`.)
+    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
+    let host_tx_offload_on = host_veth_present && host_iface_tx_offload_on(&plan.host_veth);
+    // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
+    let workload_tx_offload_on = netns_present
+        && workload_in_ns
+        && netns_iface_tx_offload_on(&plan.netns, &plan.workload_veth);
+
+    // Host prerequisites — global sysctls + the per-host-veth knob. The
+    // per-host-veth knob only exists once the host-side end exists.
+    let ip_forward_enabled = sysctl_is_one("net.ipv4.ip_forward");
+    let rp_filter_global_relaxed = sysctl_rp_filter_relaxed("net.ipv4.conf.all.rp_filter")
+        && sysctl_rp_filter_relaxed("net.ipv4.conf.lo.rp_filter");
+    let host_veth_rp_filter_relaxed = host_veth_present
+        && sysctl_rp_filter_relaxed(&format!("net.ipv4.conf.{}.rp_filter", plan.host_veth));
+
+    Ok(ObservedWorkloadVeth {
+        netns_present,
+        host_veth_present,
+        workload_veth_present,
+        workload_veth_in_netns,
+        host_addr_present,
+        workload_addr_present,
+        host_veth_up,
+        workload_veth_up,
+        lo_up,
+        default_route_present,
+        host_tx_offload_on,
+        workload_tx_offload_on,
+        ip_forward_enabled,
+        rp_filter_global_relaxed,
+        host_veth_rp_filter_relaxed,
+    })
+}
+
+/// Apply a single [`WorkloadVethStep`] via `ip netns` / `ip -n <ns>` /
+/// `sysctl` / `ethtool` — each arm maps 1:1 to the command in the variant's
+/// rustdoc. Idempotent: `EEXIST` / `File exists` on netns/link/addr/route add
+/// is swallowed; `ip link set up` and `sysctl -w` are idempotent at the
+/// kernel.
+fn execute_workload_step(
+    plan: &WorkloadNetnsPlan,
+    step: WorkloadVethStep,
+) -> Result<(), VethProvisionError> {
+    let prefix = plan.subnet.prefix_len();
+    match step {
+        WorkloadVethStep::CreateNetns => netns_add(&plan.netns),
+        WorkloadVethStep::CreateVethPair => {
+            // `ip link add <workload_veth> type veth peer name <host_veth>`.
+            // A fresh pair may collide with a surviving end from a corrupted
+            // half-pair; del both ends first (idempotent — absent is benign)
+            // so the create cannot hit "File exists".
+            link_del(&plan.host_veth)?;
+            // The in-netns end may have been moved into the netns; del it
+            // there too. Absent (or no netns) is benign.
+            if netns_exists(&plan.netns)? {
+                netns_link_del(&plan.netns, &plan.workload_veth)?;
+            }
+            link_del(&plan.workload_veth)?;
+            workload_link_add(plan)
+        }
+        WorkloadVethStep::MoveWorkloadEndIntoNetns => netns_move(&plan.workload_veth, &plan.netns),
+        WorkloadVethStep::AddHostAddr => {
+            let cidr = format!("{}/{}", plan.host_addr, prefix);
+            addr_add(&plan.host_veth, &cidr)
+        }
+        WorkloadVethStep::AddWorkloadAddr => {
+            let cidr = format!("{}/{}", plan.workload_addr, prefix);
+            netns_addr_add(&plan.netns, &plan.workload_veth, &cidr)
+        }
+        WorkloadVethStep::SetHostVethUp => link_up(&plan.host_veth),
+        WorkloadVethStep::SetWorkloadVethUp => netns_link_up(&plan.netns, &plan.workload_veth),
+        WorkloadVethStep::SetLoopbackUp => netns_link_up(&plan.netns, "lo"),
+        WorkloadVethStep::AddDefaultRoute => netns_default_route_add(&plan.netns, plan.gateway),
+        WorkloadVethStep::EnableIpForward => sysctl_set("net.ipv4.ip_forward", "1"),
+        WorkloadVethStep::RelaxGlobalRpFilter => {
+            sysctl_set("net.ipv4.conf.all.rp_filter", "0")?;
+            sysctl_set("net.ipv4.conf.lo.rp_filter", "0")
+        }
+        WorkloadVethStep::RelaxHostVethRpFilter => {
+            sysctl_set(&format!("net.ipv4.conf.{}.rp_filter", plan.host_veth), "0")
+        }
+        WorkloadVethStep::DisableHostTxOffload => tx_offload_off(&plan.host_veth),
+        WorkloadVethStep::DisableWorkloadTxOffload => {
+            netns_tx_offload_off(&plan.netns, &plan.workload_veth)
+        }
+    }
+}
+
+// ---- per-allocation `ip` / `sysctl` / `ethtool` helpers ----
+
+/// `ip netns add <netns>` — idempotent ("File exists" / "already exists" is
+/// the converge success case, swallowed).
+fn netns_add(netns: &str) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip").args(["netns", "add", netns]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("File exists") || stderr.contains("already exists") {
+        return Ok(());
+    }
+    Err(VethProvisionError::NetnsAddFailed {
+        netns: netns.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip netns del <netns>` — idempotent (an absent netns is benign).
+fn netns_del(netns: &str) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip").args(["netns", "del", netns]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if netns_absent(&stderr) {
+        return Ok(());
+    }
+    Err(VethProvisionError::NetnsDelFailed {
+        netns: netns.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// True iff `<netns>` is listed by `ip netns list`. A non-zero `ip netns
+/// list` exit (e.g. permission denied) surfaces as
+/// [`VethProvisionError::NetnsObserveFailed`].
+fn netns_exists(netns: &str) -> Result<bool, VethProvisionError> {
+    let out = std::process::Command::new("ip").args(["netns", "list"]).output()?;
+    if !out.status.success() {
+        return Err(VethProvisionError::NetnsObserveFailed {
+            operation: "netns list".to_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            status: out.status.code(),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Each line is e.g. `ovd-ns-0fff (id: 0)` — match the first token.
+    Ok(stdout.lines().any(|line| line.split_whitespace().next() == Some(netns)))
+}
+
+/// `ip link add <workload_veth> type veth peer name <host_veth>` — the pair
+/// is created with the in-netns end named `workload_veth` and the host end
+/// named `host_veth` (both born in the host netns; the move follows).
+fn workload_link_add(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip")
+        .args(["link", "add", &plan.workload_veth, "type", "veth", "peer", "name", &plan.host_veth])
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(VethProvisionError::LinkAddFailed {
+        // The host-netns variant names client/backend; for the per-alloc pair
+        // the "client" slot carries the in-netns end and the "backend" slot
+        // the host end — the message still names the exact `ip link add` args.
+        client_iface: plan.workload_veth.clone(),
+        backend_iface: plan.host_veth.clone(),
+        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip link set <iface> netns <netns>` — move `iface` from the host netns
+/// into the workload netns. Idempotent at the kernel only in the sense that
+/// a second move of an already-moved iface fails ("Cannot find device" in
+/// the host netns) — but converge only emits this when the end is NOT yet in
+/// the netns, so the move always has the iface present in the host netns.
+fn netns_move(iface: &str, netns: &str) -> Result<(), VethProvisionError> {
+    let out =
+        std::process::Command::new("ip").args(["link", "set", iface, "netns", netns]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(VethProvisionError::NetnsMoveFailed {
+        iface: iface.to_owned(),
+        netns: netns.to_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip -n <netns> addr add <cidr> dev <iface>`. Idempotent — swallows
+/// `EEXIST` / `File exists` (already-assigned is the converge success case).
+fn netns_addr_add(netns: &str, iface: &str, cidr: &str) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip")
+        .args(["-n", netns, "addr", "add", cidr, "dev", iface])
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("File exists") {
+        return Ok(());
+    }
+    Err(VethProvisionError::AddrAddFailed {
+        iface: iface.to_owned(),
+        cidr: cidr.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip -n <netns> link set <iface> up`. Idempotent at the kernel.
+fn netns_link_up(netns: &str, iface: &str) -> Result<(), VethProvisionError> {
+    let out = std::process::Command::new("ip")
+        .args(["-n", netns, "link", "set", iface, "up"])
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(VethProvisionError::LinkUpFailed {
+        iface: iface.to_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip -n <netns> link del <iface>` — del an in-netns end. "Absent" is
+/// benign (swallowed); used by the rebuild path to clear a moved in-netns
+/// end before the pair is recreated.
+fn netns_link_del(netns: &str, iface: &str) -> Result<(), VethProvisionError> {
+    let out =
+        std::process::Command::new("ip").args(["-n", netns, "link", "del", iface]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if link_absent(&stderr) {
+        return Ok(());
+    }
+    Err(VethProvisionError::LinkDelFailed {
+        iface: iface.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip -n <netns> route add default via <gateway>`. Idempotent — swallows
+/// `File exists` (the route already present is the converge success case).
+fn netns_default_route_add(netns: &str, gateway: Ipv4Addr) -> Result<(), VethProvisionError> {
+    let gw = gateway.to_string();
+    let out = std::process::Command::new("ip")
+        .args(["-n", netns, "route", "add", "default", "via", &gw])
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("File exists") {
+        return Ok(());
+    }
+    Err(VethProvisionError::RouteAddFailed {
+        cidr: "default".to_owned(),
+        iface: format!("via {gw} (netns {netns})"),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip netns exec <netns> ethtool -K <iface> tx off` — disable
+/// TX-checksum-offload on the in-netns end (same incremental-L4-csum
+/// invariant as the host-side [`tx_offload_off`]; a "fixed / not supported"
+/// non-zero exit is benign, EPERM is fatal).
+fn netns_tx_offload_off(netns: &str, iface: &str) -> Result<(), VethProvisionError> {
+    let out = match std::process::Command::new("ip")
+        .args(["netns", "exec", netns, "ethtool", "-K", iface, "tx", "off"])
+        .output()
+    {
+        Ok(out) => out,
+        Err(err) => {
+            return Err(VethProvisionError::TxOffloadDisableFailed {
+                iface: iface.to_owned(),
+                stderr: format!("spawning `ip netns exec … ethtool` failed: {err}"),
+                status: None,
+            });
+        }
+    };
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if tx_offload_benign(&stderr) {
+        return Ok(());
+    }
+    Err(VethProvisionError::TxOffloadDisableFailed {
+        iface: iface.to_owned(),
+        stderr: stderr.trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `sysctl -w <key>=<value>`. The `ip_forward` / `rp_filter` knobs are
+/// load-bearing for egress routing + asymmetric-ingress survival, so a
+/// failure is fatal (refuse the boot rather than ship a path that drops the
+/// workload's packets).
+fn sysctl_set(key: &str, value: &str) -> Result<(), VethProvisionError> {
+    let out =
+        std::process::Command::new("sysctl").args(["-w", &format!("{key}={value}")]).output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(VethProvisionError::SysctlSetFailed {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        status: out.status.code(),
+    })
+}
+
+/// `ip link show <iface>` in the HOST netns → `(present, up)`. Absent →
+/// `(false, false)`; any other non-zero exit →
+/// [`VethProvisionError::NetnsObserveFailed`].
+fn host_link_state(iface: &str) -> Result<(bool, bool), VethProvisionError> {
+    link_state(iface)
+}
+
+/// `ip -n <netns> link show <iface>` → `(present, up)`. Absent →
+/// `(false, false)`; any other non-zero exit →
+/// [`VethProvisionError::NetnsObserveFailed`].
+fn netns_link_state(netns: &str, iface: &str) -> Result<(bool, bool), VethProvisionError> {
+    let show =
+        std::process::Command::new("ip").args(["-n", netns, "link", "show", iface]).output()?;
+    if show.status.success() {
+        let stdout = String::from_utf8_lossy(&show.stdout);
+        let up = stdout.contains(",UP,")
+            || stdout.contains("<UP,")
+            || stdout.contains(",UP>")
+            || stdout.contains("state UP");
+        return Ok((true, up));
+    }
+    let stderr = String::from_utf8_lossy(&show.stderr);
+    if link_absent(&stderr) {
+        return Ok((false, false));
+    }
+    Err(VethProvisionError::NetnsObserveFailed {
+        operation: format!("-n {netns} link show {iface}"),
+        stderr: stderr.trim().to_owned(),
+        status: show.status.code(),
+    })
+}
+
+/// True when `ip -n <netns> addr show dev <iface>` reports `want` bound.
+/// A non-zero `ip addr show` (e.g. absent iface) → `Ok(false)`; a spawn
+/// failure propagates.
+fn netns_iface_has_addr(
+    netns: &str,
+    iface: &str,
+    want: Ipv4Addr,
+) -> Result<bool, VethProvisionError> {
+    let out = std::process::Command::new("ip")
+        .args(["-n", netns, "addr", "show", "dev", iface])
+        .output()?;
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let needle = format!("inet {want}/");
+    Ok(String::from_utf8_lossy(&out.stdout).contains(&needle))
+}
+
+/// True when `ip -n <netns> route show default` carries `default via
+/// <gateway>`.
+fn netns_default_route_present(netns: &str, gateway: Ipv4Addr) -> Result<bool, VethProvisionError> {
+    let out = std::process::Command::new("ip")
+        .args(["-n", netns, "route", "show", "default"])
+        .output()?;
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let needle = format!("default via {gateway}");
+    Ok(String::from_utf8_lossy(&out.stdout).contains(&needle))
+}
+
+/// True when `ethtool -k <iface>` (host netns) reports `tx-checksumming:
+/// on`. Conservative on failure (returns `false`) — same untestable impure
+/// shim class as the host-side [`iface_tx_offload_on`].
+// mutants: skip — impure I/O shim; body mutants are end-state-insensitive
+// (the downstream disable is idempotent), same class as `iface_tx_offload_on`.
+fn host_iface_tx_offload_on(iface: &str) -> bool {
+    iface_tx_offload_on(iface)
+}
+
+/// True when `ip netns exec <netns> ethtool -k <iface>` reports
+/// `tx-checksumming: on`. Conservative on failure (returns `false`).
+// mutants: skip — impure I/O shim; body mutants are end-state-insensitive
+// (the downstream disable is idempotent), same class as `iface_tx_offload_on`.
+fn netns_iface_tx_offload_on(netns: &str, iface: &str) -> bool {
+    let Ok(out) = std::process::Command::new("ip")
+        .args(["netns", "exec", netns, "ethtool", "-k", iface])
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    tx_checksumming_on(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Read a `sysctl` integer knob, returning `None` when it cannot be read
+/// (missing per-iface knob, spawn failure, non-integer output). A `NotFound`
+/// per-iface knob legitimately reads `None` — the converge then treats it as
+/// "not relaxed" / "not enabled" (the strict default).
+fn sysctl_read(key: &str) -> Option<i64> {
+    let out = std::process::Command::new("sysctl").args(["-n", key]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// True iff the integer sysctl `key` reads exactly `1`.
+fn sysctl_is_one(key: &str) -> bool {
+    sysctl_read(key) == Some(1)
+}
+
+/// True iff the `rp_filter` knob `key` is RELAXED — i.e. NOT strict. Strict
+/// reverse-path filtering is `1`; `0` (off) and `2` (loose) both count as
+/// relaxed. A knob that cannot be read (`None`) is treated as NOT relaxed
+/// (so the converge re-emits the relax — the safe default).
+fn sysctl_rp_filter_relaxed(key: &str) -> bool {
+    matches!(sysctl_read(key), Some(v) if v != 1)
+}
+
+/// True when `ip netns del/list` stderr indicates the netns is simply
+/// ABSENT, as opposed to a genuine failure (permission denied, etc.).
+/// iproute2 phrasing varies: `Cannot remove namespace file "...": No such
+/// file or directory` / `No such file or directory`.
+fn netns_absent(stderr: &str) -> bool {
+    stderr.contains("No such file or directory") || stderr.contains("does not exist")
 }
 
 #[cfg(test)]
