@@ -145,10 +145,15 @@ just signature"). **C1–C3** were the DESIGN-review DELIVER-handoff conditions
 (non-blocking suggestions 1–3, 2026-06-16, § "DESIGN review" below). **C4** (the
 resolve READ MECHANISM + the miss-classification scoping note) was added
 2026-06-16 as a tight amendment after a DELIVER step surfaced that the *model*
-was pinned but the *read mechanism* was not — see § "C4 — resolve read
-mechanism" below. C4 changes **no public API**: the `MtlsResolve` trait
-signature, the 3-variant `MtlsResolution`, the `ResolvedBackend` shape, and the
-probe all stand exactly as C1/C2 pin them; C4 pins an adapter-internal detail.
+was pinned but the *read mechanism* was not, and **REVISED 2026-06-17** (the
+resolve-index-coherence research) from observe-only to **List-then-Watch +
+relist-on-`Lagged`** — see § "C4 — resolve read mechanism" below. C4 leaves the
+**`MtlsResolve` public contract UNCHANGED** (trait signature, 3-variant
+`MtlsResolution`, `ResolvedBackend` shape, and probe all stand exactly as C1/C2
+pin them); the 2026-06-17 revision DOES add one keyless `ObservationStore`
+enumerate (`all_service_backends_rows`) — consistent surface growth mirroring the
+existing `alloc_status_rows()`/`node_health_rows()`, NOT a change to the resolve
+port itself.
 
 ### C1 — `resolve` returns a 3-variant sum type, NOT a binary `Option`
 
@@ -253,18 +258,72 @@ This sub-decision closes that gap (ratified 2026-06-16).
 
 - **`ServiceBackendsResolve` resolves against an in-RAM, address-keyed
   projection** (an `addr → Backend` view) of the `running` `service_backends`
-  set, built and refreshed from the EXISTING `ObservationStore` observation
-  surface (the `subscribe_all()` / bulk-load-then-observe path the reconciler
-  runtime already uses). `resolve()` is then a **point-lookup into the in-RAM
+  set, built via **List-then-Watch** over the `ObservationStore` and refreshed on
+  incremental updates. `resolve()` is then a **point-lookup into the in-RAM
   index** — NOT a per-`ServiceId` store query. The `ServiceId`-keyed
   `service_backends_rows` point query is the WRONG surface for an arbitrary
   `orig_dst` (the adapter holds no `ServiceId`).
-- **Uses ONLY existing `ObservationStore` surface; MUST NOT add a new trait
-  method** — no `all_service_backends_rows`, no `service_backends_by_addr`, no
-  `list_services`. The read mechanism is **adapter-internal**: the in-RAM index
-  is a private detail of `ServiceBackendsResolve`. The **PUBLIC `MtlsResolve`
-  contract is UNCHANGED** (trait signature + `MtlsResolution` + `ResolvedBackend`
-  + probe all stand exactly as C1/C2 pin them).
+- **Read mechanism = List-then-Watch + relist-on-`Lagged` (REVISED 2026-06-17,
+  reverses the prior "no new trait method" constraint).** The original C4 pinned
+  an *observe-only* mechanism (forward-only `subscribe_all()`, no bulk-load) and
+  forbade a keyless enumerate. The resolve-index-coherence research
+  (`docs/research/networking/transparent-mtls-resolve-index-coherence-research.md`,
+  2026-06-17) established observe-only-without-resync over a forward-only,
+  bounded, lossy watch as **the one shape no production mesh uses** — #237
+  cold-start, F2 concurrency, F4 lag-drop are three faces of one "coherent local
+  cache over a lossy forward-only watch" problem whose textbook fix (k8s informer,
+  etcd watch, Envoy xDS, Cilium kvstore) is **List-then-Watch + relist-on-loss**:
+  - **List-at-probe** — at `probe()` (the Earned-Trust gate), bulk-load the
+    current `service_backends` snapshot into the index BEFORE the gate opens /
+    before any `resolve` is served, so the index is never empty-but-trusted
+    (closes **#237** cold-start; mirrors Cilium `ListDone`-gates-`synced`).
+  - **Watch** — observe the NEW lag-surfacing subscription `subscribe_all_events()`
+    (NOT the lossy `subscribe_all()`) for incremental updates. The lossy surface
+    cannot carry the loss signal the relist trigger needs — see § "C4 — F4 /
+    relist-trigger refinement" below.
+  - **relist-on-`Lagged`** — on a `SubscriptionEvent::Lagged { missed }` loss
+    signal delivered by `subscribe_all_events()`, the adapter MUST re-List
+    (re-acquire the authoritative snapshot, rebuild/merge the index); it MUST NOT
+    silently discard the loss (closes **F4**; mirrors Cilium
+    `ErrCompacted → goto reList`; the tokio-idiomatic recovery).
+  - **Concurrency = single-owner drain (no take-and-replace).** ONE owner (a
+    background drain task) exclusively owns the subscription and writes the index
+    under the existing `RwLock`; per-connection `resolve` readers take the read
+    lock. Dissolves the F2 take/restore TOCTOU by open-once / single-owner
+    (`development.md` § "Check-and-act must be atomic").
+- **ADDS two `ObservationStore` surfaces** (both confined to that driven port):
+  a keyless **List** enumerate and a lag-surfacing **Watch** subscription, each
+  symmetric with the EXISTING unkeyed `alloc_status_rows()` / `node_health_rows()`
+  / `subscribe_all()`. **Pinned signatures:**
+  ```rust
+  // List leg — keyless enumerate. SHIPPED (commit 25e7acf3).
+  async fn all_service_backends_rows(&self)
+      -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+  // Watch leg — lag-surfacing subscription. NEW (this refinement, 2026-06-17).
+  pub enum SubscriptionEvent {
+      Row(ObservationRow),
+      Lagged { missed: u64 },        // domain event; adapter maps RecvError::Lagged(n) → missed
+  }
+  pub type LagAwareSubscription =
+      Box<dyn Stream<Item = SubscriptionEvent> + Send + Unpin>;
+  async fn subscribe_all_events(&self)
+      -> Result<LagAwareSubscription, ObservationStoreError>;
+  ```
+  `all_service_backends_rows` returns ALL LWW-winner `service_backends` rows
+  across all services; its name MUST NOT collide with the existing keyed
+  `service_backends_rows(&self, service_id: &ServiceId)` — `all_`-prefixed, and
+  consistent with the `*_rows()`-no-arg convention. Both surfaces touch every
+  `ObservationStore` implementor (`overdrive-store-local`, `overdrive-sim`, any
+  test doubles) — *consistent* surface growth (they mirror the existing
+  enumerators / subscription), not novel. The EXISTING lossy `subscribe_all()` /
+  `ObservationSubscription` is kept AS-IS for its ~20 current consumers; only
+  `ServiceBackendsResolve` consumes `subscribe_all_events()` (blast-radius bound —
+  see § "C4 — F4 / relist-trigger refinement"). The read mechanism is otherwise
+  **adapter-internal** (the in-RAM index is a private detail of
+  `ServiceBackendsResolve`); the **PUBLIC `MtlsResolve` contract is UNCHANGED**
+  (trait signature + `MtlsResolution` + `ResolvedBackend` + probe all stand
+  exactly as C1/C2 pin them).
 - **Classification onto the index** (consistent with C1 and the shipped 01-01
   port rustdoc `crates/overdrive-core/src/traits/mtls_resolve.rs` — C4 ADDS the
   read mechanism, it does NOT re-classify):
@@ -285,32 +344,94 @@ This sub-decision closes that gap (ratified 2026-06-16).
   in the resolve path (that is #167/#61, out of scope here; one source, two
   readers).
 
+**C4 — F4 / relist-trigger refinement (REFINED 2026-06-17, ratified — option 2:
+surface `Lagged` for event-driven relist).** The 2026-06-17 read-mechanism
+revision folded F4 in as "relist-on-`Lagged` closes F4 now" — wording that
+silently assumed the `Lagged` loss signal was already reachable on the watch
+surface. Implementation proved it **unimplementable on the current surface**:
+`subscribe_all()` returns
+`ObservationSubscription = Box<dyn Stream<Item = ObservationRow>>` — **no loss
+signal** — and BOTH store adapters strip `broadcast::RecvError::Lagged` *inside*
+`subscribe_all` before any consumer sees it (sim `ok_or_skip`;
+`overdrive-store-local` `filter_map(Result::ok)` / `filter_map`-on-`Lagged`). So
+event-driven relist requires **surfacing the `Lagged` loss signal through a
+subscription API** — a deliberate, ratified subscription-surface addition
+(**option 2**), NOT the zero-cost fold the prior wording implied.
+
+Option 2 was chosen over periodic resync because the loss signal **exists** at
+the broadcast layer, and reacting to it gives *completeness* — a dropped update
+is always either delivered (`Row`) or signaled-then-relisted (`Lagged`), never
+silently lost — which polling cannot guarantee (the etcd-`ErrCompacted` /
+k8s-reflector-`Gone` canon applied to tokio `broadcast`).
+
+What this refinement authorizes (the surface pinned above):
+
+- A **dedicated lag-surfacing method** `subscribe_all_events()` returning a
+  `LagAwareSubscription` of `SubscriptionEvent`, pinned over a shared-type change
+  to `ObservationSubscription` to **bound blast radius**: only
+  `ServiceBackendsResolve` consumes the new surface; the ~20 existing
+  `subscribe_all()` consumers (DST invariants, store test-harness, streaming)
+  stay untouched and lossy-by-design. (A shared-type change would ripple the loss
+  arm through every consumer and the contract-equivalence test for no benefit to
+  consumers that neither cache nor relist.)
+- `SubscriptionEvent::Lagged { missed }` is a **domain** event, NOT a tokio leak:
+  the host/sim adapter maps `broadcast::RecvError::Lagged(n)` to it (`n → missed`)
+  at the adapter boundary; the core trait never names `tokio::...::RecvError`.
+
+**Relist TRIGGER (the only missing leg, now wired):** the single-owner drain
+consumes `subscribe_all_events()`; on `SubscriptionEvent::Row(row)` it applies
+the row; on `SubscriptionEvent::Lagged { missed }` it re-Lists via the
+already-shipped `all_service_backends_rows()` (commit `25e7acf3`) and
+rebuilds/merges the index. The `relist()` machinery already exists and is already
+exercised at probe and on watch-close — this leg wires its TRIGGER only. F4 is
+closed with the *completeness* guarantee. List-at-probe (#237 closed,
+`25e7acf3`), the single-owner drain (F2 dissolved structurally), and
+watch-close → `Err(StoreUnreadable)` already shipped; the `Lagged` trigger is
+this amendment's sole authorization.
+
 **C4 miss-classification scoping note (the load-bearing new contract clause).**
 A pure `running`-backends reverse index cannot, *on a miss*, distinguish a
 "genuinely external addr" (→ `NonMesh`, correct) from a "should-be-mesh addr the
 index has not yet converged on" (→ would-be `MeshUnreachable`). **v1
-deliberately classifies a miss as `NonMesh`.** The resulting cleartext edge is
-BOUNDED by the v1 headless **single-source / two-readers invariant** (D-TME-10):
-`orig_dst` is an addr DNS *just* returned from the *same* `service_backends` the
-resolve reads, so a hit is overwhelmingly likely; the only miss-to-a-real-mesh-
-addr window is a backend that died between DNS-resolve and `connect()`, where
-the cleartext connection itself fails anyway (the backend is gone). The richer
-**fail-toward-handshake** miss semantic (treat an un-converged miss as
-`MeshUnreachable`) is **multi-node hardening, tracked in #236**. An implementer
-**MUST NOT** make a miss fail-closed in v1 — that would break legitimate
-external / non-mesh egress, which is the entire purpose of the `NonMesh` arm.
+deliberately classifies a miss as `NonMesh`.** With List-then-Watch +
+relist-on-`Lagged` closing the cold-start (#237) and lag (F4) windows, the
+residual exposure shrinks to the **irreducible convergence window** (a backend
+that came up microseconds ago, its `service_backends` row still in flight). The
+richer **fail-toward-handshake** miss semantic (treat an un-converged miss as
+`MeshUnreachable`) covers that residual and is **#236-coupled** (it depends on
+the agent being able to *attempt* a handshake on an ambiguous miss — multi-node-
+shaped, not yet in tree). An implementer **MUST NOT** make a miss fail-closed in
+v1 — that would break legitimate external / non-mesh egress, the entire purpose
+of the `NonMesh` arm.
 
-The v1 `ServiceBackendsResolve` adapter realizes this convergence-window edge
-specifically as a **forward-only `ObservationStore::subscribe_all()` index with
-no `service_backends` bulk-load/replay** (the `addr→service` enumerate surface
-C4 forbids) — so on a control-plane restart the index starts empty until
-`BackendDiscoveryBridge` re-converges, and a should-be-mesh peer classifies as
-`NonMesh` (cleartext) during that window. This **restart-window instance is
-v1-accepted and tracked in #237** (not closed here); its bound is that the 04-02
-composition root MUST open the adapter's subscription/`probe()` **before any
-`service_backends` write** (subscribe-before-first-write). #236 stays the named
-hardening direction; #237 is the specific tracked instance of the C4
-convergence-window edge.
+**C4 — (a) fail-toward-handshake as the stated v1 SECURITY invariant (added
+2026-06-17).** The contract the miss-classification must eventually satisfy:
+***a resolve miss must never silently emit cleartext to a should-be-mesh peer.***
+This is the **miss-meaning** lever, orthogonal to the **coherence** lever
+List-then-Watch engages — the posture every production mesh safe on this boundary
+adopts (Cilium fail-CLOSES an auth-required flow on an auth-map miss,
+`bpf/lib/auth.h:45-53`; ztunnel drops on a missing source workload). For
+single-node v1 with the full coherence fix, the residual irreducible window is
+local and bounded and is the accepted v1 posture; the CODE that realizes (a) (the
+capture-all handshake-attempt path) lands under **#236**. (a) is the load-bearing
+backstop — even a perfectly coherent cache leaks during its own irreducible
+convergence window unless what a miss MEANS is changed.
+
+**C4 — #237 disposition (corrected 2026-06-17).** List-at-probe seeds the index
+before the Earned-Trust gate opens, so on a control-plane restart the boot-time
+List captures any pre-existing `service_backends` rows (gossiped or persisted)
+and the index is never empty-but-trusted; relist-on-`Lagged` closes the lag
+window for single-node AND multi-node burst. **#237 (the cold-start restart-window
+instance) is CLOSED by this revision** (the GH issue closes once the crafter lands
+the List-at-probe + relist mechanism — not in this doc edit). The only residual is
+the irreducible convergence window → (a) / #236. **This corrects the prior
+wording**, which described the v1 adapter as a *forward-only `subscribe_all()`
+index with no `service_backends` bulk-load* and accepted the empty-on-restart
+window as a tracked-but-open v1 edge — that mechanism is the one this revision
+replaces. The in-house **"bulk-load-then-observe"** precedent the original C4 text
+cited (the reconciler-runtime `bulk_load` + `write_through`) is itself
+List-then-Watch over an *authoritative* surface — its `bulk_load` IS the List leg
+— so it argues **FOR** List-then-Watch (now what ships), **against** observe-only.
 
 **Evidence (the read mechanism is the industry-canonical shape, not a
 convenience):**
@@ -319,10 +440,16 @@ convenience):**
    is an in-RAM, **address-keyed reverse index** from IP → identity, populated
    by *subscribing* to endpoint/CIDR/node/FQDN allocation events (not by
    point-querying a service store per connection) and mirrored to a read-only
-   BPF LPM trie consulted inline per connection. Cilium also splits
-   `addr→identity` (ipcache) from `identity→peer-material` (auth map / SVID
-   store) — validating v1's `expected_svid: None` two-stage deferral of the
-   identity join to #178.
+   BPF LPM trie consulted inline per connection. Its kvstore watcher does
+   **List-before-Watch** with a one-time `ListDone` gating a `synced` flag and
+   **relists on `ErrCompacted` or any watch error** (`goto reList`) with stale
+   mark/sweep (`pkg/kvstore/etcd.go`, `pkg/kvstore/store/watchstore.go`, research
+   A5–A6) — precisely the List-then-Watch + relist-on-loss mechanism C4 now pins.
+   Cilium also splits `addr→identity` (ipcache) from `identity→peer-material`
+   (auth map / SVID store) — validating v1's `expected_svid: None` two-stage
+   deferral of the identity join to #178; and it fail-CLOSES an auth-required
+   flow on an auth-map miss (`DROP_POLICY_AUTH_REQUIRED`, `bpf/lib/auth.h:45-53`,
+   research A9) — the (a) miss-meaning posture.
 2. **Our own interception research states this in words.** `…transparent-mtls-
    interception-mechanism-2026-research.md` §4.1 (refuting the "per-connection
    resolve is a bottleneck" attack): the resolve is "a local in-memory
@@ -360,7 +487,7 @@ convenience):**
 | D-TME-8 | v1 scope = **BOTH directions**; intended-peer SVID pinning (`expected_peer`/`PeerIdentityMismatch`) **deferred to #178** (v1 = authn-only) (Q4 ratified). | SETTLED (Q4 ratified) |
 | D-TME-9 | **Name-layer integration (Q5a)**: a node-local DNS responder is injected into the per-workload netns `resolv.conf` (Fly.io `fdaa::3` model); the responder *daemon* is #61 (separate build), only the injection + return-shape contract live here. | SETTLED (Q5a folded in) |
 | D-TME-10 | **DNS-return shape**: v1 = **headless** — the responder returns a `running` backend addr from `service_backends`; that address IS the `orig_dst` `MtlsResolve.resolve` recognizes (no VIP allocator, #167, pulled into v1). VIP is the multi-node evolution. | RECOMMENDED (single open item; no new v1 dependency) |
-| D-TME-11 | **Resolve READ MECHANISM (C4)**: `ServiceBackendsResolve` resolves `orig_dst` against an **in-RAM, address-keyed reverse index** of the `running` `service_backends` set (`addr → Backend`), built/refreshed from the EXISTING `ObservationStore` `subscribe_all()` surface — NOT a per-`ServiceId` point query, and MUST NOT add a new trait method. A **miss = `NonMesh`** (cleartext pass-through), NOT `MeshUnreachable`; the bounded cleartext edge is closed by the headless single-source invariant (D-TME-10); fail-toward-handshake on an un-converged miss is multi-node hardening (#236). PUBLIC API unchanged. | SETTLED (Q3/D-TME-6 refinement, ratified 2026-06-16) |
+| D-TME-11 | **Resolve READ MECHANISM (C4)**: `ServiceBackendsResolve` resolves `orig_dst` against an **in-RAM, address-keyed reverse index** of the `running` `service_backends` set (`addr → Backend`), built via **List-then-Watch + relist-on-`Lagged`** over the `ObservationStore` — NOT a per-`ServiceId` point query. **REVISED 2026-06-17 (resolve-index-coherence research): the prior observe-only / "no new trait method" constraint is REVERSED** — the mechanism ADDS a keyless `all_service_backends_rows(&self) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>` enumerate (List leg; symmetric with `alloc_status_rows()`/`node_health_rows()`; SHIPPED `25e7acf3`), Lists-at-probe before the Earned-Trust gate opens (closes #237 cold-start), and uses a single-owner drain (dissolves the F2 take/restore TOCTOU). **F4 / relist-trigger REFINED 2026-06-17 (ratified — option 2):** the prior wording claimed relist-on-`Lagged` was free, but `subscribe_all()` returns the lossy `ObservationSubscription = Box<dyn Stream<Item = ObservationRow>>` and both adapters strip `RecvError::Lagged` internally — so closing F4 requires a NEW lag-surfacing surface: `subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError>` delivering `SubscriptionEvent::{Row(ObservationRow), Lagged { missed: u64 }}` (a DOMAIN event; adapter maps `RecvError::Lagged(n) → missed`; no tokio leak in the core trait). The single-owner drain consumes `subscribe_all_events()`; on `Lagged { missed }` it re-Lists via `all_service_backends_rows()` and rebuilds/merges the index — closing F4 with a *completeness* guarantee (every dropped update is delivered OR signaled-then-relisted, never silently lost). The dedicated method bounds blast radius (the ~20 existing `subscribe_all()` consumers stay untouched). A **miss = `NonMesh`** (cleartext pass-through), NOT `MeshUnreachable`; the residual irreducible convergence window is covered by **(a) fail-toward-handshake** — the v1 SECURITY invariant "a resolve miss must never silently emit cleartext to a should-be-mesh peer," whose code lands under **#236**. **#237 is CLOSED by this revision** (List-at-probe + relist); the residual is the irreducible window → (a)/#236. PUBLIC `MtlsResolve` API unchanged (growth confined to the `ObservationStore` driven port). | SETTLED (Q3/D-TME-6 refinement, ratified 2026-06-16; read-mechanism REVISED 2026-06-17; F4/relist-trigger REFINED 2026-06-17) |
 
 ---
 
