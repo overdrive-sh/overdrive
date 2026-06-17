@@ -38,7 +38,7 @@
 //! `CAP_NET_ADMIN` is already a precondition of serve boot (XDP attach +
 //! cgroup delegation), so provisioning adds no new privilege.
 
-use ipnet::Ipv4Net;
+use ipnet::{IpAdd, Ipv4Net};
 use std::net::Ipv4Addr;
 
 /// Default client-facing veth name for the single-node host-netns pair
@@ -199,36 +199,157 @@ pub fn derive_veth_plan(
 // leg-dial `SO_MARK` is NOT here — it belongs to the agent dial (step 03-03).
 
 /// Per-allocation network-namespace prefix for the workload netns name. The
-/// netns name embeds the [`AllocationId`] so it is unique per allocation and
-/// recognisable in `ip netns list`.
+/// netns name embeds the [`overdrive_core::AllocationId`] so it is unique per
+/// allocation and recognisable in `ip netns list`. A netns name is NOT bound
+/// by IFNAMSIZ (the kernel allows up to 255 bytes), so embedding the readable
+/// alloc id here is safe.
 const WORKLOAD_NETNS_PREFIX: &str = "ovd-ns-";
-/// Host-side veth-end name prefix (`ovd-hv-<alloc>`). This is the end that
+/// Host-side veth-end name prefix (`ovd-hv-<4hex-slot>`). This is the end that
 /// stays in the host netns, where nft-TPROXY PREROUTING intercepts the
 /// workload's egress (now ingressing the host veth) and inbound traffic.
+/// Combined with a 4-char hex [`NetSlot`] this yields an 11-char iface name,
+/// inside the 15-char IFNAMSIZ limit BY CONSTRUCTION (D-TME-12).
 const WORKLOAD_HOST_VETH_PREFIX: &str = "ovd-hv-";
-/// In-netns veth-end name prefix (`ovd-wl-<alloc>`). This end is moved into
-/// the workload netns; the workload is born behind it.
+/// In-netns veth-end name prefix (`ovd-wl-<4hex-slot>`). This end is moved
+/// into the workload netns; the workload is born behind it. Same 11-char,
+/// IFNAMSIZ-safe shape as [`WORKLOAD_HOST_VETH_PREFIX`].
 const WORKLOAD_VETH_PREFIX: &str = "ovd-wl-";
 
+/// The maximum [`NetSlot`] value: 4096 slots (`0..=4095`) tile the whole
+/// [`WORKLOAD_SUBNET_BASE`] /16 into 4096 contiguous /30s. The ceiling is the
+/// pigeonhole companion to the 4-char hex name segment — a `u16` slot below
+/// `0x1000` always renders as exactly 4 lowercase hex chars.
+pub const NET_SLOT_MAX: u16 = 4095;
+
+/// Per-host base block all per-allocation /30s are carved from. The full
+/// `0..=NET_SLOT_MAX` slot space tiles this /16 into 4096 contiguous /30s
+/// (`base + slot*4`).
+///
+/// Fixed for Phase-1 single-node; making it operator-configurable is tracked
+/// in <https://github.com/overdrive-sh/overdrive/issues/239> (do NOT make it
+/// tunable here). `Ipv4Net::new_assert` is `const` in `ipnet` 2.x, so the
+/// base is a compile-time constant; the `/16` prefix is statically valid.
+pub const WORKLOAD_SUBNET_BASE: Ipv4Net = Ipv4Net::new_assert(Ipv4Addr::new(10, 99, 0, 0), 16);
+
+/// A bounded per-allocation network slot in the range `0..=NET_SLOT_MAX`
+/// (see [`NET_SLOT_MAX`]).
+///
+/// This is the host-unique, collision-free-BY-CONSTRUCTION index a stateful
+/// allocator (step 02-04, NOT here) assigns to each live allocation. It is the
+/// answer to the pigeonhole problem D-TME-12 / B1 raises: no pure function of a
+/// 253-char [`overdrive_core::AllocationId`] can collision-free-map into a
+/// 15-char (IFNAMSIZ) iface name, so the veth names are derived from this
+/// bounded slot — rendered as a 4-char hex segment ([`Self::to_hex4`]) — NOT
+/// from the alloc id. Distinct slots yield distinct iface names AND distinct
+/// /30 subnets by construction, never by hash.
+///
+/// Construction is validating ([`Self::new`] / [`std::str::FromStr`] reject
+/// `> NET_SLOT_MAX`); [`std::fmt::Display`] is the canonical DECIMAL form and
+/// serde matches `Display` / `FromStr`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NetSlot(u16);
+
+/// The error returned when a [`NetSlot`] value is out of range or unparseable.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum NetSlotError {
+    /// The value exceeds [`NET_SLOT_MAX`].
+    #[error("net slot {value} exceeds maximum {max}")]
+    OutOfRange { value: u16, max: u16 },
+    /// The string is not a base-10 `u16` (the canonical [`NetSlot`] form).
+    #[error("net slot {raw:?} is not a base-10 integer")]
+    NotAnInteger { raw: String },
+}
+
+impl NetSlot {
+    /// Construct a [`NetSlot`], rejecting any value beyond [`NET_SLOT_MAX`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetSlotError::OutOfRange`] when `value > NET_SLOT_MAX`.
+    pub const fn new(value: u16) -> Result<Self, NetSlotError> {
+        if value > NET_SLOT_MAX {
+            return Err(NetSlotError::OutOfRange { value, max: NET_SLOT_MAX });
+        }
+        Ok(Self(value))
+    }
+
+    /// The raw slot index.
+    #[must_use]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+
+    /// The IFNAMSIZ-bounded 4-char lowercase hex name segment for this slot
+    /// (`0` → `"0000"`, `4095` → `"0fff"`). Because the slot is bounded below
+    /// `0x1000`, this is ALWAYS exactly 4 chars, which — combined with the
+    /// 7-char `ovd-hv-` / `ovd-wl-` prefix — yields an 11-char iface name,
+    /// inside the 15-char IFNAMSIZ limit (asserted in a unit test). The
+    /// `{:04x}` zero-pad keeps every slot's name the same length so a future
+    /// prefix change that would overflow fails the build-time IFNAMSIZ
+    /// assertion rather than a runtime `ip link add`.
+    #[must_use]
+    pub fn to_hex4(self) -> String {
+        format!("{:04x}", self.0)
+    }
+}
+
+impl std::fmt::Display for NetSlot {
+    /// Canonical DECIMAL form — matches the serde representation and the
+    /// [`std::str::FromStr`] parse.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for NetSlot {
+    type Err = NetSlotError;
+
+    /// Parse the canonical DECIMAL form, rejecting non-integers and any value
+    /// beyond [`NET_SLOT_MAX`].
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let value: u16 =
+            raw.parse().map_err(|_| NetSlotError::NotAnInteger { raw: raw.to_owned() })?;
+        Self::new(value)
+    }
+}
+
+impl serde::Serialize for NetSlot {
+    /// Serialise as the canonical DECIMAL string (matches `Display` /
+    /// `FromStr`).
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for NetSlot {
+    /// Deserialise from the canonical DECIMAL string, enforcing the
+    /// [`NET_SLOT_MAX`] bound (matches `FromStr`).
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        raw.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Derived plan for a single allocation's netns + veth pair. A plain value
-/// object — carries the per-alloc netns name, the two veth-end names, the
-/// host-side and in-netns addresses, the in-netns default-route gateway (=
-/// the host-side address), and the node-local DNS responder address (an
-/// INPUT carried for the later resolv.conf-injection step, D-TME-9 / Q5a;
-/// it is NOT derived state).
+/// object — carries the per-alloc netns name, the two slot-derived veth-end
+/// names, the host-side and in-netns addresses, the in-netns default-route
+/// gateway (= the host-side address), the slot-derived /30 subnet, and the
+/// node-local DNS responder address (an INPUT carried for the later
+/// resolv.conf-injection step, D-TME-9 / Q5a; it is NOT derived state).
 ///
 /// Per § "Persist inputs not derived state" this plan is recomputed at every
-/// provision from `(alloc_id, responder_addr, alloc_subnet)`; it is never
-/// persisted.
+/// provision from `(alloc_id, slot, responder_addr)`; it is never persisted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkloadNetnsPlan {
-    /// Per-allocation network-namespace name (`ovd-ns-<alloc>`).
+    /// Per-allocation network-namespace name (`ovd-ns-<alloc>`). Embeds the
+    /// readable alloc id (a netns name is not IFNAMSIZ-bound).
     pub netns: String,
-    /// Host-side veth-end name (`ovd-hv-<alloc>`) — stays in the host netns;
-    /// the nft-TPROXY PREROUTING interception point.
+    /// Host-side veth-end name (`ovd-hv-<4hex-slot>`) — stays in the host
+    /// netns; the nft-TPROXY PREROUTING interception point. SLOT-derived
+    /// (not alloc-id-derived) so it fits IFNAMSIZ by construction (D-TME-12).
     pub host_veth: String,
-    /// In-netns veth-end name (`ovd-wl-<alloc>`) — moved into `netns`; the
-    /// workload is born behind it.
+    /// In-netns veth-end name (`ovd-wl-<4hex-slot>`) — moved into `netns`; the
+    /// workload is born behind it. SLOT-derived, IFNAMSIZ-safe.
     pub workload_veth: String,
     /// Address assigned to the host-side end (`host_veth`). The FIRST usable
     /// host of `alloc_subnet`; also the in-netns default-route gateway.
@@ -240,9 +361,10 @@ pub struct WorkloadNetnsPlan {
     /// workload's egress leaves via the veth and ingresses the host-side end
     /// (`default via <host_addr> dev <workload_veth>`).
     pub gateway: Ipv4Addr,
-    /// The per-allocation point-to-point subnet the two ends are addressed
-    /// from (e.g. `10.99.0.0/30`); its prefix length sizes the `ip addr add`
-    /// CIDRs.
+    /// The per-allocation point-to-point /30 the two ends are addressed from
+    /// (e.g. `10.99.0.0/30` for slot 0). Carved from [`WORKLOAD_SUBNET_BASE`]
+    /// at `base + slot*4`; its prefix length (always 30) sizes the
+    /// `ip addr add` CIDRs. Derived from the slot — never a caller parameter.
     pub subnet: Ipv4Net,
     /// Node-local DNS responder address (D-TME-9 / Q5a) written into the
     /// netns's `resolv.conf` by a LATER step. Carried as a plan INPUT — not
@@ -251,46 +373,55 @@ pub struct WorkloadNetnsPlan {
 }
 
 /// Derive the [`WorkloadNetnsPlan`] for one allocation's netns + veth pair
-/// from the allocation id, the node-local DNS responder address, and the
-/// per-allocation point-to-point subnet.
+/// from the allocation id, the host-unique network [`NetSlot`], and the
+/// node-local DNS responder address (D-TME-12).
 ///
-/// Pure — performs no I/O, deterministic (same inputs → same plan).
+/// Pure — performs no I/O, deterministic (same inputs → same plan), total
+/// (the /30 ALWAYS has two distinct usable hosts, so there is no fallback).
 ///
-/// - `netns` = `ovd-ns-<alloc>`, `host_veth` = `ovd-hv-<alloc>`,
-///   `workload_veth` = `ovd-wl-<alloc>` (the alloc id is DNS-label-shaped, so
-///   the names are valid iface/netns names by construction).
-/// - `host_addr` = first usable host of `alloc_subnet`
-///   (`10.99.0.0/30` → `10.99.0.1`).
-/// - `workload_addr` = second usable host (`10.99.0.0/30` → `10.99.0.2`), or
-///   the network address when the subnet has no second usable host (a
-///   degenerate `/32`).
+/// - `netns` = `ovd-ns-<alloc>` (readable, embeds the alloc id; NOT
+///   IFNAMSIZ-bound).
+/// - `host_veth` = `ovd-hv-<4hex-slot>`, `workload_veth` = `ovd-wl-<4hex-slot>`
+///   — SLOT-derived 11-char names, IFNAMSIZ-safe and collision-free BY
+///   CONSTRUCTION (distinct slots ⇒ distinct names; B1).
+/// - `subnet` = the /30 at `WORKLOAD_SUBNET_BASE.network() + slot*4` — the
+///   slot tiles the /16 into 4096 contiguous /30s; distinct slots ⇒ distinct
+///   /30s (S1, the derivation owns slot→/30; the subnet is NOT a caller
+///   parameter).
+/// - `host_addr` = `subnet.network() + 1` (first usable),
+///   `workload_addr` = `subnet.network() + 2` (second usable). A /30 always
+///   has exactly two usable hosts, so neither is an `Option` / `network()`
+///   fallback (S2).
 /// - `gateway` = `host_addr` (the in-netns default route points back at the
 ///   host-side end).
-/// - `responder_addr` flows through verbatim (carried for D-TME-9).
+/// - `responder_addr` flows through verbatim (carried for D-TME-9; an INPUT,
+///   not derived state).
 #[must_use]
 pub fn derive_workload_netns_plan(
     alloc_id: &overdrive_core::AllocationId,
+    slot: NetSlot,
     responder_addr: Ipv4Addr,
-    alloc_subnet: Ipv4Net,
 ) -> WorkloadNetnsPlan {
     let id = alloc_id.as_str();
-    let mut hosts = alloc_subnet.hosts();
-    // First usable host (host-side end); falls back to the network address
-    // only for a degenerate subnet with no hosts (which the allocator does
-    // not admit, but the derivation stays total).
-    let host_addr = hosts.next().unwrap_or_else(|| alloc_subnet.network());
-    // Second usable host (in-netns end); falls back to the network address
-    // for a /31-or-smaller with no second host.
-    let workload_addr = hosts.next().unwrap_or_else(|| alloc_subnet.network());
+    let hex = slot.to_hex4();
+
+    // Carve the per-allocation /30 from the fixed base: slot N owns the four
+    // contiguous addresses at base + N*4. A /30 always has exactly two usable
+    // hosts (net+1, net+2), so the addressing is total — no Option / fallback.
+    let network = WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(slot.get()) * 4);
+    let subnet = Ipv4Net::new(network, 30)
+        .unwrap_or_else(|_| unreachable!("/30 is a statically-valid prefix; new() cannot fail"));
+    let host_addr = network.saturating_add(1);
+    let workload_addr = network.saturating_add(2);
 
     WorkloadNetnsPlan {
         netns: format!("{WORKLOAD_NETNS_PREFIX}{id}"),
-        host_veth: format!("{WORKLOAD_HOST_VETH_PREFIX}{id}"),
-        workload_veth: format!("{WORKLOAD_VETH_PREFIX}{id}"),
+        host_veth: format!("{WORKLOAD_HOST_VETH_PREFIX}{hex}"),
+        workload_veth: format!("{WORKLOAD_VETH_PREFIX}{hex}"),
         host_addr,
         workload_addr,
         gateway: host_addr,
-        subnet: alloc_subnet,
+        subnet,
         responder_addr,
     }
 }
@@ -305,17 +436,18 @@ pub fn derive_workload_netns_plan(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "twelve independent observed kernel facts (netns/pair presence, in-netns move, \
-              per-end addr, host-end up, default route, per-end tx-offload, ip_forward, rp_filter); \
-              a flag-per-fact value object is the clearest model of the converge input and mirrors \
-              the host-netns ObservedVeth shape ADR-0061 § 3.1 prescribes"
+    reason = "fourteen independent observed kernel facts (netns/pair presence, in-netns move, \
+              per-end addr, host-end up, in-netns-end up, netns lo up, default route, per-end \
+              tx-offload, ip_forward, global rp_filter, host-veth rp_filter); a flag-per-fact \
+              value object is the clearest model of the converge input and mirrors the host-netns \
+              ObservedVeth shape ADR-0061 § 3.1 prescribes"
 )]
 pub struct ObservedWorkloadVeth {
     /// The per-alloc netns (`ovd-ns-<alloc>`) exists.
     pub netns_present: bool,
-    /// The host-side veth end (`ovd-hv-<alloc>`) exists in the host netns.
+    /// The host-side veth end (`ovd-hv-<4hex-slot>`) exists in the host netns.
     pub host_veth_present: bool,
-    /// The in-netns veth end (`ovd-wl-<alloc>`) exists (in either netns).
+    /// The in-netns veth end (`ovd-wl-<4hex-slot>`) exists (in either netns).
     pub workload_veth_present: bool,
     /// The in-netns veth end has been MOVED into the workload netns (it is
     /// no longer in the host netns).
@@ -326,6 +458,12 @@ pub struct ObservedWorkloadVeth {
     pub workload_addr_present: bool,
     /// The host-side end is administratively UP.
     pub host_veth_up: bool,
+    /// The in-netns end is administratively UP. Without it the netns cannot
+    /// carry a packet (B2); ordered AFTER the in-netns move.
+    pub workload_veth_up: bool,
+    /// The netns loopback (`lo`) is administratively UP. A netns is born with
+    /// `lo` DOWN; without bringing it up the netns cannot carry a packet (B2).
+    pub lo_up: bool,
     /// The in-netns default route (`default via <host_addr>`) is present.
     pub default_route_present: bool,
     /// The host-side end still has TX-checksum-offload ON.
@@ -336,11 +474,17 @@ pub struct ObservedWorkloadVeth {
     /// prerequisite — without forwarding the host won't route to the
     /// lo-bound backend).
     pub ip_forward_enabled: bool,
-    /// `rp_filter` is relaxed on the host-side (ingress) veth + `all` + `lo`
+    /// The GLOBAL `rp_filter` relaxation is in place (`net.ipv4.conf.all` +
+    /// `net.ipv4.conf.lo`). Host-global; survives a per-alloc veth rebuild
     /// (the spike-proven asymmetric-ingress prerequisite — without it the
     /// in-via-veth / local-table-reinject-via-lo path is dropped as a false
-    /// "no fire").
-    pub rp_filter_relaxed: bool,
+    /// "no fire"). Split from the per-host-veth relaxation below (S3).
+    pub rp_filter_global_relaxed: bool,
+    /// The PER-HOST-VETH `rp_filter` relaxation is in place
+    /// (`net.ipv4.conf.<host_veth>`). A freshly created veth defaults STRICT,
+    /// so a rebuilt pair always re-needs this (independent of the global
+    /// relaxation above — S3, the lossy single bool is replaced by these two).
+    pub host_veth_rp_filter_relaxed: bool,
 }
 
 /// A single idempotent convergence action the executor applies (via `ip
@@ -366,14 +510,30 @@ pub enum WorkloadVethStep {
     AddWorkloadAddr,
     /// `ip link set <host_veth> up` (host netns).
     SetHostVethUp,
+    /// `ip -n <netns> link set <workload_veth> up` — bring the in-netns end
+    /// administratively UP (B2). Ordered AFTER `MoveWorkloadEndIntoNetns`: the
+    /// end must be inside the netns before it can be brought up there. Without
+    /// it the in-netns end stays DOWN and the netns cannot carry a packet.
+    SetWorkloadVethUp,
+    /// `ip -n <netns> link set lo up` — bring the netns loopback UP (B2). A
+    /// netns is born with `lo` DOWN; the local-table reinject (and any
+    /// loopback-bound service) needs it up, so a netns provisioned from the
+    /// plan can carry a packet.
+    SetLoopbackUp,
     /// `ip -n <netns> route add default via <gateway> dev <workload_veth>`.
     AddDefaultRoute,
     /// `sysctl -w net.ipv4.ip_forward=1` — the spike-proven egress-routing
     /// prerequisite.
     EnableIpForward,
-    /// Relax `rp_filter` on the host-side (ingress) veth + `all` + `lo` — the
-    /// spike-proven asymmetric-ingress prerequisite.
-    RelaxRpFilter,
+    /// Relax the GLOBAL `rp_filter` (`net.ipv4.conf.all` + `net.ipv4.conf.lo`)
+    /// — the spike-proven asymmetric-ingress prerequisite. Host-global;
+    /// emitted when the global relaxation is missing (S3, split from the
+    /// per-host-veth relax below).
+    RelaxGlobalRpFilter,
+    /// Relax the PER-HOST-VETH `rp_filter` (`net.ipv4.conf.<host_veth>`). A
+    /// freshly created veth defaults STRICT, so this is re-emitted on every
+    /// pair rebuild — independent of the global relaxation (S3).
+    RelaxHostVethRpFilter,
     /// `ethtool -K <host_veth> tx off` — disable TX-checksum-offload on the
     /// host-side end (the incremental-L4-csum invariant, `bpf.md` Rule 2 /
     /// commit 62fa6be2).
@@ -403,14 +563,21 @@ pub enum WorkloadVethStep {
 /// - **Present netns + pair** → emit only the MISSING resources:
 ///   `MoveWorkloadEndIntoNetns` when the in-netns end has not been moved,
 ///   `AddHostAddr` / `AddWorkloadAddr` when an address is absent,
-///   `SetHostVethUp` when the host end is down, `AddDefaultRoute` when the
-///   in-netns default route is absent.
+///   `SetHostVethUp` when the host end is down, `SetWorkloadVethUp` when the
+///   in-netns end is down (B2), `SetLoopbackUp` when the netns `lo` is down
+///   (B2), `AddDefaultRoute` when the in-netns default route is absent. The
+///   two up-steps are ordered AFTER `MoveWorkloadEndIntoNetns` — a netns
+///   provisioned from the plan must be able to carry a packet.
 /// - **Host prerequisites** → `EnableIpForward` when `ip_forward` is off,
-///   `RelaxRpFilter` when `rp_filter` is not relaxed,
-///   `DisableHostTxOffload` / `DisableWorkloadTxOffload` when the respective
-///   end still has TX-offload ON (or the pair was freshly (re)created — a new
-///   veth defaults to offload ON). These are host-global / per-veth and
-///   converge independently of the netns/pair shape.
+///   `RelaxGlobalRpFilter` when the GLOBAL `rp_filter` relaxation is missing
+///   (host-global; survives a veth rebuild), `RelaxHostVethRpFilter` when the
+///   pair was freshly (re)created (a fresh veth defaults STRICT — S3) OR when
+///   the per-host-veth relaxation is missing, `DisableHostTxOffload` /
+///   `DisableWorkloadTxOffload` when the respective end still has TX-offload
+///   ON (or the pair was freshly (re)created — a new veth defaults to offload
+///   ON). The global rp_filter / ip_forward facts are host-global and
+///   converge independently of the netns/pair shape; the per-host-veth
+///   rp_filter and the tx-offload facts are per-veth and re-emit on rebuild.
 #[must_use]
 #[allow(
     clippy::trivially_copy_pass_by_ref,
@@ -422,8 +589,11 @@ pub fn workload_converge_steps(
     plan: &WorkloadNetnsPlan,
     observed: &ObservedWorkloadVeth,
 ) -> Vec<WorkloadVethStep> {
-    let _ = plan; // the plan carries the names/addresses the executor needs;
-    // the pure diff keys only on the observed facts.
+    // N1: the plan carries the names/addresses the 02-02 executor needs; the
+    // pure diff below keys ONLY on the observed facts, so the body does not
+    // read `plan`. It stays in the signature to mirror `converge_steps` and to
+    // feed the executor — this is the contract, not a dead parameter.
+    let _ = plan;
     let mut steps = Vec::new();
 
     // Netns first. A fresh netns means the pair must be (re)built and every
@@ -458,19 +628,35 @@ pub fn workload_converge_steps(
     if pair_rebuilt || !observed.host_veth_up {
         steps.push(WorkloadVethStep::SetHostVethUp);
     }
+    // In-netns end up (B2): needed when freshly (re)built OR when down.
+    // Ordered AFTER the move — the end must be inside the netns first.
+    if pair_rebuilt || !observed.workload_veth_up {
+        steps.push(WorkloadVethStep::SetWorkloadVethUp);
+    }
+    // Netns loopback up (B2): a netns is born with `lo` DOWN. A fresh netns
+    // (CreateNetns) always re-needs it; otherwise emit only when `lo` is down.
+    if !observed.netns_present || !observed.lo_up {
+        steps.push(WorkloadVethStep::SetLoopbackUp);
+    }
     // In-netns default route: needed when freshly (re)built OR when absent.
     if pair_rebuilt || !observed.default_route_present {
         steps.push(WorkloadVethStep::AddDefaultRoute);
     }
 
-    // Spike-proven host prerequisites — host-global / per-veth, converge
-    // independently of the netns/pair shape. Emit only when unsatisfied so a
-    // re-run over a converged alloc is a no-op.
+    // Spike-proven host prerequisites. ip_forward + the GLOBAL rp_filter are
+    // host-global and converge independently of the netns/pair shape; the
+    // per-host-veth rp_filter and tx-offload are per-veth and re-emit on a
+    // rebuild (a fresh veth defaults strict rp_filter / offload ON).
     if !observed.ip_forward_enabled {
         steps.push(WorkloadVethStep::EnableIpForward);
     }
-    if !observed.rp_filter_relaxed {
-        steps.push(WorkloadVethStep::RelaxRpFilter);
+    if !observed.rp_filter_global_relaxed {
+        steps.push(WorkloadVethStep::RelaxGlobalRpFilter);
+    }
+    // Per-host-veth rp_filter relaxation: emit when freshly (re)built (a new
+    // veth defaults STRICT — S3) OR when the relaxation is missing.
+    if pair_rebuilt || !observed.host_veth_rp_filter_relaxed {
+        steps.push(WorkloadVethStep::RelaxHostVethRpFilter);
     }
     // TX-checksum-offload: emit when freshly (re)built (a new veth defaults
     // to offload ON) OR when the respective end still has it ON.
@@ -1071,14 +1257,16 @@ fn link_absent(stderr: &str) -> bool {
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod tests {
     use super::{
-        ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep, WorkloadNetnsPlan,
-        WorkloadVethStep, converge_steps, derive_veth_plan, derive_workload_netns_plan,
-        link_absent, tx_checksumming_on, tx_offload_benign, workload_converge_steps,
+        NET_SLOT_MAX, NetSlot, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
+        WORKLOAD_HOST_VETH_PREFIX, WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep,
+        converge_steps, derive_veth_plan, derive_workload_netns_plan, link_absent,
+        tx_checksumming_on, tx_offload_benign, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use overdrive_core::AllocationId;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
+    use std::str::FromStr;
 
     /// A complete (all-present, both-up, offload-OFF) observation — the
     /// baseline the converge tests mutate one field at a time. "Complete"
@@ -1567,22 +1755,20 @@ mod tests {
         Ipv4Addr::new(169, 254, 0, 53)
     }
 
-    /// A per-alloc /30 subnet: host-side end = first usable, in-netns end =
-    /// second usable. `10.99.0.0/30` → host-side `10.99.0.1`, in-netns
-    /// `10.99.0.2`.
-    fn alloc_subnet() -> Ipv4Net {
-        "10.99.0.0/30".parse().expect("valid /30")
+    fn slot(n: u16) -> NetSlot {
+        NetSlot::new(n).expect("valid slot")
     }
 
     fn workload_plan() -> WorkloadNetnsPlan {
-        derive_workload_netns_plan(&alloc("payments-0"), responder(), alloc_subnet())
+        derive_workload_netns_plan(&alloc("payments-0"), slot(0), responder())
     }
 
-    /// A complete (all-present, in-netns end moved, both addressed, host end
-    /// up, default route present, offload OFF, host prereqs satisfied)
-    /// observation — the converged baseline the partial tests mutate one
-    /// field at a time. "Complete" means fully CONVERGED, so TX-offload is
-    /// already OFF on both ends and the host prereqs are already set.
+    /// A complete (all-present, in-netns end moved, both addressed, both ends
+    /// up, netns loopback up, default route present, offload OFF, host
+    /// prereqs satisfied) observation — the converged baseline the partial
+    /// tests mutate one field at a time. "Complete" means fully CONVERGED, so
+    /// TX-offload is already OFF on both ends and both rp_filter facts are
+    /// relaxed.
     fn complete_workload_observed() -> ObservedWorkloadVeth {
         ObservedWorkloadVeth {
             netns_present: true,
@@ -1592,19 +1778,26 @@ mod tests {
             host_addr_present: true,
             workload_addr_present: true,
             host_veth_up: true,
+            workload_veth_up: true,
+            lo_up: true,
             default_route_present: true,
             host_tx_offload_on: false,
             workload_tx_offload_on: false,
             ip_forward_enabled: true,
-            rp_filter_relaxed: true,
+            rp_filter_global_relaxed: true,
+            host_veth_rp_filter_relaxed: true,
         }
     }
 
     /// The complete ordered convergence shape from a wholly-absent start.
     /// Ordering is load-bearing: netns and pair must exist before the
-    /// in-netns end is moved; the move must precede in-netns addressing and
-    /// the default route; the host prereqs (ip_forward, rp_filter, tx off)
-    /// and the route round out the converged shape.
+    /// in-netns end is moved; the move must precede in-netns addressing, the
+    /// in-netns end up, the netns loopback up, and the default route; the
+    /// host prereqs (ip_forward, rp_filter splits, tx off) round out the
+    /// converged shape. `SetWorkloadVethUp` and `SetLoopbackUp` are ordered
+    /// AFTER `MoveWorkloadEndIntoNetns` (B2 — a netns provisioned from the
+    /// plan must be able to carry a packet, so both the in-netns veth end and
+    /// the netns `lo` must come up).
     fn full_ordered_steps() -> Vec<WorkloadVethStep> {
         vec![
             WorkloadVethStep::CreateNetns,
@@ -1613,26 +1806,44 @@ mod tests {
             WorkloadVethStep::AddHostAddr,
             WorkloadVethStep::AddWorkloadAddr,
             WorkloadVethStep::SetHostVethUp,
+            WorkloadVethStep::SetWorkloadVethUp,
+            WorkloadVethStep::SetLoopbackUp,
             WorkloadVethStep::AddDefaultRoute,
             WorkloadVethStep::EnableIpForward,
-            WorkloadVethStep::RelaxRpFilter,
+            WorkloadVethStep::RelaxGlobalRpFilter,
+            WorkloadVethStep::RelaxHostVethRpFilter,
             WorkloadVethStep::DisableHostTxOffload,
             WorkloadVethStep::DisableWorkloadTxOffload,
         ]
     }
 
-    /// Derivation golden anchor: from `alloc_id` + responder + /30 subnet,
-    /// the plan carries the per-alloc netns name, the two veth names
-    /// (`ovd-wl-<alloc>` in-netns end, `ovd-hv-<alloc>` host-side end), the
-    /// host-side address (first usable), the in-netns address (second
-    /// usable), the in-netns default-route gateway (= host-side address),
-    /// and the responder address verbatim (an input, not derived state).
+    /// Derivation golden anchor (D-TME-12): from `alloc_id` + slot +
+    /// responder, the plan carries the per-alloc *readable* netns name
+    /// (`ovd-ns-<alloc>` — NOT IFNAMSIZ-bound), the SLOT-DERIVED veth names
+    /// (`ovd-wl-<4hex-slot>` in-netns end, `ovd-hv-<4hex-slot>` host-side end
+    /// — 11 chars each, IFNAMSIZ-safe BY CONSTRUCTION), the slot-derived /30
+    /// subnet (carved from `WORKLOAD_SUBNET_BASE` at `base + slot*4`), the
+    /// host-side address (first usable = net+1), the in-netns address (second
+    /// usable = net+2), the in-netns default-route gateway (= host-side
+    /// address), and the responder address verbatim (an input, not derived
+    /// state). The subnet is NO LONGER a caller parameter — the derivation
+    /// owns slot→/30 (S1).
+    ///
+    /// Slot 0 → subnet `10.99.0.0/30`, host-side `10.99.0.1`, in-netns
+    /// `10.99.0.2`, veth names `ovd-hv-0000` / `ovd-wl-0000`. The previous
+    /// golden `ovd-hv-payments-0` (17 chars — IFNAMSIZ overflow,
+    /// `ip link add`-uncreatable) is REMOVED.
     #[test]
     fn derives_per_alloc_netns_veth_names_and_addresses() {
-        let plan = derive_workload_netns_plan(&alloc("payments-0"), responder(), alloc_subnet());
+        let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(0), responder());
 
-        assert_eq!(plan.host_veth, "ovd-hv-payments-0");
-        assert_eq!(plan.workload_veth, "ovd-wl-payments-0");
+        // Netns name embeds the readable alloc id (not the hex slot).
+        assert_eq!(plan.netns, "ovd-ns-payments-0");
+        // Veth names are SLOT-derived (4-hex), IFNAMSIZ-safe — 11 chars.
+        assert_eq!(plan.host_veth, "ovd-hv-0000");
+        assert_eq!(plan.workload_veth, "ovd-wl-0000");
+        // The /30 is slot-derived from WORKLOAD_SUBNET_BASE.
+        assert_eq!(plan.subnet, "10.99.0.0/30".parse::<Ipv4Net>().expect("valid /30"));
         assert_eq!(plan.host_addr, Ipv4Addr::new(10, 99, 0, 1));
         assert_eq!(plan.workload_addr, Ipv4Addr::new(10, 99, 0, 2));
         // The in-netns default route points at the host-side end.
@@ -1640,20 +1851,159 @@ mod tests {
         // Responder address flows through verbatim (carried for the later
         // resolv.conf-injection step, D-TME-9).
         assert_eq!(plan.responder_addr, responder());
-        // The netns name embeds the alloc id.
-        assert!(
-            plan.netns.contains("payments-0"),
-            "netns name must embed the alloc id, got {:?}",
-            plan.netns
-        );
+    }
+
+    /// A non-zero slot derives a distinct /30 four addresses up per slot and
+    /// the matching hex name: slot 1 → `10.99.0.4/30`, host `10.99.0.5`,
+    /// in-netns `10.99.0.6`, names `ovd-hv-0001` / `ovd-wl-0001`. Pins the
+    /// `slot*4` subnet arithmetic and the `{:04x}` name formatting against a
+    /// concrete second point.
+    #[test]
+    fn derives_distinct_subnet_and_name_for_nonzero_slot() {
+        let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(1), responder());
+
+        assert_eq!(plan.subnet, "10.99.0.4/30".parse::<Ipv4Net>().expect("valid /30"));
+        assert_eq!(plan.host_addr, Ipv4Addr::new(10, 99, 0, 5));
+        assert_eq!(plan.workload_addr, Ipv4Addr::new(10, 99, 0, 6));
+        assert_eq!(plan.gateway, Ipv4Addr::new(10, 99, 0, 5));
+        assert_eq!(plan.host_veth, "ovd-hv-0001");
+        assert_eq!(plan.workload_veth, "ovd-wl-0001");
     }
 
     /// Determinism: same inputs → byte-identical plan (pure function).
     #[test]
     fn workload_derivation_is_deterministic() {
-        let a = derive_workload_netns_plan(&alloc("svc-7"), responder(), alloc_subnet());
-        let b = derive_workload_netns_plan(&alloc("svc-7"), responder(), alloc_subnet());
+        let a = derive_workload_netns_plan(&alloc("svc-7"), slot(42), responder());
+        let b = derive_workload_netns_plan(&alloc("svc-7"), slot(42), responder());
         assert_eq!(a, b);
+    }
+
+    // -------------------------------------------------------------------------
+    // NetSlot newtype — completeness + IFNAMSIZ ceiling (D-TME-12)
+    // -------------------------------------------------------------------------
+
+    /// IFNAMSIZ ceiling is DERIVED, not magic: the host-veth prefix plus the
+    /// 4-char hex slot must fit the 15-char Linux iface-name limit. A future
+    /// prefix change that would overflow fails THIS assertion (build-time),
+    /// not a runtime `ip link add` (D-TME-12 / B1).
+    #[test]
+    fn workload_veth_name_fits_ifnamsiz_by_construction() {
+        assert!(
+            WORKLOAD_HOST_VETH_PREFIX.len() + 4 <= 15,
+            "host-veth prefix ({}) + 4 hex chars must fit IFNAMSIZ (15)",
+            WORKLOAD_HOST_VETH_PREFIX.len()
+        );
+    }
+
+    /// `to_hex4` is a zero-padded 4-char lowercase hex of the slot value
+    /// (the IFNAMSIZ-bounded name segment). Input variations of one
+    /// formatting behaviour (Mandate 5) — one parametrised assertion.
+    #[test]
+    fn net_slot_to_hex4_is_zero_padded_lowercase() {
+        let cases: &[(u16, &str)] =
+            &[(0, "0000"), (1, "0001"), (255, "00ff"), (4095, "0fff"), (4094, "0ffe")];
+        for (n, expected) in cases {
+            assert_eq!(slot(*n).to_hex4(), *expected, "to_hex4({n}) should be {expected}");
+        }
+    }
+
+    /// `NetSlot::new` rejects any value beyond `NET_SLOT_MAX` and accepts the
+    /// whole `0..=NET_SLOT_MAX` range. The boundary (`NET_SLOT_MAX` ok,
+    /// `NET_SLOT_MAX + 1` rejected) is the killable predicate.
+    #[test]
+    fn net_slot_new_validates_bound() {
+        assert!(NetSlot::new(0).is_ok(), "0 is in range");
+        assert!(NetSlot::new(NET_SLOT_MAX).is_ok(), "NET_SLOT_MAX is in range");
+        assert!(NetSlot::new(NET_SLOT_MAX + 1).is_err(), "NET_SLOT_MAX + 1 is rejected");
+        assert!(NetSlot::new(u16::MAX).is_err(), "u16::MAX is rejected");
+    }
+
+    proptest! {
+        /// NetSlot completeness roundtrip (development.md § Newtype
+        /// completeness): for every in-range slot,
+        ///   (a) Display is the canonical DECIMAL form and FromStr round-trips
+        ///       it back bit-for-bit;
+        ///   (b) serde (to_string + from_str of the JSON) round-trips and
+        ///       matches Display/FromStr;
+        ///   (c) any value beyond NET_SLOT_MAX is rejected by both `new` and
+        ///       `FromStr`.
+        #[test]
+        fn net_slot_roundtrips_and_rejects_out_of_range(n in 0u16..=NET_SLOT_MAX) {
+            let s = NetSlot::new(n).expect("in-range");
+
+            // (a) Display = decimal; FromStr round-trips.
+            prop_assert_eq!(s.to_string(), n.to_string());
+            prop_assert_eq!(NetSlot::from_str(&s.to_string()).expect("parse"), s);
+
+            // (b) serde matches Display/FromStr.
+            let json = serde_json::to_string(&s).expect("serialize");
+            prop_assert_eq!(&json, &format!("\"{n}\""));
+            let back: NetSlot = serde_json::from_str(&json).expect("deserialize");
+            prop_assert_eq!(back, s);
+        }
+
+        /// Out-of-range rejection: every value strictly above NET_SLOT_MAX is
+        /// rejected by `new` AND `FromStr` (the bound is enforced on both
+        /// construction paths).
+        #[test]
+        fn net_slot_rejects_above_max(n in (u32::from(NET_SLOT_MAX) + 1)..=u32::from(u16::MAX)) {
+            let n = u16::try_from(n).expect("range is bounded by u16::MAX");
+            prop_assert!(NetSlot::new(n).is_err());
+            prop_assert!(NetSlot::from_str(&n.to_string()).is_err());
+        }
+
+        /// IFNAMSIZ + collision-freedom over the FULL `0..=NET_SLOT_MAX` slot
+        /// space (D-TME-12 / B1):
+        ///   (a) every slot's host_veth AND workload_veth name is <= 15 chars
+        ///       (IFNAMSIZ); and
+        ///   (b) the derived /30 subnet tiles WORKLOAD_SUBNET_BASE
+        ///       (`base + slot*4`, prefix 30), with the host-side address =
+        ///       net+1 and the in-netns address = net+2 (a /30 ALWAYS has two
+        ///       usable hosts, so no Option / network() fallback — S2).
+        #[test]
+        fn every_slot_name_fits_ifnamsiz_and_tiles_the_base(n in 0u16..=NET_SLOT_MAX) {
+            let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(n), responder());
+
+            // (a) IFNAMSIZ — names fit by construction for EVERY slot.
+            prop_assert!(plan.host_veth.len() <= 15, "host_veth {} > 15", plan.host_veth);
+            prop_assert!(plan.workload_veth.len() <= 15, "workload_veth {} > 15", plan.workload_veth);
+
+            // (b) /30 carved at base + slot*4, host=net+1, workload=net+2.
+            let expected_net = WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(n) * 4);
+            prop_assert_eq!(plan.subnet.network(), expected_net);
+            prop_assert_eq!(plan.subnet.prefix_len(), 30);
+            prop_assert_eq!(plan.host_addr, expected_net.saturating_add(1));
+            prop_assert_eq!(plan.workload_addr, expected_net.saturating_add(2));
+            prop_assert_eq!(plan.gateway, plan.host_addr);
+            // A /30 always yields two usable hosts — derivation is total.
+            prop_assert_ne!(plan.host_addr, plan.workload_addr);
+        }
+
+        /// Collision-freedom BY CONSTRUCTION (D-TME-12 / B1), NOT by hash:
+        /// for any two DISTINCT slots, the derived names AND the derived /30
+        /// subnets are distinct. This is the property the previous
+        /// `ovd-hv-<alloc>` scheme violated (truncating two long alloc ids
+        /// onto one 15-char iface name) — a bounded `NetSlot` makes the
+        /// collision unrepresentable.
+        #[test]
+        fn distinct_slots_yield_distinct_names_and_subnets(
+            a in 0u16..=NET_SLOT_MAX,
+            b in 0u16..=NET_SLOT_MAX,
+        ) {
+            prop_assume!(a != b);
+            // The alloc id is held constant: only the slot varies, isolating
+            // the slot→name/subnet injection.
+            let pa = derive_workload_netns_plan(&alloc("payments-0"), slot(a), responder());
+            let pb = derive_workload_netns_plan(&alloc("payments-0"), slot(b), responder());
+
+            prop_assert_ne!(&pa.host_veth, &pb.host_veth, "distinct slots → distinct host_veth");
+            prop_assert_ne!(
+                &pa.workload_veth,
+                &pb.workload_veth,
+                "distinct slots → distinct workload_veth"
+            );
+            prop_assert_ne!(pa.subnet, pb.subnet, "distinct slots → distinct /30");
+        }
     }
 
     /// Wholly-absent (first provision of a fresh alloc) → the full ordered
@@ -1669,11 +2019,14 @@ mod tests {
             host_addr_present: false,
             workload_addr_present: false,
             host_veth_up: false,
+            workload_veth_up: false,
+            lo_up: false,
             default_route_present: false,
             host_tx_offload_on: false,
             workload_tx_offload_on: false,
             ip_forward_enabled: false,
-            rp_filter_relaxed: false,
+            rp_filter_global_relaxed: false,
+            host_veth_rp_filter_relaxed: false,
         };
 
         let steps = workload_converge_steps(&plan, &observed);
@@ -1746,13 +2099,19 @@ mod tests {
             host_addr_present: false,
             workload_addr_present: false,
             host_veth_up: false,
+            workload_veth_up: false,
+            // The netns lo survives the veth pair (it is per-netns, not
+            // per-pair); host-global ip_forward + the GLOBAL rp_filter
+            // relaxation also survive. Only the per-host-veth rp_filter
+            // relaxation is lost — a freshly (re)built veth defaults STRICT
+            // (S3), so the rebuild must re-emit RelaxHostVethRpFilter.
+            lo_up: true,
             default_route_present: false,
             host_tx_offload_on: false,
             workload_tx_offload_on: false,
-            // host prereqs survive the netns; they are host-global / per-veth
-            // and converge independently.
             ip_forward_enabled: true,
-            rp_filter_relaxed: true,
+            rp_filter_global_relaxed: true,
+            host_veth_rp_filter_relaxed: true,
         };
 
         let steps = workload_converge_steps(&plan, &observed);
@@ -1763,6 +2122,10 @@ mod tests {
             "must NOT recreate a present, usable netns: {steps:?}"
         );
         // Must rebuild the pair and re-converge every veth-dependent step.
+        // SetLoopbackUp is omitted (lo survives the netns); but the freshly
+        // rebuilt host-side veth defaults strict rp_filter, so
+        // RelaxHostVethRpFilter is re-emitted (S3), while the GLOBAL relax and
+        // ip_forward are NOT (they survived).
         assert_eq!(
             steps,
             vec![
@@ -1771,11 +2134,13 @@ mod tests {
                 WorkloadVethStep::AddHostAddr,
                 WorkloadVethStep::AddWorkloadAddr,
                 WorkloadVethStep::SetHostVethUp,
+                WorkloadVethStep::SetWorkloadVethUp,
                 WorkloadVethStep::AddDefaultRoute,
+                WorkloadVethStep::RelaxHostVethRpFilter,
                 WorkloadVethStep::DisableHostTxOffload,
                 WorkloadVethStep::DisableWorkloadTxOffload,
             ],
-            "corrupted (netns present, pair absent) must rebuild the pair then re-converge every veth-dependent resource, got {steps:?}"
+            "corrupted (netns present, pair absent) must rebuild the pair then re-converge every veth-dependent resource (incl. the per-host-veth rp_filter relax on the fresh veth), got {steps:?}"
         );
     }
 
@@ -1839,11 +2204,14 @@ mod tests {
         );
     }
 
-    /// The four spike-proven host prereqs are emitted only when not already
-    /// satisfied: ip_forward off → EnableIpForward; rp_filter not relaxed →
-    /// RelaxRpFilter; per-end tx offload on → DisableHostTxOffload /
-    /// DisableWorkloadTxOffload. Each keyed on its own observed fact (guards
-    /// a collapse where one prereq's presence suppresses another's step).
+    /// The spike-proven host prereqs are emitted only when not already
+    /// satisfied: ip_forward off → EnableIpForward; GLOBAL rp_filter not
+    /// relaxed → RelaxGlobalRpFilter; per-host-veth rp_filter not relaxed →
+    /// RelaxHostVethRpFilter; per-end tx offload on → DisableHostTxOffload /
+    /// DisableWorkloadTxOffload. Each keyed on its OWN observed fact (guards a
+    /// collapse where one prereq's presence suppresses another's step). The
+    /// rp_filter split (S3) is the key new property: the two relaxations are
+    /// independent observed facts, not one lossy bool.
     #[test]
     fn workload_converge_emits_host_prereqs_only_when_unsatisfied() {
         let plan = workload_plan();
@@ -1857,13 +2225,28 @@ mod tests {
             "ip_forward off → exactly EnableIpForward"
         );
 
-        // rp_filter not relaxed → exactly RelaxRpFilter.
-        let no_rp =
-            ObservedWorkloadVeth { rp_filter_relaxed: false, ..complete_workload_observed() };
+        // GLOBAL rp_filter not relaxed → exactly RelaxGlobalRpFilter (the
+        // host-veth relax is unaffected — independent fact).
+        let no_global_rp = ObservedWorkloadVeth {
+            rp_filter_global_relaxed: false,
+            ..complete_workload_observed()
+        };
         assert_eq!(
-            workload_converge_steps(&plan, &no_rp),
-            vec![WorkloadVethStep::RelaxRpFilter],
-            "rp_filter not relaxed → exactly RelaxRpFilter"
+            workload_converge_steps(&plan, &no_global_rp),
+            vec![WorkloadVethStep::RelaxGlobalRpFilter],
+            "global rp_filter not relaxed → exactly RelaxGlobalRpFilter"
+        );
+
+        // Per-host-veth rp_filter not relaxed (on a present, non-rebuilt pair)
+        // → exactly RelaxHostVethRpFilter (the global relax is unaffected).
+        let no_host_veth_rp = ObservedWorkloadVeth {
+            host_veth_rp_filter_relaxed: false,
+            ..complete_workload_observed()
+        };
+        assert_eq!(
+            workload_converge_steps(&plan, &no_host_veth_rp),
+            vec![WorkloadVethStep::RelaxHostVethRpFilter],
+            "host-veth rp_filter not relaxed → exactly RelaxHostVethRpFilter"
         );
 
         // tx offload still on (host end only) → exactly DisableHostTxOffload.
@@ -1885,6 +2268,34 @@ mod tests {
         );
     }
 
+    /// B2 up-state regression: the in-netns veth end (`SetWorkloadVethUp`) and
+    /// the netns loopback (`SetLoopbackUp`) are each emitted ONLY when down,
+    /// and ONLY when their fact is unsatisfied on an otherwise-complete alloc.
+    /// Without these, a netns provisioned from the plan cannot carry a packet
+    /// (the in-netns end and `lo` stay DOWN). Each keyed on its own fact.
+    #[test]
+    fn workload_converge_brings_in_netns_end_and_loopback_up_when_down() {
+        let plan = workload_plan();
+
+        // In-netns veth end down (on a present, non-rebuilt pair) → exactly
+        // SetWorkloadVethUp.
+        let wl_down =
+            ObservedWorkloadVeth { workload_veth_up: false, ..complete_workload_observed() };
+        assert_eq!(
+            workload_converge_steps(&plan, &wl_down),
+            vec![WorkloadVethStep::SetWorkloadVethUp],
+            "in-netns end down → exactly SetWorkloadVethUp"
+        );
+
+        // Netns loopback down → exactly SetLoopbackUp.
+        let lo_down = ObservedWorkloadVeth { lo_up: false, ..complete_workload_observed() };
+        assert_eq!(
+            workload_converge_steps(&plan, &lo_down),
+            vec![WorkloadVethStep::SetLoopbackUp],
+            "netns lo down → exactly SetLoopbackUp"
+        );
+    }
+
     proptest! {
         /// The named scenario. Property: over the full present-netns,
         /// present-pair partial-state space (each converge-relevant fact
@@ -1894,23 +2305,31 @@ mod tests {
         ///   (c) emits each completion / prereq step IFF its observed fact
         ///       is unsatisfied — `MoveWorkloadEndIntoNetns` iff not moved,
         ///       `AddHostAddr` / `AddWorkloadAddr` iff that addr absent,
-        ///       `SetHostVethUp` iff host end down, `AddDefaultRoute` iff
-        ///       absent, `EnableIpForward` iff disabled, `RelaxRpFilter`
-        ///       iff not relaxed, `DisableHostTxOffload` /
-        ///       `DisableWorkloadTxOffload` iff that end's offload still on;
+        ///       `SetHostVethUp` iff host end down, `SetWorkloadVethUp` iff
+        ///       in-netns end down (B2), `SetLoopbackUp` iff netns lo down
+        ///       (B2), `AddDefaultRoute` iff absent, `EnableIpForward` iff
+        ///       disabled, `RelaxGlobalRpFilter` iff the global relax is
+        ///       missing, `RelaxHostVethRpFilter` iff the per-host-veth relax
+        ///       is missing (S3 — two independent rp_filter facts),
+        ///       `DisableHostTxOffload` / `DisableWorkloadTxOffload` iff that
+        ///       end's offload still on;
         ///   (d) re-applying the produced steps (i.e. converging from the
         ///       resulting satisfied state) is a no-op (idempotence).
         /// This is the exhaustive desired-vs-actual + idempotency invariant
-        /// for the per-alloc completion path (ADR-0061 § 3.1 Bar-1).
+        /// for the per-alloc completion path (ADR-0061 § 3.1 Bar-1), extended
+        /// for the B2 up-state facts and the S3 rp_filter split.
         #[test]
         fn workload_netns_converge_steps_are_minimal_and_idempotent(
             moved in any::<bool>(),
             host_addr in any::<bool>(),
             workload_addr in any::<bool>(),
             host_up in any::<bool>(),
+            workload_up in any::<bool>(),
+            lo_up in any::<bool>(),
             route in any::<bool>(),
             ip_forward in any::<bool>(),
-            rp_relaxed in any::<bool>(),
+            global_rp in any::<bool>(),
+            host_veth_rp in any::<bool>(),
             host_tx_on in any::<bool>(),
             workload_tx_on in any::<bool>(),
         ) {
@@ -1923,11 +2342,14 @@ mod tests {
                 host_addr_present: host_addr,
                 workload_addr_present: workload_addr,
                 host_veth_up: host_up,
+                workload_veth_up: workload_up,
+                lo_up,
                 default_route_present: route,
                 host_tx_offload_on: host_tx_on,
                 workload_tx_offload_on: workload_tx_on,
                 ip_forward_enabled: ip_forward,
-                rp_filter_relaxed: rp_relaxed,
+                rp_filter_global_relaxed: global_rp,
+                host_veth_rp_filter_relaxed: host_veth_rp,
             };
 
             let steps = workload_converge_steps(&plan, &observed);
@@ -1941,9 +2363,15 @@ mod tests {
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddHostAddr), !host_addr);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddWorkloadAddr), !workload_addr);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::SetHostVethUp), !host_up);
+            prop_assert_eq!(steps.contains(&WorkloadVethStep::SetWorkloadVethUp), !workload_up);
+            prop_assert_eq!(steps.contains(&WorkloadVethStep::SetLoopbackUp), !lo_up);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::AddDefaultRoute), !route);
             prop_assert_eq!(steps.contains(&WorkloadVethStep::EnableIpForward), !ip_forward);
-            prop_assert_eq!(steps.contains(&WorkloadVethStep::RelaxRpFilter), !rp_relaxed);
+            prop_assert_eq!(steps.contains(&WorkloadVethStep::RelaxGlobalRpFilter), !global_rp);
+            prop_assert_eq!(
+                steps.contains(&WorkloadVethStep::RelaxHostVethRpFilter),
+                !host_veth_rp
+            );
             prop_assert_eq!(steps.contains(&WorkloadVethStep::DisableHostTxOffload), host_tx_on);
             prop_assert_eq!(
                 steps.contains(&WorkloadVethStep::DisableWorkloadTxOffload),
@@ -1951,8 +2379,9 @@ mod tests {
             );
 
             // (a) complete ⇒ empty.
-            let all_satisfied = moved && host_addr && workload_addr && host_up && route
-                && ip_forward && rp_relaxed && !host_tx_on && !workload_tx_on;
+            let all_satisfied = moved && host_addr && workload_addr && host_up && workload_up
+                && lo_up && route && ip_forward && global_rp && host_veth_rp
+                && !host_tx_on && !workload_tx_on;
             if all_satisfied {
                 prop_assert!(
                     steps.is_empty(),
@@ -1971,9 +2400,14 @@ mod tests {
                     WorkloadVethStep::AddHostAddr => after.host_addr_present = true,
                     WorkloadVethStep::AddWorkloadAddr => after.workload_addr_present = true,
                     WorkloadVethStep::SetHostVethUp => after.host_veth_up = true,
+                    WorkloadVethStep::SetWorkloadVethUp => after.workload_veth_up = true,
+                    WorkloadVethStep::SetLoopbackUp => after.lo_up = true,
                     WorkloadVethStep::AddDefaultRoute => after.default_route_present = true,
                     WorkloadVethStep::EnableIpForward => after.ip_forward_enabled = true,
-                    WorkloadVethStep::RelaxRpFilter => after.rp_filter_relaxed = true,
+                    WorkloadVethStep::RelaxGlobalRpFilter => after.rp_filter_global_relaxed = true,
+                    WorkloadVethStep::RelaxHostVethRpFilter => {
+                        after.host_veth_rp_filter_relaxed = true;
+                    }
                     WorkloadVethStep::DisableHostTxOffload => after.host_tx_offload_on = false,
                     WorkloadVethStep::DisableWorkloadTxOffload => after.workload_tx_offload_on = false,
                     WorkloadVethStep::CreateNetns
@@ -1990,32 +2424,34 @@ mod tests {
             );
         }
 
-        /// Determinism over the alloc-id + subnet space: same inputs → same
-        /// plan, and the derived names embed the alloc id (`ovd-wl-<alloc>` /
-        /// `ovd-hv-<alloc>`).
+        /// Determinism over the alloc-id + slot space: same inputs → same
+        /// plan; the netns embeds the readable alloc id (`ovd-ns-<alloc>`) and
+        /// the veth names embed the 4-hex slot (`ovd-wl-<hex>` / `ovd-hv-<hex>`).
         #[test]
         fn workload_derivation_names_embed_alloc_and_are_deterministic(
             raw in "[a-z][a-z0-9]{0,20}",
-            o3 in 0u8..=255,
+            n in 0u16..=NET_SLOT_MAX,
         ) {
             let id = alloc(&raw);
-            let network = Ipv4Addr::new(10, 99, o3, 0);
-            let subnet = Ipv4Net::new(network, 30).expect("valid /30");
+            let s = slot(n);
 
-            let a = derive_workload_netns_plan(&id, responder(), subnet);
-            let b = derive_workload_netns_plan(&id, responder(), subnet);
+            let a = derive_workload_netns_plan(&id, s, responder());
+            let b = derive_workload_netns_plan(&id, s, responder());
             prop_assert_eq!(&a, &b);
 
-            prop_assert!(a.host_veth.contains(id.as_str()), "host_veth must embed alloc id");
-            prop_assert!(a.workload_veth.contains(id.as_str()), "workload_veth must embed alloc id");
+            // Netns embeds the readable alloc id; veth names embed the hex slot.
+            prop_assert!(a.netns.contains(id.as_str()), "netns must embed alloc id");
+            prop_assert!(a.netns.starts_with("ovd-ns-"), "netns prefix");
+            prop_assert!(a.host_veth.contains(&s.to_hex4()), "host_veth must embed hex slot");
+            prop_assert!(a.workload_veth.contains(&s.to_hex4()), "workload_veth must embed hex slot");
             prop_assert!(a.host_veth.starts_with("ovd-hv-"), "host_veth prefix");
             prop_assert!(a.workload_veth.starts_with("ovd-wl-"), "workload_veth prefix");
             // host-side = first usable, in-netns = second usable, gateway =
-            // host-side address.
-            let first = subnet.hosts().next().expect("/30 has hosts");
+            // host-side address; a /30 always has two distinct usable hosts.
+            let first = a.subnet.hosts().next().expect("/30 has hosts");
             prop_assert_eq!(a.host_addr, first);
             prop_assert_eq!(a.gateway, first);
-            prop_assert!(subnet.contains(&a.workload_addr));
+            prop_assert!(a.subnet.contains(&a.workload_addr));
             prop_assert_ne!(a.host_addr, a.workload_addr);
         }
     }
