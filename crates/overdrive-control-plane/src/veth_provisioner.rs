@@ -320,6 +320,17 @@ impl NetSlot {
 /// too. All three prefixes — `ovd-ns-` (netns), `ovd-hv-`, `ovd-wl-` — are
 /// asserted independently so a change to any ONE that overflowed would be
 /// caught even if the three stopped being equal-length.
+///
+/// The fourth slot-derived axis — the /30 subnet — gets the symmetric guard
+/// (S6): the full `0..=NET_SLOT_MAX` slot space carves /30s at
+/// `base + slot*4`, so the TOP slot's /30 broadcast sits at
+/// `NET_SLOT_MAX*4 + 3`. That offset must stay strictly inside
+/// [`WORKLOAD_SUBNET_BASE`]'s address span (`2^(32 - prefix_len)`), or a future
+/// `NET_SLOT_MAX` raise (or the #239 tunable base) would silently carve /30s
+/// OUTSIDE the base — an out-of-base address-collision class the name-axis
+/// guards cannot catch. `Ipv4Net::prefix_len()` is `const` in `ipnet` 2.x, so
+/// this is pure const integer arithmetic and overflows fail `cargo check`, not
+/// `ip addr add`.
 const _: () = {
     const IFNAMSIZ: usize = 15;
     assert!(WORKLOAD_NETNS_PREFIX.len() + 4 <= IFNAMSIZ, "netns prefix + 4 hex must fit IFNAMSIZ");
@@ -330,6 +341,17 @@ const _: () = {
     assert!(
         WORKLOAD_VETH_PREFIX.len() + 4 <= IFNAMSIZ,
         "workload-veth prefix + 4 hex must fit IFNAMSIZ"
+    );
+
+    // S6: the top slot's /30 broadcast must fall strictly inside the base's
+    // address span. `base_span = 2^(32 - prefix_len)` is the count of
+    // addresses in WORKLOAD_SUBNET_BASE; the highest offset any slot's /30
+    // reaches is `NET_SLOT_MAX*4 + 3` (the top /30's broadcast). Keeping that
+    // `< base_span` proves the whole slot space tiles WITHIN the base.
+    let base_span: u32 = 1u32 << (32 - WORKLOAD_SUBNET_BASE.prefix_len() as u32);
+    assert!(
+        (NET_SLOT_MAX as u32 * 4 + 3) < base_span,
+        "every slot's /30 must tile inside WORKLOAD_SUBNET_BASE (NET_SLOT_MAX*4+3 < base span)"
     );
 };
 
@@ -393,10 +415,10 @@ pub struct WorkloadNetnsPlan {
     /// workload is born behind it. SLOT-derived, IFNAMSIZ-safe.
     pub workload_veth: String,
     /// Address assigned to the host-side end (`host_veth`). The FIRST usable
-    /// host of `alloc_subnet`; also the in-netns default-route gateway.
+    /// host of `subnet`; also the in-netns default-route gateway.
     pub host_addr: Ipv4Addr,
     /// Address assigned to the in-netns end (`workload_veth`). The SECOND
-    /// usable host of `alloc_subnet`.
+    /// usable host of `subnet`.
     pub workload_addr: Ipv4Addr,
     /// In-netns default-route gateway — the host-side address, so the
     /// workload's egress leaves via the veth and ingresses the host-side end
@@ -485,7 +507,7 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
               and mirrors the host-netns ObservedVeth shape ADR-0061 § 3.1 prescribes"
 )]
 pub struct ObservedWorkloadVeth {
-    /// The per-alloc netns (`ovd-ns-<alloc>`) exists.
+    /// The per-alloc netns (`ovd-ns-<4hex-slot>`) exists.
     pub netns_present: bool,
     /// The host-side veth end (`ovd-hv-<4hex-slot>`) exists in the host netns.
     pub host_veth_present: bool,
@@ -1979,15 +2001,19 @@ mod tests {
             prop_assert!(NetSlot::from_str(&n.to_string()).is_err());
         }
 
-        /// IFNAMSIZ + collision-freedom over the FULL `0..=NET_SLOT_MAX` slot
-        /// space (D-TME-12 / B1 / B3):
+        /// IFNAMSIZ + slot-space containment over the FULL `0..=NET_SLOT_MAX`
+        /// slot space (D-TME-12 / B1 / B3 / S6):
         ///   (a) every slot's netns, host_veth AND workload_veth name is
         ///       <= 15 chars (IFNAMSIZ — the tightest of the two ceilings; the
         ///       slot-keyed netns is bounded the same as the veths, B3); and
-        ///   (b) the derived /30 subnet tiles WORKLOAD_SUBNET_BASE
-        ///       (`base + slot*4`, prefix 30), with the host-side address =
-        ///       net+1 and the in-netns address = net+2 (a /30 ALWAYS has two
-        ///       usable hosts, so no Option / network() fallback — S2).
+        ///   (b) the derived /30 subnet lies WITHIN WORKLOAD_SUBNET_BASE
+        ///       (containment, NOT an arithmetic recompute — S6: assert the
+        ///       /30's network AND broadcast both fall inside the base, so a
+        ///       future NET_SLOT_MAX raise or #239 tunable base that carved a
+        ///       /30 OUTSIDE the base fails this property), prefix 30, with the
+        ///       host-side address = its-network+1 and the in-netns address =
+        ///       its-network+2 (a /30 ALWAYS has two usable hosts, so no Option
+        ///       / network() fallback — S2).
         #[test]
         fn every_slot_name_fits_ifnamsiz_and_tiles_the_base(n in 0u16..=NET_SLOT_MAX) {
             let plan = derive_workload_netns_plan(slot(n), responder());
@@ -1998,12 +2024,37 @@ mod tests {
             prop_assert!(plan.host_veth.len() <= 15, "host_veth {} > 15", plan.host_veth);
             prop_assert!(plan.workload_veth.len() <= 15, "workload_veth {} > 15", plan.workload_veth);
 
-            // (b) /30 carved at base + slot*4, host=net+1, workload=net+2.
-            let expected_net = WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(n) * 4);
-            prop_assert_eq!(plan.subnet.network(), expected_net);
+            // (b) The /30 is CONTAINED in the base — assert containment, NOT the
+            // `base + slot*4` arithmetic the production code already uses (S6).
+            // Both bounding addresses of the /30 (its network AND its broadcast
+            // at network+3) must fall inside WORKLOAD_SUBNET_BASE's closed
+            // address interval `[base_net, base_net + base_span - 1]`; a slot
+            // whose /30 escaped the base would fail here even though the
+            // recompute-and-equality form would still pass. (`ipnet::Contains`
+            // is a `pub` trait in a private module, not re-exported from the
+            // crate root, so containment is expressed as the `u32` range check
+            // it denotes.)
+            let base_net = u32::from(WORKLOAD_SUBNET_BASE.network());
+            let base_span = 1u32 << (32 - u32::from(WORKLOAD_SUBNET_BASE.prefix_len()));
+            let base_last = base_net + base_span - 1;
+            let subnet_net = plan.subnet.network();
+            let subnet_net_u32 = u32::from(subnet_net);
+            let subnet_broadcast_u32 = subnet_net_u32 + 3;
+            prop_assert!(
+                (base_net..=base_last).contains(&subnet_net_u32),
+                "/30 network {subnet_net} escaped base {WORKLOAD_SUBNET_BASE}"
+            );
+            prop_assert!(
+                (base_net..=base_last).contains(&subnet_broadcast_u32),
+                "/30 broadcast {} escaped base {WORKLOAD_SUBNET_BASE}",
+                Ipv4Addr::from(subnet_broadcast_u32)
+            );
             prop_assert_eq!(plan.subnet.prefix_len(), 30);
-            prop_assert_eq!(plan.host_addr, expected_net.saturating_add(1));
-            prop_assert_eq!(plan.workload_addr, expected_net.saturating_add(2));
+            // host = the /30's own network+1, workload = its network+2 — anchored
+            // to the subnet's network (NOT a re-derived base+slot*4), so this
+            // checks the addressing relationship, not the slot arithmetic.
+            prop_assert_eq!(plan.host_addr, subnet_net.saturating_add(1));
+            prop_assert_eq!(plan.workload_addr, subnet_net.saturating_add(2));
             prop_assert_eq!(plan.gateway, plan.host_addr);
             // A /30 always yields two usable hosts — derivation is total.
             prop_assert_ne!(plan.host_addr, plan.workload_addr);
