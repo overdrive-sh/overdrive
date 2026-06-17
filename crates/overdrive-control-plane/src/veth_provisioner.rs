@@ -33,10 +33,24 @@
 //!   place; a corrupted pair (client present, peer absent — § 3.2) is
 //!   RECREATED. Never tears down a usable pair (DQ-4 leave-and-reuse).
 //!
-//! Single-node runs entirely in the host netns — there is no netns
-//! machinery here (no `ip netns add`, no `ip link set <if> netns <ns>`).
+//! Two topologies live in this module:
+//!
+//! - **Single-node host-netns pair** ([`derive_veth_plan`] /
+//!   [`converge_steps`] / [`provision`], ADR-0061 § 3) — the boot-time pair
+//!   stood up directly in the **host** netns. No per-allocation namespace is
+//!   involved on this path.
+//! - **Per-allocation netns + veth pair** ([`derive_workload_netns_plan`] /
+//!   [`workload_converge_steps`], transparent-mTLS / Path A, ADR-0071) — each
+//!   live allocation gets its own Linux network namespace and a slot-keyed
+//!   veth pair, so the agent has an agent-controlled routing point per
+//!   workload (the nft-TPROXY PREROUTING hook fires on the host-side veth
+//!   ingress). This path DOES use netns machinery: `workload_converge_steps`
+//!   emits [`WorkloadVethStep::CreateNetns`] (`ip netns add`) and
+//!   [`WorkloadVethStep::MoveWorkloadEndIntoNetns`]
+//!   (`ip link set <if> netns <ns>`), among others.
+//!
 //! `CAP_NET_ADMIN` is already a precondition of serve boot (XDP attach +
-//! cgroup delegation), so provisioning adds no new privilege.
+//! cgroup delegation), so neither path adds a new privilege.
 
 use ipnet::{IpAdd, Ipv4Net};
 use std::net::Ipv4Addr;
@@ -198,11 +212,16 @@ pub fn derive_veth_plan(
 // BOTH ends (the incremental-L4-csum invariant, `bpf.md` Rule 2). The
 // leg-dial `SO_MARK` is NOT here — it belongs to the agent dial (step 03-03).
 
-/// Per-allocation network-namespace prefix for the workload netns name. The
-/// netns name embeds the [`overdrive_core::AllocationId`] so it is unique per
-/// allocation and recognisable in `ip netns list`. A netns name is NOT bound
-/// by IFNAMSIZ (the kernel allows up to 255 bytes), so embedding the readable
-/// alloc id here is safe.
+/// Per-allocation network-namespace prefix for the workload netns name
+/// (`ovd-ns-<4hex-slot>`). SLOT-keyed, NOT alloc-id-keyed (B3): combined with a
+/// 4-char hex [`NetSlot`] this yields an 11-char name, bounded ≤ NAME_MAX (255)
+/// AND ≤ IFNAMSIZ (15) BY CONSTRUCTION — the identical shape to the two veth
+/// names. An alloc-id-keyed netns would overflow NAME_MAX at 260 chars for a
+/// 253-char [`overdrive_core::AllocationId`] (`ip netns add` → `ENAMETOOLONG`),
+/// the same pigeonhole/ceiling class as the IFNAMSIZ veth-name overflow B1
+/// closed. `ip netns list` shows `ovd-ns-<4hex>`; the human-readable alloc
+/// identity is rendered by tooling against the 02-04 slot↔alloc map (the Cilium
+/// `lxc<hex>` + `cilium endpoint list` model).
 const WORKLOAD_NETNS_PREFIX: &str = "ovd-ns-";
 /// Host-side veth-end name prefix (`ovd-hv-<4hex-slot>`). This is the end that
 /// stays in the host netns, where nft-TPROXY PREROUTING intercepts the
@@ -215,15 +234,18 @@ const WORKLOAD_HOST_VETH_PREFIX: &str = "ovd-hv-";
 /// IFNAMSIZ-safe shape as [`WORKLOAD_HOST_VETH_PREFIX`].
 const WORKLOAD_VETH_PREFIX: &str = "ovd-wl-";
 
-/// The maximum [`NetSlot`] value: 4096 slots (`0..=4095`) tile the whole
-/// [`WORKLOAD_SUBNET_BASE`] /16 into 4096 contiguous /30s. The ceiling is the
+/// The maximum [`NetSlot`] value: 4096 slots (`0..=4095`) carve 4096 contiguous
+/// /30s (16384 addresses = a `/18`) out of the front of the
+/// [`WORKLOAD_SUBNET_BASE`] /16 — `10.99.0.0`–`10.99.63.255` (the /16 has room
+/// for far more; only the first /18 is allocated). The ceiling is the
 /// pigeonhole companion to the 4-char hex name segment — a `u16` slot below
 /// `0x1000` always renders as exactly 4 lowercase hex chars.
 pub const NET_SLOT_MAX: u16 = 4095;
 
 /// Per-host base block all per-allocation /30s are carved from. The full
-/// `0..=NET_SLOT_MAX` slot space tiles this /16 into 4096 contiguous /30s
-/// (`base + slot*4`).
+/// `0..=NET_SLOT_MAX` slot space carves 4096 contiguous /30s (`base + slot*4`)
+/// — a `/18` (`10.99.0.0`–`10.99.63.255`) out of the front of this /16; the
+/// remainder of the /16 is unallocated headroom.
 ///
 /// Fixed for Phase-1 single-node; making it operator-configurable is tracked
 /// in <https://github.com/overdrive-sh/overdrive/issues/239> (do NOT make it
@@ -273,25 +295,43 @@ impl NetSlot {
         Ok(Self(value))
     }
 
-    /// The raw slot index.
-    #[must_use]
-    pub const fn get(self) -> u16 {
-        self.0
-    }
-
     /// The IFNAMSIZ-bounded 4-char lowercase hex name segment for this slot
     /// (`0` → `"0000"`, `4095` → `"0fff"`). Because the slot is bounded below
     /// `0x1000`, this is ALWAYS exactly 4 chars, which — combined with the
-    /// 7-char `ovd-hv-` / `ovd-wl-` prefix — yields an 11-char iface name,
-    /// inside the 15-char IFNAMSIZ limit (asserted in a unit test). The
-    /// `{:04x}` zero-pad keeps every slot's name the same length so a future
-    /// prefix change that would overflow fails the build-time IFNAMSIZ
-    /// assertion rather than a runtime `ip link add`.
+    /// 7-char `ovd-ns-` / `ovd-hv-` / `ovd-wl-` prefix — yields an 11-char
+    /// name, inside the 15-char IFNAMSIZ limit. The `{:04x}` zero-pad keeps
+    /// every slot's name the same length so a future prefix change that would
+    /// overflow fails the build-time const assertion just below this `impl` (a
+    /// `cargo check` failure, not a runtime `ip link add`).
     #[must_use]
     pub fn to_hex4(self) -> String {
         format!("{:04x}", self.0)
     }
 }
+
+/// Build-time proof (N5) that every slot-keyed name fits IFNAMSIZ BY
+/// CONSTRUCTION — a compile-time `const` assertion, so an overflowing prefix
+/// fails `cargo check`, not a runtime `ip link add` / `ip netns add`.
+///
+/// [`NetSlot::to_hex4`] always renders exactly 4 chars (the slot is bounded
+/// below `0x1000`), so the longest name any prefix produces is
+/// `<prefix>.len() + 4`. IFNAMSIZ (15) is the tightest of the IFNAMSIZ-vs-
+/// NAME_MAX ceilings, so satisfying it satisfies NAME_MAX (255) for the netns
+/// too. All three prefixes — `ovd-ns-` (netns), `ovd-hv-`, `ovd-wl-` — are
+/// asserted independently so a change to any ONE that overflowed would be
+/// caught even if the three stopped being equal-length.
+const _: () = {
+    const IFNAMSIZ: usize = 15;
+    assert!(WORKLOAD_NETNS_PREFIX.len() + 4 <= IFNAMSIZ, "netns prefix + 4 hex must fit IFNAMSIZ");
+    assert!(
+        WORKLOAD_HOST_VETH_PREFIX.len() + 4 <= IFNAMSIZ,
+        "host-veth prefix + 4 hex must fit IFNAMSIZ"
+    );
+    assert!(
+        WORKLOAD_VETH_PREFIX.len() + 4 <= IFNAMSIZ,
+        "workload-veth prefix + 4 hex must fit IFNAMSIZ"
+    );
+};
 
 impl std::fmt::Display for NetSlot {
     /// Canonical DECIMAL form — matches the serde representation and the
@@ -338,11 +378,12 @@ impl<'de> serde::Deserialize<'de> for NetSlot {
 /// resolv.conf-injection step, D-TME-9 / Q5a; it is NOT derived state).
 ///
 /// Per § "Persist inputs not derived state" this plan is recomputed at every
-/// provision from `(alloc_id, slot, responder_addr)`; it is never persisted.
+/// provision from `(slot, responder_addr)`; it is never persisted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkloadNetnsPlan {
-    /// Per-allocation network-namespace name (`ovd-ns-<alloc>`). Embeds the
-    /// readable alloc id (a netns name is not IFNAMSIZ-bound).
+    /// Per-allocation network-namespace name (`ovd-ns-<4hex-slot>`). SLOT-keyed
+    /// (B3), so 11 chars ≤ NAME_MAX (255) and ≤ IFNAMSIZ (15) by construction —
+    /// the identical shape to the two veth names.
     pub netns: String,
     /// Host-side veth-end name (`ovd-hv-<4hex-slot>`) — stays in the host
     /// netns; the nft-TPROXY PREROUTING interception point. SLOT-derived
@@ -373,21 +414,27 @@ pub struct WorkloadNetnsPlan {
 }
 
 /// Derive the [`WorkloadNetnsPlan`] for one allocation's netns + veth pair
-/// from the allocation id, the host-unique network [`NetSlot`], and the
-/// node-local DNS responder address (D-TME-12).
+/// from the host-unique network [`NetSlot`] and the node-local DNS responder
+/// address (D-TME-12).
 ///
 /// Pure — performs no I/O, deterministic (same inputs → same plan), total
 /// (the /30 ALWAYS has two distinct usable hosts, so there is no fallback).
 ///
-/// - `netns` = `ovd-ns-<alloc>` (readable, embeds the alloc id; NOT
-///   IFNAMSIZ-bound).
+/// Every name and the subnet are SLOT-derived; the allocation id is NOT a
+/// parameter (B3). With the slot keying all three names and the subnet, the
+/// alloc id derives nothing here — the alloc↔slot binding lives in the 02-04
+/// allocator map, not in this pure derivation.
+///
+/// - `netns` = `ovd-ns-<4hex-slot>` — SLOT-keyed 11-char name, ≤ NAME_MAX (255)
+///   AND ≤ IFNAMSIZ (15) by construction (B3; an alloc-id-keyed netns would
+///   overflow NAME_MAX at 260 chars for a 253-char alloc id).
 /// - `host_veth` = `ovd-hv-<4hex-slot>`, `workload_veth` = `ovd-wl-<4hex-slot>`
 ///   — SLOT-derived 11-char names, IFNAMSIZ-safe and collision-free BY
 ///   CONSTRUCTION (distinct slots ⇒ distinct names; B1).
 /// - `subnet` = the /30 at `WORKLOAD_SUBNET_BASE.network() + slot*4` — the
-///   slot tiles the /16 into 4096 contiguous /30s; distinct slots ⇒ distinct
-///   /30s (S1, the derivation owns slot→/30; the subnet is NOT a caller
-///   parameter).
+///   slot carves a /18 of contiguous /30s out of the /16; distinct slots ⇒
+///   distinct /30s (S1, the derivation owns slot→/30; the subnet is NOT a
+///   caller parameter).
 /// - `host_addr` = `subnet.network() + 1` (first usable),
 ///   `workload_addr` = `subnet.network() + 2` (second usable). A /30 always
 ///   has exactly two usable hosts, so neither is an `Option` / `network()`
@@ -397,25 +444,20 @@ pub struct WorkloadNetnsPlan {
 /// - `responder_addr` flows through verbatim (carried for D-TME-9; an INPUT,
 ///   not derived state).
 #[must_use]
-pub fn derive_workload_netns_plan(
-    alloc_id: &overdrive_core::AllocationId,
-    slot: NetSlot,
-    responder_addr: Ipv4Addr,
-) -> WorkloadNetnsPlan {
-    let id = alloc_id.as_str();
+pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> WorkloadNetnsPlan {
     let hex = slot.to_hex4();
 
     // Carve the per-allocation /30 from the fixed base: slot N owns the four
     // contiguous addresses at base + N*4. A /30 always has exactly two usable
     // hosts (net+1, net+2), so the addressing is total — no Option / fallback.
-    let network = WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(slot.get()) * 4);
+    let network = WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(slot.0) * 4);
     let subnet = Ipv4Net::new(network, 30)
         .unwrap_or_else(|_| unreachable!("/30 is a statically-valid prefix; new() cannot fail"));
     let host_addr = network.saturating_add(1);
     let workload_addr = network.saturating_add(2);
 
     WorkloadNetnsPlan {
-        netns: format!("{WORKLOAD_NETNS_PREFIX}{id}"),
+        netns: format!("{WORKLOAD_NETNS_PREFIX}{hex}"),
         host_veth: format!("{WORKLOAD_HOST_VETH_PREFIX}{hex}"),
         workload_veth: format!("{WORKLOAD_VETH_PREFIX}{hex}"),
         host_addr,
@@ -436,11 +478,11 @@ pub fn derive_workload_netns_plan(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "fourteen independent observed kernel facts (netns/pair presence, in-netns move, \
-              per-end addr, host-end up, in-netns-end up, netns lo up, default route, per-end \
-              tx-offload, ip_forward, global rp_filter, host-veth rp_filter); a flag-per-fact \
-              value object is the clearest model of the converge input and mirrors the host-netns \
-              ObservedVeth shape ADR-0061 § 3.1 prescribes"
+    reason = "fifteen independent observed kernel facts (netns presence, host-veth/workload-veth \
+              presence, in-netns move, per-end addr, host-end up, in-netns-end up, netns lo up, \
+              default route, per-end tx-offload, ip_forward, global rp_filter, host-veth \
+              rp_filter); a flag-per-fact value object is the clearest model of the converge input \
+              and mirrors the host-netns ObservedVeth shape ADR-0061 § 3.1 prescribes"
 )]
 pub struct ObservedWorkloadVeth {
     /// The per-alloc netns (`ovd-ns-<alloc>`) exists.
@@ -1258,12 +1300,11 @@ fn link_absent(stderr: &str) -> bool {
 mod tests {
     use super::{
         NET_SLOT_MAX, NetSlot, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
-        WORKLOAD_HOST_VETH_PREFIX, WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep,
-        converge_steps, derive_veth_plan, derive_workload_netns_plan, link_absent,
-        tx_checksumming_on, tx_offload_benign, workload_converge_steps,
+        WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
+        derive_veth_plan, derive_workload_netns_plan, link_absent, tx_checksumming_on,
+        tx_offload_benign, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
-    use overdrive_core::AllocationId;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
     use std::str::FromStr;
@@ -1745,10 +1786,6 @@ mod tests {
     // Per-allocation netns+veth derivation + converge (step 02-01)
     // -------------------------------------------------------------------------
 
-    fn alloc(raw: &str) -> AllocationId {
-        AllocationId::new(raw).expect("valid alloc id")
-    }
-
     fn responder() -> Ipv4Addr {
         // The node-local DNS responder address (D-TME-9 / Q5a); carried as a
         // plan INPUT, not derived state.
@@ -1760,7 +1797,7 @@ mod tests {
     }
 
     fn workload_plan() -> WorkloadNetnsPlan {
-        derive_workload_netns_plan(&alloc("payments-0"), slot(0), responder())
+        derive_workload_netns_plan(slot(0), responder())
     }
 
     /// A complete (all-present, in-netns end moved, both addressed, both ends
@@ -1817,28 +1854,29 @@ mod tests {
         ]
     }
 
-    /// Derivation golden anchor (D-TME-12): from `alloc_id` + slot +
-    /// responder, the plan carries the per-alloc *readable* netns name
-    /// (`ovd-ns-<alloc>` — NOT IFNAMSIZ-bound), the SLOT-DERIVED veth names
-    /// (`ovd-wl-<4hex-slot>` in-netns end, `ovd-hv-<4hex-slot>` host-side end
-    /// — 11 chars each, IFNAMSIZ-safe BY CONSTRUCTION), the slot-derived /30
-    /// subnet (carved from `WORKLOAD_SUBNET_BASE` at `base + slot*4`), the
-    /// host-side address (first usable = net+1), the in-netns address (second
-    /// usable = net+2), the in-netns default-route gateway (= host-side
-    /// address), and the responder address verbatim (an input, not derived
-    /// state). The subnet is NO LONGER a caller parameter — the derivation
-    /// owns slot→/30 (S1).
+    /// Derivation golden anchor (D-TME-12): from `slot` + `responder`, the plan
+    /// carries the SLOT-DERIVED netns name (`ovd-ns-<4hex-slot>` — 11 chars,
+    /// bounded ≤ NAME_MAX and ≤ IFNAMSIZ BY CONSTRUCTION, identical shape to the
+    /// veths; B3), the SLOT-DERIVED veth names (`ovd-wl-<4hex-slot>` in-netns
+    /// end, `ovd-hv-<4hex-slot>` host-side end — 11 chars each, IFNAMSIZ-safe BY
+    /// CONSTRUCTION), the slot-derived /30 subnet (carved from
+    /// `WORKLOAD_SUBNET_BASE` at `base + slot*4`), the host-side address (first
+    /// usable = net+1), the in-netns address (second usable = net+2), the
+    /// in-netns default-route gateway (= host-side address), and the responder
+    /// address verbatim (an input, not derived state). Neither the subnet nor
+    /// the alloc id is a caller parameter — the derivation owns slot→names/
+    /// subnet (S1, B3); the alloc↔slot binding lives in the 02-04 allocator map.
     ///
-    /// Slot 0 → subnet `10.99.0.0/30`, host-side `10.99.0.1`, in-netns
-    /// `10.99.0.2`, veth names `ovd-hv-0000` / `ovd-wl-0000`. The previous
-    /// golden `ovd-hv-payments-0` (17 chars — IFNAMSIZ overflow,
-    /// `ip link add`-uncreatable) is REMOVED.
+    /// Slot 0 → netns `ovd-ns-0000`, subnet `10.99.0.0/30`, host-side
+    /// `10.99.0.1`, in-netns `10.99.0.2`, veth names `ovd-hv-0000` /
+    /// `ovd-wl-0000`. The previous alloc-keyed netns `ovd-ns-payments-0` (which
+    /// would overflow NAME_MAX at 260 chars for a 253-char alloc id) is REMOVED.
     #[test]
     fn derives_per_alloc_netns_veth_names_and_addresses() {
-        let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(0), responder());
+        let plan = derive_workload_netns_plan(slot(0), responder());
 
-        // Netns name embeds the readable alloc id (not the hex slot).
-        assert_eq!(plan.netns, "ovd-ns-payments-0");
+        // Netns name is SLOT-derived (4-hex), same shape as the veths (B3).
+        assert_eq!(plan.netns, "ovd-ns-0000");
         // Veth names are SLOT-derived (4-hex), IFNAMSIZ-safe — 11 chars.
         assert_eq!(plan.host_veth, "ovd-hv-0000");
         assert_eq!(plan.workload_veth, "ovd-wl-0000");
@@ -1854,18 +1892,20 @@ mod tests {
     }
 
     /// A non-zero slot derives a distinct /30 four addresses up per slot and
-    /// the matching hex name: slot 1 → `10.99.0.4/30`, host `10.99.0.5`,
-    /// in-netns `10.99.0.6`, names `ovd-hv-0001` / `ovd-wl-0001`. Pins the
-    /// `slot*4` subnet arithmetic and the `{:04x}` name formatting against a
-    /// concrete second point.
+    /// the matching hex names: slot 1 → `10.99.0.4/30`, host `10.99.0.5`,
+    /// in-netns `10.99.0.6`, names `ovd-ns-0001` / `ovd-hv-0001` /
+    /// `ovd-wl-0001`. Pins the `slot*4` subnet arithmetic and the `{:04x}` name
+    /// formatting (including the slot-keyed netns; B3) against a concrete second
+    /// point.
     #[test]
     fn derives_distinct_subnet_and_name_for_nonzero_slot() {
-        let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(1), responder());
+        let plan = derive_workload_netns_plan(slot(1), responder());
 
         assert_eq!(plan.subnet, "10.99.0.4/30".parse::<Ipv4Net>().expect("valid /30"));
         assert_eq!(plan.host_addr, Ipv4Addr::new(10, 99, 0, 5));
         assert_eq!(plan.workload_addr, Ipv4Addr::new(10, 99, 0, 6));
         assert_eq!(plan.gateway, Ipv4Addr::new(10, 99, 0, 5));
+        assert_eq!(plan.netns, "ovd-ns-0001");
         assert_eq!(plan.host_veth, "ovd-hv-0001");
         assert_eq!(plan.workload_veth, "ovd-wl-0001");
     }
@@ -1873,27 +1913,14 @@ mod tests {
     /// Determinism: same inputs → byte-identical plan (pure function).
     #[test]
     fn workload_derivation_is_deterministic() {
-        let a = derive_workload_netns_plan(&alloc("svc-7"), slot(42), responder());
-        let b = derive_workload_netns_plan(&alloc("svc-7"), slot(42), responder());
+        let a = derive_workload_netns_plan(slot(42), responder());
+        let b = derive_workload_netns_plan(slot(42), responder());
         assert_eq!(a, b);
     }
 
     // -------------------------------------------------------------------------
     // NetSlot newtype — completeness + IFNAMSIZ ceiling (D-TME-12)
     // -------------------------------------------------------------------------
-
-    /// IFNAMSIZ ceiling is DERIVED, not magic: the host-veth prefix plus the
-    /// 4-char hex slot must fit the 15-char Linux iface-name limit. A future
-    /// prefix change that would overflow fails THIS assertion (build-time),
-    /// not a runtime `ip link add` (D-TME-12 / B1).
-    #[test]
-    fn workload_veth_name_fits_ifnamsiz_by_construction() {
-        assert!(
-            WORKLOAD_HOST_VETH_PREFIX.len() + 4 <= 15,
-            "host-veth prefix ({}) + 4 hex chars must fit IFNAMSIZ (15)",
-            WORKLOAD_HOST_VETH_PREFIX.len()
-        );
-    }
 
     /// `to_hex4` is a zero-padded 4-char lowercase hex of the slot value
     /// (the IFNAMSIZ-bounded name segment). Input variations of one
@@ -1953,18 +1980,21 @@ mod tests {
         }
 
         /// IFNAMSIZ + collision-freedom over the FULL `0..=NET_SLOT_MAX` slot
-        /// space (D-TME-12 / B1):
-        ///   (a) every slot's host_veth AND workload_veth name is <= 15 chars
-        ///       (IFNAMSIZ); and
+        /// space (D-TME-12 / B1 / B3):
+        ///   (a) every slot's netns, host_veth AND workload_veth name is
+        ///       <= 15 chars (IFNAMSIZ — the tightest of the two ceilings; the
+        ///       slot-keyed netns is bounded the same as the veths, B3); and
         ///   (b) the derived /30 subnet tiles WORKLOAD_SUBNET_BASE
         ///       (`base + slot*4`, prefix 30), with the host-side address =
         ///       net+1 and the in-netns address = net+2 (a /30 ALWAYS has two
         ///       usable hosts, so no Option / network() fallback — S2).
         #[test]
         fn every_slot_name_fits_ifnamsiz_and_tiles_the_base(n in 0u16..=NET_SLOT_MAX) {
-            let plan = derive_workload_netns_plan(&alloc("payments-0"), slot(n), responder());
+            let plan = derive_workload_netns_plan(slot(n), responder());
 
-            // (a) IFNAMSIZ — names fit by construction for EVERY slot.
+            // (a) IFNAMSIZ — all three names fit by construction for EVERY slot
+            // (the netns is slot-keyed and bounded the same as the veths, B3).
+            prop_assert!(plan.netns.len() <= 15, "netns {} > 15", plan.netns);
             prop_assert!(plan.host_veth.len() <= 15, "host_veth {} > 15", plan.host_veth);
             prop_assert!(plan.workload_veth.len() <= 15, "workload_veth {} > 15", plan.workload_veth);
 
@@ -1979,23 +2009,23 @@ mod tests {
             prop_assert_ne!(plan.host_addr, plan.workload_addr);
         }
 
-        /// Collision-freedom BY CONSTRUCTION (D-TME-12 / B1), NOT by hash:
-        /// for any two DISTINCT slots, the derived names AND the derived /30
-        /// subnets are distinct. This is the property the previous
-        /// `ovd-hv-<alloc>` scheme violated (truncating two long alloc ids
-        /// onto one 15-char iface name) — a bounded `NetSlot` makes the
-        /// collision unrepresentable.
+        /// Collision-freedom BY CONSTRUCTION (D-TME-12 / B1 / B3), NOT by hash:
+        /// for any two DISTINCT slots, all THREE derived names (netns + both
+        /// veths) AND the derived /30 subnets are distinct. This is the property
+        /// the previous `ovd-hv-<alloc>` / `ovd-ns-<alloc>` schemes violated
+        /// (truncating two long alloc ids onto one 15-char iface name, or
+        /// overflowing NAME_MAX on the netns) — a bounded `NetSlot` keying every
+        /// name makes the collision unrepresentable.
         #[test]
         fn distinct_slots_yield_distinct_names_and_subnets(
             a in 0u16..=NET_SLOT_MAX,
             b in 0u16..=NET_SLOT_MAX,
         ) {
             prop_assume!(a != b);
-            // The alloc id is held constant: only the slot varies, isolating
-            // the slot→name/subnet injection.
-            let pa = derive_workload_netns_plan(&alloc("payments-0"), slot(a), responder());
-            let pb = derive_workload_netns_plan(&alloc("payments-0"), slot(b), responder());
+            let pa = derive_workload_netns_plan(slot(a), responder());
+            let pb = derive_workload_netns_plan(slot(b), responder());
 
+            prop_assert_ne!(&pa.netns, &pb.netns, "distinct slots → distinct netns");
             prop_assert_ne!(&pa.host_veth, &pb.host_veth, "distinct slots → distinct host_veth");
             prop_assert_ne!(
                 &pa.workload_veth,
@@ -2422,37 +2452,6 @@ mod tests {
                 "re-applying the converge step set must be a no-op, got {:?}",
                 reapplied
             );
-        }
-
-        /// Determinism over the alloc-id + slot space: same inputs → same
-        /// plan; the netns embeds the readable alloc id (`ovd-ns-<alloc>`) and
-        /// the veth names embed the 4-hex slot (`ovd-wl-<hex>` / `ovd-hv-<hex>`).
-        #[test]
-        fn workload_derivation_names_embed_alloc_and_are_deterministic(
-            raw in "[a-z][a-z0-9]{0,20}",
-            n in 0u16..=NET_SLOT_MAX,
-        ) {
-            let id = alloc(&raw);
-            let s = slot(n);
-
-            let a = derive_workload_netns_plan(&id, s, responder());
-            let b = derive_workload_netns_plan(&id, s, responder());
-            prop_assert_eq!(&a, &b);
-
-            // Netns embeds the readable alloc id; veth names embed the hex slot.
-            prop_assert!(a.netns.contains(id.as_str()), "netns must embed alloc id");
-            prop_assert!(a.netns.starts_with("ovd-ns-"), "netns prefix");
-            prop_assert!(a.host_veth.contains(&s.to_hex4()), "host_veth must embed hex slot");
-            prop_assert!(a.workload_veth.contains(&s.to_hex4()), "workload_veth must embed hex slot");
-            prop_assert!(a.host_veth.starts_with("ovd-hv-"), "host_veth prefix");
-            prop_assert!(a.workload_veth.starts_with("ovd-wl-"), "workload_veth prefix");
-            // host-side = first usable, in-netns = second usable, gateway =
-            // host-side address; a /30 always has two distinct usable hosts.
-            let first = a.subnet.hosts().next().expect("/30 has hosts");
-            prop_assert_eq!(a.host_addr, first);
-            prop_assert_eq!(a.gateway, first);
-            prop_assert!(a.subnet.contains(&a.workload_addr));
-            prop_assert_ne!(a.host_addr, a.workload_addr);
         }
     }
 }
