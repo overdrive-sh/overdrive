@@ -1385,6 +1385,62 @@ pub trait ObservationStore: Send + Sync + 'static {
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
 
+    /// Read a deterministic snapshot of EVERY LWW-winner `service_backends`
+    /// row this peer currently holds — across ALL services, with NO
+    /// `ServiceId` key. This is the keyless enumerate sibling of the
+    /// `ServiceId`-keyed [`Self::service_backends_rows`]; it is symmetric
+    /// with the existing unkeyed enumerators [`Self::alloc_status_rows`] and
+    /// [`Self::node_health_rows`] (no-arg, returns the full LWW-winner set),
+    /// and follows the same `*_rows()`-no-arg naming convention with an
+    /// `all_`-prefix to avoid colliding with the keyed method.
+    ///
+    /// # Motivation (the List leg of List-then-Watch)
+    ///
+    /// The transparent-mTLS `ServiceBackendsResolve` adapter (ADR-0071,
+    /// C4 / D-TME-11) resolves an arbitrary `orig_dst: SocketAddrV4` against
+    /// an in-RAM `addr → Backend` reverse index. It holds NO `ServiceId`, so
+    /// the keyed [`Self::service_backends_rows`] is the wrong surface for a
+    /// boot-time snapshot. This method is the **List** leg of its
+    /// List-then-Watch: at `probe()` it bulk-loads the current snapshot into
+    /// the index BEFORE the Earned-Trust gate opens (so the index is never
+    /// empty-but-trusted), and on a watch-loss (`broadcast::RecvError::Lagged`)
+    /// it re-Lists the authoritative snapshot. This is the same List-before-
+    /// Watch shape the reconciler runtime's `bulk_load` already uses.
+    ///
+    /// # Preconditions
+    /// None.
+    ///
+    /// # Postconditions on `Ok(rows)`
+    /// `rows` is every `service_backends` row this peer currently holds as
+    /// LWW winner — at most one row per `ServiceId` (the table is keyed by
+    /// `ServiceId` alone). For each returned row, calling
+    /// [`Self::service_backends_rows`] with that row's `service_id` returns
+    /// the same row. The two surfaces are coherent: this method is the union
+    /// of the keyed reads over every present service.
+    ///
+    /// # Edge cases
+    /// - **Empty store** → `Ok(vec![])` (no services have written backends).
+    /// - A row whose envelope bytes fail to decode (corrupt / unknown future
+    ///   version) is skipped with a structured `tracing::warn!` per ADR-0048
+    ///   § 3 (observation log-and-skip; asymmetric vs intent fail-fast) and
+    ///   the surviving rows are returned — convergence proceeds.
+    ///
+    /// # Observable invariants
+    /// Iteration order is deterministic — ascending by `ServiceId` under the
+    /// adapter's storage shape (a [`std::collections::BTreeMap`] for the sim
+    /// adapter; ascending key bytes for the redb-backed local adapter), so
+    /// repeated calls against unchanged state return byte-identical ordered
+    /// snapshots (K3 reproducibility). The method is read-only: it mutates no
+    /// store state.
+    ///
+    /// # Errors
+    /// [`ObservationStoreError::Io`] on a backing-store read failure. A
+    /// per-row envelope-decode failure does NOT error — it is logged and the
+    /// row skipped.
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
     /// Read every LWW-winner `reconcile_conflict` row for the given
     /// [`ServiceId`]. The machine-queryable surface for genuine
     /// same-slot reconcile-output conflicts written by

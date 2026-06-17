@@ -576,6 +576,16 @@ impl ObservationStore for SimObservationStore {
         Ok(by_sb.get(service_id).cloned().into_iter().collect())
     }
 
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        // Every LWW winner across all services — the keyless List leg
+        // (C4 / D-TME-11). Deterministic iteration via the `BTreeMap`
+        // ordering on `ServiceId`, mirroring `alloc_status_rows`.
+        let by_sb = self.inner.by_service_backends.lock();
+        Ok(by_sb.values().cloned().collect())
+    }
+
     async fn reconcile_conflict_rows(
         &self,
         service_id: &ServiceId,

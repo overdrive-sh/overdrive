@@ -817,6 +817,44 @@ impl ObservationStore for LocalObservationStore {
         Ok(rows)
     }
 
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        // Full-table scan over `SERVICE_BACKENDS_TABLE` — the keyless List
+        // leg (C4 / D-TME-11). Mirrors the `alloc_status_rows` /
+        // `node_health_rows` enumerators: iterate the whole table, log +
+        // skip per ADR-0048 § 3 on a per-row envelope-decode failure, and
+        // return the surviving LWW-winner rows. Decode failures are
+        // collected inside the blocking task and emitted on the calling
+        // async thread so per-test thread-local `tracing` guards observe
+        // them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<ServiceBackendRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            let iter = table.iter().map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<ServiceBackendRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((out, failures))
+        })
+        .await
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_service_backends",
+            "skipping service-backend row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
+    }
+
     async fn reconcile_conflict_rows(
         &self,
         service_id: &ServiceId,

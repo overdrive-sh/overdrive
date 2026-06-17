@@ -28,26 +28,72 @@
 //! is a boundary-divergence rejection per CLAUDE.md § "Implement to the design",
 //! consistent with the C2 sub-decision and the shipped 01-01 port rustdoc).
 //!
-//! # Read mechanism (C4 — the in-RAM address-keyed reverse index)
+//! # Read mechanism (C4 / D-TME-11 — List-then-Watch over the `ObservationStore`)
 //!
 //! [`MtlsResolve::resolve`] is handed an arbitrary `orig_dst: SocketAddrV4` and
-//! holds NO `ServiceId`; the only `ObservationStore` backend-read surface
-//! (`service_backends_rows(service_id)`) is keyed by `ServiceId`, so a
-//! per-`ServiceId` point query is the WRONG surface. Per C4 (feature-delta
-//! § "C4 — resolve READ MECHANISM" / D-TME-11) the adapter instead resolves
-//! against an in-RAM, address-keyed reverse index (`addr → Backend`) of the
-//! `running` `service_backends` set, built and refreshed from the EXISTING
-//! [`ObservationStore::subscribe_all`] observation surface (the same forward
-//! `Stream<Item = ObservationRow>` the reconciler runtime already uses) — NOT a
-//! per-`ServiceId` point query, and WITHOUT adding any new trait method. The
-//! in-RAM index is an adapter-internal private detail; the PUBLIC [`MtlsResolve`]
-//! contract is unchanged. This is the industry-canonical shape (Cilium's
-//! `ipcache`: an in-RAM addr→identity reverse index populated by event
-//! subscription, consulted per connection).
+//! holds NO `ServiceId`; the only `ServiceId`-keyed backend-read surface
+//! (`service_backends_rows(service_id)`) is the WRONG surface. Per C4 (REVISED
+//! 2026-06-17, resolve-index-coherence research) the adapter resolves against an
+//! in-RAM, address-keyed reverse index (`addr → Backend`) of the `running`
+//! `service_backends` set, maintained by **List-then-Watch** — the
+//! industry-canonical shape for a coherent local cache over a forward-only,
+//! lossy watch (k8s informer/reflector, etcd watch, Envoy xDS, Cilium kvstore /
+//! `ipcache`):
+//!
+//! - **List-at-probe.** [`probe`](MtlsResolve::probe) bulk-loads the current
+//!   `service_backends` snapshot via the keyless
+//!   [`all_service_backends_rows`](ObservationStore::all_service_backends_rows)
+//!   enumerate into the in-RAM index AND opens the
+//!   [`subscribe_all`](ObservationStore::subscribe_all) watch BEFORE it returns
+//!   `Ok` — so the index is seeded before the Earned-Trust gate opens and is
+//!   never empty-but-trusted (closes #237 cold-start; mirrors Cilium
+//!   `ListDone`-gates-`synced`). A failed List OR a failed subscribe →
+//!   `Err(MtlsResolveError::Probe)` and the node refuses to start
+//!   (`health.startup.refused`).
+//! - **Watch (single-owner drain).** A SINGLE background drain task — the only
+//!   owner of the subscription — continuously drains
+//!   [`subscribe_all`](ObservationStore::subscribe_all) into the index under the
+//!   index write-lock. There is NO shared `take()`/restore of the subscription
+//!   (the F2 TOCTOU is dissolved structurally — the subscription is never shared,
+//!   `.claude/rules/development.md` § "Check-and-act must be atomic"). The task's
+//!   abort handle is held; the task is aborted on `Drop`.
+//! - **Watch-failure → fault.** When the watch terminates (the broadcast sender
+//!   is dropped — the stream yields `None`), the drain marks the watch FAULTED.
+//!   While the watch is faulted [`resolve`](MtlsResolve::resolve) returns
+//!   `Err(MtlsResolveError::StoreUnreadable)` — the index can no longer be
+//!   certified current, which is exactly the 01-01 "an underlying subscription
+//!   errored" `StoreUnreadable` contract (`mtls_resolve.rs` rustdoc). On a
+//!   HEALTHY watch, `resolve` always classifies (never faults).
+//! - **`resolve` reads the index only.** It takes the index read-lock,
+//!   classifies, returns — it does NOT read the store per call (the F2 race is
+//!   gone because `resolve` no longer touches the subscription).
 //!
 //! Headless v1 (D-TME-10): the addr DNS returns IS the backend addr, so the
 //! index is keyed by the backend addr DIRECTLY — there is NO VIP→backend
 //! translation in the resolve path (that is #167/#61, out of scope).
+//!
+//! ## relist-on-`Lagged` is NOT wired — pinned-but-unimplementable on the v1
+//! ## `ObservationStore` surface (surfaced blocker, see step 01-03 return)
+//!
+//! C4 / D-TME-11 also pin a **relist-on-`broadcast::RecvError::Lagged`** leg: on
+//! a watch-loss signal the drain re-Lists the authoritative snapshot. The
+//! current [`ObservationSubscription`] surface CANNOT deliver `Lagged` to this
+//! adapter: it is a `Box<dyn Stream<Item = ObservationRow>>` and BOTH store
+//! adapters strip `Lagged` inside `subscribe_all`
+//! (`BroadcastStream::new(rx).filter_map(ok_or_skip)` /
+//! `.filter_map(Result::ok)`), so a lag signal never reaches the consumer.
+//! Wiring relist-on-`Lagged` requires CHANGING the public `ObservationSubscription`
+//! surface (e.g. yield `Result<ObservationRow, Lagged>`) — a second
+//! public-surface change beyond the one pinned `all_service_backends_rows`
+//! enumerate, which this step's boundary forbids. Per CLAUDE.md § "Implement to
+//! the design — never invent API surface" this gap is SURFACED as a blocker, not
+//! improvised. The single-node v1 posture this leaves: the held subscription is
+//! the whole observation firehose over a 1024-deep broadcast; a >1024-row burst
+//! between drains can silently lose a `service_backends` update (the F4 hazard),
+//! the residual covered by (a) fail-toward-handshake under #236. The
+//! [`relist`](ServiceBackendsResolve::relist) machinery IS present and IS used at
+//! List-at-probe and on the watch-closed path — only the `Lagged`-triggered
+//! invocation is blocked on the surface change.
 //!
 //! # Classification (C1 + C4, verbatim with the shipped 01-01 port rustdoc)
 //!
@@ -57,26 +103,27 @@
 //!   [`NonMesh`](MtlsResolution::NonMesh) (cleartext pass-through, by design).
 //!   **A miss is `NonMesh`, NOT `MeshUnreachable`** — making a miss fail-closed
 //!   would break legitimate external / non-mesh egress (C4 scoping note); the
-//!   bounded cleartext edge is closed by the headless single-source invariant.
+//!   residual convergence window is covered by (a) fail-toward-handshake (#236).
 //! - A matched backend is **present-but-unreachable** (`Backend.healthy ==
 //!   false` — the readiness gate, recomputed from probe results by
 //!   `service_lifecycle`) →
 //!   [`MeshUnreachable`](MtlsResolution::MeshUnreachable) (fail-closed, NO
 //!   cleartext).
-//! - A store-layer READ FAULT (an errored [`subscribe_all`](ObservationStore::subscribe_all)
-//!   at probe/refresh time) surfaces per the 01-01 error split as an `Err` of
-//!   [`MtlsResolveError::StoreUnreadable`] — NOT `MeshUnreachable` (the
-//!   contract's asymmetry, preserved verbatim).
+//! - A store-layer READ FAULT (a failed List/subscribe at probe time, or a
+//!   FAULTED watch at resolve time) surfaces per the 01-01 error split as an
+//!   `Err` of [`MtlsResolveError::StoreUnreadable`] (resolve) /
+//!   [`MtlsResolveError::Probe`] (probe) — NOT `MeshUnreachable` (the contract's
+//!   asymmetry, preserved verbatim).
 //!
 //! # Earned-Trust probe (criterion 4)
 //!
 //! [`probe`](MtlsResolve::probe) demonstrates the adapter can read the
-//! `service_backends` surface (it opens a [`subscribe_all`](ObservationStore::subscribe_all)
-//! subscription and refreshes the index from the store). On an unreadable store
-//! it returns a structured [`MtlsResolveError::Probe`] (`health.startup.refused`-
-//! shaped) and the node MUST refuse to start — it NEVER silently returns
-//! empty / `NonMesh` (silent-empty degrading to silent pass-through IS the
-//! silent-cleartext footgun the enrollment model exists to remove).
+//! `service_backends` surface (it Lists the snapshot and opens the watch). On an
+//! unreadable store it returns a structured [`MtlsResolveError::Probe`]
+//! (`health.startup.refused`-shaped) and the node MUST refuse to start — it NEVER
+//! silently returns empty / `NonMesh` (silent-empty degrading to silent
+//! pass-through IS the silent-cleartext footgun the enrollment model exists to
+//! remove).
 //!
 //! # Dependency discipline
 //!
@@ -87,10 +134,12 @@
 //!
 //! [`probe`]: MtlsResolve::probe
 //! [`subscribe_all`]: ObservationStore::subscribe_all
+//! [`ObservationSubscription`]: overdrive_core::traits::observation_store::ObservationSubscription
 
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -100,9 +149,10 @@ use overdrive_core::traits::mtls_resolve::{
     MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend, Result,
 };
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationSubscription,
+    ObservationRow, ObservationStore, ServiceBackendRow,
 };
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
+use tokio::task::JoinHandle;
 
 /// The in-RAM, address-keyed reverse index (`addr → Backend`) of the
 /// `running` `service_backends` set — the C4 read-mechanism private detail.
@@ -147,6 +197,21 @@ impl BackendIndex {
         self.addrs_by_service.insert(service_id, contributed);
     }
 
+    /// Rebuild the WHOLE index from an authoritative snapshot (the List leg of
+    /// List-then-Watch + the relist recovery). Every prior entry is dropped and
+    /// the snapshot's rows are re-applied — a snapshot IS the complete current
+    /// state (the keyless enumerate returns every LWW winner), so a full
+    /// replace cannot strand a service the snapshot omitted (a service whose
+    /// backends were removed is simply absent from the snapshot and from the
+    /// rebuilt index).
+    fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
+        self.by_addr.clear();
+        self.addrs_by_service.clear();
+        for row in rows {
+            self.apply_row(row.service_id, &row.backends);
+        }
+    }
+
     /// Point-lookup `orig_dst` and CLASSIFY it into an [`MtlsResolution`] arm
     /// (the pure classification the mutation gate targets — C1/C4):
     ///
@@ -169,133 +234,183 @@ impl BackendIndex {
 }
 
 /// The v1 host [`MtlsResolve`] adapter — resolves `orig_dst` against an in-RAM
-/// reverse index of the `running` `service_backends` set, read from
-/// [`ObservationStore`]. See the module rustdoc for the full contract.
+/// reverse index of the `running` `service_backends` set, maintained by
+/// List-then-Watch over [`ObservationStore`]. See the module rustdoc for the
+/// full contract.
 pub struct ServiceBackendsResolve {
     /// The backing observation surface, injected as a **mandatory** constructor
-    /// parameter (no default, no builder). The adapter reads `service_backends`
-    /// rows from it via [`ObservationStore::subscribe_all`].
+    /// parameter (no default, no builder). The List leg reads
+    /// [`all_service_backends_rows`](ObservationStore::all_service_backends_rows);
+    /// the Watch leg reads [`subscribe_all`](ObservationStore::subscribe_all).
     store: Arc<dyn ObservationStore>,
-    /// The C4 in-RAM `addr → Backend` reverse index. Behind a
-    /// [`parking_lot::RwLock`] so `resolve` (read) and the index refresh (write)
-    /// can share it across the `&self` trait methods without holding a lock
-    /// across `.await`.
-    index: RwLock<BackendIndex>,
-    /// The PERSISTENT [`subscribe_all`](ObservationStore::subscribe_all)
-    /// subscription, established lazily on the first probe/resolve and HELD for
-    /// the adapter's lifetime. This is the C4 read mechanism: the broadcast
-    /// observation surface is forward-only (a subscription does NOT replay rows
-    /// written before it — verified by `LocalObservationStore`'s
-    /// "subscription opened after write must not replay historical rows"
-    /// acceptance test), so a fresh subscription per call would observe nothing.
-    /// One held subscription continuously receives every `service_backends`
-    /// write from the moment it is opened; each probe/resolve drains the
-    /// currently-ready rows into the index. Behind a [`tokio::sync::Mutex`]
-    /// because it is mutated (drained) across the `.await` on the stream's
-    /// `next()`. `None` until the first successful subscribe.
-    subscription: tokio::sync::Mutex<Option<ObservationSubscription>>,
+    /// The C4 in-RAM `addr → Backend` reverse index, behind a synchronous
+    /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
+    /// task. `resolve` takes the read lock; the drain task (and List-at-probe)
+    /// take the write lock. The lock is never held across an `.await` — the
+    /// List/relist awaits the store, then applies to the index in a sync
+    /// critical section (`.claude/rules/development.md` § "Never hold a lock
+    /// across `.await`").
+    index: Arc<RwLock<BackendIndex>>,
+    /// Watch-health flag, `Arc`-shared with the drain task. `true` while the
+    /// single-owner drain is observing a live subscription; set `false` by the
+    /// drain when the watch terminates unrecoverably (the broadcast sender was
+    /// dropped). While `false`, [`resolve`](MtlsResolve::resolve) returns
+    /// `Err(StoreUnreadable)` — the index can no longer be certified current.
+    watch_healthy: Arc<AtomicBool>,
+    /// The single-owner drain task's abort handle. Spawned once by the first
+    /// successful [`probe`](MtlsResolve::probe); held so it can be aborted on
+    /// `Drop`. `None` until the first probe opens the watch; a second probe
+    /// does NOT re-spawn (the watch is single-owner).
+    drain_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl ServiceBackendsResolve {
     /// Construct the adapter from its REQUIRED [`ObservationStore`]. Mandatory,
     /// not defaulted, no builder — a caller that forgets the store fails to
     /// construct (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// The index starts empty and no subscription is open yet;
-    /// [`probe`](MtlsResolve::probe) establishes the held subscription (the
-    /// Earned-Trust "wire → probe → use" gate) and every probe/resolve refreshes
-    /// the index from it.
+    /// The index starts empty and no watch is open yet;
+    /// [`probe`](MtlsResolve::probe) Lists the snapshot into the index and
+    /// opens the single-owner watch (the Earned-Trust "wire → probe → use"
+    /// gate).
     #[must_use]
     pub fn new(store: Arc<dyn ObservationStore>) -> Self {
         Self {
             store,
-            index: RwLock::new(BackendIndex::default()),
-            subscription: tokio::sync::Mutex::new(None),
+            index: Arc::new(RwLock::new(BackendIndex::default())),
+            // Healthy until proven otherwise: a resolve before any probe (which
+            // the composition root forbids — wire → probe → use) reads an empty
+            // index and classifies every addr `NonMesh`, never faulting. The
+            // drain sets this `false` only on a real watch termination.
+            watch_healthy: Arc::new(AtomicBool::new(true)),
+            drain_task: Mutex::new(None),
         }
     }
 
-    /// Ensure the persistent `subscribe_all` subscription is open, then drain
-    /// every CURRENTLY-ready `service_backends` row into the in-RAM index. This
-    /// is the C4 "build/refresh from the existing observation surface"
-    /// mechanism — a SINGLE long-lived subscription, opened once and held, so
-    /// the forward-only broadcast surface delivers every write from the moment
-    /// the subscription is established (a fresh subscription per call would
-    /// observe nothing, since the surface does not replay history). A store
-    /// subscription fault is the `StoreUnreadable`/`Probe` read-fault the
-    /// resolve-time and probe-time callers surface.
-    ///
-    /// The drain is non-blocking past the currently-ready items: it pulls every
-    /// row already buffered on the subscription (`now_or_never`) and stops at
-    /// the first pending poll, so it never blocks waiting for a future write.
-    /// The index write-lock is taken and released INSIDE the loop per row —
-    /// never held across the `.await` on the stream
+    /// List the authoritative `service_backends` snapshot and REBUILD the index
+    /// from it (the List leg of List-then-Watch, and the relist recovery). The
+    /// store read is awaited, then applied to the index in a sync critical
+    /// section — the write-lock is NOT held across the `.await`
     /// (`.claude/rules/development.md` § "Never hold a lock across `.await`").
-    async fn refresh_index(&self) -> std::result::Result<usize, String> {
-        use futures::FutureExt;
+    /// A store-read fault surfaces as the `String` the probe/resolve callers
+    /// map to `Probe` / `StoreUnreadable`.
+    async fn relist(&self) -> std::result::Result<(), String> {
+        let rows = self.store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
+        // Apply in a sync critical section — the await already returned.
+        self.index.write().replace_from_snapshot(&rows);
+        Ok(())
+    }
 
-        // Take the held subscription OUT of the mutex (establishing it on the
-        // first call), drain it WITHOUT holding the guard across the loop, then
-        // restore it. Taking-then-restoring keeps the mutex guard's scope tight
-        // (it is dropped before the drain) — the subscription is owned locally
-        // for the duration of the drain, so no guard spans the `now_or_never`
-        // polls. A store-layer subscription fault surfaces from
-        // `subscribe_all` here.
-        // Bind the take into a local so the mutex guard temporary drops
-        // immediately (before the match) — not held across the
-        // `subscribe_all().await` arm (`clippy::significant_drop_in_scrutinee`).
-        let taken = self.subscription.lock().await.take();
-        let mut subscription = match taken {
-            Some(existing) => existing,
-            None => self.store.subscribe_all().await.map_err(|err| err.to_string())?,
-        };
-
-        let mut ingested = 0usize;
-        // Drain only the rows already ready on the subscription; stop at the
-        // first not-yet-ready poll so the refresh is bounded and never awaits a
-        // future write. The index write-lock is taken and released per row —
-        // never held across the `.await`-bearing stream poll.
-        while let Some(Some(row)) = subscription.next().now_or_never() {
-            if let ObservationRow::ServiceBackend(row) = row {
-                self.index.write().apply_row(row.service_id, &row.backends);
-                ingested += 1;
+    /// Spawn the SINGLE-OWNER drain task that exclusively owns `subscription`
+    /// and continuously folds every `service_backends` row into the index under
+    /// the write lock. The task is the only owner of the subscription — there is
+    /// no shared `take()`/restore (the F2 TOCTOU is structurally dissolved). On
+    /// stream end (the broadcast sender dropped — a terminal watch failure) it
+    /// sets `watch_healthy = false` and exits, so `resolve` faults thereafter.
+    fn spawn_drain(
+        index: Arc<RwLock<BackendIndex>>,
+        watch_healthy: Arc<AtomicBool>,
+        mut subscription: overdrive_core::traits::observation_store::ObservationSubscription,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            // `next().await` yields `None` only when the broadcast sender is
+            // dropped (the watch is `Closed`). The `Lagged` loss signal is
+            // stripped by the store's `subscribe_all` before it reaches this
+            // stream (see module rustdoc § "relist-on-`Lagged` is NOT wired")
+            // — so the only termination this loop can observe is `Closed`.
+            while let Some(row) = subscription.next().await {
+                if let ObservationRow::ServiceBackend(row) = row {
+                    // Sync critical section — no lock across the `.await` above.
+                    index.write().apply_row(row.service_id, &row.backends);
+                }
             }
-        }
+            // The watch terminated: the index can no longer be certified
+            // current. Mark it faulted so `resolve` returns `StoreUnreadable`.
+            watch_healthy.store(false, Ordering::SeqCst);
+        })
+    }
+}
 
-        // Restore the (now-drained) subscription so the NEXT refresh continues
-        // observing from where this one stopped — the held subscription is
-        // forward-only and must persist across calls.
-        *self.subscription.lock().await = Some(subscription);
-        Ok(ingested)
+impl Drop for ServiceBackendsResolve {
+    fn drop(&mut self) {
+        // Abort the single-owner drain task so it does not outlive the adapter.
+        // Bind the `take` into a local so the `parking_lot` guard temporary
+        // drops BEFORE `abort()` (clippy::significant_drop_in_scrutinee).
+        let handle = self.drain_task.lock().take();
+        if let Some(handle) = handle {
+            handle.abort();
+        }
     }
 }
 
 #[async_trait]
 impl MtlsResolve for ServiceBackendsResolve {
     async fn probe(&self) -> Result<()> {
-        // Earned Trust: demonstrate the `service_backends` surface is readable
-        // by opening a subscription and refreshing the index. An unreadable
-        // store returns `Probe` (the `health.startup.refused`-shaped refusal) —
-        // NEVER a silent empty/`NonMesh` (silent-empty degrading to silent
-        // pass-through IS the silent-cleartext footgun the enrollment model
-        // exists to remove).
-        self.refresh_index()
+        // Earned Trust + List-at-probe: demonstrate the `service_backends`
+        // surface is readable by (1) Listing the authoritative snapshot into
+        // the index BEFORE the gate opens (so the index is never
+        // empty-but-trusted), and (2) opening the single-owner watch for
+        // incremental updates. An unreadable store at EITHER leg returns
+        // `Probe` (the `health.startup.refused`-shaped refusal) — NEVER a
+        // silent empty/`NonMesh`.
+
+        // (1) List leg — seed the index from the authoritative snapshot.
+        self.relist().await.map_err(|reason| MtlsResolveError::Probe { reason })?;
+
+        // (2) Watch leg — open the subscription and spawn the single-owner
+        // drain. Idempotent + single-owner: a probe that finds the watch already
+        // open does NOT re-open or re-spawn (the first probe's drain is already
+        // observing). The cheap `is_none` pre-check (no lock held across the
+        // `.await`) avoids opening a subscription we'd immediately discard on the
+        // common second-probe path; the claim itself is re-checked under the lock
+        // so a concurrent first-probe race resolves to a single owner
+        // (§ "Check-and-act must be atomic"). The `parking_lot::Mutex` guard is
+        // never held across the `subscribe_all().await`.
+        if self.drain_task.lock().is_some() {
+            return Ok(());
+        }
+        let subscription = self
+            .store
+            .subscribe_all()
             .await
-            .map(|_ingested| ())
-            .map_err(|reason| MtlsResolveError::Probe { reason })
+            .map_err(|err| MtlsResolveError::Probe { reason: err.to_string() })?;
+        {
+            let mut slot = self.drain_task.lock();
+            if slot.is_some() {
+                // A concurrent probe won the claim while we were awaiting
+                // `subscribe_all`; this `subscription` is dropped at the end of
+                // this scope (releasing the broadcast receiver) and the single
+                // owner is kept.
+                return Ok(());
+            }
+            self.watch_healthy.store(true, Ordering::SeqCst);
+            let handle = Self::spawn_drain(
+                Arc::clone(&self.index),
+                Arc::clone(&self.watch_healthy),
+                subscription,
+            );
+            *slot = Some(handle);
+        }
+        Ok(())
     }
 
     async fn resolve(&self, orig_dst: SocketAddrV4) -> Result<MtlsResolution> {
-        // Refresh the in-RAM index from the observation surface, then
-        // point-lookup + classify. A store-layer read fault surfaces as
-        // `StoreUnreadable` (NOT classified into `MeshUnreachable` — the 01-01
-        // contract asymmetry: a store-layer fault is not a per-connection
-        // classification).
-        self.refresh_index()
-            .await
-            .map_err(|reason| MtlsResolveError::StoreUnreadable { reason })?;
+        // The watch is the freshness guarantee for the index. If it has
+        // terminated unrecoverably, the index can no longer be certified
+        // current — surface the 01-01 `StoreUnreadable` fault (NOT a
+        // per-connection `MeshUnreachable` classification: the contract
+        // asymmetry — a store-layer fault is not a classification).
+        if !self.watch_healthy.load(Ordering::SeqCst) {
+            return Err(MtlsResolveError::StoreUnreadable {
+                reason: "service_backends watch terminated (subscription closed); \
+                         index can no longer be certified current"
+                    .to_owned(),
+            });
+        }
 
         // Read-only point lookup + pure classification. The read guard is taken
-        // AFTER the refresh `.await` returned and dropped at the end of this
-        // expression — no lock is held across an `.await`.
+        // and dropped within this expression — no lock is held across an
+        // `.await` (there is no `.await` in the classify path; the drain task
+        // owns all index writes).
         Ok(self.index.read().classify(orig_dst))
     }
 }
@@ -349,28 +464,25 @@ mod tests {
         }
     }
 
-    /// Construct the adapter over `store`, OPEN its held subscription (via the
-    /// Earned-Trust `probe`), THEN write `rows`. Ordering is load-bearing: the
-    /// `subscribe_all` surface is forward-only (no replay of pre-subscription
-    /// writes — verified by `LocalObservationStore`'s acceptance test), so the
-    /// adapter must subscribe BEFORE the rows are written for its index to
-    /// observe them. `probe` establishes the persistent subscription; the rows
-    /// written after it flow into the held subscription, drained by the next
-    /// `resolve`/`probe`.
-    async fn adapter_with_rows(
+    /// Write `rows` into `store` FIRST, THEN construct + `probe` the adapter.
+    /// Ordering is load-bearing for the List-then-Watch contract: the rows
+    /// exist in the store BEFORE the adapter starts, so the List-at-probe leg
+    /// (NOT the forward-only watch) is what seeds them into the index. The old
+    /// observe-only adapter — which only subscribed and drained, never Listed —
+    /// would MISS every pre-probe row; List-at-probe captures them.
+    async fn adapter_listing_rows(
         store: &Arc<SimObservationStore>,
         rows: Vec<ServiceBackendRow>,
     ) -> ServiceBackendsResolve {
-        let adapter = ServiceBackendsResolve::new(Arc::clone(store) as Arc<dyn ObservationStore>);
-        // Open the held subscription first (the production "wire → probe → use"
-        // order); now subsequent writes are delivered to it.
-        adapter.probe().await.expect("probe opens the held subscription");
         for row in rows {
             store
                 .write(ObservationRow::ServiceBackend(row))
                 .await
                 .expect("write service_backends row");
         }
+        let adapter = ServiceBackendsResolve::new(Arc::clone(store) as Arc<dyn ObservationStore>);
+        // List-at-probe seeds the pre-existing rows into the index.
+        adapter.probe().await.expect("probe Lists the pre-existing rows");
         adapter
     }
 
@@ -391,7 +503,7 @@ mod tests {
         let unhealthy = v4(10, 0, 0, 2, 8080);
         let unmeshed = v4(203, 0, 113, 7, 443);
 
-        let adapter = adapter_with_rows(
+        let adapter = adapter_listing_rows(
             &store,
             vec![backends_row(1, vec![backend(healthy, true), backend(unhealthy, false)], 1)],
         )
@@ -419,7 +531,40 @@ mod tests {
         );
     }
 
-    // ---- RED_UNIT: per-arm classification + filter-to-running --------------
+    /// Scenario (NEW-mechanism guarantee) —
+    /// `list_at_probe_seeds_rows_written_before_subscribe`.
+    ///
+    /// The List-at-probe leg of List-then-Watch (C4 / D-TME-11): a
+    /// `service_backends` row written to the store BEFORE the adapter is even
+    /// constructed (let alone before its watch is opened) MUST resolve to
+    /// `Mesh` — the boot-time List captures it. This is the test that FAILS on
+    /// the old observe-only mechanism (which only subscribed forward and never
+    /// Listed, so a pre-subscribe row was invisible) and PASSES on
+    /// List-then-Watch. It is the #237 cold-start closure in test form.
+    #[tokio::test]
+    async fn list_at_probe_seeds_rows_written_before_subscribe() {
+        let store = fresh_store();
+        let addr = v4(10, 0, 0, 9, 8443);
+
+        // Row exists in the store BEFORE the adapter / its watch exists.
+        store
+            .write(ObservationRow::ServiceBackend(backends_row(3, vec![backend(addr, true)], 1)))
+            .await
+            .expect("write a pre-existing service_backends row");
+
+        // Construct + probe AFTER the write. A forward-only observe-only adapter
+        // would never see this row; List-at-probe seeds it.
+        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        adapter.probe().await.expect("probe Lists the pre-existing snapshot");
+
+        assert_eq!(
+            adapter.resolve(addr).await.expect("resolve is Ok"),
+            MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None }),
+            "List-at-probe must seed a row written before the watch opened",
+        );
+    }
+
+    // ---- RED_UNIT: per-arm classification + new-mechanism units ------------
 
     /// Criterion 5 — a healthy `running` mesh backend resolves to
     /// `Mesh { addr, expected_svid: None }`, and `expected_svid` is `None` for
@@ -429,7 +574,7 @@ mod tests {
         let store = fresh_store();
         let addr = v4(10, 0, 0, 5, 9000);
         let adapter =
-            adapter_with_rows(&store, vec![backends_row(7, vec![backend(addr, true)], 1)]).await;
+            adapter_listing_rows(&store, vec![backends_row(7, vec![backend(addr, true)], 1)]).await;
 
         let resolution = adapter.resolve(addr).await.expect("resolve is Ok");
         assert_eq!(resolution, MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None }),);
@@ -446,7 +591,7 @@ mod tests {
     async fn unmeshed_addr_resolves_to_nonmesh() {
         let store = fresh_store();
         // Index holds one service; query a different, unmeshed addr.
-        let adapter = adapter_with_rows(
+        let adapter = adapter_listing_rows(
             &store,
             vec![backends_row(1, vec![backend(v4(10, 0, 0, 1, 8080), true)], 1)],
         )
@@ -463,48 +608,136 @@ mod tests {
         let store = fresh_store();
         let addr = v4(10, 0, 0, 3, 7000);
         let adapter =
-            adapter_with_rows(&store, vec![backends_row(2, vec![backend(addr, false)], 1)]).await;
+            adapter_listing_rows(&store, vec![backends_row(2, vec![backend(addr, false)], 1)])
+                .await;
 
         let got = adapter.resolve(addr).await.expect("resolve is Ok (fail-closed is an Ok arm)");
         assert_eq!(got, MtlsResolution::MeshUnreachable);
     }
 
-    /// Criterion 5 — a store-layer read fault at resolve time returns
-    /// `Err(StoreUnreadable)`, distinct from the per-connection
-    /// `Ok(MeshUnreachable)` classification (the 01-01 contract asymmetry). The
-    /// honest store-read fault the v1 adapter surfaces is an errored
-    /// `subscribe_all`; modelled by [`FaultySubscribeStore`], a delegating
-    /// `SimObservationStore` wrapper whose `subscribe_all` is armed to error.
+    /// NEW-mechanism unit — `relist_recovers_a_row_dropped_by_watch_lag`.
+    ///
+    /// The relist machinery (the F4 fix in spirit): a `service_backends` row
+    /// that the WATCH never delivered (modelling a `Lagged` drop — the row was
+    /// written to the store but never folded into the index via the
+    /// subscription) MUST become visible after a relist re-acquires the
+    /// authoritative snapshot. This drives the `relist` → `replace_from_snapshot`
+    /// recovery path deterministically WITHOUT faking a stream value: the row is
+    /// genuinely absent from the index (the watch never carried it), and the
+    /// List leg recovers it from the store's authoritative `all_service_backends_rows`.
+    ///
+    /// (NOTE on the `Lagged` TRIGGER: the pinned `ObservationSubscription`
+    /// surface strips `Lagged` before this adapter can observe it — see module
+    /// rustdoc § "relist-on-`Lagged` is NOT wired" and the 01-03 surfaced
+    /// blocker. This unit pins the relist RECOVERY logic, which IS implemented
+    /// and IS reachable at probe-time and on watch-close; the `Lagged`-triggered
+    /// invocation is blocked on a forbidden public-surface change.)
     #[tokio::test]
-    async fn store_read_fault_at_resolve_returns_store_unreadable() {
-        let store = Arc::new(FaultySubscribeStore::new());
-        store.arm_subscribe_fault();
+    async fn relist_recovers_a_row_dropped_by_watch_lag() {
+        // `DeafWatchStore`'s watch stays OPEN but delivers NOTHING (a pending
+        // stream) — so the drain never folds any row into the index, exactly
+        // modelling a `Lagged` drop where the update was permanently missed by
+        // the subscription. The List leg (`all_service_backends_rows`) and
+        // `write` delegate to a real inner store, so relist can recover the row
+        // the watch never carried. This makes the recovery DETERMINISTIC: only
+        // relist can move the row into the index (the live watch cannot
+        // race-deliver it).
+        let store = Arc::new(ScriptableStore::with_watch(WatchMode::Deaf));
+        let lagged_addr = v4(10, 0, 0, 42, 6000);
+
         let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        adapter.probe().await.expect("probe on an empty store is Ok");
+        // The address is a miss right now (the row does not exist yet).
+        assert_eq!(
+            adapter.resolve(lagged_addr).await.expect("resolve is Ok"),
+            MtlsResolution::NonMesh,
+        );
+
+        // Write the row to the store. The deaf watch will NEVER carry it into
+        // the index — this is the would-be-lagged row, permanently missed by
+        // the subscription.
+        store
+            .write(ObservationRow::ServiceBackend(backends_row(
+                5,
+                vec![backend(lagged_addr, true)],
+                1,
+            )))
+            .await
+            .expect("write the would-be-lagged row");
+
+        // Confirm the watch did NOT deliver it: still a miss before relist.
+        // (Yield first so any [incorrectly] live drain would have had its turn.)
+        tokio::task::yield_now().await;
+        assert_eq!(
+            adapter.resolve(lagged_addr).await.expect("resolve is Ok"),
+            MtlsResolution::NonMesh,
+            "the deaf watch must not deliver the row — only relist can recover it",
+        );
+
+        // The relist re-acquires the authoritative snapshot and rebuilds the
+        // index — the dropped row is recovered. (This is the recovery a
+        // `Lagged` signal WOULD trigger if the surface delivered it.)
+        adapter.relist().await.expect("relist re-acquires the authoritative snapshot");
+
+        assert_eq!(
+            adapter.resolve(lagged_addr).await.expect("resolve is Ok after relist"),
+            MtlsResolution::Mesh(ResolvedBackend { addr: lagged_addr, expected_svid: None }),
+            "relist must recover a row the watch dropped",
+        );
+    }
+
+    /// NEW-mechanism unit — `watch_failure_makes_resolve_return_store_unreadable`.
+    ///
+    /// When the watch terminates unrecoverably (the broadcast sender is dropped
+    /// → the subscription closes → the drain task marks the watch faulted),
+    /// `resolve` MUST return `Err(StoreUnreadable)` — the index can no longer be
+    /// certified current (the 01-01 "an underlying subscription errored"
+    /// `StoreUnreadable` contract). Driven by a store double whose subscription
+    /// closes immediately, so the drain observes `Closed` and faults the watch.
+    #[tokio::test]
+    async fn watch_failure_makes_resolve_return_store_unreadable() {
+        let store = Arc::new(ScriptableStore::with_watch(WatchMode::Closed));
+        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+
+        // Probe succeeds (List Ok, subscribe_all Ok) — but the subscription the
+        // double hands back is already closed, so the drain immediately sees
+        // `Closed` and faults the watch.
+        adapter.probe().await.expect("probe Lists + opens the (already-closed) watch");
+
+        // Give the spawned drain a chance to observe `Closed` and set the flag.
+        for _ in 0..100 {
+            if !adapter.watch_healthy.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
 
         let err = adapter
             .resolve(v4(10, 0, 0, 1, 8080))
             .await
-            .expect_err("an errored subscribe_all surfaces as Err at resolve time");
+            .expect_err("a faulted watch surfaces as Err at resolve time");
         assert!(
-            matches!(&err, MtlsResolveError::StoreUnreadable { reason } if reason.contains("subscribe")),
-            "expected StoreUnreadable naming the subscription fault, got {err:?}",
+            matches!(&err, MtlsResolveError::StoreUnreadable { reason } if reason.contains("watch")),
+            "expected StoreUnreadable naming the watch fault, got {err:?}",
         );
     }
 
-    /// Criterion 4 / 5 — `probe` REFUSES on an unreadable store with
-    /// `Err(Probe)` (the `health.startup.refused`-shaped refusal); it NEVER
-    /// silently returns empty. The fault-injection scenario the probe survives
-    /// by refusing.
+    /// Criterion 5 — a store-layer read fault at PROBE time (the List leg's
+    /// `all_service_backends_rows` errors) returns `Err(Probe)` — distinct from
+    /// the per-connection `Ok(MeshUnreachable)` classification (the 01-01
+    /// contract asymmetry). Modelled by [`FaultyListStore`], a delegating
+    /// `SimObservationStore` wrapper whose `all_service_backends_rows` is armed
+    /// to error.
     #[tokio::test]
-    async fn probe_refuses_on_unreadable_store() {
-        let store = Arc::new(FaultySubscribeStore::new());
-        store.arm_subscribe_fault();
+    async fn store_read_fault_at_probe_returns_probe() {
+        let store = Arc::new(ScriptableStore::with_watch(WatchMode::Live));
+        store.arm_list_fault();
         let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
 
-        let err = adapter.probe().await.expect_err("probe on an unreadable store refuses");
+        let err = adapter.probe().await.expect_err("an errored List surfaces as Err at probe time");
         assert!(
-            matches!(&err, MtlsResolveError::Probe { reason } if reason.contains("subscribe")),
-            "expected Probe naming the store fault, got {err:?}",
+            matches!(&err, MtlsResolveError::Probe { reason } if reason.contains("List")),
+            "expected Probe naming the List fault, got {err:?}",
         );
     }
 
@@ -513,7 +746,7 @@ mod tests {
     #[tokio::test]
     async fn probe_ok_on_readable_store() {
         let store = fresh_store();
-        let adapter = adapter_with_rows(&store, vec![]).await;
+        let adapter = adapter_listing_rows(&store, vec![]).await;
         adapter.probe().await.expect("probe on a readable (empty) store is Ok");
     }
 
@@ -525,8 +758,8 @@ mod tests {
         /// `healthy` bit — `healthy` ⇒ `Mesh { addr, None }`; `!healthy` ⇒
         /// `MeshUnreachable` — and a DIFFERENT addr always ⇒ `NonMesh`. The
         /// property holds over the whole address space, pinning the
-        /// healthy-filter branch + the hit/miss boundary the
-        /// `>`/`>=`/match-arm mutations target.
+        /// healthy-filter branch + the hit/miss boundary the match-arm
+        /// mutations target.
         ///
         /// Universe (observable): the [`MtlsResolution`] arm returned by
         /// `resolve` for the queried addr.
@@ -549,7 +782,7 @@ mod tests {
             rt.block_on(async {
                 let store = fresh_store();
                 let adapter =
-                    adapter_with_rows(&store, vec![backends_row(1, vec![backend(hit, healthy)], 1)])
+                    adapter_listing_rows(&store, vec![backends_row(1, vec![backend(hit, healthy)], 1)])
                         .await;
 
                 let hit_arm = adapter.resolve(hit).await.expect("resolve hit is Ok");
@@ -567,58 +800,96 @@ mod tests {
         }
     }
 
-    // ---- fault-injecting ObservationStore double (subscribe_all errors) ----
+    // ---- fault-injecting ObservationStore doubles --------------------------
 
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool as StdAtomicBool;
 
     use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
     use overdrive_core::observation::ProbeResultRow;
     use overdrive_core::traits::observation_store::{
-        AllocStatusRow, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
-        ServiceHydrationResultRow,
+        AllocStatusRow, NodeHealthRow, ObservationStoreError, ObservationSubscription,
+        ReconcileConflictRow, ServiceHydrationResultRow,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
-    /// A delegating `ObservationStore` double that forwards every method to an
-    /// inner [`SimObservationStore`] EXCEPT `subscribe_all`, which errors when
-    /// armed — the store-layer read fault the v1 adapter surfaces as
-    /// `StoreUnreadable` (at resolve) / `Probe` (at probe). Delegation keeps
-    /// every signature anchored to the real types so the double cannot drift
-    /// from the trait; only the one fault path is overridden.
-    struct FaultySubscribeStore {
-        inner: SimObservationStore,
-        fault_armed: AtomicBool,
+    /// How the scriptable double's `subscribe_all` watch behaves. The List leg
+    /// (`all_service_backends_rows`) is governed separately by `list_fault_armed`.
+    #[derive(Clone, Copy)]
+    enum WatchMode {
+        /// A real, live subscription delegated to the inner store (the watch
+        /// carries writes into the index as normal).
+        Live,
+        /// An already-CLOSED watch: an empty stream that yields `None`
+        /// immediately, modelling the broadcast sender dropping the instant the
+        /// watch opens — the single-owner drain observes `Closed` and faults.
+        Closed,
+        /// A DEAF watch: a pending stream that NEVER yields — the watch stays
+        /// open (never faults) but carries nothing, modelling a `Lagged` drop
+        /// where the update is permanently missed by the subscription. Only a
+        /// relist can recover a row written under this mode.
+        Deaf,
     }
 
-    impl FaultySubscribeStore {
-        fn new() -> Self {
+    /// One delegating `ObservationStore` double for every fault scenario the
+    /// resolve adapter must survive: a List-leg fault (`list_fault_armed`) and
+    /// the three watch behaviours ([`WatchMode`]). Every method delegates to a
+    /// real inner [`SimObservationStore`] EXCEPT the two surfaces under test
+    /// (`all_service_backends_rows` and `subscribe_all`) — delegation keeps every
+    /// signature anchored to the real trait types so the double cannot drift,
+    /// per the port-boundary double discipline.
+    struct ScriptableStore {
+        inner: SimObservationStore,
+        watch_mode: WatchMode,
+        list_fault_armed: StdAtomicBool,
+    }
+
+    impl ScriptableStore {
+        fn with_watch(watch_mode: WatchMode) -> Self {
             Self {
                 inner: SimObservationStore::single_peer(
                     NodeId::new("local").expect("valid node id"),
                     0,
                 ),
-                fault_armed: AtomicBool::new(false),
+                watch_mode,
+                list_fault_armed: StdAtomicBool::new(false),
             }
         }
 
-        /// Arm the next (and every subsequent) `subscribe_all` to error.
-        fn arm_subscribe_fault(&self) {
-            self.fault_armed.store(true, Ordering::SeqCst);
+        /// Arm the next (and every subsequent) `all_service_backends_rows` List
+        /// to error — the store-layer read fault the List leg surfaces as `Probe`.
+        fn arm_list_fault(&self) {
+            self.list_fault_armed.store(true, Ordering::SeqCst);
         }
     }
 
     #[async_trait]
-    impl ObservationStore for FaultySubscribeStore {
+    impl ObservationStore for ScriptableStore {
+        async fn all_service_backends_rows(
+            &self,
+        ) -> std::result::Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+            if self.list_fault_armed.load(Ordering::SeqCst) {
+                return Err(ObservationStoreError::Io(std::io::Error::other(
+                    "injected List (all_service_backends_rows) fault",
+                )));
+            }
+            self.inner.all_service_backends_rows().await
+        }
+
         async fn subscribe_all(
             &self,
         ) -> std::result::Result<ObservationSubscription, ObservationStoreError> {
-            if self.fault_armed.load(Ordering::SeqCst) {
-                return Err(ObservationStoreError::Io(std::io::Error::other(
-                    "injected subscribe_all fault",
-                )));
+            match self.watch_mode {
+                WatchMode::Live => self.inner.subscribe_all().await,
+                // Empty stream → yields `None` immediately (watch closed).
+                WatchMode::Closed => {
+                    Ok(Box::new(futures::stream::empty()) as ObservationSubscription)
+                }
+                // Pending stream → never yields (watch open but deaf).
+                WatchMode::Deaf => {
+                    Ok(Box::new(futures::stream::pending()) as ObservationSubscription)
+                }
             }
-            self.inner.subscribe_all().await
         }
 
         async fn write(
