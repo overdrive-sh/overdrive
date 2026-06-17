@@ -244,11 +244,15 @@ invent new `ObservationStore` trait API — a boundary-divergence rejection
 (CLAUDE.md § "Implement to the design — never invent API surface"). This
 sub-decision closes that gap and is pinned for DELIVER:
 
-- **`ServiceBackendsResolve` resolves against an in-RAM, address-keyed
-  projection** (an `addr → Backend` view) of the `running` `service_backends`
-  set, built via **List-then-Watch** over the `ObservationStore` and refreshed
-  on incremental updates. `resolve()` is then a **point-lookup into the in-RAM
-  index** — NOT a per-`ServiceId` store query.
+- **`ServiceBackendsResolve` resolves against an in-RAM, address-keyed,
+  ownership-aware projection** of the `running` `service_backends` set, built via
+  **List-then-Watch** over the `ObservationStore` and refreshed on incremental
+  updates. `resolve()` is then a **point-lookup into the in-RAM index** — NOT a
+  per-`ServiceId` store query. (The index is keyed so each contributing service's
+  backend at an addr is tracked separately — `addr → {service → Backend}`, NOT a
+  flat `addr → Backend` with global last-writer-wins eviction. See "F-A —
+  ownership-aware index" below for why; the public `MtlsResolve` contract and the
+  `NonMesh`/`MeshUnreachable`/`Err` classification arms are UNCHANGED by it.)
 - **Read mechanism = List-then-Watch + relist-on-`Lagged` (REVISED 2026-06-17,
   reverses the prior "no new trait method" constraint; the relist-TRIGGER leg
   REFINED 2026-06-17 — see "F4 / relist-trigger refinement" below).** The
@@ -312,10 +316,11 @@ sub-decision closes that gap and is pinned for DELIVER:
   consistent with the `*_rows()`-no-arg convention. Both surfaces touch every
   `ObservationStore` implementor (`overdrive-store-local`, `overdrive-sim`, any
   test doubles) — *consistent* surface growth (they mirror the existing
-  enumerators / subscription), not novel surface. The EXISTING lossy
-  `subscribe_all()` (and `ObservationSubscription`) is kept AS-IS for its ~20
-  current consumers (DST invariants, store test-harness, streaming) — only
-  `ServiceBackendsResolve` consumes `subscribe_all_events()`. The `ServiceId`-keyed
+  enumerators / subscription), not novel surface. **`subscribe_all_events()`
+  (delivering `SubscriptionEvent`) is now the SOLE observation-subscription
+  surface — the lossy `subscribe_all()` and the `ObservationSubscription` alias
+  were DELETED single-cut in commit `36a79762`** (see "F-B reconciliation" in the
+  refinement clause below for the dated history). The `ServiceId`-keyed
   `service_backends_rows` point query remains the WRONG surface for an arbitrary
   `orig_dst` (the adapter holds no `ServiceId`); the keyless List is the right
   one. The in-RAM index is still **adapter-internal**; the **PUBLIC `MtlsResolve`
@@ -345,20 +350,34 @@ applied to the tokio `broadcast` channel).
 
 What this refinement authorizes (the surface pinned above):
 
-- A **dedicated lag-surfacing subscription method** `subscribe_all_events()`
-  returning a `LagAwareSubscription` of `SubscriptionEvent` — pinned over a
-  shared-type change to `ObservationSubscription` deliberately, to **bound blast
-  radius**: only `ServiceBackendsResolve` consumes the new surface; the ~20
-  existing `subscribe_all()` consumers (DST invariants, store test-harness,
-  streaming) stay untouched and lossy-by-design. (Changing the shared item type
-  would ripple the loss arm through every consumer and the `ObservationStore`
-  contract-equivalence test for no benefit to those consumers, which neither
-  maintain a coherent cache nor relist.)
+- A **lag-surfacing subscription method** `subscribe_all_events()` returning a
+  `LagAwareSubscription` of `SubscriptionEvent`.
 - `SubscriptionEvent::Lagged { missed }` is a **domain** event, NOT a tokio leak:
   the host/sim adapter maps `broadcast::RecvError::Lagged(n)` to it (`n → missed`)
   at the adapter boundary; `tokio::...::RecvError` never appears in the core trait
   (`development.md` § "Trait definitions specify behavior" — the contract is a
   domain vocabulary, not the transport's error type).
+
+**F-B reconciliation — `subscribe_all` DELETED single-cut, superseding the
+bounded-blast-radius framing (recorded 2026-06-17 as dated history, not a silent
+overwrite).** When this refinement was authored (commit `36652ace`), it justified
+`subscribe_all_events()` as a *dedicated method* whose point was to **bound blast
+radius** — keeping the lossy `subscribe_all()` + `ObservationSubscription` alias
+in place AS-IS for their "~20 existing consumers (DST invariants, store
+test-harness, streaming)," so only `ServiceBackendsResolve` would consume the new
+surface and the migration would touch one consumer. **The very next commit
+`36a79762` did the opposite, and that single-cut is the SHIPPED, intended state:
+`subscribe_all` and the `ObservationSubscription` alias were DELETED outright and
+ALL ~20 consumers were migrated to `subscribe_all_events()`** (which now yields
+`SubscriptionEvent`). Keeping a lossy `subscribe_all()` beside the lag-aware
+surface would have been exactly the deprecated-parallel-path anti-pattern the
+project forbids (`feedback_single_cut_greenfield_migrations` /
+`feedback_delete_dont_gate`: removed is removed; no parallel old path). So:
+`subscribe_all_events()` is now the **SOLE** observation-subscription surface; the
+"~20 consumers stay untouched / bounded blast radius / not a shared-type change"
+rationale was a **point-in-time decision the subsequent single-cut superseded**,
+and is preserved above only as honest history. There is no remaining "migrate the
+other consumers" follow-up — that work is DONE (`36a79762`), not deferred.
 
 The relist TRIGGER is then concrete: the single-owner drain consumes
 `subscribe_all_events()`; on `SubscriptionEvent::Row(row)` it applies the row to
@@ -393,6 +412,36 @@ unchanged.
   in the resolve path (that is #167/#61, out of scope here; one source, two
   readers — the DNS-returned `service_backends` addr is the same addr the index
   is keyed by).
+
+**C4 — F-A: ownership-aware index (ratified 2026-06-17 — option (b)).** A flat
+`addr → Backend` index with global last-writer-wins eviction would rely on an
+**unstated cross-component invariant** — *"a given `(IP:port)` belongs to at most
+one service"* — on the silent-cleartext boundary. That invariant *does* hold
+structurally in v1 (`Backend.addr` IS the alloc's serving addr; each alloc is one
+workload's replica → in exactly one service; one listener per `(IP:port)`), but a
+correctness property that leans on an unstated cross-component invariant — and a
+last-writer-wins eviction that is non-deterministic when two services disagree
+about an addr's health — is a smell on this boundary. The index is therefore
+**ownership-aware**, so it does not rely on addr-exclusivity:
+
+  - **Keyed so each contributing service's backend at an addr is tracked
+    separately** (e.g. `addr → {service → Backend}`), NOT a single `Backend` per
+    addr with global LWW eviction.
+  - **A service's backend-set shrink evicts only THAT service's contribution** at
+    the addr; an addr stays resolvable as long as **any** service still claims a
+    healthy backend there.
+  - **Classification is `any-healthy-at-addr`** — deterministic, NOT
+    last-writer-wins: `orig_dst` hits `Mesh` iff some service still claims a
+    `running`/healthy backend at that addr.
+
+  This makes the index correct **independent** of addr-exclusivity, removing the
+  unstated cross-component invariant and the last-writer-wins healthy-disagreement
+  determinism smell. v1 single-node is structurally addr-exclusive (so the
+  per-addr service set is size-1 today); the ownership-aware shape is **defensive
+  against multi-node / future writers**, not a change to today's observable
+  behaviour. The structure is an **adapter-internal detail** — the public
+  `MtlsResolve` contract and the `NonMesh`/`MeshUnreachable`/`Err` classification
+  arms (C1, above) are **UNCHANGED**.
 
 **C4 — miss-classification scoping note (the load-bearing new contract clause).**
 A pure `running`-backends reverse index cannot, *on a miss*, distinguish a
