@@ -18,7 +18,8 @@
 //! off the shim). The driven port is the injected `ObservationStore`. The
 //! observable outcome is asserted at the `ObservationStore` boundary: a
 //! `WorkflowTerminal` row keyed by the instance correlation arrives on the
-//! store's `subscribe_all` stream after the engine drove `run` to terminal.
+//! store's `subscribe_all_events` stream after the engine drove `run` to
+//! terminal.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -34,7 +35,7 @@ use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationSubscription,
+    LagAwareSubscription, ObservationRow, ObservationStore, SubscriptionEvent,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
@@ -77,8 +78,8 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
     let workflow_id = WorkflowId::new("wf-provision-0001").expect("valid instance id");
 
     // Subscribe BEFORE driving so the terminal row is observed on the stream.
-    let mut subscription: ObservationSubscription =
-        obs.subscribe_all().await.expect("subscribe succeeds");
+    let mut subscription: LagAwareSubscription =
+        obs.subscribe_all_events().await.expect("subscribe succeeds");
 
     engine.start(&spec, &correlation, &workflow_id).await.expect("engine start succeeds");
     engine.join_all().await;
@@ -90,11 +91,20 @@ async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
     for _ in 0..8 {
         let next = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
         match next {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation, status })) => {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation,
+                status,
+            }))) => {
                 found = Some((correlation, status));
                 break;
             }
-            Ok(Some(_)) => {}
+            Ok(Some(SubscriptionEvent::Row(_))) => {}
+            // Single-workflow drain — lag is structurally impossible; surface it
+            // loudly rather than skipping (a real lag would silently drop the
+            // terminal row and fail the test for the wrong reason).
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                panic!("subscription lagged ({missed}) draining a single workflow terminal row")
+            }
             Ok(None) | Err(_) => break,
         }
     }

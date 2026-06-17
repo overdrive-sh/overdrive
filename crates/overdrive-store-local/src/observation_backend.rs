@@ -83,7 +83,7 @@ use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelo
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, NodeHealthRow,
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
+    ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
     ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
     SubscriptionEvent,
 };
@@ -264,11 +264,11 @@ const fn encode_reconcile_conflict_prefix(service_id: ServiceId) -> [u8; 8] {
 }
 
 /// Capacity of the in-process broadcast channel used for
-/// `subscribe_all`. Sized to absorb a short-lived reader stall on a
-/// single-node workload without backing memory to the moon. Subscribers
-/// that lag past this silently lose the dropped notifications and keep
-/// receiving subsequent ones — the stream does not close on lag (see
-/// module docs).
+/// `subscribe_all_events`. Sized to absorb a short-lived reader stall on a
+/// single-node workload without backing memory to the moon. A subscriber
+/// that lags past this is told via [`SubscriptionEvent::Lagged`] (the gap
+/// signal is surfaced, never silently stripped) and keeps receiving
+/// subsequent rows — the stream does not close on lag (see module docs).
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 1024;
 
 /// Redb-backed `ObservationStore`. Cheap to clone via `Arc`; safe to
@@ -280,7 +280,7 @@ pub struct LocalObservationStore {
 struct Inner {
     /// `redb::Database` handles its own internal locking.
     db: Database,
-    /// Fan-out channel for `subscribe_all` subscribers. Every
+    /// Fan-out channel for `subscribe_all_events` subscribers. Every
     /// successful `write` emits the row on this channel after the redb
     /// commit succeeds — subscribers never observe a phantom row that
     /// failed to persist.
@@ -295,7 +295,7 @@ struct Inner {
     /// record is the engine-side redb+CBOR journal (`JournalCommand::Terminal`,
     /// K5); the observation row is the LIVE convergence signal only, so a
     /// process-local in-memory index is the correct shape here — it
-    /// matches what `subscribe_all` already provides (live, not
+    /// matches what `subscribe_all_events` already provides (live, not
     /// cold-boot-durable) without minting a versioned rkyv envelope per
     /// ADR-0048 for a non-durable signal. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § "Ordered-collection
@@ -503,21 +503,14 @@ impl ObservationStore for LocalObservationStore {
         Ok(())
     }
 
-    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError> {
-        let rx = self.inner.subscription_tx.subscribe();
-        let stream = BroadcastStream::new(rx).filter_map(Result::ok);
-        Ok(Box::new(SubscriptionStream { inner: Box::pin(stream) }))
-    }
-
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
-        // Mirror `subscribe_all`, but SURFACE the broadcast lag rather than
-        // strip it: map `Ok(row) → Row`, `Err(Lagged(n)) → Lagged { missed:
-        // n }` at this adapter boundary so the core trait never names a
-        // tokio error type. The lossy `subscribe_all` above stays as-is for
-        // its ~20 consumers; only `ServiceBackendsResolve` consumes this
-        // surface and relists on `Lagged` (C4 / D-TME-11 completeness
-        // contract — a dropped row is always either delivered or signalled,
-        // never silently missed).
+        // The single subscription surface: map `Ok(row) → Row` and SURFACE the
+        // loss `Err(Lagged(n)) → Lagged { missed: n }` at this adapter boundary
+        // so the core trait never names a tokio error type. Every consumer
+        // handles `Lagged` — `ServiceBackendsResolve` relists; the DST
+        // invariants and store conformance harness fail loudly (C4 / D-TME-11
+        // completeness contract — a dropped row is always either delivered or
+        // signalled, never silently missed).
         let rx = self.inner.subscription_tx.subscribe();
         let stream = BroadcastStream::new(rx).map(|item| match item {
             Ok(row) => SubscriptionEvent::Row(row),
@@ -1221,22 +1214,9 @@ fn apply_issued_certificate(
     Ok(true)
 }
 
-/// Thin `Unpin` wrapper so we can return a `Box<dyn Stream + Unpin>`.
-struct SubscriptionStream {
-    inner: Pin<Box<dyn Stream<Item = ObservationRow> + Send>>,
-}
-
-impl Stream for SubscriptionStream {
-    type Item = ObservationRow;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.inner.as_mut().poll_next(cx)
-    }
-}
-
 /// Thin `Unpin` wrapper for the lag-surfacing [`LagAwareSubscription`]
-/// returned by [`LocalObservationStore::subscribe_all_events`] — the
-/// `SubscriptionEvent` analogue of [`SubscriptionStream`].
+/// returned by [`LocalObservationStore::subscribe_all_events`] — lets us
+/// return a `Box<dyn Stream<Item = SubscriptionEvent> + Send + Unpin>`.
 struct SubscriptionEventStream {
     inner: Pin<Box<dyn Stream<Item = SubscriptionEvent> + Send>>,
 }

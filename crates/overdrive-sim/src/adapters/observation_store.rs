@@ -64,8 +64,8 @@ use overdrive_core::id::{
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationRow, ObservationStore,
-    ObservationStoreError, ObservationSubscription, ReconcileConflictRow, ServiceBackendRow,
-    ServiceHydrationResultRow, SubscriptionEvent,
+    ObservationStoreError, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    SubscriptionEvent,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -193,7 +193,7 @@ impl PeerState {
             ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
             // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out so the
             // workflow-lifecycle reconciler (and tests subscribing via
-            // `subscribe_all`) observe the terminal off the live stream.
+            // `subscribe_all_events`) observe the terminal off the live stream.
             // Accepted unconditionally: the correlation key is unique per
             // instance terminal, so no LWW collision is possible. The row
             // is pushed to `rows` + broadcast by the shared accept branch
@@ -493,19 +493,14 @@ impl ObservationStore for SimObservationStore {
         Ok(())
     }
 
-    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError> {
-        let rx = self.inner.fan_out.subscribe();
-        let stream = BroadcastStream::new(rx).filter_map(ok_or_skip);
-        Ok(Box::new(Box::pin(stream)) as ObservationSubscription)
-    }
-
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
-        // The lag-SURFACING sibling of `subscribe_all` above (C4 / D-TME-11):
-        // where `subscribe_all` drops the `Lagged` notification via
-        // `ok_or_skip`, this maps it to `SubscriptionEvent::Lagged { missed }`
-        // at the adapter boundary so the core trait never names a tokio error
-        // type. Only `ServiceBackendsResolve` consumes this; the ~20
-        // `subscribe_all` consumers stay lossy-by-design.
+        // The single subscription surface (C4 / D-TME-11): map the broadcast
+        // `Ok(row) → Row` and SURFACE the loss `Err(Lagged(n)) → Lagged {
+        // missed: n }` at the adapter boundary so the core trait never names a
+        // tokio error type. Every consumer handles `Lagged` — the resolve
+        // index relists; the DST invariants and store conformance harness fail
+        // loudly (lag is structurally impossible there, so a `Lagged` is a real
+        // bug, never something to swallow).
         let rx = self.inner.fan_out.subscribe();
         let stream = BroadcastStream::new(rx).map(|item| match item {
             Ok(row) => SubscriptionEvent::Row(row),
@@ -673,16 +668,6 @@ impl ObservationStore for SimObservationStore {
         // `ctx.wait_for_signal` path parks on — never an error.
         Ok(self.inner.by_signal.lock().get(key).cloned())
     }
-}
-
-/// Helper for [`SimObservationStore::subscribe_all`]'s stream: drops any
-/// `Lagged` signal emitted by `BroadcastStream` when the subscriber has
-/// fallen behind the `DEFAULT_FANOUT_CAPACITY` window. A lagged
-/// subscriber in a DST run is a test-author bug (capacity should be
-/// sized for the workload); surfacing it as a stream value would force
-/// every caller to handle a variant they cannot do anything about.
-fn ok_or_skip<T, E>(item: Result<T, E>) -> futures::future::Ready<Option<T>> {
-    futures::future::ready(item.ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,20 +1123,5 @@ impl GossipRouter {
                 recipient.inner.apply(row);
             }
         }
-    }
-}
-
-// Small sanity check that the public types line up. Not a replacement
-// for the acceptance test; exists so that renaming
-// `ObservationSubscription` fails the compile here first.
-#[cfg(test)]
-mod static_wiring_check {
-    use super::*;
-    use futures::Stream;
-    #[allow(dead_code)]
-    fn _assert_observation_subscription_is_stream(
-        s: &ObservationSubscription,
-    ) -> &(dyn Stream<Item = ObservationRow> + Send + Unpin) {
-        &**s
     }
 }

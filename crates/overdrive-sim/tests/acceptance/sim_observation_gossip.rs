@@ -32,8 +32,8 @@ use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
-    ObservationSubscription,
+    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
+    ObservationStore, SubscriptionEvent,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -84,14 +84,22 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
 /// channel under the hood; calling `next().await` on an empty channel
 /// would block, so we wrap each poll in a short timeout and stop on the
 /// first `None` / timeout.
-async fn drain_subscription(subscription: &mut ObservationSubscription) -> Vec<ObservationRow> {
+async fn drain_subscription(subscription: &mut LagAwareSubscription) -> Vec<ObservationRow> {
     let mut out = Vec::new();
     // A 25ms budget is far larger than any intra-process broadcast
     // delivery; if we timeout, the channel is genuinely empty right now.
-    while let Ok(Some(row)) =
+    while let Ok(Some(event)) =
         tokio::time::timeout(Duration::from_millis(25), subscription.next()).await
     {
-        out.push(row);
+        match event {
+            SubscriptionEvent::Row(row) => out.push(row),
+            // This gossip scenario writes a bounded handful of rows and drains
+            // promptly — the 1024-deep broadcast window cannot overrun. A
+            // `Lagged` here is a real bug, not something to skip silently.
+            SubscriptionEvent::Lagged { missed } => {
+                panic!("subscription lagged ({missed}) — gossip convergence drain cannot lag")
+            }
+        }
     }
     out
 }
@@ -116,10 +124,10 @@ async fn row_written_on_one_peer_is_observable_on_every_peer_after_convergence()
 
     // Open subscriptions before the write so no event is dropped on the
     // peer's fan-out (the §4 guardrail requires we see every row).
-    let mut sub_b: ObservationSubscription =
-        peer_b.subscribe_all().await.expect("subscribe on peer B succeeds");
-    let mut sub_c: ObservationSubscription =
-        peer_c.subscribe_all().await.expect("subscribe on peer C succeeds");
+    let mut sub_b: LagAwareSubscription =
+        peer_b.subscribe_all_events().await.expect("subscribe on peer B succeeds");
+    let mut sub_c: LagAwareSubscription =
+        peer_c.subscribe_all_events().await.expect("subscribe on peer C succeeds");
 
     // When peer A writes a full alloc_status row.
     let row = alloc_status(AllocState::Running, &node("node-a"), 1);
@@ -287,10 +295,10 @@ async fn partition_blocks_gossip_delivery_until_repair() {
     let peer_b = cluster.peer(&node("node-b"));
     let peer_c = cluster.peer(&node("node-c"));
 
-    let mut sub_b: ObservationSubscription =
-        peer_b.subscribe_all().await.expect("subscribe on peer B succeeds");
-    let mut sub_c: ObservationSubscription =
-        peer_c.subscribe_all().await.expect("subscribe on peer C succeeds");
+    let mut sub_b: LagAwareSubscription =
+        peer_b.subscribe_all_events().await.expect("subscribe on peer B succeeds");
+    let mut sub_c: LagAwareSubscription =
+        peer_c.subscribe_all_events().await.expect("subscribe on peer C succeeds");
 
     // When peer A writes a row and the sim advances past the usual
     // gossip window.

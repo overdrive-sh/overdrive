@@ -64,8 +64,8 @@
 //!   [`subscribe_all_events`](ObservationStore::subscribe_all_events)
 //!   subscription, which carries a
 //!   [`SubscriptionEvent::Lagged { missed }`](overdrive_core::traits::observation_store::SubscriptionEvent::Lagged)
-//!   in-band when the broadcast drops rows (the lossy
-//!   [`subscribe_all`](ObservationStore::subscribe_all) strips it). On `Lagged`
+//!   in-band when the broadcast drops rows (the now-removed lossy `subscribe_all`
+//!   surface stripped it silently). On `Lagged`
 //!   the drain re-Lists the authoritative snapshot via `relist_into` and
 //!   rebuilds the index, so a dropped `service_backends` update is RECOVERED
 //!   (mirrors Cilium `ErrCompacted → goto reList`; the etcd-`ErrCompacted` /
@@ -94,11 +94,10 @@
 //!
 //! C4 / D-TME-11 pin a **relist-on-loss** leg: on a watch-loss signal the drain
 //! re-Lists the authoritative snapshot. The earlier observe-only revision left
-//! this leg blocked because the lossy
-//! [`subscribe_all`](ObservationStore::subscribe_all)
-//! (`Box<dyn Stream<Item = ObservationRow>>`) strips
+//! this leg blocked because the then-extant lossy `subscribe_all` surface
+//! (`Box<dyn Stream<Item = ObservationRow>>`) stripped
 //! `broadcast::RecvError::Lagged` inside both store adapters before any consumer
-//! sees it. The ratified refinement (option 2) added a dedicated LAG-SURFACING
+//! saw it. The ratified refinement (option 2) added a dedicated LAG-SURFACING
 //! subscription — [`subscribe_all_events`](ObservationStore::subscribe_all_events)
 //! returning a `LagAwareSubscription` of
 //! [`SubscriptionEvent`](overdrive_core::traits::observation_store::SubscriptionEvent)
@@ -110,9 +109,11 @@
 //! [`all_service_backends_rows`](ObservationStore::all_service_backends_rows)
 //! and rebuilds the index — closing F4 with the *completeness* guarantee (a
 //! dropped `service_backends` update is always either delivered or
-//! signalled-then-relisted, never silently lost). The blast radius is bounded:
-//! ONLY this adapter consumes `subscribe_all_events`; the ~20 existing
-//! `subscribe_all` consumers stay lossy-by-design. The
+//! signalled-then-relisted, never silently lost). `subscribe_all_events` is now
+//! the single subscription surface on `ObservationStore`: this adapter relists
+//! on `Lagged`; every other consumer (the DST workflow invariants, the store
+//! conformance harness) handles `Lagged` by failing loudly, since lag is a
+//! structural impossibility there. The
 //! [`relist`](ServiceBackendsResolve::relist) machinery (shared with the drain
 //! via `relist_into`) is exercised at List-at-probe, on watch-close, AND now on
 //! `Lagged`.
@@ -954,8 +955,7 @@ mod tests {
     use overdrive_core::observation::ProbeResultRow;
     use overdrive_core::traits::observation_store::{
         AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationStoreError,
-        ObservationSubscription, ReconcileConflictRow, ServiceHydrationResultRow,
-        SubscriptionEvent,
+        ReconcileConflictRow, ServiceHydrationResultRow, SubscriptionEvent,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -1055,15 +1055,6 @@ mod tests {
                 )));
             }
             self.inner.all_service_backends_rows().await
-        }
-
-        async fn subscribe_all(
-            &self,
-        ) -> std::result::Result<ObservationSubscription, ObservationStoreError> {
-            // The drain consumes `subscribe_all_events` (below); this lossy
-            // surface is kept only to satisfy the trait. Delegate to the inner
-            // store so the signature stays anchored.
-            self.inner.subscribe_all().await
         }
 
         async fn subscribe_all_events(

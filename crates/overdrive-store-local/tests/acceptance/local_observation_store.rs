@@ -9,8 +9,8 @@
 //! 2. **Restart round-trip** — objection-(1) regression gate. Writes
 //!    persist across store `drop` + `LocalObservationStore::open` reopen
 //!    against the same redb file.
-//! 3. Subscription delivery: `subscribe_all()` then `write` delivers the
-//!    row on the broadcast stream within bounded tokio poll time.
+//! 3. Subscription delivery: `subscribe_all_events()` then `write` delivers
+//!    the row on the broadcast stream within bounded tokio poll time.
 //!    Future-only contract — subscribers opened AFTER a write do not see
 //!    the historical row.
 //! 4. Overwrite on same key: writing twice for the same `AllocationId`
@@ -28,6 +28,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    SubscriptionEvent,
 };
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
@@ -161,21 +162,26 @@ async fn restart_round_trip_node_health() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn subscribe_all_delivers_subsequent_writes() {
+async fn subscribe_all_events_delivers_subsequent_writes() {
     let tmp = TempDir::new().expect("tempdir");
     let store = LocalObservationStore::open(tmp.path().join("observation"))
         .expect("open observation store");
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     let row = alloc_row("alloc-1", AllocState::Running, 1);
     let written = ObservationRow::AllocStatus(Box::new(row.clone()));
     store.write(written.clone()).await.expect("write after subscribe");
 
-    let delivered = timeout(Duration::from_secs(2), sub.next())
+    let event = timeout(Duration::from_secs(2), sub.next())
         .await
         .expect("subscription delivers within timeout")
         .expect("stream yields the row");
+    // Single write, immediate drain — lag is structurally impossible; a
+    // `Lagged` here is a real bug, surfaced loudly rather than skipped.
+    let SubscriptionEvent::Row(delivered) = event else {
+        panic!("subscription lagged draining a single written row: {event:?}");
+    };
     assert_eq!(delivered, written, "subscription must deliver the written row");
 }
 
@@ -192,12 +198,23 @@ async fn subscriber_opened_after_write_does_not_see_historical_row() {
         .await
         .expect("historical write");
 
-    let mut sub = store.subscribe_all().await.expect("subscribe AFTER write");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe AFTER write");
 
     // Give the broadcast channel a tokio tick — if history were being
-    // replayed, the timeout would fire with Some(row).
-    let result = timeout(Duration::from_millis(200), sub.next()).await;
-    assert!(result.is_err(), "subscription opened after write must not replay historical rows");
+    // replayed, the timeout would fire with Some(Row).
+    match timeout(Duration::from_millis(200), sub.next()).await {
+        // Timeout — no replay. This is the future-only contract passing.
+        Err(_) => {}
+        Ok(Some(SubscriptionEvent::Row(row))) => {
+            panic!("subscription opened after write must not replay historical rows; got {row:?}")
+        }
+        Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+            panic!(
+                "subscription lagged ({missed}) with no rows written after subscribe — cannot lag"
+            )
+        }
+        Ok(None) => panic!("subscription stream ended unexpectedly"),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +276,7 @@ async fn out_of_order_alloc_status_does_not_regress() {
 
     // Subscribe BEFORE the older write — if the older row is emitted,
     // the subscription will deliver it within the bounded poll window.
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     // Older (counter=2, Pending) arrives after — typical out-of-order
     // delivery. The state field differs so a regression to the older
@@ -269,8 +286,18 @@ async fn out_of_order_alloc_status_does_not_regress() {
 
     // Contract: losers do not emit. The subscription must time out
     // because the older write was rejected by LWW.
-    let delivery = timeout(Duration::from_millis(50), sub.next()).await;
-    assert!(delivery.is_err(), "LWW loser must not emit on subscriptions; got {delivery:?}");
+    match timeout(Duration::from_millis(50), sub.next()).await {
+        // Timeout — the LWW loser was correctly never broadcast.
+        Err(_) => {}
+        Ok(Some(SubscriptionEvent::Row(row))) => {
+            panic!("LWW loser must not emit on subscriptions; got {row:?}")
+        }
+        Ok(Some(SubscriptionEvent::Lagged { missed })) => panic!(
+            "subscription lagged ({missed}) on a two-write LWW case — cannot lag; a lag must not \
+             be mistaken for loser-suppression"
+        ),
+        Ok(None) => panic!("subscription stream ended unexpectedly"),
+    }
 
     // Read returns the newer row, not the older one.
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
@@ -289,7 +316,7 @@ async fn out_of_order_node_health_does_not_regress() {
     store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer row");
 
     // Subscribe BEFORE the older write.
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     // Older (counter=2) arrives second. Distinct counter on the
     // `last_heartbeat` field makes a regression observable on read.
@@ -297,8 +324,18 @@ async fn out_of_order_node_health_does_not_regress() {
     store.write(ObservationRow::NodeHealth(older)).await.expect("write older row");
 
     // Contract: losers do not emit.
-    let delivery = timeout(Duration::from_millis(50), sub.next()).await;
-    assert!(delivery.is_err(), "LWW loser must not emit on subscriptions; got {delivery:?}");
+    match timeout(Duration::from_millis(50), sub.next()).await {
+        // Timeout — the LWW loser was correctly never broadcast.
+        Err(_) => {}
+        Ok(Some(SubscriptionEvent::Row(row))) => {
+            panic!("LWW loser must not emit on subscriptions; got {row:?}")
+        }
+        Ok(Some(SubscriptionEvent::Lagged { missed })) => panic!(
+            "subscription lagged ({missed}) on a two-write LWW case — cannot lag; a lag must not \
+             be mistaken for loser-suppression"
+        ),
+        Ok(None) => panic!("subscription stream ended unexpectedly"),
+    }
 
     // Read returns the newer row, not the older one.
     let rows = store.node_health_rows().await.expect("read node rows");

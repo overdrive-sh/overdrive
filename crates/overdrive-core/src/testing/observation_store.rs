@@ -72,7 +72,8 @@ use crate::UnixInstant;
 use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
 use crate::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
+    ObservationRow, ObservationStore, SubscriptionEvent,
 };
 
 /// Bounded poll window for "subscriber must not have received this
@@ -86,6 +87,58 @@ const REJECT_POLL_TIMEOUT: Duration = Duration::from_millis(50);
 /// acceptance suites in this workspace; comfortably above any
 /// in-process fan-out latency.
 const ACCEPT_POLL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Await exactly one delivered [`ObservationRow`] off a lag-surfacing
+/// subscription, within [`ACCEPT_POLL_TIMEOUT`].
+///
+/// The conformance harness writes one row at a time and drains it
+/// immediately, so the 1024-deep broadcast window cannot overrun — a
+/// [`SubscriptionEvent::Lagged`] here is a structural impossibility that
+/// signals a real lag bug. The helper therefore **panics loudly** on
+/// `Lagged` rather than skipping it: surfacing the loss is the whole point
+/// of the migration off the (deleted) lossy `subscribe_all`. A timeout (no
+/// delivery) is a genuine "row never emitted" conformance failure.
+async fn expect_emitted_row(sub: &mut LagAwareSubscription, ctx: &str) -> ObservationRow {
+    match timeout(ACCEPT_POLL_TIMEOUT, sub.next()).await {
+        Ok(Some(SubscriptionEvent::Row(row))) => row,
+        Ok(Some(SubscriptionEvent::Lagged { missed })) => panic!(
+            "{ctx}: LWW conformance harness observed broadcast Lagged({missed}) — the harness \
+             writes/drains one row at a time and cannot lag; the broadcast window was overrun"
+        ),
+        Ok(None) => panic!("{ctx}: subscription stream ended before the expected row was emitted"),
+        Err(elapsed) => {
+            panic!("{ctx}: subscription did not deliver the expected row within timeout: {elapsed}")
+        }
+    }
+}
+
+/// Assert NO row is emitted on a lag-surfacing subscription within
+/// [`REJECT_POLL_TIMEOUT`] — the LWW-loser / append-only-duplicate
+/// suppression check.
+///
+/// The pass condition is a TIMEOUT (the loser was correctly never
+/// broadcast). A delivered [`SubscriptionEvent::Row`] is the conformance
+/// failure this defends against (a rejected row wrongly fanned out). A
+/// [`SubscriptionEvent::Lagged`] is — as in [`expect_emitted_row`] — a
+/// structural impossibility for this harness; it **panics loudly** so a
+/// real lag cannot masquerade as the (correct) "loser suppressed" timeout.
+async fn assert_no_emission(sub: &mut LagAwareSubscription, ctx: &str) {
+    match timeout(REJECT_POLL_TIMEOUT, sub.next()).await {
+        // Timeout — the loser was never broadcast. This is the pass.
+        Err(_) => {}
+        Ok(Some(SubscriptionEvent::Row(row))) => {
+            panic!("{ctx}: LWW loser / duplicate must NOT emit on subscriptions; got {row:?}")
+        }
+        Ok(Some(SubscriptionEvent::Lagged { missed })) => panic!(
+            "{ctx}: LWW conformance harness observed broadcast Lagged({missed}) — the harness \
+             writes/drains one row at a time and cannot lag; a lag must not be mistaken for \
+             loser-suppression"
+        ),
+        Ok(None) => {
+            panic!("{ctx}: subscription stream ended unexpectedly during a rejection check")
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Row helpers — every sub-case uses unique keys so cross-case state
@@ -227,13 +280,10 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
     let older = alloc_row(scope, 0, AllocState::Pending, ts(1, "control-plane-0"));
     let newer = alloc_row(scope, 0, AllocState::Running, ts(5, "control-plane-0"));
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::AllocStatus(Box::new(older.clone()))).await.expect("write older");
-    let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers older within timeout")
-        .expect("stream yields older");
+    let first = expect_emitted_row(&mut sub, "(i) alloc older delivery").await;
     assert_eq!(
         first,
         ObservationRow::AllocStatus(Box::new(older.clone())),
@@ -241,10 +291,7 @@ async fn case_newer_dominates_older_alloc_status<T: ObservationStore + ?Sized>(s
     );
 
     store.write(ObservationRow::AllocStatus(Box::new(newer.clone()))).await.expect("write newer");
-    let second = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers newer within timeout")
-        .expect("stream yields newer");
+    let second = expect_emitted_row(&mut sub, "(i) alloc newer delivery").await;
     assert_eq!(
         second,
         ObservationRow::AllocStatus(Box::new(newer.clone())),
@@ -268,12 +315,11 @@ async fn case_older_after_newer_rejected_alloc_status<T: ObservationStore + ?Siz
 
     // Subscribe BEFORE the older write so a wrongly-emitted loser would
     // be observed.
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::AllocStatus(Box::new(older))).await.expect("write older");
 
-    let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
-    assert!(delivery.is_err(), "(ii) LWW loser must NOT emit on subscriptions; got {delivery:?}");
+    assert_no_emission(&mut sub, "(ii) alloc LWW loser").await;
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     let observed: Vec<&AllocStatusRow> =
@@ -286,13 +332,10 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
     let scope = "equal-timestamp";
     let row_a = alloc_row(scope, 0, AllocState::Running, ts(3, "control-plane-0"));
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("write first");
-    let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers first within timeout")
-        .expect("stream yields first");
+    let first = expect_emitted_row(&mut sub, "(iii) alloc first delivery").await;
     assert_eq!(
         first,
         ObservationRow::AllocStatus(Box::new(row_a.clone())),
@@ -302,8 +345,7 @@ async fn case_equal_timestamp_idempotent_alloc_status<T: ObservationStore + ?Siz
     // Re-deliver the same row. Equal timestamps do NOT dominate
     // (idempotency case) — must be rejected.
     store.write(ObservationRow::AllocStatus(Box::new(row_a.clone()))).await.expect("re-deliver");
-    let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
-    assert!(delivery.is_err(), "(iii) re-delivered identical row must NOT emit; got {delivery:?}");
+    assert_no_emission(&mut sub, "(iii) alloc re-delivered identical row").await;
 
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     let observed: Vec<&AllocStatusRow> =
@@ -327,7 +369,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
         .expect("write lower writer");
 
     // Subscribe BEFORE the second write so the assertion is precise.
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     // Higher-writer arrives second. Same counter; tiebreak on writer:
     // "control-plane-1" > "control-plane-0", so higher wins.
@@ -336,10 +378,7 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
         .await
         .expect("write higher writer");
 
-    let delivery = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("higher-writer delivery within timeout")
-        .expect("stream yields higher writer");
+    let delivery = expect_emitted_row(&mut sub, "(iv) alloc higher-writer delivery").await;
     assert_eq!(
         delivery,
         ObservationRow::AllocStatus(Box::new(higher_writer.clone())),
@@ -357,17 +396,12 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
 
     // Now write lower-writer AGAIN with the same counter — must lose
     // (counter ties, writer < winning writer).
-    let mut sub2 = store.subscribe_all().await.expect("subscribe-2");
+    let mut sub2 = store.subscribe_all_events().await.expect("subscribe-2");
     store
         .write(ObservationRow::AllocStatus(Box::new(lower_writer.clone())))
         .await
         .expect("write lower writer second time");
-    let reject_delivery = timeout(REJECT_POLL_TIMEOUT, sub2.next()).await;
-    assert!(
-        reject_delivery.is_err(),
-        "(iv) lex-lower writer must NOT win against the existing higher-writer row; got \
-         {reject_delivery:?}"
-    );
+    assert_no_emission(&mut sub2, "(iv) alloc lex-lower writer must lose tiebreak").await;
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     let observed: Vec<&AllocStatusRow> =
         rows.iter().filter(|r| r.alloc_id == lower_writer.alloc_id).collect();
@@ -433,13 +467,10 @@ async fn case_newer_dominates_older_node_health<T: ObservationStore + ?Sized>(st
     let newer =
         NodeHealthRow { node_id: node_id(writer), region: region(), last_heartbeat: ts(5, writer) };
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::NodeHealth(older.clone())).await.expect("write older");
-    let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers older within timeout")
-        .expect("stream yields older");
+    let first = expect_emitted_row(&mut sub, "(i) node older delivery").await;
     assert_eq!(
         first,
         ObservationRow::NodeHealth(older.clone()),
@@ -447,10 +478,7 @@ async fn case_newer_dominates_older_node_health<T: ObservationStore + ?Sized>(st
     );
 
     store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer");
-    let second = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers newer within timeout")
-        .expect("stream yields newer");
+    let second = expect_emitted_row(&mut sub, "(i) node newer delivery").await;
     assert_eq!(
         second,
         ObservationRow::NodeHealth(newer.clone()),
@@ -473,15 +501,11 @@ async fn case_older_after_newer_rejected_node_health<T: ObservationStore + ?Size
 
     store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer");
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::NodeHealth(older)).await.expect("write older");
 
-    let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
-    assert!(
-        delivery.is_err(),
-        "(ii) NodeHealth LWW loser must NOT emit on subscriptions; got {delivery:?}"
-    );
+    assert_no_emission(&mut sub, "(ii) node LWW loser").await;
 
     let rows = store.node_health_rows().await.expect("read node rows");
     let observed: Vec<&NodeHealthRow> =
@@ -495,13 +519,10 @@ async fn case_equal_timestamp_idempotent_node_health<T: ObservationStore + ?Size
     let row =
         NodeHealthRow { node_id: node_id(writer), region: region(), last_heartbeat: ts(3, writer) };
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::NodeHealth(row.clone())).await.expect("write first");
-    let first = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("subscription delivers first within timeout")
-        .expect("stream yields first");
+    let first = expect_emitted_row(&mut sub, "(iii) node first delivery").await;
     assert_eq!(
         first,
         ObservationRow::NodeHealth(row.clone()),
@@ -509,11 +530,7 @@ async fn case_equal_timestamp_idempotent_node_health<T: ObservationStore + ?Size
     );
 
     store.write(ObservationRow::NodeHealth(row.clone())).await.expect("re-deliver");
-    let delivery = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
-    assert!(
-        delivery.is_err(),
-        "(iii) re-delivered identical NodeHealth row must NOT emit; got {delivery:?}"
-    );
+    assert_no_emission(&mut sub, "(iii) node re-delivered identical row").await;
 
     let rows = store.node_health_rows().await.expect("read node rows");
     let observed: Vec<&NodeHealthRow> = rows.iter().filter(|r| r.node_id == row.node_id).collect();
@@ -542,13 +559,10 @@ async fn case_writer_tiebreak_node_health<T: ObservationStore + ?Sized>(store: &
 
     store.write(ObservationRow::NodeHealth(lower_writer.clone())).await.expect("write lower");
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     store.write(ObservationRow::NodeHealth(higher_writer.clone())).await.expect("write higher");
-    let delivery = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("higher writer delivery within timeout")
-        .expect("stream yields higher writer");
+    let delivery = expect_emitted_row(&mut sub, "(iv) node higher-writer delivery").await;
     assert_eq!(
         delivery,
         ObservationRow::NodeHealth(higher_writer.clone()),
@@ -693,17 +707,14 @@ async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store
     let second = issued_cert_row(&serial, "spiffe://overdrive.local/wl/second");
     assert_ne!(first, second, "(viii) test rows must differ in body to detect overwrite");
 
-    let mut sub = store.subscribe_all().await.expect("subscribe");
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
 
     // First issuance at a fresh serial is accepted and fans out unchanged.
     store
         .write(ObservationRow::IssuedCertificate(first.clone()))
         .await
         .expect("write first issuance");
-    let received = timeout(ACCEPT_POLL_TIMEOUT, sub.next())
-        .await
-        .expect("(viii) subscription delivers first issuance within timeout")
-        .expect("(viii) stream yields first issuance");
+    let received = expect_emitted_row(&mut sub, "(viii) first issuance delivery").await;
     assert_eq!(
         received,
         ObservationRow::IssuedCertificate(first.clone()),
@@ -717,8 +728,7 @@ async fn case_issued_certificate_append_only<T: ObservationStore + ?Sized>(store
         .expect("write duplicate serial");
 
     // (a) No second fan-out: a duplicate serial must NOT be re-broadcast.
-    let poll = timeout(REJECT_POLL_TIMEOUT, sub.next()).await;
-    assert!(poll.is_err(), "(viii) a duplicate serial must NOT be re-broadcast — got {poll:?}");
+    assert_no_emission(&mut sub, "(viii) duplicate serial must not re-broadcast").await;
 
     // (b) The stored audit row is still the FIRST body, never overwritten.
     let rows = store.issued_certificate_rows().await.expect("(viii) read issued certificate rows");

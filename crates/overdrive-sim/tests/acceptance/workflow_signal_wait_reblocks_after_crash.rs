@@ -57,7 +57,9 @@ use overdrive_core::reconcilers::Action;
 use overdrive_core::testing::workflow::ProvisionRecordWithSignalEmit;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
-use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::observation_store::{
+    LagAwareSubscription, ObservationRow, ObservationStore, SubscriptionEvent,
+};
 use overdrive_core::traits::transport::Transport as TransportTrait;
 use overdrive_core::workflow::{SignalValue, WorkflowStatus};
 
@@ -166,7 +168,7 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
     let clock_b = Arc::new(SimClock::new());
     let engine_b = build_engine(Arc::clone(&journal), Arc::clone(&obs), clock_b.clone());
     let mut emits_b = engine_b.take_action_emit_receiver().await.expect("emit receiver");
-    let mut sub = obs.subscribe_all().await.expect("subscribe");
+    let mut sub = obs.subscribe_all_events().await.expect("subscribe");
     engine_b.start(&spec, &correlation, &workflow_id).await.expect("resume start");
 
     // Advance logical time on the resumed run — it must RE-BLOCK on the
@@ -238,18 +240,25 @@ async fn crash_while_blocked_on_signal_reblocks_on_the_same_signal_on_resume() {
 }
 
 async fn drain_terminal(
-    sub: &mut overdrive_core::traits::observation_store::ObservationSubscription,
+    sub: &mut LagAwareSubscription,
     correlation: &CorrelationKey,
 ) -> Option<WorkflowStatus> {
     use futures::StreamExt;
     for _ in 0..64 {
         match tokio::time::timeout(Duration::from_millis(50), sub.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
-                if &got == correlation =>
-            {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation: got,
+                status,
+            }))) if &got == correlation => {
                 return Some(status);
             }
-            Ok(Some(_) | None) | Err(_) => {}
+            // Single-workflow drain — lag is structurally impossible; surface it
+            // loudly rather than skipping (a real lag would silently drop the
+            // terminal row and fail the test for the wrong reason).
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                panic!("subscription lagged ({missed}) draining a single workflow terminal row")
+            }
+            Ok(Some(SubscriptionEvent::Row(_)) | None) | Err(_) => {}
         }
     }
     None

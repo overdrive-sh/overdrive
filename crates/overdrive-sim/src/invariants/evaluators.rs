@@ -683,24 +683,42 @@ async fn delivered_count(inbox: &mut SimInbox) -> usize {
 
 /// Drain the terminal `WorkflowStatus` for `correlation` off a
 /// subscription that was taken BEFORE the engine drove the workflow to
-/// terminal. `SimObservationStore::subscribe_all` returns a LIVE
+/// terminal. `SimObservationStore::subscribe_all_events` returns a LIVE
 /// broadcast stream (it does NOT replay a snapshot — `WorkflowTerminal`
 /// rows are fan-out-only, never stored), so the subscription MUST be
 /// opened before `engine.start` or the terminal row is missed. Returns
 /// `None` if no terminal row arrives within the drain budget.
+///
+/// A [`SubscriptionEvent::Lagged`] on this stream is a structural
+/// impossibility for these invariants — one workflow writes one terminal
+/// row, and the drain consumes it well inside the 1024-deep broadcast
+/// window. Surfacing it (rather than skipping) catches a real lag bug
+/// instead of hiding it; the drain therefore fails loudly on `Lagged`.
 async fn drain_terminal(
-    subscription: &mut overdrive_core::traits::observation_store::ObservationSubscription,
+    subscription: &mut overdrive_core::traits::observation_store::LagAwareSubscription,
     correlation: &CorrelationKey,
 ) -> Option<WorkflowStatus> {
     use futures::StreamExt;
+    use overdrive_core::traits::observation_store::SubscriptionEvent;
     for _ in 0..32 {
         match tokio::time::timeout(Duration::from_millis(100), subscription.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
-                if &got == correlation =>
-            {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation: got,
+                status,
+            }))) if &got == correlation => {
                 return Some(status);
             }
-            Ok(Some(_)) => {}
+            Ok(Some(SubscriptionEvent::Row(_))) => {}
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                // The single-workflow / prompt-drain shape makes broadcast lag
+                // impossible here; a `Lagged` means the broadcast window was
+                // genuinely overrun — a real bug that would otherwise silently
+                // skip the terminal row and weaken the invariant. Fail loudly.
+                unreachable!(
+                    "drain_terminal observed broadcast Lagged({{missed}}) — single-workflow \
+                     terminal drain cannot lag; the broadcast window was overrun (missed={missed})"
+                );
+            }
             Ok(None) | Err(_) => break,
         }
     }
@@ -719,7 +737,7 @@ async fn run_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<WorkflowStatu
     let (engine, _inbox) = provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
     // Subscribe BEFORE driving — the WorkflowTerminal row is broadcast
     // live (never snapshotted), so a post-run subscriber would miss it.
-    let Ok(mut subscription) = obs.subscribe_all().await else {
+    let Ok(mut subscription) = obs.subscribe_all_events().await else {
         return (Vec::new(), None);
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
@@ -834,9 +852,9 @@ pub async fn evaluate_replay_equivalence_provision_record(seed: u64) -> Invarian
         provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
     // Subscribe BEFORE driving the resumed run — the terminal row is
     // broadcast live, not snapshotted.
-    let mut resume_sub = match obs.subscribe_all().await {
+    let mut resume_sub = match obs.subscribe_all_events().await {
         Ok(s) => s,
-        Err(err) => return fail(format!("resume subscribe_all failed: {err}")),
+        Err(err) => return fail(format!("resume subscribe_all_events failed: {err}")),
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
     engine.join_all().await;
@@ -1018,7 +1036,7 @@ async fn run_signal_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<Workfl
     ));
     let (engine, clock) = provision_signal_engine(seed, Arc::clone(&journal), Arc::clone(&obs));
     let _emits = engine.take_action_emit_receiver().await;
-    let Ok(mut subscription) = obs.subscribe_all().await else {
+    let Ok(mut subscription) = obs.subscribe_all_events().await else {
         return (Vec::new(), None);
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
@@ -1131,9 +1149,9 @@ async fn check_replay_equivalence_across_signal_emit(seed: u64) -> Option<String
     let Some(mut resume_emits) = engine.take_action_emit_receiver().await else {
         return Some("resume engine had no emit receiver".to_owned());
     };
-    let mut resume_sub = match obs.subscribe_all().await {
+    let mut resume_sub = match obs.subscribe_all_events().await {
         Ok(s) => s,
-        Err(err) => return Some(format!("resume subscribe_all failed: {err}")),
+        Err(err) => return Some(format!("resume subscribe_all_events failed: {err}")),
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
     // Re-block check: advance time WITHOUT the signal — must stay blocked.
@@ -1401,7 +1419,7 @@ async fn run_sleep_uninterrupted(seed: u64) -> (Vec<LoadedEntry>, Option<Workflo
     ));
     let (engine, clock, _pre, _post) =
         provision_sleep_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
-    let Ok(mut subscription) = obs.subscribe_all().await else {
+    let Ok(mut subscription) = obs.subscribe_all_events().await else {
         return (Vec::new(), None);
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
@@ -1463,9 +1481,9 @@ async fn check_replay_equivalence_across_sleep(seed: u64) -> Option<String> {
     ));
     let (engine, clock, mut resume_pre_inbox, mut resume_post_inbox) =
         provision_sleep_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
-    let mut resume_sub = match obs.subscribe_all().await {
+    let mut resume_sub = match obs.subscribe_all_events().await {
         Ok(s) => s,
-        Err(err) => return Some(format!("resume subscribe_all failed: {err}")),
+        Err(err) => return Some(format!("resume subscribe_all_events failed: {err}")),
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
     drive_sleep_to_terminal(&engine, &clock).await;
@@ -1933,9 +1951,9 @@ pub async fn evaluate_workflow_exactly_once_effect_on_resume(seed: u64) -> Invar
     ));
     let (engine, mut inbox) = provision_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
     // Subscribe BEFORE driving — the terminal row is broadcast live.
-    let mut subscription = match obs.subscribe_all().await {
+    let mut subscription = match obs.subscribe_all_events().await {
         Ok(s) => s,
-        Err(err) => return fail(format!("resume subscribe_all failed: {err}")),
+        Err(err) => return fail(format!("resume subscribe_all_events failed: {err}")),
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
     engine.join_all().await;
@@ -2116,9 +2134,9 @@ pub async fn evaluate_workflow_terminal_status_projection(seed: u64) -> Invarian
     let engine = failure_engine(seed, Arc::clone(&journal), Arc::clone(&obs)).await;
     // Subscribe BEFORE driving — the `WorkflowTerminal` row is broadcast live
     // (never snapshotted), so a post-run subscriber would miss it.
-    let mut subscription = match obs.subscribe_all().await {
+    let mut subscription = match obs.subscribe_all_events().await {
         Ok(s) => s,
-        Err(err) => return fail(format!("subscribe_all failed: {err}")),
+        Err(err) => return fail(format!("subscribe_all_events failed: {err}")),
     };
     let _ = engine.start(&spec, &correlation, &workflow_id).await;
     engine.join_all().await;
