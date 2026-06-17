@@ -487,7 +487,14 @@ fn provision_injects_node_local_responder_into_netns_resolv_conf() {
         );
     }
 
-    // --- 3. RE-run provision: idempotent no-op, content stable ---
+    // --- 3. RE-run provision: the injected line is content-stable ---
+    // This asserts content STABILITY across a re-converge, not no-op-ness: the
+    // executor's `resolv_conf_write` is overwrite-to-desired (`std::fs::write`
+    // truncates), so the line would survive even if `WriteResolvConf` re-fired.
+    // The actual no-op proof — that a converged netns emits ZERO
+    // `WriteResolvConf` steps — is the pure proptest
+    // `workload_netns_converge_steps_are_minimal_and_idempotent` (a converged
+    // observed state yields an empty step set).
     provision_workload_netns(p)
         .expect("second provision over a complete netns must converge silently");
     let reinjected = netns_resolv_conf(&p.netns)
