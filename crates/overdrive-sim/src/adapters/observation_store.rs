@@ -53,6 +53,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::dataplane::backend_key::Proto;
@@ -62,8 +63,9 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationRow, ObservationStore,
+    ObservationStoreError, ObservationSubscription, ReconcileConflictRow, ServiceBackendRow,
+    ServiceHydrationResultRow, SubscriptionEvent,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -495,6 +497,21 @@ impl ObservationStore for SimObservationStore {
         let rx = self.inner.fan_out.subscribe();
         let stream = BroadcastStream::new(rx).filter_map(ok_or_skip);
         Ok(Box::new(Box::pin(stream)) as ObservationSubscription)
+    }
+
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        // The lag-SURFACING sibling of `subscribe_all` above (C4 / D-TME-11):
+        // where `subscribe_all` drops the `Lagged` notification via
+        // `ok_or_skip`, this maps it to `SubscriptionEvent::Lagged { missed }`
+        // at the adapter boundary so the core trait never names a tokio error
+        // type. Only `ServiceBackendsResolve` consumes this; the ~20
+        // `subscribe_all` consumers stay lossy-by-design.
+        let rx = self.inner.fan_out.subscribe();
+        let stream = BroadcastStream::new(rx).map(|item| match item {
+            Ok(row) => SubscriptionEvent::Row(row),
+            Err(BroadcastStreamRecvError::Lagged(missed)) => SubscriptionEvent::Lagged { missed },
+        });
+        Ok(Box::new(Box::pin(stream)) as LagAwareSubscription)
     }
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {

@@ -44,7 +44,8 @@
 //!   `service_backends` snapshot via the keyless
 //!   [`all_service_backends_rows`](ObservationStore::all_service_backends_rows)
 //!   enumerate into the in-RAM index AND opens the
-//!   [`subscribe_all`](ObservationStore::subscribe_all) watch BEFORE it returns
+//!   [`subscribe_all_events`](ObservationStore::subscribe_all_events) watch
+//!   BEFORE it returns
 //!   `Ok` — so the index is seeded before the Earned-Trust gate opens and is
 //!   never empty-but-trusted (closes #237 cold-start; mirrors Cilium
 //!   `ListDone`-gates-`synced`). A failed List OR a failed subscribe →
@@ -52,11 +53,27 @@
 //!   (`health.startup.refused`).
 //! - **Watch (single-owner drain).** A SINGLE background drain task — the only
 //!   owner of the subscription — continuously drains
-//!   [`subscribe_all`](ObservationStore::subscribe_all) into the index under the
-//!   index write-lock. There is NO shared `take()`/restore of the subscription
-//!   (the F2 TOCTOU is dissolved structurally — the subscription is never shared,
-//!   `.claude/rules/development.md` § "Check-and-act must be atomic"). The task's
-//!   abort handle is held; the task is aborted on `Drop`.
+//!   [`subscribe_all_events`](ObservationStore::subscribe_all_events) into the
+//!   index under the index write-lock. There is NO shared `take()`/restore of
+//!   the subscription (the F2 TOCTOU is dissolved structurally — the
+//!   subscription is never shared, `.claude/rules/development.md` §
+//!   "Check-and-act must be atomic"). The task's abort handle is held; the task
+//!   is aborted on `Drop`.
+//! - **relist-on-`Lagged` → completeness (the F4 fix — wired this step).** The
+//!   drain consumes the LAG-SURFACING
+//!   [`subscribe_all_events`](ObservationStore::subscribe_all_events)
+//!   subscription, which carries a
+//!   [`SubscriptionEvent::Lagged { missed }`](overdrive_core::traits::observation_store::SubscriptionEvent::Lagged)
+//!   in-band when the broadcast drops rows (the lossy
+//!   [`subscribe_all`](ObservationStore::subscribe_all) strips it). On `Lagged`
+//!   the drain re-Lists the authoritative snapshot via `relist_into` and
+//!   rebuilds the index, so a dropped `service_backends` update is RECOVERED
+//!   (mirrors Cilium `ErrCompacted → goto reList`; the etcd-`ErrCompacted` /
+//!   k8s-reflector-`Gone` recovery contract applied to tokio `broadcast`). A
+//!   dropped row is thus always either delivered (`Row`) or signalled-then-relisted
+//!   (`Lagged`), never silently lost (the C4 / D-TME-11 completeness guarantee).
+//!   A `Lagged`-triggered relist whose store read FAILS leaves the index
+//!   uncertifiable → the watch is faulted (`resolve` → `StoreUnreadable`).
 //! - **Watch-failure → fault.** When the watch terminates (the broadcast sender
 //!   is dropped — the stream yields `None`), the drain marks the watch FAULTED.
 //!   While the watch is faulted [`resolve`](MtlsResolve::resolve) returns
@@ -72,28 +89,33 @@
 //! index is keyed by the backend addr DIRECTLY — there is NO VIP→backend
 //! translation in the resolve path (that is #167/#61, out of scope).
 //!
-//! ## relist-on-`Lagged` is NOT wired — pinned-but-unimplementable on the v1
-//! ## `ObservationStore` surface (surfaced blocker, see step 01-03 return)
+//! ## relist-on-`Lagged` — WIRED via `subscribe_all_events` (C4 / D-TME-11
+//! ## refinement, option 2; this step closes F4)
 //!
-//! C4 / D-TME-11 also pin a **relist-on-`broadcast::RecvError::Lagged`** leg: on
-//! a watch-loss signal the drain re-Lists the authoritative snapshot. The
-//! current [`ObservationSubscription`] surface CANNOT deliver `Lagged` to this
-//! adapter: it is a `Box<dyn Stream<Item = ObservationRow>>` and BOTH store
-//! adapters strip `Lagged` inside `subscribe_all`
-//! (`BroadcastStream::new(rx).filter_map(ok_or_skip)` /
-//! `.filter_map(Result::ok)`), so a lag signal never reaches the consumer.
-//! Wiring relist-on-`Lagged` requires CHANGING the public `ObservationSubscription`
-//! surface (e.g. yield `Result<ObservationRow, Lagged>`) — a second
-//! public-surface change beyond the one pinned `all_service_backends_rows`
-//! enumerate, which this step's boundary forbids. Per CLAUDE.md § "Implement to
-//! the design — never invent API surface" this gap is SURFACED as a blocker, not
-//! improvised. The single-node v1 posture this leaves: the held subscription is
-//! the whole observation firehose over a 1024-deep broadcast; a >1024-row burst
-//! between drains can silently lose a `service_backends` update (the F4 hazard),
-//! the residual covered by (a) fail-toward-handshake under #236. The
-//! [`relist`](ServiceBackendsResolve::relist) machinery IS present and IS used at
-//! List-at-probe and on the watch-closed path — only the `Lagged`-triggered
-//! invocation is blocked on the surface change.
+//! C4 / D-TME-11 pin a **relist-on-loss** leg: on a watch-loss signal the drain
+//! re-Lists the authoritative snapshot. The earlier observe-only revision left
+//! this leg blocked because the lossy
+//! [`subscribe_all`](ObservationStore::subscribe_all)
+//! (`Box<dyn Stream<Item = ObservationRow>>`) strips
+//! `broadcast::RecvError::Lagged` inside both store adapters before any consumer
+//! sees it. The ratified refinement (option 2) added a dedicated LAG-SURFACING
+//! subscription — [`subscribe_all_events`](ObservationStore::subscribe_all_events)
+//! returning a `LagAwareSubscription` of
+//! [`SubscriptionEvent`](overdrive_core::traits::observation_store::SubscriptionEvent)
+//! — that maps the broadcast `Lagged(n)` to a domain
+//! [`SubscriptionEvent::Lagged { missed: n }`](overdrive_core::traits::observation_store::SubscriptionEvent::Lagged)
+//! at the adapter boundary (the core trait never names the tokio error). The
+//! single-owner drain now consumes that subscription and, on `Lagged`, re-Lists
+//! via the already-shipped
+//! [`all_service_backends_rows`](ObservationStore::all_service_backends_rows)
+//! and rebuilds the index — closing F4 with the *completeness* guarantee (a
+//! dropped `service_backends` update is always either delivered or
+//! signalled-then-relisted, never silently lost). The blast radius is bounded:
+//! ONLY this adapter consumes `subscribe_all_events`; the ~20 existing
+//! `subscribe_all` consumers stay lossy-by-design. The
+//! [`relist`](ServiceBackendsResolve::relist) machinery (shared with the drain
+//! via `relist_into`) is exercised at List-at-probe, on watch-close, AND now on
+//! `Lagged`.
 //!
 //! # Classification (C1 + C4, verbatim with the shipped 01-01 port rustdoc)
 //!
@@ -133,8 +155,7 @@
 //! dependencies"). `Send + Sync + 'static` (held as `Arc<dyn MtlsResolve>`).
 //!
 //! [`probe`]: MtlsResolve::probe
-//! [`subscribe_all`]: ObservationStore::subscribe_all
-//! [`ObservationSubscription`]: overdrive_core::traits::observation_store::ObservationSubscription
+//! [`subscribe_all_events`]: ObservationStore::subscribe_all_events
 
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -149,7 +170,7 @@ use overdrive_core::traits::mtls_resolve::{
     MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend, Result,
 };
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ServiceBackendRow,
+    ObservationRow, ObservationStore, ServiceBackendRow, SubscriptionEvent,
 };
 use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -241,7 +262,8 @@ pub struct ServiceBackendsResolve {
     /// The backing observation surface, injected as a **mandatory** constructor
     /// parameter (no default, no builder). The List leg reads
     /// [`all_service_backends_rows`](ObservationStore::all_service_backends_rows);
-    /// the Watch leg reads [`subscribe_all`](ObservationStore::subscribe_all).
+    /// the Watch leg reads
+    /// [`subscribe_all_events`](ObservationStore::subscribe_all_events).
     store: Arc<dyn ObservationStore>,
     /// The C4 in-RAM `addr → Backend` reverse index, behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
@@ -294,33 +316,82 @@ impl ServiceBackendsResolve {
     /// A store-read fault surfaces as the `String` the probe/resolve callers
     /// map to `Probe` / `StoreUnreadable`.
     async fn relist(&self) -> std::result::Result<(), String> {
-        let rows = self.store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
+        Self::relist_into(&self.store, &self.index).await
+    }
+
+    /// The relist primitive used by both [`Self::relist`] (the probe-time List
+    /// leg) and the single-owner drain's `Lagged`-triggered relist. Takes the
+    /// store + index by `Arc`-ref so the drain task — which holds `Arc`-clones,
+    /// not `&self` — can re-List on a watch-loss signal. The store read is
+    /// awaited, then `replace_from_snapshot` is applied in a sync critical
+    /// section; the write-lock is NEVER held across the `.await`
+    /// (`.claude/rules/development.md` § "Never hold a lock across `.await`").
+    async fn relist_into(
+        store: &Arc<dyn ObservationStore>,
+        index: &Arc<RwLock<BackendIndex>>,
+    ) -> std::result::Result<(), String> {
+        let rows = store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
         // Apply in a sync critical section — the await already returned.
-        self.index.write().replace_from_snapshot(&rows);
+        index.write().replace_from_snapshot(&rows);
         Ok(())
     }
 
     /// Spawn the SINGLE-OWNER drain task that exclusively owns `subscription`
-    /// and continuously folds every `service_backends` row into the index under
-    /// the write lock. The task is the only owner of the subscription — there is
-    /// no shared `take()`/restore (the F2 TOCTOU is structurally dissolved). On
-    /// stream end (the broadcast sender dropped — a terminal watch failure) it
-    /// sets `watch_healthy = false` and exits, so `resolve` faults thereafter.
+    /// (a lag-surfacing [`LagAwareSubscription`]) and continuously folds every
+    /// `service_backends` row into the index under the write lock. The task is
+    /// the only owner of the subscription — there is no shared `take()`/restore
+    /// (the F2 TOCTOU is structurally dissolved).
+    ///
+    /// The two non-`Row` events:
+    ///
+    /// - [`SubscriptionEvent::Lagged`] — the broadcast dropped rows because the
+    ///   drain fell behind (the F4 lag-drop). The drain re-Lists the
+    ///   authoritative `service_backends` snapshot via
+    ///   [`Self::relist_into`] and rebuilds the index, so a dropped
+    ///   `service_backends` update is recovered (the C4 / D-TME-11 completeness
+    ///   guarantee — a dropped row is never silently lost; mirrors Cilium
+    ///   `ErrCompacted → goto reList`). The `store` `Arc` is held by the task
+    ///   for exactly this re-List. A relist whose store read FAILS means the
+    ///   index can no longer be certified current — the watch is marked faulted
+    ///   (`resolve` → `StoreUnreadable`), the same terminal posture as a closed
+    ///   watch.
+    /// - stream end (`None`) — the broadcast sender was dropped (a terminal
+    ///   watch failure). The drain sets `watch_healthy = false` and exits, so
+    ///   `resolve` faults thereafter.
     fn spawn_drain(
+        store: Arc<dyn ObservationStore>,
         index: Arc<RwLock<BackendIndex>>,
         watch_healthy: Arc<AtomicBool>,
-        mut subscription: overdrive_core::traits::observation_store::ObservationSubscription,
+        mut subscription: overdrive_core::traits::observation_store::LagAwareSubscription,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             // `next().await` yields `None` only when the broadcast sender is
-            // dropped (the watch is `Closed`). The `Lagged` loss signal is
-            // stripped by the store's `subscribe_all` before it reaches this
-            // stream (see module rustdoc § "relist-on-`Lagged` is NOT wired")
-            // — so the only termination this loop can observe is `Closed`.
-            while let Some(row) = subscription.next().await {
-                if let ObservationRow::ServiceBackend(row) = row {
-                    // Sync critical section — no lock across the `.await` above.
-                    index.write().apply_row(row.service_id, &row.backends);
+            // dropped (the watch is `Closed`); a `Lagged` loss signal now
+            // arrives in-band as `SubscriptionEvent::Lagged` (it is no longer
+            // stripped by the store — the C4 / D-TME-11 lag-surfacing
+            // `subscribe_all_events` carries it here).
+            while let Some(event) = subscription.next().await {
+                match event {
+                    SubscriptionEvent::Row(ObservationRow::ServiceBackend(row)) => {
+                        // Sync critical section — no lock across the `.await`.
+                        index.write().apply_row(row.service_id, &row.backends);
+                    }
+                    // Non-`service_backends` rows are not part of the resolve
+                    // index — ignore them (the watch is the whole observation
+                    // firehose; only `service_backends` rows are folded).
+                    SubscriptionEvent::Row(_) => {}
+                    SubscriptionEvent::Lagged { .. } => {
+                        // The watch dropped rows: re-acquire the authoritative
+                        // snapshot and rebuild the index (relist-on-`Lagged`,
+                        // the F4 fix). A relist whose store read fails leaves
+                        // the index uncertifiable — fault the watch so
+                        // `resolve` returns `StoreUnreadable`, and stop draining
+                        // (the index can no longer be kept current).
+                        if Self::relist_into(&store, &index).await.is_err() {
+                            watch_healthy.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                    }
                 }
             }
             // The watch terminated: the index can no longer be certified
@@ -364,26 +435,27 @@ impl MtlsResolve for ServiceBackendsResolve {
         // common second-probe path; the claim itself is re-checked under the lock
         // so a concurrent first-probe race resolves to a single owner
         // (§ "Check-and-act must be atomic"). The `parking_lot::Mutex` guard is
-        // never held across the `subscribe_all().await`.
+        // never held across the `subscribe_all_events().await`.
         if self.drain_task.lock().is_some() {
             return Ok(());
         }
         let subscription = self
             .store
-            .subscribe_all()
+            .subscribe_all_events()
             .await
             .map_err(|err| MtlsResolveError::Probe { reason: err.to_string() })?;
         {
             let mut slot = self.drain_task.lock();
             if slot.is_some() {
                 // A concurrent probe won the claim while we were awaiting
-                // `subscribe_all`; this `subscription` is dropped at the end of
-                // this scope (releasing the broadcast receiver) and the single
-                // owner is kept.
+                // `subscribe_all_events`; this `subscription` is dropped at the
+                // end of this scope (releasing the broadcast receiver) and the
+                // single owner is kept.
                 return Ok(());
             }
             self.watch_healthy.store(true, Ordering::SeqCst);
             let handle = Self::spawn_drain(
+                Arc::clone(&self.store),
                 Arc::clone(&self.index),
                 Arc::clone(&self.watch_healthy),
                 subscription,
@@ -626,12 +698,11 @@ mod tests {
     /// genuinely absent from the index (the watch never carried it), and the
     /// List leg recovers it from the store's authoritative `all_service_backends_rows`.
     ///
-    /// (NOTE on the `Lagged` TRIGGER: the pinned `ObservationSubscription`
-    /// surface strips `Lagged` before this adapter can observe it — see module
-    /// rustdoc § "relist-on-`Lagged` is NOT wired" and the 01-03 surfaced
-    /// blocker. This unit pins the relist RECOVERY logic, which IS implemented
-    /// and IS reachable at probe-time and on watch-close; the `Lagged`-triggered
-    /// invocation is blocked on a forbidden public-surface change.)
+    /// (This unit pins the relist RECOVERY logic in isolation — that a relist
+    /// re-acquires a row the watch never carried. The `Lagged`-TRIGGERED
+    /// invocation of that recovery — the leg that was blocked in `25e7acf3` and
+    /// is wired this step over the new `subscribe_all_events` surface — is
+    /// covered by [`relist_on_lagged_recovers_a_dropped_update`] below.)
     #[tokio::test]
     async fn relist_recovers_a_row_dropped_by_watch_lag() {
         // `DeafWatchStore`'s watch stays OPEN but delivers NOTHING (a pending
@@ -683,6 +754,79 @@ mod tests {
             adapter.resolve(lagged_addr).await.expect("resolve is Ok after relist"),
             MtlsResolution::Mesh(ResolvedBackend { addr: lagged_addr, expected_svid: None }),
             "relist must recover a row the watch dropped",
+        );
+    }
+
+    /// NEW-mechanism unit (the leg blocked in `25e7acf3`, now wired) —
+    /// `relist_on_lagged_recovers_a_dropped_update`.
+    ///
+    /// The relist TRIGGER: a real [`SubscriptionEvent::Lagged`] delivered on the
+    /// lag-surfacing `subscribe_all_events` watch MUST drive the single-owner
+    /// drain to re-List the authoritative snapshot and recover a
+    /// `service_backends` update the watch dropped. This is the F4-closure
+    /// guarantee in test form (a dropped row is never silently lost: it is
+    /// signalled-then-relisted).
+    ///
+    /// DETERMINISM: the `LaggedChannel` double hands the drain an `mpsc`-backed
+    /// watch the test controls — NO racing a 1024-deep broadcast. The sequence
+    /// pins cause→effect tightly:
+    /// 1. probe (empty store) → index empty, drain subscribed to the channel;
+    /// 2. the addr is a miss (`NonMesh`);
+    /// 3. write the row to the store — the channel watch does NOT carry it (the
+    ///    test never pushes a `Row`), so it stays a miss;
+    /// 4. `emit_lagged` pushes ONE `Lagged` → the drain relists → the row,
+    ///    recovered from `all_service_backends_rows`, becomes `Mesh`.
+    /// Step 3's persisted miss + step 4's recovery is the falsifiable core:
+    /// delete the `Lagged → relist_into` arm in `spawn_drain` and the addr stays
+    /// `NonMesh` forever (the test goes RED).
+    #[tokio::test]
+    async fn relist_on_lagged_recovers_a_dropped_update() {
+        let store = Arc::new(ScriptableStore::with_watch(WatchMode::LaggedChannel));
+        let dropped_addr = v4(10, 0, 0, 77, 7443);
+
+        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        adapter.probe().await.expect("probe on an empty store opens the channel watch");
+
+        // (2) miss before anything is written.
+        assert_eq!(
+            adapter.resolve(dropped_addr).await.expect("resolve is Ok"),
+            MtlsResolution::NonMesh,
+        );
+
+        // (3) write the row; the channel watch carries no `Row`, so the drain
+        // never folds it — still a miss. (Yield so any drain progress lands.)
+        store
+            .write(ObservationRow::ServiceBackend(backends_row(
+                9,
+                vec![backend(dropped_addr, true)],
+                1,
+            )))
+            .await
+            .expect("write the would-be-lagged row");
+        tokio::task::yield_now().await;
+        assert_eq!(
+            adapter.resolve(dropped_addr).await.expect("resolve is Ok"),
+            MtlsResolution::NonMesh,
+            "the channel watch carries no Row — the update is still missed pre-Lagged",
+        );
+
+        // (4) inject the loss signal: the drain MUST relist and recover the row.
+        store.emit_lagged(3);
+
+        // The drain relists asynchronously; spin briefly until the index
+        // reflects the recovery (bounded — no unbounded wait).
+        let mut recovered = MtlsResolution::NonMesh;
+        for _ in 0..1000 {
+            recovered = adapter.resolve(dropped_addr).await.expect("resolve is Ok");
+            if recovered != MtlsResolution::NonMesh {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            recovered,
+            MtlsResolution::Mesh(ResolvedBackend { addr: dropped_addr, expected_svid: None }),
+            "a Lagged event must trigger a relist that recovers the dropped update",
         );
     }
 
@@ -804,17 +948,20 @@ mod tests {
 
     use std::sync::atomic::AtomicBool as StdAtomicBool;
 
+    use futures::channel::mpsc;
     use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
     use overdrive_core::observation::ProbeResultRow;
     use overdrive_core::traits::observation_store::{
-        AllocStatusRow, NodeHealthRow, ObservationStoreError, ObservationSubscription,
-        ReconcileConflictRow, ServiceHydrationResultRow,
+        AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationStoreError,
+        ObservationSubscription, ReconcileConflictRow, ServiceHydrationResultRow,
+        SubscriptionEvent,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
-    /// How the scriptable double's `subscribe_all` watch behaves. The List leg
-    /// (`all_service_backends_rows`) is governed separately by `list_fault_armed`.
+    /// How the scriptable double's lag-surfacing `subscribe_all_events` watch
+    /// behaves. The List leg (`all_service_backends_rows`) is governed
+    /// separately by `list_fault_armed`.
     #[derive(Clone, Copy)]
     enum WatchMode {
         /// A real, live subscription delegated to the inner store (the watch
@@ -829,19 +976,34 @@ mod tests {
         /// where the update is permanently missed by the subscription. Only a
         /// relist can recover a row written under this mode.
         Deaf,
+        /// A CHANNEL-driven watch: `subscribe_all_events` hands back the
+        /// receiving end of an `mpsc` the test controls via
+        /// [`ScriptableStore::emit_lagged`]. The watch stays open (the sender is
+        /// held by the double) and yields ONLY what the test pushes — so a
+        /// [`SubscriptionEvent::Lagged`] can be injected DETERMINISTICALLY after
+        /// a row is written, driving the relist-on-`Lagged` recovery without
+        /// racing a real 1024-deep broadcast.
+        LaggedChannel,
     }
 
     /// One delegating `ObservationStore` double for every fault scenario the
     /// resolve adapter must survive: a List-leg fault (`list_fault_armed`) and
-    /// the three watch behaviours ([`WatchMode`]). Every method delegates to a
+    /// the watch behaviours ([`WatchMode`]). Every method delegates to a
     /// real inner [`SimObservationStore`] EXCEPT the two surfaces under test
-    /// (`all_service_backends_rows` and `subscribe_all`) — delegation keeps every
-    /// signature anchored to the real trait types so the double cannot drift,
-    /// per the port-boundary double discipline.
+    /// (`all_service_backends_rows` and `subscribe_all_events`) — delegation
+    /// keeps every signature anchored to the real trait types so the double
+    /// cannot drift, per the port-boundary double discipline.
     struct ScriptableStore {
         inner: SimObservationStore,
         watch_mode: WatchMode,
         list_fault_armed: StdAtomicBool,
+        /// Sender half of the [`WatchMode::LaggedChannel`] watch, populated when
+        /// `subscribe_all_events` is first called under that mode. Held by the
+        /// double so the channel stays open (the drain never sees `Closed`)
+        /// until the test drops the store; [`Self::emit_lagged`] pushes events.
+        /// `futures::channel::mpsc` (not `tokio`) — its `UnboundedReceiver` IS a
+        /// `Stream`, so no extra `tokio-stream` dep / wrapper is needed.
+        lagged_tx: Mutex<Option<mpsc::UnboundedSender<SubscriptionEvent>>>,
     }
 
     impl ScriptableStore {
@@ -853,6 +1015,7 @@ mod tests {
                 ),
                 watch_mode,
                 list_fault_armed: StdAtomicBool::new(false),
+                lagged_tx: Mutex::new(None),
             }
         }
 
@@ -860,6 +1023,24 @@ mod tests {
         /// to error — the store-layer read fault the List leg surfaces as `Probe`.
         fn arm_list_fault(&self) {
             self.list_fault_armed.store(true, Ordering::SeqCst);
+        }
+
+        /// Push a [`SubscriptionEvent::Lagged { missed }`] onto the
+        /// [`WatchMode::LaggedChannel`] watch — the deterministic loss-signal
+        /// injection the relist-on-`Lagged` test drives the drain with. Returns
+        /// the number of receivers the send reached (`true` once the drain has
+        /// subscribed). The subscription must already be open (probe ran).
+        fn emit_lagged(&self, missed: u64) {
+            // Clone the sender out and drop the guard before sending — keeps the
+            // `parking_lot` critical section to the map read (clippy::
+            // significant_drop_tightening). `UnboundedSender` is `Clone`.
+            let tx = self
+                .lagged_tx
+                .lock()
+                .clone()
+                .expect("subscribe_all_events opened the lagged channel");
+            tx.unbounded_send(SubscriptionEvent::Lagged { missed })
+                .expect("drain receiver is alive");
         }
     }
 
@@ -879,15 +1060,31 @@ mod tests {
         async fn subscribe_all(
             &self,
         ) -> std::result::Result<ObservationSubscription, ObservationStoreError> {
+            // The drain consumes `subscribe_all_events` (below); this lossy
+            // surface is kept only to satisfy the trait. Delegate to the inner
+            // store so the signature stays anchored.
+            self.inner.subscribe_all().await
+        }
+
+        async fn subscribe_all_events(
+            &self,
+        ) -> std::result::Result<LagAwareSubscription, ObservationStoreError> {
             match self.watch_mode {
-                WatchMode::Live => self.inner.subscribe_all().await,
+                // Delegate to the inner store's REAL lag-surfacing subscription
+                // (exercises the same `subscribe_all_events` impl production
+                // uses).
+                WatchMode::Live => self.inner.subscribe_all_events().await,
                 // Empty stream → yields `None` immediately (watch closed).
-                WatchMode::Closed => {
-                    Ok(Box::new(futures::stream::empty()) as ObservationSubscription)
-                }
+                WatchMode::Closed => Ok(Box::new(futures::stream::empty()) as LagAwareSubscription),
                 // Pending stream → never yields (watch open but deaf).
-                WatchMode::Deaf => {
-                    Ok(Box::new(futures::stream::pending()) as ObservationSubscription)
+                WatchMode::Deaf => Ok(Box::new(futures::stream::pending()) as LagAwareSubscription),
+                // Channel the test drives: hand back the receiver (itself a
+                // `Stream`); hold the sender so the stream stays open and
+                // `emit_lagged` can push.
+                WatchMode::LaggedChannel => {
+                    let (tx, rx) = mpsc::unbounded::<SubscriptionEvent>();
+                    *self.lagged_tx.lock() = Some(tx);
+                    Ok(Box::new(rx) as LagAwareSubscription)
                 }
             }
         }

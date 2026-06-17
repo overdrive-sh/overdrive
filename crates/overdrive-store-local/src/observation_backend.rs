@@ -81,15 +81,17 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
-    ObservationStore, ObservationStoreError, ObservationSubscription, ReconcileConflictRow,
-    ReconcileConflictRowEnvelope, ServiceBackendRow, ServiceBackendRowEnvelope,
-    ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, NodeHealthRow,
+    NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
+    ObservationSubscription, ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
+    ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    SubscriptionEvent,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 /// Holds the rkyv-archived bytes of every `AllocStatusRow`, keyed by
 /// canonical `AllocationId` bytes.
@@ -505,6 +507,23 @@ impl ObservationStore for LocalObservationStore {
         let rx = self.inner.subscription_tx.subscribe();
         let stream = BroadcastStream::new(rx).filter_map(Result::ok);
         Ok(Box::new(SubscriptionStream { inner: Box::pin(stream) }))
+    }
+
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        // Mirror `subscribe_all`, but SURFACE the broadcast lag rather than
+        // strip it: map `Ok(row) → Row`, `Err(Lagged(n)) → Lagged { missed:
+        // n }` at this adapter boundary so the core trait never names a
+        // tokio error type. The lossy `subscribe_all` above stays as-is for
+        // its ~20 consumers; only `ServiceBackendsResolve` consumes this
+        // surface and relists on `Lagged` (C4 / D-TME-11 completeness
+        // contract — a dropped row is always either delivered or signalled,
+        // never silently missed).
+        let rx = self.inner.subscription_tx.subscribe();
+        let stream = BroadcastStream::new(rx).map(|item| match item {
+            Ok(row) => SubscriptionEvent::Row(row),
+            Err(BroadcastStreamRecvError::Lagged(missed)) => SubscriptionEvent::Lagged { missed },
+        });
+        Ok(Box::new(SubscriptionEventStream { inner: Box::pin(stream) }))
     }
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
@@ -1209,6 +1228,21 @@ struct SubscriptionStream {
 
 impl Stream for SubscriptionStream {
     type Item = ObservationRow;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+/// Thin `Unpin` wrapper for the lag-surfacing [`LagAwareSubscription`]
+/// returned by [`LocalObservationStore::subscribe_all_events`] — the
+/// `SubscriptionEvent` analogue of [`SubscriptionStream`].
+struct SubscriptionEventStream {
+    inner: Pin<Box<dyn Stream<Item = SubscriptionEvent> + Send>>,
+}
+
+impl Stream for SubscriptionEventStream {
+    type Item = SubscriptionEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.as_mut().poll_next(cx)
