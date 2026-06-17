@@ -122,23 +122,37 @@ The structural facts, binding on DELIVER:
    extend `veth_provisioner` (Q2 RATIFIED); a per-alloc network reconciler is the
    Bar-2 promotion when runtime drift matters (#197/#234 family).
 
-   **Amended 2026-06-17 (D-TME-12; resolves DELIVER 02-01 review B1+S1+S2).** The
-   veth iface names and the per-alloc point-to-point /30 subnet derive from a
-   **host-unique bounded network slot** (`NetSlot`, `0..=4095`), NOT from the
-   `AllocationId` directly. A Linux iface name is `IFNAMSIZ`=15-usable-bounded;
-   `AllocationId` is `LABEL_MAX`=253-bounded; **no pure function of a 253-char id
-   can collision-free-map into a 15-char name** (pigeonhole), so the original
-   `ovd-{hv,wl}-<alloc>` literal both overflowed IFNAMSIZ (any alloc id ≥ 9 chars)
-   and would collide two allocations onto one veth under truncation — and a *hash*
-   makes collisions merely *unlikely*, the exact hand-wave CLAUDE.md § "One shared
-   length ceiling for label-shaped ids" forbids. The slot makes collision-freedom
-   **structural**: `ovd-hv-<4hex-slot>` / `ovd-wl-<4hex-slot>` (11 chars ≤ 15, the
-   4-char hex ceiling DERIVED from `IFNAMSIZ − prefix`), and the slot indexes a /30
-   block in a fixed per-host base (`WORKLOAD_SUBNET_BASE` /16 → 4096 /30s). The
-   netns name keeps the readable `ovd-ns-<alloc>` form (a `/var/run/netns/`
-   filename, ≤255, NOT IFNAMSIZ-bound). A **per-host `NetSlot` allocator**
-   (assign-smallest-free at `on_alloc_running`, release at `on_alloc_terminal` —
-   the C3 hook above) hands out the slot; it is single-node trivial, NOT
+   **Amended 2026-06-17 (D-TME-12; resolves DELIVER 02-01 review B1+S1+S2 and the
+   02-01 re-review B3).** The netns name, BOTH veth iface names, AND the per-alloc
+   point-to-point /30 subnet derive from a **host-unique bounded network slot**
+   (`NetSlot`, `0..=4095`), NOT from the `AllocationId` directly. A Linux iface
+   name is `IFNAMSIZ`=15-usable-bounded; a netns name is a `/run/netns/` path
+   component bounded by `NAME_MAX`=255; `AllocationId` is `LABEL_MAX`=253-bounded;
+   **no pure function of a 253-char id can collision-free-map into a 15-char name**
+   (pigeonhole), so the original `ovd-{hv,wl}-<alloc>` literal both overflowed
+   IFNAMSIZ (any alloc id ≥ 9 chars) and would collide two allocations onto one
+   veth under truncation — and a *hash* makes collisions merely *unlikely*, the
+   exact hand-wave CLAUDE.md § "One shared length ceiling for label-shaped ids"
+   forbids. The slot makes collision-freedom **structural**: `ovd-hv-<4hex-slot>` /
+   `ovd-wl-<4hex-slot>` (11 chars ≤ 15, the 4-char hex ceiling DERIVED from
+   `IFNAMSIZ − prefix`), and the slot indexes a /30 block in a fixed per-host base
+   (`WORKLOAD_SUBNET_BASE` /16 → the 4096-slot space tiles a /18 within that /16,
+   NOT the whole /16). **The netns name is ALSO slot-keyed: `ovd-ns-<4hex-slot>`**
+   (11 chars ≤ `NAME_MAX` AND ≤ IFNAMSIZ, bounded by construction — B3 resolution,
+   ratified option (a). The first cut of D-TME-12 left the netns name embedding the
+   unbounded `AllocationId` (`ovd-ns-<alloc>`) with an arithmetically false "≤255"
+   reassurance — 7-char prefix + 253-char alloc id = 260 > 255 → `ENAMETOOLONG`
+   from `ip netns add`, the IDENTICAL pigeonhole/ceiling defect class as B1, on the
+   one derived name the first cut left out; slot-keying it makes the overflow
+   unrepresentable, the same lever that beat the hash for B1). `ip netns list` shows
+   `ovd-ns-<4hex>`; the human-readable alloc identity lives in the allocator's
+   slot↔alloc map, rendered by tooling (the Cilium `lxc<hex>` + `cilium endpoint
+   list` model) — a deliberate, accepted ergonomics shift. `derive_workload_netns_plan`
+   is therefore PURELY slot-derived (`(slot, responder_addr) → WorkloadNetnsPlan`);
+   the `alloc_id` parameter is DROPPED (it derives nothing once the netns name is
+   slot-keyed). A **per-host `NetSlot` allocator** (assign-smallest-free at
+   `on_alloc_running`, release at `on_alloc_terminal` — the C3 hook above) hands out
+   the slot and holds the alloc↔slot binding; it is single-node trivial, NOT
    distributed IPAM and NOT the #167 VIP allocator. The converge model ALSO brings
    the **in-netns veth end up and netns `lo` up** (B2 — a veth forwards only when
    both ends are up; a fresh netns has `lo` down) and splits `rp_filter` relaxation

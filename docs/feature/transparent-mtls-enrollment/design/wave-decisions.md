@@ -34,7 +34,7 @@ responder daemon and the #167 VIP allocator remain separate builds / dependencie
 | D-TME-8 | v1 scope = **BOTH directions**; intended-peer SVID pinning (`expected_peer`/`PeerIdentityMismatch`) **deferred to #178** (v1 = authn-only) (Q4 ratified). | Path A's point is symmetry on one mechanism; the inbound nft-TPROXY install is the proven template the outbound mirrors; the resolve port carries `expected_svid` so the pin wires the moment #178 supplies the join. |
 | D-TME-9 | **Name-layer integration (Q5a)**: a node-local DNS responder is injected into the per-workload netns `resolv.conf` (Fly.io `fdaa::3` model); the responder *daemon* is #61 (separate build), only the injection + return-shape contract live here. | The per-workload netns (Q2) IS the DNS injection point — one topology, two wins; sidecarless (Overdrive ships its own appliance OS, ADR-0068). |
 | D-TME-10 | **DNS-return shape = HEADLESS for v1**: the responder returns a `running` backend addr from `service_backends` — that address IS the `orig_dst` `MtlsResolve.resolve` recognizes (one source, two readers, byte-consistent). **No #167 (VIP allocator) v1 dependency.** VIP is the multi-node evolution. | Headless keeps `MtlsResolve` v1 thin (identity-only, no LB — LB-pick is the #178-deferred policy), pulls no new v1 dependency, and is forward-compatible (VIP arm added alongside later, K8s ships both). VIP for v1 was REJECTED (would add #167 + the VIP×intercept ordering hazard). |
-| D-TME-12 | **Per-allocation network SLOT model (resolves the 02-01 review B1+S1+S2; refines D-TME-2/C3)**: the per-allocation netns name, the two veth-end iface names, AND the point-to-point /30 subnet are ALL derived from a single **host-unique bounded network slot** — a new `NetSlot` newtype (`overdrive-control-plane`), NOT a hash of the `AllocationId`. **A hash is WRONG by pigeonhole** (`AllocationId` is `LABEL_MAX`=253-bounded; a Linux iface name is `IFNAMSIZ`=15-usable-bounded; no pure function of a 253-char id can collision-free-map into a 15-char name — a hash makes collisions merely *unlikely*, the exact hand-wave CLAUDE.md § "One shared length ceiling for label-shaped ids" forbids). The slot makes collision-freedom **structural**: distinct slot ⇒ distinct names ⇒ distinct /30 (single-source). **Slot domain**: `NetSlot(u16)`, valid range `0..=4095` (4096 concurrent per-alloc netns slots — single-node bounded concurrency; ample, and 4 hex chars renders ≤15). **Rendering**: 4-char lowercase zero-padded hex (`{:04x}`), so `ovd-hv-<4hex>` / `ovd-wl-<4hex>` = 11 chars ≤ 15 IFNAMSIZ by construction; the 4-char ceiling is DERIVED from `IFNAMSIZ - PREFIX.len()` (15−7=8 budget; 4 used), not a magic number. **/30 derivation**: the slot indexes a /30 block inside a fixed per-host `WORKLOAD_SUBNET_BASE` (`10.99.0.0/16`): subnet = base + `slot * 4` as a /30 → `host_addr` = base+slot*4+1, `workload_addr` = +2, `gateway` = `host_addr`. 4096 slots × /30 = the full `/16`. **netns name keeps the readable `ovd-ns-<alloc>`** (a `/var/run/netns/` filename, ≤255, NOT IFNAMSIZ-bound) for `ip netns list` traceability — the slot is the iface/subnet axis, the alloc id is the human axis; both resolve to the same allocation via the allocator's slot↔alloc map. **`derive_workload_netns_plan` takes the slot as a PURE input** (`(alloc_id, slot, responder_addr) -> WorkloadNetnsPlan`); the subnet is no longer a caller parameter (S1 resolved: the derivation owns slot→/30, the allocator owns slot assignment). The STATEFUL slot allocator (assign-smallest-free / release-on-teardown, a per-host free-list — NOT distributed IPAM, NOT the #167 VIP allocator) lives at the **C3 `on_alloc_running` lifecycle hook** (release at `on_alloc_terminal`), the same hook that owns netns creation. S2 resolved: a /30 always has two usable hosts, so `workload_addr` is non-degenerate by construction (no `Option`, no `network()` fallback). | The 02-01 review (B1) ground-truthed that the literal `ovd-hv-<alloc>` overflows IFNAMSIZ for any alloc id ≥ 9 chars (the golden test's own `ovd-hv-payments-0` = 17 chars is uncreatable) and a naïve truncation collides two allocs onto one veth. B1+S1+S2 are one problem: the missing host-unique handle that both names AND the /30 must derive from. No existing host-unique per-alloc integer exists (`alloc-{workload_id}-{attempt}` is workload-scoped, not host-unique; the cgroup scope keys on the full id string). The slot model makes collision-freedom by-construction and resolves all three findings in one coherent decision. (Ratified by the user 2026-06-17; resolves review `deliver/reviews/02-01.md` B1+S1+S2.) |
+| D-TME-12 | **Per-allocation network SLOT model (resolves the 02-01 review B1+S1+S2, and B3 from the 02-01 re-review; refines D-TME-2/C3)**: the per-allocation netns name, the two veth-end iface names, AND the point-to-point /30 subnet are ALL derived from a single **host-unique bounded network slot** — a new `NetSlot` newtype (`overdrive-control-plane`), NOT a hash of the `AllocationId`. **A hash is WRONG by pigeonhole** (`AllocationId` is `LABEL_MAX`=253-bounded; a Linux iface name is `IFNAMSIZ`=15-usable-bounded; no pure function of a 253-char id can collision-free-map into a 15-char name — a hash makes collisions merely *unlikely*, the exact hand-wave CLAUDE.md § "One shared length ceiling for label-shaped ids" forbids). The slot makes collision-freedom **structural**: distinct slot ⇒ distinct names ⇒ distinct /30 (single-source). **Slot domain**: `NetSlot(u16)`, valid range `0..=4095` (4096 concurrent per-alloc netns slots — single-node bounded concurrency; ample, and 4 hex chars renders ≤15). **Rendering**: 4-char lowercase zero-padded hex (`{:04x}`), so `ovd-hv-<4hex>` / `ovd-wl-<4hex>` = 11 chars ≤ 15 IFNAMSIZ by construction; the 4-char ceiling is DERIVED from `IFNAMSIZ - PREFIX.len()` (15−7=8 budget; 4 used), not a magic number. **/30 derivation**: the slot indexes a /30 block inside a fixed per-host `WORKLOAD_SUBNET_BASE` (`10.99.0.0/16`): subnet = base + `slot * 4` as a /30 → `host_addr` = base+slot*4+1, `workload_addr` = +2, `gateway` = `host_addr`. 4096 /30s = 16384 addresses = a **/18** within the `/16` base (slots 0–4095 occupy `10.99.0.0`–`10.99.63.255`), leaving 3/4 of the `/16` unused; the slot ceiling is the 4-hex IFNAMSIZ budget (`< 0x1000`), NOT the `/16` size (the `/16` could carry up to 16383 /30s, so `NET_SLOT_MAX = 4095` is a deliberate conservative cap with ample headroom — single-node bounded concurrency). **netns name is ALSO slot-keyed: `ovd-ns-<4hex>`** (11 chars ≤ `NAME_MAX`=255 AND ≤ IFNAMSIZ, bounded by construction, identical to the two veth names). **All THREE derived names (netns + both veths) are uniformly slot-keyed** — the slot is the iface/subnet/netns axis; the alloc id is the human axis, held in the allocator's slot↔alloc map (02-04), NOT embedded in any kernel/filesystem name. `ip netns list` now shows `ovd-ns-<4hex>` (hex, like the veths); the human-readable alloc identity is rendered by tooling against the slot↔alloc map — the Cilium `lxc<hex>` + `cilium endpoint list` model. This is a deliberate, accepted ergonomics shift (B3 resolution, ratified option (a) 2026-06-17), not an oversight. **`derive_workload_netns_plan` is PURELY slot-derived** (`(slot, responder_addr) -> WorkloadNetnsPlan`); the `alloc_id` parameter is DROPPED — with the netns name slot-keyed, the alloc id no longer derives anything (netns + both veths + subnet are all slot-keyed; `responder_addr` is passthrough), so carrying it would be a speculative unused parameter (the alloc↔slot binding's correct home is the 02-04 allocator map). The subnet is also no longer a caller parameter (S1 resolved: the derivation owns slot→/30, the allocator owns slot assignment). The STATEFUL slot allocator (assign-smallest-free / release-on-teardown, a per-host free-list — NOT distributed IPAM, NOT the #167 VIP allocator) lives at the **C3 `on_alloc_running` lifecycle hook** (release at `on_alloc_terminal`), the same hook that owns netns creation and holds the `alloc_id`. S2 resolved: a /30 always has two usable hosts, so `workload_addr` is non-degenerate by construction (no `Option`, no `network()` fallback). | The 02-01 review (B1) ground-truthed that the literal `ovd-hv-<alloc>` overflows IFNAMSIZ for any alloc id ≥ 9 chars (the golden test's own `ovd-hv-payments-0` = 17 chars is uncreatable) and a naïve truncation collides two allocs onto one veth. B1+S1+S2 are one problem: the missing host-unique handle that both names AND the /30 must derive from. The 02-01 re-review (B3) found the FIRST cut of D-TME-12 left the netns name embedding the unbounded `AllocationId` (`ovd-ns-<alloc>`) with an arithmetically false "≤255" reassurance (7-char prefix + 253-char alloc id = 260 > 255 → `ENAMETOOLONG` from `ip netns add` for any alloc id ≥ 249 chars, reachable via a ~244-char workload name through `reconcilers/workload_lifecycle.rs:838`'s `alloc-{workload_id}-{attempt}` mint) — the IDENTICAL pigeonhole/ceiling defect class as B1, on the one derived name the first cut left out. Resolved by slot-keying the netns name too (option (a)), making the overflow unrepresentable by construction — the same lever the slot used to beat the hash for B1. No existing host-unique per-alloc integer exists (`alloc-{workload_id}-{attempt}` is workload-scoped, not host-unique; the cgroup scope keys on the full id string). The slot model makes collision-freedom by-construction and resolves all four findings in one coherent decision. (Ratified by the user 2026-06-17; resolves review `deliver/reviews/02-01.md` B1+S1+S2 and the re-review B3.) |
 | D-TME-11 | **Resolve READ MECHANISM (C4; refines D-TME-6)**: `ServiceBackendsResolve` resolves `orig_dst` against an **in-RAM, address-keyed, ownership-aware reverse index** of the `running` `service_backends` set (`addr → {service → Backend}`, NOT a flat `addr → Backend` with global last-writer-wins — see F-A below) — NOT a per-`ServiceId` point query (the `ServiceId`-keyed `service_backends_rows` is the wrong surface; the adapter holds no `ServiceId`). **REVISED 2026-06-17 (resolve-index-coherence research):** built via **List-then-Watch + relist-on-`Lagged`** (the prior observe-only / "no new trait method" constraint is REVERSED). List leg = the keyless `all_service_backends_rows()` enumerate (SHIPPED `25e7acf3`); List-at-probe closes #237 cold-start; single-owner drain dissolves the F2 take/restore TOCTOU. **F4 / relist-trigger REFINED 2026-06-17 (ratified — option 2, surface `Lagged`):** the lossy `subscribe_all()` (item type `ObservationSubscription = Box<dyn Stream<Item = ObservationRow>>`) could not carry the loss signal — both adapters stripped `RecvError::Lagged` internally — so closing F4 needed a lag-surfacing surface `subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError>` delivering `SubscriptionEvent::{Row, Lagged { missed: u64 }}` (a DOMAIN event; adapter maps `RecvError::Lagged(n) → missed`; no tokio leak); the single-owner drain consumes it and re-Lists on `Lagged`, closing F4 with a *completeness* guarantee. **F-B (reconciled 2026-06-17): `subscribe_all_events()` is now the SOLE observation-subscription surface — the lossy `subscribe_all()` + `ObservationSubscription` alias were DELETED single-cut in commit `36a79762` and every consumer migrated** (superseding the earlier "dedicated method bounds blast radius / ~20 consumers stay untouched / not a shared-type change" framing, which the single-cut overtook — that framing is preserved only as dated honest history in the C4 condition row below). **F-A (ratified 2026-06-17 — option (b)): ownership-aware index** — keyed per contributing service at an addr; a service's backend-set shrink evicts only THAT service's contribution; classification is `any-healthy-at-addr` (deterministic, NOT last-writer-wins). This removes the unstated "one `(IP:port)` belongs to at most one service" cross-component invariant and the LWW healthy-disagreement determinism smell; v1 single-node is structurally addr-exclusive (per-addr service set size-1 today), so the shape is defensive against multi-node / future writers, NOT a behaviour change. The structure is adapter-internal; the public `MtlsResolve` contract + the `NonMesh`/`MeshUnreachable`/`Err` arms are UNCHANGED. **A miss = `NonMesh`** (cleartext pass-through), NOT `MeshUnreachable`; the residual irreducible convergence window is the **(a) fail-toward-handshake** v1 SECURITY invariant, tracked in **#236**. **#237 CLOSED by this revision** (List-at-probe + relist). PUBLIC `MtlsResolve` API unchanged; growth confined to the `ObservationStore` driven port. | D-TME-6 pinned the resolve *model* but not the *read mechanism*; a DELIVER step surfaced that `resolve(orig_dst)` has no `ServiceId` and no addr→service surface exists. Cilium's `ipcache` (in-RAM addr→identity reverse index, subscribe-populated, List-before-Watch, relist-on-loss) is the canonical precedent; research §4.1 describes the resolve as an in-RAM `service_backends` lookup. Making a miss fail-closed would break legitimate `NonMesh` external egress — forbidden. (Ratified 2026-06-16; read-mechanism REVISED 2026-06-17; F4/relist-trigger REFINED 2026-06-17; F-A ownership-aware index + F-B `subscribe_all` single-cut reconciled 2026-06-17.) |
 
 ## D-TME-12 — pinned API contract for the crafter (02-01 re-implementation)
@@ -45,20 +45,35 @@ resolution of B1+S1+S2; B2/S3/N1 are pinned here. The crafter builds ONLY the
 surface named below (CLAUDE.md § "Implement to the design — never invent API
 surface").
 
+**Amended 2026-06-17 (B3 + S4 + N2; 02-01 re-review).** The re-review
+(`deliver/reviews/02-01.md` § "Adversarial Re-Review") confirmed B1/B2/S1/S2/S3/N1
+RESOLVED and found one new blocking defect **B3** (the netns name still embedded
+the unbounded `AllocationId`) plus non-blocking S4/N2. B3 is resolved by
+slot-keying the netns name too (option (a), ratified) — pinned below; the
+`alloc_id` parameter is DROPPED from `derive_workload_netns_plan` (it no longer
+derives anything). S4 (the `SetLoopbackUp` emit-condition) and N2 (the `/18` not
+`/16` tiling) are corrected below. The remaining re-review items are code-side
+fixes for the crafter (S5 stale module docstring, N3 `NetSlot::get()`, N4
+"fourteen"→fifteen bools, N5 IFNAMSIZ `#[test]`→`const _` assert) — the architect
+does NOT edit code; they are flagged for the next crafter dispatch.
+
 ### New newtype — `NetSlot` (`overdrive-control-plane`, domain-bearing)
 
 ```rust
 /// A host-unique, bounded per-allocation network slot. The single axis from
-/// which a workload's netns iface names AND its point-to-point /30 subnet
-/// derive — collision-free by construction (distinct slot ⇒ distinct names ⇒
-/// distinct subnet). Bounded to `0..=NET_SLOT_MAX` so the rendered veth names
-/// fit IFNAMSIZ (see `derive_workload_netns_plan`). NOT a hash of the
-/// AllocationId (pigeonhole — see D-TME-12).
+/// which a workload's netns NAME, both veth iface names, AND its
+/// point-to-point /30 subnet derive — collision-free by construction (distinct
+/// slot ⇒ distinct names ⇒ distinct subnet). Bounded to `0..=NET_SLOT_MAX` so
+/// the rendered names fit both IFNAMSIZ (15) and NAME_MAX (255) (see
+/// `derive_workload_netns_plan`). NOT a hash of the AllocationId (pigeonhole —
+/// see D-TME-12).
 pub struct NetSlot(u16);
 
 /// Inclusive upper bound — 4096 concurrent per-alloc slots (single-node
-/// bounded concurrency). 4 hex chars renders ≤ 15 IFNAMSIZ; the full slot
-/// space tiles `WORKLOAD_SUBNET_BASE` (/16) into 4096 /30 blocks.
+/// bounded concurrency). 4 hex chars renders ≤ 15 IFNAMSIZ; the slot space
+/// tiles a /18 within `WORKLOAD_SUBNET_BASE` (/16) — 4096 /30 blocks =
+/// `10.99.0.0`–`10.99.63.255`. (The /16 could carry up to 16383 /30s, so 4096
+/// is a deliberate conservative cap with ample headroom.)
 pub const NET_SLOT_MAX: u16 = 4095;
 ```
 
@@ -74,22 +89,34 @@ prefix change that would overflow fails the build, not a runtime `ip link add`.
 ### Pinned `derive_workload_netns_plan` signature
 
 ```rust
-/// Per-host base block all per-alloc /30s are carved from. 4096 /30s tile the
-/// whole /16. NOT operator-tunable in v1 (single-node, fixed).
+/// Per-host base block all per-alloc /30s are carved from. The 4096-slot space
+/// tiles a /18 within this /16 (4096 /30s = `10.99.0.0`–`10.99.63.255`),
+/// leaving 3/4 of the /16 unused as headroom. NOT operator-tunable in v1
+/// (single-node, fixed).
 pub const WORKLOAD_SUBNET_BASE: Ipv4Net = /* 10.99.0.0/16 */;
 
 #[must_use]
 pub fn derive_workload_netns_plan(
-    alloc_id: &overdrive_core::AllocationId,
     slot: NetSlot,
     responder_addr: Ipv4Addr,
 ) -> WorkloadNetnsPlan;
 ```
 
+**`alloc_id` is DROPPED from the signature (B3 resolution).** With the netns
+name slot-keyed (below), the alloc id no longer derives any plan field — all
+three names + the subnet are slot-derived, and `responder_addr` is passthrough.
+The plan is now PURELY slot-derived. Do NOT carry `alloc_id` as a speculative
+field (consumer check: 02-02's executor uses `plan.netns`/`plan.*_veth`/addrs;
+02-04's C3 hook holds the `alloc_id` in its own hand as the lifecycle subject
+and owns the slot↔alloc map; 02-03's resolv.conf write keys on
+`plan.netns`/`responder_addr` — no consumer needs `alloc_id` FROM the plan).
+This applies the same "do not add speculatively" discipline the contract
+already applied to the `slot` plan field.
+
 Derivation rules (PURE, total — no `Option`, no `network()` fallback, because a
 /30 always has two usable hosts):
 
-- `netns`         = `format!("ovd-ns-{}", alloc_id.as_str())` — readable, ≤255 (NOT IFNAMSIZ-bound).
+- `netns`         = `format!("ovd-ns-{}", slot.to_hex4())` — 11 chars ≤ NAME_MAX (255) AND ≤ IFNAMSIZ (15), bounded by construction, identical shape to the veth names (B3: slot-keyed, NOT `ovd-ns-<alloc>` — the alloc id would overflow NAME_MAX at 260 chars for a 253-char alloc id, the same pigeonhole/ceiling class as B1).
 - `host_veth`     = `format!("ovd-hv-{}", slot.to_hex4())` — 11 chars ≤ 15.
 - `workload_veth` = `format!("ovd-wl-{}", slot.to_hex4())` — 11 chars ≤ 15.
 - `subnet`        = the /30 at `WORKLOAD_SUBNET_BASE.network() + (slot.0 as u32 * 4)`, prefix-len 30.
@@ -97,6 +124,14 @@ Derivation rules (PURE, total — no `Option`, no `network()` fallback, because 
 - `workload_addr` = `subnet.network() + 2` (second usable host).
 - `gateway`       = `host_addr` (in-netns default route points back at the host-side end).
 - `responder_addr` flows through verbatim (carried for D-TME-9 resolv.conf injection; NOT derived state).
+
+`ip netns list` now shows `ovd-ns-<4hex>` (hex, like the veths); the
+human-readable alloc identity is rendered by tooling against the 02-04 slot↔alloc
+map (the Cilium `lxc<hex>` + `cilium endpoint list` model) — a deliberate,
+accepted ergonomics shift, not an oversight. **B3 is the LAST derived-name axis:
+after this, netns + both veths are all slot-bounded and the subnet/addresses are
+slot-derived; no other unbounded-`AllocationId`-into-bounded-grammar mapping
+remains in the D-TME-12 surface.**
 
 The `WorkloadNetnsPlan` struct keeps its existing field set (`netns`,
 `host_veth`, `workload_veth`, `host_addr`, `workload_addr`, `gateway`, `subnet`,
@@ -120,8 +155,22 @@ brought up in-netns):
 - `SetWorkloadVethUp` — `ip -n <netns> link set <workload_veth> up`.
 - `SetLoopbackUp`     — `ip -n <netns> link set lo up`.
 
-`workload_converge_steps` emits each when (`pair_rebuilt` OR the respective fact
-is false). The named proptest's iff-emit clauses extend to both new facts; the
+Emit conditions (S4-corrected 2026-06-17 to match the shipped code, which is
+MORE correct than the original pinning):
+- `SetWorkloadVethUp` emits when (`pair_rebuilt` OR `!workload_veth_up`) — the
+  in-netns end is a property of the veth pair, so a pair rebuild must re-up it.
+- `SetLoopbackUp` emits when (`!netns_present` OR `!lo_up`) — **NOT**
+  `pair_rebuilt`. `lo` is a property of the *netns*, not the *veth pair*: it
+  survives a veth-only rebuild (netns present, pair recreated), so keying it on
+  `pair_rebuilt` would re-emit a non-minimal `ip -n <ns> link set lo up` on an
+  already-up `lo` (a corrupted-pair rebuild), violating criterion 5's "minimal"
+  + "never re-touch a usable resource." (The first cut pinned both on
+  `pair_rebuilt || fact-false`; the crafter correctly chose `!netns_present ||
+  !lo_up` for `lo` because of its netns-scoped lifetime — this amendment makes
+  the SSOT agree with that correct choice so the next reader does not "fix" the
+  code back to the over-emitting form.)
+
+The named proptest's iff-emit clauses extend to both new facts; the
 complete-observation baseline sets both `true`.
 
 ### S3 (architect contract call) — split `rp_filter_relaxed`
