@@ -276,26 +276,48 @@ fn provision_creates_and_idempotently_converges_per_workload_netns() {
     );
 
     // Criterion 4 — spike-proven host prereqs.
-    assert_eq!(sysctl_int("net.ipv4.ip_forward"), Some(1), "ip_forward must be 1");
-    // S3 — rp_filter relaxed GLOBALLY (`all` + `lo`) AND on the per-host-veth
-    // knob; the three are SEPARATE facts. `rp_filter` relaxed == not strict
-    // (`0` = off, or `2` = loose); strict is `1`. Assert each knob is not
-    // strict.
+    //
+    // The three GLOBAL knobs (ip_forward, all/lo rp_filter) are WEAK
+    // regression guards by necessity. Production's converge contract is
+    // "rp_filter relaxed == NOT STRICT" (`sysctl_rp_filter_relaxed` reads any
+    // value `!= 1`), so a `RelaxGlobalRpFilter` step is emitted ONLY when a
+    // global knob is strict (`1`). The Lima VM ships `all`/`lo` rp_filter == 2
+    // (loose) and ip_forward == 1 host-globally — already non-strict — so
+    // production CORRECTLY leaves the globals untouched (ADR-0061: do not
+    // re-write a knob that already satisfies desired). Asserting `== 0` here
+    // would be a FALSE expectation (production writes 0 only when it has to
+    // un-strict a `1`, which never happens on this VM); we therefore assert
+    // the contract production actually enforces — NOT STRICT — and accept that
+    // the VM default masks a regressed global step. These knobs are also
+    // host-sticky and shared with the concurrent host-netns veth suite, so
+    // they cannot be cleanly isolated; the PER-HOST-VETH knob below is the
+    // load-bearing rp_filter regression guard.
+    assert_eq!(
+        sysctl_int("net.ipv4.ip_forward"),
+        Some(1),
+        "ip_forward must be 1 (weak guard: VM default is already 1)",
+    );
     assert_ne!(
         sysctl_int("net.ipv4.conf.all.rp_filter"),
         Some(1),
-        "global `all` rp_filter must be relaxed (not strict)",
+        "global `all` rp_filter must be relaxed/not-strict (weak guard: VM default 2 already satisfies, host-sticky/shared)",
     );
     assert_ne!(
         sysctl_int("net.ipv4.conf.lo.rp_filter"),
         Some(1),
-        "global `lo` rp_filter must be relaxed (not strict)",
+        "global `lo` rp_filter must be relaxed/not-strict (weak guard: VM default 2 already satisfies, host-sticky/shared)",
     );
-    let host_veth_rp = format!("net.ipv4.conf.{}/rp_filter", p.host_veth);
-    assert_ne!(
+    // LOAD-BEARING per-host-veth rp_filter guard. dot separator (NOT `/` —
+    // procps swaps `.`/`/`) so this reads the knob production actually writes.
+    // A freshly created veth inherits `default.rp_filter == 2`, and the
+    // converge plan ALWAYS emits `RelaxHostVethRpFilter` on a (re)built pair
+    // (it writes `0`); so exact `== 0` is falsifiable — if that step did not
+    // run, the knob would read `2` and this assert FAILS.
+    let host_veth_rp = format!("net.ipv4.conf.{}.rp_filter", p.host_veth);
+    assert_eq!(
         sysctl_int(&host_veth_rp),
-        Some(1),
-        "per-host-veth rp_filter must be relaxed (not strict)",
+        Some(0),
+        "per-host-veth rp_filter must be relaxed to 0 by RelaxHostVethRpFilter",
     );
 
     // tx offload OFF on both ends (criterion 4). `None` → ethtool/feature
