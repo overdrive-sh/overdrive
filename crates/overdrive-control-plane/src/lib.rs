@@ -87,9 +87,10 @@ pub mod journal;
 pub mod listener_facts;
 // transparent-mtls-enrollment step 01-03 (ADR-0071, GH #178) —
 // `ServiceBackendsResolve`, the v1 host `MtlsResolve` adapter. Resolves
-// `orig_dst` against an in-RAM `addr → Backend` reverse index of the `running`
-// `service_backends` set (C4), built from the existing `ObservationStore`
-// `subscribe_all` surface; classifies into the 3-variant `MtlsResolution`
+// `orig_dst` against an in-RAM, ownership-aware `addr → {service → Backend}`
+// reverse index of the `running` `service_backends` set (C4), maintained by
+// List-then-Watch over the `ObservationStore` `all_service_backends_rows` +
+// `subscribe_all_events` surfaces; classifies into the 3-variant `MtlsResolution`
 // (Mesh / NonMesh / MeshUnreachable). v1 SHELL: `expected_svid: None`, no
 // `IdentityRead` (the identity join is #178). Earned-Trust `probe` refuses on
 // an unreadable store. Composition-root probe wiring lands in step 04-02.

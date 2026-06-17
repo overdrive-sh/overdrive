@@ -344,6 +344,65 @@ async fn out_of_order_node_health_does_not_regress() {
 }
 
 // ---------------------------------------------------------------------------
+// F-D — REAL broadcast-overflow → SubscriptionEvent::Lagged (the F4 trigger)
+//
+// The relist-on-`Lagged` recovery in `ServiceBackendsResolve` exists because
+// the watch can drop rows under load. The synthetic resolve-adapter doubles
+// inject `Lagged` directly; this test exercises the REAL
+// `BroadcastStreamRecvError::Lagged(n) → SubscriptionEvent::Lagged` mapping in
+// `LocalObservationStore::subscribe_all_events` (`observation_backend.rs`) — the
+// production trigger those doubles bypass.
+//
+// Mechanism: open the subscription, then write CAPACITY+k distinct rows WITHOUT
+// draining. The broadcast channel (capacity 1024) overflows; the undrained
+// receiver falls > capacity behind, and the first drained event is a real
+// `Lagged`. Distinct `alloc_id`s ensure every write is an LWW winner that is
+// actually broadcast (a duplicate key would be suppressed and not consume a
+// slot). Default lane (in-memory broadcast over a real redb store).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn real_broadcast_overflow_yields_lagged() {
+    // The broadcast capacity in `LocalObservationStore` is 1024; write past it.
+    const CAPACITY: usize = 1024;
+    const OVERFLOW: usize = CAPACITY + 16;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let store = LocalObservationStore::open(tmp.path().join("observation"))
+        .expect("open observation store");
+
+    // Subscribe BEFORE the writes — but NEVER drain until after the overflow.
+    let mut sub = store.subscribe_all_events().await.expect("subscribe");
+
+    // Flood the channel with distinct LWW-winner rows; the held-but-undrained
+    // receiver falls past capacity and the broadcast drops the oldest values.
+    for i in 0..OVERFLOW {
+        let row = alloc_row(&format!("alloc-flood-{i}"), AllocState::Running, 1);
+        store.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write flood row");
+    }
+
+    // Now drain. The REAL `BroadcastStreamRecvError::Lagged` mapping must
+    // surface the loss as `SubscriptionEvent::Lagged { missed }` — the loss is
+    // never silent (the C4 / D-TME-11 completeness contract this surface exists
+    // to honour). `missed > 0` and at most the overflow count.
+    let event = timeout(Duration::from_secs(2), sub.next())
+        .await
+        .expect("subscription yields within deadline")
+        .expect("stream is not closed");
+    let SubscriptionEvent::Lagged { missed } = event else {
+        panic!(
+            "an undrained subscription past broadcast capacity must yield a real Lagged, \
+             got {event:?}"
+        );
+    };
+    assert!(missed > 0, "a real overflow must report a positive missed count, got {missed}");
+    assert!(
+        missed <= OVERFLOW as u64,
+        "missed ({missed}) cannot exceed the number of rows written ({OVERFLOW})"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // AC 6 — overdrive-sim NOT in overdrive-control-plane runtime deps
 // ---------------------------------------------------------------------------
 

@@ -1325,7 +1325,7 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// `AllocationId`.
     ///
     /// Phase 1 motivation: the REST observation-read handlers land in
-    /// step 03-03; the existing `subscribe_all` surface is suited to
+    /// step 03-03; the [`Self::subscribe_all_events`] surface is suited to
     /// long-lived reactive consumers (reconcilers, dataplane hydration),
     /// not one-shot HTTP handlers. A typed snapshot is the honest read
     /// primitive for request/response handlers.

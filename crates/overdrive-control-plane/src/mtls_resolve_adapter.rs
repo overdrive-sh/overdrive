@@ -34,7 +34,8 @@
 //! holds NO `ServiceId`; the only `ServiceId`-keyed backend-read surface
 //! (`service_backends_rows(service_id)`) is the WRONG surface. Per C4 (REVISED
 //! 2026-06-17, resolve-index-coherence research) the adapter resolves against an
-//! in-RAM, address-keyed reverse index (`addr → Backend`) of the `running`
+//! in-RAM, ownership-aware address-keyed reverse index
+//! (`addr → {service → Backend}`, F-A) of the `running`
 //! `service_backends` set, maintained by **List-then-Watch** — the
 //! industry-canonical shape for a coherent local cache over a forward-only,
 //! lossy watch (k8s informer/reflector, etcd watch, Envoy xDS, Cilium kvstore /
@@ -176,43 +177,75 @@ use overdrive_core::traits::observation_store::{
 use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
-/// The in-RAM, address-keyed reverse index (`addr → Backend`) of the
-/// `running` `service_backends` set — the C4 read-mechanism private detail.
+/// The in-RAM, OWNERSHIP-AWARE address-keyed reverse index of the `running`
+/// `service_backends` set — the C4 read-mechanism private detail.
+///
+/// # Why ownership-aware (F-A — the security fix)
+///
+/// An earlier shape keyed `by_addr: BTreeMap<SocketAddrV4, Backend>` (one
+/// `Backend` per addr) and evicted a service's prior addrs from that GLOBAL
+/// map unconditionally with last-writer-wins. That relied on an UNSTATED
+/// "one `(IP:port)` ↔ one service" invariant the writers do not enforce; if
+/// two services ever contributed the same addr, one service's backend-set
+/// SHRINK would evict the OTHER service's still-healthy backend → `NonMesh`
+/// → silent cleartext until a relist (the F-A blocking defect). The index is
+/// now keyed `addr → { service → that service's Backend at this addr }`, so
+/// an addr's resolvability is **per-contributing-service**, not
+/// global-last-writer-wins: a service can only ever evict ITS OWN
+/// contribution, and an addr stays resolvable while ANY service still claims
+/// it.
 ///
 /// Keyed by [`SocketAddrV4`] (a [`BTreeMap`], not `HashMap` — the index is
 /// observable under DST and its iteration order must be deterministic across
-/// seeds, § "Ordered-collection choice"). A per-`service_id` secondary map
-/// records which addrs a given service currently contributes, so an updated
-/// row for that service REPLACES its prior addrs (the index never strands a
-/// stale backend after a service's backend set shrinks).
+/// seeds, § "Ordered-collection choice"); the inner per-service map is a
+/// [`BTreeMap`] for the same reason. A per-`service_id` secondary map records
+/// which addrs a given service currently contributes, so an updated row for
+/// that service REPLACES exactly its prior addrs (the index never strands a
+/// stale backend after a service's backend set shrinks, and never evicts a
+/// DIFFERENT service's backend).
 #[derive(Default)]
 struct BackendIndex {
-    /// `addr → Backend` — the point-lookup surface `resolve` consults. Only
-    /// V4 backends are indexed (a V6 `Backend.addr` never matches a V4
-    /// `orig_dst`, so it is simply not inserted).
-    by_addr: BTreeMap<SocketAddrV4, Backend>,
+    /// `addr → { service → that service's `Backend` at this addr }`. The
+    /// point-lookup surface `resolve` consults. Only V4 backends are indexed
+    /// (a V6 `Backend.addr` never matches a V4 `orig_dst`, so it is simply
+    /// not inserted). An addr key is present iff at least one service claims
+    /// it; the inner map is dropped when its last contributing service is
+    /// evicted.
+    by_addr: BTreeMap<SocketAddrV4, BTreeMap<ServiceId, Backend>>,
     /// `service_id → the V4 addrs that service currently contributes`. On a
-    /// new row for a service, its prior addrs are removed from
+    /// new row for a service, exactly that service's entries are removed from
     /// [`by_addr`](Self::by_addr) before the new set is inserted, so a shrunk
-    /// or replaced backend set leaves no stale entries.
+    /// or replaced backend set leaves no stale entries AND never touches
+    /// another service's contribution.
     addrs_by_service: BTreeMap<ServiceId, Vec<SocketAddrV4>>,
 }
 
 impl BackendIndex {
-    /// Apply one full `service_backends` row to the index: drop the service's
-    /// prior addrs, then insert its current V4 backends. Full-row replacement
-    /// mirrors the `service_backends` §4 full-row-write contract — the row
-    /// carries the service's entire current backend set.
+    /// Apply one full `service_backends` row to the index: drop ONLY this
+    /// service's prior contribution, then insert its current V4 backends.
+    /// Full-row replacement mirrors the `service_backends` §4 full-row-write
+    /// contract — the row carries the service's entire current backend set.
+    ///
+    /// The eviction is SCOPED to `service_id` (F-A): for each addr the service
+    /// previously contributed, the `service_id` entry is removed from
+    /// `by_addr[addr]`, and the addr key is dropped iff its inner per-service
+    /// map becomes empty (i.e. no OTHER service still claims it). A different
+    /// service's backend at a shared addr is never evicted.
     fn apply_row(&mut self, service_id: ServiceId, backends: &[Backend]) {
         if let Some(stale) = self.addrs_by_service.remove(&service_id) {
             for addr in stale {
-                self.by_addr.remove(&addr);
+                if let Some(by_service) = self.by_addr.get_mut(&addr) {
+                    by_service.remove(&service_id);
+                    if by_service.is_empty() {
+                        self.by_addr.remove(&addr);
+                    }
+                }
             }
         }
         let mut contributed = Vec::new();
         for backend in backends {
             if let SocketAddr::V4(v4) = backend.addr {
-                self.by_addr.insert(v4, backend.clone());
+                self.by_addr.entry(v4).or_default().insert(service_id, backend.clone());
                 contributed.push(v4);
             }
         }
@@ -237,16 +270,28 @@ impl BackendIndex {
     /// Point-lookup `orig_dst` and CLASSIFY it into an [`MtlsResolution`] arm
     /// (the pure classification the mutation gate targets — C1/C4):
     ///
-    /// - a `running`-and-`healthy` match → `Mesh { addr, expected_svid: None }`
-    ///   (`expected_svid` is `None` for every backend in v1 — the identity
-    ///   join is #178);
-    /// - a present-but-`healthy == false` match → `MeshUnreachable`
-    ///   (fail-closed, the readiness-gate "present but unreachable" arm);
-    /// - a miss → `NonMesh` (cleartext pass-through, by design — a miss is
-    ///   NEVER `MeshUnreachable` in v1).
+    /// - ANY contributing service has a `running`-and-`healthy` backend at the
+    ///   addr → `Mesh { addr, expected_svid: None }` (`expected_svid` is
+    ///   `None` for every backend in v1 — the identity join is #178). This is
+    ///   the **any-healthy-at-addr** rule (F-A): a deterministic disjunction
+    ///   over the contributing services, NOT last-writer-wins. If two services
+    ///   claim the addr and at least one is healthy, the addr is `Mesh`
+    ///   independent of apply order;
+    /// - the addr is claimed but NO contributing service has a healthy backend
+    ///   there → `MeshUnreachable` (fail-closed, the readiness-gate "present
+    ///   but unreachable" arm);
+    /// - the addr is unclaimed (no entry) → `NonMesh` (cleartext pass-through,
+    ///   by design — a miss is NEVER `MeshUnreachable` in v1).
+    ///
+    /// An addr key is present in `by_addr` IFF at least one service claims it:
+    /// [`Self::apply_row`] drops an addr key the moment its inner per-service
+    /// map empties and never inserts an empty inner map, so a `Some(by_service)`
+    /// here is always non-empty. The two present-key arms (`any-healthy` →
+    /// `Mesh`, else `MeshUnreachable`) therefore partition every reachable
+    /// present-key state without a redundant non-empty guard.
     fn classify(&self, orig_dst: SocketAddrV4) -> MtlsResolution {
         match self.by_addr.get(&orig_dst) {
-            Some(backend) if backend.healthy => {
+            Some(by_service) if by_service.values().any(|backend| backend.healthy) => {
                 MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None })
             }
             Some(_) => MtlsResolution::MeshUnreachable,
@@ -266,7 +311,8 @@ pub struct ServiceBackendsResolve {
     /// the Watch leg reads
     /// [`subscribe_all_events`](ObservationStore::subscribe_all_events).
     store: Arc<dyn ObservationStore>,
-    /// The C4 in-RAM `addr → Backend` reverse index, behind a synchronous
+    /// The C4 in-RAM ownership-aware `addr → {service → Backend}` reverse index
+    /// (F-A), behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
     /// task. `resolve` takes the read lock; the drain task (and List-at-probe)
     /// take the write lock. The lock is never held across an `.await` — the
@@ -403,6 +449,12 @@ impl ServiceBackendsResolve {
 }
 
 impl Drop for ServiceBackendsResolve {
+    // mutants: skip — the only observable effect is aborting the background
+    // drain task on adapter drop (best-effort cleanup, fire-and-forget). Its
+    // sole symptom is the "still-running task at teardown" nextest reports as
+    // leaky; there is no synchronous, in-process observable to assert on
+    // through the public surface (Drop cannot await the abort), so a mutant
+    // that empties this body is behaviourally indistinguishable in a test.
     fn drop(&mut self) {
         // Abort the single-owner drain task so it does not outlive the adapter.
         // Bind the `take` into a local so the `parking_lot` guard temporary
@@ -844,9 +896,9 @@ mod tests {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Closed));
         let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
 
-        // Probe succeeds (List Ok, subscribe_all Ok) — but the subscription the
-        // double hands back is already closed, so the drain immediately sees
-        // `Closed` and faults the watch.
+        // Probe succeeds (List Ok, subscribe_all_events Ok) — but the
+        // subscription the double hands back is already closed, so the drain
+        // immediately sees `Closed` and faults the watch.
         adapter.probe().await.expect("probe Lists + opens the (already-closed) watch");
 
         // Give the spawned drain a chance to observe `Closed` and set the flag.
@@ -893,6 +945,92 @@ mod tests {
         let store = fresh_store();
         let adapter = adapter_listing_rows(&store, vec![]).await;
         adapter.probe().await.expect("probe on a readable (empty) store is Ok");
+    }
+
+    // ---- F-A: ownership-aware index (the security proof) -------------------
+
+    /// Construct a [`ServiceId`] for the index unit tests.
+    fn svc(id: u64) -> ServiceId {
+        ServiceId::new(id).expect("valid service id")
+    }
+
+    /// F-A (blocking, security) —
+    /// `shared_addr_eviction_is_scoped_to_the_shrinking_service`.
+    ///
+    /// The exact defect the post-arc review demands a test for: two services
+    /// (A, B) both contribute the SAME healthy addr `X`; then A shrinks to an
+    /// empty backend set. Under the OLD global-`addr → Backend` index with
+    /// unconditional last-writer-wins eviction, A's shrink evicted `X`
+    /// wholesale → `classify(X) == NonMesh` → silent cleartext for a backend B
+    /// still serves. Under the ownership-aware index A can only evict its OWN
+    /// contribution, so B's claim survives and `classify(X)` is STILL `Mesh`.
+    ///
+    /// Tested at the index boundary directly: the v1 writers cannot produce a
+    /// shared `(IP:port)` (one service per addr in practice), so the index's
+    /// DEFENSIVE behavior against the violated invariant is proven at its own
+    /// boundary — exactly where the review located the latent footgun. RED on
+    /// the old structure, GREEN on the fix.
+    #[test]
+    fn shared_addr_eviction_is_scoped_to_the_shrinking_service() {
+        let shared = v4(10, 0, 0, 1, 8080);
+        let mut index = BackendIndex::default();
+
+        // Both A and B claim the same healthy addr.
+        index.apply_row(svc(1), &[backend(shared, true)]);
+        index.apply_row(svc(2), &[backend(shared, true)]);
+        assert_eq!(
+            index.classify(shared),
+            MtlsResolution::Mesh(ResolvedBackend { addr: shared, expected_svid: None }),
+            "an addr claimed by two healthy services is Mesh",
+        );
+
+        // A shrinks to nothing. B still claims `shared` and is healthy.
+        index.apply_row(svc(1), &[]);
+
+        assert_eq!(
+            index.classify(shared),
+            MtlsResolution::Mesh(ResolvedBackend { addr: shared, expected_svid: None }),
+            "B's still-healthy claim must survive A's shrink — no global eviction",
+        );
+    }
+
+    /// F-A (determinism) — `classify_is_any_healthy_independent_of_apply_order`.
+    ///
+    /// When two services claim the same addr with DIFFERENT readiness (A
+    /// unhealthy, B healthy), the addr must classify `Mesh` regardless of
+    /// which row was applied last — the any-healthy-at-addr rule, NOT
+    /// last-writer-wins. The OLD global index would overwrite the addr's lone
+    /// `Backend` with whichever row applied last, so the result depended on
+    /// apply order (unhealthy-last ⇒ `MeshUnreachable`). The fix makes
+    /// classification a deterministic disjunction over contributors. Both
+    /// apply orders are asserted in one test.
+    #[test]
+    fn classify_is_any_healthy_independent_of_apply_order() {
+        let shared = v4(10, 0, 0, 2, 9000);
+        let expected = MtlsResolution::Mesh(ResolvedBackend { addr: shared, expected_svid: None });
+
+        // Order 1: unhealthy A first, healthy B last.
+        let mut index = BackendIndex::default();
+        index.apply_row(svc(1), &[backend(shared, false)]);
+        index.apply_row(svc(2), &[backend(shared, true)]);
+        assert_eq!(index.classify(shared), expected, "any-healthy: unhealthy-then-healthy");
+
+        // Order 2: healthy B first, unhealthy A last — same verdict.
+        let mut index = BackendIndex::default();
+        index.apply_row(svc(2), &[backend(shared, true)]);
+        index.apply_row(svc(1), &[backend(shared, false)]);
+        assert_eq!(index.classify(shared), expected, "any-healthy: healthy-then-unhealthy");
+
+        // And when EVERY contributor at the addr is unhealthy → MeshUnreachable
+        // (the addr is claimed but unreachable), never NonMesh.
+        let mut index = BackendIndex::default();
+        index.apply_row(svc(1), &[backend(shared, false)]);
+        index.apply_row(svc(2), &[backend(shared, false)]);
+        assert_eq!(
+            index.classify(shared),
+            MtlsResolution::MeshUnreachable,
+            "an addr claimed only by unhealthy backends is MeshUnreachable",
+        );
     }
 
     proptest! {
