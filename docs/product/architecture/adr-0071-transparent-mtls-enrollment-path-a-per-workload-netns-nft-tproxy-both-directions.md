@@ -189,12 +189,24 @@ The structural facts, binding on DELIVER:
      after the driver stop, **teardown-then-release** (a crash between leaves the
      slot HELD = resource still reclaimable, never a released-but-undestroyed
      leak). The "BEFORE `Driver::start`" ordering was always correct and is
-     authoritative; only the hook NAME was wrong. The `ExecDriver`→netns join
-     *seam* exists (`with_netns_path` + `setns(CLONE_NEWNET)` pre_exec hook,
-     `overdrive-worker/src/driver.rs`) but is NOT wired per-alloc (it is a
-     once-at-construction builder, and `AllocationSpec` carries no netns field) —
-     **a SEPARATE tracked concern**, flagged for user approval as a candidate new
-     issue, NOT in the C3-wiring step's scope.
+     authoritative; only the hook NAME was wrong.
+   - **JOIN — `ExecDriver`→per-alloc-netns, FOLDED IN 2026-06-18 (NOT deferred,
+     no GH issue).** The earlier cut of this fact called the join "a SEPARATE
+     tracked concern, candidate new issue, NOT in scope." The user has folded it
+     INTO the C3-wiring step (now **02-05**): a new `AllocationSpec.netns:
+     Option<String>` field (pure in-memory — `AllocationSpec` has NO serde/rkyv and
+     is never persisted; `Option<String>` not a newtype because the value is an
+     already-bounded slot-derived `ovd-ns-<4hex>` projection with no parse surface)
+     carries the slot-derived netns NAME; the reconciler stays netns-agnostic
+     (`netns: None` at both production builders) and ONLY the action-shim C3 site
+     injects `Some(plan.netns)` before `driver.start`; `ExecDriver::start` reads
+     `spec.netns` per-call (replacing the once-at-construction `with_netns_path`
+     builder, which is DELETED single-cut with its two test fixtures rewritten onto
+     the new channel) and reuses the existing `DriverError::NetnsEntry` variant on
+     a missing/unopenable netns. Tier-3 acceptance: a real workload LANDS in
+     `ovd-ns-<slot>` (`ip netns identify <pid>` or veth egress; DNS is #61-gated and
+     NOT part of the proof). Full pinned shapes: `design/wave-decisions.md` D-TME-12
+     § "Amended 2026-06-18 (join folded into C3-wiring step)" JOIN-1..JOIN-5.
    - **G3 — allocator plumbing.** `NetSlotAllocator` (already `Clone+Default`,
      internally `Arc<Mutex<…>>`-shared like `IdentityMgr`) lives as a non-`Option`
      `AppState.net_slot_allocator` field, default-constructed inside the `AppState`

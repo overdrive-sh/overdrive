@@ -184,32 +184,34 @@ does not), and `release()` is already idempotent (`BTreeMap::remove` of an absen
 key — `veth_provisioner.rs:719-724`), so a double-terminal or a terminal for an
 alloc that never provisioned is benign.
 
-**RELATED — the `ExecDriver`→netns join is a SEPARATE tracked concern (disposition
-iii), surfaced for user approval.** "Provision before `Driver::start`" only
-achieves ADR-0071's goal if the driver actually spawns the workload INTO the
-per-workload netns. Verified: the join *seam* EXISTS — `ExecDriver::with_netns_path(PathBuf)`
-opens the netns as an `OwnedFd` and installs a `pre_exec` `setns(fd,
-CLONE_NEWNET)` hook (`overdrive-worker/src/driver.rs:185-198, 317-318, 430-434,
-486-494`), CNI-aligned (ENTERS, never creates). **BUT it is not wired per-alloc:**
-(1) `with_netns_path` is a builder set ONCE at driver construction, and the
-production composition (`compose_production_driver`, lib.rs:1333-1336) constructs
-`ExecDriver::new(...)` with NO `.with_netns_path(...)` → `netns_path: None` → the
-driver never enters any netns; (2) `AllocationSpec` (`overdrive-core` driver.rs:131-156)
-carries NO netns field, so the slot-derived per-alloc netns name (known only at
-the C3 provision site) has no channel to reach the per-alloc `driver.start(&spec)`.
-Closing this needs EITHER an `AllocationSpec.netns: Option<String>` field threaded
-from the C3 site through the driver, OR a per-alloc driver-targeting mechanism —
-both OUTSIDE the C3-wiring step's netns-provisioning scope and touching
-`overdrive-core` + `overdrive-worker`. **This is flagged to the orchestrator/user
-as a candidate NEW GitHub issue** ("wire `ExecDriver` to spawn workloads into the
-per-alloc netns: thread the slot-derived netns name through `AllocationSpec` to
-the `with_netns_path`/`setns` seam"). The C3-wiring step provisions+injects+tears
-down the netns and is independently valuable (the netns/veth/resolv.conf exist and
-converge correctly) even before the join lands; without the join the workload runs
-in the host netns and the mTLS-interception path is not yet end-to-end, which is
-ALSO gated on #61 and the Tier-3 spike (D-TME-7). Do NOT create the issue without
-user approval (CLAUDE.md § "Deferrals require GitHub issues — AND user approval
-BEFORE creation").
+**RELATED — the `ExecDriver`→netns join. DECISION CHANGED 2026-06-18: FOLDED INTO
+the C3-wiring step, NOT deferred.** The prior cut of this block (disposition iii)
+flagged the join as a SEPARATE tracked concern + a candidate NEW GitHub issue. The
+user has decided the join is **in scope for the C3-wiring step (02-05)** — there
+will be **no GitHub issue**. The full pinned shape (channel + type, injection
+point, ExecDriver per-spec refactor, construction-site sweep, Tier-3 obligation)
+is the **"Amended 2026-06-18 (join folded into C3-wiring step)"** block at the END
+of this D-TME-12 amendment section (below the G3 boundary). The verified ground
+truth that motivated the change is preserved here as honest history:
+
+"Provision before `Driver::start`" only achieves ADR-0071's goal if the driver
+actually spawns the workload INTO the per-workload netns. The join *seam* EXISTS —
+`ExecDriver::with_netns_path(PathBuf)` opens the netns as an `OwnedFd` and installs
+a `pre_exec` `setns(fd, CLONE_NEWNET)` hook (`overdrive-worker/src/driver.rs:185-198,
+317-318, 430-434, 486-494`), CNI-aligned (ENTERS, never creates). BUT it is not
+wired per-alloc: (1) `with_netns_path` is a builder set ONCE at driver
+construction, and the production composition (`compose_production_driver`,
+lib.rs:1333-1336) constructs `ExecDriver::new(...)` with NO `.with_netns_path(...)`
+→ `netns_path: None` → the driver never enters any netns; (2) `AllocationSpec`
+(`overdrive-core` driver.rs:131-156) carries NO netns field, so the slot-derived
+per-alloc netns name (known only at the C3 provision site) has no channel to reach
+the per-alloc `driver.start(&spec)`. **The folded-in block below closes both** —
+it adds the channel (an `AllocationSpec` netns field), the injection (at the
+action-shim C3 site), and the per-spec `ExecDriver::start` setns refactor. No GH
+issue is created (the work is now in-scope, not a deferral). The end-to-end mTLS
+interception path remains independently gated on #61 (DNS resolution) and the
+Tier-3 egress spike (D-TME-7) — the join makes the workload LAND in its netns; it
+does not by itself complete the interception datapath.
 
 #### G3 (allocator plumbing) — `NetSlotAllocator` on `AppState`, threaded as an explicit `dispatch_single` param
 
@@ -267,6 +269,222 @@ The `reconciler_runtime.rs` / `listener_facts.rs` / ~42-fixture callers are
 DELIBERATELY out of the boundary by the default-construct-in-constructor choice
 above — if a dispatch finds itself editing them, the plumbing approach has
 drifted from this pin (they should compile untouched).
+
+**Amended 2026-06-18 (join folded into C3-wiring step).** The user folded the
+`ExecDriver`→per-alloc-netns join (flagged as "disposition iii / separate concern"
+in the G2 RELATED block above) INTO the C3-wiring step — **no GitHub issue; it is
+in scope now.** This makes the consolidated step (now **02-05**) the single
+coherent unit: G1+G2+G3 wiring (above) PLUS the join pinned in the five JOIN
+decisions below. The boundary widens to `overdrive-core` (the `AllocationSpec`
+field) and `overdrive-worker` (the per-spec `ExecDriver` setns refactor) beyond the
+G3 control-plane boundary. Each decision is pinned to an EXACT shape so the crafter
+builds only the named surface (CLAUDE.md § "Implement to the design — never invent
+API surface"); all five are verified against shipped code (re-confirmed at this
+amendment, not assumed).
+
+#### JOIN-1 (the channel) — a new `AllocationSpec.netns: Option<String>` field (NO newtype)
+
+The slot-derived netns name reaches `driver.start` via a **new field on
+`AllocationSpec`** (`overdrive-core/src/traits/driver.rs`, the struct at
+:130-156). `AllocationSpec` derives ONLY `#[derive(Debug, Clone, PartialEq, Eq)]`
+— NO serde, NO rkyv — and is recomputed each reconcile tick, crossing
+reconciler→action-shim→driver purely in-memory (never persisted). Adding a field
+is therefore a pure in-memory change: **NO rkyv schema-evolution discipline, NO
+"persist derived state" violation** (the spec is never stored; the slot-derived
+netns name injected at the shim is transient, recomputed-on-restart per criterion
+6). Pinned exact shape:
+
+```rust
+// overdrive-core/src/traits/driver.rs — appended to AllocationSpec.
+/// Target network namespace NAME this allocation's workload is spawned
+/// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
+/// already exist — the action-shim C3 site provisions it before
+/// `Driver::start`). `Some(plan.netns)` only when the C3 site provisioned
+/// a per-workload netns (the production mTLS boot); `None` for every
+/// non-netns workload (every current test fixture, and any boot where the
+/// mTLS composition gate is off). The driver opens `/var/run/netns/<name>`
+/// when `Some`; a `None` spec yields the pre-join host-netns behaviour.
+///
+/// `Option<String>`, NOT a `NetnsName` newtype: the value is already a
+/// validated, bounded, slot-derived name (`ovd-ns-<4hex>`, 11 chars ≤
+/// NAME_MAX) minted ONLY by `derive_workload_netns_plan` — it has no parse
+/// surface, no operator-typed entry point, and no FromStr round-trip to
+/// defend (see the JOIN-1 newtype rationale in wave-decisions.md D-TME-12).
+pub netns: Option<String>,
+```
+
+**Newtype decision (CLAUDE.md § "Newtypes — STRICT by default") — explicit, not
+dodged.** The rule's normal verdict for a domain-bearing identifier is "raw
+`String`/`Option<String>` is a violation; introduce a newtype." Here the verdict is
+**`Option<String>` is acceptable, NO `NetnsName` newtype**, for the rule's own
+stated exception shape ("the newtype's job is validation + a canonical FromStr
+round-trip; a value with no parse surface gains nothing"):
+
+- The netns name is **already validated and bounded by construction** at its SOLE
+  mint site (`derive_workload_netns_plan` → `format!("ovd-ns-{}", slot.to_hex4())`,
+  bounded by the `NetSlot` newtype that DOES carry the discipline — `0..=NET_SLOT_MAX`,
+  4-hex IFNAMSIZ ceiling). The string is a pure projection of an
+  already-newtyped value; the discipline lives one layer up, on `NetSlot`.
+- There is **no parse surface** — no operator ever types a netns name, no wire
+  format carries one, no `FromStr` reconstructs one. A `NetnsName::from_str` would
+  validate input that, by construction, only ever arrives pre-validated. The
+  newtype would be ceremony with no invariant to enforce.
+- **Cost of the newtype is real and one-directional:** `WorkloadNetnsPlan.netns`
+  is currently `String` (`veth_provisioner.rs:462`); a `NetnsName` newtype would
+  force changing that field AND every consumer of `plan.netns` (the 02-02 executor's
+  `ip netns add <name>` / `ip -n <ns> link …` steps, the 02-03 resolv.conf write,
+  the teardown) — a wide ripple for zero new safety, since the value is identical
+  bytes either way. The `Option<String>` field threads the SAME `plan.netns` value
+  with no conversion.
+
+If a future need introduces a netns-name parse surface (an operator-supplied netns,
+a wire-carried name), promoting to `NetnsName` is a localized follow-up — but it is
+NOT justified now and inventing it would be speculative surface the design does not
+need.
+
+#### JOIN-2 (the injection point) — the action-shim C3 site sets `spec.netns` before `driver.start`
+
+The reconciler stays **netns-agnostic**: both production `AllocationSpec` builders
+(`overdrive-core/src/reconcilers/workload_lifecycle.rs:665` + `:750`, and the
+`reconciler_runtime.rs:2924` spec-from-action helper) construct the field as
+`netns: None`. The netns name is runtime slot state the pure reconciler must not
+hold (consistent with criterion 6's rebuilt-on-restart model — the slot is
+re-assigned at the C3 site on each lifecycle pass, not carried in intent).
+
+**Only the action-shim C3 site injects.** At the TOP of each alloc arm (the G2
+provision seam — `StartAllocation` before :887, `RestartAllocation` before :1045),
+AFTER `derive_workload_netns_plan` yields `plan`, the local `spec` binding becomes
+`mut spec` and the shim sets the netns name before the `driver.start(&spec)` match:
+
+```rust
+// action-shim StartAllocation / RestartAllocation arm, at the G2 provision site,
+// before `driver.start(&spec)` (StartAllocation :887 / RestartAllocation :1045):
+let slot = net_slot_allocator.assign(alloc_id.clone())?;              // G3
+let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot)); // G1
+// … provision + resolv.conf-inject the netns (G2) …
+spec.netns = Some(plan.netns.clone());   // JOIN-2: inject the slot-derived name
+// … existing `match driver.start(&spec).await { … }` now spawns INTO the netns.
+```
+
+Verified: `spec` is a local binding at both `driver.start(&spec)` call sites
+(`action_shim/mod.rs:887` / `:1045`); making it `mut spec` at the arm top and
+setting `spec.netns` is a local, non-rippling change. The injection happens ONLY
+on the netns-provisioning path (gated by the existing `mtls_worker.is_some()`
+composition gate, per G1); a non-mTLS boot never reaches the injection and `spec.netns`
+stays `None`.
+
+#### JOIN-3 (the ExecDriver per-spec refactor) — `start` reads `spec.netns`; delete `with_netns_path`
+
+`ExecDriver::start` (`overdrive-worker/src/driver.rs:450`) currently opens the netns
+from the **construction-time** `self.netns_path: Option<PathBuf>` field (set once by
+the `with_netns_path` builder; production never sets it). Refactor to **per-spec**:
+
+```rust
+// overdrive-worker/src/driver.rs — ExecDriver::start, replacing the
+// `self.netns_path.as_ref()` open at :486-499 with a per-spec open.
+let netns_fd = match spec.netns.as_deref() {
+    None => None,
+    Some(name) => {
+        let path = std::path::Path::new("/var/run/netns").join(name);
+        match tokio::fs::File::open(&path).await {
+            Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
+            Err(source) => {
+                let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
+                return Err(DriverError::NetnsEntry {
+                    driver: DriverType::Exec,
+                    netns_path: path.display().to_string(),
+                    source,
+                });
+            }
+        }
+    }
+};
+```
+
+Pinned specifics:
+
+- **Path construction.** The spec carries the netns NAME (`ovd-ns-<4hex>`), not a
+  path; `start` joins it onto the stock `/var/run/netns/<name>` location (where
+  `ip netns add` places it — the 02-02 executor uses stock `ip netns add`). The
+  driver still ENTERS, never creates (CNI-aligned).
+- **Error variant — REUSE the existing `DriverError::NetnsEntry`, do NOT invent.**
+  `DriverError::NetnsEntry { driver, netns_path, source }`
+  (`overdrive-core/src/traits/driver.rs:97-107`) ALREADY exists and fits exactly:
+  its rustdoc describes "configured with a target network namespace path … but the
+  `pre_exec` hook could not enter it — either the path could not be opened … or
+  `setns(CLONE_NEWNET)` failed." Both the missing/unopenable-path branch (above)
+  and the in-`pre_exec` `setns` failure (the `build_command` closure at :430-438,
+  which surfaces as an `io::Error` from `spawn()`) map to it. **No new variant.**
+- **DELETE the now-dead `with_netns_path` builder + its tests (single-cut /
+  deletion discipline).** Verified its ONLY callers are two test fixtures
+  (`overdrive-worker/tests/integration/exec_driver/netns_entry.rs:134` + `:189`) —
+  there is NO production caller (`compose_production_driver` never calls it). Once
+  `start` reads `spec.netns`, `with_netns_path` and the `self.netns_path` field are
+  dead production surface. Delete `with_netns_path`, the `netns_path:
+  Option<PathBuf>` struct field (and its `None` init in `new()` at :270), AND
+  rewrite the two `netns_entry.rs` fixtures to drive the netns via
+  `spec.netns = Some(<name>)` instead of `.with_netns_path(<path>)` — same observable
+  assertion (`/proc/<pid>/ns/net` symlink target; `DriverError::NetnsEntry` on a
+  missing netns), new channel. Do NOT leave a stub, a re-export, or a
+  `#[deprecated]` shim (CLAUDE.md § "Deletion discipline" / "single-cut greenfield
+  migrations"). The two fixtures are REWRITTEN (the new channel tests the same
+  behaviour through the production seam), NOT salvaged — the netns-entry behaviour
+  is still genuinely under test, now via `spec.netns`.
+- **Capability note (not a design blocker).** `setns(CLONE_NEWNET)` needs
+  `CAP_SYS_ADMIN`; fine under `cargo xtask lima run` (root) and the production
+  worker already runs privileged. No new privilege surface.
+
+#### JOIN-4 (the construction-site sweep) — 2 production sites + ~31 fixture sites
+
+Adding the `AllocationSpec.netns` field forces every construction site to add it.
+**PRODUCTION sites (the real boundary the crafter owns — both set `netns: None`,
+per JOIN-2):**
+
+- `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` — TWO literals
+  (`:665` StartAllocation-spec, `:750` RestartAllocation-spec). Reconciler-emitted
+  → `netns: None`.
+- `crates/overdrive-control-plane/src/reconciler_runtime.rs:2924` — the spec-from-
+  action builder fn. Reconciler-side → `netns: None`.
+
+**TEST-FIXTURE sites (~31 files, mechanical `netns: None` additions, compile-driven):**
+every other file in the `AllocationSpec { … }` construction set — the
+`overdrive-worker` / `overdrive-control-plane` / `overdrive-sim` / `overdrive-core`
+`tests/` + the `netns_entry.rs` fixtures (which ALSO migrate to `spec.netns =
+Some(<name>)` per JOIN-3). **Two of these live IN `src/` but are `#[cfg(test)]`
+helpers, NOT production sites** — the `sample_spec` fns in
+`overdrive-worker/src/driver.rs:1230` (ExecDriver's `mod tests`) and
+`overdrive-sim/src/adapters/driver.rs:492` (SimDriver's `mod tests`); treat them as
+fixtures (`netns: None`), do NOT mistake their `src/` location for production. These
+are not a design concern; the crafter adds `netns: None` (or `Some(<name>)` for the
+netns_entry fixtures) as the compiler demands.
+
+**Constructor/builder recommendation — NOT required.** A field add is simpler than
+introducing an `AllocationSpec::new(...)` constructor or a builder; the ~31
+fixture additions are a one-time mechanical sweep and a constructor would itself
+ripple every site. Plain field add is the pinned shape. (If the crafter judges a
+`#[non_exhaustive]` + constructor would localize FUTURE additions and wants to
+propose it, that is a separate decision to surface — do NOT introduce it
+unprompted under this pin.)
+
+#### JOIN-5 (the Tier-3 obligation) — a real workload LANDS in its per-alloc netns
+
+Acceptance: a real workload started through the full alloc lifecycle (Lima, root,
+`--features integration-tests`) actually LANDS in its per-alloc netns — asserted on
+the **observable kernel/ns side effect**, never on program-internal reachability
+(`.claude/rules/testing.md` § "Assertion rules"). Either observable proof suffices:
+
+- `ip netns identify <workload_pid>` == `ovd-ns-<slot>` (the workload's
+  `/proc/<pid>/ns/net` resolves to the provisioned netns's inode, NOT the host's), OR
+- the workload's traffic egressing through the per-alloc veth (e.g. a raw-IP
+  `connect()` from inside the workload reaching the host-side veth gateway).
+
+**DNS resolution is NOT part of this proof** (gated on #61) — use a raw-IP connect
+or `ip netns identify`, never a `getaddrinfo`/DNS round-trip. Record `uname -r` in
+the test (the verdict is kernel-pinned per `.claude/rules/spike.md` / ADR-0068).
+This is the end-to-end proof the join works; it lives in the consolidated step's
+Tier-3 test file(s) under `overdrive-control-plane/tests/integration/` (the
+lifecycle-level seam) — gated behind `integration-tests`, run via `cargo xtask
+lima run --`.
 
 ### New newtype — `NetSlot` (`overdrive-control-plane`, domain-bearing)
 

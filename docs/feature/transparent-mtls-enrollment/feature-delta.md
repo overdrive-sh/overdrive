@@ -116,9 +116,19 @@ hook" naming was WRONG — that callback fires AFTER `driver.start()` (verified
 provision seam is the **TOP of each `StartAllocation`/`RestartAllocation` arm,
 before `driver.start()`**; the "BEFORE `Driver::start`" ordering was always the
 authoritative requirement. See `design/wave-decisions.md` D-TME-12 § "Amended
-2026-06-18 (02-04 C3-wiring gaps)" G2 for the full pinned seams + the
-`ExecDriver`→netns-join separate-concern disposition. No CLI verb, no HTTP
-surface (consistent with
+2026-06-18 (02-04 C3-wiring gaps)" G2 for the full pinned seams. **JOIN FOLDED IN
+2026-06-18:** the `ExecDriver`→per-alloc-netns join — earlier flagged as a separate
+deferred concern — is now IN SCOPE for the consolidated C3-wiring step (02-05), no
+GH issue: a new `AllocationSpec.netns: Option<String>` field (pure in-memory; no
+serde/rkyv on `AllocationSpec`; `Option<String>` not a newtype — the value is an
+already-bounded slot-derived `ovd-ns-<4hex>` projection) carries the netns NAME, the
+reconciler stays netns-agnostic (`None` at both builders), the action-shim C3 site
+injects `Some(plan.netns)` before `driver.start`, and `ExecDriver::start` reads
+`spec.netns` per-call (the once-at-construction `with_netns_path` builder is DELETED
+single-cut). Tier-3 proof: a real workload LANDS in `ovd-ns-<slot>` (`ip netns
+identify`/veth egress; DNS #61-gated, excluded). Full pinned shapes:
+`design/wave-decisions.md` D-TME-12 § "Amended 2026-06-18 (join folded into
+C3-wiring step)" JOIN-1..JOIN-5. No CLI verb, no HTTP surface (consistent with
 ADR-0069: the feature's only observability is telemetry/metrics).
 
 ---
@@ -562,7 +572,7 @@ Default EXTEND. Every CREATE-NEW carries an evidence line that extending is impo
 | `accept_outbound_leg` / `getsockname_orig` (`mtls_intercept.rs`) | **EXTEND** | `getsockname_orig` already exists and is proven for inbound; `accept_outbound_leg` already builds `Routed::Outbound`. Path A calls `getsockname_orig` from the outbound path too — pure reuse. |
 | `MtlsEnforcement` port + adapters | **EXTEND (no contract change)** | The 4-method contract is direction-agnostic and already takes `Routed::Outbound { peer }`. No new method, no new variant. The host adapter loses its cgroup-attach intercept-setup internals (deletion, not addition). |
 | `veth_provisioner` (`derive_veth_plan`/`converge_steps`/`provision`) | **EXTEND** (recommended; Q2 alternatives) | The pure-derivation + idempotent converge-on-boot shape is the exact template for per-workload veth; extending it to a per-alloc, in-netns pair is a parameterization + a netns-create step. (Alternatives: a new per-alloc network reconciler, or drive via the `ExecDriver` setns hook — Q2.) |
-| `ExecDriver` `setns(CLONE_NEWNET)` hook (`driver.rs:181-198`) | **EXTEND (reuse the seam)** | The opt-in `netns_path: Option<PathBuf>` + `pre_exec setns` hook is exactly the seam: the provisioner creates the netns, the driver enters it. CNI-aligned (driver enters, never creates). Reuse as-is; the only change is wiring `netns_path` to the per-alloc netns the provisioner created. |
+| `ExecDriver` `setns(CLONE_NEWNET)` hook (`driver.rs:181-198`) | **EXTEND (per-spec refactor of the seam)** | The `pre_exec setns` hook is exactly the seam: the provisioner creates the netns, the driver enters it. CNI-aligned (driver enters, never creates). **Refactored per-spec (JOIN, 2026-06-18):** the netns name now arrives PER-ALLOC via the new `AllocationSpec.netns: Option<String>` field (injected at the action-shim C3 site), so `ExecDriver::start` reads `spec.netns` per-call. The once-at-construction `with_netns_path` builder + the `self.netns_path: Option<PathBuf>` field are DELETED single-cut (no production caller; two test fixtures rewritten onto the `spec.netns` channel). The `setns` `pre_exec` mechanism + `DriverError::NetnsEntry` are reused unchanged. See wave-decisions.md D-TME-12 JOIN-1..JOIN-5. |
 | #234 shared-routing infra | **EXTEND** | Path A's egress rule lives in the SAME shared `prerouting` chain + fwmark + table the inbound infra (tracked at #234 for the Bar-2 reconciler promotion) already owns. Outbound extends the existing shared infra, not a parallel one. |
 | **`MtlsResolve` port** | **CREATE-NEW (justified)** | No existing port returns `orig_dst → {backend_addr, expected_svid}` filtered to `running`. The closest surfaces are `Dataplane` (map writes, wrong shape) and the `service_backends` table (a data source consumed only by the LB hydrator, no client-facing resolve call). The enrollment model REQUIRES a per-connection resolve consumer; no existing port fits. The port is the #178 anti-corruption boundary (the research's R1/R2 named gap). Extending `MtlsEnforcement` is rejected — it would entangle the resolve concern into the enforcement contract the orchestrator explicitly froze at 4 methods. |
 | **Per-host `NetSlot` allocator** | **CREATE-NEW (justified — D-TME-12)** | No existing host-unique per-alloc integer exists: `alloc-{workload_id}-{attempt}` is workload-scoped (two jobs both have attempt 0), and the cgroup scope (`overdrive.slice/workloads.slice/<alloc>.scope`) keys on the full id string, not a host-unique handle. The slot is genuinely needed because the veth iface names MUST fit IFNAMSIZ (15) and a 253-char `AllocationId` cannot collision-free-map into 15 chars by any pure function (pigeonhole) — a hash makes collisions merely unlikely (CLAUDE.md § "One shared length ceiling" forbids that hand-wave). A bounded host-unique slot makes distinct-slot ⇒ distinct-name AND distinct-/30 structural. Single-node trivial free-list (assign-smallest-free / release); NOT distributed IPAM, NOT the #167 VIP allocator. |
