@@ -289,8 +289,14 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
 /// per-destination match because the workload's destination is unknown at
 /// install time; TPROXY preserves the original destination, which the agent
 /// recovers per-flow via `getsockname` downstream (03-02). This is the
-/// production shape per the feature-delta / ADR-0071 fact 4 — NOT the
-/// single-known-backend `ip daddr/tcp dport` shape the egress spike used.
+/// production shape per the feature-delta / ADR-0071 fact 2 (*"OUTBOUND
+/// interception = nft-TPROXY at the host-side veth"* — the active-side mirror
+/// of inbound) — NOT the single-known-backend `ip daddr/tcp dport` shape the
+/// egress spike used. The spike proved the routing MECHANISM (PREROUTING on
+/// host-veth ingress + fwmark + `ip rule` + local route + `IP_TRANSPARENT`
+/// leg-F + `getsockname` recovery), not the `iifname`-match clause literally;
+/// the real-kernel fire of the iifname clause is the Tier-3 03-01→03-03
+/// obligation (roadmap criterion 5).
 ///
 /// Like the inbound install, this APPENDS exactly one rule to the SHARED
 /// `prerouting` chain (after the F5 exemption) and returns a
@@ -301,13 +307,29 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
 ///
 /// # Idempotency
 ///
-/// The egress rule is keyed ONLY on `host_veth` (no unique daddr/dport), so a
-/// repeat install for the SAME `host_veth` would otherwise append a literal
-/// duplicate. Before appending, the shared chain is presence-checked for an
-/// existing egress rule matching this `host_veth` + redirect; if already
-/// present, no second copy is appended and a guard for the existing rule's
-/// handle is returned. (The inbound install does not need this — distinct
-/// virts produce distinct rule text.)
+/// The egress rule is keyed on `(host_veth, agent_leg_f_port)` — both the
+/// ingress interface AND the leg-F redirect target — because the egress rule
+/// has no unique `ip daddr`/`tcp dport` of its own to distinguish it. Before
+/// appending, the shared chain is presence-checked for an existing egress rule
+/// matching THIS exact `(host_veth, agent_leg_f_port)`; only when such a rule
+/// is already present is the append skipped and a guard for the existing
+/// rule's handle returned. On the normal teardown path the returned guard's
+/// [`TproxyInterceptGuard`] `Drop` removes the rule by handle, so the next
+/// install for that veth starts from a clean chain. (The inbound install does
+/// not need this presence-check — distinct virts produce distinct rule text.)
+///
+/// # Caller contract — leg-F port is part of the key
+///
+/// Because `agent_leg_f_port` is part of the dedup key, the skip fires only for
+/// the same `(host_veth, port)` pair. leg-F binds a worker-chosen *ephemeral*
+/// port per alloc (`mtls_intercept_worker.rs` `leg_f_addr`), so it is NOT
+/// node-stable across re-binds. A caller that re-installs a `host_veth` whose
+/// PRIOR egress rule SURVIVED in the kernel — e.g. a control-plane restart that
+/// left the kernel rule but dropped the in-memory guard, the surviving-veth
+/// re-install at `start_alloc` (04-01) / adopt-on-restart (02-06) — with a
+/// DIFFERENT leg-F port will NOT match the old `(veth, oldPort)` rule and WILL
+/// append a second rule. Such a caller MUST remove the prior rule first (or pin
+/// a stable-per-veth leg-F port) before re-installing.
 ///
 /// # Errors
 ///
@@ -323,10 +345,14 @@ pub fn install_outbound_tproxy(
     // shared rule/route/table/exemption is the success case, left untouched.
     ensure_shared_routing_infra()?;
 
-    // (2) Idempotent append: the egress rule is keyed only on `host_veth`, so a
-    // repeat install for the same veth would stack a literal duplicate. If this
-    // veth's egress rule is already in the shared chain, recover and return a
-    // guard for the EXISTING rule's handle instead of appending a second copy.
+    // (2) Idempotent append: the egress rule is keyed on
+    // `(host_veth, agent_leg_f_port)` — both the ingress interface AND the
+    // leg-F redirect target — since it has no unique daddr/dport. If a rule for
+    // THIS exact `(host_veth, agent_leg_f_port)` is already in the shared chain,
+    // recover and return a guard for the EXISTING rule's handle instead of
+    // appending a second copy. (A surviving rule for the same veth but a
+    // DIFFERENT leg-F port is NOT matched here — see the "Caller contract" in
+    // the rustdoc above.)
     let dump = list_chain()?;
     if dump_has_egress_rule(&dump, host_veth, agent_leg_f_port)
         && let Some(existing) = find_egress_rule_handle_in_dump(&dump, host_veth, agent_leg_f_port)
@@ -986,11 +1012,13 @@ table ip overdrive-mtls {
     // NO `ip daddr` / `tcp dport` (the workload's destination is unknown at
     // install — per-flow orig-dst recovery is 03-02), so it matches on the
     // ingress interface `iifname "<host_veth>"` and TPROXY-redirects ALL of
-    // the workload's egress TCP to the agent's leg-F listener. Because the
-    // rule is keyed ONLY on `host_veth`, a repeat install for the same veth
-    // would append a literal duplicate unless presence-checked first — hence
-    // the idempotency predicate, which the inbound (distinct daddr/dport per
-    // virt) does not need.
+    // the workload's egress TCP to the agent's leg-F listener. The dedup
+    // predicate keys on `(host_veth, agent_leg_f_port)` — both the ingress
+    // interface AND the leg-F redirect target on the same line — because the
+    // egress rule has no `ip daddr` / `tcp dport` of its own to distinguish a
+    // repeat install for the same veth from a fresh one; a presence-check on
+    // both conjuncts is what skips a literal-duplicate append, which the
+    // inbound (distinct daddr/dport per virt) does not need.
 
     /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
     /// carrying the F5 exemption at the head, ONE inbound per-virt tproxy rule,
@@ -1009,14 +1037,20 @@ table ip overdrive-mtls {
 }";
 
     #[test]
-    fn install_outbound_tproxy_appends_one_egress_rule_to_shared_chain() {
-        // Headline (RED_ACCEPTANCE-level) scenario for this default-lane step:
-        // the egress rule that `install_outbound_tproxy(host_veth, port)`
-        // appends to the SHARED `prerouting` chain has the design-pinned shape
-        // — `iifname "<host_veth>" ... tproxy to 127.0.0.1:<port> ...` — and is
-        // recognised in the chain dump, with its kernel-assigned handle parsed
-        // off the trailing `# handle <N>`. This proves the install/teardown/
-        // dedup MECHANICS default-lane; the real kernel CAPTURE is Tier-3 03-03.
+    fn egress_rule_shape_is_recognised_and_handle_parsed_in_shared_chain_dump() {
+        // Headline (RED_ACCEPTANCE-level) scenario for this default-lane step.
+        // This test exercises ONLY the pure predicates against a static fixture
+        // — it does NOT call `install_outbound_tproxy` and proves no append (the
+        // orchestration that wires ensure → presence-check → append → handle-
+        // recover shells out and is the Tier-3 03-03 obligation, the symmetric
+        // companion to inbound AC2). What it pins default-lane: the egress rule
+        // that `install_outbound_tproxy(host_veth, port)` appends to the SHARED
+        // `prerouting` chain has the design-pinned shape — `iifname
+        // "<host_veth>" ... tproxy to 127.0.0.1:<port> ...` — and is recognised
+        // in the chain dump, with its kernel-assigned handle parsed off the
+        // trailing `# handle <N>`. The dedup/teardown MECHANICS (the predicates
+        // that DRIVE the skip-append and by-handle-delete decisions) are proven
+        // here; the real kernel CAPTURE is Tier-3 03-03.
         assert!(
             dump_has_egress_rule(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
             "the egress rule appended for host_veth `ovh-aaaa0` → 127.0.0.1:41000 must be \
@@ -1096,6 +1130,42 @@ table ip overdrive-mtls {
             find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-bbbb1", 41000),
             Some(12),
             "ovh-bbbb1's egress rule handle must parse to 12"
+        );
+    }
+
+    #[test]
+    fn egress_handle_path_yields_none_for_a_matching_line_without_a_handle_marker() {
+        // T1: pins the handle-recovery contract for a line that matches BOTH
+        // `iifname "ovh-aaaa0"` AND the `tproxy to 127.0.0.1:41000` redirect but
+        // carries NO trailing `# handle <N>` marker (e.g. an `nft list chain`
+        // dump taken WITHOUT `-a`, or a truncated capture). The handle path must
+        // read `None` — there is no kernel-assigned handle to recover — while
+        // the presence-check `dump_has_egress_rule` (which does NOT require the
+        // marker) still reads `true` for the SAME line. This distinguishes the
+        // two predicates: presence = `iifname` + `redirect`; handle-recovery =
+        // presence + a recoverable `# handle <N>`. (Note: the `# handle `
+        // conjunct in the `find_egress_rule_handle_in_dump` filter is
+        // belt-and-suspenders with the downstream `parse_handle`, which is
+        // itself a `# handle ` guard — so this test pins the observable
+        // None-on-marker-less CONTRACT, not an independent mutant kill of the
+        // conjunct; the conjunct cannot diverge from `parse_handle` while
+        // `parse_handle` stays the handle extractor.)
+        let no_handle = "\
+table ip overdrive-mtls {
+\tchain prerouting {
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept
+\t}
+}";
+        assert_eq!(
+            find_egress_rule_handle_in_dump(no_handle, "ovh-aaaa0", 41000),
+            None,
+            "a matching egress line with no `# handle <N>` marker yields no recoverable handle"
+        );
+        assert!(
+            dump_has_egress_rule(no_handle, "ovh-aaaa0", 41000),
+            "the SAME marker-less line IS recognised as present by `dump_has_egress_rule` \
+             (iifname + redirect, no marker required) — presence and handle-recovery are \
+             distinct contracts"
         );
     }
 
