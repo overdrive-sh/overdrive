@@ -118,11 +118,56 @@ kernel `7.0.0-22-generic`. **Path A egress is validated.**
 seam), `ip_forward=1`, `rp_filter` relaxation on the ingress veth, and the
 leg-dial `SO_MARK`.
 
+## increment-c — 02-06 adopt-on-restart runtime validation (SPIKE-A/B/C) — VERDICT: WORKS
+
+Ran `spike-scratch/increment-c/` (Rust + libc/nix + `ip` CLI, **no eBPF/C**;
+self-contained, gitignored) as root on Lima kernel `7.0.0-22-generic`, plus a
+read-only code investigation for SPIKE-B. Full evidence in
+`findings-adopt-restart.md`.
+
+- **SPIKE-A — workload survival: WORKS.** A workload spawned with the production
+  ExecDriver shape (`setsid()` + `kill_on_drop(false)` + own cgroup-v2 scope)
+  SURVIVES a SIGKILL of its "serve" parent — reparented to ppid=1, `Ss` (own
+  session), still enrolled in its `cgroup.procs`, still in its `ovd-ns-<slot>`
+  netns. A CP restart leaves workloads running, so the allocator must ADOPT their
+  existing slots, never re-assign smallest-free onto a survivor.
+- **SPIKE-B — boot re-adoption: reconciler does NOT re-drive survivors (CONFIRMED).**
+  `WorkloadLifecycle::reconcile` emits `Action::StartAllocation` only in the
+  "No Running, no failed-needs-restart → schedule a fresh allocation" branch
+  (`workload_lifecycle.rs:708`). An already-`Running` survivor matches the Running
+  branch and emits no Start action, so the C3 `on_alloc_running` slot-rebuild never
+  fires on restart. The C6 "rebuilt on restart by re-assigning for every
+  still-Running alloc" premise has **no trigger** → a dedicated adopt-on-restart
+  boot pass (02-06) is mandatory, not optional.
+- **SPIKE-C — PID→netns slot recovery for a survivor: WORKS.** After the parent is
+  dead, `/proc/<survivor>/ns/net` inode == `stat(/var/run/netns/ovd-ns-<slot>).st_ino`
+  and `ip netns identify` recovers the name. The 02-06 binding-recovery mechanism
+  (cgroup scope → PID → `/proc/ns/net` inode → `NetSlotAllocator::adopt`) is viable.
+
+## Promotion Decision (increment-c): PROCEED-AS-DESIGNED
+
+PROCEED (verdict WORKS on all three, 2026-06-18). The 02-06 adopt-on-restart
+design (D-TME-12 "Amended 2026-06-18 (02-06 adopt-on-restart)" in
+`design/wave-decisions.md`) is **VALIDATED** — no pivot. SPIKE-B strengthens it:
+the boot pass is required precisely because nothing else rebuilds the slot↔alloc
+map. `increment-c/` is preserved (gitignored evidence), not deleted. Building 02-06
+still waits on 04-03 (the C3 wiring being live in production); this spike de-risked
+the design ahead of that step.
+
+**Design implications carried to 02-06** (detail in `findings-adopt-restart.md`):
+adopt-don't-reassign (SPIKE-A); the dedicated `run_server` boot recovery pass is the
+only trigger (SPIKE-B); recover bindings via cgroup→PID→`/proc/ns/net`→`adopt`,
+GC orphan netns with no live PID (SPIKE-C). The inherited-fd hang the probe itself
+hit (a survivor holding a parent's pipe/stdout → EOF never arrives) is a real
+production hang vector — any survivor-facing fd must be close-on-exec / detached.
+
 ## Spike code
 
 `spike-scratch/increment-a/` (gitignored): self-contained aya-rs workspace
 (`ebpf/` + `loader/`), preserved as Probe-A evidence (verdict PIVOT).
 `spike-scratch/increment-b/` (gitignored): self-contained Rust + `ip`/`nft`
-egress-TPROXY harness, preserved as Q1 evidence (verdict WORKS). No Phase-3
-walking skeleton run — DESIGN is already complete; the walking skeleton is
-DELIVER's first slice.
+egress-TPROXY harness, preserved as Q1 evidence (verdict WORKS).
+`spike-scratch/increment-c/` (gitignored): self-contained Rust + libc/nix + `ip`
+adopt-on-restart harness, preserved as 02-06 evidence (verdict WORKS; PROCEED).
+No Phase-3 walking skeleton run — DESIGN is already complete; the walking skeleton
+is DELIVER's first slice.
