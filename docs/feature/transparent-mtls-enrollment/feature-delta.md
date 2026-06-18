@@ -103,13 +103,22 @@ existing action-shim allocation lifecycle (`on_alloc_running` / `on_alloc_termin
 which already invokes `MtlsInterceptWorker::start_alloc` / `stop_alloc`.
 
 **Netns-creation call site PINNED (C3)**: the per-workload netns+veth (and its
-resolv.conf injection, Q5a) is provisioned at the action-shim **`on_alloc_running`**
-hook (alloc → Running), **BEFORE `MtlsInterceptWorker::start_alloc`** and **BEFORE
-`start_alloc` / `Driver::start`** spawns the workload process into the netns. The
-ordering is load-bearing: the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS an
-already-created netns (CNI-aligned, `driver.rs:181-198`), so the provisioner MUST
-have created+converged the netns/veth before the driver's `pre_exec setns` fires.
-Teardown is at `on_alloc_terminal`. No CLI verb, no HTTP surface (consistent with
+resolv.conf injection, Q5a) is provisioned at the action-shim alloc lifecycle,
+**BEFORE `MtlsInterceptWorker::start_alloc`** and **BEFORE `Driver::start`**
+spawns the workload process into the netns. The ordering is load-bearing: the
+`ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS an already-created netns
+(CNI-aligned, `driver.rs:181-198`), so the provisioner MUST have
+created+converged the netns/veth before the driver's `pre_exec setns` fires.
+Teardown is at the terminal arms, teardown-then-release. **SEAM CORRECTED
+2026-06-18 (02-04 C3-wiring gaps, G2):** the original "at the `on_alloc_running`
+hook" naming was WRONG — that callback fires AFTER `driver.start()` (verified
+`action_shim/mod.rs` :1002/:1152), contradicting "BEFORE `Driver::start`". The
+provision seam is the **TOP of each `StartAllocation`/`RestartAllocation` arm,
+before `driver.start()`**; the "BEFORE `Driver::start`" ordering was always the
+authoritative requirement. See `design/wave-decisions.md` D-TME-12 § "Amended
+2026-06-18 (02-04 C3-wiring gaps)" G2 for the full pinned seams + the
+`ExecDriver`→netns-join separate-concern disposition. No CLI verb, no HTTP
+surface (consistent with
 ADR-0069: the feature's only observability is telemetry/metrics).
 
 ---
@@ -901,10 +910,12 @@ crafters implement-to-design (do NOT invent). Status:
   `{ addr, expected_svid }`; the v1 `ServiceBackendsResolve` adapter returns
   `expected_svid: None` (authn-only; the expected-SVID join is #178; filling it
   here = boundary divergence) — § "`MtlsResolve` port contract" (C2).
-- **Suggestion 3 (C3) — PINNED.** Netns creation at the action-shim
-  `on_alloc_running` hook, BEFORE `MtlsInterceptWorker::start_alloc` and BEFORE
-  `start_alloc`/`Driver::start` — § "Driving ports" + the provisioner component
-  row.
+- **Suggestion 3 (C3) — PINNED.** Netns creation at the action-shim alloc
+  lifecycle, BEFORE `MtlsInterceptWorker::start_alloc` and BEFORE `Driver::start`
+  — § "Driving ports" + the provisioner component row. (Seam name corrected
+  2026-06-18: the provision seam is the TOP of the `StartAllocation`/`RestartAllocation`
+  arms, NOT the `on_alloc_running` callback which fires after `driver.start()` —
+  D-TME-12 § "Amended 2026-06-18" G2.)
 - **Suggestion 4 — NOT pinned in this fold-in (outstanding).** Pinning the
   `increment-b/` Tier-3 spike acceptance criteria (workload `connect()` redirects
   to leg-F; `getsockname` recovers orig-dst; marked leg-B/leg-S dials NOT

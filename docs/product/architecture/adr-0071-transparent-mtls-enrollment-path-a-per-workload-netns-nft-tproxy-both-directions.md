@@ -161,6 +161,49 @@ The structural facts, binding on DELIVER:
    `ObservedWorkloadVeth` surface is pinned in `feature-delta.md` § "D-TME-12 —
    pinned API contract" and `design/wave-decisions.md` D-TME-12.
 
+   **Amended 2026-06-18 (02-04 C3-wiring gaps; resolves three under-specified
+   gaps that blocked the C3 lifecycle wiring after the pure `NetSlotAllocator`
+   landed, `9f7d35ce`).** Three pins, each verified against shipped code; the full
+   detail is `design/wave-decisions.md` D-TME-12 § "Amended 2026-06-18 (02-04
+   C3-wiring gaps)" G1/G2/G3, summarised here for the ADR record:
+   - **G1 — responder address.** `responder_addr` (the `derive_workload_netns_plan`
+     input, carried into the netns `resolv.conf` per fact 8) = **the per-netns
+     gateway, `plan.host_addr = subnet.network()+1`** — the Overdrive analogue of
+     Fly's single `fdaa::3` (one well-known node-local address *per netns*,
+     reachable by construction as the default route, ZERO new converge step,
+     collision-free as the slot's own /30 host addr). The rejected alternative —
+     a single fixed constant — would have required an additional idempotent
+     per-netns route + a new `WorkloadVethStep`/`ObservedWorkloadVeth` fact. #61's
+     daemon answers on each host-veth gateway. **#61 is NOT a wiring blocker:** the
+     provision + resolv.conf injection land behind the existing mTLS composition
+     gate and write a correct, reachable `nameserver` line; only end-to-end DNS
+     resolution waits on #61 shipping.
+   - **G2 — provision SEAM CORRECTION.** The "`on_alloc_running` hook" naming in
+     the original C3 fact above (and at the per-host `NetSlot` allocator paragraph)
+     was **WRONG and is struck** — that callback fires AFTER `driver.start()`
+     (verified `action_shim/mod.rs` StartAllocation :1002 / RestartAllocation
+     :1152), contradicting "BEFORE `Driver::start`". The provision+assign seam is
+     the **TOP of each `StartAllocation`/`RestartAllocation` arm, before
+     `driver.start()`** (before :887 / before :1045). Teardown+release at the
+     terminal arms (`StopAllocation` :1227-onward / `FinalizeFailed` :851-onward),
+     after the driver stop, **teardown-then-release** (a crash between leaves the
+     slot HELD = resource still reclaimable, never a released-but-undestroyed
+     leak). The "BEFORE `Driver::start`" ordering was always correct and is
+     authoritative; only the hook NAME was wrong. The `ExecDriver`→netns join
+     *seam* exists (`with_netns_path` + `setns(CLONE_NEWNET)` pre_exec hook,
+     `overdrive-worker/src/driver.rs`) but is NOT wired per-alloc (it is a
+     once-at-construction builder, and `AllocationSpec` carries no netns field) —
+     **a SEPARATE tracked concern**, flagged for user approval as a candidate new
+     issue, NOT in the C3-wiring step's scope.
+   - **G3 — allocator plumbing.** `NetSlotAllocator` (already `Clone+Default`,
+     internally `Arc<Mutex<…>>`-shared like `IdentityMgr`) lives as a non-`Option`
+     `AppState.net_slot_allocator` field, default-constructed inside the `AppState`
+     constructors (ripple-free for the ~42 fixtures, mirroring how `mtls_worker`
+     defaults to `None`), threaded to `dispatch`/`dispatch_single` as a new
+     explicit param (the established port-passing shape). It carries no boot-time
+     state (fresh boot holds nothing; still-Running allocs re-assign on their next
+     lifecycle pass).
+
 2. **OUTBOUND interception = nft-TPROXY at the host-side veth (the active-side
    mirror of inbound).** The workload's outbound `connect()` leaves its netns
    via the veth, ingresses the host-side veth, and is nft-TPROXY-redirected to
