@@ -336,12 +336,16 @@ fn alloc(name: &str) -> AllocationId {
     AllocationId::new(name).expect("valid allocation id")
 }
 
-/// AC1 + AC4: outbound leg acquire. `make_transparent_listener` is NOT used
-/// for leg F (leg F is a plain loopback listener — the design states leg F
-/// needs no IP_TRANSPARENT), so this scenario stands up a plain
-/// `std::net::TcpListener` on `127.0.0.1:0`, dials it, and drives
-/// `accept_outbound_leg`, asserting the routing fact is `Outbound { peer }`
-/// with the pre-programmed peer and the leg is handed by value (an OwnedFd).
+/// AC1–AC4: outbound leg acquire recovers the real peer via `getsockname`
+/// (symmetric with `accept_inbound_leg`), NOT from the declared-peer slot.
+/// `make_transparent_listener` is NOT used for leg F (leg F is a plain
+/// loopback listener — the design states leg F needs no IP_TRANSPARENT), so
+/// this scenario stands up a plain `std::net::TcpListener` on `127.0.0.1:0`,
+/// dials it, and drives `accept_outbound_leg`. The routing fact is
+/// `Outbound { peer }` where `peer` is the dialed orig-dst recovered via
+/// `getsockname` on the accepted socket (== the listener's `leg_f_addr`),
+/// PROVABLY NOT the declared peer argument (which differs). The leg is handed
+/// by value (an OwnedFd).
 #[test]
 fn worker_intercept_install_leg_acquire_outbound() {
     if !is_root() {
@@ -357,9 +361,15 @@ fn worker_intercept_install_leg_acquire_outbound() {
         other => panic!("expected V4 leg-F addr, got {other}"),
     };
 
-    // The pre-programmed real peer leg B would dial (handed verbatim into
-    // accept_outbound_leg). Arbitrary stable addr; not actually connected to.
-    let peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
+    // The transitional declared-peer slot (passed verbatim into
+    // accept_outbound_leg). It is DELIBERATELY a different address from the one
+    // the client dials, so the test proves recovery (getsockname == dialed
+    // addr), not echo of the declared arg. The slot itself is removed in 04-02.
+    let declared_peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
+    assert_ne!(
+        declared_peer, leg_f_addr,
+        "the declared peer must differ from the dialed addr so the test proves recovery"
+    );
     let alloc_id = alloc("alloc-outbound-leg");
 
     // A client thread dials the leg-F listener so the production accept has a
@@ -372,12 +382,23 @@ fn worker_intercept_install_leg_acquire_outbound() {
         buf
     });
 
-    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), peer)
+    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), declared_peer)
         .expect("accept_outbound_leg must build InterceptedConnection");
 
-    // AC4: routing fact is Outbound { peer } with the pre-programmed peer.
+    // AC1/AC3: routing fact is Outbound { peer } where peer is the dialed
+    // orig-dst recovered via getsockname on the accepted socket — i.e. the
+    // listener's leg_f_addr, NOT the declared-peer arg.
     match intercepted.routed {
-        Routed::Outbound { peer: got } => assert_eq!(got, peer, "Outbound peer must round-trip"),
+        Routed::Outbound { peer: got } => {
+            assert_eq!(
+                got, leg_f_addr,
+                "Outbound peer must be the getsockname-recovered dialed addr (leg_f_addr)"
+            );
+            assert_ne!(
+                got, declared_peer,
+                "recovered peer must NOT be the declared-peer arg — proves getsockname recovery, not echo"
+            );
+        }
         Routed::Inbound { orig_dst } => panic!("expected Outbound, got Inbound {{ {orig_dst} }}"),
     }
     assert_eq!(intercepted.routed.direction(), Direction::Outbound);
