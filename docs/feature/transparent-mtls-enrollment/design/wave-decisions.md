@@ -241,9 +241,15 @@ existing `#[allow(clippy::too_many_arguments)]` rationale on `dispatch` states).
   the ~42 non-mTLS fixtures and the `reconciler_runtime.rs`/`listener_facts.rs`
   callers (`AppState::new` at reconciler_runtime.rs:3212/3687) need NO change. The
   production boot composes/holds the same default (it carries no boot-time state —
-  on a fresh process boot nothing is held; still-Running allocs re-assign on their
-  next `on_alloc_running`, criterion 6), so the production `AppState` construction
-  at lib.rs:1935 either inherits the default or sets the field explicitly post-construct.
+  on a fresh process boot nothing is held). **The "still-Running allocs re-assign on
+  their next `on_alloc_running`, criterion 6" claim here is CORRECTED by the 02-06
+  adopt-on-restart amendment below (§ "C6 was wrong: there is no re-assign
+  trigger"): the reconciler does NOT re-drive a Running survivor, so the slot is
+  rebuilt by a dedicated boot-time adopt pass (02-06), not by a re-assign on the
+  lifecycle. The G3 plumbing here is unchanged either way (a default-constructed
+  allocator that 02-06's boot pass populates by `adopt`).** So the production
+  `AppState` construction at lib.rs:1935 either inherits the default or sets the
+  field explicitly post-construct.
 - **Threading:** add `net_slot_allocator: &NetSlotAllocator` as a new explicit
   param to `dispatch(...)` (action_shim/mod.rs:474-489) and `dispatch_single(...)`
   (:682-697), passed at the loop call site (:493-508) and from
@@ -348,8 +354,12 @@ The reconciler stays **netns-agnostic**: both production `AllocationSpec` builde
 (`overdrive-core/src/reconcilers/workload_lifecycle.rs:665` + `:750`, and the
 `reconciler_runtime.rs:2924` spec-from-action helper) construct the field as
 `netns: None`. The netns name is runtime slot state the pure reconciler must not
-hold (consistent with criterion 6's rebuilt-on-restart model — the slot is
-re-assigned at the C3 site on each lifecycle pass, not carried in intent).
+hold — the slot is assigned at the C3 site on the START lifecycle (a fresh alloc),
+NOT carried in intent. (The earlier "re-assigned at the C3 site on each lifecycle
+pass / criterion 6 rebuilt-on-restart" framing is CORRECTED by the 02-06
+adopt-on-restart amendment below: a Running survivor is never re-driven through the
+C3 site, so its slot is rebuilt by 02-06's dedicated boot adopt pass. The
+netns-agnostic-reconciler decision here is unchanged regardless.)
 
 **Only the action-shim C3 site injects.** At the TOP of each alloc arm (the G2
 provision seam — `StartAllocation` before :887, `RestartAllocation` before :1045),
@@ -485,6 +495,264 @@ This is the end-to-end proof the join works; it lives in the consolidated step's
 Tier-3 test file(s) under `overdrive-control-plane/tests/integration/` (the
 lifecycle-level seam) — gated behind `integration-tests`, run via `cargo xtask
 lima run --`.
+
+**Amended 2026-06-18 (02-06 adopt-on-restart — cross-restart slot rebuild).**
+The five JOIN decisions above (02-05) wire a workload INTO its per-alloc netns on
+the normal alloc lifecycle. They are silent on what happens on a **`serve`
+restart**, where the in-RAM `NetSlotAllocator` map (G3) is lost but the workloads
+SURVIVE. This block designs the **adopt-on-restart** step (02-06) that closes that
+hazard. It is PURELY ADDITIVE on the 02-05 frozen shape (a new allocator method, a
+new observe surface, a new boot-recovery pass) — it requires NO change to any
+G1/G2/G3 or JOIN-1..JOIN-5 surface (`AllocationSpec.netns`, the
+`AppState.net_slot_allocator` field, the `dispatch`/`dispatch_single` param, the
+provision/teardown seams, the `ExecDriver` per-spec `setns`). The C6 "rebuilt on
+restart by re-assigning for every still-Running alloc" wording in the `NetSlotAllocator`
+rustdoc (`veth_provisioner.rs:636-639`) and elsewhere is **CORRECTED by this block**
+— see § "C6 was wrong: there is no re-assign trigger" below; the corrected model is
+a dedicated boot pass, NOT a reconciler re-drive. **The runtime survival/adopt
+semantics are Tier-3-spike-gated; this block pins what is settled and marks what the
+spike must settle (§ "Spike boundary").**
+
+#### The hazard (verified ground truth)
+
+On a `serve` restart the in-RAM `NetSlotAllocator` (`Arc<Mutex<BTreeMap<AllocationId,
+NetSlot>>>`, `veth_provisioner.rs:652-658`) is reconstructed empty
+(`NetSlotAllocator::new()`). But:
+
+- **Workloads SURVIVE the restart.** `ExecDriver` spawns with `setsid()`
+  (`driver.rs:413-414`), `kill_on_drop(false)` (`driver.rs:395`), and lives in its
+  own cgroup scope (`overdrive.slice/workloads.slice/<alloc>.scope`) — detached from
+  the CP process lifetime. A surviving workload keeps running in its old
+  `ovd-ns-<slot>` netns. (Survival on a real `serve` restart is SPIKE-A below; the
+  `setsid`+`kill_on_drop(false)`+cgroup-detach mechanism strongly implies it but is
+  not yet ground-truthed against a real CP restart.)
+- ⇒ A naive empty-allocator restart hands out **smallest-free from 0** to the next
+  NEW alloc → `assign` returns slot 0 → `derive_workload_netns_plan(0, …)` →
+  `provision_workload_netns` for `ovd-ns-0000` while a SURVIVING pre-restart alloc
+  still occupies `ovd-ns-0000` (it had slot 0). That is the **B1 collision
+  resurrected across restart** — two live allocs on one netns/veth/`/30`. Plus an
+  **orphan-netns leak**: a pre-restart `ovd-ns-<slot>` whose workload DID die during
+  the restart window is never torn down (its terminal arm never ran).
+- **B3 complication:** the netns name is slot-keyed (`ovd-ns-<4hex>`), carrying NO
+  alloc identity (deliberate — the Cilium `lxc<hex>` model, D-TME-12). So the netns
+  NAME alone cannot tell you which alloc owns `ovd-ns-0005` after a restart. The
+  slot↔alloc binding must be RECOVERED by correlating each surviving alloc's PIDs
+  (read from its cgroup `cgroup.procs`) to that PID's netns
+  (`/proc/<pid>/ns/net` inode → match against `/var/run/netns/ovd-ns-<slot>` inode,
+  the `ip netns identify` mechanism).
+
+#### C6 was wrong: there is no re-assign trigger (the premise gap, resolved)
+
+The C6 model ("the held set is rebuilt on restart by re-assigning for every
+still-Running alloc on its next `on_alloc_running`") assumed a rebuild trigger that
+**does not fire**. Verified in `reconcilers/workload_lifecycle.rs:614-769`: the
+`WorkloadLifecycle` reconciler emits `Action::StartAllocation` ONLY in the "**No
+Running, no failed-needs-restart → schedule a fresh allocation**" branch (:708-765).
+An alloc whose observation row is already `Running` (which a survivor's row IS,
+post-restart) takes the Running branch and emits **no Start action** — so the C3
+assign+provision seam at the action-shim alloc arms (G2) **never fires for a surviving
+alloc**. The slot is never re-assigned by the normal path. C6's "re-assign on next
+`on_alloc_running`" is therefore **false** — and unlike `IdentityMgr` (which CAN rely
+on reconciler re-drive because a `¬held` SVID is harmless to re-issue and the
+`SvidLifecycle` reconciler DOES re-issue on `¬held`), the netns case has BOTH (a) no
+re-drive trigger AND (b) a SURVIVING resource that must NOT be re-created from slot 0.
+**Conclusion: adopt-on-restart MUST be a dedicated boot-time recovery pass, not a
+reconciler re-drive.** This is the per-alloc-netns analogue of #197's observed-state
+hydration, but its own step (#197 is the host-pair network reconciler — see § "#197
+relation" below).
+
+#### 1. Observe-actual surface — `adopt_observe` (slot↔alloc recovery)
+
+A new boot-time observe function reconstructs the surviving slot↔alloc bindings by
+correlating three already-available facts. It lives in `veth_provisioner.rs`
+(co-located with the slot derivation + the existing `ip netns list` parser
+`netns_exists` at :1870, and the `provision`/`teardown` it mirrors). PINNED shape:
+
+```rust
+// veth_provisioner.rs — boot-time observe of surviving per-alloc netns bindings.
+// Pure-ish thin observer (real `ip netns list` + procfs reads, no decision logic);
+// the decision logic (adopt-vs-GC) is the pure `adopt_plan` below, default-lane
+// unit + mutation testable.
+
+/// One surviving netns observed at boot: its slot, and the alloc that owns it
+/// (recovered via PID→netns correlation) if any live PID claims it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObservedAdoptNetns {
+    pub slot: NetSlot,
+    /// `Some(alloc)` when a live PID inside `<alloc>.scope` resolves
+    /// (`/proc/<pid>/ns/net`) to this netns's inode; `None` = orphan (no live
+    /// owner → GC candidate).
+    pub owner: Option<AllocationId>,
+}
+```
+
+The observe walks:
+1. **Enumerate `ovd-ns-*` netns.** `ip netns list`, filter to the
+   `WORKLOAD_NETNS_PREFIX` (`ovd-ns-`), parse the 4-hex slot back to a `NetSlot`
+   (reuse the `netns_exists` line-parser shape at :1879-1881). This is the SET of
+   provisioned per-alloc netns surviving the restart.
+2. **Read the Running alloc set from the ObservationStore.** `obs.alloc_status_rows()`
+   (exists — `observation_store.rs:1332`) filtered to `state == Running`
+   (`AllocStatusRow` carries `alloc_id` + `state`, NOT the slot — `:652-656`). This
+   is the SET of allocs the CP believes are Running.
+3. **Correlate PID→netns per Running alloc.** For each Running `alloc`, read its
+   surviving PIDs from `CgroupPath::for_alloc(alloc).resolve(root).join("cgroup.procs")`
+   (no new cgroup-manager surface needed — the path is `CgroupPath::for_alloc`,
+   `cgroup_manager.rs:68`; reading `cgroup.procs` is a plain procfs read). For each
+   PID, resolve `/proc/<pid>/ns/net` to its netns inode (the proven in-tree mechanism
+   `read_proc_netns_inode`, `overdrive-worker/tests/integration/exec_driver/netns_entry.rs:96-102`
+   — promote a production copy into `veth_provisioner.rs`, do NOT depend on the test
+   module). Match that inode against each enumerated `ovd-ns-<slot>`'s inode
+   (`/var/run/netns/ovd-ns-<slot>` is itself a namespace handle whose inode is read
+   the same way) → the `(slot, owner=alloc)` binding.
+
+The output is `Vec<ObservedAdoptNetns>`: each enumerated netns tagged with its
+recovered owner (or `None` = orphan). **CGROUP ENUMERATION IS NOT NEEDED** — we do
+NOT list all alloc scopes (no such surface exists, and we don't add one); we drive
+the correlation from the ObservationStore Running set, reading each known alloc's
+`cgroup.procs` by its derived path. This keeps 02-06 free of any new
+`cgroup_manager` surface.
+
+**Spike-gated:** steps 1+3's runtime reliability (does `ip netns list` survive a CP
+restart with all the per-alloc netns intact? does the PID→netns inode match recover
+the slot reliably for a SURVIVING workload, not just a freshly-spawned one?) is
+SPIKE-A/C below. The SHAPE above is pinned; the runtime fidelity is the spike's job.
+
+#### 2. Allocator adopt method — `NetSlotAllocator::adopt` (ADDITIVE, atomic)
+
+An ADDITIVE method on the LANDED `NetSlotAllocator` (02-04, `9f7d35ce`) that claims a
+SPECIFIC `(alloc, slot)` binding — NOT smallest-free. PINNED signature:
+
+```rust
+// veth_provisioner.rs — ADDITIVE to the landed NetSlotAllocator impl. Does NOT
+// touch assign/release/snapshot (the 02-04/02-05 frozen surface).
+
+/// Claim the SPECIFIC `(alloc, slot)` binding observed surviving a restart
+/// (adopt-on-restart, 02-06) — the inverse of [`assign`](Self::assign)'s
+/// smallest-free pick. Used ONLY by the boot recovery pass to rebuild the
+/// held map from the recovered slot↔alloc correlation BEFORE any
+/// smallest-free `assign` can run, so a subsequent `assign` cannot hand a
+/// surviving slot to a new alloc (the cross-restart B1 collision).
+///
+/// **Atomic check-and-act (`development.md` § "Check-and-act must be atomic"):**
+/// ONE locked critical section checks whether `slot` is already held by a
+/// DIFFERENT alloc and, only if free (or already held by THIS alloc — idempotent
+/// re-adopt), inserts the binding. The conflict verdict is the insert's own
+/// outcome, never a separate pre-check.
+///
+/// # Errors
+///
+/// Returns [`NetSlotAdoptConflict`] when `slot` is already held by a DIFFERENT
+/// alloc — the boot pass treats this as a fatal correlation bug (two survivors
+/// claiming one slot is impossible by construction; distinct slots ⇒ distinct
+/// netns) and refuses to boot rather than silently overwrite. Re-adopting the
+/// SAME `(alloc, slot)` is an idempotent no-op success.
+pub fn adopt(&self, alloc: AllocationId, slot: NetSlot) -> Result<(), NetSlotAdoptConflict>;
+```
+
+with the companion error:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("net slot {slot} already held by {held_by}, cannot adopt for {requested_by}")]
+pub struct NetSlotAdoptConflict {
+    pub slot: NetSlot,
+    pub held_by: AllocationId,
+    pub requested_by: AllocationId,
+}
+```
+
+ADDITIVE confirmation: `assign` / `release` / `snapshot` are UNCHANGED; `adopt`
+shares the same `Arc<Mutex<BTreeMap<AllocationId, NetSlot>>>` held map and the same
+one-locked-critical-section discipline. The held-by-different-alloc check IS the
+atomic verdict (scan the map's values for `slot` while holding the guard; insert iff
+free-or-self). PINNED as a single locked op — no contains-then-insert TOCTOU.
+
+#### 3. Boot sequence — a recovery pass in `serve`, adopt-then-GC, BEFORE serving
+
+WHO drives it: a **boot-time recovery pass in `run_server_with_obs_and_driver`**
+(mirroring where the host-netns `veth_provisioner::provision` already sits in the boot
+order, `lib.rs:1507`), NOT a reconciler observe. Rationale: (a) the C6 finding above —
+there is no reconciler re-drive trigger for a Running survivor; (b) the pass must
+complete BEFORE the convergence loop or the action-shim can hand out a smallest-free
+slot, which is a boot-ordering guarantee a once-per-boot pass gives and a steady-state
+reconciler tick does not; (c) it mirrors `IdentityMgr`'s "fresh boot" handling site
+(boot composition) even though the netns MECHANISM differs (adopt-survivor, not
+re-drive). PINNED order (additive, sits after `AppState` construction at `lib.rs:1935`
+where `net_slot_allocator` is available, and BEFORE the convergence loop / exit-observer
+spawn at :1956+, gated by the same `mtls_worker.is_some()` composition gate G1 uses —
+the recovery pass is a no-op on a non-mTLS boot where no per-alloc netns exist):
+
+1. **`adopt_observe`** → `Vec<ObservedAdoptNetns>` (§1).
+2. **Adopt every owned binding** — for each `ObservedAdoptNetns { slot, owner: Some(alloc) }`,
+   `net_slot_allocator.adopt(alloc, slot)?`. This rebuilds the held map so the very
+   next smallest-free `assign` cannot collide with a survivor. A `NetSlotAdoptConflict`
+   refuses the boot (`health.startup.refused`, reason `netns.adopt`) — two survivors on
+   one slot is a correlation bug, never silently resolved.
+3. **GC every orphan** — for each `ObservedAdoptNetns { slot, owner: None }`, derive the
+   plan (`derive_workload_netns_plan(slot, responder_addr_for_slot(slot))`) and
+   `teardown_workload_netns(&plan)` (exists, idempotent, slot-derived — `:1671`). The
+   orphan's slot becomes free for a future `assign`. Teardown-not-release: there is no
+   held binding to release (orphan = no owner), so GC is teardown-only.
+4. **THEN serve** — the convergence loop / action-shim start. By construction every
+   surviving slot is held (adopted) and every orphan is reaped, so the first
+   smallest-free `assign` picks a genuinely-free slot.
+
+Adopt-BEFORE-GC ordering is load-bearing: adopt first so the held map reflects every
+survivor before any free-slot scan; GC second so orphan slots return to the free pool.
+Order 2→3 within the pass; both strictly before serving (4).
+
+**Spike-gated:** SPIKE-B (what does `serve` boot do TODAY with already-Running allocs —
+does anything re-adopt / re-drive / nothing?) confirms the pass has no pre-existing
+behaviour to conflict with. The pass SHAPE + ordering is pinned; its interaction with
+whatever boot already does is the spike's to confirm before the rest is locked.
+
+#### 4. IdentityMgr coupling
+
+`IdentityMgr` rebuilds its own held state on restart by the **opposite** mechanism: it
+boots EMPTY (`IdentityMgr::new`, `identity_mgr.rs:66-74`) and relies on the
+`SvidLifecycle` reconciler re-issuing for every still-Running alloc that reads as
+`¬held` (`identity_mgr.rs:9`, `:69`). **02-06 does NOT mirror that** — and the contrast
+is the whole point: an SVID is cheap and safe to re-mint on `¬held` (a fresh cert, no
+surviving kernel resource), so reconciler re-drive works; a netns is a SURVIVING kernel
+resource that must NOT be re-created from slot 0, and (per the C6 finding) the reconciler
+does not even re-drive a Running survivor. So 02-06 adopts the survivor rather than
+re-creating it. The two restart models are deliberately different and both correct for
+their resource. **#26 coupling:** whether the workload's mTLS kernel material (kTLS /
+bpffs-pinned, the kernel-mediated identity) survives a CP restart is the #26-coupled,
+Tier-3-spike question flagged in CLAUDE.md § "Workload identity model"; 02-06's adopt
+recovers the NETNS/SLOT binding only — it does NOT claim to recover or re-supply the
+mTLS crypto, which is #26's concern. 02-06's scope is the network-slot rebuild; the
+identity-material survival is out of scope and explicitly NOT assumed.
+
+#### Spike boundary — PINNED vs SPIKE-GATED
+
+PINNED (settled by the codebase grounding above, build to these now):
+- The `adopt` method signature + `NetSlotAdoptConflict` (§2) — pure in-RAM, no runtime
+  unknown.
+- The `ObservedAdoptNetns` shape + the three-fact correlation WALK (§1) — the
+  mechanism is `ip netns list` (proven parser at `:1870`) + `cgroup.procs` read +
+  `/proc/<pid>/ns/net` inode (proven at `netns_entry.rs:96`).
+- The boot-pass ORDERING (adopt-then-GC-then-serve) + its home (`run_server`, after
+  `AppState`, before the convergence loop) + adopt-conflict-refuses-boot (§3).
+- The IdentityMgr contrast (§4).
+
+SPIKE-GATED (do NOT fully pin past these — see the spike recommendation in the
+orchestrator report):
+- **SPIKE-A:** do workloads actually SURVIVE a real `serve` restart on the Lima
+  kernel (not just "setsid + kill_on_drop(false) + cgroup-detach implies it")? If they
+  do NOT survive, the whole adopt model collapses to "GC everything + let the
+  reconciler re-Start from a fresh slot pool" — a materially simpler 02-06.
+- **SPIKE-B:** what does `serve` boot do TODAY with already-Running allocs (re-adopt /
+  re-drive / nothing)? Confirms the recovery pass has no pre-existing conflicting
+  behaviour.
+- **SPIKE-C:** does `/proc/<surviving-pid>/ns/net` inode → `/var/run/netns/ovd-ns-<slot>`
+  inode reliably recover the slot for a SURVIVING workload across the restart (the
+  proven in-tree mechanism is for a FRESHLY-spawned child; the restart-survivor case is
+  unverified)?
+
+Until SPIKE-A/B/C return, §1/§3's runtime fidelity is provisional. §2/§4 are pinnable
+regardless (pure / contrast-only).
 
 ### New newtype — `NetSlot` (`overdrive-control-plane`, domain-bearing)
 
@@ -648,6 +916,20 @@ requirement). Release+teardown DO happen at the terminal arms
 Step 02-04 split in execution: the PURE `NetSlotAllocator` (assign/release logic)
 landed (`9f7d35ce`); the C3 lifecycle WIRING (the seams + plumbing) is the
 follow-up step pinned by the three G1/G2/G3 amendments under D-TME-12.
+
+**Amended 2026-06-18 (02-06 adopt-on-restart).** The allocator's CROSS-RESTART
+rebuild is its own step, **02-06** (designed in the "Amended 2026-06-18 (02-06
+adopt-on-restart)" block under D-TME-12 above). The 02-04 `NetSlotAllocator`
+rustdoc claims the held map is "rebuilt on restart by re-assigning for every
+still-Running alloc" (`veth_provisioner.rs:636-639`) — that premise is **FALSE**
+(the reconciler does not re-drive a Running survivor; see the 02-06 "C6 was wrong"
+analysis), and the rustdoc is flagged for the 02-06 crafter to correct in-code
+(architect does not edit code). 02-06 adds an ADDITIVE `NetSlotAllocator::adopt`
+(claim a specific `(alloc, slot)`, atomic), a boot-time `adopt_observe` +
+adopt-then-GC-then-serve recovery pass in `run_server`, and is PURELY ADDITIVE on
+the 02-05 frozen shape. **02-06's survival/adopt RUNTIME semantics are
+Tier-3-spike-gated** (SPIKE-A/B/C in the D-TME-12 block) — the orchestrator should
+run an `nw-spike` PROBE before dispatching the 02-06 crafter.
 
 ## Reuse Analysis verdict
 

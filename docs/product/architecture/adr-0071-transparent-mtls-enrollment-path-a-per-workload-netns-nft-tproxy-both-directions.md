@@ -213,8 +213,36 @@ The structural facts, binding on DELIVER:
      constructors (ripple-free for the ~42 fixtures, mirroring how `mtls_worker`
      defaults to `None`), threaded to `dispatch`/`dispatch_single` as a new
      explicit param (the established port-passing shape). It carries no boot-time
-     state (fresh boot holds nothing; still-Running allocs re-assign on their next
-     lifecycle pass).
+     state (fresh boot holds nothing). The "still-Running allocs re-assign on their
+     next lifecycle pass" claim is **CORRECTED by the 02-06 amendment below** — a
+     Running survivor is never re-driven, so the slot is rebuilt by a dedicated boot
+     adopt pass, not by a re-assign.
+   - **02-06 — adopt-on-restart (cross-restart slot rebuild), designed
+     2026-06-18.** On a `serve` restart the in-RAM `NetSlotAllocator` map is lost
+     but the workloads SURVIVE (`ExecDriver` `setsid` + `kill_on_drop(false)` +
+     own cgroup scope, detached from CP lifetime). A naive empty-allocator restart
+     would hand smallest-free slot 0 to a NEW alloc while a survivor still holds
+     `ovd-ns-0000` (B1 collision resurrected across restart), and orphan netns whose
+     workload died during the restart window would leak. C6's "rebuilt on restart by
+     re-assigning for every still-Running alloc" premise is **false** — the
+     `WorkloadLifecycle` reconciler emits `StartAllocation` only in its "no Running"
+     branch, so a Running survivor never re-triggers the C3 seam. **02-06 adds a
+     dedicated boot-time recovery pass** (in `run_server`, after `AppState`, before
+     the convergence loop): observe surviving `ovd-ns-*` netns + correlate to
+     surviving allocs (ObservationStore Running set → per-alloc `cgroup.procs` PIDs →
+     `/proc/<pid>/ns/net` inode match, the `ip netns identify` mechanism), then
+     **adopt** each owned `(alloc, slot)` binding via an ADDITIVE
+     `NetSlotAllocator::adopt` (claim a SPECIFIC slot atomically, NOT smallest-free),
+     then **GC** every orphan netns (`teardown_workload_netns`), then serve. PURELY
+     ADDITIVE on the 02-05 frozen shape (new method, new observe, new boot pass — no
+     change to `AllocationSpec.netns` / the `AppState` field / the dispatch param /
+     the provision-teardown seams / the `ExecDriver` per-spec `setns`). Contrast
+     `IdentityMgr` (boots empty, relies on `SvidLifecycle` reconciler re-issue on
+     `¬held` — a cheap re-mint with no surviving resource; the netns case adopts a
+     survivor instead). **The survival/adopt RUNTIME semantics are Tier-3-spike-gated
+     (SPIKE-A/B/C); #26-coupled mTLS-material survival is out of 02-06 scope.** Full
+     design: `design/wave-decisions.md` D-TME-12 § "Amended 2026-06-18 (02-06
+     adopt-on-restart)".
 
 2. **OUTBOUND interception = nft-TPROXY at the host-side veth (the active-side
    mirror of inbound).** The workload's outbound `connect()` leaves its netns
