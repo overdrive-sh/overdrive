@@ -276,6 +276,103 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
     Ok(TproxyInterceptGuard { handle })
 }
 
+/// Install the OUTBOUND nft-TPROXY prerouting intercept for one workload's
+/// host-side veth.
+///
+/// The active-side mirror of [`install_inbound_tproxy`] (ADR-0071 Path A
+/// unifies inbound + outbound on the ONE nft-TPROXY mechanism). Where the
+/// inbound rule matches a specific *destination* (`ip daddr <vip>` +
+/// `tcp dport <vport>`), the egress rule matches the *ingress interface* —
+/// `iifname <host_veth>` — capturing ALL of the workload's outbound TCP as it
+/// ingresses the per-workload host-side veth, and TPROXY-redirecting it to the
+/// agent's leg-F `IP_TRANSPARENT` listener on `agent_leg_f_port`. There is no
+/// per-destination match because the workload's destination is unknown at
+/// install time; TPROXY preserves the original destination, which the agent
+/// recovers per-flow via `getsockname` downstream (03-02). This is the
+/// production shape per the feature-delta / ADR-0071 fact 4 — NOT the
+/// single-known-backend `ip daddr/tcp dport` shape the egress spike used.
+///
+/// Like the inbound install, this APPENDS exactly one rule to the SHARED
+/// `prerouting` chain (after the F5 exemption) and returns a
+/// [`TproxyInterceptGuard`] whose `Drop` removes ONLY that one rule by its
+/// kernel-assigned handle; the node-global shared routing infra
+/// ([`ensure_shared_routing_infra`]) is ensured idempotently and never torn
+/// down per-workload.
+///
+/// # Idempotency
+///
+/// The egress rule is keyed ONLY on `host_veth` (no unique daddr/dport), so a
+/// repeat install for the SAME `host_veth` would otherwise append a literal
+/// duplicate. Before appending, the shared chain is presence-checked for an
+/// existing egress rule matching this `host_veth` + redirect; if already
+/// present, no second copy is appended and a guard for the existing rule's
+/// handle is returned. (The inbound install does not need this — distinct
+/// virts produce distinct rule text.)
+///
+/// # Errors
+///
+/// Returns [`InterceptError::TproxyInstall`] if ensuring the shared infra
+/// fails for a reason other than "already present", if appending the egress
+/// rule fails, or if the rule's handle cannot be recovered from the chain dump.
+pub fn install_outbound_tproxy(
+    host_veth: &str,
+    agent_leg_f_port: u16,
+) -> Result<TproxyInterceptGuard> {
+    // (1) Ensure the SHARED, node-global routing infra idempotently — exactly
+    // as the inbound install does. Add-if-missing converges; a pre-existing
+    // shared rule/route/table/exemption is the success case, left untouched.
+    ensure_shared_routing_infra()?;
+
+    // (2) Idempotent append: the egress rule is keyed only on `host_veth`, so a
+    // repeat install for the same veth would stack a literal duplicate. If this
+    // veth's egress rule is already in the shared chain, recover and return a
+    // guard for the EXISTING rule's handle instead of appending a second copy.
+    let dump = list_chain()?;
+    if dump_has_egress_rule(&dump, host_veth, agent_leg_f_port)
+        && let Some(existing) = find_egress_rule_handle_in_dump(&dump, host_veth, agent_leg_f_port)
+    {
+        return Ok(TproxyInterceptGuard { handle: existing });
+    }
+
+    // (3) Append exactly ONE egress rule to the shared chain, after the F5
+    // exemption. Match on the ingress interface (`iifname <host_veth>`) +
+    // `meta l4proto tcp`; redirect ALL the workload's egress TCP to leg F.
+    // TPROXY preserves orig-dst → recovered per-flow downstream (03-02), so a
+    // single shared fwmark routes every flow (same as inbound).
+    run_nft(&[
+        "add",
+        "rule",
+        "ip",
+        NFT_TABLE,
+        NFT_CHAIN,
+        "iifname",
+        host_veth,
+        "meta",
+        "l4proto",
+        "tcp",
+        "tproxy",
+        "to",
+        &format!("127.0.0.1:{agent_leg_f_port}"),
+        "meta",
+        "mark",
+        "set",
+        &format!("{TPROXY_FWMARK:#x}"),
+        "accept",
+    ])?;
+
+    // (4) Recover the kernel-assigned handle of the rule we just appended so
+    // Drop can delete EXACTLY that rule (siblings, the exemption, and the
+    // shared infra all untouched).
+    let handle = find_egress_rule_handle(host_veth, agent_leg_f_port)?.ok_or_else(|| {
+        InterceptError::TproxyInstall {
+            reason: format!(
+                "could not recover nft rule handle for egress host_veth {host_veth} → 127.0.0.1:{agent_leg_f_port} after append"
+            ),
+        }
+    })?;
+    Ok(TproxyInterceptGuard { handle })
+}
+
 /// Ensure the SHARED node-global TPROXY routing infrastructure exists,
 /// idempotently (add-if-missing). Converge-on-boot Bar-1: a pre-existing
 /// component is the success case, not an error — so two concurrent installs
@@ -489,6 +586,58 @@ fn find_virt_rule_handle(virt: SocketAddrV4, agent_port: u16) -> Result<u64> {
     })
 }
 
+/// Recover this host-veth's EGRESS TPROXY rule handle from the live shared
+/// chain, or `None` if no such rule is present.
+///
+/// Thin shell-out shim over [`find_egress_rule_handle_in_dump`] (the pure
+/// parse, unit-tested there) — `Ok(None)` means "no egress rule for this veth
+/// yet" (the first-install / append case), `Ok(Some(handle))` means "already
+/// present" (the idempotent re-install case), and an `Err` means the chain
+/// dump itself could not be obtained.
+// mutants: skip
+fn find_egress_rule_handle(host_veth: &str, agent_leg_f_port: u16) -> Result<Option<u64>> {
+    Ok(find_egress_rule_handle_in_dump(&list_chain()?, host_veth, agent_leg_f_port))
+}
+
+/// Pure: parse the kernel-assigned handle of the egress rule for `host_veth` +
+/// `agent_leg_f_port` from an `nft -a list chain` dump, or `None` if absent.
+///
+/// The egress rule matches BOTH `iifname "<host_veth>"` AND the
+/// `tproxy to 127.0.0.1:<agent_leg_f_port>` redirect on the SAME line — both
+/// conjuncts are required so an inbound `ip daddr`/`tcp dport` rule sharing the
+/// redirect target, or a different veth's egress rule sharing the redirect, is
+/// NOT mistaken for this veth's rule. The handle is read off the trailing
+/// `# handle <N>`. Pure so a unit test can pin the conjunction + parse against
+/// captured nft output without a kernel.
+fn find_egress_rule_handle_in_dump(
+    dump: &str,
+    host_veth: &str,
+    agent_leg_f_port: u16,
+) -> Option<u64> {
+    let iifname = format!("iifname \"{host_veth}\"");
+    let redirect = format!("tproxy to 127.0.0.1:{agent_leg_f_port}");
+    dump.lines()
+        .filter(|l| l.contains(&iifname) && l.contains(&redirect) && l.contains("# handle "))
+        .find_map(parse_handle)
+}
+
+/// Pure: true iff the `nft -a list chain` dump already carries the egress rule
+/// for `host_veth` + `agent_leg_f_port` — used so the idempotent
+/// [`install_outbound_tproxy`] append fires only when the rule is missing
+/// (otherwise a repeat install for the same veth stacks a duplicate, since the
+/// egress rule has no unique daddr/dport to distinguish it).
+///
+/// Requires BOTH the `iifname "<host_veth>"` match AND the
+/// `tproxy to 127.0.0.1:<agent_leg_f_port>` redirect on the SAME line: an
+/// inbound daddr/dport rule, or a different veth's egress rule, must not be
+/// read as this veth's egress rule. Pure so a unit test pins the conjunction
+/// against captured nft output.
+fn dump_has_egress_rule(dump: &str, host_veth: &str, agent_leg_f_port: u16) -> bool {
+    let iifname = format!("iifname \"{host_veth}\"");
+    let redirect = format!("tproxy to 127.0.0.1:{agent_leg_f_port}");
+    dump.lines().any(|l| l.contains(&iifname) && l.contains(&redirect))
+}
+
 /// Extract the `<N>` from a trailing `# handle <N>` on an `nft -a` rule line.
 fn parse_handle(line: &str) -> Option<u64> {
     let (_, after) = line.rsplit_once("# handle ")?;
@@ -698,7 +847,10 @@ mod tests {
     //! 8-hex marks, trailing `# handle <N>`), so a drift in nft's format OR a
     //! regression in the parse is caught here without a kernel.
 
-    use super::{dump_has_leg_s_exemption, ip_rule_dump_has_fwmark, parse_handle};
+    use super::{
+        dump_has_egress_rule, dump_has_leg_s_exemption, find_egress_rule_handle_in_dump,
+        ip_rule_dump_has_fwmark, parse_handle,
+    };
 
     // --- `ip rule show` fwmark-routing predicate (extracted from the
     // `ip`-shelling shim so the conjunction is unit-killable; mirrors the
@@ -826,5 +978,141 @@ table ip overdrive-mtls {
     fn handle_parse_rejects_a_line_with_no_handle_marker() {
         let header = "\t\ttype filter hook prerouting priority mangle; policy accept;";
         assert_eq!(parse_handle(header), None, "a line with no `# handle` marker yields None");
+    }
+
+    // --- egress (`install_outbound_tproxy`) dump-parse helpers ---
+    //
+    // The egress rule differs from the inbound one ONLY in its match: it has
+    // NO `ip daddr` / `tcp dport` (the workload's destination is unknown at
+    // install — per-flow orig-dst recovery is 03-02), so it matches on the
+    // ingress interface `iifname "<host_veth>"` and TPROXY-redirects ALL of
+    // the workload's egress TCP to the agent's leg-F listener. Because the
+    // rule is keyed ONLY on `host_veth`, a repeat install for the same veth
+    // would append a literal duplicate unless presence-checked first — hence
+    // the idempotency predicate, which the inbound (distinct daddr/dport per
+    // virt) does not need.
+
+    /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
+    /// carrying the F5 exemption at the head, ONE inbound per-virt tproxy rule,
+    /// and TWO egress (iifname-matched) tproxy rules for distinct host veths —
+    /// each rendered as nft renders it (quoted iifname, zero-padded
+    /// `0x00000001` set-mark, trailing `# handle <N>`).
+    const EGRESS_CHAIN_DUMP: &str = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 7
+\t\tiifname \"ovh-bbbb1\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 12
+\t}
+}";
+
+    #[test]
+    fn install_outbound_tproxy_appends_one_egress_rule_to_shared_chain() {
+        // Headline (RED_ACCEPTANCE-level) scenario for this default-lane step:
+        // the egress rule that `install_outbound_tproxy(host_veth, port)`
+        // appends to the SHARED `prerouting` chain has the design-pinned shape
+        // — `iifname "<host_veth>" ... tproxy to 127.0.0.1:<port> ...` — and is
+        // recognised in the chain dump, with its kernel-assigned handle parsed
+        // off the trailing `# handle <N>`. This proves the install/teardown/
+        // dedup MECHANICS default-lane; the real kernel CAPTURE is Tier-3 03-03.
+        assert!(
+            dump_has_egress_rule(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            "the egress rule appended for host_veth `ovh-aaaa0` → 127.0.0.1:41000 must be \
+             recognised in the shared-chain dump (iifname match + redirect)"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            Some(7),
+            "the egress rule's kernel-assigned handle must parse off the trailing `# handle 7`"
+        );
+    }
+
+    #[test]
+    fn egress_rule_present_only_for_its_own_host_veth() {
+        // Idempotency presence-check: a chain that ALREADY carries this veth's
+        // egress rule reads as present (so re-install skips the append); a
+        // chain WITHOUT it reads as absent (so the first install appends).
+        assert!(
+            dump_has_egress_rule(EGRESS_CHAIN_DUMP, "ovh-bbbb1", 41000),
+            "ovh-bbbb1's egress rule IS in the dump → present → re-install must skip"
+        );
+        let no_egress = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(no_egress, "ovh-aaaa0", 41000),
+            "a chain with no egress rule for ovh-aaaa0 must read as absent → first install appends"
+        );
+    }
+
+    #[test]
+    fn egress_rule_requires_iifname_and_redirect_to_match_the_same_rule() {
+        // Discriminating case that KILLS the `&&`→`||` and wrong-needle mutants
+        // on the egress predicate. Line A carries OUR iifname but a DIFFERENT
+        // redirect target (41999, not 41000); line B carries OUR redirect but a
+        // DIFFERENT iifname (ovh-other2). Under correct `&&` neither qualifies
+        // for (ovh-aaaa0, 41000): false. Under the `||` mutant, line A
+        // satisfies the iifname conjunct and line B satisfies the redirect
+        // conjunct → the mutant wrongly returns true and a duplicate is left
+        // unappended (or, on the handle path, the wrong handle recovered).
+        let cross = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41999 meta mark set 0x00000001 accept # handle 5
+\t\tiifname \"ovh-other2\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 6
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(cross, "ovh-aaaa0", 41000),
+            "no single line both matches iifname `ovh-aaaa0` AND redirects to 127.0.0.1:41000; \
+             the rule is absent and the predicate must return false (the `||` mutant would \
+             wrongly report it present and skip the needed append)"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(cross, "ovh-aaaa0", 41000),
+            None,
+            "with no line matching BOTH conjuncts, no handle is recoverable for (ovh-aaaa0, 41000)"
+        );
+    }
+
+    #[test]
+    fn egress_handle_parsed_per_host_veth_in_a_multi_rule_chain() {
+        // Handle-recovery: distinct host veths in a multi-rule fixture yield
+        // distinct handles, so two egress installs capture distinct handles
+        // and each guard's Drop deletes EXACTLY its own rule.
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            Some(7),
+            "ovh-aaaa0's egress rule handle must parse to 7"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-bbbb1", 41000),
+            Some(12),
+            "ovh-bbbb1's egress rule handle must parse to 12"
+        );
+    }
+
+    #[test]
+    fn egress_predicate_does_not_mistake_an_inbound_daddr_rule_for_an_egress_rule() {
+        // The inbound rule (ip daddr/tcp dport, NO iifname) must NOT be read as
+        // any veth's egress rule — guards against an over-broad needle that
+        // matches on the shared `tproxy to 127.0.0.1:<port>` tail alone.
+        let inbound_only = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 3
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(inbound_only, "ovh-aaaa0", 41000),
+            "an inbound daddr/dport rule (no iifname) must NOT be read as ovh-aaaa0's egress rule"
+        );
     }
 }
