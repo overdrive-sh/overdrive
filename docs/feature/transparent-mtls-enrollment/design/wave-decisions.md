@@ -513,6 +513,13 @@ a dedicated boot pass, NOT a reconciler re-drive. **The runtime survival/adopt
 semantics are Tier-3-spike-gated; this block pins what is settled and marks what the
 spike must settle (§ "Spike boundary").**
 
+The same boot pass also reconciles a SECOND surviving-resource class the netns decisions
+are silent on — the per-workload nft-TPROXY rules in the node-global shared `overdrive-mtls`
+chain, whose in-RAM RAII guards are lost on restart (the nft-rule twin of the netns-slot
+survivor). That is § 5 below (folding 03-01 adversarial-review finding D2, commit `c1d5f9d`);
+it too is additive and re-uses the landed by-handle delete + dump-parse predicates, inventing
+no new surface.
+
 #### The hazard (verified ground truth)
 
 On a `serve` restart the in-RAM `NetSlotAllocator` (`Arc<Mutex<BTreeMap<AllocationId,
@@ -725,6 +732,133 @@ recovers the NETNS/SLOT binding only — it does NOT claim to recover or re-supp
 mTLS crypto, which is #26's concern. 02-06's scope is the network-slot rebuild; the
 identity-material survival is out of scope and explicitly NOT assumed.
 
+#### 5. Surviving per-workload nft-TPROXY rules — the nft-rule twin of the survivor problem
+
+§1–§3 reconcile the surviving per-alloc **netns/veth/slot** resources across a `serve`
+restart. There is a SECOND class of surviving per-workload kernel resource the
+five-decision 02-05 shape and §1–§4 are SILENT on: the **per-workload nft-TPROXY
+rules** in the node-global shared `overdrive-mtls` `prerouting` chain. This sub-section
+folds in the 03-01 adversarial-review finding D2
+(`docs/feature/transparent-mtls-enrollment/deliver/reviews/03-01.md` § "issue
+(blocking): D2", commit `c1d5f9d`) — the nft-rule analogue of the netns-slot survivor
+problem §1–§3 solve.
+
+**The hazard (verified ground truth).** Structurally identical to §1–§3's
+surviving-resource-plus-lost-in-RAM-handle shape:
+
+- **The rules SURVIVE the restart.** Each per-workload TPROXY rule (egress via
+  `install_outbound_tproxy`, inbound via `install_inbound_tproxy`) is APPENDED to the
+  SHARED `overdrive-mtls` `prerouting` chain, which is converge-on-boot infra ensured
+  idempotently (`ensure_shared_routing_infra`, `mtls_intercept_worker.rs:402-469`) and
+  **NEVER torn down per-workload** (`NFT_TABLE` rustdoc `:47-56`: *"ensured idempotently
+  … NEVER torn down per-workload"*). So on a `serve` restart these rules remain in the
+  kernel — exactly like the surviving netns the §1–§3 pass adopts.
+- **The in-RAM handle is LOST.** Each rule's lifetime is owned by an in-RAM RAII
+  `TproxyInterceptGuard` whose `Drop` deletes the rule by its kernel-assigned handle
+  (`:679-695`). On a CP restart the worker's per-alloc state is reconstructed empty and
+  every guard is dropped without its `Drop` ever running against the kernel (the process
+  died), so the in-RAM handle map is GONE — the precise analogue of the empty
+  `NetSlotAllocator` map (§The hazard).
+- **The re-bound legs choose NEW ephemeral ports.** Leg-C (inbound) and leg-F (outbound)
+  are `IP_TRANSPARENT`/plain listeners bound to `127.0.0.1:0` — **kernel-chosen ephemeral
+  per bind** (verified: `mtls_intercept_worker.rs:361` binds `"127.0.0.1:0"` and reads the
+  assigned port back at `:369`; the `install_outbound_tproxy` caller-contract rustdoc
+  `:321-332` states leg-F is *"a worker-chosen ephemeral port … NOT node-stable across
+  re-binds"*). So after a restart the re-bound leg ports are **NOT** the surviving rules'
+  redirect targets.
+- ⇒ **Egress: stale-survivor + duplicate-on-re-install.** The egress install is
+  idempotent keyed on `(host_veth, agent_leg_f_port)` — BOTH the `iifname` match AND the
+  `tproxy to 127.0.0.1:<port>` redirect (verified: `dump_has_egress_rule` `:661-665`,
+  `find_egress_rule_handle_in_dump` `:638-648`, both conjoin iifname AND redirect-port).
+  A re-install for a SURVIVING `host_veth` with a CHANGED leg-F port does NOT match the
+  old `(veth, oldPort)` rule → the presence-check reads **absent** → it **APPENDS A
+  SECOND egress rule**. Two TPROXY rules then fire for one workload's veth; the first
+  redirects to a now-dead leg-F listener (chain-order dependent — the kernel evaluates the
+  surviving rule first if it sits earlier). This is finding D2's *"two TPROXY rules fire
+  for one workload's veth"* shape, reachable at the re-install path (04-03 `start_alloc` +
+  this 02-06 boot pass), NOT in 03-01's isolation.
+- ⇒ **Inbound twin: stale-survivor (distinct shape).** `install_inbound_tproxy(virt,
+  agent_port)` appends UNCONDITIONALLY (no per-rule presence-check — it relies on distinct
+  `virt`s producing distinct rule text; `:239-277`), and its handle recovery keys on
+  `ip daddr <vip>` + `tcp dport <vport>` + the leg-C redirect port (`find_virt_rule_handle`
+  `:591-613`). On a restart it ALSO leaves a stale survivor (lost guard) and, when re-run
+  for the same `virt` with a changed leg-C port, appends a fresh rule alongside the
+  survivor. **Caveat (verified):** the inbound *production* install is currently
+  **#178-DEFERRED** — at 04-01 `start_alloc` records `tproxy_guard = None` and installs NO
+  production inbound rule (`mtls_intercept_worker.rs:391-417`), so the inbound survivor is
+  not reachable until #178 lands the production virt source. But it shares the survivor
+  CLASS exactly, so the reconcile this sub-section pins must cover BOTH directions to be
+  forward-correct.
+
+This is the per-workload-nft-rule analogue of §The hazard's per-alloc-netns survivor:
+**a surviving node-global-chain resource whose in-RAM owner-handle is lost on restart**,
+which a naive empty-state re-install duplicates (egress) or strands (both). It is in-scope
+for the SAME boot-recovery pass that already adopts surviving netns and GCs orphans (§3) —
+reconciling the surviving per-workload nft rules is the natural extension of that pass.
+
+**The pinned reconcile (option (i) — adopt-pass tears down surviving per-workload nft
+rules; the rule analogue of orphan-GC).** The §3 recovery pass, BEFORE serving, sweeps the
+shared `overdrive-mtls` `prerouting` chain and **removes every per-workload TPROXY rule**
+(every `iifname`-matched egress rule and every `ip daddr`/`tcp dport`-matched inbound rule),
+leaving the shared infra (the F5 `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption at the
+chain head, the `ip rule fwmark`, the `ip route local … table`, the table+chain themselves)
+UNTOUCHED. A `nft -a list chain ip overdrive-mtls prerouting` dump enumerates the survivors;
+each per-workload rule is deleted by its handle (the same by-handle `nft delete rule …
+handle <N>` the guard's `Drop` uses, `:685-695`); the shared infra is recognised-and-kept by
+the existing predicates (`dump_has_leg_s_exemption` `:552-557` distinguishes the exemption
+from a per-workload rule). The subsequent 04-03 `start_alloc` re-install for each
+still-Running alloc then runs against a CLEAN chain — its append is unconditionally correct
+and its returned guard owns the fresh handle. This is **symmetric with the netns orphan-GC
+already in §3** (teardown-the-survivor, re-create-clean) and re-uses the existing by-handle
+delete + dump-parse predicates verbatim — no new public surface, no new keying model.
+
+Ordering within the §3 pass: the nft-rule sweep is a THIRD recovery action, ordered with
+the netns adopt/GC. Because the nft sweep tears down ALL per-workload rules (it does not
+adopt — there is no in-RAM guard to rebuild, and a guard cannot be reconstructed from a bare
+kernel handle without the alloc binding it would need to outlive the re-install anyway), it
+is independent of the adopt-vs-GC netns decision and may run in the same pass before serving.
+PINNED order: **(netns) adopt-then-GC, (nft) sweep-all-per-workload-rules, THEN serve** — by
+construction, after the pass every surviving slot is held, every orphan netns is reaped, and
+the shared chain carries ONLY the shared infra, so the first 04-03 re-install appends exactly
+one clean rule per direction per alloc.
+
+**Rejected alternatives** (house style — record why not):
+
+- **(ii) Pin a stable-per-veth (slot-keyed) leg-C/leg-F port** so a re-install matches the
+  survivor and is genuinely idempotent. REJECTED for 02-06: it changes the ephemeral-port
+  model the worker deliberately adopted (`127.0.0.1:0` kernel-chosen, `:361`; the
+  `install_outbound_tproxy` rustdoc `:321-332` documents the ephemeral choice as
+  intentional), is a larger cross-cutting change touching `mtls_intercept_worker.rs`'s leg
+  bind + the per-alloc bookkeeping, and would have to derive a collision-free stable port
+  from the `NetSlot` (a second slot-keyed derivation axis, re-opening the IFNAMSIZ/bound
+  analysis D-TME-12 settled for names/subnets). The survivor-teardown in (i) achieves
+  forward-correctness with NO change to the port model and re-uses the landed by-handle
+  delete. (ii) may still be the right LONG-TERM shape if leg-port stability is wanted for
+  reasons beyond restart (e.g. observability), but it is NOT needed to close this hazard and
+  is out of 02-06 scope.
+- **(iii) Re-key teardown/recovery so a changed port REPLACES rather than stacks** (adopt the
+  surviving rule's handle by `iifname`-only / `daddr/dport`-only match, ignoring the port,
+  then delete-or-refresh). REJECTED as strictly more complex than (i) for no benefit here:
+  it requires a SECOND, port-blind variant of every dump-parse predicate (the landed ones
+  conjoin the port deliberately, to distinguish a re-install with a changed port from a
+  genuine duplicate — `find_egress_rule_handle_in_dump` `:638-648`), and the "refresh"
+  branch still ends in delete-old + append-new, i.e. (i)'s teardown plus extra matching
+  machinery. Sweep-all-then-clean-re-install (i) gets the same end state with the existing
+  port-keyed predicates untouched. (iii)'s port-blind match would ALSO be the wrong primitive
+  to leave lying around — it is exactly the over-broad needle the 03-01 tests
+  (`egress_predicate_does_not_mistake_an_inbound_daddr_rule_for_an_egress_rule`,
+  `mtls_intercept_worker.rs:1172-1187`) were written to forbid.
+
+**IdentityMgr / netns contrast (consistency with §4).** Like the netns survivor (§4), the
+nft-rule survivor is a SURVIVING kernel resource — so, like netns, it cannot rely on a
+cheap re-mint the way `IdentityMgr` re-issues an SVID on `¬held`. But UNLIKE the netns
+survivor (which §1–§3 ADOPT, because the running workload still lives in it and re-creating
+it from slot 0 would collide), the nft rule is TORN DOWN not adopted: the rule's only
+purpose is to redirect to a leg port that the restart invalidated, so the surviving rule is
+DEAD weight (it points at a dead listener) and there is nothing to preserve — the clean
+re-install at 04-03 is what restores a correct rule. Adopt the netns (live), reap the nft
+rule (dead): both correct for their resource, the same split-by-survival-semantics §4 draws.
+
 #### Spike boundary — PINNED vs SPIKE-GATED
 
 PINNED (settled by the codebase grounding above, build to these now):
@@ -736,6 +870,13 @@ PINNED (settled by the codebase grounding above, build to these now):
 - The boot-pass ORDERING (adopt-then-GC-then-serve) + its home (`run_server`, after
   `AppState`, before the convergence loop) + adopt-conflict-refuses-boot (§3).
 - The IdentityMgr contrast (§4).
+- The nft-rule reconcile DECISION (§5): option (i) — the boot pass sweeps every
+  per-workload TPROXY rule (both directions) from the shared chain by handle, leaving the
+  shared infra untouched, so the 04-03 re-install is clean. The MECHANISM is the landed
+  by-handle delete (`mtls_intercept_worker.rs:685-695`) + the landed dump-parse predicates
+  (`dump_has_egress_rule`/`find_egress_rule_handle_in_dump`/`dump_has_leg_s_exemption`) — no
+  new public surface. The rejected alternatives (ii)/(iii) and the adopt-netns-vs-reap-rule
+  contrast are pinned.
 
 SPIKE-GATED (do NOT fully pin past these — see the spike recommendation in the
 orchestrator report):
@@ -750,9 +891,23 @@ orchestrator report):
   inode reliably recover the slot for a SURVIVING workload across the restart (the
   proven in-tree mechanism is for a FRESHLY-spawned child; the restart-survivor case is
   unverified)?
+- **SPIKE-D (§5 — the nft-rule twin of SPIKE-A):** do the per-workload nft-TPROXY rules
+  in the shared `overdrive-mtls` `prerouting` chain actually SURVIVE a real `serve` restart
+  on the Lima kernel (the shared-chain "never torn down per-workload" claim implies it, but
+  the survival-across-a-real-CP-restart is unverified, exactly as SPIKE-A is for netns)? And
+  does the chosen reconcile — sweep every per-workload rule by handle while keeping the F5
+  exemption + shared infra — behave on the real kernel (the by-handle `nft delete rule …
+  handle <N>` fires against a SURVIVING rule whose guard never ran; the post-sweep chain
+  carries ONLY the shared infra; a subsequent clean re-install appends exactly one rule)?
+  Cross-checks against the same `nft -a list chain` dump-parse the landed predicates use.
+  If the rules do NOT survive a real restart (kernel/netns teardown takes them with it),
+  §5 collapses to a no-op (nothing to sweep) and the 04-03 re-install is already clean —
+  a materially simpler 02-06, the same way SPIKE-A's negative would simplify the netns side.
 
-Until SPIKE-A/B/C return, §1/§3's runtime fidelity is provisional. §2/§4 are pinnable
-regardless (pure / contrast-only).
+Until SPIKE-A/B/C/D return, §1/§3/§5's runtime fidelity is provisional. §2/§4 are pinnable
+regardless (pure / contrast-only), and §5's reconcile DECISION (option (i): sweep-all) is
+pinned regardless of SPIKE-D — the spike only settles whether there is anything to sweep and
+whether the by-handle delete fires on a guard-less survivor, not WHICH reconcile is correct.
 
 ### New newtype — `NetSlot` (`overdrive-control-plane`, domain-bearing)
 
