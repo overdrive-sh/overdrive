@@ -79,6 +79,15 @@ mod integration {
     // alloc running with cleartext egress.
     mod mtls_intercept_fail_closed;
 
+    // transparent-mtls-enrollment (ADR-0071, step 03-03) — Tier-3 EGRESS
+    // capture walking proof: composes `install_outbound_tproxy` (03-01) +
+    // `accept_outbound_leg` getsockname recovery (03-02) +
+    // `make_transparent_listener` on the REAL kernel via the increment-b spike
+    // topology (netns + veth + nft-TPROXY). Proves the ADR-0071 Tier-3 (a)+(b)
+    // obligations: workload egress → leg-F redirect → getsockname == dialed-dst,
+    // plus the F5 anti-loop SO_MARK exemption (positive + self-exempt-impossible).
+    mod egress_tproxy_capture;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
