@@ -1157,3 +1157,238 @@ invented here.
 - `docs/product/architecture/adr-0071-transparent-mtls-enrollment-path-a-….md` (amends ADR-0069).
 - `docs/product/architecture/brief.md` § 35 (Application Architecture extension) + C4 L1/L2.
 - This file.
+
+---
+
+## Amended 2026-06-20 (phase-04 re-plan — two verified dependency inversions resolved)
+
+DELIVER stalled at step 04-01 on two **verified** (not assumed) circular
+dependencies in the phase-04 roadmap graph. The crafter correctly STOPPED both
+times rather than invent API surface (`execution-log.json`: `02-05` COMMIT
+SKIPPED `BLOCKED_BY_DEPENDENCY`; `04-01` PREPARE..COMMIT all SKIPPED
+`BLOCKED_BY_DEPENDENCY`). This block records the corrected acyclic structure.
+It changes **roadmap sequencing only** — no DESIGN decision (D-TME-1..D-TME-12,
+C1..C4, G1..G3, JOIN-1..JOIN-5, the 02-06 adopt-on-restart design) is
+reopened. The orchestrator translates the step list below into `roadmap.json`;
+the architect does not edit `roadmap.json` / `execution-log.json` / code.
+
+### The two inversions (verified against HEAD + `wip/02-05-netns-join @ a4c2a61d`)
+
+**Inversion 1 — `04-01` ⇄ `04-03` are mutually dependent (a true cycle).**
+
+- `04-01` AC1 requires `start_alloc` to call `install_outbound_tproxy(host_veth,
+  leg_f_port)`. `install_outbound_tproxy` takes `host_veth: &str`
+  (`crates/overdrive-worker/src/mtls_intercept.rs:340-343`).
+- But HEAD `start_alloc(self: &Arc<Self>, spec: &AllocationSpec)` receives ONLY
+  `spec` (`mtls_intercept_worker.rs:341-344`), and `AllocationSpec` has NO
+  netns / slot / host_veth field at HEAD (`overdrive-core/src/traits/driver.rs:131-156`
+  — fields are exactly `alloc, identity, command, args, resources,
+  probe_descriptors`). The `host_veth` (`ovd-hv-<4hex-slot>`) is produced by the
+  per-workload netns/veth provisioning — i.e. `04-03`'s C3 wiring plus the
+  `AllocationSpec.netns` channel (JOIN-1) on `wip/02-05-netns-join`. **So `04-01`
+  needs `04-03`'s output.**
+- And `roadmap.json:364` declares `04-03 deps: ["02-02","02-03","04-01"]` — **so
+  `04-03` needs `04-01`**. Closing the cycle: `04-03`'s C3 wiring breaks the
+  `mtls_production_activation` e2e whose deletion lives in `04-01`
+  (`execution-log.json` `02-05` COMMIT skip names this verbatim). Neither can
+  cleanly precede the other.
+- **Resolution: MERGE `04-01` + `04-03` into ONE atomic step.** This is the only
+  atomic resolution, and it is well-formed: the merged step's C3 wiring provides
+  the `host_veth` the swap consumes, and the merged step's deletion removes the
+  broken `mtls_production_activation` e2e in the same commit — so the workspace is
+  never red mid-step. The merge is a *single-commit single-cut* (CLAUDE.md
+  § "Deletion discipline" + `feedback_single_cut_greenfield_migrations`): orphan
+  the cgroup path AND delete it AND wire its replacement, atomically.
+
+**Inversion 2 — the production TPROXY install is NOT #178-entangled for OUTBOUND;
+INBOUND's production `virt` source IS #178-gated (but is not a merge blocker).**
+
+This was the load-bearing question. Settled definitively against the code:
+
+- **OUTBOUND install lands a WORKING production path NOW (authn-only).**
+  `install_outbound_tproxy` matches `iifname "<host_veth>"` + `meta l4proto tcp`
+  and TPROXY-redirects ALL the workload's egress to leg-F
+  (`mtls_intercept.rs:340-388`, rustdoc :280-300). It has **NO per-destination
+  match** — "there is no per-destination match because the workload's destination
+  is unknown at install time; TPROXY preserves the original destination, which the
+  agent recovers per-flow via `getsockname` downstream (03-02)" (rustdoc
+  :289-292). The destination is then classified **per-connection** by THIS
+  feature's own v1 resolve adapter (D-TME-6 / `ServiceBackendsResolve`, built
+  01-03; consumed 04-02) — NOT at install time, NOT from #178. The `host_veth` is
+  the only input the outbound install needs, and it comes from the merged step's
+  C3 wiring (`derive_workload_netns_plan(slot).host_veth`). **No #178 source is
+  required for the outbound production install.**
+- **INBOUND production install is #178-gated for its `virt` match-key.**
+  `install_inbound_tproxy(virt, agent_port)` keys on `ip daddr <virt> tcp dport
+  <vport>` (`mtls_intercept.rs:240,256-261`) — it needs the server workload's
+  listen `virt` at install time. HEAD `start_alloc` is explicit that v1 has NO
+  production source for it: "`AllocationSpec` carries no listen-addr field and the
+  workload binds its own socket at runtime (the same east-west service-resolution
+  gap that defers the outbound peer set; #178 … names the inbound
+  orig-dst→real-backend resolution and the `server_dial_addr` / D-MTLS-15
+  replacement site as #178's job)" (`mtls_intercept_worker.rs:398-416`). So HEAD
+  records `tproxy_guard = None` and installs NO inbound rule; the
+  `install_inbound_tproxy` free fn "stays the named #178 production-install site,
+  exercised today only by the worker integration tests (which supply a real,
+  distinct virt)" (module rustdoc :53-59).
+- **What this means for the merged step's ACs.** The leg-C `IP_TRANSPARENT`
+  listener + the inbound accept→`enforce` loop ARE production and ARE wired by the
+  merged step (unchanged from HEAD `start_alloc`). The *production inbound nft
+  rule* is the only inbound piece with no v1 source — it stays test-only-until-#178
+  exactly as HEAD already has it. **The merged step does NOT regress inbound** (it
+  preserves the existing inbound-listener-production / inbound-rule-#178-deferred
+  posture) and **fully lands the OUTBOUND production path**. The walking skeletons
+  (05-*) drive the inbound rule via the worker integration tests' real distinct
+  virt (the established "only test callers until #178" shape), and exercise the
+  outbound path as a genuine production flow. This is consistent with D-TME-8 / Q4
+  (v1 = authn-only; `expected_peer` / intended-peer pinning deferred to #178) and
+  ADR-0071 fact 3 (inbound UNCHANGED from ADR-0069: per-`virt`, not `iifname`).
+
+  **Scope note on the merged step's AC wording.** The feature-delta line 89 / ADR
+  framing "`start_alloc` installs BOTH nft-TPROXY rules (outbound on host-veth +
+  inbound on the workload virt)" describes the *eventual* both-directions
+  production shape. For v1 the *inbound* production rule has no virt source, so the
+  merged step's AC must read: **install the OUTBOUND rule as production
+  (`iifname host_veth`, no #178 dependency); stand up the leg-C listener + inbound
+  accept loop as production; the INBOUND production nft rule stays #178-deferred
+  (`install_inbound_tproxy` remains the named #178 install site, test-callers
+  only), exactly as HEAD.** The merged step DELETES the cgroup outbound surface
+  and the declared-peer surface; it does NOT invent an inbound virt source. Stating
+  "installs BOTH rules in production" as a v1 AC would force inventing a `virt`
+  source — forbidden (CLAUDE.md § "Implement to the design — never invent API
+  surface").
+
+**#178 verdict (one line):** the OUTBOUND production install is **fully buildable
+now within this feature**, authn-only, using this feature's own v1
+`ServiceBackendsResolve` (04-02) for per-connection classification — it needs NO
+#178 source. The INBOUND production *nft-rule* `virt` source IS genuinely
+#178-gated and stays test-only-until-#178 (unchanged from HEAD); the leg-C
+listener + accept loop are production. The expected-SVID / intended-peer pin is
+separately #178 (authn-only v1 is fine, D-TME-8). **The merged step LANDS NOW as a
+working outbound production path.** *(Orchestrator: before landing, confirm #178's
+scope with `gh issue view 178 --comments` per CLAUDE.md — the inbound-virt
+attribution is from the HEAD code comment + this feature's design framing; #178's
+own body/comments should be checked to confirm it covers the inbound
+orig-dst→virt resolution and not only the expected-SVID join. The architect could
+not run `gh` in this doc-only dispatch.)*
+
+### Corrected phase-04 step structure (acyclic)
+
+The merge of `04-01`+`04-03` is renumbered **`04-01`** (the consolidated
+production-rewire + C3-wiring step). `04-02` (resolve consumer) stays separate and
+moves AFTER the merged step. `02-05` is removed as a step (its work — the C3
+wiring + ExecDriver join on `wip/02-05-netns-join @ a4c2a61d` — is folded INTO the
+merged `04-01`). The spike-validated 02-06 adopt-on-restart becomes **`04-04`**
+(its true position: it depends on the merged C3 wiring being live). Final list:
+
+| id | name | deps | one-line scope |
+|---|---|---|---|
+| `04-01` | **Merged production rewire + C3 netns wiring + single-cut deletions** | `02-03`, `03-01`, `03-02` | The atomic resolution of Inversion 1. Re-apply `wip/02-05 @ a4c2a61d` (G1+G2+G3 + JOIN-1..JOIN-5 + review findings 1&2) for the per-alloc netns/veth C3 wiring + `AllocationSpec.netns` channel + ExecDriver per-spec `setns` (delete `with_netns_path`); swap `start_alloc` to install the OUTBOUND `install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` rule as production + stand up leg-F/leg-C listeners + accept loops (inbound nft rule stays #178-deferred per Inversion 2); single-cut DELETE the cgroup surface (`cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, the whole `MtlsDataplane` struct, `attach_alloc`/`program_redirect`/`MtlsCgroupLink`, the orphaned `MtlsBootError::Load`/`OutboundAttach` error variants) AND delete the `mtls_production_activation` e2e + `mtls_e2e_helpers` + the OLD-mechanism test files (the 04-01 deletion list) it breaks, in the SAME commit. Tier-3: JOIN-5 (workload lands in netns) + start_alloc installs the outbound rule on a real alloc; re-run boot fixtures under Lima (NOT `--no-run`). |
+| `04-02` | Per-connection resolve consumer + DELETE declared-peer surface | `01-02`, `03-02`, `04-01` | Unchanged from the existing 04-02 EXCEPT `deps` drops the now-merged `04-01`-as-cgroup-deleter (still `04-01`, now the merged step) — wire `MtlsResolve` (mandatory `new()` param) into the outbound accept loop: `Mesh`→enforce, `NonMesh`→pass-through, `MeshUnreachable`→fail-closed; single-cut DELETE `program_declared_peer_redirect`, `real_peer`/`leg_f_addr` slots, `AcceptOutcome::Dropped`, `accept_drop_outbound`, the `MtlsInterceptError` enum + inline tests; fix the `lib.rs:981-986` broken doc link. Default-lane DST + mutation ≥80% on the 3-arm decision. |
+| `04-03` | *(removed — merged into `04-01`)* | — | The old `04-03` C3-wiring step is the second half of the merged `04-01`; it no longer exists as a separate step. |
+| `04-04` | Adopt-on-restart cross-restart slot+rule rebuild (the former "02-06") | `04-01` | The spike-validated (PROCEED-AS-DESIGNED, kernel 7.0.0, `spike/findings-adopt-restart.md`) adopt-on-restart pass: `NetSlotAllocator::adopt` (additive, atomic) + `adopt_observe` (cgroup→PID→`/proc/ns/net` slot recovery) + a `run_server` boot recovery pass (adopt-then-GC-then-serve, BEFORE the convergence loop) + the §5 surviving-nft-rule sweep. Depends on `04-01` because the C3 wiring (the `NetSlotAllocator` on `AppState`, the provision/teardown seams, the per-workload nft rules) must be LIVE for there to be slots/rules to adopt/reap. Tier-3 under Lima. |
+
+`02-05` is **removed from the roadmap as a step** — see "02-05 disposition" below.
+
+### New dependency graph — every edge justified (acyclic)
+
+Phase-04 (and the two cross-phase feeders) edges:
+
+- `04-01 → 02-03`: the merged step provisions the per-workload netns and the
+  resolv.conf injection (02-03) is part of the provisioner converge surface it
+  reuses.
+- `04-01 → 03-01`: the merged step's `start_alloc` swap calls
+  `install_outbound_tproxy` (built in 03-01).
+- `04-01 → 03-02`: the merged step's outbound accept loop relies on
+  `accept_outbound_leg`'s `getsockname` orig-dst recovery (built in 03-02).
+- `04-02 → 04-01`: the resolve consumer runs in the outbound accept loop the
+  merged step stands up; and the merged step has already deleted the
+  cgroup/`MtlsDataplane` surface + `MtlsInterceptError::Dataplane` source 04-02's
+  remaining declared-peer deletion would otherwise collide with.
+- `04-02 → 01-02`: the consumer's default-lane DST drives `SimMtlsResolve` (01-02).
+- `04-02 → 03-02`: the consumer reads the `getsockname`-recovered orig_dst (03-02).
+- `04-04 → 04-01`: adopt-on-restart rebuilds the `NetSlotAllocator` map + reaps
+  surviving netns/nft rules — all of which only EXIST once the merged step's C3
+  wiring + nft installs are live.
+- `05-01 → 04-02, 04-01, 03-03, 02-03`: the composed walking skeleton needs the
+  resolve consumer (04-02), the merged C3 wiring + both installs (04-01), the
+  egress capture proof (03-03), and resolv.conf injection (02-03). **The old
+  `05-01 deps: ["02-03","03-03","04-02","04-03"]` rewrites to
+  `["02-03","03-03","04-02","04-01"]`** (`04-03` → merged `04-01`).
+- `05-03 → 04-02, 03-03`: unchanged (no `04-03`/`04-01`-cgroup edge).
+- `05-02 → 02-03, 05-01`: unchanged.
+
+No edge points both ways; the graph is a DAG. The cycle is broken because the two
+formerly-mutually-dependent steps are now one node.
+
+### 04-02 placement — SEPARATE-AFTER the merged step (NOT folded)
+
+`04-02` (resolve consumer) is kept **separate and sequenced after** the merged
+`04-01`, not folded in. Rationale: (a) the merged step is already the largest
+single-cut in the feature (re-apply the whole wip branch + the swap + the cgroup
+deletion + the e2e deletion); folding the resolve consumer + the declared-peer
+deletion in would make one commit that is hard to review and hard to bisect; (b)
+04-02's deletion (declared-peer slots, `program_declared_peer_redirect`,
+`AcceptOutcome::Dropped`) is orphaned by **the resolve consumer**, not by the
+cgroup swap — so by the dispatch-sequencing rule ("the step that orphans a surface
+deletes it") it belongs with the resolve-consumer step; (c) 04-02 is default-lane
+DST + mutation, a different test tier from the merged step's Tier-3 — separable
+cleanly. The merged step leaves the declared-peer slots in place (HEAD shape minus
+cgroup); 04-02 removes them when it adds the resolve consumer that supersedes them.
+This matches the existing roadmap's intent (04-02 already deps on 04-01 and already
+owns the declared-peer deletion); only the cycle through 04-03 is removed.
+
+### 04-04 (adopt-on-restart) placement and id
+
+The step the design calls "02-06" is **not** a phase-02 step — it depends on the
+C3 wiring (the `NetSlotAllocator` on `AppState`, the provision/teardown seams, the
+per-workload nft rules) being LIVE, which is the merged `04-01`'s output. Its true
+position is **after** the merged step, so it is renumbered **`04-04`**, `deps:
+["04-01"]`. (Keeping the "02-06" label would assert a phase-02 position the
+dependency graph contradicts.) Its design is fully pinned + spike-validated
+(PROCEED-AS-DESIGNED, kernel 7.0.0); SPIKE-A/B/C returned positive. **Residual
+flagged:** SPIKE-D (do the per-workload nft-TPROXY rules SURVIVE a real `serve`
+restart, and does the by-handle sweep fire on a guard-less survivor?) was NOT run
+in `spike/findings-adopt-restart.md` (only A/B/C). Per the design, §5's reconcile
+DECISION (sweep-all by handle) is pinned regardless of SPIKE-D — SPIKE-D only
+settles whether there is anything to sweep. So `04-04` is not blocked, but its §5
+nft-rule-sweep leg carries an un-probed runtime assumption the crafter should
+ground-truth (or the orchestrator may run SPIKE-D before dispatching `04-04`'s §5
+half). This is a residual to confirm, not a blocker.
+
+### 02-05 disposition — REMOVED as a step
+
+`02-05` is **removed from the roadmap**. Its implementation
+(`wip/02-05-netns-join @ a4c2a61d`: G1+G2+G3 + JOIN-1..JOIN-5 + review findings
+1&2, default-lane GREEN, JOIN-5 Tier-3 passed) is **re-applied / folded into the
+merged `04-01`**. `02-05` could never land in its phase-02 position: it breaks the
+`mtls_production_activation` e2e that only `04-01` deletes (the
+`execution-log.json` `02-05` COMMIT SKIP records this). It was a premature
+duplicate of `04-03`'s C3 wiring; with `04-03` now merged into `04-01`, `02-05`'s
+work lands there. The branch is the IMPLEMENTATION the merged step reuses — the
+merged step does NOT re-derive the G1/G2/G3/JOIN design.
+
+### Execution-log reconciliation — FLAG to the orchestrator (do NOT touch here)
+
+`execution-log.json` carries entries that reference removed/redefined steps after
+this restructure; the architect does NOT edit it (doc-only dispatch). The
+orchestrator must reconcile:
+
+- **`02-05` entries** (PREPARE..GREEN EXECUTED PASS, COMMIT SKIPPED
+  `BLOCKED_BY_DEPENDENCY`, all `2026-06-18`): the step is removed. Its GREEN work
+  re-lands under the merged `04-01`. The orchestrator decides whether to (a) leave
+  the `02-05` events as historical record of the premature attempt (preferred —
+  they are the honest record, and CLAUDE.md "kept so the execution-log entries are
+  not orphaned" already governs this), or (b) annotate them as superseded by
+  `04-01`. Do NOT delete them.
+- **`04-01` entries** (PREPARE EXECUTED PASS; RED_ACCEPTANCE / RED_UNIT / GREEN /
+  COMMIT all SKIPPED `BLOCKED_BY_DEPENDENCY`, `2026-06-19`): the step id `04-01`
+  is REDEFINED (now the merged production-rewire + C3 step). The orchestrator must
+  decide whether the prior `04-01` skip events stand as the record of the
+  pre-merge blocker, or are reset for the redefined step. The redefined `04-01`
+  is a NEW execution against the merged scope; its events will be appended fresh.
+- **`04-03` entries:** none exist (the step never executed). No reconciliation
+  needed beyond removing the step definition.
+
+The architect leaves `roadmap.json` and `execution-log.json` UNTOUCHED; this block
+is the corrected step list the orchestrator translates.
