@@ -201,34 +201,41 @@ struct AllocIntercept {
     #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
     leg_f_addr: SocketAddrV4,
     /// The single declared peer's REAL destination address — the addr the
-    /// workload originally `connect()`ed to (and that `cgroup_connect4_mtls`
-    /// rewrote to leg-F in place). The kernel rewrite is lossy (unlike
-    /// inbound TPROXY, the original destination is NOT recoverable via
-    /// `getsockname` on the accepted leg-F socket), so the worker cannot
-    /// observe `real_peer` from the connection alone. The declared-peer
-    /// seam SUPPLIES it: `program_declared_peer_redirect` records it here
-    /// (it already receives `real_peer` to program `MTLS_REDIRECT_DEST`),
-    /// and the OUTBOUND accept loop reads it to build
-    /// `Routed::Outbound { peer: real_peer }` so `enforce` dials the REAL
-    /// peer — not the agent's own leg-F (the self-loop the recorded `peer`
-    /// would otherwise be). Shared (`Arc<Mutex<_>>`) because the seam
-    /// writes it AFTER `start_alloc` has already spawned the accept loop;
-    /// the same `Arc` is cloned into [`AcceptLeg::Outbound`] so the loop
-    /// reads whatever the seam last recorded. `None` until a redirect is
-    /// programmed — and a connection only arrives on leg-F once one is, so
-    /// the accept loop fails-closed (logs + skips) rather than self-looping
-    /// if it somehow reads `None`.
+    /// workload originally `connect()`ed to.
     ///
-    /// This is the #178 stand-in doing exactly what #178 will do — supply
-    /// the dial target — while the SINGLE declared peer is the ratified
-    /// D-MTLS-15 scope. General per-connection multi-peer orig-dst recovery
-    /// remains [#178](https://github.com/overdrive-sh/overdrive/issues/178).
+    /// TRANSITIONAL (03-02→04-02): this declared-peer slot is now VESTIGIAL.
+    /// As of step 03-02 (D-TME-4, the shipped nft-TPROXY mechanism) the
+    /// outbound orig-dst IS recovered via `getsockname` on the accepted
+    /// leg-F socket — `accept_outbound_leg` builds `Routed::Outbound { peer }`
+    /// from that recovered addr, exactly symmetric with inbound TPROXY, and
+    /// no longer reads `real_peer` to route. (The earlier claim that the
+    /// rewrite was lossy and the orig-dst NOT `getsockname`-recoverable
+    /// described the RETIRED `cgroup_connect4` rewrite, D-TME-3 RETIRED.)
+    /// This field/slot is DELETED in step 04-02, when the resolve consumer
+    /// orphans the declared-peer model.
+    ///
+    /// Still true while it lives: the declared-peer seam records it here
+    /// (`program_declared_peer_redirect` already receives `real_peer` to
+    /// program `MTLS_REDIRECT_DEST`). Shared (`Arc<Mutex<_>>`) because the
+    /// seam writes it AFTER `start_alloc` has already spawned the accept
+    /// loop; the same `Arc` is cloned into [`AcceptLeg::Outbound`]. `None`
+    /// until a redirect is programmed — and a connection only arrives on
+    /// leg-F once one is, so the accept loop fails-closed (logs + skips)
+    /// rather than proceeding if it somehow reads `None`.
+    ///
+    /// This is the #178 stand-in: it gates whether a leg-F redirect was
+    /// programmed at all (the SINGLE declared peer is the ratified D-MTLS-15
+    /// scope). It no longer SUPPLIES the dial target — getsockname recovery
+    /// does (see the TRANSITIONAL note above). General per-connection
+    /// multi-peer orig-dst recovery remains
+    /// [#178](https://github.com/overdrive-sh/overdrive/issues/178).
     ///
     /// Read back from the struct ONLY by the `integration-tests`-gated
-    /// `program_declared_peer_redirect` seam (the `AcceptLeg::Outbound`
-    /// loop reads a SEPARATE `Arc` clone, not this field). In a production
-    /// build the field is recorded but never read — the same shape as
-    /// `leg_f_addr` above (#178), so the `dead_code` allow is correct.
+    /// `program_declared_peer_redirect` seam; the `AcceptLeg::Outbound` loop
+    /// no longer reads this field to route (it builds the routing fact from
+    /// the getsockname-recovered orig-dst). In a production build the field
+    /// is recorded but never read — the same shape as `leg_f_addr` above
+    /// (#178), so the `dead_code` allow is correct.
     #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
     real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
 }
@@ -656,8 +663,16 @@ impl MtlsInterceptWorker {
                     };
                     // The connection is pending; `accept_outbound_leg`'s
                     // internal `accept()` returns it immediately, built into
-                    // `Routed::Outbound { peer: real_peer }` so `enforce` dials
-                    // the REAL peer.
+                    // `Routed::Outbound { peer }` from the getsockname-recovered
+                    // orig-dst (D-TME-4, symmetric with inbound) — so `enforce`
+                    // dials the REAL peer.
+                    //
+                    // TRANSITIONAL (03-02→04-02): the passed `peer` (from the
+                    // declared-peer `real_peer` slot) is now IGNORED inside
+                    // `accept_outbound_leg` (received as `_peer`); the routing
+                    // fact comes from getsockname, not this arg. This
+                    // declared-peer call-site is removed in step 04-02 when the
+                    // resolve consumer orphans the declared-peer model.
                     accept_outbound_leg(listener, alloc.clone(), peer)
                 }
                 AcceptLeg::Inbound { listener } => {
