@@ -436,6 +436,50 @@ fn dial_with_so_mark(
     Ok(stream)
 }
 
+/// Bound a blocking `accept()` on `listener` to `timeout` by setting
+/// `SO_RCVTIMEO` on the listener socket. On Linux, `SO_RCVTIMEO` applies to
+/// `accept(2)` — a `listen`ing socket with the timeout set returns
+/// `EAGAIN`/`EWOULDBLOCK` after `timeout` with no incoming connection. This lets
+/// the PRODUCTION `accept_outbound_leg`'s internal blocking `leg_f.accept()`
+/// (mtls_intercept.rs) return a clean error after a bounded wait instead of
+/// hanging forever to nextest's 120 s slow-timeout SIGKILL (which reads
+/// identically to "VM hung / infra broke" per debugging.md § 11). The happy path
+/// (a connection arrives in well under `timeout`) is unaffected; only the
+/// silent-redirect-failure path clean-fails. The production API is UNCHANGED —
+/// this is a test-side socket-option tweak applied before handing `&leg_f` to
+/// the production fn.
+///
+/// If `SO_RCVTIMEO`-on-listener does not reliably bound `accept()` on this
+/// kernel, the bound is best-effort and the production accept may still block;
+/// the diagnostic `.expect()` messages at the call sites document the
+/// hang-on-failure shape so a future failure is still diagnosable.
+fn bound_listener_accept(listener: &TcpListener, timeout: Duration) {
+    let tv = libc::timeval {
+        tv_sec: timeout.as_secs() as libc::time_t,
+        tv_usec: libc::suseconds_t::from(timeout.subsec_micros()),
+    };
+    // SAFETY: listener owns a live socket fd; SO_RCVTIMEO takes a `timeval` of
+    // the size passed. A non-zero return is a best-effort failure (the bound is
+    // not load-bearing for correctness — only for the diagnostic failure shape),
+    // so we log rather than panic.
+    let rc = unsafe {
+        libc::setsockopt(
+            listener.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVTIMEO,
+            std::ptr::from_ref(&tv).cast(),
+            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
+        )
+    };
+    if rc != 0 {
+        eprintln!(
+            "[03-03] warn: SO_RCVTIMEO on leg-F listener failed ({}); production accept may \
+             hang to slow-timeout on a silent redirect failure",
+            std::io::Error::last_os_error()
+        );
+    }
+}
+
 /// THE deliverable (ADR-0071 Tier-3 (a) + (b)): compose `install_outbound_tproxy`
 /// + `accept_outbound_leg` + `make_transparent_listener` on the REAL kernel.
 ///
@@ -447,9 +491,19 @@ fn dial_with_so_mark(
 ///        appends the `iifname <host_veth>` rule; the workload's `connect` is
 ///        redirected to the leg-F IP_TRANSPARENT listener; `accept_outbound_leg`
 ///        recovers orig-dst via getsockname == the dialed (ip,port).
-///   AC2-a (F5 positive): the agent's HOST-netns dial carrying
-///        `SO_MARK = MTLS_LEG_S_DIAL_MARK` is short-circuited by the chain-head
-///        exemption and reaches the REAL backend directly (NOT re-captured).
+///   AC2-a (agent HOST dial reaches the backend — by TOPOLOGY, NOT the F5
+///        exemption): the agent's HOST-netns dial carrying
+///        `SO_MARK = MTLS_LEG_S_DIAL_MARK` reaches the REAL backend directly
+///        (NOT re-captured to leg-F) because it originates host-side and never
+///        ingresses the workload veth, so the production `iifname <host_veth>`
+///        egress rule cannot match it — WITH OR WITHOUT the F5 exemption. This
+///        path does NOT exercise the egress F5 exemption: the exemption is
+///        irrelevant to the `iifname` rule (it matches on ingress interface, not
+///        destination), and its load-bearing role is on the SHARED chain's
+///        INBOUND `ip daddr`/`tcp dport` rules — where a host-originated marked
+///        dial to a virt DOES match and WOULD loop. See the inline gap note at
+///        the AC2-a block for why a genuinely load-bearing egress F5 *positive*
+///        control is out of 03-03's scope.
 ///   AC2-b (self-exempt-impossible — the SAFE negative control): a WORKLOAD dial
 ///        that sets `SO_MARK` INSIDE its own netns is STILL captured to leg-F —
 ///        the mark is skb-local and does not cross the veth/netns boundary, so a
@@ -511,6 +565,11 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // redirect to leg-F + getsockname orig-dst recovery.
     // ----------------------------------------------------------------
     // leg-F MUST be IP_TRANSPARENT (TPROXY delivers orig-dst-addressed packets).
+    // FORWARD-NOTE (04-01): make_transparent_listener's rustdoc
+    // (mtls_intercept.rs:127) still says "inbound leg-C", but the fn is
+    // direction-agnostic and 03-03 exercises it here for leg-F (egress). 04-01
+    // wires both legs and touches that file — broaden the rustdoc there to cover
+    // leg-C (inbound) / leg-F (egress). (Test-only step: cannot touch src/ here.)
     let leg_f = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .expect("make_transparent_listener leg-F");
     let leg_f_port = match leg_f.local_addr().expect("leg-F local_addr") {
@@ -545,8 +604,19 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     let declared_peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
     assert_ne!(declared_peer, backend, "placeholder must differ from the dialed dst");
     let alloc_id = alloc("alloc-egress-legf");
-    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), declared_peer)
-        .expect("accept_outbound_leg must build InterceptedConnection from the TPROXY redirect");
+    // Bound the PRODUCTION accept_outbound_leg's internal blocking accept(): if
+    // the redirect silently failed (the dial landed on the fallback backend
+    // instead of leg-F), this returns a clean error after 8 s instead of hanging
+    // to the 120 s slow-timeout SIGKILL.
+    bound_listener_accept(&leg_f, Duration::from_secs(8));
+    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), declared_peer).expect(
+        "accept_outbound_leg must build InterceptedConnection from the TPROXY redirect. A \
+             clean error here (EAGAIN/timeout after 8 s) means the redirect did NOT deliver to \
+             leg-F — egress capture did not fire (the dial reached the fallback backend instead). \
+             If this HANGS instead of clean-failing, SO_RCVTIMEO did not bound the production \
+             accept on this kernel; treat a 120 s slow-timeout SIGKILL as the same \
+             redirect-did-not-fire signal.",
+    );
 
     // AC1: the redirect fired (leg-F accepted, NOT the fallback backend) AND
     // getsockname recovered the dialed orig-dst.
@@ -591,11 +661,30 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     drop(backend_fallback);
 
     // ----------------------------------------------------------------
-    // AC2-a — F5 POSITIVE: the agent's HOST-netns dial carrying
-    // SO_MARK = MTLS_LEG_S_DIAL_MARK is short-circuited by the chain-head
-    // exemption and reaches the REAL backend directly (NOT re-captured to leg-F).
-    // ----------------------------------------------------------------
-    let agent_backend = TcpListener::bind(backend).expect("bind real backend (F5 positive)");
+    // AC2-a — agent HOST dial reaches the backend by TOPOLOGY (NOT the F5
+    // exemption): the agent's HOST-netns dial carrying
+    // SO_MARK = MTLS_LEG_S_DIAL_MARK reaches the REAL backend directly (NOT
+    // re-captured to leg-F) because it originates host-side and never ingresses
+    // the workload veth, so the production `iifname VETH_H` egress rule cannot
+    // match it — WITH OR WITHOUT the F5 exemption. The SO_MARK is decorative on
+    // THIS path: the dst (10.200.0.1) lives on host `lo`, so the packet ingresses
+    // with `iif=lo`, never `iif=VETH_H`. This does NOT exercise the egress F5
+    // exemption.
+    //
+    // GAP NOTE (honest, per the 03-03 review): the egress F5 exemption's
+    // load-bearingness FOR THE AGENT'S leg-S re-dial is a SEPARATE, UNPROVEN
+    // (possibly inapplicable) claim that touches ADR-0071's obligation-(b)
+    // framing and depends on how leg-S is wired in 04-01/04-02. For EGRESS, the
+    // ADR-0071 Tier-3 obligation (b) is satisfied HERE by AC2-b
+    // (self-exempt-impossible) alone. A genuinely load-bearing egress F5
+    // *positive* control would require a dial that actually INGRESSES the
+    // workload veth carrying the leg-S mark (the agent's real leg-S dial path,
+    // wired in 04-01/04-02) — a host-`lo` dial cannot match the production
+    // `iifname` rule and so cannot exercise the exemption. That is explicitly out
+    // of 03-03's scope. (The exemption's real load-bearing role is on the SHARED
+    // chain's INBOUND `ip daddr`/`tcp dport` rules, where a host-originated marked
+    // dial to a virt DOES match and WOULD loop without it.)
+    let agent_backend = TcpListener::bind(backend).expect("bind real backend (AC2-a topology)");
     let agent_dial = std::thread::spawn(move || {
         let s = dial_with_so_mark(backend, MTLS_LEG_S_DIAL_MARK, Duration::from_secs(8));
         if let Ok(mut s) = s {
@@ -606,23 +695,29 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     });
     let (mut agent_conn, agent_peer) = accept_with_timeout(&agent_backend, Duration::from_secs(5))
         .expect(
-            "F5 positive: the agent's SO_MARK-stamped HOST dial must reach the REAL backend \
-             directly (the chain-head exemption short-circuits it before the iifname rule). \
-             A timeout means the exemption is broken and the marked dial looped to leg-F.",
+            "AC2-a topology: the agent's HOST dial must reach the REAL backend directly because \
+             it originates host-side and ingresses with iif=lo, so the production `iifname VETH_H` \
+             egress rule cannot match it (with or without the F5 exemption). A timeout here means \
+             the host-side routing/topology is broken — NOT that the exemption is broken (this \
+             path does not exercise the exemption).",
         );
     let mut abuf = [0u8; 12];
     agent_conn.read_exact(&mut abuf).expect("read agent marker");
     assert_eq!(
         &abuf, b"AGENT-MARKED",
-        "F5 positive: backend must receive the agent's marked bytes"
+        "AC2-a topology: backend must receive the agent's marked bytes (host dial never \
+         iifname-matched)"
     );
     agent_dial.join().expect("agent dial thread");
     eprintln!(
-        "[03-03][AC2-a F5 positive] agent marked dial reached backend directly, peer={agent_peer}"
+        "[03-03][AC2-a topology] agent HOST dial reached backend directly (never iifname-matched, \
+         NOT via the F5 exemption), peer={agent_peer}"
     );
     // The agent dial originates in the HOST netns (NOT via the veth), so its peer
     // is the loopback source the host kernel picks for a lo-bound dst — proving
-    // it never traversed the veth and was never iifname-matched.
+    // it never traversed the veth and was never iifname-matched. This is WHY it
+    // reaches the backend: the topology non-match, not the F5 exemption (which is
+    // irrelevant to the egress iifname rule). See the AC2-a gap note above.
     drop(agent_backend);
 
     // ----------------------------------------------------------------
@@ -635,10 +730,15 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     let selfexempt_client =
         std::thread::spawn(move || run_client_in_netns(backend, Some(MTLS_LEG_S_DIAL_MARK)));
     let alloc_id2 = alloc("alloc-egress-selfexempt");
+    // Bound the production accept again (the SO_RCVTIMEO set above persists on the
+    // listener fd; re-apply defensively in case a prior accept reset it).
+    bound_listener_accept(&leg_f, Duration::from_secs(8));
     let intercepted2 = accept_outbound_leg(&leg_f, alloc_id2, declared_peer).expect(
         "self-exempt-impossible: a workload's SO_MARK-stamped dial must STILL be captured to \
-         leg-F (the mark does not cross the netns boundary). A failure here would mean the \
-         workload self-exempted — a security hole.",
+         leg-F (the mark does not cross the netns boundary). A clean error here (EAGAIN/timeout \
+         after 8 s) means the workload self-exempted — a security hole. If this HANGS instead, \
+         SO_RCVTIMEO did not bound the production accept on this kernel; a 120 s slow-timeout \
+         SIGKILL is the same self-exempt-leaked signal.",
     );
     match intercepted2.routed {
         Routed::Outbound { peer: got } => {
@@ -657,8 +757,11 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     eprintln!("[03-03][AC2-b self-exempt-impossible] client: {selfexempt_out}");
 
     eprintln!(
-        "[03-03] VERDICT: WORKS — egress redirect + getsockname recovery + F5 (positive + \
-         self-exempt-impossible) validated on kernel {kr}"
+        "[03-03] VERDICT: WORKS — egress redirect + getsockname recovery + self-exempt-impossible \
+         (ADR-0071 obligation (b) for egress) validated on kernel {kr}. AC2-a's agent HOST dial \
+         reaches the backend by topology non-match (never iifname-matched), NOT via the F5 \
+         exemption — a load-bearing egress F5 *positive* control needs the real leg-S veth-ingress \
+         dial wired in 04-01/04-02 (out of 03-03 scope)."
     );
 
     // Teardown: drop the per-workload guard (removes ONLY the iifname rule), then
