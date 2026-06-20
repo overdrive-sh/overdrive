@@ -12,10 +12,14 @@
 //!        `overdrive-mtls` PREROUTING chain matching `iifname <host_veth>` and
 //!        redirecting to a leg-F loopback port (`tproxy to 127.0.0.1:<legF>`).
 //!        This is `install_outbound_tproxy` (03-01) wired into `start_alloc`.
-//!   AC2  NO cgroup program is attached — the retired `cgroup_connect4_mtls`
-//!        kernel-side program is GONE from `overdrive_bpf.o`, so `bpftool prog
-//!        show` lists no `cgroup_connect4_mtls` (the deletion is observable, not
-//!        just structural). The worker holds no `MtlsDataplane`.
+//!   AC2  the retired `cgroup_connect4_mtls` kernel-side program is GONE from
+//!        the built `overdrive_bpf.o` — its ELF section `cgroup/connect4_mtls`
+//!        is ABSENT from the `readelf -S` section table while the look-alike LB
+//!        section `cgroup/connect4` is PRESENT (the deletion is observable at
+//!        the ELF boundary, and the named false-positive is preserved). The
+//!        worker holds no `MtlsDataplane`. (Re-adding the program to the ELF
+//!        turns this RED — unlike the prior `bpftool prog show` check, which was
+//!        vacuous because the test process never loads the object.)
 //!   AC3  the leg-C IP_TRANSPARENT listener + the leg-F + leg-C accept loops are
 //!        stood up (the install completes `Ok(())`; a re-fire is idempotent).
 //!   AC4  on `stop_alloc`, the per-veth egress rule is REMOVED by handle (the
@@ -182,20 +186,47 @@ fn dump_has_egress_rule(dump: &str, host_veth: &str) -> bool {
     })
 }
 
-/// `bpftool prog show` — true iff a `cgroup_connect4_mtls` program is loaded.
-/// AC2: the retired program is GONE from `overdrive_bpf.o`, so this MUST be
-/// false (the deletion is observable at the kernel boundary, not just in source).
-fn cgroup_connect4_mtls_program_loaded() -> bool {
-    let out = Command::new("bpftool")
-        .args(["prog", "show"])
+/// Resolve the built `overdrive_bpf.o` path. Honours `OVERDRIVE_BPF_OBJECT`
+/// (the env override the mutation runner + Lima wrapper set), else the
+/// workspace-relative `target/bpf/overdrive_bpf.o`. `CARGO_MANIFEST_DIR` is
+/// `crates/overdrive-worker`; pop twice to the workspace root. (Copied from
+/// `overdrive-bpf/tests/integration/bpf_artifact.rs` per the test-helper
+/// convention — the worker crate does not dep `overdrive-bpf`.)
+fn bpf_object_path() -> std::path::PathBuf {
+    if let Some(p) = std::env::var_os("OVERDRIVE_BPF_OBJECT").filter(|v| !v.is_empty()) {
+        return std::path::PathBuf::from(p);
+    }
+    let mut root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root.pop();
+    root.pop();
+    root.join("target/bpf/overdrive_bpf.o")
+}
+
+/// The set of `cgroup/connect4*` ELF section names in `overdrive_bpf.o`
+/// (`readelf -S` section-header dump). The HONEST deletion litmus: the SWAP
+/// retired the `cgroup_connect4_mtls` kernel-side program, so its section
+/// `cgroup/connect4_mtls` MUST be ABSENT from the freshly-built object — while
+/// the look-alike LB program's section `cgroup/connect4` MUST still be present
+/// (proving the test actually parsed a real object, not an empty/missing file).
+/// Re-adding the deleted program to the ELF turns the absence assertion RED.
+fn cgroup_connect4_sections() -> Vec<String> {
+    let obj = bpf_object_path();
+    let out = Command::new("readelf")
+        .args(["-S", "-W", &obj.to_string_lossy()])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output();
-    match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).contains("cgroup_connect4_mtls"),
-        // bpftool absent/failed — treat as "not loaded" (cannot prove presence).
-        Err(_) => false,
-    }
+        .output()
+        .expect("spawn readelf -S");
+    assert!(
+        out.status.success(),
+        "readelf -S {} failed — run `cargo xtask bpf-build` first",
+        obj.display()
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .filter(|tok| tok.starts_with("cgroup/connect4"))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec {
@@ -257,12 +288,26 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
          → tproxy to 127.0.0.1:<legF>, got chain:\n{dump}"
     );
 
-    // AC2: the retired cgroup_connect4_mtls program is GONE — no cgroup attach.
+    // AC2: the retired cgroup_connect4_mtls program is GONE from the built ELF.
+    // HONEST litmus (not vacuous): parse the actual `overdrive_bpf.o` section
+    // table and assert `cgroup/connect4_mtls` is ABSENT while the look-alike LB
+    // section `cgroup/connect4` is PRESENT. Re-adding the deleted program to the
+    // ELF turns the first assertion RED; a missing/empty object turns the second
+    // assertion RED. (The prior `bpftool prog show` check was vacuous: the test
+    // process never loads overdrive_bpf.o, so it would pass identically before
+    // the deletion.)
+    let sections = cgroup_connect4_sections();
     assert!(
-        !cgroup_connect4_mtls_program_loaded(),
-        "AC2: the retired cgroup_connect4_mtls program must NOT be loaded — start_alloc \
-         installs the egress nft rule, NOT a cgroup attach (the program is deleted from \
-         overdrive_bpf.o)"
+        !sections.iter().any(|s| s == "cgroup/connect4_mtls"),
+        "AC2: the retired cgroup_connect4_mtls program must be ABSENT from overdrive_bpf.o's \
+         section table (the deletion is observable at the ELF boundary), got cgroup/connect4* \
+         sections: {sections:?}"
+    );
+    assert!(
+        sections.iter().any(|s| s == "cgroup/connect4"),
+        "AC2: the look-alike LB program section cgroup/connect4 must STILL be present (proves \
+         the litmus parsed a real object, and the named false-positive was preserved), got: \
+         {sections:?}"
     );
 
     // AC3: re-fire is idempotent — a second start_alloc for the same alloc tears
@@ -285,21 +330,25 @@ async fn start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup() {
          reinstall), got {egress_rule_count}:\n{dump_after_refire}"
     );
 
-    // AC4: stop_alloc removes the per-veth egress rule by handle; the shared
-    // chain itself survives (per-veth teardown, not raze).
+    // AC4: stop_alloc removes the per-veth egress rule by handle; the SHARED
+    // chain itself SURVIVES (per-veth teardown, NOT raze — the shared
+    // overdrive-mtls routing infra is node-global converge-on-boot state, so a
+    // single alloc's stop must not raze it out from under every other alloc).
     worker.stop_alloc(&alloc);
     // The blocking accept loops observe the cooperative stop flag between 200ms
     // poll slices, then exit; the guard Drop removes the nft rule synchronously
-    // on stop_alloc. Re-dump and assert the egress rule is gone.
-    let dump_after_stop = nft_list_chain();
-    if let Ok(dump_after_stop) = dump_after_stop {
-        assert!(
-            !dump_has_egress_rule(&dump_after_stop, VETH_H),
-            "AC4: stop_alloc must remove the per-veth egress rule for {VETH_H} by handle, \
-             got chain:\n{dump_after_stop}"
-        );
-    }
-    // (If the chain itself is gone that's also acceptable — nothing left to match.)
+    // on stop_alloc. Re-dump and assert (a) the shared chain still EXISTS and
+    // (b) only the per-veth rule is gone.
+    let dump_after_stop = nft_list_chain().expect(
+        "AC4: the shared overdrive-mtls prerouting chain must SURVIVE stop_alloc \
+         (per-veth teardown, not raze) — its absence means the per-alloc stop razed \
+         shared node-global infra",
+    );
+    assert!(
+        !dump_has_egress_rule(&dump_after_stop, VETH_H),
+        "AC4: stop_alloc must remove the per-veth egress rule for {VETH_H} by handle, \
+         leaving the shared chain otherwise intact, got chain:\n{dump_after_stop}"
+    );
 
     clean_shared_infra();
 }

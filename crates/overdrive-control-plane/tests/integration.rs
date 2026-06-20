@@ -54,6 +54,15 @@ mod integration {
     mod ca_boot_and_audit;
     mod ca_equivalence;
 
+    /// transparent-mtls-enrollment step 04-01 (Path A / ADR-0071, D-TME-12 /
+    /// AC14) — Tier-3 acceptance for the C3 action-shim seam. Drives the
+    /// PRODUCTION `action_shim::dispatch` with `mtls_worker: Some(...)` (the
+    /// ACTIVE seam path) + a real `NetSlotAllocator`: provision-before-spawn +
+    /// lands-in-`ovd-ns-<slot>` (`ip netns identify`) + terminal teardown
+    /// (root-gated, SKIP otherwise), and provision-failure → `Failed` row
+    /// carrying `WorkloadNetnsProvisionFailed` (deterministic, slot exhaustion,
+    /// no root — mirrors `fail_closed_on_mtls_install`).
+    mod alloc_netns_lifecycle;
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state

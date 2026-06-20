@@ -191,6 +191,22 @@ pub enum TransitionReason {
     /// kind, source }` cause-class shape — `stage` is a `String` carrying a
     /// closed vocabulary, NOT a sub-enum.
     MtlsInterceptInstallFailed { stage: String, detail: String },
+    /// The alloc's per-workload network namespace + veth could NOT be
+    /// provisioned (or a free network slot could not be assigned), so the alloc
+    /// is failed fail-closed rather than spawned without its netns
+    /// (transparent-mtls-enrollment D-TME-12 / AC14, Path A / ADR-0071). Unlike
+    /// `MtlsInterceptInstallFailed` — which supersedes an already-`Running` row
+    /// when the post-spawn intercept install fails — this fires at the
+    /// PRE-`Running` provision seam (the provision precedes `Driver::start`), so
+    /// the alloc never reached Running and a persistent provision failure (slot
+    /// exhaustion, EPERM creating the netns/veth) drives the alloc to `Failed`
+    /// instead of looping `Pending` forever. `stage` is one of
+    /// `"net_slot_assign"` (no free slot) or `"netns_provision"` (the netns/veth
+    /// shell-out failed); `detail` is the verbatim `Display` of the underlying
+    /// `NetSlotExhausted` / `VethProvisionError`. Mirrors the
+    /// `MtlsInterceptInstallFailed { stage, detail }` cause-class shape — `stage`
+    /// is a `String` carrying a closed vocabulary, NOT a sub-enum.
+    WorkloadNetnsProvisionFailed { stage: String, detail: String },
 }
 
 /// Initiator of a `Stopped` transition.
@@ -774,6 +790,9 @@ impl TransitionReason {
             Self::MtlsInterceptInstallFailed { stage, detail } => {
                 format!("mTLS intercept install failed ({stage}): {detail}")
             }
+            Self::WorkloadNetnsProvisionFailed { stage, detail } => {
+                format!("workload netns provision failed ({stage}): {detail}")
+            }
         }
     }
 
@@ -806,7 +825,8 @@ impl TransitionReason {
             | Self::NoCapacity { .. }
             | Self::OutOfMemory { .. }
             | Self::WorkloadCrashedImmediately { .. }
-            | Self::MtlsInterceptInstallFailed { .. } => true,
+            | Self::MtlsInterceptInstallFailed { .. }
+            | Self::WorkloadNetnsProvisionFailed { .. } => true,
         }
     }
 }

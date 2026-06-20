@@ -1,6 +1,8 @@
-//! `ExecDriver::with_netns_path()` enters the target netns before
-//! `execve`. Real-kernel test: spawn `/bin/sh -c 'readlink
-//! /proc/self/ns/net >>/tmp/...; sleep 60'` with `netns_path` pointing
+//! `ExecDriver::start` with `spec.netns = Some(<name>)` enters the
+//! target netns before `execve` (the `with_netns_path` builder was
+//! deleted single-cut; the netns NAME now travels on `AllocationSpec`,
+//! JOIN-2). Real-kernel test: spawn `/bin/sh -c 'readlink
+//! /proc/self/ns/net >>/tmp/...; sleep 60'` with `spec.netns` pointing
 //! at a freshly-created netns, and assert the child's
 //! `/proc/self/ns/net` symlink resolves to the target netns's inode
 //! (NOT the test process's inode).
@@ -105,8 +107,8 @@ fn read_proc_netns_inode(pid: u32) -> Option<u64> {
 
 #[tokio::test]
 #[serial(cgroup)]
-async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
-    if !require_root_or_skip("exec_driver_with_netns_path") {
+async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
+    if !require_root_or_skip("exec_driver_with_spec_netns") {
         return;
     }
 

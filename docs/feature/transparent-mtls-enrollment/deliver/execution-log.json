@@ -925,6 +925,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-20T05:02:15Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T05:05:36Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T08:43:32Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T08:51:13Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: action-shim wiring + pure cause-class classifier covered by the Tier-3 AT (provision-failure RED-proven via bare-? revert); schema-evolution roundtrip pin added for the new TransitionReason variant",
+      "t": "2026-06-20T08:51:13Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T09:03:49Z"
     }
   ]
 }

@@ -405,12 +405,13 @@ impl MtlsInterceptWorker {
         inbound_listener: std::net::TcpListener,
     ) {
         let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
-        // The declared-peer dial target, supplied by the #178 stand-in seam
-        // AFTER this `start_alloc` returns. Cloned into the OUTBOUND accept
-        // loop (which reads it per accept) and into the recorded intercept
-        // (which `program_declared_peer_redirect` writes). `None` until the
-        // seam records it; a leg-F connection only arrives once a redirect is
-        // programmed, so the loop sees `Some(real_peer)` by then.
+        // VESTIGIAL outbound dial target — ALWAYS `None` as of 04-01. The
+        // declared-peer model that once wrote it was deleted this step, and the
+        // per-connection `MtlsResolve` consumer that 04-02 will wire is not yet
+        // present. So the OUTBOUND accept loop always sees `None` and
+        // fail-closed-drops leg-F traffic (see `accept_loop`'s Outbound arm).
+        // Retained only so the accept-loop signature is stable across 04-01⇄04-02;
+        // 04-02 replaces this slot with the resolve consumer.
         let real_peer: Arc<Mutex<Option<SocketAddrV4>>> = Arc::new(Mutex::new(None));
         // Cooperative stop flag the accept loops observe between poll slices.
         let stop = Arc::new(AtomicBool::new(false));
@@ -529,58 +530,47 @@ impl MtlsInterceptWorker {
             let built = match leg {
                 AcceptLeg::Outbound { listener, leg_f_addr, real_peer } => {
                     let _ = leg_f_addr; // the redirect TARGET, never the dial target
-                    // TRANSITIONAL (this whole declared-peer gate is DELETED in
-                    // step 04-02 when the `MtlsResolve` consumer lands). As of
-                    // the Path-A egress nft-TPROXY mechanism (D-TME-4, the
-                    // RETIRED `cgroup_connect4_mtls` rewrite gone in step
-                    // 04-01) the outbound orig-dst IS getsockname-recoverable
-                    // from the accepted leg-F socket — `accept_outbound_leg`
-                    // below builds `Routed::Outbound { peer }` from that
-                    // recovered addr (symmetric with inbound TPROXY) and
-                    // IGNORES the `real_peer` arg. The vestigial `real_peer`
-                    // slot below is now ALWAYS `None` (nothing programs it
-                    // since `program_declared_peer_redirect` was deleted in
-                    // 04-01), so leg-F traffic currently fail-closed-drops
-                    // until 04-02 wires the resolve consumer.
+                    // 04-01 installs the OUTBOUND nft-TPROXY rule + the leg-F /
+                    // leg-C listeners + this accept loop. It does NOT yet complete
+                    // leg-F traffic: the per-connection `MtlsResolve` consumer
+                    // that supplies the dial peer lands in step 04-02. Until then
+                    // `real_peer` is ALWAYS `None` (the declared-peer model that
+                    // once wrote it was deleted this step), so EVERY accepted
+                    // leg-F connection takes the fail-closed-drop path below —
+                    // the workload's connection is closed and NO cleartext
+                    // egresses. The `Some(peer)` arm is unreachable as of 04-01
+                    // and is removed in 04-02 when the resolve consumer replaces
+                    // the `real_peer` slot.
                     //
-                    // Block until a connection is PENDING on the listener
-                    // WITHOUT consuming it, THEN read the (vestigial)
-                    // `real_peer` slot.
+                    // Block until a connection is PENDING on the listener WITHOUT
+                    // consuming it, then read the (vestigial) `real_peer` slot.
                     match await_pending_connection(listener, stop) {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
                     }
                     let Some(peer) = *real_peer.lock() else {
-                        // A pending leg-F connection with no recorded declared
-                        // peer — an anomaly (the seam records before it
-                        // programs the redirect). Fail CLOSED: accept-and-drop
-                        // so the workload's connection is closed and NO
-                        // cleartext egresses — never self-loop to `leg_f_addr`.
+                        // The 04-01 path: no resolve consumer yet, so no dial
+                        // peer. Fail CLOSED: accept-and-drop so the workload's
+                        // connection is closed and NO cleartext egresses — never
+                        // self-loop to `leg_f_addr`. 04-02 replaces this with the
+                        // resolve-driven dial.
                         match accept_drop_outbound(listener) {
                             AcceptOutcome::Dropped => {
                                 tracing::warn!(
-                                    name: "health.mtls.outbound_no_declared_peer",
+                                    name: "health.mtls.outbound_fail_closed_pre_resolve",
                                     alloc = %alloc,
-                                    "leg-F connection with no recorded declared peer; \
-                                     dropped fail-closed (no cleartext, no self-loop)"
+                                    "leg-F connection dropped fail-closed (no resolve consumer \
+                                     until 04-02; no cleartext, no self-loop)"
                                 );
                                 continue;
                             }
                             AcceptOutcome::ListenerClosed => return,
                         }
                     };
-                    // The connection is pending; `accept_outbound_leg`'s
-                    // internal `accept()` returns it immediately, built into
-                    // `Routed::Outbound { peer }` from the getsockname-recovered
-                    // orig-dst (D-TME-4, symmetric with inbound) — so `enforce`
-                    // dials the REAL peer.
-                    //
-                    // TRANSITIONAL (03-02→04-02): the passed `peer` (from the
-                    // declared-peer `real_peer` slot) is now IGNORED inside
-                    // `accept_outbound_leg` (received as `_peer`); the routing
-                    // fact comes from getsockname, not this arg. This
-                    // declared-peer call-site is removed in step 04-02 when the
-                    // resolve consumer orphans the declared-peer model.
+                    // UNREACHABLE as of 04-01 (`real_peer` is always `None`).
+                    // Kept only so the leg-acquisition shape is stable across the
+                    // 04-01⇄04-02 boundary; 04-02 wires the resolve consumer that
+                    // makes this arm live.
                     accept_outbound_leg(listener, alloc.clone(), peer)
                 }
                 AcceptLeg::Inbound { listener } => {
