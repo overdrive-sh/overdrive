@@ -1197,28 +1197,34 @@ mod tests {
         assert_eq!(recorded[0].alloc, alloc("alloc-mesh"), "alloc must round-trip to enforce");
         assert!(!recorded[0].expected_peer_is_some, "v1 authn-only: expected_peer is None");
         // The handle is pushed into the teardown set AFTER `enforce` returns Ok
-        // (inside the spawned task, after the spy recorded the call) — spin
-        // (bounded) until it lands so the assertion does not race the push.
-        for _ in 0..1000 {
-            if enforced.lock().len() == 1 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        // (inside the spawned task, after the spy recorded the call) — wait
+        // (bounded, real-time) until it lands so the assertion does not race the push.
+        wait_until("enforced handle joins teardown set", || enforced.lock().len() == 1).await;
         assert_eq!(enforced.lock().len(), 1, "the enforced handle joins the teardown set");
     }
 
-    /// Spin (bounded — no unbounded wait) until `calls` holds at least `n`
-    /// recorded `enforce` calls, then return a clone. The enforce dispatch is a
-    /// spawned task; this closes the race between "handle_outbound returned" and
-    /// "the spawned enforce ran" without a fixed sleep.
-    async fn wait_for_calls(calls: &Arc<Mutex<Vec<EnforceCall>>>, n: usize) -> Vec<EnforceCall> {
-        for _ in 0..1000 {
-            if calls.lock().len() >= n {
-                break;
-            }
-            tokio::task::yield_now().await;
+    /// Wait (bounded, in real wall-clock time) until `cond` holds. Polls on a
+    /// real timer instead of a fixed `yield_now` budget so a spawned `enforce`
+    /// task gets genuine scheduling even under heavy CPU contention — the old
+    /// 1000-iteration yield-spin elapsed in microseconds and starved the task
+    /// under the high-parallelism mutants profile ("got 0 calls"). `yield_now`
+    /// only reschedules among READY tasks; it grants no wall-clock time for a
+    /// starved task to become ready. Panics on a 5s timeout (the spawned work
+    /// is genuinely broken, not merely slow).
+    async fn wait_until(label: &str, mut cond: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !cond() {
+            assert!(tokio::time::Instant::now() < deadline, "condition not met within 5s: {label}");
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
+    }
+
+    /// Wait (bounded, real-time) until `calls` holds at least `n` recorded
+    /// `enforce` calls, then return a clone. The enforce dispatch is a spawned
+    /// task; this closes the race between "handle_outbound returned" and "the
+    /// spawned enforce ran" without a fixed sleep or a starvable yield budget.
+    async fn wait_for_calls(calls: &Arc<Mutex<Vec<EnforceCall>>>, n: usize) -> Vec<EnforceCall> {
+        wait_until("enforce calls recorded", || calls.lock().len() >= n).await;
         calls.lock().clone()
     }
 
