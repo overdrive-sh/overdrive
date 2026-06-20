@@ -543,6 +543,26 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
     }
 }
 
+/// The node-local DNS-responder / mTLS-interception address for `slot` — the
+/// per-netns **gateway** (the host-side veth-end address), i.e. the SAME value
+/// [`derive_workload_netns_plan`] computes as `plan.host_addr` / `plan.gateway`
+/// (`WORKLOAD_SUBNET_BASE.network() + slot*4 + 1`, the first usable host of the
+/// slot's /30). D-TME-12 G1: the responder IS the per-netns gateway — reachable
+/// by construction (it is the in-netns default route), collision-free (the
+/// slot's own /30 host address), and the Overdrive analogue of Fly's fixed
+/// `fdaa::3`.
+///
+/// Pure — performs no I/O, deterministic, total over `0..=NET_SLOT_MAX`. Exposed
+/// so the action-shim C3 site can pass a concrete `responder_addr` into
+/// `derive_workload_netns_plan` in ONE line without re-deriving the gateway
+/// arithmetic; `debug_assert_eq!(plan.responder_addr, plan.host_addr)` holds at
+/// the call site.
+#[must_use]
+pub fn responder_addr_for_slot(slot: NetSlot) -> Ipv4Addr {
+    // Mirror the plan's own gateway math: net = base + slot*4; gateway = net+1.
+    WORKLOAD_SUBNET_BASE.network().saturating_add(u32::from(slot.0) * 4).saturating_add(1)
+}
+
 /// The desired body of a per-workload netns's `/etc/resolv.conf`: a single
 /// `nameserver <responder_addr>` line with a trailing newline (D-TME-9 / Q5a,
 /// the Fly.io `fdaa::3` injection model). This is the stock single-`nameserver`

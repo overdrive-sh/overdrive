@@ -102,6 +102,9 @@ fn liveness_restart_spec_default() -> overdrive_core::traits::driver::Allocation
             memory_bytes: 64 * 1024 * 1024,
         },
         probe_descriptors: vec![],
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+        netns: None,
+        host_veth: None,
     }
 }
 

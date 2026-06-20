@@ -347,38 +347,20 @@ pub enum DataplaneBootError {
 /// Boot-time failure of the production transparent-mTLS layer
 /// (transparent-mtls-host-socket, D-MTLS-17, GH #26; step 06-03).
 ///
-/// Mirrors [`DataplaneBootError`]'s `Construct`/`Probe` shape: the mTLS
-/// layer is wired AFTER `IdentityMgr` (so `HostMtlsEnforcement` can read
-/// the held identity), `probe()`d under the wire→probe→use invariant, and
-/// only then used. A failure happens BEFORE the listener binds, so the
-/// `to_response` arm on the embedding [`ControlPlaneError::MtlsBoot`]
-/// variant is exhaustiveness-only. Pass-through `#[from]` per
-/// `.claude/rules/development.md` § "Never flatten a typed error to
-/// `Internal(String)`": each cause keeps its own variant so the
+/// The mTLS layer is wired AFTER `IdentityMgr` (so `HostMtlsEnforcement` can
+/// read the held identity), `probe()`d under the wire→probe→use invariant,
+/// and only then used. A failure happens BEFORE the listener binds, so the
+/// `to_response` arm on the embedding [`ControlPlaneError::MtlsBoot`] variant
+/// is exhaustiveness-only. As of step 04-01 (ADR-0071 Path A) the only boot
+/// failure mode is the `probe()` step: the OUTBOUND intercept is a per-veth
+/// egress nft-TPROXY rule installed per-alloc at `start_alloc`, not a
+/// boot-time BPF load, so the former `Load` variant (`MtlsDataplane::load`)
+/// is gone. Per `.claude/rules/development.md` § "Never flatten a typed error
+/// to `Internal(String)`" the `Probe` cause keeps its own variant so the
 /// composition root can `matches!(e, ControlPlaneError::MtlsBoot(_))` for
 /// structured boot diagnostics without `Display`-grepping.
 #[derive(Debug, Error)]
 pub enum MtlsBootError {
-    /// `MtlsDataplane::load` failed — the shared `overdrive_bpf.o` could
-    /// not be loaded, `cgroup_connect4_mtls` / `MTLS_REDIRECT_DEST` was
-    /// absent (a build/embed regression), or the program's verifier load
-    /// was rejected. The node MUST refuse to start (fail-closed for
-    /// confidentiality — NO degrade to a cleartext path).
-    #[error(
-        "transparent-mTLS dataplane load failed; refusing to boot \
-         (no cleartext fallback): {source}\n\
-         \n\
-         Try:\n\
-           - `mount | grep bpffs` to verify /sys/fs/bpf is mounted.\n\
-           - `dmesg | tail` for kernel-side BPF verifier errors.\n\
-           - Confirm CAP_BPF / CAP_NET_ADMIN for the running process."
-    )]
-    Load {
-        /// Underlying typed `MtlsDataplaneError` from `MtlsDataplane::load`.
-        #[from]
-        source: overdrive_dataplane::mtls::MtlsDataplaneError,
-    },
-
     /// `MtlsEnforcement::probe` failed — the kTLS-arm + agent-light
     /// forward-encrypt substrate did not round-trip clean on the loopback
     /// sentinel (D-MTLS-11/12). The proxy is not trustworthy; the node

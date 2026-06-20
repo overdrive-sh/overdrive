@@ -2934,6 +2934,11 @@ fn liveness_restart_spec(
             .chain(spec.liveness_probes.iter())
             .cloned()
             .collect(),
+        // Netns-agnostic reconciler side (JOIN-2) — the slot-derived netns
+        // name + host-veth name are injected ONLY at the action-shim C3 site,
+        // never here.
+        netns: None,
+        host_veth: None,
     }
 }
 

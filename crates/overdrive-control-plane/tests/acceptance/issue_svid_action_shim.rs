@@ -142,6 +142,9 @@ async fn issue_svid_executor_audits_before_hold() {
         &broker,
         None,
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await
     .expect("IssueSvid dispatch succeeds");
@@ -212,6 +215,9 @@ async fn audit_write_failure_refuses_hold() {
         &broker,
         None,
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await;
 

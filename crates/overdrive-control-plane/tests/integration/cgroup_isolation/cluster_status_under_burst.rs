@@ -90,6 +90,9 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         ],
         resources: Resources { cpu_milli: 1000, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+        netns: None,
+        host_veth: None,
     };
     let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 

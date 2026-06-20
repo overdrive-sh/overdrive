@@ -129,10 +129,8 @@ async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
         "freshly-created netns must have a distinct inode from the test process's netns",
     );
 
-    let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs)
-            .with_netns_path(target_ns.path()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs));
 
     let alloc = AllocationId::new("alloc-netns-entry").expect("valid alloc id");
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
@@ -144,12 +142,17 @@ async fn exec_driver_with_netns_path_spawns_child_inside_target_netns() {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // The netns NAME (not a path) — the production C3 channel (JOIN-2).
+        // `start` joins it onto `/var/run/netns/<name>` (where `ip netns add`
+        // placed it) and enters it via `setns(CLONE_NEWNET)`.
+        netns: Some(target_ns.name.clone()),
+        host_veth: None,
     };
 
     let handle = driver
         .start(&spec)
         .await
-        .expect("ExecDriver::start with netns_path succeeds for /bin/sleep");
+        .expect("ExecDriver::start with spec.netns succeeds for /bin/sleep");
 
     let pid = handle.pid.expect("ExecDriver populates pid on start");
 
@@ -180,14 +183,12 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         .await
         .expect("workloads.slice bootstrap succeeds");
 
-    let missing = PathBuf::from(format!("/var/run/netns/ovd-edns-missing-{}", std::process::id()));
+    let missing_name = format!("ovd-edns-missing-{}", std::process::id());
     // Make sure it really doesn't exist.
-    let _ = std::fs::remove_file(&missing);
+    let _ = std::fs::remove_file(format!("/var/run/netns/{missing_name}"));
 
-    let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs)
-            .with_netns_path(missing.clone()),
-    );
+    let driver: Arc<dyn Driver> =
+        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()), fs));
 
     let alloc = AllocationId::new("alloc-netns-missing").expect("valid alloc id");
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
@@ -199,9 +200,13 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // A netns NAME that does not exist under `/var/run/netns/` — the
+        // open() pre-flight fails → `DriverError::NetnsEntry`.
+        netns: Some(missing_name.clone()),
+        host_veth: None,
     };
 
-    let err = driver.start(&spec).await.expect_err("start must fail for missing netns_path");
+    let err = driver.start(&spec).await.expect_err("start must fail for missing netns");
 
     match err {
         DriverError::NetnsEntry { netns_path, .. } => {

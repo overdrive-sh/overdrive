@@ -46,6 +46,10 @@ async fn missing_binary_does_not_create_cgroup_scope() {
         args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
+        // mTLS-composed boot gate — no provisioned netns/veth.
+        netns: None,
+        host_veth: None,
     };
 
     let result = driver.start(&spec).await;

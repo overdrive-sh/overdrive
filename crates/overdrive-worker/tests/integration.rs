@@ -73,11 +73,13 @@ mod integration {
     // outbound/inbound leg-acquire → `InterceptedConnection` build.
     mod mtls_intercept_install;
 
-    // fix-mtls-intercept-fail-open (D-MTLS-18) — Tier 3 regression gate that
-    // `MtlsInterceptWorker::start_alloc` fails CLOSED (returns `Err`) when an
-    // install step fails, rather than swallowing the failure and leaving the
-    // alloc running with cleartext egress.
-    mod mtls_intercept_fail_closed;
+    // transparent-mtls-enrollment (ADR-0071, step 04-01) — Tier-3 AT that
+    // `MtlsInterceptWorker::start_alloc` installs BOTH the OUTBOUND egress
+    // nft-TPROXY rule (on the alloc's host-side veth, `spec.host_veth`) AND
+    // the leg-F + leg-C IP_TRANSPARENT listeners + accept loops, with NO
+    // cgroup-attach step (the retired `cgroup_connect4_mtls` mechanism is
+    // gone). Port-to-port through `start_alloc`.
+    mod start_alloc_installs_both_tproxy;
 
     // transparent-mtls-enrollment (ADR-0071, step 03-03) — Tier-3 EGRESS
     // capture walking proof: composes `install_outbound_tproxy` (03-01) +

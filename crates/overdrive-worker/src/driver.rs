@@ -178,24 +178,6 @@ pub struct ExecDriver {
     /// Validates ADR-0026 D9 warn-and-continue under controlled
     /// failure.
     force_limit_write_failure: bool,
-    /// Opt-in target network namespace for every spawned child.
-    /// `None` (the production default) yields bit-identical behaviour
-    /// to the pre-2026-05-21 driver. `Some(path)` causes
-    /// `Driver::start` to open `path` (typically
-    /// `/var/run/netns/<name>`) as an `OwnedFd` and install a
-    /// `pre_exec` hook that calls `setns(fd, CLONE_NEWNET)` in the
-    /// forked child between fork and exec — the spawned binary is
-    /// born already inside the target netns.
-    ///
-    /// Structurally aligned with the CNI spec model: the netns is
-    /// created and managed by the caller (a test fixture today, a
-    /// CNI-runtime-equivalent in future container/microvm driver
-    /// types); the driver only ENTERS an already-existing namespace,
-    /// never creates one. See
-    /// `docs/research/testing/walking-skeleton-xdp-lb-topology.md`
-    /// § Findings 2.4 + 2.5 for the Rust ecosystem precedent
-    /// (`netns-rs`, `netns-exec`) and the CNI cross-reference.
-    netns_path: Option<PathBuf>,
     /// Live allocations indexed by ID. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § Ordered
     /// collections.
@@ -267,7 +249,6 @@ impl ExecDriver {
             cgroup_manager,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
-            netns_path: None,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -296,29 +277,6 @@ impl ExecDriver {
     }
 
     /// Target every spawned child at `netns_path` (typically
-    /// `/var/run/netns/<name>`). On `Driver::start`, the driver
-    /// opens the path as an `OwnedFd` and installs a `pre_exec`
-    /// hook calling `setns(fd, CLONE_NEWNET)` in the forked child
-    /// before `execve` — the workload binary is born already inside
-    /// the target netns.
-    ///
-    /// Default = `None` (production behaviour, bit-identical to the
-    /// pre-2026-05-21 driver). The builder is opt-in for test
-    /// fixtures that pre-create per-test netns (and, in future,
-    /// for container / microvm driver types whose runtime owns the
-    /// netns lifecycle — the same shape CNI plugins consume via
-    /// `CNI_NETNS`).
-    ///
-    /// On netns-open / `setns` failure at start time, the start call
-    /// returns `DriverError::NetnsEntry { netns_path, source }` so
-    /// the caller can distinguish a netns-targeting setup error from
-    /// a workload-spec rejection (`StartRejected`).
-    #[must_use]
-    pub fn with_netns_path(mut self, netns_path: PathBuf) -> Self {
-        self.netns_path = Some(netns_path);
-        self
-    }
-
     /// Override the grace window between SIGTERM and SIGKILL.
     /// Default is 5 seconds. Tests use shorter grace.
     #[must_use]
@@ -379,7 +337,8 @@ impl ExecDriver {
     /// the contract is to call only async-signal-safe functions;
     /// `setsid(2)` is on the POSIX async-signal-safe list.
     ///
-    /// When `netns_fd` is `Some`, a second `pre_exec` hook calls
+    /// When `netns_fd` is `Some` (the caller opened `/var/run/netns/
+    /// <spec.netns>` for this start), a second `pre_exec` hook calls
     /// `setns(fd, CLONE_NEWNET)` so the spawned child enters the
     /// target network namespace before `execve`. `setns(2)` is on
     /// the kernel's async-signal-safe list for the namespace-FD case
@@ -416,9 +375,9 @@ impl ExecDriver {
             });
         }
 
-        // Opt-in netns entry — see `with_netns_path()` rustdoc for
-        // the rationale. The `setns(2)` syscall against a
-        // namespace-FD is async-signal-safe; the closure runs in the
+        // Per-spec netns entry — see `AllocationSpec::netns` rustdoc
+        // (overdrive-core) for the rationale. The `setns(2)` syscall
+        // against a namespace-FD is async-signal-safe; the closure runs in the
         // forked child between fork and exec and touches no
         // allocator / locked state. The FD is moved into the closure
         // (its `Drop` after `setns` returns drops the parent-side
@@ -475,27 +434,34 @@ impl Driver for ExecDriver {
             );
         }
 
-        // 3. If `netns_path` is set, open the netns FD up-front so
-        //    failure surfaces as a structured `NetnsEntry` error
+        // 3. If `spec.netns` is set, open the per-spec netns FD up-front
+        //    so failure surfaces as a structured `NetnsEntry` error
         //    (rather than as a generic `spawn()` failure buried in
         //    the `pre_exec` closure). Pre-open also fails fast on
         //    permission / missing-netns errors before the child fork
         //    happens, which is the cleaner failure mode. On success
         //    the FD is moved into the `pre_exec` closure for
-        //    `setns()`.
-        let netns_fd = match self.netns_path.as_ref() {
+        //    `setns()`. The spec carries the netns NAME (`ovd-ns-<4hex>`,
+        //    minted by the C3 site's `derive_workload_netns_plan`), which
+        //    `start` joins onto the stock `/var/run/netns/<name>` location
+        //    (where `ip netns add` places it). The driver ENTERS, never
+        //    creates (CNI-aligned).
+        let netns_fd = match spec.netns.as_deref() {
             None => None,
-            Some(path) => match tokio::fs::File::open(path).await {
-                Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
-                Err(source) => {
-                    let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-                    return Err(DriverError::NetnsEntry {
-                        driver: DriverType::Exec,
-                        netns_path: path.display().to_string(),
-                        source,
-                    });
+            Some(name) => {
+                let path = std::path::Path::new("/var/run/netns").join(name);
+                match tokio::fs::File::open(&path).await {
+                    Ok(f) => Some(std::os::fd::OwnedFd::from(f.into_std().await)),
+                    Err(source) => {
+                        let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
+                        return Err(DriverError::NetnsEntry {
+                            driver: DriverType::Exec,
+                            netns_path: path.display().to_string(),
+                            source,
+                        });
+                    }
                 }
-            },
+            }
         };
 
         // 4. Spawn the child. Failure here means the binary path is
@@ -506,16 +472,19 @@ impl Driver for ExecDriver {
             Ok(child) => child,
             Err(err) => {
                 let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-                // A spawn failure when `netns_path` is set most
+                // A spawn failure when `spec.netns` is set most
                 // likely came from the netns-entry `pre_exec` hook
                 // (setns(2) returned EPERM / EINVAL — the open()
                 // pre-flight above already ruled out a missing
                 // path). Surface as `NetnsEntry` so the caller can
                 // distinguish from a workload-spec rejection.
-                if let Some(path) = self.netns_path.as_ref() {
+                if let Some(name) = spec.netns.as_deref() {
                     return Err(DriverError::NetnsEntry {
                         driver: DriverType::Exec,
-                        netns_path: path.display().to_string(),
+                        netns_path: std::path::Path::new("/var/run/netns")
+                            .join(name)
+                            .display()
+                            .to_string(),
                         source: err,
                     });
                 }
@@ -1235,6 +1204,8 @@ mod lifecycle_hook_tests {
             args: vec![],
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::<ProbeDescriptor>::new(),
+            netns: None,
+            host_veth: None,
         }
     }
 

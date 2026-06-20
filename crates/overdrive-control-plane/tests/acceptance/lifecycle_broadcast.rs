@@ -176,6 +176,9 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+        netns: None,
+        host_veth: None,
     }
 }
 
@@ -270,7 +273,11 @@ proptest! {
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-                &tx, &tick, &writer_node, allocator, &test_broker, None, None)
+                &tx, &tick, &writer_node, allocator, &test_broker, None, None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+    )
                 .await
                 .expect("dispatch must succeed");
 
@@ -348,6 +355,9 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         &test_broker,
         None,
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -499,6 +509,9 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         &test_broker,
         None,
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await
     .expect("dispatch must succeed");

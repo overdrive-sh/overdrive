@@ -65,7 +65,6 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use parking_lot::Mutex;
 
-pub mod dataplane;
 mod inbound;
 mod ktls;
 mod limits;
@@ -73,8 +72,6 @@ mod outbound;
 mod splice;
 mod supervision;
 mod tls_config;
-
-pub use dataplane::{MtlsCgroupLink, MtlsDataplane, MtlsDataplaneError};
 
 use limits::InFlightLedger;
 use splice::{PumpHandle, SelfTeardown};

@@ -1,20 +1,21 @@
 //! Test-harness roles for the composed transparent-mTLS walking skeleton (step
 //! 01-01). These stand in for the WORKER composition-root role (step 07-01) +
-//! the workload/peer/client/server processes — they own the intercept setup
-//! (cgroup_connect4 attach / nft-TPROXY), the leg-F/leg-C listeners, the
-//! `accept()`, and the real TLS peers/workloads. ONLY the accepted leg crosses
-//! into the adapter via `InterceptedConnection`; the adapter API is the 4 pinned
-//! methods, nothing here is adapter surface.
+//! the workload/server/client processes — they own the INBOUND intercept setup
+//! (nft-TPROXY), the IP_TRANSPARENT leg-C listener, the `accept()`, and the real
+//! TLS server/client. ONLY the accepted leg crosses into the adapter via
+//! `InterceptedConnection`; the adapter API is the 4 pinned methods, nothing here
+//! is adapter surface.
 //!
 //! Lifted from the proven spike orchestrators:
-//! - `OutboundPeer` ← increment-f `role_peer` (kTLS-RX server that decrypts).
-//! - `OutboundWorkload` (the WORKER) ← increment-e relay orchestrator (load BPF,
-//!   attach cgroup_connect4_mtls, program MTLS_REDIRECT_DEST, spawn the
-//!   cgroup-isolated workload, accept leg F).
 //! - `InboundServer` ← increment-i `role_server` (plaintext S, holds nothing).
 //! - `InboundWorker` (the WORKER) ← increment-i `role_agent` intercept half
 //!   (nft-TPROXY install, IP_TRANSPARENT listener, accept leg C, orig-dst recover)
 //!   + `role_client` spawn (the client presenting a client SVID).
+//!
+//! The OUTBOUND roles (`OutboundPeer`/`OutboundWorkload`, the cgroup_connect4_mtls
+//! relay) were removed at step 04-01 when the worker swapped the deleted
+//! cgroup-connect4 outbound mechanism for the nft-TPROXY install. Fresh outbound
+//! coverage on the nft-TPROXY path is re-established in steps 05-01/05-03.
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
@@ -54,7 +55,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::SpiffeId;
-use rustls::server::WebPkiClientVerifier;
 
 use super::mtls_netns_topology::MtlsTopology;
 use super::mtls_pki::TestPki;
@@ -65,15 +65,6 @@ use super::traffic::{WireCapture, WireScan};
 /// their TLS records, so the AF_PACKET confidentiality oracle captures there.
 const LOOPBACK_IFACE: &str = "lo";
 
-/// A multi-record request marker — large enough that kTLS frames it into ≥1 TLS
-/// 1.3 application_data record (the forward F→B leg). The workload writes this;
-/// the peer must reconstruct it byte-exact after kTLS-RX decrypt.
-const OUTBOUND_REQUEST: &[u8] =
-    b"OVERDRIVE_OUTBOUND_REQUEST_workload_speaks_first_then_steady_state_must_arrive_TLS13_decrypted_byte_exact_0001";
-/// The peer's reply (the return B→F leg, GAP 2). The workload must read it back
-/// byte-exact off leg F (proving the return splice).
-const OUTBOUND_REPLY: &[u8] =
-    b"OVERDRIVE_OUTBOUND_REPLY_peer_responds_return_leg_must_splice_back_to_workload_byte_exact_0002";
 /// The inbound client request (C→S). S must receive it byte-exact as plaintext.
 const INBOUND_REQUEST: &[u8] =
     b"OVERDRIVE_INBOUND_REQUEST_client_mtls_must_arrive_as_plaintext_at_server_S_agent_light_in_order_0003";
@@ -81,13 +72,6 @@ const INBOUND_REQUEST: &[u8] =
 /// back byte-exact over leg C's kTLS.
 const INBOUND_RESPONSE: &[u8] =
     b"OVERDRIVE_INBOUND_RESPONSE_server_replies_must_ride_back_over_legC_ktls_to_client_byte_exact_0004";
-
-/// What the outbound round-trip observed (forward F→B + return B→F + RST).
-pub struct OutboundRoundTrip {
-    pub forward_delivered_byte_exact: bool,
-    pub return_delivered_byte_exact: bool,
-    pub observed_rst: bool,
-}
 
 /// What the inbound server S observed.
 pub struct InboundServerResult {
@@ -123,34 +107,10 @@ pub struct WireObservations {
 }
 
 // =====================================================================
-// OUTBOUND peer — the real mTLS server the agent's leg B dials. Arms kTLS-RX to
-// decrypt the workload's request and replies (the B→F response leg).
-//
-// Productionises increment-f `role_peer`: a tokio + tokio-rustls + ktls TLS-1.3
-// server. Presents the peer SVID (chaining to the test CA, DNS SAN PEER_SNI so the
-// adapter's leg-B SNI verification passes), arms kTLS-RX, reads the workload's
-// request (proving decrypt — plaintext on the wire would break the TLS stream),
-// replies. A pcap on the peer-facing veth leg is the confidentiality oracle.
+// Shared wire-capture state machine — the confidentiality oracle plumbing used by
+// the INBOUND worker's client-facing leg-C capture. The AF_PACKET capture is taken
+// live, then stopped+scanned once (the scan cached for repeat reads).
 // =====================================================================
-pub struct OutboundPeer {
-    addr: SocketAddrV4,
-    handle: Option<std::thread::JoinHandle<PeerOutcome>>,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
-    /// REAL AF_PACKET capture on `lo` filtered to the peer port — the
-    /// confidentiality oracle is derived from these captured bytes (F2), NOT from
-    /// the peer's handshake-success bookkeeping. Stopped+scanned by
-    /// `wire_observations`; the cached scan answers repeat calls.
-    wire: parking_lot::Mutex<WireCaptureState>,
-    /// The CLIENT SPIFFE-id the peer's `WebPkiClientVerifier` REQUIRED and the peer
-    /// thread extracted from the presented (and verified) client leaf's URI SAN —
-    /// written by `outbound_peer_serve` BEFORE it extracts the kTLS secrets, read by
-    /// the test via `presented_client_spiffe`. `None` until the handshake completes
-    /// (or if the peer never saw a client cert — which cannot happen now the peer
-    /// REQUIRES client auth). This is what proves the agent's leg-B client handshake
-    /// actually PRESENTED the held client SVID (F1) — surfaced to the test, not
-    /// swallowed in the peer thread.
-    presented_client_spiffe: Arc<parking_lot::Mutex<Option<SpiffeId>>>,
-}
 
 /// Either the live capture (not yet scanned) or the cached scan result.
 enum WireCaptureState {
@@ -190,223 +150,11 @@ fn stop_scan_cached(
     scan
 }
 
-struct PeerOutcome {
-    request_byte_exact: bool,
-    plaintext_seen_on_wire: bool,
-}
-
-impl OutboundPeer {
-    pub fn spawn(pki: &TestPki) -> Self {
-        // Bind on loopback; the adapter's leg B dials this real addr. The
-        // confidentiality oracle is a REAL AF_PACKET capture on `lo` (the peer leg's
-        // wire): it counts genuine TLS 1.3 `0x17` application_data records by walking
-        // the record framing and confirms the cleartext request marker never appears
-        // — derived from captured bytes, not from the peer's decrypt-success.
-        let cert = pki.peer_leaf.cert_der.clone();
-        let key = pki.peer_leaf.key_der.clone_key();
-        // Present `[leaf, intermediate]`: the agent's leg-B client verifies the peer's
-        // server cert against the ROOT anchor only, so the peer must append the
-        // intermediate chain material for the path to build (production root →
-        // intermediate → leaf shape; F1).
-        let intermediate = pki.intermediate_cert_der();
-        // REQUIRE+VERIFY the client's SVID against the test CA (F1): the peer is the
-        // outbound mTLS server, so it must request and verify the client cert the
-        // agent's leg B presents — otherwise the SVID-presentation path is never
-        // exercised and this gate would pass even if it were broken. Built from the
-        // SAME root-store construction the inbound client uses (`ca_root_store`),
-        // mirroring `src/mtls/tls_config::server_config`'s `WebPkiClientVerifier`.
-        let client_verifier =
-            WebPkiClientVerifier::builder(Arc::new(ca_root_store(pki.ca_cert_pem())))
-                .build()
-                .expect("peer client-cert verifier");
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("peer bind");
-        let addr = match listener.local_addr().expect("peer addr") {
-            std::net::SocketAddr::V4(a) => a,
-            std::net::SocketAddr::V6(_) => unreachable!("bound on 127.0.0.1"),
-        };
-        // Start the wire capture BEFORE accepting, so the very first leg-B record is
-        // on the wire after the capture is live.
-        let capture = WireCapture::start(LOOPBACK_IFACE, addr.port());
-        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        // Shared slot the peer thread writes the verified client SPIFFE-id into (F1).
-        let presented_client_spiffe = Arc::new(parking_lot::Mutex::new(None));
-        let spiffe_slot = Arc::clone(&presented_client_spiffe);
-        let handle = std::thread::spawn(move || {
-            outbound_peer_serve(&listener, cert, intermediate, key, client_verifier, &spiffe_slot)
-        });
-        Self {
-            addr,
-            handle: Some(handle),
-            shutdown,
-            wire: parking_lot::Mutex::new(WireCaptureState::Live(capture)),
-            presented_client_spiffe,
-        }
-    }
-
-    pub fn addr(&self) -> SocketAddrV4 {
-        self.addr
-    }
-
-    /// The CLIENT SPIFFE-id the peer's `WebPkiClientVerifier` REQUIRED + verified and
-    /// extracted from the presented client leaf's URI SAN (F1). `None` until the
-    /// leg-B handshake has completed; the test reads this after the round-trip to
-    /// assert the agent presented the held client SVID and its SAN matches.
-    pub fn presented_client_spiffe(&self) -> Option<SpiffeId> {
-        self.presented_client_spiffe.lock().clone()
-    }
-
-    /// Stop the wire capture (on first call) and scan it for the oracle. The scan is
-    /// cached so repeat calls return the same observation. Called by the test AFTER
-    /// the request/reply round-trip has completed, so every peer-leg record is on the
-    /// captured wire.
-    pub fn wire_observations(&self) -> WireObservations {
-        // The peer port IS the wire_port. The request (OUTBOUND_REQUEST, forward F→B)
-        // flows TOWARD it; the reply (OUTBOUND_REPLY, return B→F) flows FROM it.
-        let scan = stop_scan_cached(&self.wire, OUTBOUND_REQUEST, OUTBOUND_REPLY);
-        WireObservations {
-            records_request_dir: scan.records_to_wire_port,
-            records_response_dir: scan.records_from_wire_port,
-            plaintext_marker_hits: scan.plaintext_marker_hits,
-        }
-    }
-
-    pub fn shutdown(&self) {
-        self.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// The peer serve loop (synchronous rustls + raw kTLS arm — same shape as the
-/// production inbound server side, no tokio/ktls-crate dep): accept leg B, complete
-/// the rustls SERVER handshake, arm kTLS-TX+RX via raw `setsockopt`, read the
-/// workload's request (decrypted by kTLS-RX — cleartext could not reconstruct it),
-/// reply (the B→F return leg, encrypted by kTLS-TX). The byte-exact kTLS-RX
-/// reconstruction IS the confidentiality oracle: the request arrived as TLS 1.3
-/// application_data, never as cleartext on the peer wire.
-fn outbound_peer_serve(
-    listener: &TcpListener,
-    cert: rustls::pki_types::CertificateDer<'static>,
-    intermediate: rustls::pki_types::CertificateDer<'static>,
-    key: rustls::pki_types::PrivateKeyDer<'static>,
-    client_verifier: Arc<dyn rustls::server::danger::ClientCertVerifier>,
-    spiffe_slot: &parking_lot::Mutex<Option<SpiffeId>>,
-) -> PeerOutcome {
-    let Some((tcp, _)) = accept_with_timeout(listener, Duration::from_secs(10)) else {
-        return PeerOutcome { request_byte_exact: false, plaintext_seen_on_wire: false };
-    };
-    tcp.set_nodelay(true).ok();
-    let fd = tcp.as_raw_fd();
-    // REQUIRE+VERIFY the client SVID against the test CA (F1): without this the peer
-    // never asks for the client cert, and the gate would pass even if the agent's
-    // leg-B SVID-presentation path were broken. Mirrors the production inbound
-    // server side (`src/mtls/tls_config::server_config`).
-    // Present `[leaf, intermediate]` so the agent's root-anchor-only leg-B verifier
-    // builds `leaf → intermediate → root` (F1).
-    let mut cfg = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(client_verifier)
-        .with_single_cert(vec![cert, intermediate], key)
-        .expect("peer server config");
-    cfg.enable_secret_extraction = true;
-    cfg.send_tls13_tickets = 0; // raw kTLS-RX hits EIO on a post-handshake ticket record
-    let mut tcp = tcp;
-    tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
-    let mut conn = rustls::ServerConnection::new(Arc::new(cfg)).expect("peer ServerConnection");
-    if !drive_server_handshake(&mut conn, &mut tcp) {
-        return PeerOutcome { request_byte_exact: false, plaintext_seen_on_wire: false };
-    }
-    // F1: read the presented (and verifier-accepted) client cert and record its URI
-    // SAN as a SpiffeId — BEFORE `dangerous_extract_secrets` consumes the connection
-    // (the same Mechanics #6 ordering the production inbound `server_handshake` uses).
-    // The verifier already REQUIRED + chain-verified it; this extracts the identity
-    // so the TEST can assert it equals the held client SVID's SPIFFE.
-    if let Some(spiffe) = peer_presented_client_spiffe(&conn) {
-        *spiffe_slot.lock() = Some(spiffe);
-    }
-    // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
-    // handshake BEFORE extract consumes the connection — those bytes seed `got` so
-    // the peer never loses an early-arriving forward record (kTLS early-data
-    // correctness; mirrors the production reader legs' `drain_early_plaintext`).
-    let mut got = drain_early_plaintext(&mut conn.reader());
-    let secrets = conn.dangerous_extract_secrets().expect("peer extract secrets");
-    arm_ktls_raw(fd, &secrets);
-    std::mem::forget(tcp); // keep the fd open for the kTLS read/write
-
-    // Read the workload's request off the kTLS-RX leg (decrypted by the kernel).
-    let stream = unsafe { TcpStream::from_raw_fd(fd) };
-    stream.set_read_timeout(Some(Duration::from_secs(8))).ok();
-    let mut buf = vec![0u8; 4096];
-    let deadline = std::time::Instant::now() + Duration::from_secs(8);
-    while got.len() < OUTBOUND_REQUEST.len() && std::time::Instant::now() < deadline {
-        match (&stream).read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => got.extend_from_slice(&buf[..n]),
-            Err(ref e)
-                if e.kind() == std::io::ErrorKind::WouldBlock
-                    || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                break;
-            }
-            Err(_) => break,
-        }
-    }
-    let request_byte_exact = got == OUTBOUND_REQUEST;
-    if !request_byte_exact {
-        // On a forward-delivery miss, name how many bytes arrived (a partial forward
-        // splice is the canonical Tier-3 flake signature) so a captured failure is
-        // debuggable from the output.
-        eprintln!(
-            "OUTBOUND-PEER: forward miss — received {} of {} request bytes",
-            got.len(),
-            OUTBOUND_REQUEST.len()
-        );
-    }
-
-    // The wire oracle is NOT derived from this decrypt-success bookkeeping — the REAL
-    // AF_PACKET capture on `lo` (owned by `OutboundPeer`) counts the genuine `0x17`
-    // records and confirms the cleartext marker is absent. The peer's byte-exact
-    // reconstruction drives `forward_delivered_byte_exact` (the workload's exit code).
-
-    // Reply (the return B→F leg, GAP 2) — encrypted by kTLS-TX. Reply ONLY when the
-    // request reconstructed byte-exact, so the workload's exit code reflects forward
-    // success: a partial/missing forward → no reply → the workload's read-reply
-    // times out → exit != 0 → `forward_delivered_byte_exact == false`. This keeps
-    // the workload-side assertion (line 176) and the peer-wire assertion (line 192)
-    // consistent rather than letting the workload succeed on an unconditional reply.
-    if request_byte_exact {
-        // F4: split the reply into TWO post-arm writes with an inter-write delay
-        // larger than the agent's decrypt-pump poll window (40 ms), so kTLS-TX frames
-        // ≥2 distinct TLS records on the return leg B (B→F direction). The workload
-        // reconstructs the concatenation byte-exact (its read loop accumulates until
-        // the full marker length).
-        let mid = OUTBOUND_REPLY.len() / 2;
-        let _ = (&stream).write_all(&OUTBOUND_REPLY[..mid]);
-        let _ = (&stream).flush();
-        std::thread::sleep(Duration::from_millis(150));
-        let _ = (&stream).write_all(&OUTBOUND_REPLY[mid..]);
-        let _ = (&stream).flush();
-    }
-    std::thread::sleep(Duration::from_millis(600));
-
-    PeerOutcome { request_byte_exact, plaintext_seen_on_wire: false }
-}
-
-/// Extract the CLIENT SPIFFE-id (URI SAN) from the leaf certificate the peer's
-/// `WebPkiClientVerifier` REQUIRED + verified — the F1 identity proof. Reads
-/// `conn.peer_certificates()` (which must be called BEFORE
-/// `dangerous_extract_secrets` consumes the connection), parses the leaf DER with
-/// `x509-parser`, and returns the sole URI SAN parsed as a `SpiffeId`. `None` if no
-/// client cert was presented (cannot happen now the peer REQUIRES client auth) or
-/// the leaf carries no URI SAN. Mirrors the workspace's established URI-SAN
-/// extraction (`overdrive-host` `rcgen_ca_chain_verify` test).
-fn peer_presented_client_spiffe(conn: &rustls::ServerConnection) -> Option<SpiffeId> {
-    peer_presented_leaf_spiffe(conn.peer_certificates())
-}
-
 /// Extract the SPIFFE-id (sole URI SAN) from chain position 0 (the leaf) of a
-/// presented certificate chain. Direction-agnostic — the OUTBOUND peer feeds it
-/// `ServerConnection::peer_certificates()` (the verified CLIENT leaf), the INBOUND
-/// client feeds it `ClientConnection::peer_certificates()` (the verified SERVER
-/// leaf). Returns `None` when no chain was presented or the leaf carries no URI
-/// SAN. Mirrors the workspace's established URI-SAN extraction (`overdrive-host`
+/// presented certificate chain. The INBOUND client feeds it
+/// `ClientConnection::peer_certificates()` (the verified SERVER leaf). Returns
+/// `None` when no chain was presented or the leaf carries no URI SAN. Mirrors the
+/// workspace's established URI-SAN extraction (`overdrive-host`
 /// `rcgen_ca_chain_verify` test).
 fn peer_presented_leaf_spiffe(
     certs: Option<&[rustls::pki_types::CertificateDer<'_>]>,
@@ -423,353 +171,12 @@ fn peer_presented_leaf_spiffe(
     uri.parse::<SpiffeId>().ok()
 }
 
-/// Drain every byte of already-decrypted plaintext rustls buffered during the
-/// handshake, BEFORE `dangerous_extract_secrets` consumes the connection — the
-/// test-harness mirror of the production `mtls::drain_early_plaintext`. The peer's
-/// `read_seq` already counts these records, so the kTLS-RX arm resumes at the next
-/// on-wire record; without this the peer would lose any 0.5-RTT forward record the
-/// proxy's leg-B client sent coalesced with its `Finished`.
-fn drain_early_plaintext(reader: &mut dyn Read) -> Vec<u8> {
-    let mut early = Vec::new();
-    let mut buf = [0u8; 16384];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => early.extend_from_slice(&buf[..n]),
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(_) => break,
-        }
-    }
-    early
-}
-
-/// Drive a rustls SERVER handshake to completion (synchronous); false on failure.
-fn drive_server_handshake(conn: &mut rustls::ServerConnection, tcp: &mut TcpStream) -> bool {
-    use std::io::ErrorKind;
-    loop {
-        while conn.wants_write() {
-            if conn.write_tls(tcp).is_err() {
-                return false;
-            }
-        }
-        if !conn.is_handshaking() {
-            while conn.wants_write() {
-                if conn.write_tls(tcp).is_err() {
-                    return false;
-                }
-            }
-            return true;
-        }
-        match conn.read_tls(tcp) {
-            Ok(0) => return false,
-            Ok(_) => {
-                if conn.process_new_packets().is_err() {
-                    return false;
-                }
-            }
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {}
-            Err(_) => return false,
-        }
-    }
-}
-
-/// Arm kTLS-TX+RX on `fd` from rustls-extracted secrets via raw `setsockopt`
-/// (mirrors the spike + the production `mtls::ktls`; AES-256-GCM TLS 1.3).
-fn arm_ktls_raw(fd: RawFd, secrets: &rustls::ExtractedSecrets) {
-    let ulp = b"tls\0";
-    // SAFETY: 3-byte "tls" ULP option on a connected fd.
-    let rc = unsafe { libc::setsockopt(fd, libc::SOL_TCP, libc::TCP_ULP, ulp.as_ptr().cast(), 3) };
-    assert!(rc == 0, "peer TCP_ULP: {}", std::io::Error::last_os_error());
-    set_crypto_info(fd, libc::TLS_TX, &secrets.tx);
-    set_crypto_info(fd, libc::TLS_RX, &secrets.rx);
-}
-
-fn set_crypto_info(fd: RawFd, dir: libc::c_int, sec: &(u64, rustls::ConnectionTrafficSecrets)) {
-    use rustls::ConnectionTrafficSecrets;
-    #[repr(C)]
-    struct Info {
-        version: u16,
-        cipher: u16,
-        iv: [u8; 8],
-        key: [u8; 32],
-        salt: [u8; 4],
-        rec_seq: [u8; 8],
-    }
-    let (seq, traffic) = sec;
-    let ConnectionTrafficSecrets::Aes256Gcm { key, iv } = traffic else {
-        panic!("peer kTLS arm requires AES-256-GCM TLS 1.3");
-    };
-    let ivb = iv.as_ref();
-    let mut info = Info {
-        version: 0x0304,
-        cipher: 52,
-        iv: [0; 8],
-        key: [0; 32],
-        salt: [0; 4],
-        rec_seq: seq.to_be_bytes(),
-    };
-    info.key.copy_from_slice(key.as_ref());
-    info.salt.copy_from_slice(&ivb[0..4]);
-    info.iv.copy_from_slice(&ivb[4..12]);
-    // SAFETY: `Info` is `#[repr(C)]` matching `tls12_crypto_info_aes_gcm_256`.
-    let rc = unsafe {
-        libc::setsockopt(
-            fd,
-            libc::SOL_TLS,
-            dir,
-            std::ptr::from_ref(&info).cast(),
-            std::mem::size_of::<Info>() as libc::socklen_t,
-        )
-    };
-    assert!(rc == 0, "peer SOL_TLS dir={dir}: {}", std::io::Error::last_os_error());
-}
-
-// =====================================================================
-// OUTBOUND workload + WORKER — loads BPF, attaches cgroup_connect4_mtls to the
-// workload cgroup, programs MTLS_REDIRECT_DEST[real_peer -> leg-F listener],
-// spawns the cgroup-isolated workload (into the netns), accepts leg F.
-//
-// Productionises increment-e relay orchestrator. The workload is a real
-// cgroup-isolated subprocess (python3) in the workload netns; its connect() to the
-// real peer addr is transparently rewritten by cgroup_connect4_mtls to the agent's
-// leg-F listener (bound on the host veth IP, reachable from the netns). Leg F is an
-// ORDINARY accepted socket — the forward path is the adapter's agent-light
-// splice(legF -> legB) pump, NOT a sockmap egress redirect, so there is no sockops
-// enroll / verdict attach / FPORT / agent-cgroup setup here.
-// =====================================================================
-pub struct OutboundWorkload {
-    _bpf: aya::Ebpf,
-    _connect_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLink,
-    leg_f_listener: TcpListener,
-    workload: Option<Child>,
-    handshake_delay: Duration,
-}
-
-/// Fixed fake-peer address the workload aims at (rewritten by cgroup_connect4_mtls
-/// to the agent's leg-F listener). The adapter's leg B dials the REAL peer addr.
-const OUTBOUND_FAKE_PEER: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 200);
-const OUTBOUND_FAKE_PEER_PORT: u16 = 9443;
-
-impl OutboundWorkload {
-    pub fn run(topo: &MtlsTopology, real_peer: SocketAddrV4, handshake_delay: Duration) -> Self {
-        // The leg-F listener binds on the host veth IP (10.66.0.1) so the workload
-        // in the netns can reach it over the veth. cgroup_connect4_mtls rewrites the
-        // workload's connect(fake_peer) -> (host_veth_ip, leg_f_port). Leg F is an
-        // ordinary accepted socket (the forward path is the adapter's read->write_all
-        // copy pump into leg B's kTLS TX), so no agent cgroup / sockops enroll / FPORT
-        // setup is needed.
-        let host_veth_ip = Ipv4Addr::new(10, 66, 0, 1);
-
-        let leg_f_listener =
-            TcpListener::bind((host_veth_ip, 0)).expect("leg-F listener bind on host veth");
-        let leg_f_port = leg_f_listener.local_addr().expect("leg-F addr").port();
-
-        // Load the embedded BPF object, attach cgroup_connect4_mtls to the WORKLOAD
-        // cgroup subtree (F5 — workload subtree only; the agent's own leg-B dial
-        // runs on the host, outside this cgroup, so it is never re-intercepted).
-        // The shared object also carries the phase-2 SERVICE_MAP HoM, which aya
-        // 0.13.x cannot create from the ELF alone — so pre-pin it by name into a
-        // test-owned bpffs dir and load with `map_pin_path` (the same `pinning =
-        // ByName` workaround the adapter uses; `.claude/rules/development.md`
-        // § "Sharing the outer HoM … `pinning = ByName`").
-        let obj = build_bpf_object_path();
-        let mut bpf = load_workload_bpf(&obj);
-        let cgroup_file =
-            std::fs::File::open(topo.cgroup_path()).expect("open workload cgroup for attach");
-        let connect_link = {
-            use aya::programs::CgroupSockAddr;
-            let prog: &mut CgroupSockAddr = bpf
-                .program_mut("cgroup_connect4_mtls")
-                .expect("cgroup_connect4_mtls program present")
-                .try_into()
-                .expect("program is CgroupSockAddr");
-            prog.load().expect("load cgroup_connect4_mtls");
-            let link_id = prog
-                .attach(&cgroup_file, aya::programs::CgroupAttachMode::Single)
-                .expect("attach cgroup_connect4_mtls to workload cgroup");
-            prog.take_link(link_id).expect("take cgroup link")
-        };
-
-        // Program MTLS_REDIRECT_DEST[fake_peer] = leg-F listener (host-order keys).
-        program_redirect_dest(
-            &mut bpf,
-            OUTBOUND_FAKE_PEER,
-            OUTBOUND_FAKE_PEER_PORT,
-            host_veth_ip,
-            leg_f_port,
-        );
-
-        // Spawn the cgroup-isolated workload in the netns: it connects to the FAKE
-        // peer (rewritten), writes the request, then (after the proxy arms) reads
-        // the reply. real_peer is unused by the workload (it aims at the fake peer);
-        // the adapter dials the real peer on leg B.
-        let _ = real_peer;
-        let workload = spawn_outbound_workload(topo);
-
-        Self {
-            _bpf: bpf,
-            _connect_link: connect_link,
-            leg_f_listener,
-            workload: Some(workload),
-            handshake_delay,
-        }
-    }
-
-    /// Accept the transparently-redirected workload connection — leg F (the owned
-    /// plaintext leg the adapter takes ownership of).
-    pub fn accept_leg_f(&mut self) -> OwnedFd {
-        self.leg_f_listener.set_nonblocking(false).expect("blocking leg-F listener");
-        // Bounded accept so a failed intercept does not hang the harness.
-        let (leg_f, _peer) = accept_with_timeout(&self.leg_f_listener, Duration::from_secs(10))
-            .expect("leg-F accept (cgroup_connect4_mtls intercept must deliver the connection)");
-        leg_f.set_nodelay(true).ok();
-        // Honour the timing-regime delay: a deliberate handshake-window delay
-        // before the adapter is handed the leg, to defeat the increment-e
-        // throwaway-harness RST under traced/delayed timing.
-        if !self.handshake_delay.is_zero() {
-            std::thread::sleep(self.handshake_delay);
-        }
-        OwnedFd::from(leg_f)
-    }
-
-    /// Join the workload child and report the bidirectional round-trip outcome.
-    pub fn join(mut self) -> OutboundRoundTrip {
-        self.workload.take().map_or(
-            OutboundRoundTrip {
-                forward_delivered_byte_exact: false,
-                return_delivered_byte_exact: false,
-                observed_rst: true,
-            },
-            |mut child| {
-                let stderr = child.stderr.take();
-                let status = wait_child_bounded(&mut child, Duration::from_secs(12));
-                if let (true, Some(mut e)) = (status != Some(0), stderr) {
-                    let mut s = String::new();
-                    let _ = e.read_to_string(&mut s);
-                    eprintln!("OUTBOUND-WORKLOAD exit={status:?} stderr={}", s.trim());
-                }
-                read_workload_outcome(status)
-            },
-        )
-    }
-}
-
-/// Parse the workload subprocess's exit code into the round-trip outcome. The
-/// python workload exits 0 on full success (forward sent + reply byte-exact, no
-/// RST), 10 if the reply was not byte-exact, 20 on a connection reset.
-fn read_workload_outcome(code: Option<i32>) -> OutboundRoundTrip {
-    match code {
-        Some(0) => OutboundRoundTrip {
-            forward_delivered_byte_exact: true,
-            return_delivered_byte_exact: true,
-            observed_rst: false,
-        },
-        Some(10) => OutboundRoundTrip {
-            forward_delivered_byte_exact: true,
-            return_delivered_byte_exact: false,
-            observed_rst: false,
-        },
-        Some(20) => OutboundRoundTrip {
-            forward_delivered_byte_exact: false,
-            return_delivered_byte_exact: false,
-            observed_rst: true,
-        },
-        _ => OutboundRoundTrip {
-            forward_delivered_byte_exact: false,
-            return_delivered_byte_exact: false,
-            observed_rst: true,
-        },
-    }
-}
-
-/// Spawn the cgroup-isolated outbound workload: a python3 process placed into the
-/// workload cgroup (via `pre_exec`) and run inside the workload netns (via `ip
-/// netns exec`). It connects to the FAKE peer (rewritten by cgroup_connect4_mtls),
-/// writes OUTBOUND_REQUEST, then reads OUTBOUND_REPLY byte-exact.
-fn spawn_outbound_workload(topo: &MtlsTopology) -> Child {
-    // The workload writes the request in TWO phases to exercise BOTH the lossless
-    // pre-arm capture AND the steady-state forward pump (GAP 1):
-    //   phase 1 (immediately on connect) — the PRE-ARM portion the agent drains
-    //            losslessly during the handshake window and flushes through leg B;
-    //   phase 2 (after a delay) — the STEADY-STATE portion that arrives AFTER the
-    //            agent has armed kTLS + spawned the forward encrypt pump, so it rides
-    //            the agent-light read->write_all COPY (legF → legB) into leg B's kTLS
-    //            TX (the kernel tls_sw_sendmsg encrypts each write). The peer
-    //            reconstructs both, in order, byte-exact.
-    let split = OUTBOUND_REQUEST.len() / 2;
-    let script = format!(
-        r#"
-import socket, sys, time
-part1 = {part1}
-part2 = {part2}
-reply = {reply}
-try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(12)
-    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    s.connect(("{fake_ip}", {fake_port}))
-    # phase 1: pre-arm plaintext (drained losslessly during the handshake window)
-    s.sendall(part1)
-    # phase 2: steady-state bytes — written well after the agent has armed kTLS +
-    # spawned the forward encrypt pump (generous margin over the 400ms handshake-delay
-    # regime + the proxy's ~400ms drain/handshake/arm/settle), so they ride the
-    # agent-light read->write_all COPY (legF -> legB) into leg B's kTLS TX (NOT a
-    # splice -- a splice into kTLS-TX loses records), not the pre-arm drain.
-    time.sleep(2.0)
-    s.sendall(part2)
-    # read the peer's reply back over the spliced return leg (B->F).
-    got = b""
-    s.settimeout(5)
-    while len(got) < len(reply):
-        b = s.recv(4096)
-        if not b:
-            break
-        got += b
-    if got == reply:
-        sys.exit(0)
-    else:
-        sys.stderr.write("reply mismatch got=%d want=%d\n" % (len(got), len(reply)))
-        sys.exit(10)
-except (ConnectionResetError, BrokenPipeError) as e:
-    sys.stderr.write("RST: %s\n" % e)
-    sys.exit(20)
-except Exception as e:
-    sys.stderr.write("workload err: %s\n" % e)
-    sys.exit(30)
-"#,
-        part1 = PyBytes(&OUTBOUND_REQUEST[..split]),
-        part2 = PyBytes(&OUTBOUND_REQUEST[split..]),
-        reply = PyBytes(OUTBOUND_REPLY),
-        fake_ip = OUTBOUND_FAKE_PEER,
-        fake_port = OUTBOUND_FAKE_PEER_PORT,
-    );
-    let procs = format!("{}/cgroup.procs", topo.cgroup_path());
-    let mut cmd = Command::new("ip");
-    cmd.args(["netns", "exec", topo.netns(), "python3", "-c", &script])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    // Place THIS process (the `ip netns exec` wrapper, which execs python) into the
-    // workload cgroup before exec, so the workload's connect() fires
-    // cgroup_connect4_mtls. cgroup membership is inherited across exec.
-    // SAFETY: pre_exec runs in the forked child before exec; writing our own pid to
-    // cgroup.procs is async-signal-safe enough for this fixture (single write).
-    unsafe {
-        cmd.pre_exec(move || {
-            let pid = std::process::id();
-            std::fs::write(&procs, pid.to_string())
-                .map_err(|e| std::io::Error::other(format!("join cgroup: {e}")))?;
-            Ok(())
-        });
-    }
-    cmd.spawn().expect("spawn outbound workload")
-}
-
 // =====================================================================
 // INBOUND server S — the identity-unaware plaintext server WORKLOAD; holds nothing.
 //
-// GAP 3: S is a CGROUP-ISOLATED NETNS SUBPROCESS (matching the outbound workload's
-// `spawn_outbound_workload` shape — `ip netns exec` + `cgroup.procs` pre_exec), NOT
-// a host-side sibling thread. It binds the netns veth IP (`server_netns_ip:VIRT_PORT`)
+// GAP 3: S is a CGROUP-ISOLATED NETNS SUBPROCESS (`ip netns exec` + `cgroup.procs`
+// pre_exec, via `spawn_inbound_server_workload`), NOT a host-side sibling thread. It
+// binds the netns veth IP (`server_netns_ip:VIRT_PORT`)
 // so the agent's leg-S dial reaches it over the veth (after the harness DNATs the
 // verbatim orig-dst the production adapter dials). It reads the decrypted request
 // the agent splices to it and replies (the S→C response leg).
@@ -1160,99 +567,6 @@ impl std::fmt::Display for PyBytes<'_> {
         }
         f.write_str("\"")
     }
-}
-
-/// Resolve the BPF object path the way the adapter does (the build-time embedded
-/// path env), so the workload-side BPF load uses the SAME object.
-fn build_bpf_object_path() -> std::path::PathBuf {
-    // OVERDRIVE_BPF_OBJECT_PATH is set by build.rs / the mutation env override.
-    if let Ok(p) = std::env::var("OVERDRIVE_BPF_OBJECT_PATH") {
-        return std::path::PathBuf::from(p);
-    }
-    // Fall back to the canonical workspace-relative path.
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    std::path::Path::new(manifest)
-        .join("../../target/bpf/overdrive_bpf.o")
-        .canonicalize()
-        .expect("BPF object path")
-}
-
-/// The test-owned bpffs pin dir for the workload-side shared-object load. Distinct
-/// from the adapter's `/sys/fs/bpf/overdrive-mtls` so the two loads do not collide
-/// on the SERVICE_MAP pin (each `Ebpf` instance reuses its OWN pinned outer map).
-const WORKLOAD_PIN_DIR: &str = "/sys/fs/bpf/overdrive-mtls-workload";
-
-/// Load the shared BPF object for the workload-side `cgroup_connect4_mtls` attach
-/// via the `pinning = ByName` SERVICE_MAP workaround (aya 0.13.x cannot create the
-/// phase-2 HoM from the ELF alone). Pre-pins SERVICE_MAP into the test-owned dir,
-/// then loads with `map_pin_path`.
-fn load_workload_bpf(obj: &std::path::Path) -> aya::Ebpf {
-    use overdrive_dataplane::maps::ServiceKey;
-    use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
-
-    let pin_dir = std::path::Path::new(WORKLOAD_PIN_DIR);
-    std::fs::create_dir_all(pin_dir).expect("create workload bpffs pin dir");
-    let pin_path = pin_dir.join("SERVICE_MAP");
-    let _ = std::fs::remove_file(&pin_path); // clean any stale pin
-    // 4096 outer / Maglev-default inner — the SSOT capacities the adapter uses.
-    let inner = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
-    let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
-        "SERVICE_MAP",
-        4096,
-        inner,
-        pin_dir,
-    )
-    .expect("pre-pin workload SERVICE_MAP");
-    // Leak the handle for the test's lifetime so the pin stays valid while the ELF
-    // is loaded + the workload runs.
-    std::mem::forget(service_map);
-    aya::EbpfLoader::new()
-        .map_pin_path(pin_dir)
-        // Tolerate the HASH_OF_MAPS SERVICE_MAP (aya 0.13.x has no typed variant);
-        // the pinned outer map is reused via `map_pin_path`.
-        .allow_unsupported_maps()
-        .load_file(obj)
-        .unwrap_or_else(|e| panic!("load workload BPF object {}: {e}", obj.display()))
-}
-
-/// `MtlsDestKey` / `MtlsAddrPort` userspace mirrors (8-byte host-order PODs,
-/// matching `overdrive-bpf::maps::mtls_redirect_dest`).
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct MtlsDestKey {
-    ip_host: u32,
-    port_host: u16,
-    _pad: u16,
-}
-// SAFETY: 8-byte `#[repr(C)]` POD with no padding-derived invariants beyond `_pad`.
-unsafe impl aya::Pod for MtlsDestKey {}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct MtlsAddrPort {
-    ip_host: u32,
-    port_host: u16,
-    _pad: u16,
-}
-// SAFETY: 8-byte `#[repr(C)]` POD.
-unsafe impl aya::Pod for MtlsAddrPort {}
-
-/// Program `MTLS_REDIRECT_DEST[fake_peer] = agent_leg_f_listener` (host-order keys
-/// per the endianness lockstep — `u32::from(Ipv4Addr)` is host-order).
-fn program_redirect_dest(
-    bpf: &mut aya::Ebpf,
-    fake_ip: Ipv4Addr,
-    fake_port: u16,
-    agent_ip: Ipv4Addr,
-    agent_port: u16,
-) {
-    use aya::maps::HashMap as AyaHashMap;
-    let mut redir: AyaHashMap<_, MtlsDestKey, MtlsAddrPort> =
-        AyaHashMap::try_from(bpf.map_mut("MTLS_REDIRECT_DEST").expect("MTLS_REDIRECT_DEST"))
-            .expect("MTLS_REDIRECT_DEST handle");
-    let key = MtlsDestKey { ip_host: u32::from(fake_ip), port_host: fake_port, _pad: 0 };
-    let val = MtlsAddrPort { ip_host: u32::from(agent_ip), port_host: agent_port, _pad: 0 };
-    redir.insert(key, val, 0).expect("program MTLS_REDIRECT_DEST");
 }
 
 /// Build a `RootCertStore` from a CA cert PEM.

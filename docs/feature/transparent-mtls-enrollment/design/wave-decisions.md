@@ -1283,7 +1283,7 @@ merged `04-01`). The spike-validated 02-06 adopt-on-restart becomes **`04-04`**
 
 | id | name | deps | one-line scope |
 |---|---|---|---|
-| `04-01` | **Merged production rewire + C3 netns wiring + single-cut deletions** | `02-03`, `03-01`, `03-02` | The atomic resolution of Inversion 1. Re-apply `wip/02-05 @ a4c2a61d` (G1+G2+G3 + JOIN-1..JOIN-5 + review findings 1&2) for the per-alloc netns/veth C3 wiring + `AllocationSpec.netns` channel + ExecDriver per-spec `setns` (delete `with_netns_path`); swap `start_alloc` to install the OUTBOUND `install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` rule as production + stand up leg-F/leg-C listeners + accept loops (inbound nft rule stays #178-deferred per Inversion 2); single-cut DELETE the cgroup surface (`cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, the whole `MtlsDataplane` struct, `attach_alloc`/`program_redirect`/`MtlsCgroupLink`, the orphaned `MtlsBootError::Load`/`OutboundAttach` error variants) AND delete the `mtls_production_activation` e2e + `mtls_e2e_helpers` + the OLD-mechanism test files (the 04-01 deletion list) it breaks, in the SAME commit. Tier-3: JOIN-5 (workload lands in netns) + start_alloc installs the outbound rule on a real alloc; re-run boot fixtures under Lima (NOT `--no-run`). |
+| `04-01` | **Merged production rewire + C3 netns wiring + single-cut deletions** | `02-03`, `03-01`, `03-02` | The atomic resolution of Inversion 1. Re-apply `wip/02-05 @ a4c2a61d` (G1+G2+G3 + JOIN-1..JOIN-5 + review findings 1&2) for the per-alloc netns/veth C3 wiring + `AllocationSpec.netns` channel + ExecDriver per-spec `setns` (delete `with_netns_path`); swap `start_alloc` to install the OUTBOUND `install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` rule as production (the `host_veth` value reaches `start_alloc` via the JOIN-1-sibling `AllocationSpec.host_veth: Option<String>` field — see JOIN-6 below) + stand up leg-F/leg-C listeners + accept loops (inbound nft rule stays #178-deferred per Inversion 2); single-cut DELETE the cgroup surface (`cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, the whole `MtlsDataplane` struct, `attach_alloc`/`program_redirect`/`MtlsCgroupLink`, the orphaned `MtlsBootError::Load`/`OutboundAttach` error variants) AND delete the `mtls_production_activation` e2e + `mtls_e2e_helpers` + the OLD-mechanism test files (the 04-01 deletion list) it breaks, in the SAME commit. Tier-3: JOIN-5 (workload lands in netns) + start_alloc installs the outbound rule on a real alloc; re-run boot fixtures under Lima (NOT `--no-run`). |
 | `04-02` | Per-connection resolve consumer + DELETE declared-peer surface | `01-02`, `03-02`, `04-01` | Unchanged from the existing 04-02 EXCEPT `deps` drops the now-merged `04-01`-as-cgroup-deleter (still `04-01`, now the merged step) — wire `MtlsResolve` (mandatory `new()` param) into the outbound accept loop: `Mesh`→enforce, `NonMesh`→pass-through, `MeshUnreachable`→fail-closed; single-cut DELETE `program_declared_peer_redirect`, `real_peer`/`leg_f_addr` slots, `AcceptOutcome::Dropped`, `accept_drop_outbound`, the `MtlsInterceptError` enum + inline tests; fix the `lib.rs:981-986` broken doc link. Default-lane DST + mutation ≥80% on the 3-arm decision. |
 | `04-03` | *(removed — merged into `04-01`)* | — | The old `04-03` C3-wiring step is the second half of the merged `04-01`; it no longer exists as a separate step. |
 | `04-04` | Adopt-on-restart cross-restart slot+rule rebuild (the former "02-06") | `04-01` | The spike-validated (PROCEED-AS-DESIGNED, kernel 7.0.0, `spike/findings-adopt-restart.md`) adopt-on-restart pass: `NetSlotAllocator::adopt` (additive, atomic) + `adopt_observe` (cgroup→PID→`/proc/ns/net` slot recovery) + a `run_server` boot recovery pass (adopt-then-GC-then-serve, BEFORE the convergence loop) + the §5 surviving-nft-rule sweep. Depends on `04-01` because the C3 wiring (the `NetSlotAllocator` on `AppState`, the provision/teardown seams, the per-workload nft rules) must be LIVE for there to be slots/rules to adopt/reap. Tier-3 under Lima. |
@@ -1392,3 +1392,101 @@ orchestrator must reconcile:
 
 The architect leaves `roadmap.json` and `execution-log.json` UNTOUCHED; this block
 is the corrected step list the orchestrator translates.
+
+### JOIN-6 (the `host_veth` channel) — a new `AllocationSpec.host_veth: Option<String>` field (NO newtype) — user-approved 2026-06-20
+
+**Context — a genuine signature gap, not an already-decided point.** The merged
+`04-01` scope row (~line 1286) pins
+`install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` inside
+`MtlsInterceptWorker::start_alloc`. That row pins the **VALUE source**
+(`derive_workload_netns_plan(slot).host_veth`) but is silent on the **CHANNEL** —
+how the control-plane-derived `host_veth` string reaches the worker's
+`start_alloc`. The crafter surfaced this and escalated rather than inventing
+surface (`execution-log.json` `04-01` blocked; CLAUDE.md § "Implement to the
+design — never invent API surface"). This block records the user-approved
+resolution.
+
+- `host_veth` (`ovd-hv-<4hex-slot>`) is produced by
+  `derive_workload_netns_plan(slot).host_veth` in `overdrive-control-plane` (the
+  action-shim C3 provision seam).
+- `overdrive-worker` does NOT depend on `overdrive-control-plane`, so the worker
+  cannot re-derive `host_veth` (it would need a forbidden dep edge or a duplicated
+  prefix constant).
+- `MtlsInterceptWorker::start_alloc(self: &Arc<Self>, spec: &AllocationSpec)` is an
+  INHERENT method (not a port-trait), called directly by the action-shim's
+  `StartAllocation`/`RestartAllocation` arms (`action_shim/mod.rs` ~:980 / ~:1133).
+
+**Resolution: add `AllocationSpec.host_veth: Option<String>` — a JOIN-1 SIBLING
+field, symmetric with the existing `netns: Option<String>` (JOIN-1).** Pinned exact
+shape:
+
+```rust
+// overdrive-core/src/traits/driver.rs — appended to AllocationSpec, beside `netns`.
+/// Host-side veth interface NAME for this allocation's per-workload veth
+/// pair (`ovd-hv-<4hex-slot>`), the `iifname` the outbound nft-TPROXY rule
+/// matches to redirect the workload's egress to leg-F
+/// (`MtlsInterceptWorker::start_alloc` →
+/// `install_outbound_tproxy(host_veth, leg_f_port)`). `Some(plan.host_veth)`
+/// ONLY when the action-shim C3 site provisioned a per-workload netns/veth
+/// (the production mTLS-composed boot); `None` for every non-netns workload
+/// (every current test fixture, and any boot where the mTLS composition gate
+/// is off) — the pre-join host-netns behaviour, exactly like `netns`.
+///
+/// `Option<String>`, NOT a newtype — the SAME rationale as JOIN-1's `netns`
+/// (see the JOIN-1 newtype-decision block above): the value is already a
+/// validated, bounded, slot-derived name minted ONLY by
+/// `derive_workload_netns_plan` (a pure projection of the already-newtyped
+/// `NetSlot`); it has no parse surface, no operator-typed entry point, and no
+/// `FromStr` round-trip to defend.
+pub host_veth: Option<String>,
+```
+
+**Injection point — set at the SAME C3 provision seam as `spec.netns` (JOIN-2).**
+In the action-shim provision path (`provision_and_inject_netns`), add the
+`host_veth` assignment beside the existing `netns` one — reading `plan.host_veth`
+before the `plan` local is dropped/moved:
+
+```rust
+// action-shim C3 provision seam, beside the JOIN-2 `spec.netns = Some(plan.netns)`:
+spec.netns     = Some(plan.netns.clone());      // JOIN-2 (existing)
+spec.host_veth = Some(plan.host_veth.clone());  // JOIN-6 (this amendment)
+```
+
+**Read point — `start_alloc` keeps its 2-arg signature UNCHANGED.**
+`MtlsInterceptWorker::start_alloc(self: &Arc<Self>, spec: &AllocationSpec)` reads
+`spec.host_veth.as_deref()` to feed `install_outbound_tproxy`. No new parameter, no
+worker signature change, no `overdrive-worker → overdrive-control-plane` dep edge.
+
+**Construction-site sweep — extends the JOIN-4 `netns: None` sweep.** The
+`host_veth: None` additions ride the SAME ~31 construction sites JOIN-4 already
+sweeps for `netns: None` — one more field each, off the mTLS-composed boot gate.
+The two production reconciler sites (workload_lifecycle.rs `:665`/`:750`,
+reconciler_runtime.rs `:2924`) get `host_veth: None` (reconciler stays
+netns/veth-agnostic, per JOIN-2); the `netns_entry.rs` JOIN-3 fixtures that drive
+`spec.netns = Some(<name>)` need no `host_veth` value (their assertion is the
+netns-entry seam, not the outbound rule) and take `host_veth: None`.
+
+**Why Option A (this) over the rejected alternative (a `host_veth` parameter on
+`start_alloc` + threading `plan` out of the provision helper):**
+
+- The merged-step row pinned the VALUE source (`plan.host_veth`), not the CHANNEL —
+  so this was a genuine signature gap to fill, not a decided point being
+  re-litigated.
+- `netns` and `host_veth` are the **same category of data**: per-alloc,
+  slot-derived strings from the same `plan`, set at the same provision seam.
+  JOIN-1 already ratified putting that category on `AllocationSpec` as
+  `Option<String>` (no newtype); this is the faithful, symmetric extension — one
+  line beside the existing `spec.netns` assignment.
+- The "a host artifact doesn't belong on a workload spec" objection was already
+  decided when JOIN-1 put `netns` (an identical host artifact) on `AllocationSpec`.
+  This stays consistent with that ratified boundary rather than reopening it for one
+  more field.
+- The rejected alternative diverges more from the re-applied
+  `wip/02-05-netns-join @ a4c2a61d` C3 code and changes the worker method
+  signature, for no architectural gain.
+
+**Scope note:** this amendment adds EXACTLY ONE field
+(`AllocationSpec.host_veth: Option<String>`) and no other API surface. It does not
+reopen any D-TME / C / G / JOIN-1..JOIN-5 decision or the 02-06/04-04
+adopt-on-restart design; the merged `04-01` row's substance (`host_veth =
+plan.host_veth`) is unchanged — this block names the channel that carries it.

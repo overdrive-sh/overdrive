@@ -47,6 +47,10 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 1_000, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
+        // mTLS-composed boot gate — no provisioned netns/veth.
+        netns: None,
+        host_veth: None,
     };
 
     let handle = driver.start(&initial_spec).await.expect("start succeeds");

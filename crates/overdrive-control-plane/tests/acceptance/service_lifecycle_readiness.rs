@@ -115,6 +115,9 @@ fn fact_with_readiness(
                 memory_bytes: 64 * 1024 * 1024,
             },
             probe_descriptors: vec![],
+            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+            netns: None,
+            host_veth: None,
         },
     }
 }
@@ -155,6 +158,9 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
                 memory_bytes: 64 * 1024 * 1024,
             },
             probe_descriptors: vec![],
+            // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+            netns: None,
+            host_veth: None,
         },
     }
 }

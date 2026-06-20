@@ -49,6 +49,10 @@ async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
+        // mTLS-composed boot gate — no provisioned netns/veth.
+        netns: None,
+        host_veth: None,
     };
 
     // Action — through driving port.

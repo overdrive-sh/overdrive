@@ -135,6 +135,9 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         args: vec!["--mode=fast".to_string()],
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+        netns: None,
+        host_veth: None,
     };
     let action = Action::RestartAllocation {
         alloc_id,
@@ -191,6 +194,9 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         None,
         // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await
     .expect("dispatch must succeed");

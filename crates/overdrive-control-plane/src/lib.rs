@@ -326,6 +326,20 @@ pub struct AppState {
     /// `SimDataplane`-override boot (no real BPF to intercept on). The
     /// action-shim reads `state.mtls_worker` and fires `if let Some`.
     pub mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    /// Per-host network-slot free-list (transparent-mtls-enrollment, D-TME-12
+    /// G3; step 04-01). Hands out the host-unique, collision-free-by-
+    /// construction [`veth_provisioner::NetSlot`] each live allocation's
+    /// netns/veth/subnet is keyed from, at the action-shim C3 provision seam.
+    ///
+    /// NOT an `Option`: unlike `mtls_worker`, the allocator is harmless on the
+    /// non-mTLS fixture surface (it just hands out slots nobody provisions),
+    /// so a non-optional `Default`-constructed field keeps every fixture
+    /// ripple-free. The type is already `#[derive(Clone, Default)]` and holds
+    /// its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY (it self-shares on clone,
+    /// exactly like `IdentityMgr`), so the field is a plain value — no outer
+    /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
+    /// on a fresh process boot nothing is held (criterion 6).
+    pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -543,6 +557,15 @@ impl AppState {
             ca,
             identity,
             mtls_worker,
+            // Default-construct the per-host slot allocator INSIDE the
+            // constructor (transparent-mtls-enrollment D-TME-12 G3, step
+            // 04-01) — NOT a constructor parameter. This is the same
+            // ripple-avoidance `mtls_worker` (`None`) + `workflow_engine`
+            // (empty registry) use: the ~42 non-mTLS fixtures and the
+            // `reconciler_runtime`/`listener_facts` callers need no change.
+            // On a fresh process boot nothing is held; still-Running allocs
+            // re-assign on their next lifecycle pass (criterion 6).
+            net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
         }
     }
 }
@@ -1817,40 +1840,22 @@ pub async fn run_server_with_obs_and_driver(
     // refusal. The 42 non-mTLS fixtures call `AppState::new` directly
     // (bypassing this boot path) and are unaffected either way.
     //
-    // wire → probe → use (fail-closed): `MtlsDataplane::load` +
-    // `HostMtlsEnforcement::probe()`. On either failure the node REFUSES
-    // to boot with `health.startup.refused` — it does NOT degrade to a
-    // cleartext path (the confidentiality invariant the feature rests on).
+    // wire → probe → use (fail-closed): construct `HostMtlsEnforcement` +
+    // `HostMtlsEnforcement::probe()`. On probe failure the node REFUSES to
+    // boot with `health.startup.refused` — it does NOT degrade to a cleartext
+    // path (the confidentiality invariant the feature rests on). As of step
+    // 04-01 (ADR-0071 Path A) there is no `MtlsDataplane::load` step: the
+    // OUTBOUND intercept is the per-veth egress nft-TPROXY rule installed
+    // per-alloc by `start_alloc`, NOT a cgroup-attached BPF program, so the
+    // worker holds no BPF object to load at boot. SERVICE_MAP is pinned
+    // independently and earlier by `EbpfDataplane::new_with_pin_dir`.
     #[cfg(feature = "integration-tests")]
     let compose_mtls = config.dataplane_override.is_none() || config.mtls_probe_fault.is_some();
     #[cfg(not(feature = "integration-tests"))]
     let compose_mtls = config.dataplane_override.is_none();
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
-            let pin_dir: std::path::PathBuf = config
-                .dataplane_pin_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from(overdrive_dataplane::DEFAULT_PIN_DIR));
-
-            // (1) load — its own `aya::Ebpf` (D-MTLS-17 item 1): recover
-            // `cgroup_connect4_mtls` + `MTLS_REDIRECT_DEST`, reuse the
-            // pinned-by-name SERVICE_MAP. Fail-closed on load failure.
-            let mtls_dataplane = match overdrive_dataplane::mtls::MtlsDataplane::load(&pin_dir) {
-                Ok(dp) => dp,
-                Err(source) => {
-                    tracing::warn!(
-                        name: "health.startup.refused",
-                        reason = "dataplane.mtls",
-                        error = %source,
-                        "transparent-mTLS dataplane load failed; refusing to boot (no cleartext fallback)"
-                    );
-                    return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Load {
-                        source,
-                    }));
-                }
-            };
-
-            // (2) construct the enforcement port over the held identity +
+            // (1) construct the enforcement port over the held identity +
             // the F7 limits. `IdentityMgr` impls `IdentityRead`.
             //
             // PKI-SEAM (transparent-mtls-host-socket step 06-03,
@@ -1876,7 +1881,7 @@ pub async fn run_server_with_obs_and_driver(
                     overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
                 ));
 
-            // (3) probe (Earned Trust): the test-only `mtls_probe_fault` seam
+            // (2) probe (Earned Trust): the test-only `mtls_probe_fault` seam
             // forces a probe failure so criteria[0] exercises the fail-closed
             // refusal without a real substrate fault; otherwise the real
             // `probe()` runs. Either failure → refuse to boot.
@@ -1914,18 +1919,15 @@ pub async fn run_server_with_obs_and_driver(
                 }));
             }
 
-            // (4) construct the worker with both ports as REQUIRED params
-            // (mandatory `new()`, no builder) and the shared cgroup root. The
-            // root is the same `DEFAULT_CGROUP_ROOT` the driver-composition
-            // and the workloads-slice bootstrap use above — re-derived here
-            // (rather than threaded through the intervening dataplane block)
-            // so the mTLS worker resolves per-alloc `.scope` paths under the
-            // identical root.
-            let mtls_cgroup_root = std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT);
+            // (3) construct the worker with both ports as REQUIRED params
+            // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
+            // A) the worker holds no `MtlsDataplane` and no cgroup root — the
+            // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
+            // `start_alloc` against the host-veth NAME carried on
+            // `AllocationSpec.host_veth` (set at the action-shim C3 provision
+            // seam, JOIN-6).
             Some(Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
                 enforcement,
-                mtls_dataplane,
-                mtls_cgroup_root,
                 config.clock.clone(),
             )))
         } else {

@@ -59,6 +59,10 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
+        // mTLS-composed boot gate — no provisioned netns/veth.
+        netns: None,
+        host_veth: None,
     };
 
     // Start the allocation but intentionally discard the returned handle,

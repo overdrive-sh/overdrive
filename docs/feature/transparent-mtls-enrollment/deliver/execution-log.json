@@ -1,0 +1,930 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "transparent-mtls-enrollment",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T13:39:45Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure driven-port (trait+types) definition has no port-to-port AT scaffold; classification covered by RED_UNIT proptest",
+      "t": "2026-06-16T13:39:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T13:41:54Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T13:46:19Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T13:48:32Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T14:05:17Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T14:08:47Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T14:08:47Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T14:11:04Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T14:12:41Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T15:41:21Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T15:56:09Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T15:56:09Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T15:56:09Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-16T16:02:17Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T04:41:41Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T04:49:46Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T04:49:46Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T05:09:09Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T05:11:57Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T05:58:19Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T06:07:44Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T06:07:44Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T06:13:30Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T06:17:04Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T07:58:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T07:58:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T07:58:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T07:58:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T08:00:19Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T09:14:26Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure default-lane converge derivation has no port-to-port AT scaffold; classification covered by the RED_UNIT proptest",
+      "t": "2026-06-17T09:14:32Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T09:16:28Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T09:22:17Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T09:36:40Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T12:36:34Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure default-lane converge derivation has no port-to-port AT scaffold; classification covered by the RED_UNIT proptest",
+      "t": "2026-06-17T12:36:39Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T12:40:26Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T12:45:47Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T12:51:58Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T14:58:58Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure default-lane derivation/converge has no port-to-port AT scaffold; covered by the RED_UNIT proptest",
+      "t": "2026-06-17T14:59:04Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:01:13Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:04:32Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:10:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:33:17Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure default-lane hardening/doc cleanup; no port-to-port AT scaffold",
+      "t": "2026-06-17T15:33:24Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test-hardening (de-tautologize the subnet containment proptest) + a compile-time const guard + stale-doc fixes over already-correct derivation; no failing-first behavior change",
+      "t": "2026-06-17T15:33:24Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:37:25Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:44:32Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T15:59:14Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:02:03Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: real-kernel netns shell-out observer/executor has no pure sub-logic beyond the 02-01-covered workload_converge_steps diff and the existing tx_checksumming_on/link_absent parsers (both already unit-tested); the impure ip/sysctl/ethtool shims are end-state-insensitive (mutants: skip class), so correctness is the Tier-3 assertion",
+      "t": "2026-06-17T16:02:03Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:05:15Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:06:59Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:55:36Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:57:52Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 test-assertion hardening (load-bearing sysctl key fix); no production change and no new pure logic to unit-test",
+      "t": "2026-06-17T16:57:53Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:58:05Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T16:59:23Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:14:26Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:15:24Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:20:20Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:21:25Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:23:01Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:46:45Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: docs/comment correctness + error-variant message accuracy over already-correct behaviour proven by the existing 02-03 Tier-3 AT; no new failing-first scenario",
+      "t": "2026-06-17T17:46:50Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: error-variant split (ResolvConfWriteFailed->ResolvConfRemoveFailed for the teardown removal path) is internal error-message/shape accuracy, not a behaviour change; no existing test pins the variant and both paths stay fatal-by-design (only NotFound swallowed); a Display-string assertion would be a low-value language-guarantee test",
+      "t": "2026-06-17T17:47:11Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:49:45Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T17:51:19Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:06:42Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 assertion de-vacuity hardening (unconditional host-unaffected check) over already-correct behaviour; no new failing-first scenario",
+      "t": "2026-06-17T18:06:44Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single Tier-3 assertion tightening; no pure sub-logic to unit-test",
+      "t": "2026-06-17T18:06:48Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:07:48Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:09:01Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:26:57Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: scenario net_slot_allocator_assigns_smallest_free_and_releases is a default-lane src-module test, not a pre-authored port-to-port AT scaffold in tests/; no @skip/@ignore AT exists to activate (same as 02-01/02-02)",
+      "t": "2026-06-17T18:27:04Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:29:10Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T18:35:48Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-17T19:32:54Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T10:14:56Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T10:41:23Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T10:41:23Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T10:41:23Z"
+    },
+    {
+      "sid": "02-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 02-05 netns join breaks the phase-06 mtls_production_activation host-socket e2e (cgroup_connect4 redirect assumes host-netns loopback; the workload now spawns into ovd-ns-0000). That superseded surface is slated for DELETE at steps 04-01/04-02 per feature-delta + roadmap, AFTER 02-05. Cannot commit green over a red workspace, weaken the test, or delete out-of-scope surface. Orchestrator decision needed: resequence 04-01/04-02 before 02-05, OR grant 02-05 scope to delete the cgroup_connect4 path + mtls_production_activation e2e.",
+      "t": "2026-06-18T10:49:37Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T11:51:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T11:51:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T11:51:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T11:51:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T11:53:54Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T13:07:33Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: docs-correctness (D1 cite, D2 keying) + test-hardening (T1, D4 rename) over already-correct already-reviewed behaviour; no new failing-first scenario",
+      "t": "2026-06-18T13:07:34Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T13:08:50Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T13:10:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T13:12:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T16:15:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T16:15:56Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T16:16:54Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T16:18:38Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-18T16:20:43Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T05:29:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: docs-correctness over already-GREEN behaviour (03-02 commit 5815737e); no new failing-first scenario",
+      "t": "2026-06-19T05:29:22Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: comment-correctness only; no production logic change, nothing new to unit-test",
+      "t": "2026-06-19T05:29:23Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T05:30:46Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T05:32:31Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T10:32:54Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T10:38:13Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test-only step adds no production source and no new pure sub-logic; the composed driving-port fns (install_outbound_tproxy, accept_outbound_leg, make_transparent_listener) are already unit/Tier-3-covered in 03-01/03-02, and the impure ip/nft/netns shell-out topology is end-state-tested by the Tier-3 acceptance assertion (getsockname == dialed-dst). The acceptance test reached GREEN without any unit test.",
+      "t": "2026-06-19T10:38:21Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T10:38:22Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T10:40:06Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T17:25:22Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: revision of already-GREEN step 03-03 (commit 024f9416) \u2014 honest-documentation correction of AC2-a's vacuous F5 over-attribution against the production iifname rule, plus test-hardening (bounded leg-F accepts for diagnosability). No new failing-first scenario; behaviour unchanged. Matches prior in-feature review-revision skips (03-01, 03-02 second cycles).",
+      "t": "2026-06-19T17:25:28Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test-only revision adds no new production source and no new pure sub-logic. The composed production fns (install_outbound_tproxy / accept_outbound_leg / make_transparent_listener) are unchanged and already unit/Tier-3 covered in 03-01/03-02; edits are docstring/label/.expect() attribution corrections + a test-side SO_RCVTIMEO accept-bound helper. No unit test to author.",
+      "t": "2026-06-19T17:25:34Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T17:25:38Z"
+    },
+    {
+      "sid": "03-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T17:27:32Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T17:43:27Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: start_alloc has no production source for host_veth/virt at HEAD; the C3 netns-provision supplier (04-03) deps on 04-01 (dependency inversion from 02-05\u219204-03 supersession in 70cdabf3). Cannot author a Tier-3 'installs BOTH rules' AT without inventing a host_veth source (forbidden API invention). Surfaced as blocker.",
+      "t": "2026-06-19T17:44:08Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: RED_ACCEPTANCE could not be authored (no production source for host_veth/virt at HEAD; C3 supplier 04-03 deps on 04-01 \u2014 dependency inversion from 70cdabf3). No unit-testable logic to author absent the AT. Blocker surfaced to orchestrator.",
+      "t": "2026-06-19T17:45:04Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot implement the swap half \u2014 start_alloc 'install BOTH nft-TPROXY rules' (AC1/AC5) has no production source for host_veth (supplied by C3 wiring 04-03, which deps on 04-01) nor virt (#178). Implementing requires inventing host_veth API surface \u2014 forbidden (CLAUDE.md 'never invent API surface'; 02-04 STOP precedent). No code changed; working tree clean. Blocker surfaced.",
+      "t": "2026-06-19T17:45:11Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing to commit \u2014 GREEN blocked, no code changes. Step requires orchestrator decision (recommend: re-sequence 04-03 C3 wiring before/with 04-01 so host_veth/AllocationSpec.netns exist when start_alloc installs). Working tree clean of code changes.",
+      "t": "2026-06-19T17:45:18Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-19T19:56:10Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: design under-specifies the channel carrying plan.host_veth into worker start_alloc; surfaced to orchestrator for signature pin",
+      "t": "2026-06-19T19:56:25Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: design under-specifies the channel carrying plan.host_veth into worker start_alloc; surfaced to orchestrator for signature pin",
+      "t": "2026-06-19T19:56:25Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: design under-specifies the channel carrying plan.host_veth into worker start_alloc; surfaced to orchestrator for signature pin",
+      "t": "2026-06-19T19:56:25Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: design under-specifies the channel carrying plan.host_veth into worker start_alloc; surfaced to orchestrator for signature pin",
+      "t": "2026-06-19T19:56:25Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T04:05:36Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T04:40:17Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new pure sub-logic \u2014 composed fns (install_outbound_tproxy/accept_outbound_leg/make_transparent_listener) covered in 03-01/03-02; netns derivation+allocator+responder_addr_for_slot in 02-01/02-04/02-05 (re-applied wip proptest); the swap is wiring exercised by the Tier-3 AT",
+      "t": "2026-06-20T04:40:18Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC10/AC11 internal contradiction surfaced. All production code + C3 wiring + JOIN-6 + start_alloc swap + single-cut deletions compile clean; clippy -D warnings clean workspace-wide; the new Tier-3 AT (start_alloc_installs_outbound_and_inbound_tproxy_no_cgroup) PASSES on kernel 7.0.0; the C3 netns_entry Tier-3 tests PASS. BLOCKER: AC11 prunes OutboundWorkload/OutboundPeer/program_redirect_dest from mtls_roles.rs, but the SOLE consumer is mtls_agent_handshake (a SURVIVING test NOT in AC10's deletion list). AC2's deletion of cgroup_connect4_mtls from the ELF already makes mtls_agent_handshake's OUTBOUND half RUNTIME-PANIC (mtls_roles.rs:583). Resolving needs a design decision the AC/design docs do not cover.",
+      "t": "2026-06-20T04:40:37Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T05:02:04Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: deletion/prune finish (Option C drop of outbound test half + AC11 helper prune + Cargo.toml comment), no new pure sub-logic to unit-test",
+      "t": "2026-06-20T05:02:11Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-20T05:02:15Z"
+    }
+  ]
+}

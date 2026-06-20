@@ -166,6 +166,10 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         args: vec!["-c".to_owned(), "trap '' TERM; sleep 60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
+        // mTLS-composed boot gate — no provisioned netns/veth.
+        netns: None,
+        host_veth: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

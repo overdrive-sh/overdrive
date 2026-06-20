@@ -31,9 +31,13 @@ integration-tests = ["overdrive-dataplane/integration-tests"]
 
 [dependencies]
 overdrive-core.workspace = true
-# transparent-mtls-host-socket (D-MTLS-17, GH #26; step 06-03) — the
-# `MtlsInterceptWorker` drives `overdrive_dataplane::mtls::MtlsDataplane`
-# (load/attach_alloc/program_redirect) per allocation. No cycle:
+# transparent-mtls-host-socket (GH #26) — provides the production
+# `HostMtlsEnforcement` binding the worker composes against the
+# `overdrive_core::traits::mtls_enforcement::MtlsEnforcement` port, plus the
+# `integration-tests` feature-forward above. (The old cgroup_connect4_mtls
+# `MtlsDataplane` surface was removed at step 04-01; the worker now installs
+# the nft-TPROXY outbound intercept via its OWN `crate::mtls_intercept`
+# (`install_outbound_tproxy`), not a dataplane call.) No cycle:
 # `overdrive-dataplane` does NOT depend on `overdrive-worker`.
 overdrive-dataplane.path = "../overdrive-dataplane"
 async-trait.workspace    = true

@@ -8,22 +8,23 @@
 //!
 //! - [`start_alloc`](MtlsInterceptWorker::start_alloc) — fired at the
 //!   action-shim's `on_alloc_running` site (after the alloc commits a
-//!   `Running` row). Attaches `cgroup_connect4_mtls` to the allocation's
-//!   own `.scope` cgroup (the F5-exempt per-workload subtree,
-//!   [`MtlsDataplane::attach_alloc`]), stands up the agent's leg-F
-//!   (outbound, plaintext) + leg-C (inbound, `IP_TRANSPARENT`) listeners,
-//!   and spawns the accept→`enforce` tasks. It programs **NEITHER** of the
-//!   two east-west service-resolution facts v1 has no production source for:
-//!   not the OUTBOUND `MTLS_REDIRECT_DEST` redirect, and not the INBOUND
-//!   nft-TPROXY rule (whose match key is the server workload's logical virt
-//!   address). Both are [#178](https://github.com/overdrive-sh/overdrive/issues/178)
-//!   — see the module-level "DECLARED-PEER" note below.
+//!   `Running` row). Installs the OUTBOUND egress nft-TPROXY rule
+//!   ([`install_outbound_tproxy`](crate::mtls_intercept::install_outbound_tproxy),
+//!   D-TME-4 / ADR-0071 Path A) matching the allocation's host-side veth
+//!   (`spec.host_veth`, set by the action-shim C3 provision seam, JOIN-6) and
+//!   redirecting the workload's egress TCP to leg-F; stands up the agent's
+//!   leg-F (outbound, plaintext) + leg-C (inbound, `IP_TRANSPARENT`)
+//!   listeners, and spawns the accept→`enforce` tasks. The INBOUND nft-TPROXY
+//!   rule stays #178-deferred (its match key is the server workload's logical
+//!   virt address — an east-west service-resolution fact v1 has no production
+//!   source for); the leg-C listener + accept loop ARE production. See the
+//!   module-level note below.
 //! - [`stop_alloc`](MtlsInterceptWorker::stop_alloc) — fired at the
 //!   action-shim's `on_alloc_terminal` site. Drains the alloc's
 //!   per-connection teardown set (`enforcement.teardown`), aborts the
-//!   accept tasks, drops the `MtlsCgroupLink` (detach the cgroup
-//!   program), and drops the `TproxyInterceptGuard` (remove the nft
-//!   rule/route). Idempotent.
+//!   accept tasks, and drops the OUTBOUND + INBOUND `TproxyInterceptGuard`s
+//!   (each removes its per-veth / per-virt nft rule by handle; the
+//!   node-global shared routing infra is left intact). Idempotent.
 //!
 //! ## Supervision shape — (C)+(B), no central loop (ADR-0070 / D-MTLS-16)
 //!
@@ -35,34 +36,32 @@
 //! liveness registry, NOT a `supervise_tick`, NOT a tick cadence. The
 //! retired central `MtlsSupervisor` (shape (A)) is deleted.
 //!
-//! ## DECLARED-PEER scoping (v1 authn-only, #178 upgrade)
+//! ## Outbound interception (ADR-0071 Path A) + inbound #178-deferral
 //!
-//! The OUTBOUND intercept is **per-destination**: the
-//! `cgroup_connect4_mtls` program rewrites `connect(real_peer)` only when
-//! `MTLS_REDIRECT_DEST[real_peer]` is programmed (on a map MISS the
-//! `connect` passes through unchanged). v1 has NO production source for
-//! "the set of peers this workload will dial" — that enumeration is
-//! east-west service resolution
-//! ([#178](https://github.com/overdrive-sh/overdrive/issues/178) /
-//! [#61](https://github.com/overdrive-sh/overdrive/issues/61), DEFERRED).
-//! So `start_alloc` does NOT program the redirect; the per-alloc
-//! [`MtlsDataplane`] handle is exposed (under `integration-tests`) so the
-//! e2e activation gate can program the single declared-peer entry as the
-//! #178 stand-in.
+//! The OUTBOUND intercept is the per-veth egress nft-TPROXY rule: every TCP
+//! flow the workload emits on its host-side veth (`iifname spec.host_veth`)
+//! is TPROXY-redirected to the agent's leg-F listener, with the original
+//! destination recovered per-flow via `getsockname` on the accepted leg-F
+//! socket (D-TME-4, symmetric with the inbound TPROXY path). No per-peer
+//! enumeration is needed — TPROXY captures ALL the workload's egress, so the
+//! declared-peer `MTLS_REDIRECT_DEST` map + per-destination rewrite of the
+//! retired cgroup mechanism are GONE (D-TME-3 RETIRED). The per-connection
+//! `MtlsResolve` consumer that decides Mesh-vs-NonMesh per recovered orig-dst
+//! lands in step 04-02; until then the outbound accept loop carries the
+//! vestigial declared-peer `real_peer` slot (inert — nothing programs it).
 //!
-//! The INBOUND nft-TPROXY rule is deferred **symmetrically**: its match key
-//! is the server workload's logical (virt) address — the loopback addr/port
-//! clients dial — which is the same #178 east-west fact with no v1 production
-//! source. So `start_alloc` installs NO inbound TPROXY rule (it records
+//! The INBOUND nft-TPROXY rule is deferred: its match key is the server
+//! workload's logical (virt) address — the loopback addr/port clients dial —
+//! which is an east-west service-resolution fact with no v1 production source.
+//! So `start_alloc` installs NO inbound TPROXY rule (it records
 //! `tproxy_guard = None`); the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
 //! free function stays the named #178 production-install site, exercised today
 //! only by the worker integration tests (which supply a real, distinct virt).
-//! Everything else (load + attach + leg-F + leg-C listeners + both accept
-//! loops + `enforce` + the wire) is production.
+//! Everything else (the outbound egress rule + leg-F + leg-C listeners + both
+//! accept loops + `enforce` + the wire) is production.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddrV4;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -70,13 +69,11 @@ use overdrive_core::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::mtls_enforcement::{EnforcedConnection, MtlsEnforcement};
-use overdrive_dataplane::mtls::{MtlsCgroupLink, MtlsDataplane, MtlsDataplaneError};
 use parking_lot::Mutex;
 
-use crate::cgroup_manager::CgroupPath;
 use crate::mtls_intercept::{
     self, InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_leg,
-    make_transparent_listener,
+    install_outbound_tproxy, make_transparent_listener,
 };
 
 /// Per-alloc transparent-mTLS intercept-install failure (D-MTLS-18).
@@ -89,23 +86,29 @@ use crate::mtls_intercept::{
 /// not swallowed in a `warn!`.
 ///
 /// This enum invents NO new lower-level error surface — it wraps the typed
-/// errors the install steps already produce
-/// ([`MtlsDataplaneError`] for the cgroup attach, [`InterceptError`] for the
-/// leg-C transparent listener) which the worker previously discarded. Each
-/// source `Display` names the privilege / kernel-feature remediation an
-/// operator acts on. (The inbound nft-TPROXY rule install is #178-deferred —
-/// see the module DECLARED-PEER note — so it is not an install step and has no
-/// failure site here; the [`InterceptError::TproxyInstall`] variant still
+/// [`InterceptError`] the install steps already produce (the OUTBOUND egress
+/// nft-TPROXY install + the leg-C transparent listener) plus the leg-F bind
+/// `io::Error`. Each source `Display` names the privilege / kernel-feature
+/// remediation an operator acts on. (The inbound nft-TPROXY rule install is
+/// #178-deferred — see the module note — so it is not an install step and has
+/// no failure site here; the [`InterceptError::TproxyInstall`] variant still
 /// flows through `Inbound` from the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
 /// free function's own callers.)
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum MtlsInterceptInstallError {
-    /// OUTBOUND `cgroup_connect4_mtls` attach to the alloc `.scope` failed
-    /// (site 1). Source `Display` names the `CAP_BPF` / `CAP_NET_ADMIN` /
-    /// missing-scope remediation.
-    #[error("mTLS outbound cgroup attach failed: {0}")]
-    OutboundAttach(#[from] MtlsDataplaneError),
+    /// OUTBOUND nft-TPROXY rule install (`install_outbound_tproxy`) failed
+    /// (site 1). The egress rule matches the workload's host-side veth
+    /// (`spec.host_veth`) and redirects its egress TCP to the agent's leg-F
+    /// listener (D-TME-4, ADR-0071 Path A). Source `Display` names the
+    /// `CAP_NET_ADMIN` / nft / shared-routing-infra remediation.
+    ///
+    /// `#[source]` (not `#[from]`): the sibling `Inbound` variant already
+    /// owns the single `#[from] InterceptError` auto-conversion, so the
+    /// outbound site names this constructor explicitly to keep the two
+    /// `InterceptError` sources distinct in `Display`.
+    #[error("mTLS outbound TPROXY install failed: {0}")]
+    OutboundTproxyInstall(#[source] InterceptError),
 
     /// leg-F (outbound, workload-facing plaintext) listener bind failed
     /// (site 2). `#[source]` (not `#[from]`): a bare `io::Error` from-impl
@@ -136,20 +139,28 @@ impl MtlsInterceptInstallError {
         Self::LegFBind(source)
     }
 
+    /// Associated constructor for the site-1 outbound nft-TPROXY install
+    /// failure. `#[source]` wrap (not `#[from]`, which the `Inbound` variant
+    /// owns), so the call site names this constructor explicitly.
+    #[must_use]
+    const fn outbound_tproxy_install(source: InterceptError) -> Self {
+        Self::OutboundTproxyInstall(source)
+    }
+
     /// The closed-vocabulary install-stage label for the
     /// [`TransitionReason::MtlsInterceptInstallFailed`] cause-class the shim
     /// writes. Maps the 3-variant error (and, for [`Self::Inbound`], the
     /// inner [`InterceptError`] variant) to the four pinned stage strings:
-    /// `"outbound_attach"`, `"leg_f_bind"`, `"leg_c_transparent_listener"`,
-    /// `"inbound_tproxy"`. Internal mapping helper — NOT new contract
-    /// surface.
+    /// `"outbound_tproxy_install"`, `"leg_f_bind"`,
+    /// `"leg_c_transparent_listener"`, `"inbound_tproxy"`. Internal mapping
+    /// helper — NOT new contract surface.
     ///
     /// [`TransitionReason::MtlsInterceptInstallFailed`]:
     ///     overdrive_core::transition_reason::TransitionReason::MtlsInterceptInstallFailed
     #[must_use]
     pub const fn stage(&self) -> &'static str {
         match self {
-            Self::OutboundAttach(_) => "outbound_attach",
+            Self::OutboundTproxyInstall(_) => "outbound_tproxy_install",
             Self::LegFBind(_) => "leg_f_bind",
             Self::Inbound(InterceptError::TransparentListener { .. }) => {
                 "leg_c_transparent_listener"
@@ -167,11 +178,19 @@ impl MtlsInterceptInstallError {
 /// torn down on `stop_alloc`. This is lifecycle bookkeeping keyed by
 /// `AllocationId` (NOT a liveness loop — D-MTLS-16).
 struct AllocIntercept {
-    /// The `cgroup_connect4_mtls` attach link for this alloc's `.scope`.
-    /// Dropping it detaches the program from the workload subtree.
-    _cgroup_link: MtlsCgroupLink,
+    /// The OUTBOUND nft-TPROXY egress-rule guard for this alloc's host-side
+    /// veth (`install_outbound_tproxy`, D-TME-4 / ADR-0071 Path A). Dropping
+    /// it removes the per-veth egress rule from the shared `prerouting`
+    /// chain by handle (the node-global shared routing infra is left intact).
+    /// `Some` on the mTLS-composed production boot (where the action-shim C3
+    /// seam set `spec.host_veth`); `None` off the gate (a fixture with no
+    /// provisioned veth), where the leg-F listener + accept loop still stand
+    /// up but no egress rule is installed.
+    _outbound_tproxy_guard: Option<TproxyInterceptGuard>,
     /// The inbound nft-TPROXY redirect guard. Dropping it removes the
-    /// per-virt rule from the shared chain.
+    /// per-virt rule from the shared chain. `None` while the inbound rule is
+    /// #178-deferred (the leg-C listener + accept loop ARE production; only
+    /// the inbound nft rule has no v1 virt source).
     _tproxy_guard: Option<TproxyInterceptGuard>,
     /// The spawned accept→enforce tasks (outbound + inbound). Aborted on
     /// teardown so a blocked `accept()` does not outlive the alloc.
@@ -188,56 +207,6 @@ struct AllocIntercept {
     /// per-alloc `Mutex` so the spawned accept task can push as it
     /// `enforce`s.
     enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
-    /// The agent's leg-F (outbound) listener address for this alloc —
-    /// the kernel-redirect target `cgroup_connect4_mtls` rewrites a
-    /// declared-peer `connect()` to. Recorded so the #178 declared-peer
-    /// stand-in seam can resolve THIS alloc's own leg-F when it programs
-    /// `MTLS_REDIRECT_DEST[real_peer] = leg_f` (the test never has to
-    /// supply — or even observe — the worker-chosen ephemeral port).
-    /// Read ONLY by the `integration-tests`-gated
-    /// `program_declared_peer_redirect` seam — in a production build the
-    /// field is recorded but never read (v1 production has no east-west
-    /// peer enumeration; #178), so the `dead_code` allow is correct.
-    #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
-    leg_f_addr: SocketAddrV4,
-    /// The single declared peer's REAL destination address — the addr the
-    /// workload originally `connect()`ed to.
-    ///
-    /// TRANSITIONAL (03-02→04-02): this declared-peer slot is now VESTIGIAL.
-    /// As of step 03-02 (D-TME-4, the shipped nft-TPROXY mechanism) the
-    /// outbound orig-dst IS recovered via `getsockname` on the accepted
-    /// leg-F socket — `accept_outbound_leg` builds `Routed::Outbound { peer }`
-    /// from that recovered addr, exactly symmetric with inbound TPROXY, and
-    /// no longer reads `real_peer` to route. (The earlier claim that the
-    /// rewrite was lossy and the orig-dst NOT `getsockname`-recoverable
-    /// described the RETIRED `cgroup_connect4` rewrite, D-TME-3 RETIRED.)
-    /// This field/slot is DELETED in step 04-02, when the resolve consumer
-    /// orphans the declared-peer model.
-    ///
-    /// Still true while it lives: the declared-peer seam records it here
-    /// (`program_declared_peer_redirect` already receives `real_peer` to
-    /// program `MTLS_REDIRECT_DEST`). Shared (`Arc<Mutex<_>>`) because the
-    /// seam writes it AFTER `start_alloc` has already spawned the accept
-    /// loop; the same `Arc` is cloned into [`AcceptLeg::Outbound`]. `None`
-    /// until a redirect is programmed — and a connection only arrives on
-    /// leg-F once one is, so the accept loop fails-closed (logs + skips)
-    /// rather than proceeding if it somehow reads `None`.
-    ///
-    /// This is the #178 stand-in: it gates whether a leg-F redirect was
-    /// programmed at all (the SINGLE declared peer is the ratified D-MTLS-15
-    /// scope). It no longer SUPPLIES the dial target — getsockname recovery
-    /// does (see the TRANSITIONAL note above). General per-connection
-    /// multi-peer orig-dst recovery remains
-    /// [#178](https://github.com/overdrive-sh/overdrive/issues/178).
-    ///
-    /// Read back from the struct ONLY by the `integration-tests`-gated
-    /// `program_declared_peer_redirect` seam; the `AcceptLeg::Outbound` loop
-    /// no longer reads this field to route (it builds the routing fact from
-    /// the getsockname-recovered orig-dst). In a production build the field
-    /// is recorded but never read — the same shape as `leg_f_addr` above
-    /// (#178), so the `dead_code` allow is correct.
-    #[cfg_attr(not(feature = "integration-tests"), allow(dead_code))]
-    real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
 }
 
 /// The worker-side mTLS intercept-and-enforce lifecycle component.
@@ -253,14 +222,6 @@ pub struct MtlsInterceptWorker {
     /// The per-connection enforcement port (`HostMtlsEnforcement` in
     /// production; `SimMtlsEnforcement` under test composition).
     enforcement: Arc<dyn MtlsEnforcement>,
-    /// The production mTLS BPF intercept-install surface. `attach_alloc`
-    /// is `&mut self`, so the dataplane sits behind a `Mutex` — per-alloc
-    /// attach is serialised, which is correct (alloc lifecycle events are
-    /// not a hot path; D-MTLS-17 item 1).
-    dataplane: Mutex<MtlsDataplane>,
-    /// The cgroupfs root (`/sys/fs/cgroup`) the alloc `.scope` paths
-    /// resolve under.
-    cgroup_root: PathBuf,
     /// Injected `Clock` per the mandatory-port-dependency rule. Reserved
     /// for the deferred per-connection progress-stall watchdog
     /// ([#232](https://github.com/overdrive-sh/overdrive/issues/232));
@@ -274,23 +235,19 @@ pub struct MtlsInterceptWorker {
 }
 
 impl MtlsInterceptWorker {
-    /// Construct from the REQUIRED ports. `enforcement` and `dataplane`
-    /// are both mandatory — no defaulting, no builder
+    /// Construct from the REQUIRED ports. `enforcement` and `clock` are both
+    /// mandatory — no defaulting, no builder
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
+    ///
+    /// As of step 04-01 (ADR-0071 Path A) the OUTBOUND intercept is the
+    /// host-veth nft-TPROXY rule installed per-alloc in
+    /// [`start_alloc`](Self::start_alloc) — NOT a `cgroup_connect4_mtls`
+    /// attach — so the worker no longer holds an `MtlsDataplane` or a
+    /// `cgroup_root`. The host-veth NAME the egress rule matches arrives
+    /// per-alloc on `AllocationSpec.host_veth` (JOIN-6), not at construction.
     #[must_use]
-    pub fn new(
-        enforcement: Arc<dyn MtlsEnforcement>,
-        dataplane: MtlsDataplane,
-        cgroup_root: PathBuf,
-        clock: Arc<dyn Clock>,
-    ) -> Self {
-        Self {
-            enforcement,
-            dataplane: Mutex::new(dataplane),
-            cgroup_root,
-            _clock: clock,
-            intercepts: Mutex::new(BTreeMap::new()),
-        }
+    pub fn new(enforcement: Arc<dyn MtlsEnforcement>, clock: Arc<dyn Clock>) -> Self {
+        Self { enforcement, _clock: clock, intercepts: Mutex::new(BTreeMap::new()) }
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
@@ -307,7 +264,7 @@ impl MtlsInterceptWorker {
     /// install is a security control, NOT a best-effort observability hook:
     /// an alloc whose intercept cannot be installed MUST NOT run with
     /// cleartext egress/ingress. On any of the three install-step failures
-    /// (OUTBOUND `cgroup_connect4_mtls` attach; leg-F bind; leg-C transparent
+    /// (OUTBOUND egress nft-TPROXY install; leg-F bind; leg-C transparent
     /// listener) `start_alloc` returns the typed
     /// [`MtlsInterceptInstallError`] — surfacing the cause the worker
     /// previously discarded — and the action-shim drives the alloc to
@@ -316,22 +273,20 @@ impl MtlsInterceptWorker {
     /// observation the reconciler consumes; an mTLS-install failure produces
     /// no such feedback loop, so "log and continue" would silently leave the
     /// confidentiality guarantee broken. (The INBOUND nft-TPROXY rule install
-    /// is #178-deferred — see the module DECLARED-PEER note — so it is not an
-    /// install step here and has no fail-closed site.)
+    /// is #178-deferred — see the module note — so it is not an install step
+    /// here and has no fail-closed site.)
     ///
     /// **Partial-teardown on the `Err` path.** Every guard acquired before
-    /// the failing step (the [`MtlsCgroupLink`], the leg-F / leg-C listeners)
-    /// is still a LOCAL at each failure point —
-    /// it has not yet been handed to `spawn_legs_and_record`, so `stop_alloc`
-    /// cannot find it in `self.intercepts`. Returning `Err` before recording
-    /// drops those
-    /// locals, and their `Drop` detaches the cgroup program / closes the
-    /// listeners / removes the nft rule. The worker leaks NO half-installed
-    /// intercept.
+    /// the failing step (the OUTBOUND [`TproxyInterceptGuard`], the leg-F /
+    /// leg-C listeners) is still a LOCAL at each failure point — it has not
+    /// yet been handed to `spawn_legs_and_record`, so `stop_alloc` cannot find
+    /// it in `self.intercepts`. Returning `Err` before recording drops those
+    /// locals, and their `Drop` removes the egress nft rule / closes the
+    /// listeners. The worker leaks NO half-installed intercept.
     ///
     /// # Errors
     ///
-    /// [`MtlsInterceptInstallError::OutboundAttach`] (site 1),
+    /// [`MtlsInterceptInstallError::OutboundTproxyInstall`] (site 1),
     /// [`MtlsInterceptInstallError::LegFBind`] (site 2), or
     /// [`MtlsInterceptInstallError::Inbound`] (site 3 — the leg-C transparent
     /// listener) when the corresponding install step fails. Each source
@@ -346,38 +301,48 @@ impl MtlsInterceptWorker {
         // (Restart reuses the alloc id).
         self.stop_alloc(&spec.alloc);
 
-        let scope_path = CgroupPath::for_alloc(&spec.alloc).resolve(&self.cgroup_root);
-
-        // OUTBOUND install: attach cgroup_connect4_mtls to THIS alloc's
-        // own .scope (the F5-exempt per-workload subtree). The
-        // MTLS_REDIRECT_DEST programming is DEFERRED to #178 (the e2e gate
-        // programs the single declared-peer entry as the stand-in) — see
-        // the module DECLARED-PEER note.
-        // Take the lock into a `let` so the guard drops before the match
-        // body runs (clippy `significant_drop_in_scrutinee`).
-        // Fail-closed (D-MTLS-18 site 1): `?` surfaces the typed
-        // `MtlsDataplaneError` via `#[from]` as `OutboundAttach` — nothing is
-        // acquired yet, so there is nothing to tear down.
-        let cgroup_link = self.dataplane.lock().attach_alloc(&scope_path)?;
-
         // The agent's leg-F (outbound, workload-facing plaintext) listener
         // — agent-chosen ephemeral loopback (D-MTLS-15). Leg F needs no
-        // IP_TRANSPARENT; a plain bound listener suffices.
+        // IP_TRANSPARENT; a plain bound listener suffices. Bound FIRST so its
+        // ephemeral port is the redirect target the OUTBOUND nft-TPROXY rule
+        // points at.
         // Fail-closed (D-MTLS-18 site 2): on bind failure, return `Err`;
-        // `cgroup_link` (the only guard acquired so far) drops here → detach.
+        // nothing is acquired yet, so there is nothing to tear down.
         let leg_f_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
             Ok(l) => l,
             Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
         };
-        // The agent's chosen leg-F address — the kernel-redirect target a
-        // declared-peer `connect()` is rewritten to. Recorded in the
-        // per-alloc bookkeeping so the #178 declared-peer stand-in seam can
-        // resolve THIS alloc's own leg-F when it programs the redirect.
+        // The agent's chosen leg-F address — the kernel-redirect TARGET the
+        // OUTBOUND nft-TPROXY egress rule redirects the workload's egress to.
+        // Recorded in the per-alloc bookkeeping (the declared-peer slot, still
+        // present until 04-02, reads it).
         let leg_f_addr = leg_f_listener
             .local_addr()
             .ok()
             .and_then(socketaddr_v4)
             .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
+
+        // OUTBOUND install (D-TME-4 / ADR-0071 Path A, site 1): append the
+        // per-veth egress nft-TPROXY rule matching the workload's host-side
+        // veth (`iifname spec.host_veth`) and redirecting ALL its egress TCP
+        // to leg F. The host-veth NAME arrives per-alloc on
+        // `AllocationSpec.host_veth` (JOIN-6), set by the action-shim C3
+        // provision seam; `None` off the mTLS-composed boot (a fixture with no
+        // provisioned veth), where the install is SKIPPED rather than matching
+        // a bogus interface.
+        // Fail-closed (D-MTLS-18 site 1): on install failure return `Err`;
+        // `leg_f_listener` (the only guard acquired so far) drops here → close.
+        // `None` host-veth (off the mTLS-composed boot gate) SKIPS the install
+        // (no interface to match) but still stands up the leg-F listener +
+        // accept loop — a fixture that drives leg-F directly exercises the
+        // accept path without the kernel redirect.
+        let outbound_tproxy_guard = match spec.host_veth.as_deref() {
+            Some(host_veth) => Some(
+                install_outbound_tproxy(host_veth, leg_f_addr.port())
+                    .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?,
+            ),
+            None => None,
+        };
 
         // INBOUND install: the agent's leg-C IP_TRANSPARENT listener. The
         // accompanying nft-TPROXY redirect that would aim real client traffic
@@ -386,9 +351,9 @@ impl MtlsInterceptWorker {
         // Fail-closed (D-MTLS-18 site 3): a server workload with no leg-C
         // inbound listener accepts cleartext client connections — a
         // confidentiality breach symmetric to the outbound one. Return `Err`
-        // (the inbound carve-out is REJECTED per D-MTLS-18 P2); `cgroup_link`
-        // + `leg_f_listener` (the guards acquired so far) drop here → detach
-        // the cgroup program / close the leg-F listener.
+        // (the inbound carve-out is REJECTED per D-MTLS-18 P2);
+        // `outbound_tproxy_guard` + `leg_f_listener` (the guards acquired so
+        // far) drop here → remove the egress rule / close the leg-F listener.
         let inbound_listener =
             match make_transparent_listener(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)) {
                 Ok(l) => l,
@@ -416,7 +381,7 @@ impl MtlsInterceptWorker {
         // inert in production while reading as "inbound mTLS works".
         self.spawn_legs_and_record(
             spec,
-            cgroup_link,
+            outbound_tproxy_guard,
             None,
             leg_f_listener,
             leg_f_addr,
@@ -433,7 +398,7 @@ impl MtlsInterceptWorker {
     fn spawn_legs_and_record(
         self: &Arc<Self>,
         spec: &AllocationSpec,
-        cgroup_link: MtlsCgroupLink,
+        outbound_tproxy_guard: Option<TproxyInterceptGuard>,
         tproxy_guard: Option<TproxyInterceptGuard>,
         leg_f_listener: std::net::TcpListener,
         leg_f_addr: SocketAddrV4,
@@ -469,12 +434,10 @@ impl MtlsInterceptWorker {
 
         self.record_intercept_full(
             spec.alloc.clone(),
-            cgroup_link,
+            outbound_tproxy_guard,
             tproxy_guard,
             vec![outbound_task, inbound_task],
             enforced,
-            leg_f_addr,
-            real_peer,
             stop,
         );
     }
@@ -526,62 +489,6 @@ impl MtlsInterceptWorker {
         drop(intercept);
     }
 
-    /// Test-only (#178 stand-in): program the single declared-peer
-    /// `MTLS_REDIRECT_DEST[real_peer] = <alloc's own leg-F>` entry into
-    /// THIS worker's own `MtlsDataplane`, so the e2e activation gate can
-    /// drive a workload that dials a KNOWN declared peer through the
-    /// production boot path. The leg-F target is resolved from the alloc's
-    /// OWN per-alloc bookkeeping (recorded by `start_alloc`) — the test
-    /// never supplies (nor needs to observe) the worker-chosen ephemeral
-    /// leg-F port, so the redirect always lands on the worker's real
-    /// accept→`enforce` listener (a test-chosen leg-F would bypass the
-    /// accept loop, never reach `enforce`, and produce no TLS on the
-    /// peer wire).
-    ///
-    /// NOT a production surface — v1 production has no east-west peer
-    /// enumeration (that is #178); `start_alloc` never programs the
-    /// redirect itself. `alloc` MUST have been `start_alloc`-ed first
-    /// (so its leg-F is recorded); a redirect for an unknown alloc
-    /// returns [`MtlsInterceptError::UnknownAlloc`].
-    ///
-    /// # Errors
-    ///
-    /// [`MtlsInterceptError::UnknownAlloc`] when `alloc` has no recorded
-    /// intercept (it was never `start_alloc`-ed, or was already stopped);
-    /// [`MtlsInterceptError::Dataplane`] when the `MTLS_REDIRECT_DEST`
-    /// update syscall fails.
-    #[cfg(feature = "integration-tests")]
-    pub fn program_declared_peer_redirect(
-        &self,
-        alloc: &AllocationId,
-        real_peer: SocketAddrV4,
-    ) -> Result<(), MtlsInterceptError> {
-        // Resolve the alloc's own leg-F AND its shared `real_peer` slot in
-        // one lock acquisition (the slot is what the OUTBOUND accept loop
-        // reads to dial the REAL peer instead of self-looping to leg-F).
-        let (leg_f, real_peer_slot) = {
-            let intercepts = self.intercepts.lock();
-            let resolved = intercepts
-                .get(alloc)
-                .map(|intercept| (intercept.leg_f_addr, Arc::clone(&intercept.real_peer)));
-            drop(intercepts);
-            resolved.ok_or_else(|| MtlsInterceptError::UnknownAlloc { alloc: alloc.clone() })?
-        };
-        // Record the real peer FIRST, then program the kernel redirect. The
-        // ordering is load-bearing: the redirect is what causes a workload
-        // `connect(real_peer)` to land on leg-F, so the slot MUST hold
-        // `Some(real_peer)` before any connection can arrive. Recording after
-        // programming opens a window where the first redirected connection is
-        // accepted while the slot is still `None` (dropped fail-closed). The
-        // worker already receives `real_peer` here — it was discarding it;
-        // recording it is the whole of the #178 stand-in's dial-target supply.
-        *real_peer_slot.lock() = Some(real_peer);
-        self.dataplane
-            .lock()
-            .program_redirect(real_peer, leg_f)
-            .map_err(|source| MtlsInterceptError::Dataplane { source })
-    }
-
     /// Spawn the accept→`enforce` loop for one leg. Each accepted
     /// connection is built into an `InterceptedConnection`, `enforce`d,
     /// and its handle pushed into the alloc's teardown set.
@@ -622,22 +529,23 @@ impl MtlsInterceptWorker {
             let built = match leg {
                 AcceptLeg::Outbound { listener, leg_f_addr, real_peer } => {
                     let _ = leg_f_addr; // the redirect TARGET, never the dial target
-                    // OUTBOUND: the `cgroup_connect4_mtls` rewrite is LOSSY —
-                    // it rewrote the workload's `connect(real_peer)` →
-                    // `connect(leg_f)` in place, and the original destination
-                    // is NOT recoverable from the accepted leg-F socket
-                    // (unlike inbound TPROXY's `getsockname` orig-dst). The
-                    // declared-peer seam SUPPLIES the dial target: read the
-                    // recorded `real_peer` and route leg B to IT.
+                    // TRANSITIONAL (this whole declared-peer gate is DELETED in
+                    // step 04-02 when the `MtlsResolve` consumer lands). As of
+                    // the Path-A egress nft-TPROXY mechanism (D-TME-4, the
+                    // RETIRED `cgroup_connect4_mtls` rewrite gone in step
+                    // 04-01) the outbound orig-dst IS getsockname-recoverable
+                    // from the accepted leg-F socket — `accept_outbound_leg`
+                    // below builds `Routed::Outbound { peer }` from that
+                    // recovered addr (symmetric with inbound TPROXY) and
+                    // IGNORES the `real_peer` arg. The vestigial `real_peer`
+                    // slot below is now ALWAYS `None` (nothing programs it
+                    // since `program_declared_peer_redirect` was deleted in
+                    // 04-01), so leg-F traffic currently fail-closed-drops
+                    // until 04-02 wires the resolve consumer.
                     //
                     // Block until a connection is PENDING on the listener
-                    // WITHOUT consuming it, THEN read `real_peer`. Reading the
-                    // slot AFTER a connection is pending (not before the
-                    // blocking accept) closes the stale-read window: the seam
-                    // records `real_peer` before it programs the redirect, and
-                    // the redirect is what routes a connection here, so by the
-                    // time `await_pending_connection` reports POLLIN the slot
-                    // holds `Some(real_peer)`.
+                    // WITHOUT consuming it, THEN read the (vestigial)
+                    // `real_peer` slot.
                     match await_pending_connection(listener, stop) {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
@@ -730,53 +638,26 @@ impl MtlsInterceptWorker {
     }
 
     /// Record a fully-installed (outbound + inbound) intercept.
-    #[allow(clippy::too_many_arguments)]
     fn record_intercept_full(
         &self,
         alloc: AllocationId,
-        cgroup_link: MtlsCgroupLink,
+        outbound_tproxy_guard: Option<TproxyInterceptGuard>,
         tproxy_guard: Option<TproxyInterceptGuard>,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
         enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
-        leg_f_addr: SocketAddrV4,
-        real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
         stop: Arc<AtomicBool>,
     ) {
         self.intercepts.lock().insert(
             alloc,
             AllocIntercept {
-                _cgroup_link: cgroup_link,
+                _outbound_tproxy_guard: outbound_tproxy_guard,
                 _tproxy_guard: tproxy_guard,
                 accept_tasks,
                 stop,
                 enforced,
-                leg_f_addr,
-                real_peer,
             },
         );
     }
-}
-
-/// Test-only error for the #178 declared-peer stand-in seam.
-///
-/// Returned by [`MtlsInterceptWorker::program_declared_peer_redirect`].
-/// Gated out of production builds entirely — the production worker never
-/// programs the redirect (v1 has no east-west peer enumeration), so this
-/// error has no production call site.
-#[cfg(feature = "integration-tests")]
-#[derive(Debug, thiserror::Error)]
-pub enum MtlsInterceptError {
-    /// `program_declared_peer_redirect` was called for an alloc with no
-    /// recorded intercept (never `start_alloc`-ed, or already stopped),
-    /// so its leg-F target cannot be resolved.
-    #[error("no recorded mTLS intercept for alloc {alloc} (start_alloc must run first)")]
-    UnknownAlloc { alloc: AllocationId },
-    /// The underlying `MTLS_REDIRECT_DEST` map-update syscall failed.
-    #[error("mTLS redirect program failed: {source}")]
-    Dataplane {
-        #[source]
-        source: overdrive_dataplane::mtls::MtlsDataplaneError,
-    },
 }
 
 /// Which leg an accept loop is draining.
