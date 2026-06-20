@@ -1205,16 +1205,21 @@ INBOUND's production `virt` source IS #178-gated (but is not a merge blocker).**
 
 This was the load-bearing question. Settled definitively against the code:
 
-- **OUTBOUND install lands a WORKING production path NOW (authn-only).**
-  `install_outbound_tproxy` matches `iifname "<host_veth>"` + `meta l4proto tcp`
-  and TPROXY-redirects ALL the workload's egress to leg-F
+- **OUTBOUND install is a production path buildable WITHIN this feature
+  (authn-only), realized across `04-01` + `04-02` — NOT complete after `04-01`
+  alone.** `install_outbound_tproxy` matches `iifname "<host_veth>"` + `meta
+  l4proto tcp` and TPROXY-redirects ALL the workload's egress to leg-F
   (`mtls_intercept.rs:340-388`, rustdoc :280-300). It has **NO per-destination
   match** — "there is no per-destination match because the workload's destination
   is unknown at install time; TPROXY preserves the original destination, which the
   agent recovers per-flow via `getsockname` downstream (03-02)" (rustdoc
   :289-292). The destination is then classified **per-connection** by THIS
   feature's own v1 resolve adapter (D-TME-6 / `ServiceBackendsResolve`, built
-  01-03; consumed 04-02) — NOT at install time, NOT from #178. The `host_veth` is
+  01-03; consumed `04-02`) — NOT at install time, NOT from #178. **`04-01`
+  installs the outbound rule + the leg-F/leg-C listeners + the accept loop; the
+  outbound traffic path does not complete until `04-02` wires that resolve
+  consumer — until then `real_peer` is `None` and leg-F traffic
+  fail-closed-drops.** (Honesty clarification 2026-06-20, per the 04-01 review.) The `host_veth` is
   the only input the outbound install needs, and it comes from the merged step's
   C3 wiring (`derive_workload_netns_plan(slot).host_veth`). **No #178 source is
   required for the outbound production install.**
@@ -1264,8 +1269,19 @@ now within this feature**, authn-only, using this feature's own v1
 #178 source. The INBOUND production *nft-rule* `virt` source IS genuinely
 #178-gated and stays test-only-until-#178 (unchanged from HEAD); the leg-C
 listener + accept loop are production. The expected-SVID / intended-peer pin is
-separately #178 (authn-only v1 is fine, D-TME-8). **The merged step LANDS NOW as a
-working outbound production path.** *(Orchestrator: before landing, confirm #178's
+separately #178 (authn-only v1 is fine, D-TME-8). **The merged step (`04-01`)
+installs the OUTBOUND production rule + the leg-F/leg-C listeners + the accept
+loop; the outbound *traffic path* completes once `04-02` wires the per-connection
+resolve consumer (`ServiceBackendsResolve` → `Mesh`/`NonMesh`/`MeshUnreachable`).
+Until `04-02`, `real_peer` is always `None` and leg-F traffic fail-closed-drops —
+so "production outbound path" means realized within THIS feature across `04-01` +
+`04-02`, NOT complete after `04-01` alone, with NO #178 dependency.**
+*(Honesty clarification 2026-06-20, prompted by the 04-01 review: the prior
+"LANDS NOW as a working outbound production path" wording was misreadable as
+"complete after 04-01 alone." It is not — 04-01 lands the install + listeners +
+accept loop; 04-02 lands the per-connection classification that completes the
+traffic path. The load-bearing point — the whole outbound path is buildable
+WITHIN this feature with NO #178 source — is unchanged.)* *(Orchestrator: before landing, confirm #178's
 scope with `gh issue view 178 --comments` per CLAUDE.md — the inbound-virt
 attribution is from the HEAD code comment + this feature's design framing; #178's
 own body/comments should be checked to confirm it covers the inbound
