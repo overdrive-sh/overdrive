@@ -24,9 +24,12 @@ crate_class = "adapter-host"
 # `.claude/rules/testing.md` § Workspace convention.
 #
 # Forwards to `overdrive-dataplane/integration-tests` so the worker's
-# mTLS intercept component (`mtls_intercept_worker`) compiles its
-# `#[cfg(feature = "integration-tests")]` #178 redirect-stand-in seam
-# in lock-step with the dataplane surface it drives (step 06-03).
+# mTLS intercept component (`mtls_intercept_worker`) compiles in
+# lock-step with the dataplane surface it drives (the `HostMtlsEnforcement`
+# binding). The former `#[cfg(feature = "integration-tests")]` declared-peer
+# redirect-stand-in seam was deleted at step 04-02 (the per-connection
+# `MtlsResolve` consumer superseded it); the forward remains because the
+# Tier-3 worker intercept-install suite is gated on it.
 integration-tests = ["overdrive-dataplane/integration-tests"]
 
 [dependencies]

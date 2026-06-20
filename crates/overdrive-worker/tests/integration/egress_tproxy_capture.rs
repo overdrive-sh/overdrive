@@ -78,11 +78,9 @@ use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use overdrive_core::AllocationId;
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
-use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_worker::mtls_intercept::{
-    accept_outbound_leg, install_outbound_tproxy, make_transparent_listener,
+    accept_outbound_and_recover_orig_dst, install_outbound_tproxy, make_transparent_listener,
 };
 
 // ---- topology constants (mirror the increment-b spike recipe) ----
@@ -141,10 +139,6 @@ impl Drop for KernelStateLock {
 fn is_root() -> bool {
     // SAFETY: getuid is always safe; takes no args and never fails.
     unsafe { libc::getuid() == 0 }
-}
-
-fn alloc(name: &str) -> AllocationId {
-    AllocationId::new(name).expect("valid allocation id")
 }
 
 fn backend_addr() -> SocketAddrV4 {
@@ -597,20 +591,17 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
 
     let redirect_client = std::thread::spawn(move || run_client_in_netns(backend, None));
 
-    // accept_outbound_leg drives the production getsockname recovery on the
-    // TPROXY-intercepted leg-F socket. The declared-peer arg is transitional;
-    // pass a placeholder that DIFFERS from the dialed backend so the assertion
-    // proves recovery, not echo.
-    let declared_peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
-    assert_ne!(declared_peer, backend, "placeholder must differ from the dialed dst");
-    let alloc_id = alloc("alloc-egress-legf");
-    // Bound the PRODUCTION accept_outbound_leg's internal blocking accept(): if
-    // the redirect silently failed (the dial landed on the fallback backend
-    // instead of leg-F), this returns a clean error after 8 s instead of hanging
-    // to the 120 s slow-timeout SIGKILL.
+    // accept_outbound_and_recover_orig_dst drives the production getsockname
+    // recovery on the TPROXY-intercepted leg-F socket and returns the recovered
+    // orig-dst (the resolve consumer that classifies it is 04-02's default-lane
+    // DST job — here we prove the kernel-side capture + getsockname recovery).
+    // Bound the PRODUCTION accept's internal blocking accept(): if the redirect
+    // silently failed (the dial landed on the fallback backend instead of
+    // leg-F), this returns a clean error after 8 s instead of hanging to the
+    // 120 s slow-timeout SIGKILL.
     bound_listener_accept(&leg_f, Duration::from_secs(8));
-    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), declared_peer).expect(
-        "accept_outbound_leg must build InterceptedConnection from the TPROXY redirect. A \
+    let (leg, got) = accept_outbound_and_recover_orig_dst(&leg_f).expect(
+        "accept_outbound_and_recover_orig_dst must recover orig-dst from the TPROXY redirect. A \
              clean error here (EAGAIN/timeout after 8 s) means the redirect did NOT deliver to \
              leg-F — egress capture did not fire (the dial reached the fallback backend instead). \
              If this HANGS instead of clean-failing, SO_RCVTIMEO did not bound the production \
@@ -620,35 +611,23 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
 
     // AC1: the redirect fired (leg-F accepted, NOT the fallback backend) AND
     // getsockname recovered the dialed orig-dst.
-    match intercepted.routed {
-        Routed::Outbound { peer: got } => {
-            eprintln!("[03-03][AC1] getsockname(leg-F accepted) = {got}");
-            eprintln!("[03-03][AC1] expected dialed backend    = {backend}");
-            assert_eq!(
-                got, backend,
-                "getsockname-recovered orig-dst must equal the dialed backend {backend}"
-            );
-            assert_ne!(
-                got, declared_peer,
-                "recovered peer must NOT be the declared-peer placeholder — proves getsockname \
-                 recovery, not echo of the arg"
-            );
-            assert_ne!(
-                got.port(),
-                leg_f_port,
-                "recovered orig-dst port must be the backend port, NOT leg-F's bound port"
-            );
-            assert_ne!(
-                u32::from(*got.ip()),
-                u32::from(Ipv4Addr::LOCALHOST),
-                "recovered orig-dst must be the backend addr, NOT leg-F's loopback bind addr"
-            );
-        }
-        Routed::Inbound { orig_dst } => panic!("expected Outbound, got Inbound {{ {orig_dst} }}"),
-    }
-    assert_eq!(intercepted.routed.direction(), Direction::Outbound);
-    assert_eq!(intercepted.alloc, alloc_id, "alloc must round-trip");
-    assert!(intercepted.expected_peer.is_none(), "v1 authn-only: expected_peer is None");
+    eprintln!("[03-03][AC1] getsockname(leg-F accepted) = {got}");
+    eprintln!("[03-03][AC1] expected dialed backend    = {backend}");
+    assert_eq!(
+        got, backend,
+        "getsockname-recovered orig-dst must equal the dialed backend {backend}"
+    );
+    assert_ne!(
+        got.port(),
+        leg_f_port,
+        "recovered orig-dst port must be the backend port, NOT leg-F's bound port"
+    );
+    assert_ne!(
+        u32::from(*got.ip()),
+        u32::from(Ipv4Addr::LOCALHOST),
+        "recovered orig-dst must be the backend addr, NOT leg-F's loopback bind addr"
+    );
+    drop(leg);
 
     // The fallback backend must NOT have accepted — the redirect took the dial.
     assert!(
@@ -729,30 +708,25 @@ fn workload_egress_redirects_to_legf_and_getsockname_recovers_orig_dst() {
     // ----------------------------------------------------------------
     let selfexempt_client =
         std::thread::spawn(move || run_client_in_netns(backend, Some(MTLS_LEG_S_DIAL_MARK)));
-    let alloc_id2 = alloc("alloc-egress-selfexempt");
     // Bound the production accept again (the SO_RCVTIMEO set above persists on the
     // listener fd; re-apply defensively in case a prior accept reset it).
     bound_listener_accept(&leg_f, Duration::from_secs(8));
-    let intercepted2 = accept_outbound_leg(&leg_f, alloc_id2, declared_peer).expect(
+    let (leg2, got2) = accept_outbound_and_recover_orig_dst(&leg_f).expect(
         "self-exempt-impossible: a workload's SO_MARK-stamped dial must STILL be captured to \
          leg-F (the mark does not cross the netns boundary). A clean error here (EAGAIN/timeout \
          after 8 s) means the workload self-exempted — a security hole. If this HANGS instead, \
          SO_RCVTIMEO did not bound the production accept on this kernel; a 120 s slow-timeout \
          SIGKILL is the same self-exempt-leaked signal.",
     );
-    match intercepted2.routed {
-        Routed::Outbound { peer: got } => {
-            eprintln!(
-                "[03-03][AC2-b self-exempt-impossible] workload marked dial STILL captured; getsockname = {got}"
-            );
-            assert_eq!(
-                got, backend,
-                "self-exempt-impossible: the workload's marked dial is still captured to leg-F \
-                 and getsockname recovers the dialed backend {backend}"
-            );
-        }
-        Routed::Inbound { orig_dst } => panic!("expected Outbound, got Inbound {{ {orig_dst} }}"),
-    }
+    eprintln!(
+        "[03-03][AC2-b self-exempt-impossible] workload marked dial STILL captured; getsockname = {got2}"
+    );
+    assert_eq!(
+        got2, backend,
+        "self-exempt-impossible: the workload's marked dial is still captured to leg-F \
+         and getsockname recovers the dialed backend {backend}"
+    );
+    drop(leg2);
     let selfexempt_out = selfexempt_client.join().expect("self-exempt client thread");
     eprintln!("[03-03][AC2-b self-exempt-impossible] client: {selfexempt_out}");
 

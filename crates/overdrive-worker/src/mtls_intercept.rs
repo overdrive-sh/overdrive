@@ -100,8 +100,8 @@ pub enum InterceptError {
         /// Human-readable cause (the failing `nft` / `ip` command + stderr).
         reason: String,
     },
-    /// `accept_inbound_leg` / `accept_outbound_leg` could not accept the
-    /// redirected connection on the intercept listener.
+    /// `accept_inbound_leg` / `accept_outbound_and_recover_orig_dst` could not
+    /// accept the redirected connection on the intercept listener.
     #[error("leg accept failed on the {direction} intercept listener: {source}")]
     Accept {
         /// `"inbound"` or `"outbound"` — which intercept listener accept failed on.
@@ -110,9 +110,10 @@ pub enum InterceptError {
         #[source]
         source: std::io::Error,
     },
-    /// `accept_inbound_leg` (inbound orig-dst) or `accept_outbound_leg`
-    /// (outbound dialed-peer recovery) could not recover the original
-    /// destination via `getsockname` on the TPROXY-redirected accepted leg.
+    /// `accept_inbound_leg` (inbound orig-dst) or
+    /// `accept_outbound_and_recover_orig_dst` (outbound orig-dst recovery) could
+    /// not recover the original destination via `getsockname` on the
+    /// TPROXY-redirected accepted leg.
     #[error("getsockname original-destination recovery failed: {source}")]
     OrigDst {
         /// The originating `getsockname` error.
@@ -696,46 +697,40 @@ impl Drop for TproxyInterceptGuard {
 }
 
 /// Accept the redirected OUTBOUND workload connection on the agent's leg-F
-/// listener.
+/// listener and recover the workload's dialed original destination
+/// (`orig_dst`).
 ///
-/// Recovers the real peer (the workload's dialed orig-dst) via `getsockname`
-/// on the TPROXY-intercepted leg-F socket — symmetric with
-/// [`accept_inbound_leg`], which recovers inbound orig-dst the same way — and
-/// builds [`InterceptedConnection`] (`Routed::Outbound { peer }`) from the
-/// RECOVERED addr, NOT from a declared-peer slot. Under TPROXY the dialed
-/// destination IS the accepted socket's local addr (D-TME-4; symmetric with
-/// the inbound `findings-inbound-intercept.md` §1 — NOT `SO_ORIGINAL_DST`).
-/// The owned leg F is handed by value. Productionises `roles.rs::accept_leg_f`.
+/// Recovers `orig_dst` via `getsockname` on the TPROXY-intercepted leg-F socket
+/// — symmetric with [`accept_inbound_leg`], which recovers inbound orig-dst the
+/// same way. Under TPROXY the dialed destination IS the accepted socket's local
+/// addr (D-TME-4; symmetric with the inbound `findings-inbound-intercept.md` §1
+/// — NOT `SO_ORIGINAL_DST`). Returns the OWNED leg-F fd plus the recovered
+/// `orig_dst` so the worker can RESOLVE `orig_dst` against the mesh
+/// (`MtlsResolve`, 04-02) BEFORE deciding the connection's fate — the resolve
+/// outcome (`Mesh` / `NonMesh` / `MeshUnreachable`), not a declared-peer slot,
+/// now drives whether the leg is enforced over mTLS, passed through cleartext,
+/// or fail-closed. The peer leg B dials on the `Mesh` arm is the RESOLVED
+/// backend addr (`ResolvedBackend.addr`), which the worker stamps into
+/// `Routed::Outbound { peer }` itself — NOT `orig_dst` (v1 headless: the two
+/// coincide, but the worker uses the resolved addr so #167/#61 VIP→backend
+/// translation wires without touching this seam).
 ///
 /// # Errors
 ///
 /// Returns [`InterceptError::Accept`] if the leg-F accept fails, or
-/// [`InterceptError::OrigDst`] if `getsockname` peer recovery fails.
-pub fn accept_outbound_leg(
+/// [`InterceptError::OrigDst`] if `getsockname` orig-dst recovery fails.
+pub fn accept_outbound_and_recover_orig_dst(
     leg_f_listener: &std::net::TcpListener,
-    alloc: AllocationId,
-    // Transitional/vestigial: the declared-peer slot is no longer the routing
-    // source (the peer is now recovered via getsockname below). The param and
-    // its caller's `real_peer` slot in `mtls_intercept_worker.rs` are removed
-    // in 04-02, where the resolve consumer orphans the declared-peer model.
-    _peer: SocketAddrV4,
-) -> Result<InterceptedConnection> {
+) -> Result<(OwnedFd, SocketAddrV4)> {
     let (leg_f, _accept_peer) = leg_f_listener
         .accept()
         .map_err(|source| InterceptError::Accept { direction: "outbound", source })?;
     leg_f.set_nodelay(true).ok();
-    // Symmetric with `accept_inbound_leg`: the real peer (the workload's dialed
-    // orig-dst) IS the TPROXY-intercepted accepted socket's local addr,
-    // recovered via the shared `getsockname_orig` helper.
-    let peer = getsockname_orig(leg_f.as_raw_fd())?;
-    Ok(InterceptedConnection {
-        leg: OwnedFd::from(leg_f),
-        routed: Routed::Outbound { peer },
-        alloc,
-        // v1 = authn-only (F5 / #178): the expected-peer SAN-match is
-        // supplied downstream by east-west SPIFFE-ID resolution, never here.
-        expected_peer: None,
-    })
+    // Symmetric with `accept_inbound_leg`: the dialed orig-dst IS the
+    // TPROXY-intercepted accepted socket's local addr, recovered via the shared
+    // `getsockname_orig` helper.
+    let orig_dst = getsockname_orig(leg_f.as_raw_fd())?;
+    Ok((OwnedFd::from(leg_f), orig_dst))
 }
 
 /// Accept the TPROXY-redirected INBOUND connection on leg-C.
@@ -1202,27 +1197,25 @@ table ip overdrive-mtls {
         );
     }
 
-    // --- `accept_outbound_leg` getsockname orig-dst recovery (D-TME-4) ---
+    // --- `accept_outbound_and_recover_orig_dst` getsockname recovery (D-TME-4) ---
 
     #[test]
-    fn accept_outbound_leg_recovers_orig_dst_via_getsockname() {
-        // `accept_outbound_leg` recovers the real peer via `getsockname` on the
-        // accepted leg-F socket (symmetric with `accept_inbound_leg`), NOT from
-        // the declared-peer arg. `accept` + `getsockname` + `set_nodelay` do no
-        // privileged syscall, so this is default-lane (no root / no TPROXY): on
-        // a plain loopback listener `getsockname` of the accepted socket returns
-        // the dialed local addr. The real TPROXY orig-dst==dialed-dst on a live
-        // intercepted connect is the Tier-3 03-03 obligation; here we pin that
-        // the routing fact is built from the recovered addr, provably NOT the
-        // declared arg (which differs).
-        use std::io::Read as _;
+    fn accept_outbound_and_recover_orig_dst_returns_the_getsockname_dialed_addr() {
+        // `accept_outbound_and_recover_orig_dst` recovers the dialed orig-dst via
+        // `getsockname` on the accepted leg-F socket (symmetric with
+        // `accept_inbound_leg`). `accept` + `getsockname` + `set_nodelay` do no
+        // privileged syscall, so this is default-lane (no root / no TPROXY): on a
+        // plain loopback listener `getsockname` of the accepted socket returns the
+        // dialed local addr. The real TPROXY orig-dst==dialed-dst on a live
+        // intercepted connect is the Tier-3 03-03 / 05-01 obligation; here we pin
+        // that the recovered orig_dst is the getsockname addr and the owned leg is
+        // the genuine accepted socket.
+        use std::io::{Read as _, Write as _};
         use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+        use std::os::fd::{AsRawFd as _, FromRawFd as _};
         use std::time::Duration;
 
-        use overdrive_core::AllocationId;
-        use overdrive_core::traits::mtls_enforcement::Routed;
-
-        use super::accept_outbound_leg;
+        use super::accept_outbound_and_recover_orig_dst;
 
         let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("bind plain loopback leg-F listener");
@@ -1231,50 +1224,42 @@ table ip overdrive-mtls {
             v6 @ std::net::SocketAddr::V6(_) => panic!("expected V4 addr, got {v6}"),
         };
 
-        // Declared-peer arg DELIBERATELY differs from the dialed addr so the
-        // test proves getsockname recovery, not echo of the (transitional) arg.
-        let declared_peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
-        assert_ne!(
-            declared_peer, dialed_addr,
-            "declared peer must differ from the dialed addr for the recovery proof to be meaningful"
-        );
-        let alloc = AllocationId::new("alloc-outbound-unit").expect("valid allocation id");
-
-        // Client dials so the production `accept()` has a pending connection.
-        // The probe keeps the connection open until accept completes; the
-        // thread then exits (the leg fd is dropped by the production type).
+        // Client dials so the production `accept()` has a pending connection, then
+        // reads one byte written back through the recovered owned leg — proving
+        // the returned fd IS the genuine accepted socket.
         let client = std::thread::spawn(move || {
             let mut s = TcpStream::connect_timeout(&dialed_addr.into(), Duration::from_secs(5))
                 .expect("dial loopback leg-F");
             let mut buf = [0u8; 1];
-            // EOF is expected when the accepted leg is dropped at end of test.
-            let _ = s.read(&mut buf);
+            s.read_exact(&mut buf).expect("read echoed byte");
+            buf
         });
 
-        let intercepted = accept_outbound_leg(&listener, alloc.clone(), declared_peer)
-            .expect("accept_outbound_leg must build InterceptedConnection");
+        let (leg, orig_dst) = accept_outbound_and_recover_orig_dst(&listener)
+            .expect("accept_outbound_and_recover_orig_dst must recover orig-dst");
 
-        match intercepted.routed {
-            Routed::Outbound { peer: got } => {
-                assert_eq!(
-                    got, dialed_addr,
-                    "Outbound peer must be the getsockname-recovered dialed addr, not the declared arg"
-                );
-                assert_ne!(
-                    got, declared_peer,
-                    "recovered peer must NOT equal the declared arg — proves getsockname recovery, not echo"
-                );
-            }
-            Routed::Inbound { orig_dst } => {
-                panic!("expected Outbound, got Inbound {{ {orig_dst} }}")
-            }
-        }
-        assert_eq!(intercepted.alloc, alloc, "alloc must round-trip");
-        assert!(intercepted.expected_peer.is_none(), "v1 authn-only: expected_peer is None");
+        assert_eq!(
+            orig_dst, dialed_addr,
+            "recovered orig_dst must be the getsockname-recovered dialed addr"
+        );
 
-        // Drop the intercepted connection (closes the accepted leg) so the
-        // client's blocking read returns EOF and the thread joins cleanly.
-        drop(intercepted);
-        client.join().expect("client thread");
+        // Write a byte through the owned leg; the client reads it back byte-exact.
+        // SAFETY: a fresh owned fd over the accepted TCP leg; dropped at scope end.
+        let mut stream = unsafe { TcpStream::from_raw_fd(libc_dup(leg.as_raw_fd())) };
+        stream.write_all(b"X").expect("write through the owned leg");
+        stream.flush().ok();
+        drop(stream);
+
+        assert_eq!(&client.join().expect("client thread"), b"X");
+        drop(leg);
+    }
+
+    /// `dup(2)` a raw fd so the test can write through a copy while production
+    /// keeps owning the original `OwnedFd`.
+    fn libc_dup(fd: i32) -> i32 {
+        // SAFETY: dup of a live fd; the returned fd is owned by the caller.
+        let new = unsafe { libc::dup(fd) };
+        assert!(new >= 0, "dup: {}", std::io::Error::last_os_error());
+        new
     }
 }

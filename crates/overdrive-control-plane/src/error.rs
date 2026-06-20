@@ -375,6 +375,26 @@ pub enum MtlsBootError {
         #[source]
         source: overdrive_core::traits::mtls_enforcement::MtlsEnforcementError,
     },
+
+    /// `MtlsResolve::probe` failed — the per-connection enrollment-resolve
+    /// adapter (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) could not read
+    /// its backing `service_backends` surface at boot (a failed List or a
+    /// failed watch-open). The Earned-Trust gate (wire → probe → use) refuses
+    /// to start: an adapter that cannot read `service_backends` would degrade
+    /// to silent `NonMesh`-everywhere → silent cleartext — the exact footgun
+    /// the enrollment model exists to remove. Distinct from [`Self::Probe`]
+    /// (the enforcement substrate) so the operator sees WHICH boot probe
+    /// refused; the node refuses with `health.startup.refused` either way
+    /// (fail-closed, no cleartext fallback).
+    #[error(
+        "transparent-mTLS resolve probe failed; refusing to boot \
+         (no cleartext fallback): {source}"
+    )]
+    ResolveProbe {
+        /// Underlying `MtlsResolveError` from `MtlsResolve::probe`.
+        #[source]
+        source: overdrive_core::traits::mtls_resolve::MtlsResolveError,
+    },
 }
 
 /// Top-level control-plane error.

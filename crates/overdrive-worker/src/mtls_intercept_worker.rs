@@ -45,10 +45,15 @@
 //! socket (D-TME-4, symmetric with the inbound TPROXY path). No per-peer
 //! enumeration is needed — TPROXY captures ALL the workload's egress, so the
 //! declared-peer `MTLS_REDIRECT_DEST` map + per-destination rewrite of the
-//! retired cgroup mechanism are GONE (D-TME-3 RETIRED). The per-connection
-//! `MtlsResolve` consumer that decides Mesh-vs-NonMesh per recovered orig-dst
-//! lands in step 04-02; until then the outbound accept loop carries the
-//! vestigial declared-peer `real_peer` slot (inert — nothing programs it).
+//! retired cgroup mechanism are GONE (D-TME-3 RETIRED). As of step 04-02 the
+//! per-connection [`MtlsResolve`](overdrive_core::traits::mtls_resolve::MtlsResolve)
+//! consumer drives the outbound accept loop: each captured connection's
+//! recovered `orig_dst` is resolved against the mesh and branched on the
+//! returned `MtlsResolution` variant (ADR-0071 fact 4, C1) —
+//! `Mesh`→`enforce` over mTLS to the resolved backend, `NonMesh`→cleartext
+//! pass-through (by design), `MeshUnreachable`→fail-closed (refuse, NO
+//! cleartext). The vestigial declared-peer `real_peer` slot is GONE (deleted
+//! single-cut this step alongside the resolve consumer it superseded).
 //!
 //! The INBOUND nft-TPROXY rule is deferred: its match key is the server
 //! workload's logical (virt) address — the loopback addr/port clients dial —
@@ -68,11 +73,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use overdrive_core::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::AllocationSpec;
-use overdrive_core::traits::mtls_enforcement::{EnforcedConnection, MtlsEnforcement};
+use overdrive_core::traits::mtls_enforcement::{
+    EnforcedConnection, InterceptedConnection, MtlsEnforcement, Routed,
+};
+use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use parking_lot::Mutex;
 
 use crate::mtls_intercept::{
-    self, InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_leg,
+    InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
     install_outbound_tproxy, make_transparent_listener,
 };
 
@@ -222,6 +230,16 @@ pub struct MtlsInterceptWorker {
     /// The per-connection enforcement port (`HostMtlsEnforcement` in
     /// production; `SimMtlsEnforcement` under test composition).
     enforcement: Arc<dyn MtlsEnforcement>,
+    /// The per-connection enrollment-resolve port (`ServiceBackendsResolve` in
+    /// production; `SimMtlsResolve` under test composition; ADR-0071 fact 4,
+    /// the #178 anti-corruption boundary). The outbound accept loop resolves
+    /// each captured connection's `getsockname`-recovered `orig_dst` against
+    /// the mesh through this port and branches on the returned
+    /// [`MtlsResolution`] variant (the C1 3-arm decision —
+    /// `Mesh`→enforce / `NonMesh`→cleartext pass-through /
+    /// `MeshUnreachable`→fail-closed). Mandatory `new()` param, no builder
+    /// (`.claude/rules/development.md` § "Port-trait dependencies").
+    resolve: Arc<dyn MtlsResolve>,
     /// Injected `Clock` per the mandatory-port-dependency rule. Reserved
     /// for the deferred per-connection progress-stall watchdog
     /// ([#232](https://github.com/overdrive-sh/overdrive/issues/232));
@@ -235,9 +253,11 @@ pub struct MtlsInterceptWorker {
 }
 
 impl MtlsInterceptWorker {
-    /// Construct from the REQUIRED ports. `enforcement` and `clock` are both
-    /// mandatory — no defaulting, no builder
-    /// (`.claude/rules/development.md` § "Port-trait dependencies").
+    /// Construct from the REQUIRED ports. `enforcement`, `resolve`, and `clock`
+    /// are all mandatory — no defaulting, no builder
+    /// (`.claude/rules/development.md` § "Port-trait dependencies": a builder
+    /// makes the dependency optional, and "optional" means "tests can forget";
+    /// the compiler enforces every call site is explicit).
     ///
     /// As of step 04-01 (ADR-0071 Path A) the OUTBOUND intercept is the
     /// host-veth nft-TPROXY rule installed per-alloc in
@@ -245,9 +265,19 @@ impl MtlsInterceptWorker {
     /// attach — so the worker no longer holds an `MtlsDataplane` or a
     /// `cgroup_root`. The host-veth NAME the egress rule matches arrives
     /// per-alloc on `AllocationSpec.host_veth` (JOIN-6), not at construction.
+    ///
+    /// As of step 04-02 the worker holds the [`MtlsResolve`] port: the outbound
+    /// accept loop resolves each captured connection's recovered `orig_dst`
+    /// through it and branches on the [`MtlsResolution`] variant — production
+    /// wires `ServiceBackendsResolve` (reading `service_backends`), tests wire
+    /// `SimMtlsResolve`.
     #[must_use]
-    pub fn new(enforcement: Arc<dyn MtlsEnforcement>, clock: Arc<dyn Clock>) -> Self {
-        Self { enforcement, _clock: clock, intercepts: Mutex::new(BTreeMap::new()) }
+    pub fn new(
+        enforcement: Arc<dyn MtlsEnforcement>,
+        resolve: Arc<dyn MtlsResolve>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self { enforcement, resolve, _clock: clock, intercepts: Mutex::new(BTreeMap::new()) }
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
@@ -314,8 +344,10 @@ impl MtlsInterceptWorker {
         };
         // The agent's chosen leg-F address — the kernel-redirect TARGET the
         // OUTBOUND nft-TPROXY egress rule redirects the workload's egress to.
-        // Recorded in the per-alloc bookkeeping (the declared-peer slot, still
-        // present until 04-02, reads it).
+        // Load-bearing: it is the `agent_leg_f_port` the egress rule points at
+        // (`install_outbound_tproxy(host_veth, leg_f_addr.port())` below). It is
+        // NOT a dial target — the dial peer is the per-connection RESOLVED
+        // backend addr (04-02), recovered in the accept loop, never this slot.
         let leg_f_addr = leg_f_listener
             .local_addr()
             .ok()
@@ -373,18 +405,18 @@ impl MtlsInterceptWorker {
         // So `start_alloc` records `tproxy_guard = None` and installs no rule;
         // the [`install_inbound_tproxy`] free function stays the named #178
         // production-install site, exercised today only by the worker
-        // integration tests (which supply a real, distinct virt) — the SAME
-        // "only test callers until #178" shape as the outbound
-        // `program_declared_peer_redirect` seam. A `virt` synthesised from the
-        // agent's own ephemeral leg-C port (the prior shape) installed a
-        // self-referential rule that matched no real inbound connection —
-        // inert in production while reading as "inbound mTLS works".
+        // integration tests (which supply a real, distinct virt). A `virt`
+        // synthesised from the agent's own ephemeral leg-C port (the prior
+        // shape) installed a self-referential rule that matched no real inbound
+        // connection — inert in production while reading as "inbound mTLS
+        // works". (The OUTBOUND direction is NOT #178-gated: it resolves
+        // orig_dst per-connection via the `MtlsResolve` consumer wired in the
+        // accept loop below — see [`Self::handle_outbound`].)
         self.spawn_legs_and_record(
             spec,
             outbound_tproxy_guard,
             None,
             leg_f_listener,
-            leg_f_addr,
             inbound_listener,
         );
         Ok(())
@@ -393,36 +425,23 @@ impl MtlsInterceptWorker {
     /// Spawn the outbound + inbound accept loops for an alloc and record the
     /// full intercept bookkeeping. Factored out of [`start_alloc`] so that
     /// method stays under the small-function budget; this owns the shared
-    /// per-alloc state (`enforced` teardown set, `real_peer` dial-target slot,
-    /// cooperative `stop` flag) the two legs and the recorded intercept share.
+    /// per-alloc state (`enforced` teardown set, cooperative `stop` flag) the
+    /// two legs and the recorded intercept share.
     fn spawn_legs_and_record(
         self: &Arc<Self>,
         spec: &AllocationSpec,
         outbound_tproxy_guard: Option<TproxyInterceptGuard>,
         tproxy_guard: Option<TproxyInterceptGuard>,
         leg_f_listener: std::net::TcpListener,
-        leg_f_addr: SocketAddrV4,
         inbound_listener: std::net::TcpListener,
     ) {
         let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
-        // VESTIGIAL outbound dial target — ALWAYS `None` as of 04-01. The
-        // declared-peer model that once wrote it was deleted this step, and the
-        // per-connection `MtlsResolve` consumer that 04-02 will wire is not yet
-        // present. So the OUTBOUND accept loop always sees `None` and
-        // fail-closed-drops leg-F traffic (see `accept_loop`'s Outbound arm).
-        // Retained only so the accept-loop signature is stable across 04-01⇄04-02;
-        // 04-02 replaces this slot with the resolve consumer.
-        let real_peer: Arc<Mutex<Option<SocketAddrV4>>> = Arc::new(Mutex::new(None));
         // Cooperative stop flag the accept loops observe between poll slices.
         let stop = Arc::new(AtomicBool::new(false));
 
         let outbound_task = self.spawn_accept_loop(
             spec.alloc.clone(),
-            AcceptLeg::Outbound {
-                listener: leg_f_listener,
-                leg_f_addr,
-                real_peer: Arc::clone(&real_peer),
-            },
+            AcceptLeg::Outbound { listener: leg_f_listener },
             Arc::clone(&enforced),
             Arc::clone(&stop),
         );
@@ -511,11 +530,16 @@ impl MtlsInterceptWorker {
 
     /// Blocking accept loop (the leg listeners are blocking
     /// `std::net::TcpListener`s — leg acquisition is a one-shot per
-    /// intercepted connection, not an async pump). Each accept builds the
-    /// `InterceptedConnection` and hands it to `enforce` on the tokio
-    /// runtime; `enforce`'s own task owns the pumps + (B) self-teardown.
-    /// Exits when `stop` is set (observed between bounded poll slices) so the
-    /// loop does not outlive the alloc on a `spawn_blocking` thread.
+    /// intercepted connection, not an async pump). Exits when `stop` is set
+    /// (observed between bounded poll slices) so the loop does not outlive the
+    /// alloc on a `spawn_blocking` thread.
+    ///
+    /// The OUTBOUND leg drives the per-connection enrollment resolve (04-02):
+    /// accept leg-F → recover `orig_dst` via `getsockname` → `MtlsResolve` →
+    /// branch on the [`MtlsResolution`] variant ([`Self::handle_outbound`]).
+    /// The INBOUND leg builds the `InterceptedConnection` from the
+    /// TPROXY-recovered orig-dst and hands it to `enforce` directly (its routing
+    /// fact needs no resolve — the server SVID is selected by the orig-dst).
     fn accept_loop(
         self: &Arc<Self>,
         alloc: &AllocationId,
@@ -527,51 +551,32 @@ impl MtlsInterceptWorker {
             if stop.load(Ordering::SeqCst) {
                 return;
             }
-            let built = match leg {
-                AcceptLeg::Outbound { listener, leg_f_addr, real_peer } => {
-                    let _ = leg_f_addr; // the redirect TARGET, never the dial target
-                    // 04-01 installs the OUTBOUND nft-TPROXY rule + the leg-F /
-                    // leg-C listeners + this accept loop. It does NOT yet complete
-                    // leg-F traffic: the per-connection `MtlsResolve` consumer
-                    // that supplies the dial peer lands in step 04-02. Until then
-                    // `real_peer` is ALWAYS `None` (the declared-peer model that
-                    // once wrote it was deleted this step), so EVERY accepted
-                    // leg-F connection takes the fail-closed-drop path below —
-                    // the workload's connection is closed and NO cleartext
-                    // egresses. The `Some(peer)` arm is unreachable as of 04-01
-                    // and is removed in 04-02 when the resolve consumer replaces
-                    // the `real_peer` slot.
-                    //
-                    // Block until a connection is PENDING on the listener WITHOUT
-                    // consuming it, then read the (vestigial) `real_peer` slot.
+            match leg {
+                AcceptLeg::Outbound { listener } => {
+                    // Poll for a pending connection (observing `stop`) before the
+                    // blocking accept, so the loop exits cooperatively on teardown.
                     match await_pending_connection(listener, stop) {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
                     }
-                    let Some(peer) = *real_peer.lock() else {
-                        // The 04-01 path: no resolve consumer yet, so no dial
-                        // peer. Fail CLOSED: accept-and-drop so the workload's
-                        // connection is closed and NO cleartext egresses — never
-                        // self-loop to `leg_f_addr`. 04-02 replaces this with the
-                        // resolve-driven dial.
-                        match accept_drop_outbound(listener) {
-                            AcceptOutcome::Dropped => {
-                                tracing::warn!(
-                                    name: "health.mtls.outbound_fail_closed_pre_resolve",
-                                    alloc = %alloc,
-                                    "leg-F connection dropped fail-closed (no resolve consumer \
-                                     until 04-02; no cleartext, no self-loop)"
-                                );
-                                continue;
-                            }
-                            AcceptOutcome::ListenerClosed => return,
+                    // Accept leg-F + recover the dialed orig_dst, then run the
+                    // per-connection resolve consumer. A closed listener (alloc
+                    // torn down) exits the loop; any other leg-acquire fault skips
+                    // this connection.
+                    match accept_outbound_and_recover_orig_dst(listener) {
+                        Ok((leg_f, orig_dst)) => {
+                            self.handle_outbound(alloc, leg_f, orig_dst, enforced);
                         }
-                    };
-                    // UNREACHABLE as of 04-01 (`real_peer` is always `None`).
-                    // Kept only so the leg-acquisition shape is stable across the
-                    // 04-01⇄04-02 boundary; 04-02 wires the resolve consumer that
-                    // makes this arm live.
-                    accept_outbound_leg(listener, alloc.clone(), peer)
+                        Err(InterceptError::Accept { .. }) => return,
+                        Err(source) => {
+                            tracing::warn!(
+                                name: "health.mtls.leg_acquire_failed",
+                                alloc = %alloc,
+                                error = %source,
+                                "mTLS leg-F acquire failed; skipping this connection"
+                            );
+                        }
+                    }
                 }
                 AcceptLeg::Inbound { listener } => {
                     // Poll for a pending connection (observing `stop`) before
@@ -582,49 +587,138 @@ impl MtlsInterceptWorker {
                         ConnectionReady::Pending => {}
                         ConnectionReady::ListenerClosed | ConnectionReady::Stopped => return,
                     }
-                    accept_inbound_leg(listener, alloc.clone())
-                }
-            };
-            let conn = match built {
-                Ok(conn) => conn,
-                Err(mtls_intercept::InterceptError::Accept { .. }) => {
-                    // The listener was closed (alloc torn down / task
-                    // aborted) — exit the loop cleanly.
-                    return;
-                }
-                Err(source) => {
-                    tracing::warn!(
-                        name: "health.mtls.leg_acquire_failed",
-                        alloc = %alloc,
-                        error = %source,
-                        "mTLS leg-acquire failed; skipping this connection"
-                    );
-                    continue;
-                }
-            };
-
-            // Hand the intercepted connection to `enforce` on the tokio
-            // runtime. `enforce` is the single fail-closed gate; on `Ok`
-            // its handle joins the teardown set, on `Err` the leg is
-            // already closed by the port and no cleartext egressed.
-            let enforcement = Arc::clone(&self.enforcement);
-            let enforced = Arc::clone(enforced);
-            let alloc_for_log = alloc.clone();
-            let handle = tokio::runtime::Handle::current();
-            handle.spawn(async move {
-                match enforcement.enforce(conn).await {
-                    Ok(handle) => enforced.lock().push(handle),
-                    Err(source) => {
-                        tracing::warn!(
-                            name: "health.mtls.enforce_failed",
-                            alloc = %alloc_for_log,
-                            error = %source,
-                            "mTLS enforce refused the connection (fail-closed; no cleartext)"
-                        );
+                    match accept_inbound_leg(listener, alloc.clone()) {
+                        Ok(conn) => self.spawn_enforce(alloc, conn, enforced),
+                        Err(InterceptError::Accept { .. }) => return,
+                        Err(source) => {
+                            tracing::warn!(
+                                name: "health.mtls.leg_acquire_failed",
+                                alloc = %alloc,
+                                error = %source,
+                                "mTLS leg-C acquire failed; skipping this connection"
+                            );
+                        }
                     }
                 }
-            });
+            }
         }
+    }
+
+    /// Per-connection OUTBOUND resolve consumer (04-02, ADR-0071 fact 4 / C1).
+    ///
+    /// Resolves the captured connection's recovered `orig_dst` against the mesh
+    /// through the injected [`MtlsResolve`] port and acts on the
+    /// [`MtlsResolution`] variant — the 3-arm decision IS the variant, never
+    /// inferred from a sentinel:
+    /// - [`Mesh(backend)`](MtlsResolution::Mesh) → build
+    ///   `InterceptedConnection { routed: Outbound { peer: backend.addr } }`
+    ///   (`expected_peer` stays `None` until #178 — v1 authn-only) and hand it
+    ///   to `enforce` (mTLS to the resolved backend). The peer is the RESOLVED
+    ///   backend addr, NOT `orig_dst` (v1 headless: they coincide, but the
+    ///   worker uses the resolved addr so #167/#61 wires here unchanged).
+    /// - [`NonMesh`](MtlsResolution::NonMesh) → cleartext pass-through, by
+    ///   design: the workload dialed a non-mesh dst, so the agent relays leg-F
+    ///   to a cleartext dial of `orig_dst` ([`spawn_cleartext_passthrough`]).
+    ///   NO mTLS, NO `enforce` call.
+    /// - [`MeshUnreachable`](MtlsResolution::MeshUnreachable) → FAIL-CLOSED:
+    ///   `orig_dst` should be a mesh peer but cannot be reached/validated, so
+    ///   the agent REFUSES — drops leg-F (closing the workload's connection),
+    ///   NO cleartext, NO dial. This is the silent-cleartext footgun the
+    ///   enrollment model exists to remove.
+    ///
+    /// A store-layer resolve `Err` (poisoned handle / corrupt table — NOT a
+    /// per-connection classification) is treated fail-closed: the leg is
+    /// dropped, no cleartext (a resolve the agent cannot trust must never
+    /// degrade to silent cleartext).
+    fn handle_outbound(
+        self: &Arc<Self>,
+        alloc: &AllocationId,
+        leg_f: std::os::fd::OwnedFd,
+        orig_dst: SocketAddrV4,
+        enforced: &Arc<Mutex<Vec<EnforcedConnection>>>,
+    ) {
+        // The resolve port is async; this loop runs on a `spawn_blocking`
+        // thread (a blocking-pool thread, not a runtime worker), so
+        // `Handle::block_on` is valid here — it drives the resolve future to
+        // completion before the 3-arm decision.
+        let runtime = tokio::runtime::Handle::current();
+        let resolution = match runtime.block_on(self.resolve.resolve(orig_dst)) {
+            Ok(resolution) => resolution,
+            Err(source) => {
+                // A store-layer fault is NOT a per-connection classification —
+                // but the agent cannot trust the resolve, so it must FAIL CLOSED
+                // (drop leg-F, no cleartext) rather than guess.
+                tracing::warn!(
+                    name: "health.mtls.resolve_failed",
+                    alloc = %alloc,
+                    orig_dst = %orig_dst,
+                    error = %source,
+                    "mTLS resolve faulted; dropping leg-F fail-closed (no cleartext)"
+                );
+                drop(leg_f);
+                return;
+            }
+        };
+
+        match decide_outbound(&resolution) {
+            OutboundAction::Enforce { peer } => {
+                // Mesh → enforce mTLS to the RESOLVED backend addr.
+                let conn = InterceptedConnection {
+                    leg: leg_f,
+                    routed: Routed::Outbound { peer },
+                    alloc: alloc.clone(),
+                    // v1 authn-only (F5 / #178): the expected-peer SAN-match is
+                    // supplied downstream by east-west SPIFFE-ID resolution.
+                    expected_peer: None,
+                };
+                self.spawn_enforce(alloc, conn, enforced);
+            }
+            OutboundAction::PassThrough => {
+                // NonMesh → cleartext pass-through, by design: relay leg-F to a
+                // cleartext dial of orig_dst. NO mTLS, NO enforce.
+                spawn_cleartext_passthrough(&runtime, alloc.clone(), leg_f, orig_dst);
+            }
+            OutboundAction::FailClosed => {
+                // MeshUnreachable → REFUSE: drop leg-F, NO cleartext, NO dial.
+                tracing::warn!(
+                    name: "health.mtls.outbound_fail_closed",
+                    alloc = %alloc,
+                    orig_dst = %orig_dst,
+                    "leg-F connection refused fail-closed (orig_dst should be a mesh peer but \
+                     is unreachable/invalid; no cleartext)"
+                );
+                drop(leg_f);
+            }
+        }
+    }
+
+    /// Hand an [`InterceptedConnection`] to `enforce` on the tokio runtime.
+    /// `enforce` is the single fail-closed gate; on `Ok` its handle joins the
+    /// alloc's teardown set, on `Err` the port has already closed the leg and no
+    /// cleartext egressed.
+    fn spawn_enforce(
+        self: &Arc<Self>,
+        alloc: &AllocationId,
+        conn: InterceptedConnection,
+        enforced: &Arc<Mutex<Vec<EnforcedConnection>>>,
+    ) {
+        let enforcement = Arc::clone(&self.enforcement);
+        let enforced = Arc::clone(enforced);
+        let alloc_for_log = alloc.clone();
+        let handle = tokio::runtime::Handle::current();
+        handle.spawn(async move {
+            match enforcement.enforce(conn).await {
+                Ok(handle) => enforced.lock().push(handle),
+                Err(source) => {
+                    tracing::warn!(
+                        name: "health.mtls.enforce_failed",
+                        alloc = %alloc_for_log,
+                        error = %source,
+                        "mTLS enforce refused the connection (fail-closed; no cleartext)"
+                    );
+                }
+            }
+        });
     }
 
     /// Record a fully-installed (outbound + inbound) intercept.
@@ -652,31 +746,55 @@ impl MtlsInterceptWorker {
 
 /// Which leg an accept loop is draining.
 enum AcceptLeg {
-    /// Outbound leg-F (workload-facing plaintext). `leg_f_addr` is the
-    /// agent's own listener addr the kernel redirected the workload to —
-    /// it is the redirect TARGET, never the dial target. `real_peer` is
-    /// the shared slot the declared-peer seam records the workload's
-    /// ORIGINAL destination into; the accept loop reads it to build
-    /// `Routed::Outbound { peer: real_peer }` so `enforce` dials the REAL
-    /// peer (not a self-loop back to `leg_f_addr`).
-    Outbound {
-        listener: std::net::TcpListener,
-        leg_f_addr: SocketAddrV4,
-        real_peer: Arc<Mutex<Option<SocketAddrV4>>>,
-    },
+    /// Outbound leg-F (workload-facing plaintext). The dialed orig-dst is
+    /// recovered per-connection via `getsockname` on the accepted leg-F socket
+    /// (`accept_outbound_and_recover_orig_dst`) and resolved against the mesh
+    /// (`MtlsResolve`); the resolve outcome — NOT a declared-peer slot — drives
+    /// whether the connection is enforced over mTLS to the resolved backend,
+    /// passed through cleartext, or fail-closed (the C1 3-arm decision).
+    Outbound { listener: std::net::TcpListener },
     /// Inbound leg-C (client-facing, TPROXY-redirected). orig-dst is
     /// recovered via `getsockname` inside `accept_inbound_leg`.
     Inbound { listener: std::net::TcpListener },
 }
 
-/// Outcome of an accept-and-drop on the outbound leg when no declared peer
-/// is recorded — distinguishes a dropped connection (fail-closed, continue
-/// the loop) from a closed listener (alloc torn down, exit the loop).
-enum AcceptOutcome {
-    /// A connection was accepted and immediately dropped (fail-closed).
-    Dropped,
-    /// The listener was closed (alloc torn down / task aborted).
-    ListenerClosed,
+/// The OUTBOUND per-connection decision (the C1 3-arm action — a 1:1 projection
+/// of the [`MtlsResolution`] variant the resolve port returns). Kept as a
+/// distinct sum type so the decision is a pure, exhaustively-matched function
+/// ([`decide_outbound`]) the mutation gate targets per arm — a dropped arm is a
+/// security regression (a collapsed `FailClosed`→`PassThrough` = silent
+/// cleartext to a should-be-mesh peer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutboundAction {
+    /// `Mesh` → enforce mTLS to the RESOLVED backend `peer` (the resolved
+    /// `ResolvedBackend.addr`, NOT `orig_dst`).
+    Enforce { peer: SocketAddrV4 },
+    /// `NonMesh` → cleartext pass-through to `orig_dst`, by design (the
+    /// classification arm — not an error, not a fail-closed).
+    PassThrough,
+    /// `MeshUnreachable` (or an untrusted resolve fault) → refuse, NO cleartext.
+    FailClosed,
+}
+
+/// The C1 3-arm decision: map an [`MtlsResolution`] to its [`OutboundAction`].
+///
+/// This is the security-critical core — each arm is independently
+/// mutation-killed by the per-arm DST assertions, because a dropped/swapped arm
+/// is a distinct bug:
+/// - `Mesh(b)` → `Enforce { peer: b.addr }` (the only handshake-driving arm);
+/// - `NonMesh` → `PassThrough` (cleartext, by design);
+/// - `MeshUnreachable` → `FailClosed` (refuse, NO cleartext — collapsing this
+///   to `PassThrough` is the silent-cleartext footgun the enrollment model
+///   exists to remove).
+///
+/// Takes `&MtlsResolution` so the decision is a pure read (the caller still owns
+/// the resolution); only the `Copy` `ResolvedBackend.addr` is projected out.
+const fn decide_outbound(resolution: &MtlsResolution) -> OutboundAction {
+    match resolution {
+        MtlsResolution::Mesh(backend) => OutboundAction::Enforce { peer: backend.addr },
+        MtlsResolution::NonMesh => OutboundAction::PassThrough,
+        MtlsResolution::MeshUnreachable => OutboundAction::FailClosed,
+    }
 }
 
 /// Outcome of waiting for a pending connection on a leg listener WITHOUT
@@ -690,10 +808,11 @@ enum ConnectionReady {
     Stopped,
 }
 
-/// Block until a connection is PENDING on `listener` without accepting it,
-/// so the caller can read the declared-peer slot AFTER a connection has
-/// arrived (closing the stale-read window) and THEN accept. Returns
-/// [`ConnectionReady::ListenerClosed`] when the listener fd is invalidated
+/// Block until a connection is PENDING on `listener` without accepting it, so
+/// the accept loop can observe the cooperative `stop` flag (and a torn-down
+/// listener) between bounded poll slices BEFORE committing to a blocking
+/// `accept()` — the loop must not block forever on a stale fd after teardown.
+/// Returns [`ConnectionReady::ListenerClosed`] when the listener fd is invalidated
 /// (the alloc was torn down and the listener dropped), or
 /// [`ConnectionReady::Stopped`] when the cooperative `stop` flag is observed
 /// set between poll slices. Polls in bounded (200ms) slices so both a
@@ -728,18 +847,84 @@ fn await_pending_connection(
     }
 }
 
-/// Accept one connection on the outbound leg-F listener and drop it
-/// immediately (fail-closed). Used when a leg-F connection arrives with no
-/// recorded declared peer — the connection is closed with NO cleartext
-/// egress and NO self-loop dial. Returns [`AcceptOutcome::ListenerClosed`]
-/// when the listener has been closed (the alloc was torn down).
-fn accept_drop_outbound(listener: &std::net::TcpListener) -> AcceptOutcome {
-    match listener.accept() {
-        // The accepted stream drops at end of scope → the workload's leg-F
-        // connection is closed. No `enforce`, no leg-B dial, no cleartext.
-        Ok(_) => AcceptOutcome::Dropped,
-        Err(_) => AcceptOutcome::ListenerClosed,
-    }
+/// Spawn the `NonMesh` cleartext pass-through: dial `orig_dst` in cleartext and
+/// bidirectionally relay bytes between the captured leg-F and the dialed
+/// upstream (the C1 `NonMesh → PASS-THROUGH (cleartext, by design)` arm).
+///
+/// The workload dialed a NON-mesh destination, so its egress proceeds in
+/// cleartext exactly as it would have without interception — the agent merely
+/// stands in the path the TPROXY redirect created. NO mTLS, NO `enforce`, NO
+/// SVID: this is the classification arm, not a security control. (The byte-exact
+/// relay correctness on a real intercepted connect is the Tier-3 05-01
+/// obligation; here the relay is the minimal cleartext shuttle.)
+///
+/// Spawned as a detached blocking task so it does not stall the accept loop; a
+/// dial failure closes leg-F (the upstream is unreachable — nothing to relay).
+fn spawn_cleartext_passthrough(
+    runtime: &tokio::runtime::Handle,
+    alloc: AllocationId,
+    leg_f: std::os::fd::OwnedFd,
+    orig_dst: SocketAddrV4,
+) {
+    runtime.spawn_blocking(move || {
+        let upstream = match std::net::TcpStream::connect(orig_dst) {
+            Ok(stream) => stream,
+            Err(source) => {
+                // The non-mesh upstream is unreachable — close leg-F. This is a
+                // plain connectivity failure on a cleartext path, NOT a mesh
+                // fail-closed (the resolve already classified it `NonMesh`).
+                tracing::warn!(
+                    name: "health.mtls.passthrough_dial_failed",
+                    alloc = %alloc,
+                    orig_dst = %orig_dst,
+                    error = %source,
+                    "cleartext pass-through dial failed; closing leg-F"
+                );
+                drop(leg_f);
+                return;
+            }
+        };
+        // `OwnedFd → TcpStream` is the safe stdlib conversion (RAII close on
+        // drop); `leg_f` is the accepted TCP socket handed over by
+        // `accept_outbound_and_recover_orig_dst`, so there is exactly one owner.
+        let downstream = std::net::TcpStream::from(leg_f);
+        if let Err(source) = relay_cleartext(&downstream, &upstream) {
+            tracing::warn!(
+                name: "health.mtls.passthrough_relay_ended",
+                alloc = %alloc,
+                orig_dst = %orig_dst,
+                error = %source,
+                "cleartext pass-through relay ended"
+            );
+        }
+        // Both streams drop here → both legs close.
+    });
+}
+
+/// Minimal bidirectional cleartext relay between the captured workload leg
+/// (`downstream`) and the dialed non-mesh upstream. Returns when EITHER side
+/// reaches EOF / errors (the connection is done). One thread copies
+/// down→up; this thread copies up→down. NO crypto — cleartext both ways, by
+/// design (the `NonMesh` classification arm).
+fn relay_cleartext(
+    downstream: &std::net::TcpStream,
+    upstream: &std::net::TcpStream,
+) -> std::io::Result<()> {
+    let mut down_to_up = downstream.try_clone()?;
+    let mut up_for_writer = upstream.try_clone()?;
+    let copy_thread = std::thread::spawn(move || {
+        // EOF / error on either end ends the copy; the result is informational.
+        let _ = std::io::copy(&mut down_to_up, &mut up_for_writer);
+        // Half-close the upstream write side so the peer sees EOF.
+        let _ = up_for_writer.shutdown(std::net::Shutdown::Write);
+    });
+    let mut up_to_down = upstream.try_clone()?;
+    let mut down_for_writer = downstream.try_clone()?;
+    let _ = std::io::copy(&mut up_to_down, &mut down_for_writer);
+    let _ = down_for_writer.shutdown(std::net::Shutdown::Write);
+    // Best-effort join so the relay task does not leak the copy thread.
+    let _ = copy_thread.join();
+    Ok(())
 }
 
 /// Narrow `SocketAddr → SocketAddrV4` projection (the legs are bound on
@@ -748,5 +933,404 @@ const fn socketaddr_v4(addr: std::net::SocketAddr) -> Option<SocketAddrV4> {
     match addr {
         std::net::SocketAddr::V4(v4) => Some(v4),
         std::net::SocketAddr::V6(_) => None,
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::doc_markdown,
+    reason = "unit-test bodies: a failed precondition must panic with an informative message; \
+              test docstrings reference enum-variant names (NonMesh, StoreUnreadable, …) in prose"
+)]
+mod tests {
+    //! Default-lane DST for the OUTBOUND per-connection resolve consumer
+    //! (04-02, ADR-0071 fact 4 / C1).
+    //!
+    //! The scenario
+    //! `outbound_resolve_consumer_drives_enforce_passthrough_failclosed_per_arm`
+    //! drives the worker's outbound handling
+    //! ([`MtlsInterceptWorker::handle_outbound`], the driving port for the
+    //! resolve consumer) against a scripted [`SimMtlsResolve`] (01-02) per arm
+    //! and asserts the OBSERVABLE per-arm outcome at the driven-port boundary:
+    //!
+    //! - `Mesh(b)` → `enforce` is called with `Routed::Outbound { peer == b.addr }`
+    //!   (the RESOLVED backend addr, not `orig_dst`), `expected_peer == None`;
+    //! - `NonMesh` → `enforce` is NOT called; the captured leg is relayed
+    //!   cleartext to a real upstream that receives the workload's bytes
+    //!   (pass-through, by design);
+    //! - `MeshUnreachable` → `enforce` is NOT called; NO upstream is dialed; the
+    //!   captured leg is closed (the workload sees EOF — fail-closed, no
+    //!   cleartext).
+    //!
+    //! Each arm is asserted DISTINCTLY so an arm-match mutation in
+    //! [`decide_outbound`] (the security-critical 3-arm core — a collapsed
+    //! `FailClosed`→`PassThrough` is silent cleartext) is independently killed.
+    //! Authn-only boundary (Q4 / D-TME-8): the test asserts the
+    //! enforce/pass-through/fail-closed routing only — it does NOT call the
+    //! wrong-but-valid-peer case "protected" and does NOT thread `IdentityRead`
+    //! (`expected_peer` is `None` until #178).
+
+    use std::collections::BTreeMap;
+    use std::io::{Read as _, Write as _};
+    use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use overdrive_core::AllocationId;
+    use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::mtls_enforcement::{
+        EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
+        PumpLiveness, Routed,
+    };
+    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
+    use overdrive_sim::adapters::SimMtlsResolve;
+    use overdrive_sim::adapters::clock::SimClock;
+    use parking_lot::Mutex;
+
+    use super::{MtlsInterceptWorker, OutboundAction, decide_outbound};
+
+    /// One recorded `enforce` call — the observable driven-port surface the
+    /// per-arm assertions read (the `Routed` routing fact + the alloc + whether
+    /// `expected_peer` was set). A spy, NOT a mock: the test asserts on the
+    /// recorded business outcome (the routed peer), not on call-count alone.
+    #[derive(Debug, Clone)]
+    struct EnforceCall {
+        routed: Routed,
+        alloc: AllocationId,
+        expected_peer_is_some: bool,
+    }
+
+    /// Spy [`MtlsEnforcement`] recording every `enforce` call's `Routed` so the
+    /// Mesh arm can assert `peer == b.addr`. `enforce` always succeeds (returns
+    /// an `EnforcedConnection`) — the test exercises the WORKER's 3-arm routing,
+    /// not the enforcement substrate (which has its own equivalence suite).
+    struct SpyEnforcement {
+        calls: Arc<Mutex<Vec<EnforceCall>>>,
+        counter: std::sync::atomic::AtomicU64,
+    }
+
+    impl SpyEnforcement {
+        fn new() -> (Arc<Self>, Arc<Mutex<Vec<EnforceCall>>>) {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let spy = Arc::new(Self {
+                calls: Arc::clone(&calls),
+                counter: std::sync::atomic::AtomicU64::new(0),
+            });
+            (spy, calls)
+        }
+    }
+
+    #[async_trait]
+    impl MtlsEnforcement for SpyEnforcement {
+        async fn probe(&self) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            Ok(())
+        }
+
+        async fn enforce(
+            &self,
+            conn: InterceptedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
+            self.calls.lock().push(EnforceCall {
+                routed: conn.routed,
+                alloc: conn.alloc.clone(),
+                expected_peer_is_some: conn.expected_peer.is_some(),
+            });
+            // `conn.leg` drops here (the spy does not pump) — closing the leg.
+            let counter = self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(EnforcedConnection::new(EnforcedConnectionId::new(conn.alloc, counter)))
+        }
+
+        fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
+            PumpLiveness::Running
+        }
+
+        async fn teardown(
+            &self,
+            _handle: EnforcedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Map an [`AbsentSvid`]-free spy onto the worker. The resolve port is the
+    /// arm-under-test; the enforcement spy records the Mesh-arm routing.
+    fn worker_with(
+        enforcement: Arc<SpyEnforcement>,
+        resolve: Arc<dyn MtlsResolve>,
+    ) -> Arc<MtlsInterceptWorker> {
+        let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+        Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock))
+    }
+
+    /// Build a `SimMtlsResolve` that maps `orig_dst` to `arm` (any other addr
+    /// resolves to the `NonMesh` default — the host-faithful default per the
+    /// 01-02 review).
+    fn resolve_scripting(orig_dst: SocketAddrV4, arm: MtlsResolution) -> Arc<dyn MtlsResolve> {
+        let mut scripted = BTreeMap::new();
+        scripted.insert(orig_dst, arm);
+        Arc::new(SimMtlsResolve::new(scripted, MtlsResolution::NonMesh))
+    }
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("valid allocation id")
+    }
+
+    /// Stand up a loopback leg-F listener + a client dial, accept the client,
+    /// and hand the accepted leg's [`OwnedFd`] back together with the listener's
+    /// addr (== the `orig_dst` a getsockname on the accepted socket recovers on
+    /// a plain loopback). The connected client stream is returned so the test
+    /// can drive bytes / observe EOF through it.
+    fn accepted_leg_f() -> (std::os::fd::OwnedFd, SocketAddrV4, TcpStream) {
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind leg-F loopback listener");
+        let leg_f_addr = match listener.local_addr().expect("local_addr") {
+            std::net::SocketAddr::V4(a) => a,
+            other @ std::net::SocketAddr::V6(_) => panic!("expected V4 addr, got {other}"),
+        };
+        let client = TcpStream::connect_timeout(&leg_f_addr.into(), Duration::from_secs(5))
+            .expect("client dials leg-F");
+        client.set_nodelay(true).ok();
+        let (accepted, _peer) = listener.accept().expect("accept the client on leg-F");
+        accepted.set_nodelay(true).ok();
+        (std::os::fd::OwnedFd::from(accepted), leg_f_addr, client)
+    }
+
+    /// Drive [`MtlsInterceptWorker::handle_outbound`] on a blocking thread (so
+    /// its internal `Handle::block_on(resolve)` is valid — `handle_outbound`
+    /// runs on a `spawn_blocking` thread in production), then await the spawned
+    /// `JoinHandle`. The `enforced` teardown set is returned so a test can read
+    /// the produced handles.
+    async fn run_handle_outbound(
+        worker: &Arc<MtlsInterceptWorker>,
+        alloc: AllocationId,
+        leg_f: std::os::fd::OwnedFd,
+        orig_dst: SocketAddrV4,
+    ) -> Arc<Mutex<Vec<EnforcedConnection>>> {
+        let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
+        let worker = Arc::clone(worker);
+        let enforced_for_task = Arc::clone(&enforced);
+        tokio::task::spawn_blocking(move || {
+            worker.handle_outbound(&alloc, leg_f, orig_dst, &enforced_for_task);
+        })
+        .await
+        .expect("handle_outbound blocking task joins");
+        enforced
+    }
+
+    // ---- the pure 3-arm decision (the mutation-gate target, per arm) --------
+
+    /// C1 — the 3-arm decision IS the [`MtlsResolution`] variant: `Mesh(b)` →
+    /// `Enforce { peer: b.addr }`, `NonMesh` → `PassThrough`, `MeshUnreachable`
+    /// → `FailClosed`. Each arm is asserted DISTINCTLY so an arm-match mutation
+    /// (the canonical bug shape — a collapsed `FailClosed`→`PassThrough` is
+    /// silent cleartext) is independently killed.
+    #[test]
+    fn decide_outbound_maps_each_resolution_arm_to_its_distinct_action() {
+        let backend_addr = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 7), 8443);
+
+        // Mesh → Enforce with the RESOLVED backend addr (not orig_dst).
+        assert_eq!(
+            decide_outbound(&MtlsResolution::Mesh(ResolvedBackend {
+                addr: backend_addr,
+                expected_svid: None,
+            })),
+            OutboundAction::Enforce { peer: backend_addr },
+            "Mesh must drive enforce to the resolved backend addr",
+        );
+
+        // NonMesh → PassThrough (cleartext, by design — NOT FailClosed).
+        assert_eq!(
+            decide_outbound(&MtlsResolution::NonMesh),
+            OutboundAction::PassThrough,
+            "NonMesh must pass through cleartext, never fail-closed",
+        );
+
+        // MeshUnreachable → FailClosed (refuse, NO cleartext — NOT PassThrough;
+        // collapsing this arm to PassThrough is the silent-cleartext footgun).
+        assert_eq!(
+            decide_outbound(&MtlsResolution::MeshUnreachable),
+            OutboundAction::FailClosed,
+            "MeshUnreachable must fail closed, never silently pass through cleartext",
+        );
+    }
+
+    // ---- the integrated resolve consumer, per arm (port-to-port) -----------
+
+    /// Mesh arm: `enforce` is called with `Routed::Outbound { peer == b.addr }`
+    /// (the RESOLVED backend addr, provably NOT `orig_dst`), `expected_peer`
+    /// `None` (authn-only). The worker recovered `orig_dst` from the leg-F
+    /// socket, resolved it to `Mesh(b)`, and stamped `b.addr` into the routing
+    /// fact — the resolved addr, not the recovered dst.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mesh_arm_enforces_to_the_resolved_backend_addr() {
+        let (leg_f, orig_dst, _client) = accepted_leg_f();
+        // The resolved backend addr DELIBERATELY differs from orig_dst so the
+        // assertion proves the worker uses `b.addr`, not the recovered dst.
+        let backend_addr = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
+        assert_ne!(backend_addr, orig_dst, "backend addr must differ from orig_dst for the proof");
+
+        let (spy, calls) = SpyEnforcement::new();
+        let resolve = resolve_scripting(
+            orig_dst,
+            MtlsResolution::Mesh(ResolvedBackend { addr: backend_addr, expected_svid: None }),
+        );
+        let worker = worker_with(Arc::clone(&spy), resolve);
+
+        let enforced = run_handle_outbound(&worker, alloc("alloc-mesh"), leg_f, orig_dst).await;
+
+        // `enforce` is dispatched on a spawned task; spin briefly (bounded) until
+        // it is recorded so the assertion is not racing the spawn.
+        let recorded = wait_for_calls(&calls, 1).await;
+        assert_eq!(recorded.len(), 1, "Mesh must drive exactly one enforce call");
+        match recorded[0].routed {
+            Routed::Outbound { peer } => assert_eq!(
+                peer, backend_addr,
+                "enforce must be called with the RESOLVED backend addr, not orig_dst",
+            ),
+            Routed::Inbound { orig_dst } => {
+                panic!("expected Outbound, got Inbound {{ {orig_dst} }}")
+            }
+        }
+        assert_eq!(recorded[0].alloc, alloc("alloc-mesh"), "alloc must round-trip to enforce");
+        assert!(!recorded[0].expected_peer_is_some, "v1 authn-only: expected_peer is None");
+        // The handle is pushed into the teardown set AFTER `enforce` returns Ok
+        // (inside the spawned task, after the spy recorded the call) — spin
+        // (bounded) until it lands so the assertion does not race the push.
+        for _ in 0..1000 {
+            if enforced.lock().len() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(enforced.lock().len(), 1, "the enforced handle joins the teardown set");
+    }
+
+    /// Spin (bounded — no unbounded wait) until `calls` holds at least `n`
+    /// recorded `enforce` calls, then return a clone. The enforce dispatch is a
+    /// spawned task; this closes the race between "handle_outbound returned" and
+    /// "the spawned enforce ran" without a fixed sleep.
+    async fn wait_for_calls(calls: &Arc<Mutex<Vec<EnforceCall>>>, n: usize) -> Vec<EnforceCall> {
+        for _ in 0..1000 {
+            if calls.lock().len() >= n {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        calls.lock().clone()
+    }
+
+    /// NonMesh arm: `enforce` is NOT called; the captured leg is relayed
+    /// cleartext to a real upstream bound at `orig_dst`, which receives the
+    /// workload's bytes (pass-through, by design). The upstream-receives-bytes
+    /// assertion is the falsifiable core: it proves cleartext egress reached the
+    /// dialed dst, NOT a fail-closed drop.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn nonmesh_arm_passes_through_cleartext_to_orig_dst() {
+        // A real upstream server bound on a concrete loopback addr — this IS the
+        // `orig_dst` the workload "dialed" (the leg-F getsockname recovers the
+        // accepted socket's local addr, so we bind the upstream there is not
+        // possible; instead we point orig_dst AT a server we control and assert
+        // the relay reaches it). We bind the upstream first and use ITS addr as
+        // orig_dst, then make leg-F a separate accepted socket.
+        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind upstream server");
+        let upstream_addr = match upstream.local_addr().expect("local_addr") {
+            std::net::SocketAddr::V4(a) => a,
+            other @ std::net::SocketAddr::V6(_) => panic!("expected V4 addr, got {other}"),
+        };
+
+        let (leg_f, _leg_f_addr, mut client) = accepted_leg_f();
+        let (spy, calls) = SpyEnforcement::new();
+        // orig_dst is the upstream's addr → NonMesh → relay to it.
+        let resolve = resolve_scripting(upstream_addr, MtlsResolution::NonMesh);
+        let worker = worker_with(Arc::clone(&spy), resolve);
+
+        // Upstream echoes what it receives so the client can read its own bytes
+        // back THROUGH the relay (down→up→down) — proving bidirectional
+        // cleartext pass-through.
+        let upstream_thread = std::thread::spawn(move || {
+            let (mut conn, _peer) = upstream.accept().expect("upstream accepts the relayed dial");
+            let mut buf = [0u8; 5];
+            conn.read_exact(&mut buf).expect("upstream reads the relayed bytes");
+            conn.write_all(&buf).expect("upstream echoes back");
+            conn.flush().ok();
+            buf
+        });
+
+        // Drive the resolve consumer with orig_dst == upstream_addr.
+        let _enforced =
+            run_handle_outbound(&worker, alloc("alloc-nonmesh"), leg_f, upstream_addr).await;
+
+        // The workload writes through leg-F (the client side of the accepted
+        // pair); the relay carries it to the upstream, which echoes it back.
+        client.write_all(b"HELLO").expect("workload writes cleartext through leg-F");
+        client.flush().ok();
+        let mut echoed = [0u8; 5];
+        client.read_exact(&mut echoed).expect("workload reads the echoed bytes back through relay");
+
+        assert_eq!(
+            &echoed, b"HELLO",
+            "cleartext bytes must round-trip through the pass-through relay"
+        );
+        assert_eq!(
+            upstream_thread.join().expect("upstream thread"),
+            *b"HELLO",
+            "the upstream must receive the workload's cleartext bytes (pass-through)",
+        );
+        assert!(calls.lock().is_empty(), "NonMesh must NOT call enforce (no mTLS, pass-through)");
+    }
+
+    /// MeshUnreachable arm: `enforce` is NOT called; NO upstream is dialed; the
+    /// captured leg is closed so the workload's connection sees EOF (fail-closed,
+    /// NO cleartext). The EOF-on-the-client assertion is the falsifiable core: a
+    /// pass-through (the bug) would keep the leg open and try to relay.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mesh_unreachable_arm_fails_closed_no_cleartext() {
+        let (leg_f, orig_dst, mut client) = accepted_leg_f();
+        let (spy, calls) = SpyEnforcement::new();
+        let resolve = resolve_scripting(orig_dst, MtlsResolution::MeshUnreachable);
+        let worker = worker_with(Arc::clone(&spy), resolve);
+
+        let _enforced = run_handle_outbound(&worker, alloc("alloc-unreach"), leg_f, orig_dst).await;
+
+        // The worker dropped leg-F (fail-closed) → the client's read returns EOF
+        // (0 bytes), NOT a relayed response. A short read timeout guards against
+        // a hang if the leg were (wrongly) kept open.
+        client.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let mut buf = [0u8; 1];
+        let n = client.read(&mut buf).expect("read on a closed leg returns Ok(0) (EOF)");
+        assert_eq!(n, 0, "MeshUnreachable must close leg-F (EOF), never relay cleartext");
+        assert!(calls.lock().is_empty(), "MeshUnreachable must NOT call enforce (fail-closed)");
+    }
+
+    /// A store-layer resolve `Err` (StoreUnreadable — NOT a per-connection
+    /// classification) is treated FAIL-CLOSED: `enforce` is NOT called and the
+    /// leg is closed (EOF). An untrusted resolve must never degrade to silent
+    /// cleartext.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resolve_store_fault_fails_closed_no_cleartext() {
+        let (leg_f, orig_dst, mut client) = accepted_leg_f();
+        let (spy, calls) = SpyEnforcement::new();
+        // Construct a resolve and arm a one-shot store fault for the next call.
+        let mut scripted = BTreeMap::new();
+        scripted.insert(
+            orig_dst,
+            MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None }),
+        );
+        let sim = SimMtlsResolve::new(scripted, MtlsResolution::NonMesh);
+        sim.script_resolve_fault("poisoned service_backends handle");
+        let resolve: Arc<dyn MtlsResolve> = Arc::new(sim);
+        let worker = worker_with(Arc::clone(&spy), resolve);
+
+        let _enforced = run_handle_outbound(&worker, alloc("alloc-fault"), leg_f, orig_dst).await;
+
+        client.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let mut buf = [0u8; 1];
+        let n = client.read(&mut buf).expect("read on a closed leg returns Ok(0) (EOF)");
+        assert_eq!(n, 0, "a resolve store-fault must close leg-F fail-closed (no cleartext)");
+        assert!(calls.lock().is_empty(), "a faulted resolve must NOT call enforce");
     }
 }

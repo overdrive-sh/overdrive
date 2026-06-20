@@ -245,14 +245,19 @@ fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec
     }
 }
 
-/// Build the worker with a sim enforcement double — the AT asserts the INSTALL
-/// (nft rule + listeners), never drives a connection, so the enforcement port
-/// need not actually enforce.
+/// Build the worker with sim enforcement + resolve doubles — the AT asserts the
+/// INSTALL (nft rule + listeners), never drives a connection, so neither port is
+/// actually exercised (the resolve consumer is the 04-02 default-lane DST's job).
 fn build_worker() -> Arc<MtlsInterceptWorker> {
     let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
     let enforcement: Arc<dyn MtlsEnforcement> =
         Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
-    Arc::new(MtlsInterceptWorker::new(enforcement, Arc::new(SimClock::new())))
+    let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        ));
+    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())))
 }
 
 /// The MERGED-step 04-01 AT: `start_alloc` installs the OUTBOUND egress

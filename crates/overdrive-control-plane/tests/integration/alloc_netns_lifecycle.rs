@@ -101,13 +101,19 @@ fn is_root() -> bool {
 }
 
 /// A real `MtlsInterceptWorker` — its `Some(...)` presence is what ARMS the C3
-/// provision/teardown seam (`mtls_worker.is_some()`). The enforcement port is a
-/// sim double: the AT asserts the netns lifecycle, never drives a connection.
+/// provision/teardown seam (`mtls_worker.is_some()`). The enforcement + resolve
+/// ports are sim doubles: the AT asserts the netns lifecycle, never drives a
+/// connection (the resolve consumer is the 04-02 default-lane DST's job).
 fn build_worker() -> Arc<MtlsInterceptWorker> {
     let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
     let enforcement: Arc<dyn MtlsEnforcement> =
         Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
-    Arc::new(MtlsInterceptWorker::new(enforcement, Arc::new(SimClock::new())))
+    let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        ));
+    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())))
 }
 
 /// A shared in-process `SimObservationStore` — the dispatch path writes the

@@ -1890,15 +1890,45 @@ pub async fn run_server_with_obs_and_driver(
                 }));
             }
 
-            // (3) construct the worker with both ports as REQUIRED params
+            // (3) construct the per-connection enrollment-resolve adapter
+            // (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) over the
+            // `ObservationStore` and run its Earned-Trust probe BEFORE the
+            // worker (and therefore before any connection is resolved). The
+            // List-at-probe leg seeds the in-RAM addr→Backend index from the
+            // authoritative `service_backends` snapshot (capturing rows written
+            // before boot — e.g. on a control-plane restart) and opens the
+            // single-owner watch; on an unreadable store the probe refuses to
+            // boot fail-closed (`health.startup.refused`) rather than serve an
+            // empty-but-trusted index that would degrade to silent cleartext.
+            // wire → probe → use (principle 12).
+            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> = Arc::new(
+                crate::mtls_resolve_adapter::ServiceBackendsResolve::new(Arc::clone(&obs)),
+            );
+            if let Err(source) = resolve.probe().await {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.resolve.probe",
+                    error = %source,
+                    "transparent-mTLS resolve probe failed; refusing to boot (no cleartext fallback)"
+                );
+                return Err(error::ControlPlaneError::MtlsBoot(
+                    error::MtlsBootError::ResolveProbe { source },
+                ));
+            }
+
+            // (4) construct the worker with all three ports as REQUIRED params
             // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
             // A) the worker holds no `MtlsDataplane` and no cgroup root — the
             // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
             // `start_alloc` against the host-veth NAME carried on
             // `AllocationSpec.host_veth` (set at the action-shim C3 provision
-            // seam, JOIN-6).
+            // seam, JOIN-6). As of step 04-02 the worker also holds the
+            // probed-Ok `MtlsResolve` adapter — the outbound accept loop
+            // resolves each captured connection's recovered `orig_dst` through
+            // it (the C1 3-arm decision).
             Some(Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
                 enforcement,
+                resolve,
                 config.clock.clone(),
             )))
         } else {
