@@ -438,6 +438,12 @@ pub fn install_outbound_tproxy(
 /// obtained (the chain/table absent is treated as "nothing to sweep" → `Ok(0)`,
 /// distinguished by [`list_chain`]'s success/failure), or if a by-handle
 /// `nft delete rule` fails.
+// mutants: skip — thin nft-I/O shim (`list_chain` + by-handle `run_nft delete`);
+// the pure decision is `per_workload_rule_handles_in_dump` (unit + mutation
+// covered). Body-replacement mutants (`Ok(0)`/`Ok(1)`) are killable only by the
+// real-kernel Tier-3 AT `serve_restart_sweeps_surviving_per_workload_tproxy_rule`
+// (overdrive-control-plane), which the worker-package default-lane mutants suite
+// cannot run.
 pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
     // The shared table/chain may not exist on a first boot (no mTLS workload has
     // ever installed a rule). `list_chain` returns `Err` for a chain-absent
