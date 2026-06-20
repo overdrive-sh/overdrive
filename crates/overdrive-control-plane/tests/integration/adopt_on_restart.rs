@@ -104,6 +104,51 @@ fn netns_present(netns: &str) -> bool {
     String::from_utf8_lossy(&out.stdout).lines().any(|l| l.split_whitespace().next() == Some(netns))
 }
 
+/// `nft -a list chain ip overdrive-mtls prerouting` — the live shared
+/// `prerouting` chain dump (with handles). The AT inspects the OBSERVABLE
+/// kernel state through the same `nft` surface the production guard's `Drop`
+/// and the §5 sweep operate on. `None` iff the chain (or table) does not exist.
+fn nft_chain_dump() -> Option<String> {
+    let out = Command::new("nft")
+        .args(["-a", "list", "chain", "ip", "overdrive-mtls", "prerouting"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// True iff the live chain dump carries an egress per-workload TPROXY rule for
+/// `host_veth` → `127.0.0.1:<port>` (the `iifname "<veth>"` match conjoined with
+/// the `tproxy to 127.0.0.1:<port>` redirect on one line — the exact shape
+/// `install_outbound_tproxy` appends and the §5 sweep removes). The AT re-derives
+/// the predicate locally (the production parse is private to `mtls_intercept`).
+fn dump_has_egress_rule(dump: &str, host_veth: &str, port: u16) -> bool {
+    let iifname = format!("iifname \"{host_veth}\"");
+    let redirect = format!("tproxy to 127.0.0.1:{port}");
+    dump.lines().any(|l| l.contains(&iifname) && l.contains(&redirect))
+}
+
+/// True iff the live chain dump carries the F5 `meta mark … accept` leg-S-dial
+/// exemption (nft's zero-padded `0x000000NN` rendering). This is the SHARED
+/// infra the §5 sweep MUST leave untouched.
+fn dump_has_leg_s_exemption(dump: &str) -> bool {
+    let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+    let nft_rendered = format!("meta mark {leg_s_mark:#010x} accept");
+    dump.lines().any(|l| l.trim().contains(&nft_rendered))
+}
+
+/// RAII best-effort cleanup of the shared `overdrive-mtls` nft table + the
+/// fwmark `ip rule` / `local` route, so a panicking §5 test leaves no residue
+/// for the next run (the sweep test deliberately strands a guard-less rule).
+struct SharedInfraGuard;
+impl Drop for SharedInfraGuard {
+    fn drop(&mut self) {
+        let _ = Command::new("nft").args(["delete", "table", "ip", "overdrive-mtls"]).status();
+    }
+}
+
 /// RAII teardown — runs the production teardown for a slot plan on drop so the
 /// netns + host veth leave no residue even when an assertion panics.
 struct NetnsGuard {
@@ -344,4 +389,173 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     );
 
     // Drop guards reap the survivor PID + both netns + the cgroup scope.
+}
+
+/// Tier-3 acceptance test for step 04-04 §5 — the surviving per-workload
+/// nft-TPROXY rule sweep (D-TME-12 §5, folding 03-01 review finding D2).
+///
+/// THE HAZARD (verified ground truth, SPIKE-D, kernel 7.0.0): a per-workload
+/// egress TPROXY rule is APPENDED to the node-global shared `overdrive-mtls`
+/// `prerouting` chain and is NEVER torn down per-workload, so it SURVIVES a
+/// `serve` restart — but its in-RAM RAII `TproxyInterceptGuard` is LOST (the CP
+/// died; `Drop` never ran). The surviving rule redirects to a now-dead leg-F
+/// listener port → DEAD weight; a later per-alloc re-install with a NEW
+/// ephemeral leg-F port does NOT match `(veth, oldPort)` and APPENDS A SECOND
+/// rule (the duplicate-stack D2 hazard). §5's boot-recovery sweep removes EVERY
+/// per-workload rule so the next re-install starts from a clean chain.
+///
+/// The scenario `serve_restart_sweeps_surviving_per_workload_tproxy_rule`:
+///   1. Stand up the SHARED infra + a per-workload egress rule by calling the
+///      production `install_outbound_tproxy(host_veth, port)` (its append IS the
+///      pre-restart state; it ensures the table+chain+F5 exemption idempotently
+///      and appends one `iifname`-matched egress rule).
+///   2. Simulate CP DEATH: `std::mem::forget` the returned guard so its `Drop`
+///      NEVER runs against the kernel — the rule SURVIVES guard-less, exactly the
+///      post-restart survivor shape SPIKE-D proved.
+///   3. Run the PRODUCTION boot-recovery sweep
+///      `mtls_intercept::sweep_per_workload_tproxy_rules()`.
+///   4. Assert observable kernel side effects (every one load-bearing):
+///      a. the surviving per-workload egress rule is GONE from the post-sweep
+///         chain (reds if the sweep did not remove it — the D2 dead-weight);
+///      b. the F5 `meta mark … accept` exemption REMAINS (reds if the sweep over-
+///         reached and tore down shared infra — the SCOPE GUARD: sweep is
+///         cleanup, NEVER shared-infra teardown);
+///      c. the table+chain REMAIN (the dump still resolves);
+///      d. the sweep RETURNS the count of rules it removed (== 1 here);
+///      e. a subsequent clean re-install appends EXACTLY ONE rule (the chain was
+///         left clean → no duplicate-stack).
+///   5. Idempotent re-sweep returns 0 (a chain with only shared infra is a
+///      no-op).
+///
+/// PORT-TO-PORT: drives the production `sweep_per_workload_tproxy_rules` free
+/// function — its public signature IS the driving port for the node-global
+/// chain. Litmus (dispatch): delete the sweep call-site (or the sweep body) ⇒
+/// assertion (a)/(d) stay RED. This test does NOT assert that survivor egress
+/// interception is restored after restart — that is the ACCEPTED #26-coupled
+/// limitation (a still-Running survivor legitimately ends with NO nft rule until
+/// reschedule), explicitly OUT of §5 scope (cleanup, not restoration).
+///
+/// Root + CAP_NET_ADMIN required (real `nft` table/chain/rule); SKIP on an
+/// unprivileged runner. Run via `cargo xtask lima run -- cargo nextest run -p
+/// overdrive-control-plane --features integration-tests`. NEVER `--no-run`.
+#[tokio::test]
+async fn serve_restart_sweeps_surviving_per_workload_tproxy_rule() {
+    use overdrive_worker::mtls_intercept::{
+        install_outbound_tproxy, sweep_per_workload_tproxy_rules,
+    };
+
+    // A synthetic host-veth NAME for the egress rule's `iifname` match. The
+    // egress install stores the rule by string match regardless of whether the
+    // interface exists, so no real veth is needed to exercise the sweep — the
+    // sweep operates on the chain dump, not on live interfaces.
+    const HOST_VETH: &str = "ovh-sweep0";
+    // A leg-F redirect port standing in for the (now-dead) listener the survivor
+    // rule points at.
+    const DEAD_LEG_F_PORT: u16 = 45123;
+
+    if !is_root() {
+        eprintln!(
+            "SKIP serve_restart_sweeps_surviving_per_workload_tproxy_rule: not root \
+             (needs CAP_NET_ADMIN for nft table/chain/rule)"
+        );
+        return;
+    }
+
+    // Pre-sweep residue from a crashed prior run: drop the whole shared table so
+    // we start from a known-empty kernel (the install re-creates it idempotently).
+    let _ = Command::new("nft").args(["delete", "table", "ip", "overdrive-mtls"]).status();
+    let _infra_guard = SharedInfraGuard;
+
+    // --- (1) Pre-restart state: ensure shared infra + ONE per-workload egress
+    // rule via the production install. ---
+    let guard = match install_outbound_tproxy(HOST_VETH, DEAD_LEG_F_PORT) {
+        Ok(g) => g,
+        Err(source) => {
+            eprintln!(
+                "SKIP serve_restart_sweeps_surviving_per_workload_tproxy_rule: \
+                 install_outbound_tproxy failed (likely no CAP_NET_ADMIN / nft absent): {source}"
+            );
+            return;
+        }
+    };
+
+    // Precondition (NOT the assertion under test): the egress rule + the F5
+    // exemption are both present pre-sweep. If not, the fixture is broken — skip.
+    let pre = nft_chain_dump().expect("shared chain must exist after install");
+    if !dump_has_egress_rule(&pre, HOST_VETH, DEAD_LEG_F_PORT) || !dump_has_leg_s_exemption(&pre) {
+        eprintln!(
+            "SKIP serve_restart_sweeps_surviving_per_workload_tproxy_rule: \
+             pre-sweep chain missing egress rule or F5 exemption (fixture precondition)"
+        );
+        return;
+    }
+
+    // --- (2) Simulate CP DEATH: the guard's Drop must NEVER run, so the rule
+    // SURVIVES guard-less (the post-restart survivor shape, SPIKE-D). ---
+    std::mem::forget(guard);
+
+    // --- (3) Run the PRODUCTION boot-recovery sweep. ---
+    let swept = sweep_per_workload_tproxy_rules().expect("sweep must succeed against a live chain");
+
+    // --- (4d) The sweep removed exactly the one surviving per-workload rule. ---
+    assert_eq!(
+        swept, 1,
+        "the sweep must report removing exactly the 1 surviving per-workload egress rule",
+    );
+
+    let post = nft_chain_dump().expect("shared chain must still exist after the sweep");
+
+    // --- (4a) The surviving per-workload egress rule is GONE. ---
+    assert!(
+        !dump_has_egress_rule(&post, HOST_VETH, DEAD_LEG_F_PORT),
+        "the surviving per-workload egress rule for {HOST_VETH} → 127.0.0.1:{DEAD_LEG_F_PORT} \
+         must be SWEPT from the shared chain (the D2 dead-weight redirecting to a dead listener)",
+    );
+
+    // --- (4b) The F5 exemption REMAINS (sweep is cleanup, NOT shared-infra
+    // teardown — the SCOPE GUARD). ---
+    assert!(
+        dump_has_leg_s_exemption(&post),
+        "the shared F5 `meta mark … accept` exemption must REMAIN after the sweep \
+         (the sweep removes only per-workload rules, never shared infra)",
+    );
+
+    // --- (4c) The table+chain REMAIN (the dump resolved at all above proves the
+    // chain survived; assert the chain header is intact). ---
+    assert!(
+        post.contains("chain prerouting"),
+        "the shared table+chain must survive the sweep (only per-workload rules are removed)",
+    );
+
+    // --- (4e) A subsequent clean re-install appends EXACTLY ONE rule (the chain
+    // was left clean → no duplicate-stack — the forward-correctness §5 buys). ---
+    let reinstall = install_outbound_tproxy(HOST_VETH, DEAD_LEG_F_PORT)
+        .expect("clean re-install against the swept chain must succeed");
+    let after_reinstall = nft_chain_dump().expect("chain present after re-install");
+    let egress_rule_count = after_reinstall
+        .lines()
+        .filter(|l| {
+            l.contains(&format!("iifname \"{HOST_VETH}\""))
+                && l.contains(&format!("tproxy to 127.0.0.1:{DEAD_LEG_F_PORT}"))
+        })
+        .count();
+    assert_eq!(
+        egress_rule_count, 1,
+        "a clean re-install after the sweep must append EXACTLY ONE egress rule \
+         (no duplicate-stack — the chain was swept clean)",
+    );
+    // This re-install's guard IS dropped (normal teardown) — its Drop removes the
+    // one rule by handle, leaving only shared infra for the idempotent re-sweep.
+    drop(reinstall);
+
+    // --- (5) Idempotent re-sweep: a chain carrying ONLY shared infra is a
+    // no-op (0 rules removed). ---
+    let swept_again =
+        sweep_per_workload_tproxy_rules().expect("re-sweep against a clean chain must succeed");
+    assert_eq!(
+        swept_again, 0,
+        "a re-sweep of a chain carrying only shared infra must remove 0 rules (idempotent no-op)",
+    );
+
+    // SharedInfraGuard drops the whole table at test end.
 }

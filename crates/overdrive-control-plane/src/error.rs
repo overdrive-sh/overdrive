@@ -520,6 +520,24 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     NetnsRecovery(#[from] crate::veth_provisioner::NetnsRecoveryError),
 
+    /// Adopt-on-restart §5 nft-rule-sweep failure (transparent-mtls-enrollment
+    /// step 04-04, D-TME-12 §5; folds 03-01 review finding D2). After the netns
+    /// adopt+GC, the boot pass sweeps every surviving per-workload nft-TPROXY
+    /// rule from the shared `overdrive-mtls prerouting` chain (their in-RAM RAII
+    /// guards were lost on the CP restart, so the rules are dead-weight
+    /// survivors); a by-handle `nft delete rule` failing surfaces here.
+    /// Pass-through `#[from]` per `.claude/rules/development.md` § "Never flatten
+    /// a typed error to `Internal(String)`" — NOT `internal(...)` — so the
+    /// composition root can `matches!(e, ControlPlaneError::NftRuleSweep(_))` and
+    /// branch on the inner `InterceptError` cause without `Display`-grepping.
+    /// Same boot-path shape as `NetnsRecovery` / `MtlsBoot`: happens BEFORE the
+    /// listener binds (the `to_response` arm is exhaustiveness-only) and is
+    /// fail-closed — the node refuses to start (`health.startup.refused`, reason
+    /// `nft.sweep`) rather than serve with stale per-workload rules that would
+    /// duplicate-stack on the next per-alloc re-install.
+    #[error(transparent)]
+    NftRuleSweep(#[from] overdrive_worker::mtls_intercept::InterceptError),
+
     /// `[dataplane.vip_allocator]` TOML parser refusal per
     /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
     /// embedding so the CLI / composition root can branch on
@@ -825,6 +843,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // adopt-on-restart recovery runs AFTER `AppState` and BEFORE
             // the listener binds (step 04-04), emitting `health.startup.
             // refused` (reason `netns.adopt`) itself; this arm is
+            // exhaustiveness-only.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::NftRuleSweep(e) => (
+            // Same boot-path shape as `NetnsRecovery` above: the §5
+            // per-workload nft-rule sweep runs AFTER `AppState` and BEFORE
+            // the listener binds (step 04-04 §5), emitting `health.startup.
+            // refused` (reason `nft.sweep`) itself; this arm is
             // exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },

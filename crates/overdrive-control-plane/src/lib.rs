@@ -1971,22 +1971,57 @@ pub async fn run_server_with_obs_and_driver(
     // per-alloc netns exist. A `NetSlotAdoptConflict` (two survivors on one
     // slot — a fatal correlation bug) refuses the boot via
     // `health.startup.refused`, reason `netns.adopt`.
-    if state.mtls_worker.is_some()
-        && let Err(source) = veth_provisioner::adopt_on_restart_recovery(
+    if state.mtls_worker.is_some() {
+        if let Err(source) = veth_provisioner::adopt_on_restart_recovery(
             state.obs.as_ref(),
             &state.net_slot_allocator,
             std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
         )
         .await
-    {
-        tracing::warn!(
-            name: "health.startup.refused",
-            reason = "netns.adopt",
-            error = %source,
-            "adopt-on-restart boot recovery failed; refusing to boot \
-             (a surviving slot↔alloc map could not be rebuilt)"
-        );
-        return Err(error::ControlPlaneError::NetnsRecovery(source));
+        {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "netns.adopt",
+                error = %source,
+                "adopt-on-restart boot recovery failed; refusing to boot \
+                 (a surviving slot↔alloc map could not be rebuilt)"
+            );
+            return Err(error::ControlPlaneError::NetnsRecovery(source));
+        }
+
+        // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
+        // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
+        // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
+        // appended once and is NEVER torn down per-workload, so it SURVIVES the
+        // restart — but its in-RAM RAII guard was lost (the CP died; `Drop`
+        // never ran), and the rule now redirects to a dead leg-C/leg-F listener.
+        // Unlike the surviving netns (ADOPTED above — the workload lives in it),
+        // the surviving rule is DEAD weight (it points at a dead listener), so
+        // the boot pass REAPS it, leaving the shared infra (F5 exemption,
+        // table+chain) untouched. The clean re-install at `start_alloc` then
+        // appends exactly one rule per direction. PINNED order: adopt → GC →
+        // sweep → serve. A sweep failure (a by-handle `nft delete` error)
+        // refuses the boot, same fail-closed posture as the adopt conflict.
+        match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
+            Ok(swept) => {
+                tracing::info!(
+                    name: "mtls.boot.swept_per_workload_rules",
+                    swept,
+                    "adopt-on-restart §5: swept {swept} surviving per-workload nft-TPROXY \
+                     rule(s) from the shared chain (shared infra left intact)"
+                );
+            }
+            Err(source) => {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "nft.sweep",
+                    error = %source,
+                    "adopt-on-restart §5 nft-rule sweep failed; refusing to boot \
+                     (surviving per-workload TPROXY rules could not be reaped)"
+                );
+                return Err(error::ControlPlaneError::NftRuleSweep(source));
+            }
+        }
     }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so

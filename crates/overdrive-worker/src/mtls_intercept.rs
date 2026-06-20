@@ -401,6 +401,72 @@ pub fn install_outbound_tproxy(
     Ok(TproxyInterceptGuard { handle })
 }
 
+/// Boot-recovery sweep (adopt-on-restart §5, D-TME-12; folds 03-01 finding D2).
+///
+/// Removes EVERY per-workload TPROXY rule — egress (`iifname`-matched) AND
+/// inbound (`ip daddr`/`tcp dport`-matched) — from the shared `overdrive-mtls`
+/// `prerouting` chain by handle, leaving the shared infra (the F5 `meta mark
+/// <MTLS_LEG_S_DIAL_MARK> accept` exemption, the table+chain, the chain
+/// policy/type/hook line) UNTOUCHED — so a subsequent per-alloc re-install
+/// appends exactly one clean rule per direction.
+///
+/// # Why a sweep (not an adopt)
+///
+/// On a `serve` restart each per-workload rule SURVIVES in the shared chain
+/// (it is appended once and NEVER torn down per-workload — [`NFT_TABLE`]
+/// rustdoc), but its in-RAM RAII [`TproxyInterceptGuard`] is LOST (the CP died;
+/// `Drop` never ran). The surviving rule redirects to a now-dead leg-C/leg-F
+/// listener port → DEAD weight; a later re-install with a NEW ephemeral port
+/// does NOT match the stale `(veth, oldPort)` rule and would APPEND A SECOND
+/// rule (duplicate-stack, finding D2). Unlike the surviving netns (which the
+/// boot pass ADOPTS, because the workload still lives in it), the surviving
+/// rule has nothing to preserve — it points at a dead listener — so the boot
+/// pass REAPS it. The clean re-install at `start_alloc` restores a correct
+/// rule. (Scope: this is CLEANUP only — it does NOT re-bind legs, re-spawn
+/// listeners, or re-install rules to "restore" a survivor's interception; a
+/// still-Running survivor legitimately ends with no rule until reschedule,
+/// the accepted #26-coupled limitation.)
+///
+/// # Idempotency
+///
+/// A no-op (returns `Ok(0)`) when the chain carries only shared infra. Safe to
+/// run on every boot.
+///
+/// # Errors
+///
+/// Returns [`InterceptError::TproxyInstall`] if the chain dump cannot be
+/// obtained (the chain/table absent is treated as "nothing to sweep" → `Ok(0)`,
+/// distinguished by [`list_chain`]'s success/failure), or if a by-handle
+/// `nft delete rule` fails.
+pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
+    // The shared table/chain may not exist on a first boot (no mTLS workload has
+    // ever installed a rule). `list_chain` returns `Err` for a chain-absent
+    // table — which is "nothing to sweep", the dominant and benign cause on a
+    // boot where no rule was ever installed — so a list failure short-circuits
+    // to `Ok(0)`. (`mtls_worker.is_some()` gates this call; the FIRST
+    // `start_alloc` that installs a rule is what creates the table, so a
+    // chain-absent boot legitimately has zero rules to reap.) A genuine `nft`
+    // failure on the SAME boot would also fail the subsequent `start_alloc`
+    // install loudly; there is no per-workload rule to strand in the meantime.
+    let Ok(dump) = list_chain() else {
+        return Ok(0);
+    };
+
+    // Classify (pure): collect the handle of every per-workload TPROXY rule,
+    // leaving the shared infra (chain header / type-policy line / F5 exemption)
+    // — none of which carry a `tproxy to ` redirect — untouched.
+    let handles = per_workload_rule_handles_in_dump(&dump);
+
+    // Delete each by handle — the SAME by-handle `nft delete rule … handle <N>`
+    // the guard's `Drop` uses. A delete failure (a real `nft` error, not an
+    // absent rule) refuses the boot: surface it as `TproxyInstall`.
+    for handle in &handles {
+        let h = handle.to_string();
+        run_nft(&["delete", "rule", "ip", NFT_TABLE, NFT_CHAIN, "handle", &h])?;
+    }
+    Ok(handles.len())
+}
+
 /// Ensure the SHARED node-global TPROXY routing infrastructure exists,
 /// idempotently (add-if-missing). Converge-on-boot Bar-1: a pre-existing
 /// component is the success case, not an error — so two concurrent installs
@@ -672,6 +738,36 @@ fn parse_handle(line: &str) -> Option<u64> {
     after.split_whitespace().next()?.parse::<u64>().ok()
 }
 
+/// Pure: collect the kernel-assigned handle of EVERY per-workload TPROXY rule in
+/// an `nft -a list chain` dump, port-blind (§5 boot-recovery sweep).
+///
+/// A per-workload rule — egress (`iifname "<veth>" … tproxy to …`) OR inbound
+/// (`ip daddr <vip> tcp dport <vport> … tproxy to …`) — is recognised by the
+/// `tproxy to ` redirect it carries, paired with a trailing `# handle <N>`. The
+/// SHARED infra is recognised-and-KEPT by the absence of `tproxy to `: the chain
+/// header (`chain prerouting { # handle 1`), the type/policy line, and the F5
+/// `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption all carry NO `tproxy to `,
+/// so none is collected. Port-blind by design: a restart loses the dead
+/// leg-C/leg-F ports, so the port-keyed predicates ([`find_egress_rule_handle_in_dump`],
+/// [`find_virt_rule_handle`]) cannot drive the sweep — the sweep removes ALL
+/// per-workload rules regardless of redirect port.
+///
+/// Pure so a unit test can pin the keep/collect partition against the verbatim
+/// captured nft fixtures without a kernel.
+fn per_workload_rule_handles_in_dump(dump: &str) -> Vec<u64> {
+    dump.lines()
+        // A per-workload rule is the only chain line carrying a `tproxy to `
+        // redirect: egress (`iifname … tproxy to …`) and inbound
+        // (`ip daddr … tcp dport … tproxy to …`) both have it; the shared infra
+        // (chain header, type/policy line, F5 `meta mark … accept` exemption)
+        // never does. The trailing `# handle <N>` is parsed by `parse_handle`;
+        // a `tproxy to` line without a handle marker (a non-`-a` / truncated
+        // dump) yields nothing to delete and is skipped by `filter_map`.
+        .filter(|line| line.contains("tproxy to "))
+        .filter_map(parse_handle)
+        .collect()
+}
+
 /// RAII guard removing ONLY this virt's per-virt TPROXY rule on `Drop`.
 ///
 /// Deletes the rule by its kernel-assigned handle. The shared routing infra —
@@ -886,7 +982,7 @@ mod tests {
 
     use super::{
         dump_has_egress_rule, dump_has_leg_s_exemption, find_egress_rule_handle_in_dump,
-        ip_rule_dump_has_fwmark, parse_handle,
+        ip_rule_dump_has_fwmark, parse_handle, per_workload_rule_handles_in_dump,
     };
 
     // --- `ip rule show` fwmark-routing predicate (extracted from the
@@ -1194,6 +1290,99 @@ table ip overdrive-mtls {
         assert!(
             !dump_has_egress_rule(inbound_only, "ovh-aaaa0", 41000),
             "an inbound daddr/dport rule (no iifname) must NOT be read as ovh-aaaa0's egress rule"
+        );
+    }
+
+    // --- §5 boot-recovery sweep classifier (`per_workload_rule_handles_in_dump`) ---
+    //
+    // The sweep is port-BLIND (a restart loses the dead leg-C/leg-F ports, so the
+    // port-keyed predicates above cannot drive it). The classifier walks the
+    // shared-chain dump and collects the `# handle <N>` of every per-workload
+    // TPROXY rule (egress `iifname`-matched AND inbound `daddr`/`dport`-matched),
+    // recognising both by the `tproxy to ` redirect they share, while KEEPING the
+    // shared infra (chain header, type/policy line, and the F5 `meta mark … accept`
+    // exemption — none of which carry `tproxy to `). This is the §5 mutation
+    // target: pinned against the verbatim fixtures the egress/inbound tests reuse.
+
+    #[test]
+    fn classifier_collects_every_per_workload_handle_and_no_shared_infra_handle() {
+        // `EGRESS_CHAIN_DUMP` = F5 exemption (# handle 2) + chain header
+        // (# handle 1) + ONE inbound rule (# handle 3) + TWO egress rules
+        // (# handle 7, # handle 12). The classifier must yield EXACTLY the three
+        // per-workload handles {3, 7, 12} and NEVER the chain-header (1) or
+        // exemption (2) handle.
+        let mut handles = per_workload_rule_handles_in_dump(EGRESS_CHAIN_DUMP);
+        handles.sort_unstable();
+        assert_eq!(
+            handles,
+            vec![3, 7, 12],
+            "the classifier must collect every per-workload (egress + inbound) handle and \
+             NEVER the chain-header (1) or F5-exemption (2) handle"
+        );
+        assert!(
+            !handles.contains(&1),
+            "the chain-header `# handle 1` must NEVER be swept (it is the chain itself, not a rule)"
+        );
+        assert!(
+            !handles.contains(&2),
+            "the F5 exemption `# handle 2` must NEVER be swept (it is shared infra)"
+        );
+    }
+
+    #[test]
+    fn classifier_collects_both_inbound_per_workload_handles() {
+        // `CHAIN_DUMP` = F5 exemption (# handle 2) + chain header (# handle 1) +
+        // TWO inbound rules (# handle 3, # handle 9). The classifier recognises
+        // inbound rules by the SAME `tproxy to ` redirect, so it must yield
+        // {3, 9} — proving it is not egress-only (which would miss the
+        // #178-forward inbound survivor the sweep must also cover).
+        let mut handles = per_workload_rule_handles_in_dump(CHAIN_DUMP);
+        handles.sort_unstable();
+        assert_eq!(
+            handles,
+            vec![3, 9],
+            "the classifier must collect inbound (`ip daddr`/`tcp dport`) per-workload handles too, \
+             not only egress — both share the `tproxy to` redirect that distinguishes a rule \
+             from the F5 exemption"
+        );
+    }
+
+    #[test]
+    fn classifier_is_a_noop_on_a_chain_with_only_shared_infra() {
+        // A chain carrying ONLY the shared infra (chain header, type/policy line,
+        // F5 exemption) — no per-workload TPROXY rule — must yield ZERO handles,
+        // so the sweep is an idempotent no-op (the re-run / clean-boot case).
+        let infra_only = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t}
+}";
+        assert!(
+            per_workload_rule_handles_in_dump(infra_only).is_empty(),
+            "a chain carrying only shared infra (header + policy + F5 exemption) must yield NO \
+             sweepable handles → the sweep is an idempotent no-op"
+        );
+    }
+
+    #[test]
+    fn classifier_does_not_collect_a_per_workload_line_lacking_a_handle_marker() {
+        // A `tproxy to` rule line WITHOUT a trailing `# handle <N>` (e.g. a dump
+        // taken without `-a`, or truncated) yields no handle — there is nothing
+        // to delete by handle. KILLS a mutant that would collect a sentinel /
+        // panic on a marker-less rule line.
+        let no_handle = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept
+\t}
+}";
+        assert!(
+            per_workload_rule_handles_in_dump(no_handle).is_empty(),
+            "a `tproxy to` rule with NO trailing `# handle <N>` marker yields no sweepable handle \
+             (nothing to delete by handle); the chain-header/exemption handles are still excluded"
         );
     }
 
