@@ -1956,6 +1956,39 @@ pub async fn run_server_with_obs_and_driver(
         mtls_worker,
     );
 
+    // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
+    // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
+    // is reconstructed EMPTY, but workloads SURVIVE in their old
+    // `ovd-ns-<slot>` netns (setsid + kill_on_drop(false) + own cgroup scope —
+    // SPIKE-A) and `WorkloadLifecycle::reconcile` does NOT re-drive a Running
+    // survivor (SPIKE-B), so this dedicated boot pass is the ONLY trigger that
+    // rebuilds the lost slot↔alloc map. It runs AFTER `AppState` construction
+    // (so `state.net_slot_allocator` / `state.obs` are available) and BEFORE
+    // the convergence loop / exit-observer spawn (so the first smallest-free
+    // `assign` cannot hand a surviving slot to a new alloc — the cross-restart
+    // B1 collision). Gated by `state.mtls_worker.is_some()` — the same
+    // composition gate G1 uses — so it is a no-op on a non-mTLS boot where no
+    // per-alloc netns exist. A `NetSlotAdoptConflict` (two survivors on one
+    // slot — a fatal correlation bug) refuses the boot via
+    // `health.startup.refused`, reason `netns.adopt`.
+    if state.mtls_worker.is_some()
+        && let Err(source) = veth_provisioner::adopt_on_restart_recovery(
+            state.obs.as_ref(),
+            &state.net_slot_allocator,
+            std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
+        )
+        .await
+    {
+        tracing::warn!(
+            name: "health.startup.refused",
+            reason = "netns.adopt",
+            error = %source,
+            "adopt-on-restart boot recovery failed; refusing to boot \
+             (a surviving slot↔alloc map could not be rebuilt)"
+        );
+        return Err(error::ControlPlaneError::NetnsRecovery(source));
+    }
+
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`
     // channel when the first action-shim write happens. The observer

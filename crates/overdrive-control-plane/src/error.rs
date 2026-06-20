@@ -502,6 +502,24 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     MtlsBoot(#[from] MtlsBootError),
 
+    /// Adopt-on-restart boot-recovery failure (transparent-mtls-enrollment
+    /// step 04-04, D-TME-12 §1–§4). The boot pass that rebuilds the lost
+    /// in-RAM `NetSlotAllocator` map from the surviving `ovd-ns-<slot>` netns
+    /// (and GCs orphan netns) failed: a slot-correlation conflict (two
+    /// survivors on one slot — impossible by construction), an `ip netns` /
+    /// procfs observe failure, or an obs-store read failure. Pass-through
+    /// `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)`" so the composition root can `matches!(e,
+    /// ControlPlaneError::NetnsRecovery(_))` and branch on the inner
+    /// `NetnsRecoveryError` cause without `Display`-grepping. Same boot-path
+    /// shape as `MtlsBoot` / `DataplaneBoot`: happens BEFORE the listener
+    /// binds (the `to_response` arm is exhaustiveness-only) and is fail-closed
+    /// — the node refuses to start (`health.startup.refused`, reason
+    /// `netns.adopt`) rather than serve with a half-rebuilt allocator that
+    /// would collide a fresh alloc onto a survivor.
+    #[error(transparent)]
+    NetnsRecovery(#[from] crate::veth_provisioner::NetnsRecoveryError),
+
     /// `[dataplane.vip_allocator]` TOML parser refusal per
     /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
     /// embedding so the CLI / composition root can branch on
@@ -799,6 +817,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::MtlsBoot(_))`) to emit
             // `health.startup.refused` and refuse to boot fail-closed;
             // this arm exists only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::NetnsRecovery(e) => (
+            // Same boot-path shape as `MtlsBoot` / `DataplaneBoot` above:
+            // adopt-on-restart recovery runs AFTER `AppState` and BEFORE
+            // the listener binds (step 04-04), emitting `health.startup.
+            // refused` (reason `netns.adopt`) itself; this arm is
+            // exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

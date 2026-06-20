@@ -131,3 +131,104 @@ The probe is idempotent and self-cleaning: it killed both the survivor and the
 leftover prior-run `sleep`, `rmdir`'d the cgroup scope, and `ip netns del`'d the
 test netns. Post-run confirmation: `ip netns list` empty, workload dead, scope dir
 gone. No kernel residue left in the Lima VM.
+
+---
+
+# SPIKE-D — the nft-rule twin of the survivor problem (increment-d, 2026-06-20)
+
+**Probe:** `spike-scratch/increment-d` · **Kernel (`uname -r`):** `7.0.0-22-generic`
+
+Settles the SPIKE-D residual the design left open (wave-decisions.md § "Spike
+boundary", SPIKE-D bullet): **do the per-workload nft-TPROXY rules in the shared
+`overdrive-mtls prerouting` chain SURVIVE a real `serve` restart, and does the
+by-handle delete fire on a guard-less survivor leaving only the shared infra?**
+Self-contained nft/ip CLI probe (constants copied from `mtls_intercept.rs`, NOT a
+crate dep), replicating the production `ensure_shared_routing_infra` +
+`install_outbound_tproxy` (step 3) install and the `TproxyInterceptGuard::Drop`
+by-handle delete verbatim.
+
+## Verdicts
+
+| Q | Question | Verdict |
+|---|---|---|
+| **Q1** | Do per-workload nft-TPROXY rules SURVIVE a `serve` restart on this kernel? | **WORKS — SURVIVES** |
+| **Q2** | Does by-handle `nft delete rule … handle <N>` fire on a GUARD-LESS survivor, leaving ONLY the shared infra (F5 exemption)? | **WORKS** |
+
+**One-line gate:** §5 reconcile is REQUIRED (rules survive ⇒ not a no-op) and the
+sweep-by-handle MECHANISM is sound on this kernel. **BUT the §5 implementation is
+a 04-04 BOUNDARY BLOCKER** — see § "Boundary consequence".
+
+## Hypothesis / prediction / falsification
+
+- **Q1.** H: the egress rule is APPENDED to a node-global chain production never
+  tears down per-workload, so it persists when the owner dies. Prediction: the
+  rule is in the re-dump after the restart. Falsification: absent from re-dump.
+- **Q2.** H: the kernel handle is recoverable from `nft -a` (`# handle <N>`) and
+  `nft delete rule … handle <N>` removes exactly that rule, keeping the F5
+  exemption. Prediction: post-delete dump has F5, not the egress rule.
+  Falsification: delete fails / removes F5 / leaves the egress rule.
+
+## Pasted evidence (real run, kernel 7.0.0-22-generic)
+
+```
+=== SPIKE-D Q1: do the per-workload rules SURVIVE? (re-dump after the 'restart') ===
+    table ip overdrive-mtls {
+    	chain prerouting { # handle 1
+    		type filter hook prerouting priority mangle; policy accept;
+    		meta mark 0x00000002 accept # handle 2
+    		iifname "ovd-hv-d00d" meta l4proto tcp tproxy to 127.0.0.1:41001 meta mark set 0x00000001 accept # handle 3
+    	}
+    }
+  Q1 VERDICT: SURVIVES — the egress rule is still in the chain after process death
+
+=== SPIKE-D Q2: by-handle delete on the GUARD-LESS survivor ===
+  recovered survivor handle = '3'
+  $ nft delete rule ip overdrive-mtls prerouting handle 3
+  delete rc = 0
+  chain AFTER by-handle sweep:
+    table ip overdrive-mtls {
+    	chain prerouting { # handle 1
+    		type filter hook prerouting priority mangle; policy accept;
+    		meta mark 0x00000002 accept # handle 2
+    	}
+    }
+  Q2 VERDICT: WORKS — per-workload rule deleted by handle; F5 exemption (shared infra) intact
+
+=== SUMMARY ===
+  Q1 (rules survive restart) = SURVIVES
+  Q2 (by-handle del on guard-less survivor) = WORKS
+```
+
+(`meta mark 0x00000002 accept` is the probe's stand-in for the F5
+`MTLS_LEG_S_DIAL_MARK` exemption — its exact value is immaterial to the
+survival + by-handle-delete questions; the probe only needs *a* shared-infra rule
+at the chain head to prove the sweep keeps it. Production renders
+`overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK` identically.)
+
+## Boundary consequence — §5 is a 04-04 BOUNDARY BLOCKER (NOT implemented this step)
+
+SPIKE-D confirms §5 is REQUIRED and its mechanism sound. But the design pins the
+sweep to re-use "the landed by-handle delete + the landed dump-parse predicates
+**verbatim — no new public surface**" (wave-decisions.md §5). Ground-truth of the
+LANDED code contradicts the "no new public surface" premise:
+
+- The sweep machinery lives in **`crates/overdrive-worker/src/mtls_intercept.rs`**
+  — NOT in 04-04's `files_to_modify` (only `veth_provisioner.rs`, `lib.rs`, and
+  the two test files are in scope).
+- The dump-parse predicates the sweep must re-use are **PRIVATE**:
+  `dump_has_egress_rule` (`:663`), `find_egress_rule_handle_in_dump` (`:640`),
+  `dump_has_leg_s_exemption` (`:554`) are all `fn`, not `pub fn`; `NFT_TABLE` /
+  `NFT_CHAIN` (`:56` / `:61`) are private `const`s; the by-handle delete is inside
+  `TproxyInterceptGuard::Drop` (`:687-696`) with no standalone public delete entry.
+- A sweep driven from `lib.rs`/`veth_provisioner.rs` (04-04's named files) thus
+  REQUIRES either making those predicates+delete `pub` in `mtls_intercept.rs`, OR
+  adding a new `pub fn sweep_per_workload_tproxy_rules(...)` there. BOTH add NEW
+  public surface to a file OUTSIDE 04-04's boundary — exactly what BOUNDARY_RULES
+  and CLAUDE.md § "Implement to the design — never invent API surface" forbid.
+
+**This is NOT the SPIKE-D negative branch** (which would have collapsed §5 to a
+no-op). The rules DO survive; the sweep IS needed; it cannot be built within
+04-04's file boundary without inventing a new public sweep surface in
+`mtls_intercept.rs`. Per the dispatch BOUNDARY instruction, §5 is surfaced as a
+blocker, not built past the boundary. The netns half (§1–§4) is fully in-boundary
+and IS implemented in 04-04.

@@ -54,6 +54,15 @@ mod integration {
     mod ca_boot_and_audit;
     mod ca_equivalence;
 
+    /// transparent-mtls-enrollment step 04-04 (D-TME-12 § "Amended 2026-06-18
+    /// (02-06 adopt-on-restart)", §1–§4) — Tier-3 acceptance for the
+    /// `run_server` boot-recovery pass. Drives the PRODUCTION
+    /// `veth_provisioner::adopt_on_restart_recovery` seam against a real
+    /// surviving netns + spawned PID + cgroup scope + Running obs row and a
+    /// real orphan netns: the fresh (post-restart) allocator ADOPTS the
+    /// survivor's slot (a later `assign` cannot collide) and the orphan netns
+    /// is GC'd. Root + CAP_NET_ADMIN; SKIP otherwise.
+    mod adopt_on_restart;
     /// transparent-mtls-enrollment step 04-01 (Path A / ADR-0071, D-TME-12 /
     /// AC14) — Tier-3 acceptance for the C3 action-shim seam. Drives the
     /// PRODUCTION `action_shim::dispatch` with `mtls_worker: Some(...)` (the

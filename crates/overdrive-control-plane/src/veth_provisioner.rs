@@ -754,6 +754,73 @@ impl NetSlotAllocator {
     pub fn snapshot(&self) -> BTreeMap<AllocationId, NetSlot> {
         self.held.lock().clone()
     }
+
+    /// Claim the SPECIFIC `(alloc, slot)` binding observed surviving a restart
+    /// (adopt-on-restart, 04-04) — the inverse of [`assign`](Self::assign)'s
+    /// smallest-free pick. Used ONLY by the boot recovery pass
+    /// ([`adopt_on_restart_recovery`]) to rebuild the held map from the
+    /// recovered slot↔alloc correlation BEFORE any smallest-free `assign` can
+    /// run, so a subsequent `assign` cannot hand a surviving slot to a new
+    /// alloc (the cross-restart B1 collision).
+    ///
+    /// **Atomic check-and-act (`development.md` § "Check-and-act must be
+    /// atomic"):** ONE locked critical section scans the held map's values for
+    /// `slot` and inserts iff free OR already held by THIS alloc (idempotent
+    /// re-adopt). The conflict verdict IS the scan's own outcome under the
+    /// guard — never a separate contains-then-insert pre-check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NetSlotAdoptConflict`] when `slot` is already held by a
+    /// DIFFERENT alloc — the boot pass treats this as a fatal correlation bug
+    /// (two survivors claiming one slot is impossible by construction; distinct
+    /// slots ⇒ distinct netns) and refuses to boot rather than silently
+    /// overwrite. Re-adopting the SAME `(alloc, slot)` is an idempotent no-op
+    /// success.
+    pub fn adopt(&self, alloc: AllocationId, slot: NetSlot) -> Result<(), NetSlotAdoptConflict> {
+        // ONE locked critical section: scan the held values for `slot` AND
+        // insert, with no contains-then-insert TOCTOU window. The scan's own
+        // outcome IS the conflict verdict.
+        let mut held = self.held.lock();
+        // Is `slot` already held by SOMEONE? Find the holder.
+        if let Some((holder, _)) = held.iter().find(|&(_, &held_slot)| held_slot == slot) {
+            if holder == &alloc {
+                // Idempotent re-adopt of the SAME (alloc, slot): the binding is
+                // already present and correct — a no-op success.
+                drop(held);
+                return Ok(());
+            }
+            // Held by a DIFFERENT alloc: a fatal correlation bug. Refuse.
+            let conflict =
+                NetSlotAdoptConflict { slot, held_by: holder.clone(), requested_by: alloc };
+            drop(held);
+            return Err(conflict);
+        }
+        // The slot is free — bind it to `alloc` in the SAME critical section.
+        // (An idempotent re-adopt where THIS alloc already holds a DIFFERENT
+        // slot is not expected from the recovery pass — each alloc has exactly
+        // one surviving netns/slot — so we record the observed binding as-is.)
+        held.insert(alloc, slot);
+        drop(held);
+        Ok(())
+    }
+}
+
+/// The error returned when [`NetSlotAllocator::adopt`] is asked to claim a
+/// `slot` that is ALREADY held by a DIFFERENT allocation — a fatal
+/// boot-recovery correlation bug (two survivors cannot share one slot, since
+/// distinct slots ⇒ distinct netns by construction). The boot pass refuses to
+/// start (`health.startup.refused`, reason `netns.adopt`) rather than silently
+/// overwrite the binding.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("net slot {slot} already held by {held_by}, cannot adopt for {requested_by}")]
+pub struct NetSlotAdoptConflict {
+    /// The contested slot.
+    pub slot: NetSlot,
+    /// The allocation currently holding `slot`.
+    pub held_by: AllocationId,
+    /// The allocation the recovery pass tried to adopt `slot` for.
+    pub requested_by: AllocationId,
 }
 
 /// Observed actual kernel state of one allocation's netns + veth pair — the
@@ -1702,6 +1769,270 @@ pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvi
     resolv_conf_dir_remove(&plan.netns)
 }
 
+// --- Adopt-on-restart boot recovery (step 04-04, D-TME-12 §1–§4) ---------
+//
+// On a `serve` restart the in-RAM NetSlotAllocator map is reconstructed EMPTY,
+// but workloads SURVIVE (setsid + kill_on_drop(false) + own cgroup scope —
+// SPIKE-A, kernel 7.0.0) inside their old `ovd-ns-<slot>` netns. A naive empty
+// allocator hands smallest-free slot 0 to the next NEW alloc → collides with a
+// survivor still occupying `ovd-ns-0000` (B1 resurrected across restart). Plus
+// an orphan-netns leak: a pre-restart `ovd-ns-<slot>` whose workload DIED in
+// the restart window is never torn down. SPIKE-B confirmed
+// `WorkloadLifecycle::reconcile` does NOT re-drive already-Running survivors,
+// so a dedicated boot-time recovery pass is the ONLY trigger that rebuilds the
+// slot↔alloc map. B3: the netns name carries NO alloc identity, so the binding
+// is RECOVERED via cgroup→PID→`/proc/<pid>/ns/net` inode correlation (SPIKE-C).
+
+/// One surviving netns observed at boot: its slot, and the alloc that owns it
+/// (recovered via PID→netns correlation) if any live PID claims it (D-TME-12
+/// §1). `Some(alloc)` ⇒ ADOPT the binding; `None` ⇒ ORPHAN (GC candidate).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObservedAdoptNetns {
+    /// The slot parsed back from the surviving `ovd-ns-<4hex>` netns name.
+    pub slot: NetSlot,
+    /// `Some(alloc)` when a live PID inside `<alloc>.scope` resolves
+    /// (`/proc/<pid>/ns/net`) to this netns's inode; `None` = orphan (no live
+    /// owner → GC candidate).
+    pub owner: Option<AllocationId>,
+}
+
+/// The PURE adopt-vs-GC decision over the observed surviving netns (D-TME-12
+/// §1, the "DECISION LOGIC … must be a SEPARATE PURE function" mandate). Total,
+/// deterministic, no I/O — the default-lane unit + mutation surface
+/// (criterion 1).
+///
+/// - every `{ slot, owner: Some(alloc) }` → an ADOPT of `(alloc, slot)`;
+/// - every `{ slot, owner: None }` → a GC of `slot`.
+///
+/// Order is preserved from the input so the boot pass's adopt-then-GC ordering
+/// (§3) is the caller's, not buried here.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AdoptPlan {
+    /// `(alloc, slot)` bindings to ADOPT into the allocator.
+    pub adopt: Vec<(AllocationId, NetSlot)>,
+    /// Slots whose netns is an ORPHAN (no live owner) to GC.
+    pub gc: Vec<NetSlot>,
+}
+
+/// Pure adopt-vs-GC planner (D-TME-12 §1). Owned → adopt; orphan → GC.
+#[must_use]
+pub fn plan_adopt_actions(observed: &[ObservedAdoptNetns]) -> AdoptPlan {
+    let mut plan = AdoptPlan::default();
+    for o in observed {
+        match &o.owner {
+            Some(alloc) => plan.adopt.push((alloc.clone(), o.slot)),
+            None => plan.gc.push(o.slot),
+        }
+    }
+    plan
+}
+
+/// The error returned when the boot recovery pass cannot reconstruct a
+/// consistent slot↔alloc map — a fatal boot condition the node refuses to start
+/// on (`health.startup.refused`, reason `netns.adopt`) rather than serve with a
+/// half-rebuilt allocator that would collide a fresh alloc onto a survivor.
+#[derive(Debug, thiserror::Error)]
+pub enum NetnsRecoveryError {
+    /// Two surviving netns correlated to the SAME slot for DIFFERENT allocs —
+    /// impossible by construction (distinct slots ⇒ distinct netns), so it
+    /// signals a correlation bug. Pass-through the typed
+    /// [`NetSlotAdoptConflict`] per `.claude/rules/development.md` § "Never
+    /// flatten a typed error to `Internal(String)`".
+    #[error("adopt-on-restart slot conflict: {source}")]
+    AdoptConflict {
+        /// The underlying allocator conflict.
+        #[from]
+        source: NetSlotAdoptConflict,
+    },
+    /// An `ip netns` / procfs read failed while observing the surviving netns.
+    #[error("adopt-on-restart observe failed: {source}")]
+    Observe {
+        /// The underlying `ip(8)` / observe failure.
+        #[from]
+        source: VethProvisionError,
+    },
+    /// Reading the ObservationStore Running set failed.
+    #[error("adopt-on-restart could not read alloc_status rows: {source}")]
+    Observation {
+        /// The underlying observation-store read failure.
+        #[from]
+        source: overdrive_core::traits::observation_store::ObservationStoreError,
+    },
+}
+
+/// Read the netns inode from a `/proc/<pid>/ns/net` symlink target. The symlink
+/// resolves to `net:[<inode>]`; parse out the inode. `None` when the PID is
+/// gone or the link is unreadable (a benign "no longer a live owner" signal).
+///
+/// Production copy of the proven in-tree mechanism (the
+/// `overdrive-worker/tests/.../netns_entry.rs` precedent, SPIKE-C); the
+/// recovery pass MUST NOT depend on a test module.
+fn read_proc_netns_inode(pid: u32) -> Option<u64> {
+    let link = std::fs::read_link(format!("/proc/{pid}/ns/net")).ok()?;
+    let s = link.to_string_lossy();
+    let inner = s.strip_prefix("net:[")?.strip_suffix(']')?;
+    inner.parse::<u64>().ok()
+}
+
+/// Read the inode of a named netns handle at `/var/run/netns/<netns>` (the
+/// same inode `/proc/<pid>/ns/net` resolves to when a PID lives in it — the
+/// `ip netns identify` mechanism). `None` when the handle is absent.
+fn netns_file_inode(netns: &str) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(format!("/var/run/netns/{netns}")).ok().map(|m| m.ino())
+}
+
+/// Parse the slot back from an `ovd-ns-<4hex>` netns name (the inverse of
+/// [`NetSlot::to_hex4`] + the [`WORKLOAD_NETNS_PREFIX`]). `None` for a name that
+/// is not a workload netns or whose hex is out of range.
+fn slot_from_netns_name(name: &str) -> Option<NetSlot> {
+    let hex = name.strip_prefix(WORKLOAD_NETNS_PREFIX)?;
+    let value = u16::from_str_radix(hex, 16).ok()?;
+    NetSlot::new(value).ok()
+}
+
+/// Enumerate every surviving `ovd-ns-*` workload netns via `ip netns list`,
+/// parsing each back to its [`NetSlot`] (reuses the [`netns_exists`] line-parse
+/// shape — the first whitespace token is the name).
+fn list_workload_netns_slots() -> Result<Vec<NetSlot>, VethProvisionError> {
+    let out = std::process::Command::new("ip").args(["netns", "list"]).output()?;
+    if !out.status.success() {
+        return Err(VethProvisionError::NetnsObserveFailed {
+            operation: "netns list".to_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            status: out.status.code(),
+        });
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    Ok(stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter_map(slot_from_netns_name)
+        .collect())
+}
+
+/// Read the live PIDs of an allocation from its cgroup scope's `cgroup.procs`
+/// (`overdrive.slice/workloads.slice/<alloc>.scope/cgroup.procs`, resolved
+/// under `cgroup_root`). An absent / unreadable scope yields an EMPTY pid list
+/// (the alloc has no live process here — a benign "not an owner via this
+/// scope" signal), NOT an error: a Running row whose scope is gone is exactly a
+/// survivor that died, which the orphan-GC path then handles.
+fn alloc_scope_pids(alloc: &AllocationId, cgroup_root: &std::path::Path) -> Vec<u32> {
+    let procs = overdrive_worker::cgroup_manager::CgroupPath::for_alloc(alloc)
+        .resolve(cgroup_root)
+        .join("cgroup.procs");
+    let Ok(body) = std::fs::read_to_string(&procs) else {
+        return Vec::new();
+    };
+    body.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect()
+}
+
+/// Observe the surviving slot↔alloc bindings at boot (D-TME-12 §1) — a thin
+/// impure observer (real `ip netns list` + procfs reads, NO decision logic;
+/// the adopt-vs-GC decision is the pure [`plan_adopt_actions`]).
+///
+/// Walk:
+/// 1. Enumerate surviving `ovd-ns-<slot>` netns ([`list_workload_netns_slots`])
+///    and their inodes ([`netns_file_inode`]).
+/// 2. Read the Running alloc set from `obs.alloc_status_rows()` filtered to
+///    `state == Running` (B3: the row carries `alloc_id`, NOT the slot).
+/// 3. For each Running alloc, read its `cgroup.procs` PIDs and resolve each
+///    PID's `/proc/<pid>/ns/net` inode; match against the enumerated netns
+///    inodes → the `(slot, owner=alloc)` binding. A surviving netns with no
+///    matched live owner is an ORPHAN (`owner: None`).
+async fn adopt_observe(
+    obs: &dyn overdrive_core::traits::observation_store::ObservationStore,
+    cgroup_root: &std::path::Path,
+) -> Result<Vec<ObservedAdoptNetns>, NetnsRecoveryError> {
+    use overdrive_core::traits::observation_store::AllocState;
+
+    // (1) the surviving workload netns + their inodes.
+    let slots = list_workload_netns_slots()?;
+    let mut by_inode: BTreeMap<u64, NetSlot> = BTreeMap::new();
+    let mut owner: BTreeMap<NetSlot, Option<AllocationId>> = BTreeMap::new();
+    for slot in slots {
+        let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+        if let Some(ino) = netns_file_inode(&plan.netns) {
+            by_inode.insert(ino, slot);
+        }
+        owner.entry(slot).or_insert(None);
+    }
+
+    // (2) the Running alloc set (B3: alloc id, not slot).
+    let running: Vec<AllocationId> = obs
+        .alloc_status_rows()
+        .await?
+        .into_iter()
+        .filter(|r| r.state == AllocState::Running)
+        .map(|r| r.alloc_id)
+        .collect();
+
+    // (3) correlate PID→netns per Running alloc → owner binding.
+    for alloc in running {
+        for pid in alloc_scope_pids(&alloc, cgroup_root) {
+            if let Some(ino) = read_proc_netns_inode(pid)
+                && let Some(&slot) = by_inode.get(&ino)
+            {
+                owner.insert(slot, Some(alloc.clone()));
+                break;
+            }
+        }
+    }
+
+    Ok(owner.into_iter().map(|(slot, owner)| ObservedAdoptNetns { slot, owner }).collect())
+}
+
+/// The boot-time adopt-on-restart recovery pass (D-TME-12 §3). Driven by
+/// `run_server` after `AppState` construction, BEFORE the convergence loop /
+/// exit-observer spawn, gated by the same `mtls_worker.is_some()` composition
+/// gate G1 uses (a no-op on a non-mTLS boot where no per-alloc netns exist).
+///
+/// PINNED order (adopt-BEFORE-GC is load-bearing):
+/// 1. [`adopt_observe`] → the surviving slot↔alloc bindings.
+/// 2. [`plan_adopt_actions`] → the pure adopt-vs-GC decision.
+/// 3. ADOPT every owned binding via [`NetSlotAllocator::adopt`] — rebuilds the
+///    held map so the very next smallest-free `assign` cannot collide with a
+///    survivor. A [`NetSlotAdoptConflict`] REFUSES the boot.
+/// 4. GC every orphan via [`teardown_workload_netns`] (teardown-not-release:
+///    an orphan holds no binding) — its slot returns to the free pool.
+///
+/// This is the netns half (§1–§4) only. The §5 nft-rule sweep is a SEPARATE
+/// surviving-resource class whose machinery lives in
+/// `overdrive-worker::mtls_intercept` (private predicates + by-handle delete);
+/// SPIKE-D (findings-adopt-restart.md § SPIKE-D, kernel 7.0.0) confirmed the
+/// rules survive and the sweep is needed, but it cannot be built within this
+/// step's file boundary without inventing new public surface in
+/// `mtls_intercept.rs` — surfaced as a boundary blocker, not built here.
+///
+/// # Errors
+///
+/// [`NetnsRecoveryError`] when observe fails, the obs read fails, or an adopt
+/// conflicts (two survivors on one slot — a fatal correlation bug).
+pub async fn adopt_on_restart_recovery(
+    obs: &dyn overdrive_core::traits::observation_store::ObservationStore,
+    allocator: &NetSlotAllocator,
+    cgroup_root: &std::path::Path,
+) -> Result<(), NetnsRecoveryError> {
+    let observed = adopt_observe(obs, cgroup_root).await?;
+    let plan = plan_adopt_actions(&observed);
+
+    // (3) ADOPT first — rebuild the held map before any free-slot scan.
+    for (alloc, slot) in plan.adopt {
+        allocator.adopt(alloc, slot)?;
+    }
+
+    // (4) GC orphans second — return their slots to the free pool.
+    for slot in plan.gc {
+        let orphan_plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+        // Teardown is idempotent (swallows "absent"); a non-benign failure
+        // (e.g. permission denied) surfaces so the boot does not silently leave
+        // a leaked netns behind.
+        teardown_workload_netns(&orphan_plan)?;
+    }
+
+    Ok(())
+}
+
 /// Read the actual kernel state of one allocation's netns + veth pair into
 /// an [`ObservedWorkloadVeth`] — the input to the pure
 /// [`workload_converge_steps`] diff (the per-allocation parallel of
@@ -2259,11 +2590,12 @@ fn netns_absent(stderr: &str) -> bool {
 #[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
 mod tests {
     use super::{
-        NET_SLOT_MAX, NetSlot, NetSlotAllocator, NetSlotExhausted, ObservedVeth,
-        ObservedWorkloadVeth, VethProvisionPlan, VethStep, WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan,
-        WorkloadVethStep, converge_steps, derive_veth_plan, derive_workload_netns_plan,
-        link_absent, resolv_conf_contents, smallest_free_slot, tx_checksumming_on,
-        tx_offload_benign, workload_converge_steps,
+        AdoptPlan, NET_SLOT_MAX, NetSlot, NetSlotAdoptConflict, NetSlotAllocator, NetSlotExhausted,
+        ObservedAdoptNetns, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
+        WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
+        derive_veth_plan, derive_workload_netns_plan, link_absent, plan_adopt_actions,
+        resolv_conf_contents, smallest_free_slot, tx_checksumming_on, tx_offload_benign,
+        workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use overdrive_core::AllocationId;
@@ -3771,5 +4103,114 @@ mod tests {
         );
         assert!(!snap.contains_key(&b), "a released alloc is absent from the snapshot");
         assert_eq!(snap.len(), 1, "snapshot contains exactly the one still-held alloc");
+    }
+
+    // --- adopt-on-restart §2 (NetSlotAllocator::adopt) -------------------
+    //
+    // Test budget: 4 distinct behaviors × 2 = 8. Behaviors:
+    //   B1 adopt a free slot → bound;  B2 idempotent re-adopt (alloc,slot) → Ok;
+    //   B3 conflict on a slot held by a DIFFERENT alloc → typed error;
+    //   B4 pure planner: owner Some→adopt / None→GC.
+    // Parametrized PBT covers the input variations of each (Mandate 5).
+
+    /// B1: adopting a FREE slot records the `(alloc, slot)` binding, and a
+    /// subsequent `assign` for a NEW alloc cannot be handed that slot (the
+    /// whole point of adopt — close the cross-restart B1 collision).
+    #[test]
+    fn adopt_claims_a_free_slot_so_a_later_assign_cannot_collide() {
+        let allocator = NetSlotAllocator::new();
+        let survivor = alloc("alloc-survivor-0");
+        allocator.adopt(survivor.clone(), slot(0)).expect("adopt free slot 0");
+        assert_eq!(
+            allocator.snapshot().get(&survivor).copied(),
+            Some(slot(0)),
+            "adopt must record the (survivor, slot 0) binding"
+        );
+        // The very next smallest-free assign must skip slot 0 (now held).
+        let fresh = allocator.assign(alloc("alloc-fresh-0")).expect("fresh assign");
+        assert_ne!(fresh, slot(0), "a fresh assign must not collide with the adopted slot 0");
+    }
+
+    /// B2: re-adopting the SAME `(alloc, slot)` is an idempotent no-op success
+    /// (a re-run of the recovery pass must not error or double-bind).
+    #[test]
+    fn adopt_is_idempotent_for_the_same_alloc_and_slot() {
+        let allocator = NetSlotAllocator::new();
+        let a = alloc("alloc-aaa-0");
+        allocator.adopt(a.clone(), slot(5)).expect("first adopt");
+        allocator.adopt(a.clone(), slot(5)).expect("idempotent re-adopt is Ok");
+        let snap = allocator.snapshot();
+        assert_eq!(snap.get(&a).copied(), Some(slot(5)), "binding unchanged after re-adopt");
+        assert_eq!(snap.len(), 1, "idempotent re-adopt must not double-bind");
+    }
+
+    /// B3: adopting a slot ALREADY held by a DIFFERENT alloc returns the typed
+    /// `NetSlotAdoptConflict { slot, held_by, requested_by }` and does NOT
+    /// overwrite the existing binding (fatal correlation bug → refuse).
+    #[test]
+    fn adopt_conflicts_when_slot_held_by_a_different_alloc() {
+        let allocator = NetSlotAllocator::new();
+        let first = alloc("alloc-first-0");
+        let second = alloc("alloc-second-0");
+        allocator.adopt(first.clone(), slot(3)).expect("first adopt");
+        let err = allocator.adopt(second.clone(), slot(3)).expect_err("conflict expected");
+        assert_eq!(
+            err,
+            NetSlotAdoptConflict {
+                slot: slot(3),
+                held_by: first.clone(),
+                requested_by: second.clone(),
+            },
+            "the conflict must name the contested slot, the holder, and the requester"
+        );
+        // The existing binding is untouched; the conflicting alloc holds nothing.
+        let snap = allocator.snapshot();
+        assert_eq!(snap.get(&first).copied(), Some(slot(3)), "holder's binding preserved");
+        assert!(!snap.contains_key(&second), "conflicting alloc must not be bound");
+    }
+
+    // B3 (input variation, parametrized via proptest): for ANY two distinct
+    // allocs and ANY in-range slot, the second adopt of the same slot
+    // conflicts and the holder's binding survives.
+    proptest! {
+        #[test]
+        fn adopt_conflict_holds_for_any_distinct_allocs_and_slot(raw in 0u16..=NET_SLOT_MAX) {
+            let allocator = NetSlotAllocator::new();
+            let s = NetSlot::new(raw).expect("in range");
+            let holder = alloc("alloc-holder-0");
+            let other = alloc("alloc-other-0");
+            allocator.adopt(holder.clone(), s).expect("holder adopt");
+            let err = allocator.adopt(other.clone(), s).expect_err("must conflict");
+            prop_assert_eq!(err.slot, s);
+            prop_assert_eq!(&err.held_by, &holder);
+            prop_assert_eq!(err.requested_by, other);
+            prop_assert_eq!(allocator.snapshot().get(&holder).copied(), Some(s));
+        }
+    }
+
+    /// B4: the PURE adopt-vs-GC planner maps each owned observation to an
+    /// ADOPT and each orphan (owner None) to a GC, preserving input order.
+    #[test]
+    fn plan_adopt_actions_splits_owned_from_orphan() {
+        let owned = ObservedAdoptNetns { slot: slot(2), owner: Some(alloc("alloc-owned-0")) };
+        let orphan = ObservedAdoptNetns { slot: slot(4), owner: None };
+        let owned2 = ObservedAdoptNetns { slot: slot(6), owner: Some(alloc("alloc-owned2-0")) };
+        let plan = plan_adopt_actions(&[owned, orphan, owned2]);
+        assert_eq!(
+            plan,
+            AdoptPlan {
+                adopt: vec![(alloc("alloc-owned-0"), slot(2)), (alloc("alloc-owned2-0"), slot(6)),],
+                gc: vec![slot(4)],
+            },
+            "owned → adopt (in order), orphan → gc"
+        );
+    }
+
+    /// B4 (boundary): an EMPTY observation yields an empty plan (a fresh boot
+    /// with no surviving netns is a no-op, never a spurious adopt or GC).
+    #[test]
+    fn plan_adopt_actions_on_empty_is_empty() {
+        let plan = plan_adopt_actions(&[]);
+        assert_eq!(plan, AdoptPlan::default(), "no survivors → no adopt, no gc");
     }
 }
