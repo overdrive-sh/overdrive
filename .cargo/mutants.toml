@@ -6,7 +6,8 @@
 # the per-PR and nightly mutants runs do not produce false "caught"
 # signals from code paths we deliberately exclude.
 #
-# Version assumption: cargo-mutants 25.x (the version
+# Version assumption: cargo-mutants 27.x (27.1.0 observed in the Lima
+# dev VM, 2026-06-21; the version
 # taiki-e/install-action@v2 resolves at the time of writing; see
 # .github/workflows/ci.yml and nightly.yml, which install via
 # `tool: cargo-mutants` without a pin — this file uses only stable keys
@@ -247,11 +248,14 @@ exclude_re = [
     # tests behind `integration-tests` feature gate (real in-process
     # TLS server + reqwest). Not reachable from the default nextest
     # lane, so every mutation in these functions shows as MISSED
-    # during `--diff` runs. The per-function `// mutants::skip`
-    # comments in the source remain as documentation of which arms
-    # have dedicated integration coverage; these regexes are the
-    # actual suppression mechanism (cargo-mutants' comment-based
-    # skip applies at function granularity, which matches here).
+    # during `--diff` runs. The per-function `// mutants: skip`
+    # comments in the source remain as DOCUMENTATION ONLY of which
+    # arms have dedicated integration coverage; these regexes are the
+    # actual suppression mechanism. (cargo-mutants has NO comment-based
+    # skip — only the `#[mutants::skip]` attribute, `exclude_globs`,
+    # and `exclude_re`; a bare `// mutants: skip` line suppresses
+    # nothing. Verified v27.1.0; https://mutants.rs/attrs.html +
+    # https://mutants.rs/skip.html.)
     "in consume_stream$",
     "in consume_stream_job$",
     "replace run -> Result<\\(\\)> with Ok",
@@ -369,11 +373,10 @@ exclude_re = [
     # IS the spec for the unimplemented work, and no test can
     # distinguish a "succeeded vacuously" Ok(()) from a "panicked
     # because not yet implemented" todo!() until the GREEN body
-    # lands. The source-level `// mutants: skip` comment above the
-    # function does not suffice because cargo-mutants matches it
-    # case-sensitively on a single line above the fn, and an em-dash
-    # continuation in the existing comment ate the parser's
-    # `mutants: skip` token. Add an exclude_re entry instead — when
+    # lands. A source-level `// mutants: skip` comment does not
+    # suffice because cargo-mutants has NO comment-based skip at all —
+    # only the `#[mutants::skip]` attribute / `exclude_globs` /
+    # `exclude_re` (verified v27.1.0). Use an exclude_re entry — when
     # the GREEN body lands in slice 01-03c, this exclusion is
     # removed in the same commit and a real test kills the mutant.
     "replace ProbeRunner::probe -> Result<\\(\\), ProbeRunnerError> with Ok\\(\\(\\)\\)",
@@ -459,8 +462,9 @@ exclude_re = [
     # `crates/overdrive-control-plane/src/listener_facts.rs` carries the
     # same rationale as documentation; this regex is the actual
     # suppression mechanism (same shape as the `ProbeRunner::probe` and
-    # `evaluate_reconciler_is_pure` entries above — comment-skip does not
-    # fire for a mid-body expression mutation).
+    # `evaluate_reconciler_is_pure` entries above — a `// mutants: skip`
+    # comment is not a cargo-mutants mechanism at all, so exclude_re is
+    # always the suppression, not merely for mid-body expression mutants).
     "replace \\|\\| with && in ListenerFactStore::rebuild_from_intent",
 
     # `Ca::adopt_persisted_root` / `Ca::adopt_persisted_intermediate`
@@ -481,6 +485,30 @@ exclude_re = [
     # carry the same rationale as documentation, this regex is the mechanism.
     "replace Ca::adopt_persisted_root -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
     "replace Ca::adopt_persisted_intermediate -> Result<\\(\\)> with Ok\\(\\(\\)\\)",
+
+    # `sweep_per_workload_tproxy_rules` (transparent-mtls 04-04 §5 —
+    # boot-recovery nft-rule sweep). Thin nft-I/O shim: calls
+    # `list_chain` (real `nft -a list chain`) + `run_nft` (real
+    # by-handle `nft delete rule`). Its PURE decision —
+    # `per_workload_rule_handles_in_dump` — is unit + mutation covered
+    # (killed). The whole-fn body-replacement mutants (`Ok(0)`/`Ok(1)`)
+    # are killable only by the control-plane real-kernel Tier-3 AT
+    # `serve_restart_sweeps_surviving_per_workload_tproxy_rule`, which the
+    # overdrive-worker default-lane nextest suite cannot run — same
+    # feature-gated-I/O class as the `consume_stream` / `run` entries.
+    # (The `// mutants: skip` comment on the fn is documentation; this
+    # regex is the suppression.)
+    "replace sweep_per_workload_tproxy_rules -> Result<usize> with Ok",
+
+    # `find_egress_rule_handle` (transparent-mtls 03-x) — I/O wrapper
+    # that runs `list_chain` then delegates to the PURE
+    # `find_egress_rule_handle_in_dump` (which IS in mutation scope and
+    # killed). The wrapper's whole-fn return-replacement mutants
+    # (`Ok(Some(0))`/`Ok(Some(1))`) are reachable only via real `nft`
+    # output → default-lane MISSED/TIMEOUT. The ` -> Result<Option<u64>>`
+    # anchor matches the I/O wrapper ONLY, not the pure `..._in_dump` fn
+    # (whose name carries `_in_dump` before ` -> `), which stays mutated.
+    "replace find_egress_rule_handle -> Result<Option<u64>> with Ok",
 ]
 
 # ---------------------------------------------------------------------------
