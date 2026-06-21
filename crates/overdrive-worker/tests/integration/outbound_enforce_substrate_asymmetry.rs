@@ -41,17 +41,34 @@
 //! ## How this is OBSERVABLE (syscall side effects only — testing.md Tier-3 rules)
 //!
 //! The directional copy strategy is observable via `strace` on the agent's own
-//! pump threads (the test process runs the production accept loop in-process, so the
-//! pump threads ARE this process's threads). Rust `TcpStream` `read`/`write_all`
+//! pump threads. The test process runs the production accept loop in-process, so the
+//! pump threads (`PumpHandle::spawn_encrypt`/`spawn_decrypt` → `std::thread::spawn`)
+//! are CLONE_THREAD threads of THIS process — they share the test's thread group
+//! (tgid). The netns workload client, by contrast, is a SEPARATE process
+//! (`ip netns exec … python3`, a distinct tgid). Rust `TcpStream` `read`/`write_all`
 //! lower to `recvfrom`/`sendto` (or `read`/`write`); the return decrypt pump issues
 //! `splice(2)`. So:
 //!   - the FORWARD COPY surfaces as the request plaintext appearing in a `write(2)`/
-//!     `sendto(2)` buffer INTO leg B (the kTLS-TX leg — a NON-splice-source fd), and
-//!     NOT riding a `splice` (a copy through userspace is exactly what the forward
-//!     is); and
+//!     `sendto(2)` buffer INTO leg B (the kTLS-TX leg), issued BY A THREAD OF THE TEST
+//!     PROCESS (the agent's forward pump) — and NOT riding a `splice` (a copy through
+//!     userspace is exactly what the forward is); and
 //!   - the RETURN SPLICE surfaces as ≥1 `splice(2)` call (the response decrypt pump,
 //!     `splice(legB → legF)`).
 //! These are REAL captured syscalls, never the adapter's own bookkeeping.
+//!
+//! ### Thread-group isolation — the FORWARD oracle MUST attribute to the agent
+//!
+//! `strace -f` follows the netns client's forked `python3` descendant, whose own
+//! `s.sendall(OUTBOUND_REQUEST)` lowers to a `sendto(<plaintext incl. marker>)` —
+//! so the request marker appears in the trace on BOTH the agent's forward-pump write
+//! AND the workload client's send. The two are distinguished by the leading TID
+//! `strace -f` prefixes on every line: the agent's pump threads' TIDs are members of
+//! this process's thread group (enumerated from `/proc/self/task`, sampled WHILE the
+//! pumps are live); the netns `python3`'s TID is not. The forward-copy oracle counts
+//! a marker-carrying write ONLY when its owning TID belongs to the test's thread
+//! group — so the workload's identical plaintext send CANNOT satisfy it. Without this
+//! filter the oracle is confounded (the client's send alone flips the flag regardless
+//! of the agent's pump strategy); WITH it the oracle proves the AGENT copied.
 //!
 //! ## Driven through the PRODUCTION composition root (port-to-port / TBU defense)
 //!
@@ -161,7 +178,12 @@ const LOOPBACK_IFACE: &str = "lo";
 /// → the mesh server. Its distinctive interior bytes are the FORWARD-COPY marker:
 /// because the forward pump is a `read(legF) → write_all(legB)` COPY, this plaintext
 /// MUST appear in a userspace `write`/`sendto` buffer INTO leg B (the kTLS-TX leg),
-/// proving the forward direction copies through userspace and is NOT a splice.
+/// issued by a thread of the TEST process (the agent's forward pump) — proving the
+/// forward direction copies through userspace and is NOT a splice. NOTE: the netns
+/// workload client ALSO sends this same plaintext (it is the application request),
+/// so the marker appears in the trace on the client's `sendto` too; the forward
+/// oracle's thread-group filter (see `TraceFindings::parse`) is what attributes the
+/// flip to the AGENT and excludes the client's identical send.
 const OUTBOUND_REQUEST: &[u8] =
     b"OVERDRIVE_0503_OUTBOUND_REQUEST_forward_copy_marker_workload_to_mesh_legF_to_legB_writeall";
 /// The OUTBOUND application response the mesh server replies; it rides back over
@@ -1140,6 +1162,13 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     // `sendto` buffer (the forward-copy signature).
     let mut syscalls = StraceProbe::attach_self(&["splice", "sendto", "write", "recvfrom", "read"]);
 
+    // Sample the test process's own thread group WHILE the agent's pumps run, so the
+    // forward-copy oracle can attribute a marker-carrying write to the AGENT (an
+    // in-tgid TID) and EXCLUDE the netns client's identical plaintext send (a
+    // separate-process TID). Started before the dial so every pump thread's TID is
+    // observed (S1).
+    let tid_sampler = TidSampler::start();
+
     // The workload (inside the netns) dials the mesh backend, sends the request,
     // reads the response. Its egress ingresses vethH → PREROUTING → TPROXY →
     // PRODUCTION leg-F → PRODUCTION accept_loop → getsockname → resolve(Mesh) →
@@ -1154,7 +1183,10 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     let client_out = mesh_client.join().expect("outbound mesh client thread");
     let client_read = client_out.stdout.clone();
     let mesh_request_ok = mesh_peer.join().expect("mesh peer thread");
-    let trace = syscalls.detach_and_read();
+    // Collect the test's thread group BEFORE detaching strace so the pump threads are
+    // still captured, then parse the trace with that attribution oracle.
+    let test_thread_group = tid_sampler.stop_and_collect();
+    let (trace, raw_trace) = syscalls.detach_and_read(&test_thread_group);
     let scan = outbound_wire.stop_and_scan(OUTBOUND_REQUEST, OUTBOUND_RESPONSE);
 
     eprintln!(
@@ -1165,6 +1197,11 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
         mesh_request_ok,
     );
     eprintln!("[05-03] leg-B wire scan = {scan:?}");
+    eprintln!(
+        "[05-03] test thread group (size {}) = {:?}",
+        test_thread_group.len(),
+        test_thread_group
+    );
     eprintln!("[05-03] strace summary = {}", trace.summary());
 
     // The round-trip completed through the PRODUCTION accept_loop's Mesh arm — the
@@ -1227,32 +1264,98 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
          must be traced; strace summary:\n{}",
         trace.summary()
     );
+    // S3: PIN the return splice to `legB → legF`. Leg B is a single TX+RX kTLS fd, so
+    // the agent's forward-write DESTINATION fd == the return-splice SOURCE fd. A
+    // recovered splice source that equals an agent forward-write dst is genuinely the
+    // leg-B → leg-F return pump, not an incidental splice elsewhere in the process.
+    assert!(
+        trace.return_splice_source_is_legb(),
+        "ASYMMETRY (return = splice on leg B): at least one traced splice(2) must source from the \
+         leg-B kTLS fd (== the agent forward-write destination fd, since leg B is one TX+RX fd). \
+         No recovered splice source matched an agent forward-write dst, so the splice cannot be \
+         pinned to the legB → legF return path. strace summary:\n{}",
+        trace.summary()
+    );
 
     // FORWARD = write_all COPY: the request plaintext rode a `read(legF) →
     // write_all(legB)` COPY, so the request marker MUST appear in a traced
-    // `write(2)`/`sendto(2)` buffer INTO a NON-splice-source fd (leg B, the kTLS-TX
-    // leg — the agent copies each forward byte through userspace; the kernel
-    // tls_sw_sendmsg encrypts on write). The request plaintext appearing in a
-    // write/sendto buffer into a non-splice-source leg IS the forward-copy signature;
-    // its ABSENCE (i.e. the forward riding a splice instead) would be the inbound
-    // shape, not the outbound one. This is the FORWARD half of the asymmetry.
+    // `write(2)`/`sendto(2)` buffer INTO leg B (the kTLS-TX leg) issued BY THE AGENT
+    // (a thread of THIS process). The kernel tls_sw_sendmsg encrypts on write; the
+    // marker in a userspace write buffer is the copy-through-userspace signature. The
+    // AGENT-attribution (thread-group filter) is what makes this load-bearing: the
+    // netns client also sends the same plaintext, but from a separate process —
+    // excluded.
     assert!(
         trace.request_forwarded_through_io_copy,
         "ASYMMETRY (forward = write_all COPY): the FORWARD path (plaintext workload → ciphertext \
          backend, leg-F → leg-B) must COPY the request through a userspace write_all into leg-B's \
          kTLS-TX — the request plaintext marker MUST appear in a traced write(2)/sendto(2) buffer \
-         into a NON-splice-source fd (leg B). It did NOT, which means the forward rode a splice \
-         (the inbound shape) instead of the outbound copy. strace summary:\n{}",
+         issued by a THREAD OF THE TEST PROCESS (the agent's forward pump). It did NOT (agent \
+         marker writes = {}), which means the forward rode a splice (the inbound shape) instead of \
+         the outbound copy. strace summary:\n{}",
+        trace.agent_marker_writes,
         trace.summary()
+    );
+
+    // ----------------------------------------------------------------
+    // FALSIFICATION of the FORWARD oracle (the load-bearing S1 re-validation).
+    //
+    // The prior cycle's "invert assert!(flag)" litmus only proved the flag toggles —
+    // NOT that the AGENT sets it (the netns client's plaintext send sets it too). The
+    // genuine falsification HOLDS the netns client's plaintext send CONSTANT and shows
+    // the oracle now tracks the AGENT:
+    //
+    //   (a) the netns client's marker-carrying sendto DOES exist in the trace — it is
+    //       captured under `strace -f` and is the EXCLUDED population; and
+    //   (b) re-running the SAME parse with the test thread group REMOVED (i.e. as if
+    //       the agent's pump threads were not in the test process) drops the
+    //       agent-attributed forward-copy count to ZERO — while the client's
+    //       (excluded) marker send still exists. So it is the AGENT's write, not the
+    //       client's, that flips the flag.
+    //
+    // (a) is satisfied because the round-trip completed (the client necessarily sent
+    // the request plaintext); (b) is demonstrated by re-parsing against the EMPTY
+    // thread group: with no TID in the set, every marker write is excluded and the
+    // agent count is zero.
+    let empty_tg: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+    let agent_excluded = TraceFindings::parse(&raw_trace, &empty_tg);
+    assert_eq!(
+        agent_excluded.agent_marker_writes,
+        0,
+        "FALSIFICATION (forward oracle tracks the AGENT): with the test thread group REMOVED, the \
+         agent-attributed forward-copy count MUST drop to zero — proving the live flag was set by \
+         an in-tgid (agent) TID, not by the netns client. Got {} agent marker writes against the \
+         empty thread group. summary:\n{}",
+        agent_excluded.agent_marker_writes,
+        agent_excluded.summary()
+    );
+    assert!(
+        agent_excluded.excluded_marker_writes > 0,
+        "FALSIFICATION (the netns client's plaintext send is held CONSTANT and PRESENT): the \
+         workload client's own marker-carrying sendto MUST exist in the trace (it sent the request \
+         plaintext) — yet it is EXCLUDED from the forward oracle. Got {} excluded marker writes; if \
+         zero, the client's send was not captured and the held-constant premise of the \
+         falsification is unmet. summary:\n{}",
+        agent_excluded.excluded_marker_writes,
+        agent_excluded.summary()
+    );
+    eprintln!(
+        "[05-03] FALSIFICATION OK: forward oracle tracks the AGENT — live agent_marker_writes={} \
+         (flag set by an in-tgid TID); with the thread group removed agent_marker_writes drops to \
+         0 while the client's excluded marker send persists (excluded_marker_writes={}). The \
+         client's identical plaintext send canNOT satisfy the oracle.",
+        trace.agent_marker_writes, agent_excluded.excluded_marker_writes
     );
 
     eprintln!(
         "[05-03] VERDICT: WORKS — OUTBOUND enforce-substrate per-direction asymmetry validated on \
          kernel {kr}: FORWARD (workload → backend, leg-F → leg-B) is a write_all COPY (request \
-         plaintext seen in a write/sendto into the kTLS-TX leg), RETURN (backend → workload, leg-B \
-         → leg-F) is a splice (>=1 splice(2) out of leg-B's kTLS-RX). Encryption asserted (0x17 \
-         both directions, no cleartext on the leg-B wire). Authn-only honoured (expected_svid None \
-         on the resolved arm; no intended-peer protection claim, #178)."
+         plaintext seen in a write/sendto into the kTLS-TX leg, ATTRIBUTED TO THE AGENT's pump \
+         thread — the netns client's identical send is excluded), RETURN (backend → workload, \
+         leg-B → leg-F) is a splice pinned to the leg-B source fd (>=1 splice(2) out of leg-B's \
+         kTLS-RX). Encryption asserted (0x17 both directions, no cleartext on the leg-B wire). \
+         Authn-only honoured (expected_svid None on the resolved arm; no intended-peer protection \
+         claim, #178)."
     );
 
     // Teardown: drop the production outbound intercept (removes the egress rule),
@@ -1304,7 +1407,18 @@ impl StraceProbe {
 
     /// Stop strace (SIGTERM → it detaches cleanly and flushes the log), read the
     /// captured trace, and parse it for the substrate asymmetry evidence.
-    fn detach_and_read(&mut self) -> TraceFindings {
+    ///
+    /// `test_thread_group` is the union of the test process's own thread TIDs sampled
+    /// WHILE the pumps were live — it is what attributes a marker-carrying write to
+    /// the agent vs the netns client (S1). See `TidSampler`.
+    /// Returns `(findings, raw_trace)`. The raw trace is returned so the caller can
+    /// RE-PARSE it against a different thread group for the S1 falsification (proving
+    /// the live flag was set by an in-tgid agent TID, not the netns client) without
+    /// re-reading the on-disk file (which `Drop` removes).
+    fn detach_and_read(
+        &mut self,
+        test_thread_group: &std::collections::BTreeSet<i32>,
+    ) -> (TraceFindings, String) {
         // Let the steady-state round-trip's last records flush, then detach.
         std::thread::sleep(Duration::from_millis(300));
         if let Some(mut child) = self.child.take() {
@@ -1319,13 +1433,62 @@ impl StraceProbe {
         // Diagnostic dump of the agent's splice lines so a return-mechanism mismatch
         // is debuggable from the captured nextest output.
         for line in raw.lines() {
-            let body = strip_strace_pid_prefix(line);
+            let (_tid, body) = split_strace_tid_prefix(line);
             if body.starts_with("splice(") {
                 let head: String = body.chars().take(80).collect();
                 eprintln!("STRACE: {head}");
             }
         }
-        TraceFindings::parse(&raw)
+        let findings = TraceFindings::parse(&raw, test_thread_group);
+        (findings, raw)
+    }
+}
+
+/// Background sampler that unions the test process's own thread TIDs
+/// (`/proc/self/task`) on a tight loop WHILE the agent's pumps are live, so even a
+/// short-lived pump thread that has already exited by `detach_and_read` is captured.
+/// The agent's `std::thread::spawn` pump threads are CLONE_THREAD threads of the test
+/// process — their TIDs land in this set; the netns `python3` client is a separate
+/// process whose TID never does. This set is the attribution oracle for the forward
+/// copy (S1): a marker-carrying write from a TID NOT in this set is the workload's
+/// own send, excluded.
+struct TidSampler {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<std::collections::BTreeSet<i32>>>,
+}
+
+impl TidSampler {
+    fn start() -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || -> std::collections::BTreeSet<i32> {
+            let mut tids: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
+            // Always include the sampler's own snapshot at least once, even if the
+            // round-trip is fast.
+            loop {
+                if let Ok(entries) = std::fs::read_dir("/proc/self/task") {
+                    for e in entries.flatten() {
+                        if let Some(t) = e.file_name().to_str().and_then(|s| s.parse::<i32>().ok())
+                        {
+                            tids.insert(t);
+                        }
+                    }
+                }
+                if stop_thread.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            tids
+        });
+        Self { stop, handle: Some(handle) }
+    }
+
+    /// Stop sampling and return the union of every TID observed in the test's thread
+    /// group while the pumps ran.
+    fn stop_and_collect(mut self) -> std::collections::BTreeSet<i32> {
+        self.stop.store(true, Ordering::SeqCst);
+        self.handle.take().expect("tid-sampler handle").join().expect("tid-sampler join")
     }
 }
 
@@ -1343,57 +1506,98 @@ impl Drop for StraceProbe {
 struct TraceFindings {
     /// `splice(2)` was used (the RETURN zero-copy decrypt pump, leg-B → leg-F).
     splice_calls: usize,
+    /// The set of recovered `splice(2)` SOURCE fds (the return pump splices OUT of
+    /// leg-B's kTLS-RX). Used to PIN the return-half assertion to a real leg-B fd
+    /// (S3) rather than just "some splice happened".
+    splice_src_fds: std::collections::BTreeSet<i32>,
     /// The request plaintext appeared in a traced `write(2)`/`sendto(2)` buffer INTO
-    /// a NON-splice-source fd (leg B, the kTLS-TX leg) — MUST be true (the FORWARD is
-    /// a `read → write_all` COPY; the copied request surfaces in the write buffer).
+    /// leg B (the kTLS-TX leg) issued BY A THREAD OF THE TEST PROCESS — the AGENT's
+    /// forward pump. MUST be true (the FORWARD is a `read → write_all` COPY; the
+    /// copied request surfaces in the agent's own write buffer). The thread-group
+    /// filter is what makes this attribute to the agent and NOT to the netns client.
     request_forwarded_through_io_copy: bool,
+    /// The count of marker-carrying writes attributed to the AGENT (a TID in the test
+    /// thread group). ≥1 is the positive forward-copy signal.
+    agent_marker_writes: usize,
+    /// The count of marker-carrying writes attributed to a NON-agent TID (the netns
+    /// workload client's own `s.sendall(request)`, captured under `strace -f`). This
+    /// is the EXCLUDED population — it exists in the trace but does NOT flip the
+    /// forward oracle. Tracked so the falsification can prove the filter works: the
+    /// client's send is present yet excluded, and it is the agent's write that flips
+    /// the flag.
+    excluded_marker_writes: usize,
+    /// The DESTINATION fds of the agent's marker-carrying forward writes (leg B, the
+    /// kTLS-TX leg). Leg B is a SINGLE kTLS fd (TX+RX armed), so this is the SAME fd
+    /// the return pump splices OUT of — used to PIN the return-splice source to leg B
+    /// (S3): a return splice whose source is one of these fds is genuinely
+    /// `legB → legF`, not an incidental splice elsewhere.
+    agent_forward_write_dst_fds: std::collections::BTreeSet<i32>,
     write_calls: usize,
     read_calls: usize,
 }
 
 impl TraceFindings {
-    /// A distinctive interior substring of the OUTBOUND request (OUTBOUND_REQUEST).
-    /// Because the FORWARD is a userspace COPY into leg-B's kTLS-TX, this plaintext
-    /// appears in a `write`/`sendto` buffer off the agent's forward pump. It must
-    /// (the forward is a copy, not a splice). Kept in sync with `OUTBOUND_REQUEST`.
-    fn request_marker() -> Vec<u8> {
-        b"forward_copy_marker_workload_to_mesh_legF_to_legB_writeall".to_vec()
+    /// A distinctive interior substring of the OUTBOUND request. Because the FORWARD
+    /// is a userspace COPY into leg-B's kTLS-TX, this plaintext appears in a
+    /// `write`/`sendto` buffer off the agent's forward pump (the forward is a copy,
+    /// not a splice). Derived as a real sub-slice of `OUTBOUND_REQUEST` (S4: a
+    /// `debug_assert!` pins it as an actual substring so silent drift of either the
+    /// request or the marker cannot go unnoticed).
+    fn request_marker() -> &'static [u8] {
+        // The interior bytes after the `OVERDRIVE_0503_OUTBOUND_REQUEST_` prefix
+        // (32 bytes) through end — a real sub-slice of OUTBOUND_REQUEST
+        // (`forward_copy_marker_..._writeall`).
+        let marker = &OUTBOUND_REQUEST[32..];
+        debug_assert!(
+            OUTBOUND_REQUEST.windows(marker.len()).any(|w| w == marker),
+            "request_marker MUST be an actual sub-slice of OUTBOUND_REQUEST (S4 drift guard)"
+        );
+        marker
     }
 
-    fn parse(raw: &str) -> Self {
+    /// Parse the strace log, attributing each marker-carrying write to the AGENT (a
+    /// TID in `test_thread_group`) or to the excluded netns client (any other TID).
+    ///
+    /// `test_thread_group` is the union of `/proc/self/task` TIDs sampled WHILE the
+    /// agent's pumps were live — the agent's `std::thread::spawn` pump threads are
+    /// CLONE_THREAD threads of the test process, so their TIDs are in this set; the
+    /// netns `python3` client is a separate process whose TID is not.
+    fn parse(raw: &str, test_thread_group: &std::collections::BTreeSet<i32>) -> Self {
         let mut splice_calls = 0usize;
         let mut write_calls = 0usize;
         let mut read_calls = 0usize;
-        let mut request_forwarded_through_io_copy = false;
+        let mut agent_marker_writes = 0usize;
+        let mut excluded_marker_writes = 0usize;
+        let mut agent_forward_write_dst_fds: std::collections::BTreeSet<i32> =
+            std::collections::BTreeSet::new();
 
         // `-xx` renders buffers as `\xHH\xHH...`; convert the marker to that hex form
         // so a substring match against the raw line finds the plaintext regardless of
         // where strace truncated the buffer or split it across records.
-        let req_hex = to_strace_hex(&Self::request_marker());
+        let req_hex = to_strace_hex(Self::request_marker());
 
         // The agent's pumps' splice SOURCE fds — `splice(SRC, NULL, DST, NULL, len,
-        // flags)`. Leg B's kTLS-RX is the return-splice SOURCE; leg F is the forward
-        // read source but NOT a splice source (the forward is read→write_all, not a
-        // splice). Collecting splice sources lets the forward-copy check ISOLATE the
-        // agent's FORWARD write into the kTLS-TX leg (a NON-splice-source dst) from
-        // any incidental write to a splice-source fd, and isolates the agent's own
-        // pumps from the in-process mesh-peer thread's TLS writes (a different socket
-        // fd, never a splice source of the agent's pumps).
+        // flags)`. Leg B is a SINGLE kTLS fd (TX+RX armed on the same fd,
+        // mtls/outbound.rs:111): it is the return-`splice` SOURCE and ALSO the
+        // forward-`write_all` DESTINATION. Collecting splice sources serves two ends:
+        // (a) S3 — PIN the return-half assertion to a real recovered leg-B source fd;
+        // (b) the forward-copy parse-order invariant below.
         let mut splice_src_fds: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
 
         for line in raw.lines() {
-            // strace `-f` prefixes each line with the traced thread's PID then a
-            // space: `<pid> syscall(args) = ret`, with blocking calls split as
-            // `... <unfinished ...>` / `<... syscall resumed> ...`. Strip the PID
-            // prefix and the `<... resumed>` marker so the buffer content on either
-            // fragment is matched. Classify by the leading syscall-name token.
+            // strace `-f` prefixes each line with the traced thread's TID then a
+            // space: `<tid> syscall(args) = ret`, with blocking calls split as
+            // `... <unfinished ...>` / `<... syscall resumed> ...`. Recover the TID
+            // (for thread-group attribution) AND the body (syscall + args). Classify
+            // by the leading syscall-name token.
             //
             // The agent's FORWARD pump COPIES the request via `read(legF) →
             // write_all(legB)`; leg B is kTLS-TX-armed, so the request plaintext
             // surfaces in a `write`/`sendto(legB, <request-plaintext>)` buffer — the
             // copy-through-userspace SIGNATURE of the forward direction. The RETURN
-            // pump is `splice` out of leg-B's kTLS-RX.
-            let body = strip_strace_pid_prefix(line);
+            // pump is `splice` out of leg-B's kTLS-RX. The netns client ALSO sends the
+            // request plaintext, but from a non-agent TID — excluded below.
+            let (tid, body) = split_strace_tid_prefix(line);
             let is_resume = body.starts_with("<...");
             let names = |n: &str| body.starts_with(n) || (is_resume && body.contains(n));
             let carries_req = body.contains(&req_hex);
@@ -1405,41 +1609,95 @@ impl TraceFindings {
                 }
             } else if names("sendto(") || names("write(") {
                 write_calls += 1;
-                // A request marker carried by a `write`/`sendto` INTO a fd that is NOT
-                // a splice source (i.e. leg B, the agent's kTLS-TX forward dst) is the
-                // FORWARD COPY signature — the agent copied the request through
-                // userspace into the kTLS-TX leg. A write to a splice-source fd would
-                // not be the forward copy (and the forward dst is never a splice
-                // source: the forward writes, it does not splice).
-                if carries_req && syscall_fd(body).is_some_and(|fd| !splice_src_fds.contains(&fd)) {
-                    request_forwarded_through_io_copy = true;
+                if carries_req {
+                    // ATTRIBUTION (S1): a marker-carrying write counts as the FORWARD
+                    // COPY only when its owning TID belongs to the TEST process's
+                    // thread group (the agent's pump threads). The netns workload
+                    // client sends the same plaintext from a SEPARATE process whose
+                    // TID is not in the set — that send is EXCLUDED, so it cannot
+                    // satisfy the forward oracle. This is the structural defense
+                    // against the netns-client confound: the oracle now tracks the
+                    // AGENT, not whoever happens to put the marker on the wire.
+                    //
+                    // (Parse-order note, S2: leg B is a single kTLS fd that is both
+                    // the forward-write dst AND the return-splice source, so in the
+                    // FULL trace leg B *is* a splice source; the forward write into it
+                    // is parsed BEFORE any return splice inserts leg B into
+                    // `splice_src_fds` — causally the request is forwarded before the
+                    // response returns. We therefore do NOT gate the forward write on
+                    // "non-splice-source fd"; the thread-group filter is the real and
+                    // sufficient isolator. The in-process mesh-peer thread writes
+                    // CIPHERTEXT and never carries the plaintext marker, so it cannot
+                    // false-positive here regardless.)
+                    match tid {
+                        Some(t) if test_thread_group.contains(&t) => {
+                            agent_marker_writes += 1;
+                            if let Some(fd) = syscall_fd(body) {
+                                agent_forward_write_dst_fds.insert(fd);
+                            }
+                        }
+                        _ => excluded_marker_writes += 1,
+                    }
                 }
             } else if names("recvfrom(") || names("read(") {
                 read_calls += 1;
             }
         }
 
-        Self { splice_calls, request_forwarded_through_io_copy, write_calls, read_calls }
+        Self {
+            splice_calls,
+            splice_src_fds,
+            request_forwarded_through_io_copy: agent_marker_writes > 0,
+            agent_marker_writes,
+            excluded_marker_writes,
+            agent_forward_write_dst_fds,
+            write_calls,
+            read_calls,
+        }
+    }
+
+    /// True iff ≥1 recovered `splice` SOURCE fd is a leg-B fd the agent's forward pump
+    /// wrote the request into (leg B is a single TX+RX kTLS fd, so forward-write-dst
+    /// == return-splice-source). PINS the return half to `legB → legF` (S3) rather
+    /// than admitting any incidental splice. `None`-safe: empty when neither set was
+    /// populated.
+    fn return_splice_source_is_legb(&self) -> bool {
+        self.splice_src_fds.intersection(&self.agent_forward_write_dst_fds).next().is_some()
     }
 
     fn summary(&self) -> String {
         format!(
-            "splice={} write={} read={} request_copy_seen={}",
+            "splice={} splice_srcs={:?} fwd_write_dsts={:?} write={} read={} \
+             agent_marker_writes={} excluded_marker_writes={} request_copy_seen={} \
+             return_splice_src_is_legb={}",
             self.splice_calls,
+            self.splice_src_fds,
+            self.agent_forward_write_dst_fds,
             self.write_calls,
             self.read_calls,
+            self.agent_marker_writes,
+            self.excluded_marker_writes,
             self.request_forwarded_through_io_copy,
+            self.return_splice_source_is_legb(),
         )
     }
 }
 
-/// Strip strace's leading `<pid> ` prefix (present under `-f`) so the syscall name is
-/// at the start of the returned slice. A line with no leading-digit prefix is
-/// returned unchanged.
-fn strip_strace_pid_prefix(line: &str) -> &str {
+/// Split strace's leading `<tid> ` prefix (present under `-f`) into `(Some(tid),
+/// body)` where `body` begins at the syscall name. A line with no leading-digit
+/// prefix returns `(None, trimmed_line)`. The TID is the traced THREAD's id — for a
+/// CLONE_THREAD thread it equals neither the leader pid nor a child process pid, so
+/// it cleanly distinguishes the agent's in-process pump threads (members of
+/// `/proc/self/task`) from the netns client's separate-process descendant.
+fn split_strace_tid_prefix(line: &str) -> (Option<i32>, &str) {
     let trimmed = line.trim_start();
-    let rest = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
-    if rest.len() < trimmed.len() { rest.trim_start() } else { trimmed }
+    let digits_end = trimmed.find(|c: char| !c.is_ascii_digit()).unwrap_or(trimmed.len());
+    if digits_end == 0 {
+        return (None, trimmed);
+    }
+    let tid = trimmed[..digits_end].parse::<i32>().ok();
+    let rest = trimmed[digits_end..].trim_start();
+    (tid, rest)
 }
 
 /// The first-argument fd of a `syscall(FD, ...)` line (e.g. `write(26, ...)` →
