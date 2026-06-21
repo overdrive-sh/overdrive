@@ -1331,6 +1331,174 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-21T12:40:46Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T12:42:54Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T14:20:57Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: authored Tier-3 AT dns_returned_service_backends_addr_is_recognized_by_mtls_resolve driving production seams (egress nft-TPROXY->leg-F->accept_outbound_and_recover_orig_dst getsockname recovery->SimMtlsResolve.resolve). Single-source invariant: getsockname-recovered orig_dst==B==addr MtlsResolve recognizes (Mesh{addr:B,expected_svid:None}). Falsifiability litmus (NOT committed): feeding resolve a wrong addr (port+1) instead of recovered orig_dst goes RED (left 18822 vs right 18821) - the single-source assertion is genuinely load-bearing, not fixture theater. Production seams pre-existed (03-02 getsockname, 01-02 SimMtlsResolve, 02-03 resolv.conf injection) per tdd-methodology 'already implemented from WS' case; the AT proves cross-seam consistency.",
+      "t": "2026-06-21T14:26:55Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS: authored kernel-free default-lane companion single_source_invariant_holds_kernel_free_via_sim_mtls_resolve in the AT file - scripts B->Mesh{addr:B}, feeds the SAME B as the (stubbed-capture) orig_dst, asserts resolve recognizes it byte-identically with expected_svid None (v1 authn-only). Pairs with the Tier-3 AT as the cheap in-binary reproduction. The canonical cheap reproduction sim_mtls_resolve_returns_scripted_arm_per_orig_dst (overdrive-sim/src/adapters/mtls_resolve.rs, default lane) is cited in the AT module-doc and verified still does exactly script-B/feed-B/assert-Mesh{addr:B}. No NEW pure sub-logic warranted a separate unit test - all production seams (getsockname recovery, MtlsResolve, resolv.conf format) pre-existed.",
+      "t": "2026-06-21T14:27:45Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: Tier-3 AT + kernel-free companion both green under Lima (kernel 7.0.0-22-generic); full overdrive-worker integration suite 169 passed/0 failed/0 skipped (no regression); clippy -D warnings clean (added clippy::format_collect module allow with rationale matching 05-01, in-scope fix). Oracle 1 getsockname-recovered orig_dst==B (10.200.0.1:18821); Oracle 2 SimMtlsResolve.resolve(recovered)==Mesh{addr:B,expected_svid:None} byte-identical (single-source invariant); Oracle 3 in-netns /etc/resolv.conf carries 'nameserver 10.100.0.53' (02-03 injection wired, #61 responder stubbed). TEST-ONLY step: no production src touched (resolv_conf_contents NOT importable - overdrive-control-plane depends on overdrive-worker, cycle; asserted the observable D-TME-9 nameserver line format directly). uname -r recorded.",
+      "t": "2026-06-21T14:29:39Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: committed fd2a2457 - exactly the two files_to_modify (name_resolve_enforce_consistency.rs NEW 690 lines + integration.rs mod declaration, 703 insertions). Lefthook pipeline green: fmt + doctest + clippy + nextest-affected (1702 passed/17 skipped). Focused-subset discipline: staged only the two test files via git-add (project forbids the stash workflow); unrelated review .md (04-01/04-02/04-04) + execution-log.json correctly excluded from the commit. TEST-ONLY step: no production src touched, so per-step mutation run N/A per testing.md.",
+      "t": "2026-06-21T14:32:51Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T14:33:58Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T14:33:58Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T14:33:58Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T14:33:58Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T15:48:04Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T15:56:39Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 wire-observable coverage-restoration; no unit-test layer \u2014 the directional substrate asymmetry (forward write_all copy / return splice) is only observable through the real enforce path under strace on the real kernel",
+      "t": "2026-06-21T15:56:40Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T15:56:40Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T15:59:05Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T16:20:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T16:25:56Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 wire-observable coverage-restoration; no unit-test layer \u2014 directional asymmetry only observable through the real enforce path",
+      "t": "2026-06-21T16:25:56Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T16:26:23Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T16:29:10Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T17:17:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T17:17:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T17:17:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T17:17:38Z"
     }
   ]
 }

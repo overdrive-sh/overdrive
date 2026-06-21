@@ -44,8 +44,10 @@
 //! pump threads. The test process runs the production accept loop in-process, so the
 //! pump threads (`PumpHandle::spawn_encrypt`/`spawn_decrypt` → `std::thread::spawn`)
 //! are CLONE_THREAD threads of THIS process — they share the test's thread group
-//! (tgid). The netns workload client, by contrast, is a SEPARATE process
-//! (`ip netns exec … python3`, a distinct tgid). Rust `TcpStream` `read`/`write_all`
+//! (tgid), and their TID is recovered race-free from the `clone`/`clone3` lines in
+//! the strace log (see "Thread-group isolation" below). The netns workload client, by
+//! contrast, is a SEPARATE process (`ip netns exec … python3`, a distinct tgid, a
+//! `clone` WITHOUT CLONE_THREAD). Rust `TcpStream` `read`/`write_all`
 //! lower to `recvfrom`/`sendto` (or `read`/`write`); the return decrypt pump issues
 //! `splice(2)`. So:
 //!   - the FORWARD COPY surfaces as the request plaintext appearing in a `write(2)`/
@@ -56,19 +58,30 @@
 //!     `splice(legB → legF)`).
 //! These are REAL captured syscalls, never the adapter's own bookkeeping.
 //!
-//! ### Thread-group isolation — the FORWARD oracle MUST attribute to the agent
+//! ### Thread-group isolation — the FORWARD oracle MUST attribute to the agent (RACE-FREE)
 //!
 //! `strace -f` follows the netns client's forked `python3` descendant, whose own
 //! `s.sendall(OUTBOUND_REQUEST)` lowers to a `sendto(<plaintext incl. marker>)` —
 //! so the request marker appears in the trace on BOTH the agent's forward-pump write
 //! AND the workload client's send. The two are distinguished by the leading TID
 //! `strace -f` prefixes on every line: the agent's pump threads' TIDs are members of
-//! this process's thread group (enumerated from `/proc/self/task`, sampled WHILE the
-//! pumps are live); the netns `python3`'s TID is not. The forward-copy oracle counts
-//! a marker-carrying write ONLY when its owning TID belongs to the test's thread
-//! group — so the workload's identical plaintext send CANNOT satisfy it. Without this
-//! filter the oracle is confounded (the client's send alone flips the flag regardless
-//! of the agent's pump strategy); WITH it the oracle proves the AGENT copied.
+//! this process's thread group; the netns `python3`'s TID is a separate-process fork.
+//!
+//! The test's thread group is derived RACE-FREE (NOT by live polling — a 15 ms
+//! `/proc/self/task` poll races a sub-15 ms pump thread and misses it ~29% of runs).
+//! Two combined sources: (1) a SINGLE `/proc/self/task` snapshot taken at strace-attach
+//! time — race-free for every PRE-EXISTING thread (the tokio runtime + accept-loop
+//! threads, all alive at that instant); (2) the transitive `CLONE_THREAD` closure
+//! parsed from the strace log itself — every thread created AFTER attach emits a
+//! `clone`/`clone3({flags=...CLONE_THREAD...}) = <child_tid>` line whose parent TID is
+//! already in the set, so the closure reaches the short-lived forward pump regardless
+//! of how briefly it lived (its clone line is PERMANENTLY in the log). A process fork
+//! (the netns client) is a `clone` WITHOUT `CLONE_THREAD` → never added → deterministically
+//! excluded. The forward-copy oracle counts a marker-carrying write ONLY when its owning
+//! TID belongs to this race-free thread group — so the workload's identical plaintext
+//! send CANNOT satisfy it. Without this filter the oracle is confounded (the client's
+//! send alone flips the flag regardless of the agent's pump strategy); WITH it the
+//! oracle proves the AGENT copied.
 //!
 //! ## Driven through the PRODUCTION composition root (port-to-port / TBU defense)
 //!
@@ -238,6 +251,43 @@ impl Drop for KernelStateLock {
 fn is_root() -> bool {
     // SAFETY: getuid is always safe; takes no args and never fails.
     unsafe { libc::getuid() == 0 }
+}
+
+/// PANIC-SAFE teardown (F3). Owns the node-global kernel-state scrub + the production
+/// worker stop, run from `Drop` so a panicking assertion CANNOT leak the
+/// `overdrive-mtls` nft table, the test netns/veth/lo-addr, or the fwmark rule/route,
+/// and cannot hang 120 s on the leaked production `accept_loop` (`stop_alloc` removes
+/// the egress rule and stops the loop). Mirrors the `AllocCleanup` RAII discipline in
+/// `.claude/rules/testing.md` § "Leaked workload cgroups". Declared AFTER
+/// `KernelStateLock` at the call site so it drops FIRST (Rust drops in reverse
+/// declaration order) — the scrub runs while the cross-process lock is still held.
+struct TopologyGuard {
+    /// The production worker whose alloc must be stopped (egress rule removed,
+    /// accept_loop halted). `None` once stopped, so a manual end-of-test stop and the
+    /// Drop-path stop do not double-fire.
+    worker: Option<Arc<MtlsInterceptWorker>>,
+    client_alloc: AllocationId,
+}
+
+impl TopologyGuard {
+    fn new(worker: Arc<MtlsInterceptWorker>, client_alloc: AllocationId) -> Self {
+        Self { worker: Some(worker), client_alloc }
+    }
+}
+
+impl Drop for TopologyGuard {
+    fn drop(&mut self) {
+        // Stop the production alloc FIRST (removes the egress rule + halts the
+        // accept_loop, so the test process does not hang on the leaked loop), then
+        // scrub the per-test topology and the node-global shared infra. Best-effort:
+        // every call tolerates "nothing to clean" so a partial-setup panic still
+        // converges the kernel to clean.
+        if let Some(worker) = self.worker.take() {
+            worker.stop_alloc(&self.client_alloc);
+        }
+        teardown_topology();
+        clean_shared_infra();
+    }
 }
 
 // ============================================================================
@@ -1135,6 +1185,13 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
         "PRODUCTION start_alloc must bind leg-F + install the egress rule + spawn accept_loop",
     );
 
+    // PANIC-SAFE teardown (F3): from here on, ANY panicking assertion scrubs the
+    // node-global kernel state + stops the production alloc via this guard's Drop —
+    // no leaked nft table / netns / lo-addr / fwmark rule, no 120 s hang on the
+    // leaked accept_loop. Declared AFTER `_kernel_lock` so it drops FIRST (scrub runs
+    // while the cross-process lock is still held).
+    let topology_guard = TopologyGuard::new(Arc::clone(&worker), pki.client_alloc.clone());
+
     // The PRODUCTION install appended the `iifname VETH_H` egress rule (observable
     // kernel side effect; the worker — not the fixture — installed it).
     let dump = nft_dump_table();
@@ -1157,17 +1214,16 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     // is captured. Trace `splice` (the return decrypt pump signature) +
     // `sendto`/`write` (the forward COPY's write side INTO leg B's kTLS-TX — where
     // the request plaintext appears) + `recvfrom`/`read` (so the forward read off
-    // leg F is visible and the splice sources can be isolated). `-s 512 -xx` dumps
-    // the read/write buffers so the request plaintext can be located in a `write`/
-    // `sendto` buffer (the forward-copy signature).
-    let mut syscalls = StraceProbe::attach_self(&["splice", "sendto", "write", "recvfrom", "read"]);
-
-    // Sample the test process's own thread group WHILE the agent's pumps run, so the
-    // forward-copy oracle can attribute a marker-carrying write to the AGENT (an
-    // in-tgid TID) and EXCLUDE the netns client's identical plaintext send (a
-    // separate-process TID). Started before the dial so every pump thread's TID is
-    // observed (S1).
-    let tid_sampler = TidSampler::start();
+    // leg F is visible and the splice sources can be isolated) + `clone`/`clone3`
+    // (the RACE-FREE thread-group closure: every post-attach CLONE_THREAD child is
+    // recovered from the log, so the short-lived forward pump's TID is attributed
+    // deterministically — see `TraceFindings::thread_group_closure`). `-s 512 -xx`
+    // dumps the read/write buffers so the request plaintext can be located in a
+    // `write`/`sendto` buffer (the forward-copy signature). The attach also snapshots
+    // `/proc/self/task` ONCE (the closure seed of pre-existing threads).
+    let mut syscalls = StraceProbe::attach_self(&[
+        "splice", "sendto", "write", "recvfrom", "read", "clone", "clone3",
+    ]);
 
     // The workload (inside the netns) dials the mesh backend, sends the request,
     // reads the response. Its egress ingresses vethH → PREROUTING → TPROXY →
@@ -1183,10 +1239,11 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     let client_out = mesh_client.join().expect("outbound mesh client thread");
     let client_read = client_out.stdout.clone();
     let mesh_request_ok = mesh_peer.join().expect("mesh peer thread");
-    // Collect the test's thread group BEFORE detaching strace so the pump threads are
-    // still captured, then parse the trace with that attribution oracle.
-    let test_thread_group = tid_sampler.stop_and_collect();
-    let (trace, raw_trace) = syscalls.detach_and_read(&test_thread_group);
+    // Detach strace and parse. The test's thread group is derived RACE-FREE inside
+    // `detach_and_read` (attach-time `/proc/self/task` seed ∪ CLONE_THREAD closure
+    // parsed from the log) — no live sampling, so the short-lived forward pump cannot
+    // be missed. Returns the recovered thread group for the falsification re-parse.
+    let (trace, raw_trace, test_thread_group) = syscalls.detach_and_read();
     let scan = outbound_wire.stop_and_scan(OUTBOUND_REQUEST, OUTBOUND_RESPONSE);
 
     eprintln!(
@@ -1298,53 +1355,81 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
     );
 
     // ----------------------------------------------------------------
-    // FALSIFICATION of the FORWARD oracle (the load-bearing S1 re-validation).
+    // FALSIFICATION of the FORWARD oracle (the load-bearing S1 re-validation, F4).
     //
-    // The prior cycle's "invert assert!(flag)" litmus only proved the flag toggles —
-    // NOT that the AGENT sets it (the netns client's plaintext send sets it too). The
-    // genuine falsification HOLDS the netns client's plaintext send CONSTANT and shows
-    // the oracle now tracks the AGENT:
+    // The genuine falsification HOLDS the netns client's plaintext send CONSTANT and
+    // varies ONLY the attribution partition, proving the thread-group SET — not the
+    // bytes on the wire — is the discriminator:
     //
-    //   (a) the netns client's marker-carrying sendto DOES exist in the trace — it is
-    //       captured under `strace -f` and is the EXCLUDED population; and
-    //   (b) re-running the SAME parse with the test thread group REMOVED (i.e. as if
-    //       the agent's pump threads were not in the test process) drops the
-    //       agent-attributed forward-copy count to ZERO — while the client's
-    //       (excluded) marker send still exists. So it is the AGENT's write, not the
-    //       client's, that flips the flag.
+    //   (a) under the REAL race-free partition, the netns client's marker-carrying
+    //       sendto exists in the trace (captured under `strace -f`) and is the EXCLUDED
+    //       population — `excluded_marker_writes ≥ 1`, with the client's TID(s)
+    //       recovered FROM the trace (a separate-process fork, no CLONE_THREAD, so
+    //       never in the closure). This is the client held CONSTANT.
+    //   (b) re-parse with those SAME client TIDs ADDED to the attribution set. The
+    //       identical client writes — same bytes, same lines — now flip to
+    //       agent-attributed: `agent_marker_writes` rises by EXACTLY the excluded
+    //       count, and `excluded_marker_writes` drops to zero. Nothing about the wire
+    //       changed; only the partition did. So it is the PARTITION that attributes a
+    //       marker write to the agent vs the client — the client's identical plaintext
+    //       send is excluded under the real partition precisely because its TID is not
+    //       in the test's thread group, NOT because of anything in the bytes.
     //
-    // (a) is satisfied because the round-trip completed (the client necessarily sent
-    // the request plaintext); (b) is demonstrated by re-parsing against the EMPTY
-    // thread group: with no TID in the set, every marker write is excluded and the
-    // agent count is zero.
-    let empty_tg: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
-    let agent_excluded = TraceFindings::parse(&raw_trace, &empty_tg);
-    assert_eq!(
-        agent_excluded.agent_marker_writes,
-        0,
-        "FALSIFICATION (forward oracle tracks the AGENT): with the test thread group REMOVED, the \
-         agent-attributed forward-copy count MUST drop to zero — proving the live flag was set by \
-         an in-tgid (agent) TID, not by the netns client. Got {} agent marker writes against the \
-         empty thread group. summary:\n{}",
-        agent_excluded.agent_marker_writes,
-        agent_excluded.summary()
+    // This is race-free (it re-parses the captured log; no live sampling) and runs on
+    // every PASS path (the live forward assertion above must already have passed to
+    // reach here, so the client necessarily sent the request plaintext).
+    assert!(
+        trace.excluded_marker_writes >= 1,
+        "FALSIFICATION (client held CONSTANT, present-and-excluded): the netns workload client's \
+         own marker-carrying sendto MUST exist in the trace (it sent the request plaintext) yet be \
+         EXCLUDED under the race-free partition — got {} excluded marker writes. If zero, the \
+         client's send was not captured and the held-constant premise is unmet. summary:\n{}",
+        trace.excluded_marker_writes,
+        trace.summary()
     );
     assert!(
-        agent_excluded.excluded_marker_writes > 0,
-        "FALSIFICATION (the netns client's plaintext send is held CONSTANT and PRESENT): the \
-         workload client's own marker-carrying sendto MUST exist in the trace (it sent the request \
-         plaintext) — yet it is EXCLUDED from the forward oracle. Got {} excluded marker writes; if \
-         zero, the client's send was not captured and the held-constant premise of the \
-         falsification is unmet. summary:\n{}",
-        agent_excluded.excluded_marker_writes,
-        agent_excluded.summary()
+        !trace.excluded_marker_write_tids.is_empty(),
+        "FALSIFICATION: the EXCLUDED client TID(s) must be recoverable from the trace to vary the \
+         attribution against them. summary:\n{}",
+        trace.summary()
+    );
+    // Vary ONLY the partition: add the client's recovered TIDs to the thread group
+    // (`test_thread_group` is no longer needed after this, so move it).
+    let mut group_with_client = test_thread_group;
+    group_with_client.extend(trace.excluded_marker_write_tids.iter().copied());
+    let reattributed = TraceFindings::parse(&raw_trace, &group_with_client);
+    assert_eq!(
+        reattributed.agent_marker_writes,
+        trace.agent_marker_writes + trace.excluded_marker_writes,
+        "FALSIFICATION (vary the partition, hold the client constant): adding the client's recovered \
+         TID(s) to the attribution set MUST re-attribute its EXACT same marker writes to the \
+         'agent' count (rising by the excluded count) — the bytes did not change, only the \
+         partition did, proving the thread-group SET is the discriminator. Got agent={} (expected \
+         {}+{}). summary (re-parsed):\n{}",
+        reattributed.agent_marker_writes,
+        trace.agent_marker_writes,
+        trace.excluded_marker_writes,
+        reattributed.summary()
+    );
+    assert_eq!(
+        reattributed.excluded_marker_writes,
+        0,
+        "FALSIFICATION: once the client's TID(s) are in the attribution set, NO marker write may \
+         remain excluded — every marker-carrying write is now attributed. Got {} still excluded. \
+         summary:\n{}",
+        reattributed.excluded_marker_writes,
+        reattributed.summary()
     );
     eprintln!(
-        "[05-03] FALSIFICATION OK: forward oracle tracks the AGENT — live agent_marker_writes={} \
-         (flag set by an in-tgid TID); with the thread group removed agent_marker_writes drops to \
-         0 while the client's excluded marker send persists (excluded_marker_writes={}). The \
-         client's identical plaintext send canNOT satisfy the oracle.",
-        trace.agent_marker_writes, agent_excluded.excluded_marker_writes
+        "[05-03] FALSIFICATION OK (F4): forward oracle keys on the PARTITION, not the bytes — under \
+         the race-free partition agent_marker_writes={} / excluded_marker_writes={} (client TIDs \
+         {:?}); ADDING the client's TIDs re-attributes its identical writes to agent={} \
+         (excluded→0). The client's plaintext send is excluded ONLY because its TID is a \
+         separate-process fork, never in the CLONE_THREAD closure.",
+        trace.agent_marker_writes,
+        trace.excluded_marker_writes,
+        trace.excluded_marker_write_tids,
+        reattributed.agent_marker_writes,
     );
 
     eprintln!(
@@ -1358,11 +1443,11 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
          claim, #178)."
     );
 
-    // Teardown: drop the production outbound intercept (removes the egress rule),
-    // then scrub the shared infra + topology so a re-run reproduces.
-    worker.stop_alloc(&pki.client_alloc);
-    teardown_topology();
-    clean_shared_infra();
+    // Teardown is panic-safe (F3): the `TopologyGuard` Drop scrubs the node-global
+    // kernel state + stops the production alloc. Drop it explicitly here on the clean
+    // path so the egress rule / netns / nft state are gone before the function returns
+    // (and the `_kernel_lock` releases). The same Drop runs on the panic path.
+    drop(topology_guard);
 }
 
 // =====================================================================
@@ -1374,17 +1459,34 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
 
 /// A live `strace` attached to this test process (and its threads). Captures the raw
 /// syscall log to a temp file; `detach_and_read` stops it and parses.
+///
+/// `seed_tids` is a SINGLE `/proc/self/task` snapshot taken at attach time — it
+/// captures the *pre-existing* thread group (the tokio runtime + accept-loop threads
+/// alive at the attach instant). Combined with the CLONE_THREAD closure parsed from
+/// the strace log (which captures every thread created AFTER attach, including the
+/// short-lived forward-copy pump), this derives the test's thread group RACE-FREE —
+/// no live polling, so a pump thread shorter-lived than any poll interval cannot be
+/// missed (the prior `TidSampler` 15 ms poll raced sub-15 ms pumps, ~29% miss).
 struct StraceProbe {
     child: Option<Child>,
     out_path: std::path::PathBuf,
+    seed_tids: std::collections::BTreeSet<i32>,
 }
 
 impl StraceProbe {
     /// Attach `strace -f -p <self_pid>` filtered to `syscalls`, dumping read/write
     /// buffers (`-s 512 -xx`) so the request plaintext can be located in a
-    /// `write`/`sendto` buffer (the forward-copy signature). Blocks briefly until
-    /// strace has attached (so the pump syscalls that follow are captured).
+    /// `write`/`sendto` buffer (the forward-copy signature). `syscalls` MUST include
+    /// `clone` + `clone3` (the thread-group-closure seed lines) — see
+    /// `TraceFindings::thread_group_closure`. Blocks briefly until strace has attached
+    /// (so the pump syscalls that follow are captured), then snapshots
+    /// `/proc/self/task` ONCE (the race-free seed of pre-existing threads).
     fn attach_self(syscalls: &[&str]) -> Self {
+        debug_assert!(
+            syscalls.contains(&"clone") && syscalls.contains(&"clone3"),
+            "the strace filter MUST include clone + clone3 — the post-attach CLONE_THREAD \
+             closure (race-free thread-group derivation) is parsed from those lines"
+        );
         let pid = std::process::id();
         let out_path = std::env::temp_dir().join(format!("mtls-outbound-strace-{pid}.log"));
         let _ = std::fs::remove_file(&out_path);
@@ -1402,23 +1504,28 @@ impl StraceProbe {
         // Give strace a moment to attach to every thread before the pumps spawn; a
         // few hundred ms is ample on the Lima VM.
         std::thread::sleep(Duration::from_millis(400));
-        Self { child: Some(child), out_path }
+        // SEED snapshot — taken ONCE, now, AFTER strace has attached and BEFORE the
+        // dial. Every thread alive at this instant (the tokio worker pool, the
+        // accept-loop thread) is captured race-free by this single read. Threads
+        // created AFTER this instant — the forward-copy pump in particular — are
+        // captured instead by the CLONE_THREAD closure parsed from the log, whose
+        // clone line is PERMANENTLY present regardless of how briefly the thread lived.
+        let seed_tids = snapshot_proc_self_task();
+        Self { child: Some(child), out_path, seed_tids }
     }
 
     /// Stop strace (SIGTERM → it detaches cleanly and flushes the log), read the
     /// captured trace, and parse it for the substrate asymmetry evidence.
     ///
-    /// `test_thread_group` is the union of the test process's own thread TIDs sampled
-    /// WHILE the pumps were live — it is what attributes a marker-carrying write to
-    /// the agent vs the netns client (S1). See `TidSampler`.
-    /// Returns `(findings, raw_trace)`. The raw trace is returned so the caller can
-    /// RE-PARSE it against a different thread group for the S1 falsification (proving
-    /// the live flag was set by an in-tgid agent TID, not the netns client) without
-    /// re-reading the on-disk file (which `Drop` removes).
-    fn detach_and_read(
-        &mut self,
-        test_thread_group: &std::collections::BTreeSet<i32>,
-    ) -> (TraceFindings, String) {
+    /// The test's thread group is derived RACE-FREE inside `parse`: the attach-time
+    /// `seed_tids` (pre-existing threads) UNION the transitive CLONE_THREAD closure
+    /// parsed from the log (post-attach threads, incl. the short-lived forward pump).
+    /// Returns `(findings, raw_trace, thread_group)`. The raw trace + the recovered
+    /// thread group are returned so the caller can RE-PARSE against a DIFFERENT
+    /// attribution set for the falsification (proving the live flag was set by an
+    /// in-tgid agent TID, not the netns client) without re-reading the on-disk file
+    /// (which `Drop` removes).
+    fn detach_and_read(&mut self) -> (TraceFindings, String, std::collections::BTreeSet<i32>) {
         // Let the steady-state round-trip's last records flush, then detach.
         std::thread::sleep(Duration::from_millis(300));
         if let Some(mut child) = self.child.take() {
@@ -1439,57 +1546,25 @@ impl StraceProbe {
                 eprintln!("STRACE: {head}");
             }
         }
-        let findings = TraceFindings::parse(&raw, test_thread_group);
-        (findings, raw)
+        // RACE-FREE thread group: seed (pre-existing) ∪ CLONE_THREAD closure (post-attach).
+        let thread_group = TraceFindings::thread_group_closure(&raw, &self.seed_tids);
+        let findings = TraceFindings::parse(&raw, &thread_group);
+        (findings, raw, thread_group)
     }
 }
 
-/// Background sampler that unions the test process's own thread TIDs
-/// (`/proc/self/task`) on a tight loop WHILE the agent's pumps are live, so even a
-/// short-lived pump thread that has already exited by `detach_and_read` is captured.
-/// The agent's `std::thread::spawn` pump threads are CLONE_THREAD threads of the test
-/// process — their TIDs land in this set; the netns `python3` client is a separate
-/// process whose TID never does. This set is the attribution oracle for the forward
-/// copy (S1): a marker-carrying write from a TID NOT in this set is the workload's
-/// own send, excluded.
-struct TidSampler {
-    stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<std::collections::BTreeSet<i32>>>,
-}
-
-impl TidSampler {
-    fn start() -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || -> std::collections::BTreeSet<i32> {
-            let mut tids: std::collections::BTreeSet<i32> = std::collections::BTreeSet::new();
-            // Always include the sampler's own snapshot at least once, even if the
-            // round-trip is fast.
-            loop {
-                if let Ok(entries) = std::fs::read_dir("/proc/self/task") {
-                    for e in entries.flatten() {
-                        if let Some(t) = e.file_name().to_str().and_then(|s| s.parse::<i32>().ok())
-                        {
-                            tids.insert(t);
-                        }
-                    }
-                }
-                if stop_thread.load(Ordering::SeqCst) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(15));
+/// Snapshot the test process's current thread-group TIDs from `/proc/self/task`. A
+/// single read — race-free for every thread alive at the call instant.
+fn snapshot_proc_self_task() -> std::collections::BTreeSet<i32> {
+    let mut tids = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir("/proc/self/task") {
+        for e in entries.flatten() {
+            if let Some(t) = e.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) {
+                tids.insert(t);
             }
-            tids
-        });
-        Self { stop, handle: Some(handle) }
+        }
     }
-
-    /// Stop sampling and return the union of every TID observed in the test's thread
-    /// group while the pumps ran.
-    fn stop_and_collect(mut self) -> std::collections::BTreeSet<i32> {
-        self.stop.store(true, Ordering::SeqCst);
-        self.handle.take().expect("tid-sampler handle").join().expect("tid-sampler join")
-    }
+    tids
 }
 
 impl Drop for StraceProbe {
@@ -1526,6 +1601,13 @@ struct TraceFindings {
     /// client's send is present yet excluded, and it is the agent's write that flips
     /// the flag.
     excluded_marker_writes: usize,
+    /// The TIDs of the EXCLUDED marker-carrying writes (the netns client's send,
+    /// captured under `strace -f` but NOT in the test thread group). The falsification
+    /// (F4) re-parses with these TIDs ADDED to the attribution set and shows the SAME
+    /// client writes then flip to agent-attributed — holding the client's send
+    /// CONSTANT and varying ONLY the partition, proving the thread-group set is the
+    /// discriminator, not the bytes on the wire.
+    excluded_marker_write_tids: std::collections::BTreeSet<i32>,
     /// The DESTINATION fds of the agent's marker-carrying forward writes (leg B, the
     /// kTLS-TX leg). Leg B is a SINGLE kTLS fd (TX+RX armed), so this is the SAME fd
     /// the return pump splices OUT of — used to PIN the return-splice source to leg B
@@ -1555,19 +1637,61 @@ impl TraceFindings {
         marker
     }
 
+    /// Derive the test process's thread group RACE-FREE from `(seed_tids,
+    /// strace_log)`. `seed_tids` is the attach-time `/proc/self/task` snapshot
+    /// (pre-existing threads). The strace log carries every `clone`/`clone3` issued
+    /// AFTER attach; each thread-creating clone (one whose flag set contains
+    /// `CLONE_THREAD`) is emitted by a parent TID (the strace `-f` line prefix) and
+    /// returns the child TID. Seed the closure with `seed_tids`, then add any
+    /// CLONE_THREAD child whose PARENT TID is already in the set, to a fixpoint.
+    ///
+    /// This is the structural defense against the prior `TidSampler` flake: the
+    /// short-lived forward-copy pump is created AFTER attach, so its clone line is
+    /// PERMANENTLY in the log regardless of how briefly it lived — captured by the
+    /// closure. Its parent (a tokio runtime / accept-loop thread) is captured by the
+    /// seed (pre-existing) or by the closure (also post-attach), so the closure
+    /// reaches the pump. A process fork (the netns `ip`/`python3` client) is a `clone`
+    /// WITHOUT `CLONE_THREAD` → never added → deterministically excluded. Pure over
+    /// its inputs; unit-tested against a captured fixture.
+    fn thread_group_closure(
+        raw: &str,
+        seed_tids: &std::collections::BTreeSet<i32>,
+    ) -> std::collections::BTreeSet<i32> {
+        // Collect the post-attach CLONE_THREAD edges: (parent_tid -> child_tid).
+        let edges = clone_thread_edges(raw);
+        let mut group = seed_tids.clone();
+        // Fixpoint: a CLONE_THREAD child whose parent is in the group joins the group;
+        // iterate until no edge adds a new member (a thread can itself spawn threads).
+        loop {
+            let mut added = false;
+            for &(parent, child) in &edges {
+                if group.contains(&parent) && group.insert(child) {
+                    added = true;
+                }
+            }
+            if !added {
+                break;
+            }
+        }
+        group
+    }
+
     /// Parse the strace log, attributing each marker-carrying write to the AGENT (a
     /// TID in `test_thread_group`) or to the excluded netns client (any other TID).
     ///
-    /// `test_thread_group` is the union of `/proc/self/task` TIDs sampled WHILE the
-    /// agent's pumps were live — the agent's `std::thread::spawn` pump threads are
+    /// `test_thread_group` is the RACE-FREE thread group from `thread_group_closure`
+    /// (attach-time seed ∪ CLONE_THREAD closure) — the agent's pump threads are
     /// CLONE_THREAD threads of the test process, so their TIDs are in this set; the
-    /// netns `python3` client is a separate process whose TID is not.
+    /// netns `python3` client is a separate-process fork (no CLONE_THREAD) whose TID
+    /// is not.
     fn parse(raw: &str, test_thread_group: &std::collections::BTreeSet<i32>) -> Self {
         let mut splice_calls = 0usize;
         let mut write_calls = 0usize;
         let mut read_calls = 0usize;
         let mut agent_marker_writes = 0usize;
         let mut excluded_marker_writes = 0usize;
+        let mut excluded_marker_write_tids: std::collections::BTreeSet<i32> =
+            std::collections::BTreeSet::new();
         let mut agent_forward_write_dst_fds: std::collections::BTreeSet<i32> =
             std::collections::BTreeSet::new();
 
@@ -1636,7 +1760,12 @@ impl TraceFindings {
                                 agent_forward_write_dst_fds.insert(fd);
                             }
                         }
-                        _ => excluded_marker_writes += 1,
+                        _ => {
+                            excluded_marker_writes += 1;
+                            if let Some(t) = tid {
+                                excluded_marker_write_tids.insert(t);
+                            }
+                        }
                     }
                 }
             } else if names("recvfrom(") || names("read(") {
@@ -1650,6 +1779,7 @@ impl TraceFindings {
             request_forwarded_through_io_copy: agent_marker_writes > 0,
             agent_marker_writes,
             excluded_marker_writes,
+            excluded_marker_write_tids,
             agent_forward_write_dst_fds,
             write_calls,
             read_calls,
@@ -1668,8 +1798,8 @@ impl TraceFindings {
     fn summary(&self) -> String {
         format!(
             "splice={} splice_srcs={:?} fwd_write_dsts={:?} write={} read={} \
-             agent_marker_writes={} excluded_marker_writes={} request_copy_seen={} \
-             return_splice_src_is_legb={}",
+             agent_marker_writes={} excluded_marker_writes={} excluded_tids={:?} \
+             request_copy_seen={} return_splice_src_is_legb={}",
             self.splice_calls,
             self.splice_src_fds,
             self.agent_forward_write_dst_fds,
@@ -1677,6 +1807,7 @@ impl TraceFindings {
             self.read_calls,
             self.agent_marker_writes,
             self.excluded_marker_writes,
+            self.excluded_marker_write_tids,
             self.request_forwarded_through_io_copy,
             self.return_splice_source_is_legb(),
         )
@@ -1698,6 +1829,74 @@ fn split_strace_tid_prefix(line: &str) -> (Option<i32>, &str) {
     let tid = trimmed[..digits_end].parse::<i32>().ok();
     let rest = trimmed[digits_end..].trim_start();
     (tid, rest)
+}
+
+/// Recover every post-attach `CLONE_THREAD` edge `(parent_tid, child_tid)` from the
+/// strace log. A thread-creating clone is `clone`/`clone3` whose flag set contains
+/// `CLONE_THREAD`; the PARENT tid is the strace `-f` line prefix and the CHILD tid is
+/// the clone's return value. Handles BOTH strace forms observed on the dev kernel
+/// (strace 6.19):
+///   - inline:  `<p> clone3({flags=...CLONE_THREAD...} ...) = <c>`
+///   - split:   `<p> clone(... flags=...CLONE_THREAD... <unfinished ...>` then
+///     `<p> <... clone resumed> ...) = <c>` (the flags are on the unfinished half,
+///     the child tid on the resumed half; correlated by the shared parent-tid prefix
+///     — clone is not re-entrant per thread, so at most one clone is outstanding per
+///     parent at a time).
+///
+/// A process fork (the netns `ip`/`python3` client) is a `clone` WITHOUT
+/// `CLONE_THREAD` (`flags=CLONE_VM|CLONE_VFORK|SIGCHLD`) → no edge emitted → the
+/// forked subtree is never reachable from the test's thread group.
+fn clone_thread_edges(raw: &str) -> Vec<(i32, i32)> {
+    let mut edges: Vec<(i32, i32)> = Vec::new();
+    // Per-parent pending CLONE_THREAD whose return value (child tid) has not yet been
+    // seen — set on the `<unfinished ...>` half, cleared on the `<... resumed> ... = c`.
+    let mut pending_thread_clone: std::collections::BTreeMap<i32, bool> =
+        std::collections::BTreeMap::new();
+    for line in raw.lines() {
+        let (tid, body) = split_strace_tid_prefix(line);
+        let Some(parent) = tid else { continue };
+        let is_clone_start = body.starts_with("clone(") || body.starts_with("clone3(");
+        let is_clone_resume = body.starts_with("<...")
+            && (body.contains("clone resumed") || body.contains("clone3 resumed"));
+        if !is_clone_start && !is_clone_resume {
+            continue;
+        }
+        let has_clone_thread = body.contains("CLONE_THREAD");
+        if body.contains("<unfinished ...>") {
+            // Split form, first half: record whether this outstanding clone is a
+            // thread clone; the child tid arrives on the resumed half.
+            pending_thread_clone.insert(parent, has_clone_thread);
+            continue;
+        }
+        // Either an inline clone (start + return on one line) or the resumed half.
+        let is_thread = if is_clone_resume {
+            // Resumed half: the flags lived on the unfinished half — consult pending.
+            pending_thread_clone.remove(&parent).unwrap_or(false)
+        } else {
+            has_clone_thread
+        };
+        if !is_thread {
+            continue;
+        }
+        if let Some(child) = clone_return_child_tid(body) {
+            edges.push((parent, child));
+        }
+    }
+    edges
+}
+
+/// The child TID a completed `clone`/`clone3` line returns — the integer after the
+/// final `= ` on the line (e.g. `... ) = 20534` → `Some(20534)`). `body` has its
+/// parent-tid prefix stripped. `None` on an error return (`= -1 EAGAIN ...`) or a
+/// line with no resolved return.
+fn clone_return_child_tid(body: &str) -> Option<i32> {
+    let eq = body.rfind('=')?;
+    let after = body[eq + 1..].trim_start();
+    let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+    if end == 0 {
+        return None; // negative / non-numeric return (error)
+    }
+    after[..end].parse::<i32>().ok()
 }
 
 /// The first-argument fd of a `syscall(FD, ...)` line (e.g. `write(26, ...)` →
@@ -1731,4 +1930,107 @@ fn to_strace_hex(bytes: &[u8]) -> String {
         let _ = write!(s, "\\x{b:02x}");
     }
     s
+}
+
+// ============================================================================
+// Pure-parser unit tests (default-lane; guard the F1 race-free TID partition).
+//
+// These do NOT need root / a kernel / strace — they pin the clone-tree TID partition
+// (the F1 fix) as a pure function over a CAPTURED strace fixture. The fixture lines
+// are REAL strace 6.19 output captured on the dev kernel (7.0) — the exact forms the
+// live oracle parses. The load-bearing invariant: the CLONE_THREAD closure includes
+// the (post-attach, short-lived) pump TID and EXCLUDES the netns-client fork pid.
+// ============================================================================
+
+/// A real `clone3` thread-spawn line (inline form): parent 20528 spawns thread 20533.
+/// Captured verbatim from strace 6.19 on kernel 7.0.
+const FIXTURE_CLONE3_THREAD: &str = "20528 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0xef6439aff588, parent_tid=0xef6439aff230, exit_signal=0, stack=0xef64392f0000, stack_size=0x80ea40, tls=0xef6439aff880} => {parent_tid=[20533]}, 88) = 20533";
+
+/// A real process-fork `clone` (split across two lines): parent 20479 forks process
+/// 20480 with CLONE_VFORK|SIGCHLD — NO CLONE_THREAD. This is the netns-client shape.
+const FIXTURE_FORK_UNFINISHED: &str =
+    "20479 clone(child_stack=0xffffdc8051a0, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>";
+const FIXTURE_FORK_RESUMED: &str = "20479 <... clone resumed>)              = 20480";
+
+#[test]
+fn clone_tree_closure_includes_post_attach_thread_excludes_fork() {
+    // Seed = the attach-time snapshot: only the parent thread 20528 pre-exists.
+    let mut seed = std::collections::BTreeSet::new();
+    seed.insert(20528_i32);
+
+    // The log: a CLONE_THREAD spawn of 20533 by the in-group 20528 (the post-attach
+    // short-lived pump shape), PLUS a process fork of 20480 by an UNRELATED pid 20479
+    // (the netns-client shape — not in the seed, no CLONE_THREAD).
+    let raw =
+        format!("{FIXTURE_CLONE3_THREAD}\n{FIXTURE_FORK_UNFINISHED}\n{FIXTURE_FORK_RESUMED}\n");
+    let group = TraceFindings::thread_group_closure(&raw, &seed);
+
+    assert!(
+        group.contains(&20533),
+        "the CLONE_THREAD child of an in-group parent MUST join the thread group \
+         (the post-attach short-lived pump). got {group:?}"
+    );
+    assert!(
+        !group.contains(&20480),
+        "the process fork (CLONE_VFORK|SIGCHLD, no CLONE_THREAD) MUST be excluded — it \
+         is the netns-client subtree. got {group:?}"
+    );
+    assert!(group.contains(&20528), "the seed thread must remain. got {group:?}");
+}
+
+#[test]
+fn clone_tree_closure_is_transitive() {
+    // Seed = thread A (100). A spawns thread B (200); B spawns thread C (300). The
+    // closure must reach C even though C's parent B was itself only added by the
+    // closure — a fixpoint, not a single pass.
+    let mut seed = std::collections::BTreeSet::new();
+    seed.insert(100_i32);
+    let a_spawns_b =
+        "100 clone3({flags=CLONE_VM|CLONE_THREAD|CLONE_SETTLS} => {parent_tid=[200]}, 88) = 200";
+    let b_spawns_c =
+        "200 clone3({flags=CLONE_VM|CLONE_THREAD|CLONE_SETTLS} => {parent_tid=[300]}, 88) = 300";
+    // Order the lines so the transitive edge appears BEFORE its parent is in the set,
+    // to prove the fixpoint (not order-dependence).
+    let raw = format!("{b_spawns_c}\n{a_spawns_b}\n");
+    let group = TraceFindings::thread_group_closure(&raw, &seed);
+    assert_eq!(
+        group,
+        [100, 200, 300].into_iter().collect::<std::collections::BTreeSet<i32>>(),
+        "the closure must be transitive (A→B→C) and order-independent"
+    );
+}
+
+#[test]
+fn clone_thread_edges_parses_inline_and_split_thread_clones_only() {
+    // Inline thread clone (edge), split process fork (NO edge).
+    let raw =
+        format!("{FIXTURE_CLONE3_THREAD}\n{FIXTURE_FORK_UNFINISHED}\n{FIXTURE_FORK_RESUMED}\n");
+    let edges = clone_thread_edges(&raw);
+    assert_eq!(
+        edges,
+        vec![(20528, 20533)],
+        "only the CLONE_THREAD clone yields an edge; the CLONE_VFORK fork does not"
+    );
+
+    // A SPLIT thread clone (CLONE_THREAD on the unfinished half, child tid on the
+    // resumed half) MUST also yield an edge — correlated by the parent-tid prefix.
+    let split = "777 clone(child_stack=0xdead, flags=CLONE_VM|CLONE_THREAD|CLONE_SETTLS <unfinished ...>\n777 <... clone resumed>)              = 888\n";
+    let edges = clone_thread_edges(split);
+    assert_eq!(
+        edges,
+        vec![(777, 888)],
+        "a split CLONE_THREAD clone (unfinished+resumed) yields the (parent, child) edge"
+    );
+}
+
+#[test]
+fn clone_return_child_tid_rejects_error_returns() {
+    // A failed clone (= -1 EAGAIN ...) yields no child tid.
+    assert_eq!(
+        clone_return_child_tid(
+            "clone3({flags=CLONE_THREAD} => {parent_tid=[0]}, 88) = -1 EAGAIN (Resource temporarily unavailable)"
+        ),
+        None
+    );
+    assert_eq!(clone_return_child_tid("<... clone resumed>)              = 888"), Some(888));
 }
