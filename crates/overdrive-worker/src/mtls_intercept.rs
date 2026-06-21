@@ -100,6 +100,13 @@ pub enum InterceptError {
         /// Human-readable cause (the failing `nft` / `ip` command + stderr).
         reason: String,
     },
+    /// `nft list chain` reported the shared table/chain absent — a benign
+    /// "nothing installed yet / nothing to sweep" signal on a fresh boot,
+    /// distinct from a genuine `nft` failure (binary missing, EPERM, transient
+    /// lock). Callers that treat absence as empty (the §5 boot sweep) map this
+    /// to a no-op; callers that require the chain propagate it.
+    #[error("the shared nft table/chain does not exist (nothing to sweep)")]
+    ChainAbsent,
     /// `accept_inbound_leg` / `accept_outbound_and_recover_orig_dst` could not
     /// accept the redirected connection on the intercept listener.
     #[error("leg accept failed on the {direction} intercept listener: {source}")]
@@ -434,10 +441,13 @@ pub fn install_outbound_tproxy(
 ///
 /// # Errors
 ///
-/// Returns [`InterceptError::TproxyInstall`] if the chain dump cannot be
-/// obtained (the chain/table absent is treated as "nothing to sweep" → `Ok(0)`,
-/// distinguished by [`list_chain`]'s success/failure), or if a by-handle
-/// `nft delete rule` fails.
+/// Fail-CLOSED on every genuine failure (matching the by-handle delete path):
+/// the ONLY swallowed case is the shared table/chain being absent
+/// ([`InterceptError::ChainAbsent`] from [`list_chain`]) → `Ok(0)`, the benign
+/// "nothing to sweep" signal on a fresh boot. A spawn error or a genuine `nft`
+/// failure on the `list chain` (binary missing, EPERM, transient lock —
+/// surfaced by [`list_chain`] as [`InterceptError::TproxyInstall`]) propagates
+/// and refuses the boot, as does a by-handle `nft delete rule` failure.
 // mutants: skip — thin nft-I/O shim (`list_chain` + by-handle `run_nft delete`);
 // the pure decision is `per_workload_rule_handles_in_dump` (unit + mutation
 // covered). Body-replacement mutants (`Ok(0)`/`Ok(1)`) are killable only by the
@@ -446,16 +456,22 @@ pub fn install_outbound_tproxy(
 // cannot run.
 pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
     // The shared table/chain may not exist on a first boot (no mTLS workload has
-    // ever installed a rule). `list_chain` returns `Err` for a chain-absent
-    // table — which is "nothing to sweep", the dominant and benign cause on a
-    // boot where no rule was ever installed — so a list failure short-circuits
-    // to `Ok(0)`. (`mtls_worker.is_some()` gates this call; the FIRST
-    // `start_alloc` that installs a rule is what creates the table, so a
-    // chain-absent boot legitimately has zero rules to reap.) A genuine `nft`
-    // failure on the SAME boot would also fail the subsequent `start_alloc`
-    // install loudly; there is no per-workload rule to strand in the meantime.
-    let Ok(dump) = list_chain() else {
-        return Ok(0);
+    // ever installed a rule). `list_chain` distinguishes that benign
+    // chain-absent case (`InterceptError::ChainAbsent`) — "nothing to sweep",
+    // the dominant cause on a boot where no rule was ever installed — from a
+    // GENUINE `nft` failure (binary missing, EPERM, transient lock).
+    //
+    // Absent → `Ok(0)`. A genuine failure PROPAGATES and refuses the boot
+    // (fail-CLOSED, matching the by-handle delete path below). It must NOT be
+    // swallowed: a still-Running survivor does NOT trigger a `start_alloc`
+    // (SPIKE-B — the reconciler does not re-drive survivors), so there is no
+    // downstream install to catch a stranded guard-less survivor rule (the D2
+    // dead-weight §5 exists to reap) if the list fails — fail-closed is the only
+    // posture that does not leave it stranded.
+    let dump = match list_chain() {
+        Ok(dump) => dump,
+        Err(InterceptError::ChainAbsent) => return Ok(0),
+        Err(e) => return Err(e),
     };
 
     // Classify (pure): collect the handle of every per-workload TPROXY rule,
@@ -630,8 +646,20 @@ fn dump_has_leg_s_exemption(dump: &str) -> bool {
     dump.lines().any(|l| l.trim().contains(&nft_rendered))
 }
 
+/// True iff `nft`'s stderr for a `list chain` of an ABSENT table/chain
+/// (the benign "nothing to sweep" case), distinct from a genuine failure.
+/// nft emits "No such file or directory" / "does not exist" for the
+/// absent case. Pure so a unit test pins the classification without nft.
+fn stderr_reports_absent_chain(stderr: &str) -> bool {
+    stderr.contains("No such file or directory") || stderr.contains("does not exist")
+}
+
 /// `nft -a list chain ip <table> <chain>` (with handles). Returns the dump on
-/// success; maps a spawn / non-zero exit to [`InterceptError::TproxyInstall`].
+/// success; maps a non-zero exit whose stderr reports the table/chain absent to
+/// [`InterceptError::ChainAbsent`] (the benign "nothing to sweep" signal), and
+/// every other failure (spawn error, or a non-success whose stderr is a genuine
+/// `nft` error — EPERM, missing binary, transient lock) to
+/// [`InterceptError::TproxyInstall`].
 fn list_chain() -> Result<String> {
     let out = Command::new("nft")
         .args(["-a", "list", "chain", "ip", NFT_TABLE, NFT_CHAIN])
@@ -642,16 +670,22 @@ fn list_chain() -> Result<String> {
             reason: format!("spawn nft list chain: {e}"),
         })?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-    } else {
-        Err(InterceptError::TproxyInstall {
-            reason: format!(
-                "nft -a list chain ip {NFT_TABLE} {NFT_CHAIN} exited {:?}: {}",
-                out.status.code(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        })
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr_reports_absent_chain(&stderr) {
+        // Benign: the shared table/chain has never been created (fresh boot, no
+        // mTLS workload has installed a rule). Callers that tolerate absence (the
+        // §5 sweep) map this to a no-op; callers that require the chain propagate.
+        return Err(InterceptError::ChainAbsent);
+    }
+    Err(InterceptError::TproxyInstall {
+        reason: format!(
+            "nft -a list chain ip {NFT_TABLE} {NFT_CHAIN} exited {:?}: {}",
+            out.status.code(),
+            stderr.trim()
+        ),
+    })
 }
 
 /// Recover this virt's TPROXY rule handle from the `nft -a list chain` dump.
@@ -1390,6 +1424,47 @@ table ip overdrive-mtls {
             "a `tproxy to` rule with NO trailing `# handle <N>` marker yields no sweepable handle \
              (nothing to delete by handle); the chain-header/exemption handles are still excluded"
         );
+    }
+
+    // --- §5 sweep absent-chain classifier (`stderr_reports_absent_chain`) ---
+    //
+    // The §5 boot sweep treats the shared table/chain being ABSENT as the benign
+    // "nothing to sweep" signal (`Ok(0)`), distinct from a genuine `nft` failure
+    // (binary missing, EPERM, transient lock) which must propagate and refuse the
+    // boot (fail-CLOSED, matching the by-handle delete path). The discriminator is
+    // this pure classifier over `nft`'s stderr — pinned here without a kernel.
+
+    #[test]
+    fn stderr_reports_absent_chain_classifies_absent_vs_genuine_failures() {
+        use super::stderr_reports_absent_chain;
+        // ABSENT-table / absent-chain shapes nft emits when the table or chain
+        // does not exist — the benign fresh-boot "nothing to sweep" case → true.
+        for absent in [
+            "Error: No such file or directory",
+            "Error: No such file or directory\nlist chain ip overdrive-mtls prerouting\n      ^^^^^^^^^^^^",
+            "Error: chain `prerouting` does not exist in table `overdrive-mtls`",
+            "table `overdrive-mtls` does not exist",
+        ] {
+            assert!(
+                stderr_reports_absent_chain(absent),
+                "absent-table/chain stderr must classify as absent (→ Ok(0), nothing to sweep): {absent:?}"
+            );
+        }
+        // GENUINE failures — these are NOT "absent"; the sweep must propagate them
+        // and refuse the boot. KILLS a mutant that flips the predicate to a
+        // constant `true` (which would re-open the swallow the fix closes).
+        for genuine in [
+            "Error: Operation not permitted",
+            "nft: command not found",
+            "Error: Could not process rule: Resource temporarily unavailable",
+            "",
+        ] {
+            assert!(
+                !stderr_reports_absent_chain(genuine),
+                "a genuine nft failure (EPERM / missing binary / transient lock / empty) must NOT \
+                 classify as absent — it propagates and refuses the boot: {genuine:?}"
+            );
+        }
     }
 
     // --- `accept_outbound_and_recover_orig_dst` getsockname recovery (D-TME-4) ---

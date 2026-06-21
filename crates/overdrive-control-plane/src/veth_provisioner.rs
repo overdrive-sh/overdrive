@@ -1968,6 +1968,15 @@ async fn adopt_observe(
         .collect();
 
     // (3) correlate PID→netns per Running alloc → owner binding.
+    //
+    // `owner` is keyed by SLOT, so two Running allocs correlating to the SAME
+    // slot collapse here to last-write-wins — `plan_adopt_actions` therefore
+    // never emits two adopts for one slot, and `NetSlotAllocator::adopt`'s
+    // conflict arm (the `?` boot-refusal in `adopt_on_restart_recovery`) is
+    // STRUCTURALLY UNREACHABLE from this real observe path. That arm is a
+    // defensive guard reachable only by the direct unit tests
+    // (`adopt_conflicts_when_slot_held_by_a_different_alloc`); do not mistake
+    // criterion-3's "adopt-conflict refuses boot" for a live production path.
     for alloc in running {
         for pid in alloc_scope_pids(&alloc, cgroup_root) {
             if let Some(ino) = read_proc_netns_inode(pid)
@@ -2016,7 +2025,11 @@ pub async fn adopt_on_restart_recovery(
     let observed = adopt_observe(obs, cgroup_root).await?;
     let plan = plan_adopt_actions(&observed);
 
-    // (3) ADOPT first — rebuild the held map before any free-slot scan.
+    // (3) ADOPT first — rebuild the held map before any free-slot scan. The `?`
+    // boot-refusal on a `NetSlotAdoptConflict` is a defensive guard: the real
+    // observe path keys `owner` by slot (last-write-wins; see `adopt_observe`
+    // step 3), so it can NEVER emit two adopts for one slot. This arm is
+    // exercised only by the direct unit tests, not by production recovery.
     for (alloc, slot) in plan.adopt {
         allocator.adopt(alloc, slot)?;
     }

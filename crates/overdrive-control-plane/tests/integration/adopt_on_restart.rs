@@ -10,10 +10,20 @@
 //! SAME pattern `serve_boot_provisions_veth` uses: drive the boot-pass seam
 //! directly (its public signature IS the driving port), not the full
 //! `run_server` (TLS / ports / mTLS-probe composition are out of scope for this
-//! invariant). The litmus the dispatch names — "delete the `run_server`
-//! call-site wiring ⇒ this test stays RED" — is preserved by the boot pass
-//! being THIS exact function: with the call site removed, no recovery runs,
-//! the empty allocator hands slot 0 to a fresh alloc, and the survivor collides.
+//! invariant).
+//!
+//! Litmus — what reds when the behaviour regresses: this test pins the SEAM's
+//! observable kernel/ns effects (adopt the survivor's slot, keep the live
+//! survivor netns, GC the orphan), NOT the `run_server` call-site wiring.
+//! Deleting the call site would NOT turn this test RED — the test drives
+//! `adopt_on_restart_recovery(...)` directly. (The wiring's happy path is
+//! exercised by the mTLS-enabled `run_server` Tier-3 tests that boot with
+//! `compose_mtls` true; its error→`health.startup.refused` arms — `NetnsRecovery`
+//! / `NftRuleSweep` — are wired in `lib.rs` from these seam errors but have no
+//! dedicated executing coverage, the known seam-vs-call-site gap.) Falsify the
+//! seam itself by reverting `adopt`/`plan_adopt_actions`: assertion (b) reds
+//! because the empty allocator hands slot `S` to the fresh alloc and the
+//! survivor collides.
 //!
 //! THE HAZARD (verified ground truth, SPIKE-A/B/C, kernel 7.0.0):
 //!   On a `serve` restart the in-RAM `NetSlotAllocator` map is reconstructed
@@ -262,6 +272,30 @@ async fn obs_with_running(alloc: &AllocationId) -> Arc<dyn ObservationStore> {
 
 #[tokio::test]
 async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
+    // CROSS-TEST GC SAFETY (host-global `ip netns` namespace).
+    //
+    // `adopt_on_restart_recovery` → `adopt_observe` enumerates EVERY `ovd-ns-*`
+    // netns on the host and GCs any whose slot is not owned by a Running alloc in
+    // THIS test's obs store (here `obs_with_running(&survivor_alloc)` — only the
+    // survivor). The netns namespace is process-global, so a sibling Tier-3 test
+    // holding a live `ovd-ns-<other-slot>` at the recovery instant would, in
+    // principle, be classified as an orphan and torn down.
+    //
+    // Empirically this does NOT fire: the full `-p overdrive-control-plane
+    // --features integration-tests` suite is GREEN on kernel 7.0.0, AND a forced
+    // `--test-threads 8` 5× stress of THIS test interleaved with
+    // `alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal` (which holds
+    // a live `ovd-ns-0000`) is 5/5 GREEN — the fast in-process recovery pass and
+    // the slow `/bin/sleep`+setns landing window do not overlap at the GC instant
+    // in practice. That is a TIMING observation, NOT a structural guarantee:
+    // neither this test nor the netns-lifecycle tests are in the
+    // `host-kernel-shared` `max-threads = 1` group (`.config/nextest.toml`),
+    // which is the only cross-PROCESS single-writer guard. The structural fix
+    // (adding the netns-touching Tier-3 tests to `host-kernel-shared`) lives in
+    // the nextest config and is tracked as the seam-vs-infra serialization gap
+    // surfaced in the 04-04 revision (see reviews/04-04.md cross-test GC item);
+    // it is out of this test file's scope to land.
+
     // Choose distinct slots well away from 0 so a fresh-assign collision is
     // unambiguous: survivor at slot S, orphan at slot O. The fresh allocator
     // would hand smallest-free (slot 0) to a new alloc UNLESS S is adopted —
@@ -429,11 +463,16 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
 ///
 /// PORT-TO-PORT: drives the production `sweep_per_workload_tproxy_rules` free
 /// function — its public signature IS the driving port for the node-global
-/// chain. Litmus (dispatch): delete the sweep call-site (or the sweep body) ⇒
-/// assertion (a)/(d) stay RED. This test does NOT assert that survivor egress
-/// interception is restored after restart — that is the ACCEPTED #26-coupled
-/// limitation (a still-Running survivor legitimately ends with NO nft rule until
-/// reschedule), explicitly OUT of §5 scope (cleanup, not restoration).
+/// chain. Litmus: revert the sweep BODY (the `per_workload_rule_handles_in_dump`
+/// classify + by-handle delete) ⇒ assertion (a)/(d) stay RED. This test drives
+/// the sweep seam directly, so it does NOT exercise (and would NOT red on
+/// deleting) the `run_server` call-site wiring — that wiring's happy path is
+/// covered by the mTLS-enabled `run_server` Tier-3 boots, and its
+/// error→`health.startup.refused` arm (`NftRuleSweep`) is the known seam-vs-
+/// call-site gap. This test does NOT assert that survivor egress interception is
+/// restored after restart — that is the ACCEPTED #26-coupled limitation (a
+/// still-Running survivor legitimately ends with NO nft rule until reschedule),
+/// explicitly OUT of §5 scope (cleanup, not restoration).
 ///
 /// Root + CAP_NET_ADMIN required (real `nft` table/chain/rule); SKIP on an
 /// unprivileged runner. Run via `cargo xtask lima run -- cargo nextest run -p
