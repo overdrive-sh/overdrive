@@ -95,8 +95,9 @@ use crate::mtls_intercept::{
 ///
 /// This enum invents NO new lower-level error surface — it wraps the typed
 /// [`InterceptError`] the install steps already produce (the OUTBOUND egress
-/// nft-TPROXY install + the leg-C transparent listener) plus the leg-F bind
-/// `io::Error`. Each source `Display` names the privilege / kernel-feature
+/// nft-TPROXY install + the leg-F and leg-C transparent listeners — both bound
+/// via [`make_transparent_listener`](crate::mtls_intercept::make_transparent_listener)).
+/// Each source `Display` names the privilege / kernel-feature
 /// remediation an operator acts on. (The inbound nft-TPROXY rule install is
 /// #178-deferred — see the module note — so it is not an install step and has
 /// no failure site here; the [`InterceptError::TproxyInstall`] variant still
@@ -118,12 +119,21 @@ pub enum MtlsInterceptInstallError {
     #[error("mTLS outbound TPROXY install failed: {0}")]
     OutboundTproxyInstall(#[source] InterceptError),
 
-    /// leg-F (outbound, workload-facing plaintext) listener bind failed
-    /// (site 2). `#[source]` (not `#[from]`): a bare `io::Error` from-impl
-    /// would be too greedy, and a named constructor keeps the site-2 cause
-    /// distinct in `Display`.
+    /// leg-F (outbound, workload-facing plaintext) `IP_TRANSPARENT` listener
+    /// bind failed (site 2). leg-F is bound via
+    /// [`make_transparent_listener`](crate::mtls_intercept::make_transparent_listener)
+    /// — the SAME transparent-socket call leg-C (`Inbound`) uses — because the
+    /// OUTBOUND egress `tproxy` divert is non-rewriting and delivers
+    /// orig-dst-addressed packets a plain socket cannot receive. The source is
+    /// therefore the typed [`InterceptError`] that transparent bind produces
+    /// (most often [`InterceptError::TransparentListener`], whose `Display`
+    /// names the `CAP_NET_ADMIN` / `IP_TRANSPARENT` remediation), NOT a bare
+    /// `io::Error`. `#[source]` (not `#[from]`): the sibling `Inbound` variant
+    /// already owns the single `#[from] InterceptError` auto-conversion, so the
+    /// site-2 leg-F bind names its constructor explicitly to keep the two
+    /// `InterceptError` sources distinct in `Display`.
     #[error("mTLS leg-F listener bind failed: {0}")]
-    LegFBind(#[source] std::io::Error),
+    LegFBind(#[source] InterceptError),
 
     /// INBOUND leg-C transparent listener bind failed (site 3,
     /// [`InterceptError::TransparentListener`]). Source `Display` names the
@@ -138,12 +148,15 @@ pub enum MtlsInterceptInstallError {
 }
 
 impl MtlsInterceptInstallError {
-    /// Associated constructor for the site-2 leg-F bind failure, per the
-    /// project's "associated constructor per variant" convention. The
-    /// `#[source]` wrap (not `#[from]`) means there is no auto-conversion, so
+    /// Associated constructor for the site-2 leg-F transparent-listener bind
+    /// failure, per the project's "associated constructor per variant"
+    /// convention. The source is the typed [`InterceptError`]
+    /// [`make_transparent_listener`](crate::mtls_intercept::make_transparent_listener)
+    /// produces. The `#[source]` wrap (not `#[from]`, which the `Inbound`
+    /// variant owns for `InterceptError`) means there is no auto-conversion, so
     /// the call site names this constructor explicitly.
     #[must_use]
-    const fn leg_f_bind(source: std::io::Error) -> Self {
+    const fn leg_f_bind(source: InterceptError) -> Self {
         Self::LegFBind(source)
     }
 
@@ -332,16 +345,30 @@ impl MtlsInterceptWorker {
         self.stop_alloc(&spec.alloc);
 
         // The agent's leg-F (outbound, workload-facing plaintext) listener
-        // — agent-chosen ephemeral loopback (D-MTLS-15). Leg F needs no
-        // IP_TRANSPARENT; a plain bound listener suffices. Bound FIRST so its
-        // ephemeral port is the redirect target the OUTBOUND nft-TPROXY rule
-        // points at.
+        // — agent-chosen ephemeral loopback (D-MTLS-15). Leg F MUST be
+        // `IP_TRANSPARENT`: the OUTBOUND egress rule the matching
+        // `install_outbound_tproxy` appends is a NON-REWRITING
+        // `tproxy to 127.0.0.1:<legF>` divert, so the kernel delivers the
+        // workload's SYN with its ORIGINAL destination address intact (NOT
+        // rewritten to leg-F's bound addr). A plain (non-transparent) socket
+        // bound to `127.0.0.1:<legF>` cannot receive a SYN whose dst is the
+        // orig-dst — the divert is refused and the workload sees
+        // ConnectionRefused, breaking the Path-A outbound capture. The
+        // transparent socket is ALSO what makes the per-flow `getsockname`
+        // orig-dst recovery work (`accept_outbound_and_recover_orig_dst`):
+        // under TPROXY the recovered orig-dst IS the accepted socket's local
+        // addr, which is only the dialed dst on a transparent socket. This
+        // mirrors the leg-C transparent bind below EXACTLY — leg-F and leg-C
+        // are symmetric TPROXY-divert targets, not asymmetric. Bound FIRST so
+        // its ephemeral port is the redirect target the OUTBOUND nft-TPROXY
+        // rule points at.
         // Fail-closed (D-MTLS-18 site 2): on bind failure, return `Err`;
         // nothing is acquired yet, so there is nothing to tear down.
-        let leg_f_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
-            Ok(l) => l,
-            Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
-        };
+        let leg_f_listener =
+            match make_transparent_listener(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)) {
+                Ok(l) => l,
+                Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
+            };
         // The agent's chosen leg-F address — the kernel-redirect TARGET the
         // OUTBOUND nft-TPROXY egress rule redirects the workload's egress to.
         // Load-bearing: it is the `agent_leg_f_port` the egress rule points at
@@ -1338,5 +1365,43 @@ mod tests {
         let n = client.read(&mut buf).expect("read on a closed leg returns Ok(0) (EOF)");
         assert_eq!(n, 0, "a resolve store-fault must close leg-F fail-closed (no cleartext)");
         assert!(calls.lock().is_empty(), "a faulted resolve must NOT call enforce");
+    }
+
+    /// Each `MtlsInterceptInstallError` variant maps to its PINNED closed-
+    /// vocabulary install-stage label (the `TransitionReason` cause-class the
+    /// action-shim writes). The exact string per variant is load-bearing — the
+    /// shim and any operator-facing diagnostic key off it — so each label is
+    /// asserted EXACTLY, not merely "non-empty". This pins `leg_f_bind` (the
+    /// stage for the leg-F IP_TRANSPARENT bind whose error type this change
+    /// migrated to `InterceptError`) alongside its three siblings; replacing any
+    /// label string turns this RED.
+    #[test]
+    fn stage_label_is_pinned_per_install_error_variant() {
+        use super::{InterceptError, MtlsInterceptInstallError};
+
+        let tproxy = || InterceptError::TproxyInstall { reason: "boom".to_owned() };
+        let transparent = || InterceptError::TransparentListener {
+            addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+
+        let cases: [(MtlsInterceptInstallError, &str); 4] = [
+            (MtlsInterceptInstallError::OutboundTproxyInstall(tproxy()), "outbound_tproxy_install"),
+            // The leg-F bind site (site 2). Its inner `InterceptError` is what
+            // `make_transparent_listener` produces — this change's surface.
+            (MtlsInterceptInstallError::LegFBind(transparent()), "leg_f_bind"),
+            // Inbound leg-C transparent-listener bind failure → the leg-C label.
+            (MtlsInterceptInstallError::Inbound(transparent()), "leg_c_transparent_listener"),
+            // Any other inbound `InterceptError` is the site-4 nft-TPROXY install.
+            (MtlsInterceptInstallError::Inbound(tproxy()), "inbound_tproxy"),
+        ];
+
+        for (err, expected_stage) in cases {
+            assert_eq!(
+                err.stage(),
+                expected_stage,
+                "{err:?} must map to stage label {expected_stage:?}"
+            );
+        }
     }
 }
