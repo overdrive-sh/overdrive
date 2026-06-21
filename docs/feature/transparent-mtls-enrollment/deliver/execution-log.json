@@ -1205,6 +1205,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-21T09:51:17Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:54:16Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T11:09:34Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T11:21:55Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 composition re-level over already-covered seams; the pure decide_outbound 3-arm decision is already unit-tested in mtls_intercept_worker.rs; no newly-surfaced production fix (production NonMesh/MeshUnreachable arms were already correct when first driven e2e through accept_loop)",
+      "t": "2026-06-21T11:21:56Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T11:23:21Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T11:25:29Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T11:41:59Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: inbound re-leveled to drive spawned production inbound accept_loop via start_alloc + D-TME-13 leg_c_addr accessor + test-installed redirect; litmus (break leg_c_addr capture to wrong port) proves inbound goes RED while outbound stays GREEN (inbound client handshake failed, O3 panic at :1710)",
+      "t": "2026-06-21T11:53:35Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: leg_c_addr is a pure in-memory BTreeMap read (Some/None on live-intercept presence); its observable behavior is exercised end-to-end by the Tier-3 inbound drive (redirect installed at the returned addr must land on production leg-C) and pinned by the litmus \u2014 a unit test would re-assert the same map-get the Tier-3 drive already proves",
+      "t": "2026-06-21T11:53:35Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: composed test GREEN both regimes (NORMAL+TRACED) \u2014 inbound leg-C wire scan 4 records each direction, 0 plaintext, driven through spawned production inbound accept_loop via D-TME-13 leg_c_addr; full worker integration suite 167 passed 0 failed under Lima 7.0.0-22; no kernel-state leak",
+      "t": "2026-06-21T11:54:24Z"
     }
   ]
 }

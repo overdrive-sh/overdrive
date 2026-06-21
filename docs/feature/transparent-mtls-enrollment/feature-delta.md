@@ -131,6 +131,23 @@ identify`/veth egress; DNS #61-gated, excluded). Full pinned shapes:
 C3-wiring step)" JOIN-1..JOIN-5. No CLI verb, no HTTP surface (consistent with
 ADR-0069: the feature's only observability is telemetry/metrics).
 
+**Worker leg-C bound-addr accessor PINNED (D-TME-13, 2026-06-21):** the worker
+exposes ONE additional public read —
+`MtlsInterceptWorker::leg_c_addr(&self, &AllocationId) -> Option<SocketAddrV4>` —
+returning the ephemeral loopback addr its inbound (leg-C) `IP_TRANSPARENT`
+listener is bound to for a live intercept (`None` when none is installed). It is a
+production-legitimate diagnostic/observability accessor (the inbound twin of the
+already-production-observable outbound leg-F port, and the production read-point
+#178's inbound nft-TPROXY install will consume) — NOT a test-only hook. v1 uses it
+as the Tier-3 inbound test-observability seam: with the inbound redirect
+#178-deferred, a Tier-3 test installs its own redirect to leg-C and drives the
+spawned production inbound `accept_loop`. It exposes ONLY a socket address — no
+SVID/identity material — so the authn-only v1 boundary (D-TME-8 / #178) is
+respected. No symmetric `leg_f_addr` is added (the outbound egress redirect is
+production-installed on `host_veth`, so a test needs no leg-F port — the
+asymmetry is load-bearing). Full pinned signature + contract + rationale:
+`design/wave-decisions.md` § "D-TME-13". Cites ADR-0071 + #178.
+
 ---
 
 ## [REF] Driven ports + adapters

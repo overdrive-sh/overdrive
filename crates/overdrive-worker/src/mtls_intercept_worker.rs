@@ -213,6 +213,16 @@ struct AllocIntercept {
     /// #178-deferred (the leg-C listener + accept loop ARE production; only
     /// the inbound nft rule has no v1 virt source).
     _tproxy_guard: Option<TproxyInterceptGuard>,
+    /// The ephemeral loopback addr leg-C (the inbound `IP_TRANSPARENT`
+    /// listener) was bound to in `start_alloc`, captured BEFORE the listener
+    /// was moved into the spawned inbound `accept_loop` (the symmetric twin of
+    /// `leg_f_addr` for the outbound rule). Retained so [`leg_c_addr`] can be a
+    /// pure in-memory read — the listener itself has been consumed by the accept
+    /// task and its `local_addr()` is no longer reachable from here. Private to
+    /// the module; the only public surface is the [`leg_c_addr`] accessor.
+    ///
+    /// [`leg_c_addr`]: MtlsInterceptWorker::leg_c_addr
+    leg_c_addr: SocketAddrV4,
     /// The spawned accept→enforce tasks (outbound + inbound). Aborted on
     /// teardown so a blocked `accept()` does not outlive the alloc.
     accept_tasks: Vec<tokio::task::JoinHandle<()>>,
@@ -336,6 +346,14 @@ impl MtlsInterceptWorker {
     /// `Display` names the privilege / kernel-feature remediation an operator
     /// acts on. (The inbound nft-TPROXY rule is #178-deferred; it is not
     /// installed here, so there is no site-4 failure.)
+    #[allow(
+        clippy::similar_names,
+        reason = "leg_c_addr (inbound) and leg_f_addr (outbound) are the deliberate \
+                  symmetric vocabulary of this crate (D-TME-13 naming decision); the \
+                  similarity is the point — leg-C and leg-F are the two TPROXY-divert \
+                  targets, and renaming either to dodge the lint would break the \
+                  established leg-C/leg-F naming the struct comments and AcceptLeg variants use"
+    )]
     pub fn start_alloc(
         self: &Arc<Self>,
         spec: &AllocationSpec,
@@ -418,6 +436,19 @@ impl MtlsInterceptWorker {
                 Ok(l) => l,
                 Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
             };
+        // Capture leg-C's bound addr BEFORE the listener moves into the spawned
+        // inbound `accept_loop` — the diagnostic twin of `leg_f_addr` above
+        // (:378-382). Retained on `AllocIntercept` so `leg_c_addr(&self, alloc)`
+        // stays a pure in-memory read (the listener is consumed by the accept
+        // task; its `local_addr()` is no longer reachable from the worker). It is
+        // the EXACT addr the spawned inbound accept loop accepts on, so a redirect
+        // installed at it lands on the production inbound leg (D-TME-13; the
+        // read-site #178's production inbound-redirect install will also use).
+        let leg_c_addr = inbound_listener
+            .local_addr()
+            .ok()
+            .and_then(socketaddr_v4)
+            .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
 
         // The inbound nft-TPROXY rule install is #178-DEFERRED, symmetric with
         // the OUTBOUND `MTLS_REDIRECT_DEST` redirect above. The rule's match
@@ -445,6 +476,7 @@ impl MtlsInterceptWorker {
             None,
             leg_f_listener,
             inbound_listener,
+            leg_c_addr,
         );
         Ok(())
     }
@@ -461,6 +493,7 @@ impl MtlsInterceptWorker {
         tproxy_guard: Option<TproxyInterceptGuard>,
         leg_f_listener: std::net::TcpListener,
         inbound_listener: std::net::TcpListener,
+        leg_c_addr: SocketAddrV4,
     ) {
         let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
         // Cooperative stop flag the accept loops observe between poll slices.
@@ -483,6 +516,7 @@ impl MtlsInterceptWorker {
             spec.alloc.clone(),
             outbound_tproxy_guard,
             tproxy_guard,
+            leg_c_addr,
             vec![outbound_task, inbound_task],
             enforced,
             stop,
@@ -749,11 +783,20 @@ impl MtlsInterceptWorker {
     }
 
     /// Record a fully-installed (outbound + inbound) intercept.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "private bookkeeping constructor: one arg per AllocIntercept field \
+                  (the two tproxy guards, leg_c_addr per D-TME-13, accept_tasks, enforced, \
+                  stop); bundling them into a params struct would just move the same field \
+                  list one indirection away with no clarity gain — the call site is the \
+                  single internal caller in spawn_legs_and_record"
+    )]
     fn record_intercept_full(
         &self,
         alloc: AllocationId,
         outbound_tproxy_guard: Option<TproxyInterceptGuard>,
         tproxy_guard: Option<TproxyInterceptGuard>,
+        leg_c_addr: SocketAddrV4,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
         enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
         stop: Arc<AtomicBool>,
@@ -763,11 +806,57 @@ impl MtlsInterceptWorker {
             AllocIntercept {
                 _outbound_tproxy_guard: outbound_tproxy_guard,
                 _tproxy_guard: tproxy_guard,
+                leg_c_addr,
                 accept_tasks,
                 stop,
                 enforced,
             },
         );
+    }
+
+    /// The ephemeral loopback address the live intercept's **leg-C** (the inbound,
+    /// client-facing `IP_TRANSPARENT` listener) is bound to for `alloc`, or `None`
+    /// when no intercept is currently installed for `alloc`.
+    ///
+    /// leg-C is the agent's inbound TPROXY-divert target: `start_alloc` binds it at
+    /// a worker-chosen ephemeral `127.0.0.1:0` and spawns the inbound `accept_loop`
+    /// over it. This accessor exposes that bound addr so a caller can observe WHERE
+    /// the inbound intercept is listening — the diagnostic counterpart to the
+    /// outbound leg-F port the egress nft-TPROXY rule already encodes
+    /// (`install_outbound_tproxy(host_veth, leg_f_port)`).
+    ///
+    /// # Preconditions
+    ///
+    /// None. Any `AllocationId` is a valid query; an unknown alloc returns `None`.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(addr)` — the bound leg-C `SocketAddrV4` (always `127.0.0.1:<ephemeral>`,
+    ///   the addr `make_transparent_listener` bound in `start_alloc`) when a live
+    ///   intercept exists for `alloc` (i.e. `start_alloc` succeeded and `stop_alloc`
+    ///   has not since run for it).
+    /// - `None` when no live intercept exists for `alloc` — never started, already
+    ///   stopped, or an `alloc` this worker never intercepted.
+    ///
+    /// # Observable invariant
+    ///
+    /// For any `alloc`: `leg_c_addr(alloc).is_some()` ⇔ a live `AllocIntercept` is
+    /// recorded for `alloc` in `self.intercepts`. The returned addr is stable for the
+    /// life of that intercept (leg-C is bound once in `start_alloc` and never re-bound)
+    /// and is the EXACT addr the spawned inbound `accept_loop` is accepting on — so a
+    /// redirect installed at the returned addr lands on the production inbound leg.
+    ///
+    /// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #178)
+    ///
+    /// This exposes ONLY a bound socket address — NO SVID, NO key, NO identity
+    /// material of any kind. It is a bound-addr read, not an identity read. Workloads
+    /// hold nothing and the worker exposes nothing about *who* leg-C will mTLS as; the
+    /// expected-SVID / intended-peer join is strictly #178's (the
+    /// `MtlsResolve.expected_svid` anti-corruption field, `None` in v1). The accessor
+    /// is therefore inside the authn-only v1 boundary by construction.
+    #[must_use]
+    pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4> {
+        self.intercepts.lock().get(alloc).map(|i| i.leg_c_addr)
     }
 }
 

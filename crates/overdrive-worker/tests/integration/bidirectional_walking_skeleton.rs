@@ -22,20 +22,23 @@
 //!     injected port; the production resolve index 01-03 is its own DST's job).
 //!     The enforce substrate is the REAL `HostMtlsEnforcement` (ADR-0069,
 //!     UNCHANGED 4-method port).
-//!   - INBOUND (driven through the PRODUCTION leg-acquire + enforce SEAM —
-//!     `accept_inbound_leg` + the real `enforce`, the EXACT components the
-//!     production inbound `accept_loop` arm invokes): `install_inbound_tproxy(virt,
-//!     leg_c_port)` (#178-deferred in production) appends the inbound rule; a
-//!     client's `connect(virt)` → PREROUTING → TPROXY → leg-C; `accept_inbound_leg`
-//!     recovers orig-dst and `HostMtlsEnforcement::enforce` drives the rustls
-//!     SERVER handshake on leg-C + the SO_MARK-exempt leg-S dial — 0x17 on the
-//!     leg-C wire. NOTE: routing the inbound client through the SPAWNED inbound
-//!     accept loop would require a public accessor for production's ephemeral
-//!     leg-C port (unexposed on `new`/`start_alloc`/`stop_alloc`), which CLAUDE.md
-//!     "never invent API surface" forbids a crafter from adding — surfaced as a
-//!     blocker pending an architect-pinned accessor signature. The OUTBOUND half
-//!     (the C1 blocking core + all three Q3 arms) IS driven through the spawned
-//!     production `accept_loop`.
+//!   - INBOUND (driven through the SPAWNED PRODUCTION inbound `accept_loop`,
+//!     symmetric with the outbound half): `start_alloc(&server_spec)` binds the
+//!     PRODUCTION leg-C (IP_TRANSPARENT) at an ephemeral port and spawns the
+//!     production inbound accept loop over it (`AcceptLeg::Inbound`:
+//!     `accept_inbound_leg → spawn_enforce` → the real `HostMtlsEnforcement::
+//!     enforce`). The test discovers the production-bound leg-C ephemeral addr via
+//!     the architect-pinned accessor `MtlsInterceptWorker::leg_c_addr` (D-TME-13)
+//!     and installs its OWN `install_inbound_tproxy(virt, leg_c_port)` redirect to
+//!     that PRODUCTION leg-C — the production inbound rule is #178-deferred
+//!     (`start_alloc` installs none), and #178's production install will consume
+//!     the SAME accessor. A client's `connect(virt)` → PREROUTING → TPROXY →
+//!     PRODUCTION leg-C → the spawned production inbound `accept_loop`: getsockname
+//!     orig-dst recovery → SERVER handshake on leg-C + the SO_MARK-exempt leg-S
+//!     dial — 0x17 on the leg-C wire. NO test code accepts or enforces on the
+//!     inbound leg; production owns it, exactly as the outbound half does. BOTH
+//!     halves (the C1 blocking core + all three Q3 arms outbound; the inbound
+//!     round-trip) are driven through the spawned production `accept_loop`.
 //!
 //! The mTLS substrate (`HostMtlsEnforcement`) is REUSED from `overdrive-dataplane`
 //! (a production `[dependencies]` edge of `overdrive-worker`); the egress topology
@@ -111,7 +114,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+use std::net::{SocketAddrV4, TcpListener, TcpStream};
 use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -122,16 +125,12 @@ use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
 use overdrive_core::traits::driver::{AllocationSpec, Resources};
-use overdrive_core::traits::mtls_enforcement::{
-    InterceptedConnection, MtlsEnforcement, MtlsLimits, Routed,
-};
+use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_worker::mtls_intercept::{
-    accept_inbound_leg, install_inbound_tproxy, make_transparent_listener,
-};
+use overdrive_worker::mtls_intercept::install_inbound_tproxy;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use rcgen::string::Ia5String;
@@ -593,6 +592,25 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
         probe_descriptors: Vec::new(),
         netns: None,
         host_veth,
+    }
+}
+
+/// The `AllocationSpec` the INBOUND production `start_alloc` consumes: keyed on the
+/// SERVER alloc id (so production's `enforce` selects the held server SVID for the
+/// leg-C SERVER handshake). `host_veth = None`: the inbound nft-TPROXY rule is the
+/// test-installed redirect to the production-bound leg-C (the production inbound
+/// rule is #178-deferred — `start_alloc` installs none), NOT an egress rule, so no
+/// veth match is needed.
+fn build_server_spec(pki: &TestPki) -> AllocationSpec {
+    AllocationSpec {
+        alloc: pki.server_alloc.clone(),
+        identity: pki.server_leaf.spiffe.clone(),
+        command: "/bin/true".to_owned(),
+        args: vec![],
+        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
+        netns: None,
+        host_veth: None,
     }
 }
 
@@ -1360,7 +1378,7 @@ async fn composed_bidirectional_mtls_completes_no_rst_with_tls13_wire_capture() 
         [("NORMAL", Duration::ZERO), ("TRACED", Duration::from_millis(250))]
     {
         eprintln!("[05-01] ===== regime: {regime} (handshake_delay={handshake_delay:?}) =====");
-        run_one_regime(&adapter, &pki, &kr, handshake_delay).await;
+        run_one_regime(&adapter, &pki, &kr, handshake_delay);
     }
 
     eprintln!(
@@ -1391,7 +1409,7 @@ async fn composed_bidirectional_mtls_completes_no_rst_with_tls13_wire_capture() 
 /// to the wrong arm and the handshake to the right peer would never complete) +
 /// the sibling `start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic`
 /// guard's direct `Routed::Outbound { peer == dialed }` spy assertion.
-async fn run_one_regime(
+fn run_one_regime(
     adapter: &Arc<HostMtlsEnforcement>,
     pki: &TestPki,
     kr: &str,
@@ -1583,54 +1601,78 @@ async fn run_one_regime(
     // ----------------------------------------------------------------
     // INBOUND leg (workload = server). Capture → enforce (server handshake).
     // ----------------------------------------------------------------
-    drive_inbound_leg(adapter, pki, handshake_delay).await;
+    drive_inbound_leg(adapter, pki, handshake_delay);
 
     // O6 (F5 — workload cannot self-exempt): an EXPLICIT self-exempt-impossible
     // probe, driven through the PRODUCTION accept_loop.
     prove_workload_cannot_self_exempt(adapter, pki, handshake_delay);
 }
 
-/// INBOUND leg, driven through the PRODUCTION worker's leg-C accept path
-/// (`accept_inbound_leg` + the real `HostMtlsEnforcement::enforce` — the EXACT
-/// components production's inbound `accept_loop` arm invokes:
-/// `accept_inbound_leg(listener) → spawn_enforce`). The inbound nft-TPROXY rule
-/// is #178-deferred (production `start_alloc` installs NONE — its match key is the
-/// server's virt, an east-west fact v1 has no production source for), so the test
-/// installs the per-virt rule itself against a leg-C the test binds.
+/// INBOUND leg, driven through the SPAWNED PRODUCTION inbound `accept_loop` —
+/// symmetric with the outbound half. `start_alloc(&server_spec)` binds the
+/// PRODUCTION leg-C (the IP_TRANSPARENT inbound listener) at a worker-chosen
+/// ephemeral port and spawns the production inbound accept loop over it
+/// (`accept_loop`'s `AcceptLeg::Inbound` arm: `accept_inbound_leg → spawn_enforce`
+/// → the real `HostMtlsEnforcement::enforce`). NO test code touches the inbound
+/// accept/enforce path — production owns it, exactly as the outbound half does.
 ///
-/// **Seam note (surfaced as a blocker — see the test's module/commit narrative).**
-/// Production `start_alloc` DOES bind leg-C + spawn its inbound accept loop, but
-/// the leg-C ephemeral port is not exposed on the worker's public surface
-/// (`new`/`start_alloc`/`stop_alloc`), and the inbound TPROXY rule that would
-/// route a client's virt to that ephemeral leg-C is #178-deferred. So routing an
-/// inbound client THROUGH the spawned inbound `accept_loop` would require a new
-/// public accessor on the worker (e.g. `fn leg_c_addr(&self, &AllocationId) ->
-/// Option<SocketAddrV4>`) — which CLAUDE.md "Implement to the design — never
-/// invent API surface" forbids a crafter from adding on its own initiative. The
-/// inbound half therefore drives the production leg-acquire + enforce seam
-/// directly (these ARE the production inbound components), pending an
-/// architect-pinned accessor signature. The OUTBOUND half — the C1 blocking core,
-/// including all three Q3 arms — IS driven through the production `accept_loop`.
-async fn drive_inbound_leg(
-    adapter: &Arc<HostMtlsEnforcement>,
-    pki: &TestPki,
-    handshake_delay: Duration,
-) {
+/// **How the client reaches production leg-C (D-TME-13 + #178).** The inbound
+/// nft-TPROXY redirect that routes a client's virt to leg-C is #178-deferred:
+/// production `start_alloc` installs NO inbound rule (its match key is the
+/// server's virt, an east-west fact v1 has no production source for —
+/// `start_alloc` records `tproxy_guard = None`). So the test discovers leg-C's
+/// ephemeral bound addr via the architect-pinned accessor
+/// [`MtlsInterceptWorker::leg_c_addr`] (D-TME-13 — the diagnostic twin of the
+/// leg-F port the egress rule already encodes; the SAME read-site #178's
+/// production inbound-redirect install will use) and installs its OWN
+/// `install_inbound_tproxy(virt, leg_c_port)` redirect to that PRODUCTION-bound
+/// leg-C. A client's `connect(virt)` → PREROUTING → TPROXY → production leg-C →
+/// the spawned production inbound `accept_loop`. When #178 lands the production
+/// inbound rule it replaces this test redirect; the accessor and the spawned
+/// accept loop are unchanged.
+///
+/// All oracles stay observable kernel/wire side effects (O1 orig-dst via the
+/// byte-exact round-trip, O2 `0x17` both directions, O3 byte-exact, O4 no-RST) —
+/// none read program-internal state. authn-only v1 (AC8 / #178): the client
+/// asserts chain-to-bundle + held-server-SVID, never an intended-peer
+/// "protection" claim; `expected_peer`/`expected_svid` stay `None`.
+fn drive_inbound_leg(adapter: &Arc<HostMtlsEnforcement>, pki: &TestPki, handshake_delay: Duration) {
     let virt = SocketAddrV4::new(INBOUND_VIRT_IP.parse().unwrap(), INBOUND_VIRT_PORT);
 
-    // leg-C: the agent's IP_TRANSPARENT inbound listener (TPROXY lands the
-    // intercepted client connection here). Bound by the test because production's
-    // leg-C ephemeral port is unexposed (see the seam note above).
-    let leg_c = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-C");
-    let leg_c_port = match leg_c.local_addr().expect("leg-C local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-C addr, got {other}"),
-    };
+    // Build the PRODUCTION worker over the REAL enforce substrate and drive
+    // `start_alloc` for the SERVER alloc — this binds the PRODUCTION leg-C
+    // IP_TRANSPARENT listener at an ephemeral port and spawns the PRODUCTION
+    // inbound `accept_loop` over it. `spec.alloc = server_alloc` so production's
+    // `enforce` selects the held SERVER SVID for the leg-C handshake. The resolve
+    // port is unused by the inbound arm (it goes straight to `spawn_enforce`), but
+    // is a mandatory `new()` param — an empty `ScriptedResolve` suffices. No
+    // `host_veth`: the inbound rule is the test-installed redirect below
+    // (#178-deferred), not the egress rule.
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(ScriptedResolve::new(BTreeMap::new()));
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(adapter) as Arc<dyn MtlsEnforcement>;
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        Arc::clone(&resolve),
+        Arc::new(SimClock::new()),
+    ));
+    let spec = build_server_spec(pki);
+    worker.start_alloc(&spec).expect(
+        "PRODUCTION start_alloc must bind leg-C + spawn the inbound accept_loop for the server alloc",
+    );
+
+    // Discover the PRODUCTION-bound leg-C ephemeral addr via the D-TME-13 accessor
+    // (the listener is owned by the spawned accept loop; this is the only way to
+    // learn WHERE it accepts). `is_some()` ⇔ a live intercept is recorded.
+    let leg_c_addr = worker
+        .leg_c_addr(&spec.alloc)
+        .expect("leg_c_addr must expose the production-bound leg-C for a live intercept");
+    let leg_c_port = leg_c_addr.port();
 
     // Install the INBOUND nft-TPROXY rule (#178-deferred in production): a client
-    // dialing the virt is redirected to leg-C. The F5 exemption (chain head) lets
-    // the agent's SO_MARK-stamped leg-S dial reach the real server S verbatim.
+    // dialing the virt is redirected to the PRODUCTION leg-C. The F5 exemption
+    // (chain head) lets the agent's SO_MARK-stamped leg-S dial reach the real
+    // server S verbatim. This redirect is the ONLY test-supplied plumbing; the
+    // accept/enforce that runs on the other end is the spawned production loop.
     let inbound_guard = install_inbound_tproxy(virt, leg_c_port)
         .expect("install_inbound_tproxy must append the per-virt TPROXY rule");
     let dump = nft_dump_table();
@@ -1649,41 +1691,16 @@ async fn drive_inbound_leg(
     // connects so the first record is on the captured wire.
     let inbound_wire = WireCapture::start(LOOPBACK_IFACE, INBOUND_VIRT_PORT);
 
-    // The inbound client (presents the CLIENT SVID, dials the virt → TPROXY → leg-C),
-    // delayed so its first app write lands after the agent arms kTLS-RX. The TRACED
-    // regime's slow signal is folded into this send_delay.
+    // The inbound client (presents the CLIENT SVID, dials the virt → TPROXY →
+    // PRODUCTION leg-C → spawned production inbound accept_loop), delayed so its
+    // first app write lands after the agent arms kTLS-RX. The TRACED regime's slow
+    // signal is folded into this send_delay.
     let inbound_client = spawn_inbound_client(pki, Duration::from_millis(400).max(handshake_delay));
 
-    // Agent (production inbound components): accept leg-C, recover orig-dst, enforce
-    // (server handshake + leg-S dial). `accept_inbound_leg` is the exact fn the
-    // production inbound `accept_loop` calls; `enforce` is the same real substrate.
-    let (leg_c_fd, inbound_orig_dst) = accept_inbound_leg(&leg_c, pki.server_alloc.clone())
-        .map(|conn| match conn.routed {
-            Routed::Inbound { orig_dst } => (conn.leg, orig_dst),
-            Routed::Outbound { peer } => panic!("expected Inbound, got Outbound {{ {peer} }}"),
-        })
-        .expect("accept_inbound_leg must build InterceptedConnection from the TPROXY redirect");
-
-    // O1 (inbound orig-dst recovery): the getsockname-recovered orig-dst IS the virt.
-    assert_eq!(
-        inbound_orig_dst, virt,
-        "O1 inbound: getsockname-recovered orig-dst must equal the client's dialed virt"
-    );
-
-    // INBOUND enforce: server handshake on leg-C + leg-S dial to S. The leg-S dial
-    // is SO_MARK-exempt (F5 inbound), so the agent's own dial to the virt reaches S
-    // rather than recursing onto leg-C.
-    let inbound_conn = InterceptedConnection {
-        leg: leg_c_fd,
-        routed: Routed::Inbound { orig_dst: inbound_orig_dst },
-        alloc: pki.server_alloc.clone(),
-        // Authn-only (AC8 / #178): NO intended-peer pinning.
-        expected_peer: None,
-    };
-    let inbound_handle = adapter
-        .enforce(inbound_conn)
-        .await
-        .expect("inbound enforce must complete the server handshake + leg-S dial");
+    // NO test code accepts or enforces — the spawned PRODUCTION inbound accept_loop
+    // accepts leg-C, recovers orig-dst via getsockname, and enforces (server
+    // handshake + SO_MARK-exempt leg-S dial to S). The test only joins the client +
+    // server and reads the wire.
 
     // O3 (inbound round-trip): the client reads S's response byte-exact over leg-C's
     // kTLS, S received the request byte-exact, and the agent presented the held
@@ -1692,13 +1709,19 @@ async fn drive_inbound_leg(
     let client_result = inbound_client.join().expect("inbound client thread");
     assert!(
         server_request_ok,
-        "O3 inbound: server S must receive the client's request byte-exact (decrypted on leg-C, \
-         spliced to leg-S)"
+        "O3 inbound: server S must receive the client's request byte-exact (decrypted on the \
+         production leg-C, spliced to leg-S) — through the spawned production inbound accept_loop"
     );
     assert!(
         client_result.received_response_byte_exact,
-        "O3 inbound: the client must read S's response byte-exact back over leg-C's kTLS"
+        "O3 inbound: the client must read S's response byte-exact back over the production leg-C's \
+         kTLS"
     );
+    // O1 (inbound orig-dst recovery, observed through the round-trip): production's
+    // `getsockname` recovery inside the inbound accept_loop is NOT a return value
+    // here. The byte-exact round-trip to the virt IS the O1 oracle — had production
+    // recovered the wrong orig-dst, its SO_MARK-exempt leg-S dial would have aimed
+    // at the wrong addr and S would never have received the request byte-exact.
     // O4 (no RST, inbound): the client's `observed_rst == false` is a genuinely
     // observable no-RST oracle; the byte-exact round-trip above is the corroborating
     // proof (a mid-stream RST would truncate it).
@@ -1736,7 +1759,10 @@ async fn drive_inbound_leg(
         "O2 inbound: NO cleartext request/response marker may appear on the encrypted leg-C wire"
     );
 
-    adapter.teardown(inbound_handle).await.expect("inbound teardown");
+    // Tear the production inbound intercept down (aborts the accept loop, drains
+    // the enforced handle through `enforcement.teardown`); then drop the test
+    // redirect guard (removes the per-virt rule).
+    worker.stop_alloc(&spec.alloc);
     drop(inbound_guard);
 }
 

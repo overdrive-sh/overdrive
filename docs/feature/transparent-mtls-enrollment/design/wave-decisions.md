@@ -1506,3 +1506,221 @@ netns-entry seam, not the outbound rule) and take `host_veth: None`.
 reopen any D-TME / C / G / JOIN-1..JOIN-5 decision or the 02-06/04-04
 adopt-on-restart design; the merged `04-01` row's substance (`host_veth =
 plan.host_veth`) is unchanged — this block names the channel that carries it.
+
+---
+
+## D-TME-13 (the leg-C bound-addr accessor) — `MtlsInterceptWorker::leg_c_addr(&self, &AllocationId) -> Option<SocketAddrV4>` — architect-pinned 2026-06-21
+
+**Context — a genuine worker-surface gap, surfaced and escalated (not invented).**
+Step `05-01` (composed bidirectional Tier-3 walking skeleton) had to drive the
+production composition root `MtlsInterceptWorker::start_alloc` / `accept_loop`
+(05-01 review C1, `deliver/reviews/05-01.md`). The OUTBOUND half is resolved
+(commit `6683708f` drives the spawned production `accept_loop` + all three Q3
+arms). The INBOUND half could NOT be driven through the spawned production inbound
+`accept_loop` without new public API, and the crafter correctly STOPPED rather than
+invent surface (CLAUDE.md § "Implement to the design — never invent API surface";
+the wall is documented in-code at
+`crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs`
+~:1601-1613). The reason is mechanical:
+
+- Production `start_alloc` (`crates/overdrive-worker/src/mtls_intercept_worker.rs`
+  :339) binds an **IP_TRANSPARENT leg-C listener** (`make_transparent_listener`,
+  :416) at an **ephemeral loopback port**, then moves that listener into the
+  spawned inbound `accept_loop` (`spawn_legs_and_record` → `AcceptLeg::Inbound`).
+- The inbound nft-TPROXY redirect that would route a client's connection to leg-C
+  is **#178-deferred** (`start_alloc` records `tproxy_guard = None` and installs no
+  inbound rule — verified at `mtls_intercept_worker.rs` :406-441; #178 / D-MTLS-15
+  "GAP-3", `server_dial_addr` named replacement site). So a Tier-3 test must install
+  its OWN redirect to leg-C to drive the production inbound `accept_loop`.
+- To install that redirect, the test must know **leg-C's ephemeral bound addr** —
+  which is **not exposed** anywhere on the worker's public surface
+  (`new` / `start_alloc` / `stop_alloc`), and is NOT retained as an addr in
+  `AllocIntercept` today (the listener is consumed by the spawned accept loop;
+  `record_intercept_full` stores guards / tasks / `stop` / `enforced` only).
+
+The orchestrator + user chose to add a public accessor so a Tier-3 test can install
+a redirect to leg-C and drive the spawned production inbound `accept_loop`. This
+block records the architect-pinned exact shape, contract, and rationale.
+
+### Pinned EXACT signature
+
+```rust
+// crates/overdrive-worker/src/mtls_intercept_worker.rs — inherent method on
+// `impl MtlsInterceptWorker` (NOT a port trait; alongside start_alloc/stop_alloc).
+/// The ephemeral loopback address the live intercept's **leg-C** (the inbound,
+/// client-facing `IP_TRANSPARENT` listener) is bound to for `alloc`, or `None`
+/// when no intercept is currently installed for `alloc`.
+///
+/// leg-C is the agent's inbound TPROXY-divert target: `start_alloc` binds it at
+/// a worker-chosen ephemeral `127.0.0.1:0` and spawns the inbound `accept_loop`
+/// over it. This accessor exposes that bound addr so a caller can observe WHERE
+/// the inbound intercept is listening — the diagnostic counterpart to the
+/// outbound leg-F port the egress nft-TPROXY rule already encodes
+/// (`install_outbound_tproxy(host_veth, leg_f_port)`).
+///
+/// # Preconditions
+///
+/// None. Any `AllocationId` is a valid query; an unknown alloc returns `None`.
+///
+/// # Returns
+///
+/// - `Some(addr)` — the bound leg-C `SocketAddrV4` (always `127.0.0.1:<ephemeral>`,
+///   the addr `make_transparent_listener` bound in `start_alloc`) when a live
+///   intercept exists for `alloc` (i.e. `start_alloc` succeeded and `stop_alloc`
+///   has not since run for it).
+/// - `None` when no live intercept exists for `alloc` — never started, already
+///   stopped, or an `alloc` this worker never intercepted.
+///
+/// # Observable invariant
+///
+/// For any `alloc`: `leg_c_addr(alloc).is_some()` ⇔ a live `AllocIntercept` is
+/// recorded for `alloc` in `self.intercepts`. The returned addr is stable for the
+/// life of that intercept (leg-C is bound once in `start_alloc` and never re-bound)
+/// and is the EXACT addr the spawned inbound `accept_loop` is accepting on — so a
+/// redirect installed at the returned addr lands on the production inbound leg.
+///
+/// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #178)
+///
+/// This exposes ONLY a bound socket address — NO SVID, NO key, NO identity
+/// material of any kind. It is a bound-addr read, not an identity read. Workloads
+/// hold nothing and the worker exposes nothing about *who* leg-C will mTLS as; the
+/// expected-SVID / intended-peer join is strictly #178's (the
+/// `MtlsResolve.expected_svid` anti-corruption field, `None` in v1). The accessor
+/// is therefore inside the authn-only v1 boundary by construction.
+pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4>;
+```
+
+**Receiver is `&self`, NOT `self: &Arc<Self>`.** Unlike `start_alloc` /
+`stop_alloc` (which `Arc::clone(self)` to hand into spawned accept tasks), this is
+a pure read of `self.intercepts` and needs no `Arc`. Take `&self` — the narrowest
+receiver that compiles — matching `record_intercept_full(&self, …)` (the other
+`&self` method in the impl).
+
+### Signature decisions — each made deliberately
+
+- **`SocketAddrV4`, NOT `SocketAddr`.** leg-C is bound on `127.0.0.1` (an IPv4
+  literal) via `make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST,
+  0))`; the crate already projects to `SocketAddrV4` everywhere (the
+  `socketaddr_v4` helper, `orig_dst: SocketAddrV4`, `OutboundAction::Enforce {
+  peer: SocketAddrV4 }`, `leg_f_addr: SocketAddrV4`). Returning `SocketAddr` would
+  force every caller to re-narrow a value that is V4 by construction. `SocketAddrV4`
+  is the honest type — it makes "leg-C is always IPv4-loopback" unrepresentable-as-
+  V6 at the boundary.
+- **Name `leg_c_addr`, NOT `inbound_leg_addr`.** The crate's vocabulary is "leg-C"
+  (inbound) / "leg-F" (outbound) throughout — the struct comments, the
+  `AcceptLeg::{Inbound, Outbound}` docs, the error variant
+  `leg_c_transparent_listener`, the test wall comment all say "leg-C". `leg_c_addr`
+  matches that established vocabulary and reads symmetric with a future `leg_f_addr`
+  (see asymmetry decision below). `inbound_leg_addr` would introduce a second
+  name for the same concept.
+- **`Option<SocketAddrV4>` return, NOT `Result`.** "No live intercept for this
+  alloc" is a normal, expected answer (the alloc was never started or already
+  stopped), not a fault — exactly the `None`-not-`Err` shape. There is no fallible
+  I/O: the addr is read from in-memory `self.intercepts`, never re-queried from the
+  kernel. (See the implementation note: the addr must be *stored* at `start_alloc`
+  time so this stays a pure in-memory read; it is not a live `local_addr()` call on
+  a listener — the listener has been moved into the accept task.)
+- **Parameter `&AllocationId`, NOT owned.** A borrow suffices for the
+  `BTreeMap::get` lookup; matches `stop_alloc(&self, alloc_id: &AllocationId)`.
+
+### Required implementing change — store the leg-C addr in `AllocIntercept`
+
+**This accessor is NOT a pure read of existing state — `AllocIntercept` does not
+retain the leg-C bound addr today** (the `inbound_listener` is moved into the
+spawned `accept_loop`; only guards / tasks / `stop` / `enforced` are stored). So
+the crafter MUST, in the SAME change:
+
+1. Capture leg-C's bound addr in `start_alloc` (project `inbound_listener
+   .local_addr()` through the existing `socketaddr_v4` helper, BEFORE the listener
+   is moved into `spawn_legs_and_record`) — mirroring exactly how `leg_f_addr` is
+   already captured from `leg_f_listener` at :378-382.
+2. Thread it through `spawn_legs_and_record` → `record_intercept_full` and store it
+   as a new field on `AllocIntercept` (e.g. `leg_c_addr: SocketAddrV4`).
+3. `leg_c_addr(&self, alloc)` returns `self.intercepts.lock().get(alloc).map(|i|
+   i.leg_c_addr)`.
+
+This added field and threading are the design — they are the minimum to make the
+accessor a pure in-memory read consistent with the existing leg-F capture. They are
+NOT new public surface (the field is private to the module; the only new public
+item is the one accessor method).
+
+### Production-legitimacy verdict — `pub`, a legitimate diagnostic/observability accessor
+
+**Verdict: `pub`, production-legitimate — NOT a test-only hook.** The "new public
+method only called from test code" smell (`development.md` § "src/ is production
+code") is real and was checked. This accessor clears it on two grounds:
+
+1. **It is the inbound twin of an already-production-observable fact.** The
+   OUTBOUND leg-F port IS observable in production — it is encoded into the egress
+   nft-TPROXY rule (`install_outbound_tproxy(host_veth, leg_f_port)`) and recoverable
+   from the kernel via the nft chain dump (`find_egress_rule_handle`). leg-C's
+   ephemeral port has no such production-observable encoding today *only because*
+   its redirect is #178-deferred (no inbound rule encodes it yet). `leg_c_addr`
+   restores symmetric observability: a diagnostic / operator surface can ask the
+   worker "where is this alloc's inbound intercept listening?" — a genuine
+   operability question (ISO 25010 → operability / analysability) for a security
+   control that silently terminates client mTLS.
+2. **It is the natural production read-site for #178's own inbound-redirect
+   install.** When #178 lands the production inbound nft-TPROXY rule, *something*
+   must supply leg-C's ephemeral port as the redirect target (symmetric to how the
+   outbound install already reads `leg_f_addr.port()`). `leg_c_addr` is that read
+   point. v1 ships it as the test-observability seam; #178 consumes the SAME
+   accessor for the production install — it does not become dead code, it becomes
+   production-driving. (This is the same lifecycle as `install_inbound_tproxy`,
+   which is "test-callers-only until #178" yet is unambiguously production surface.)
+
+So the accessor is production-legitimate observability that v1 *also* uses for
+Tier-3 observability. It is `pub`. It is exempt from the test-only-smell rejection.
+
+### leg-C vs leg-F asymmetry — why leg-C needs this and leg-F does not; NO `leg_f_addr` now
+
+**A symmetric `leg_f_addr` is NOT warranted now — do not add it.** The asymmetry is
+real and load-bearing, not an oversight:
+
+- **OUTBOUND (leg-F):** the egress redirect IS production-installed, keyed on the
+  workload's `host_veth` (`iifname <host_veth> … tproxy to 127.0.0.1:<legF>`). A
+  Tier-3 test drives outbound by making the workload `connect()` from inside its
+  netns — the **kernel** redirects via the production rule; the test never needs
+  leg-F's port (it is already encoded in the installed rule, and the workload
+  reaches leg-F through the veth, not by dialing the port). The 05-01 OUTBOUND half
+  proves this: it drives the production `accept_loop` with zero need for a
+  `leg_f_addr` accessor.
+- **INBOUND (leg-C):** the redirect is #178-deferred, so production installs NO
+  inbound rule. A Tier-3 test must therefore install its **own** redirect to leg-C
+  to route a client through the production inbound `accept_loop` — and to install
+  that redirect it must know leg-C's ephemeral addr. Hence the accessor.
+
+Adding `leg_f_addr` speculatively would grow surface for no consumer (CLAUDE.md
+"never invent API surface"; SA principle 8 "simplest solution first"). If a future
+need for outbound leg-F observability arises (e.g. an outbound diagnostic surface),
+`leg_f_addr` is a one-line symmetric addition at that point — `leg_c_addr` is
+deliberately named to make that future addition read consistently. Until then: ONE
+accessor, leg-C only.
+
+### #178 relationship (one line)
+
+This is the **v1 test-observability seam** for the inbound leg; when #178 lands the
+production inbound nft-TPROXY redirect, `leg_c_addr` remains as the production
+read-point that supplies leg-C's ephemeral port to that install (and as a standing
+operator diagnostic) — it is not throwaway. Cites ADR-0071 (authn-only v1 / the
+#178 anti-corruption boundary) + #178 (the inbound orig-dst → real-backend
+redirect, `server_dial_addr` / D-MTLS-15 / GAP-3).
+
+### Scope note + crafter instruction
+
+This amendment adds EXACTLY ONE public item
+(`MtlsInterceptWorker::leg_c_addr(&self, &AllocationId) -> Option<SocketAddrV4>`)
+plus the private `AllocIntercept.leg_c_addr` field and its `start_alloc` →
+`spawn_legs_and_record` → `record_intercept_full` threading required to feed it. It
+reopens no D-TME / C / G / JOIN decision and does NOT design the #178 production
+inbound redirect (that stays #178's job).
+
+**The crafter MUST implement this signature EXACTLY — `pub fn leg_c_addr(&self,
+alloc: &AllocationId) -> Option<SocketAddrV4>` — and MUST NOT deviate from it or add
+any adjacent public surface** (no `leg_f_addr`, no `inbound_leg_addr` alias, no
+`Result` return, no `SocketAddr` widening, no public getter for the listener or the
+guards). If implementing reveals the pinned shape is insufficient (e.g. the test
+genuinely needs more than the bound addr to install its redirect), the crafter
+STOPS and surfaces the gap to the orchestrator — it does NOT improvise additional
+surface (CLAUDE.md § "Implement to the design — never invent API surface"; "STOP
+and surface the gap").
