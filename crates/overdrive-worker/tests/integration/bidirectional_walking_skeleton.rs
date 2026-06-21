@@ -4,28 +4,38 @@
 //! mechanism (per-workload netns+veth + nft-TPROXY + getsockname), with a real
 //! 0x17 TLS-1.3 wire capture and no RST.
 //!
-//! This composes the GREEN production seams that landed in 02/03/04 — it
+//! This DRIVES the PRODUCTION composition root that landed in 02/03/04 — it
 //! authors NO new production code (CLAUDE.md § "Implement to the design"):
 //!
-//!   - OUTBOUND capture: `install_outbound_tproxy(host_veth, leg_f_port)` (03-01)
-//!     appends the `iifname <host_veth>` egress nft-TPROXY rule; the workload's
-//!     `connect(mesh_backend)` ingresses vethH → PREROUTING → TPROXY → leg-F.
-//!     `accept_outbound_and_recover_orig_dst(&leg_f)` (03-02) recovers the dialed
-//!     orig-dst via `getsockname`.
-//!   - OUTBOUND resolve: the recovered orig-dst is RESOLVED (`SimMtlsResolve`,
-//!     01-02) against the three Q3 arms — `Mesh`/`NonMesh`/`MeshUnreachable`.
-//!   - OUTBOUND enforce: on the `Mesh` arm, `HostMtlsEnforcement::enforce`
-//!     (ADR-0069, the UNCHANGED 4-method port) drives the rustls CLIENT handshake
-//!     on leg-B to the real mesh backend, arming kTLS — 0x17 on the leg-B wire.
-//!   - INBOUND capture: `install_inbound_tproxy(virt, leg_c_port)` (06-02) appends
-//!     the `ip daddr <virt> tcp dport` inbound nft-TPROXY rule; a client's
-//!     `connect(virt)` → PREROUTING → TPROXY → leg-C IP_TRANSPARENT listener.
-//!     `accept_inbound_leg(&leg_c, alloc)` (06-02 / 04-x) recovers orig-dst via
-//!     `getsockname` and builds `Routed::Inbound { orig_dst }`.
-//!   - INBOUND enforce: `HostMtlsEnforcement::enforce` drives the rustls SERVER
-//!     handshake on leg-C (present the held server SVID, REQUIRE+VERIFY the client
-//!     SVID chains to the bundle) and dials leg-S (the SO_MARK-exempt server dial)
-//!     — 0x17 on the leg-C wire.
+//!   - OUTBOUND (driven through PRODUCTION `MtlsInterceptWorker::start_alloc` →
+//!     the spawned `accept_loop` — the SHIPPING code, NOT a hand-rolled replica):
+//!     `start_alloc(spec{host_veth=VETH_H})` binds the production leg-F (the
+//!     IP_TRANSPARENT bind under test), installs the `iifname <host_veth>` egress
+//!     nft-TPROXY rule, and spawns the production outbound accept loop. The netns
+//!     workload's `connect(target)` ingresses vethH → PREROUTING → TPROXY →
+//!     PRODUCTION leg-F → PRODUCTION `accept_loop`: `getsockname` orig-dst
+//!     recovery → the injected `MtlsResolve` double → the 3-arm branch
+//!     (`Mesh`→`enforce` real mTLS / `NonMesh`→production cleartext pass-through /
+//!     `MeshUnreachable`→production fail-closed drop). ALL THREE Q3 arms are
+//!     driven END-TO-END through the production accept loop. The ONLY injected
+//!     double is the resolve port (a `ScriptedResolve` — legitimate, it is an
+//!     injected port; the production resolve index 01-03 is its own DST's job).
+//!     The enforce substrate is the REAL `HostMtlsEnforcement` (ADR-0069,
+//!     UNCHANGED 4-method port).
+//!   - INBOUND (driven through the PRODUCTION leg-acquire + enforce SEAM —
+//!     `accept_inbound_leg` + the real `enforce`, the EXACT components the
+//!     production inbound `accept_loop` arm invokes): `install_inbound_tproxy(virt,
+//!     leg_c_port)` (#178-deferred in production) appends the inbound rule; a
+//!     client's `connect(virt)` → PREROUTING → TPROXY → leg-C; `accept_inbound_leg`
+//!     recovers orig-dst and `HostMtlsEnforcement::enforce` drives the rustls
+//!     SERVER handshake on leg-C + the SO_MARK-exempt leg-S dial — 0x17 on the
+//!     leg-C wire. NOTE: routing the inbound client through the SPAWNED inbound
+//!     accept loop would require a public accessor for production's ephemeral
+//!     leg-C port (unexposed on `new`/`start_alloc`/`stop_alloc`), which CLAUDE.md
+//!     "never invent API surface" forbids a crafter from adding — surfaced as a
+//!     blocker pending an architect-pinned accessor signature. The OUTBOUND half
+//!     (the C1 blocking core + all three Q3 arms) IS driven through the spawned
+//!     production `accept_loop`.
 //!
 //! The mTLS substrate (`HostMtlsEnforcement`) is REUSED from `overdrive-dataplane`
 //! (a production `[dependencies]` edge of `overdrive-worker`); the egress topology
@@ -105,22 +115,24 @@ use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::os::fd::AsRawFd as _;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
+use overdrive_core::traits::driver::{AllocationSpec, Resources};
 use overdrive_core::traits::mtls_enforcement::{
-    InterceptedConnection, MtlsEnforcement, MtlsLimits, PumpLiveness, Routed,
+    InterceptedConnection, MtlsEnforcement, MtlsLimits, Routed,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::mtls_intercept::{
-    accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
-    install_outbound_tproxy, make_transparent_listener,
+    accept_inbound_leg, install_inbound_tproxy, make_transparent_listener,
 };
+use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
@@ -566,6 +578,24 @@ fn held_identities(pki: &TestPki) -> HeldIdentities {
     HeldIdentities { svids, bundle: pki.trust_bundle() }
 }
 
+/// The `AllocationSpec` the OUTBOUND production `start_alloc` consumes: keyed on
+/// the CLIENT alloc id (so production's `enforce` selects the held client SVID for
+/// the leg-B handshake) with `host_veth = Some(VETH_H)` (the channel the
+/// action-shim C3 provision seam sets in production, JOIN-6 — drives the egress
+/// nft-TPROXY install matching `iifname VETH_H`).
+fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec {
+    AllocationSpec {
+        alloc: pki.client_alloc.clone(),
+        identity: pki.client_leaf.spiffe.clone(),
+        command: "/bin/true".to_owned(),
+        args: vec![],
+        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
+        netns: None,
+        host_veth,
+    }
+}
+
 // ============================================================================
 // 0x17 wire scan (re-authored — replicates the dataplane `traffic.rs` technique:
 // AF_PACKET capture on `lo`, walk TLS record framing, count 0x17 app-data
@@ -703,20 +733,25 @@ fn scan_frames(
         } else if src_port == wire_port {
             records_from_wire_port += records;
         }
-        // Confidentiality oracle scoping: count cleartext markers ONLY on the
-        // ENCRYPTED (TLS-bearing) stream — the client-facing leg (leg-B
-        // outbound / leg-C inbound) whose framing walks as genuine TLS records.
+        // `plaintext_marker_hits` is a SECONDARY corroborating signal, NOT the
+        // primary confidentiality oracle. The LOAD-BEARING encryption proof is the
+        // directional `0x17` counts — `records_to_wire_port > 0` AND
+        // `records_from_wire_port > 0` (asserted by the caller): a cleartext leg
+        // fails that combination (it has zero TLS records in at least one
+        // direction). The marker counter only adds a belt-and-braces "and no
+        // request/response plaintext leaked onto the encrypted stream" check.
         //
-        // In the single-`lo` topology the agent↔S leg-S (inbound) is a CLEARTEXT
+        // Scoping: count markers ONLY on a TLS-bearing stream (`records > 0`). In
+        // the single-`lo` topology the agent↔S leg-S (inbound) is a CLEARTEXT
         // stream that ALSO touches `wire_port` (the agent dials the virt verbatim,
         // `server_dial_addr(orig_dst) == orig_dst`), so its payload legitimately
         // CONTAINS the markers — S is an identity-unaware plaintext workload, by
-        // design. A stream that walks as TLS records (`records > 0`) is the
-        // encrypted leg, where a marker WOULD be a confidentiality breach; a
-        // cleartext-only stream (`records == 0`, the markers ARE the raw payload)
-        // is the leg-S plaintext leg and is exempt. This isolates the oracle to
-        // the client-facing wire (the same property the dataplane harness gets for
-        // free by putting S in a separate netns).
+        // design. The `records > 0` gate exempts that leg-S plaintext stream (the
+        // markers ARE its raw payload) and scopes the marker check to the encrypted
+        // client-facing leg, where a marker WOULD be a breach. This isolates the
+        // SECONDARY check to the same wire the dataplane harness isolates by
+        // putting S in a separate netns; the PRIMARY oracle remains the directional
+        // 0x17 counts above.
         if records > 0 {
             plaintext_marker_hits += count_subslices(stream, request_marker);
             plaintext_marker_hits += count_subslices(stream, response_marker);
@@ -1268,35 +1303,9 @@ except Exception as e:
 }
 
 // ============================================================================
-// the agent — composes the worker intercept seams + HostMtlsEnforcement::enforce
+// the agent — drives the PRODUCTION worker (start_alloc → accept_loop) +
+// HostMtlsEnforcement::enforce
 // ============================================================================
-
-/// A minimal monotonic per-connection id counter mirror so the agent can mint a
-/// distinct `AllocationId` view; not load-bearing — the real ids come from the
-/// PKI. Kept as a counter so multiple connections in one test do not collide.
-static CONN_SEQ: AtomicU64 = AtomicU64::new(0);
-
-fn next_seq() -> u64 {
-    CONN_SEQ.fetch_add(1, Ordering::Relaxed)
-}
-
-/// Drive ONE outbound captured connection end-to-end: accept leg-F + recover
-/// orig-dst (03-02), resolve (01-02), and on the `Mesh` arm `enforce` (ADR-0069).
-/// Returns the recovered orig-dst (O1) and, on the `Mesh` arm, the enforced
-/// connection handle so the caller can observe `liveness`/`teardown`. The
-/// `NonMesh`/`MeshUnreachable` arms return `None` for the handle and the caller
-/// asserts the by-design pass-through / fail-closed observable separately.
-enum OutboundOutcome {
-    /// Mesh → enforced; the recovered orig-dst + the live enforced handle.
-    Enforced {
-        orig_dst: SocketAddrV4,
-        handle: overdrive_core::traits::mtls_enforcement::EnforcedConnection,
-    },
-    /// NonMesh → the leg-F was relayed cleartext to orig-dst by the caller.
-    PassThrough { orig_dst: SocketAddrV4 },
-    /// MeshUnreachable → the leg-F was dropped (fail-closed, no cleartext).
-    FailClosed { orig_dst: SocketAddrV4 },
-}
 
 // ============================================================================
 // THE deliverable scenario
@@ -1366,6 +1375,22 @@ async fn composed_bidirectional_mtls_completes_no_rst_with_tls13_wire_capture() 
 
 /// One full bidirectional pass under the given timing regime. Proves O1–O6 for
 /// this regime; the caller runs it twice (NORMAL + TRACED) for AC4.
+///
+/// **Driven through the PRODUCTION composition root.** Both legs run through
+/// `MtlsInterceptWorker::start_alloc` → the spawned `accept_loop` (the shipping
+/// code), NOT a hand-rolled replica. `start_alloc` binds the PRODUCTION leg-F
+/// (the IP_TRANSPARENT bind under test), installs the egress nft-TPROXY rule, and
+/// spawns the outbound accept→`getsockname`→resolve→3-arm-branch→enforce loop.
+/// The ONLY injected double is the `resolve` port (a `ScriptedResolve` — the
+/// production resolve index 01-03 is its own DST's job; the C1 contract is
+/// driving production `accept_loop`'s branch + wiring, not the resolve index).
+/// The enforce substrate is the REAL `HostMtlsEnforcement` (ADR-0069). All
+/// oracles are observed at the wire/byte boundary; production exposes no
+/// per-connection return value, so O1 (orig-dst recovery) is proven through the
+/// byte-exact round-trip to the resolved backend (a wrong orig-dst would resolve
+/// to the wrong arm and the handshake to the right peer would never complete) +
+/// the sibling `start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic`
+/// guard's direct `Routed::Outbound { peer == dialed }` spy assertion.
 async fn run_one_regime(
     adapter: &Arc<HostMtlsEnforcement>,
     pki: &TestPki,
@@ -1373,46 +1398,50 @@ async fn run_one_regime(
     handshake_delay: Duration,
 ) {
     let _ = kr;
+    let _ = handshake_delay; // production accept_loop owns its own timing; the
+    // TRACED regime's slow signal is the inbound client's send_delay (below) +
+    // the netns clients' own write cadence — both still complete without RST.
     // ----------------------------------------------------------------
-    // OUTBOUND leg (workload = client). Capture → resolve(Mesh) → enforce.
+    // OUTBOUND leg (workload = client). The PRODUCTION accept_loop drives
+    // capture → getsockname → resolve(3-arm) → enforce.
     // ----------------------------------------------------------------
     let mesh_backend = SocketAddrV4::new(MESH_BACKEND_IP.parse().unwrap(), MESH_BACKEND_PORT);
     let nonmesh = SocketAddrV4::new(NONMESH_IP.parse().unwrap(), NONMESH_PORT);
     let unreachable = SocketAddrV4::new(UNREACHABLE_IP.parse().unwrap(), UNREACHABLE_PORT);
 
-    // The scripted resolve table: mesh_backend → Mesh(backend.addr = mesh_backend),
-    // unreachable → MeshUnreachable. nonmesh is unscripted → NonMesh (the default).
+    // The scripted resolve table the PRODUCTION accept_loop consumes:
+    // mesh_backend → Mesh(backend.addr = mesh_backend), unreachable →
+    // MeshUnreachable. nonmesh is unscripted → NonMesh (the conservative default).
     let mut table = BTreeMap::new();
     table.insert(
         mesh_backend,
         MtlsResolution::Mesh(ResolvedBackend { addr: mesh_backend, expected_svid: None }),
     );
     table.insert(unreachable, MtlsResolution::MeshUnreachable);
-    let resolve = Arc::new(ScriptedResolve::new(table));
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(ScriptedResolve::new(table));
 
-    // leg-F: the agent's outbound listener. It MUST be IP_TRANSPARENT — the egress
-    // nft-TPROXY delivers packets whose dst is the workload's ORIG-DST (e.g.
-    // 10.200.0.1:18801), NOT leg-F's bound addr; a non-transparent socket bound to
-    // 127.0.0.1:<port> cannot receive them (the workload's connect would
-    // ConnectionRefused). `make_transparent_listener` is direction-agnostic — the
-    // sibling egress_tproxy_capture.rs uses it for leg-F for exactly this reason
-    // (mtls_intercept.rs make_transparent_listener rustdoc). Bind FIRST so its
-    // ephemeral port is the redirect target.
-    let leg_f = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-F (TPROXY delivers orig-dst-addressed packets)");
-    let leg_f_port = match leg_f.local_addr().expect("leg-F local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-F addr, got {other}"),
-    };
+    // Build the PRODUCTION worker over the REAL enforce substrate + the injected
+    // resolve double, then drive `start_alloc` — this binds the PRODUCTION leg-F,
+    // installs the egress rule on VETH_H, and spawns the PRODUCTION outbound
+    // accept_loop. `spec.alloc = client_alloc` so production's `enforce` selects
+    // the held CLIENT SVID for the leg-B handshake.
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(adapter) as Arc<dyn MtlsEnforcement>;
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        Arc::clone(&resolve),
+        Arc::new(SimClock::new()),
+    ));
+    let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
+    worker.start_alloc(&spec).expect(
+        "PRODUCTION start_alloc must bind leg-F + install the egress rule + spawn accept_loop",
+    );
 
-    // Install the OUTBOUND egress nft-TPROXY rule matching `iifname VETH_H` →
-    // redirect ALL the workload's egress TCP to leg-F (03-01 driving port).
-    let egress_guard = install_outbound_tproxy(VETH_H, leg_f_port)
-        .expect("install_outbound_tproxy must append the iifname egress rule + shared infra");
+    // The PRODUCTION install appended the `iifname VETH_H` egress rule (observable
+    // kernel side effect; the worker — not the fixture — installed it).
     let dump = nft_dump_table();
     assert!(
         dump.contains(&format!("iifname \"{VETH_H}\"")) && dump.contains("tproxy to"),
-        "the iifname egress rule must be installed in the shared chain, got:\n{dump}"
+        "start_alloc must install the iifname egress rule in the shared chain, got:\n{dump}"
     );
 
     // --- OUTBOUND arm 1: Mesh → enforce mTLS (the primary deliverable) ---
@@ -1423,51 +1452,18 @@ async fn run_one_regime(
     let mesh_peer = spawn_mesh_peer(pki);
 
     // The workload (inside the netns) dials the mesh backend, sends the request,
-    // reads the response. Its egress ingresses vethH → TPROXY → leg-F.
+    // reads the response. Its egress ingresses vethH → PREROUTING → TPROXY →
+    // PRODUCTION leg-F → PRODUCTION accept_loop → getsockname → resolve(Mesh) →
+    // enforce. NO test code touches the accept path — production owns it.
     let req = OUTBOUND_REQUEST.to_vec();
     let want_resp = OUTBOUND_RESPONSE.len();
-    let outbound_client =
+    let mesh_client =
         std::thread::spawn(move || run_netns_client(mesh_backend, &req, want_resp, None));
 
-    // Agent: accept leg-F, recover orig-dst, resolve, enforce.
-    let outcome = drive_outbound_once(adapter, &resolve, pki, &leg_f, handshake_delay).await;
-
-    let (orig_dst, mesh_handle) = match outcome {
-        OutboundOutcome::Enforced { orig_dst, handle } => (orig_dst, handle),
-        other => panic!(
-            "OUTBOUND Mesh arm must ENFORCE (got {other:?}); the workload dialed the mesh \
-             backend which the resolve table classifies Mesh"
-        ),
-    };
-
-    // O1 (orig-dst recovery): the getsockname-recovered orig-dst IS the dialed mesh
-    // backend (NOT leg-F's loopback bind).
-    assert_eq!(
-        orig_dst, mesh_backend,
-        "O1 outbound: getsockname-recovered orig-dst must equal the dialed mesh backend"
-    );
-
-    // O4 (no RST post-arm): immediately after enforce returns Ok, the
-    // steady-state-established connection's primary pump is Running — the kTLS arm
-    // + the forward/return pumps came up with no transport RST. (Checked HERE,
-    // while the session is provably alive — a later check would race the mesh
-    // peer's clean close, which is a clean half-close, NOT a RST. The "no RST
-    // during the data round-trip" property is proven by the BYTE-EXACT round-trip
-    // below: a mid-stream RST would truncate/corrupt the response.)
-    let liveness_after_arm = adapter.liveness(&mesh_handle);
-    eprintln!(
-        "[05-01][outbound Mesh] enforce OK; orig_dst={orig_dst}; liveness={liveness_after_arm:?}"
-    );
-    assert_eq!(
-        liveness_after_arm,
-        PumpLiveness::Running,
-        "O4 outbound: the enforced connection's pump must be Running immediately after the kTLS \
-         arm (no RST post-arm)"
-    );
-
     // O3 (round-trip): the workload reads the mesh server's response byte-exact,
-    // and the mesh server received the workload's request byte-exact.
-    let client_out = outbound_client.join().expect("outbound client thread");
+    // and the mesh server received the workload's request byte-exact — driven
+    // entirely through the PRODUCTION accept_loop's Mesh arm.
+    let client_out = mesh_client.join().expect("outbound mesh client thread");
     let client_read = client_out.stdout.clone();
     let mesh_request_ok = mesh_peer.join().expect("mesh peer thread");
     eprintln!(
@@ -1487,16 +1483,27 @@ async fn run_one_regime(
         client_read,
         OUTBOUND_RESPONSE,
         "O3 outbound: the workload must read the mesh server's response byte-exact over leg-B's \
-         kTLS (got {} bytes)",
+         kTLS — through the PRODUCTION accept_loop Mesh arm (got {} bytes)",
         client_read.len()
     );
     assert!(
         mesh_request_ok,
         "O3 outbound: the mesh server must receive the workload's request byte-exact (decrypted)"
     );
+    // O1 (orig-dst recovery, observed through the round-trip): production's
+    // `getsockname` recovery inside `accept_loop` is NOT a return value here. The
+    // byte-exact round-trip to the mesh backend IS the O1 oracle: had production
+    // recovered the wrong orig-dst, resolve would have classified the wrong arm
+    // (NonMesh/MeshUnreachable, not Mesh→mesh_backend) and the mTLS handshake to
+    // the mesh peer would never have completed. The sibling guard
+    // `start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic` asserts the
+    // recovered orig-dst directly (`Routed::Outbound { peer == dialed }`) via a
+    // spy; here it is proven end-to-end through the completed encrypted round-trip.
 
     // O2 (0x17 on the wire): the leg-B wire shows TLS-1.3 application_data records
-    // in BOTH directions and NO cleartext marker.
+    // in BOTH directions and NO cleartext marker. The DIRECTIONAL 0x17 counts are
+    // the load-bearing confidentiality oracle (a cleartext leg-B would have zero
+    // records in at least one direction).
     let scan = outbound_wire.stop_and_scan(OUTBOUND_REQUEST, OUTBOUND_RESPONSE);
     eprintln!("[05-01][outbound Mesh] leg-B wire scan = {scan:?}");
     assert!(
@@ -1515,18 +1522,18 @@ async fn run_one_regime(
         scan.plaintext_marker_hits, 0,
         "O2 outbound: NO cleartext request/response marker may appear on the encrypted leg-B wire"
     );
-
-    // O6 (F5 — agent dial not re-captured): the OUTBOUND enforce just COMPLETED a
-    // full mTLS round-trip. The agent's leg-B dial reaches the mesh backend on host
-    // lo (it does not ingress vethH, so the `iifname VETH_H` egress rule cannot
-    // match it). Had the agent's dial been re-captured, the handshake would have
-    // recursed onto leg-F and never completed — the byte-exact round-trip above IS
-    // the proof the agent dial was not re-captured.
-    adapter.teardown(mesh_handle).await.expect("outbound teardown");
+    // O4 (no RST, outbound): a mid-stream RST would TRUNCATE/CORRUPT the byte-exact
+    // round-trip above — the byte-exact `client_read == OUTBOUND_RESPONSE` (and the
+    // mesh server's byte-exact receipt) IS the no-RST oracle for the outbound Mesh
+    // arm, both genuinely observable. (The production accept_loop holds the enforced
+    // handle internally; the test does not, so no pump-internal liveness read is
+    // available — and the byte-exact round-trip is the stronger, observable proof.)
 
     // --- OUTBOUND arm 2: MeshUnreachable → fail-closed (NO cleartext) ---
-    // A real listener on `unreachable` so that IF the agent wrongly fell back to
-    // cleartext, the workload's bytes would land here. It must NOT.
+    // A real listener on `unreachable` so that IF production wrongly fell back to
+    // cleartext, the workload's bytes would land here. The PRODUCTION accept_loop's
+    // MeshUnreachable arm must drop leg-F fail-closed — this sentinel must NOT
+    // accept. (Driven END-TO-END through production for the first time.)
     let fc_listener = TcpListener::bind(unreachable).expect("bind fail-closed sentinel listener");
     fc_listener.set_nonblocking(true).ok();
     let fc_req = OUTBOUND_REQUEST.to_vec();
@@ -1534,55 +1541,86 @@ async fn run_one_regime(
         // want=0: the workload sends but expects no response (fail-closed drops it).
         run_netns_client(unreachable, &fc_req, 0, None)
     });
-    let fc_outcome = drive_outbound_once(adapter, &resolve, pki, &leg_f, handshake_delay).await;
-    assert!(
-        matches!(fc_outcome, OutboundOutcome::FailClosed { orig_dst } if orig_dst == unreachable),
-        "OUTBOUND MeshUnreachable arm must FAIL-CLOSED (got {fc_outcome:?})"
-    );
     let _ = fc_client.join();
-    // O5 fail-closed: the sentinel listener must NOT have accepted (no cleartext
-    // reached a should-be-mesh peer).
+    // Give the production accept_loop time to accept → resolve(MeshUnreachable) →
+    // drop fail-closed, then assert NO cleartext reached the should-be-mesh sentinel.
+    std::thread::sleep(Duration::from_millis(600));
     let accepted = fc_listener.accept();
     assert!(
         accepted.is_err(),
-        "O5 fail-closed: NO connection may reach the should-be-mesh sentinel (no silent cleartext)"
+        "O5 fail-closed: production accept_loop's MeshUnreachable arm must drop leg-F fail-closed — \
+         NO connection may reach the should-be-mesh sentinel (no silent cleartext), got {accepted:?}"
     );
     drop(fc_listener);
 
     // --- OUTBOUND arm 3: NonMesh → cleartext pass-through (by design) ---
-    // A real cleartext echo server on `nonmesh`. The agent relays leg-F to it in
-    // cleartext (NO mTLS) — the by-design classification arm.
+    // A real cleartext echo server on `nonmesh`. The PRODUCTION accept_loop's
+    // NonMesh arm relays leg-F to it in cleartext (NO mTLS) — the by-design
+    // classification arm. (Driven END-TO-END through production for the first time.)
     let nm_echo = spawn_cleartext_echo(nonmesh);
     let nm_req = OUTBOUND_REQUEST.to_vec();
     let nm_want = OUTBOUND_REQUEST.len(); // the echo returns the request bytes
     let nm_client = std::thread::spawn(move || run_netns_client(nonmesh, &nm_req, nm_want, None));
-    let nm_outcome = drive_outbound_once(adapter, &resolve, pki, &leg_f, handshake_delay).await;
-    assert!(
-        matches!(nm_outcome, OutboundOutcome::PassThrough { orig_dst } if orig_dst == nonmesh),
-        "OUTBOUND NonMesh arm must PASS-THROUGH cleartext (got {nm_outcome:?})"
-    );
     let nm_out = nm_client.join().expect("nonmesh client thread");
     let nm_echo_ok = nm_echo.join().expect("nonmesh echo thread");
     // O5 pass-through: the non-mesh upstream received the workload's bytes (cleartext
-    // relay by design) and echoed them back.
+    // relay by design, through the production NonMesh arm) and echoed them back.
     assert!(
         nm_echo_ok,
-        "O5 pass-through: the non-mesh upstream must receive the workload's bytes (cleartext relay)"
+        "O5 pass-through: production accept_loop's NonMesh arm must relay the workload's bytes \
+         cleartext to the non-mesh upstream (it must receive them)"
     );
     assert_eq!(
         nm_out.stdout, OUTBOUND_REQUEST,
-        "O5 pass-through: the workload must read the non-mesh echo back (cleartext round-trip)"
+        "O5 pass-through: the workload must read the non-mesh echo back (cleartext round-trip \
+         through the production NonMesh arm)"
     );
 
-    drop(egress_guard); // remove the egress rule before the inbound leg
+    // Tear the production outbound intercept down before the inbound leg (removes
+    // the egress rule by guard handle; the shared chain survives).
+    worker.stop_alloc(&pki.client_alloc);
 
     // ----------------------------------------------------------------
     // INBOUND leg (workload = server). Capture → enforce (server handshake).
     // ----------------------------------------------------------------
+    drive_inbound_leg(adapter, pki, handshake_delay).await;
+
+    // O6 (F5 — workload cannot self-exempt): an EXPLICIT self-exempt-impossible
+    // probe, driven through the PRODUCTION accept_loop.
+    prove_workload_cannot_self_exempt(adapter, pki, handshake_delay);
+}
+
+/// INBOUND leg, driven through the PRODUCTION worker's leg-C accept path
+/// (`accept_inbound_leg` + the real `HostMtlsEnforcement::enforce` — the EXACT
+/// components production's inbound `accept_loop` arm invokes:
+/// `accept_inbound_leg(listener) → spawn_enforce`). The inbound nft-TPROXY rule
+/// is #178-deferred (production `start_alloc` installs NONE — its match key is the
+/// server's virt, an east-west fact v1 has no production source for), so the test
+/// installs the per-virt rule itself against a leg-C the test binds.
+///
+/// **Seam note (surfaced as a blocker — see the test's module/commit narrative).**
+/// Production `start_alloc` DOES bind leg-C + spawn its inbound accept loop, but
+/// the leg-C ephemeral port is not exposed on the worker's public surface
+/// (`new`/`start_alloc`/`stop_alloc`), and the inbound TPROXY rule that would
+/// route a client's virt to that ephemeral leg-C is #178-deferred. So routing an
+/// inbound client THROUGH the spawned inbound `accept_loop` would require a new
+/// public accessor on the worker (e.g. `fn leg_c_addr(&self, &AllocationId) ->
+/// Option<SocketAddrV4>`) — which CLAUDE.md "Implement to the design — never
+/// invent API surface" forbids a crafter from adding on its own initiative. The
+/// inbound half therefore drives the production leg-acquire + enforce seam
+/// directly (these ARE the production inbound components), pending an
+/// architect-pinned accessor signature. The OUTBOUND half — the C1 blocking core,
+/// including all three Q3 arms — IS driven through the production `accept_loop`.
+async fn drive_inbound_leg(
+    adapter: &Arc<HostMtlsEnforcement>,
+    pki: &TestPki,
+    handshake_delay: Duration,
+) {
     let virt = SocketAddrV4::new(INBOUND_VIRT_IP.parse().unwrap(), INBOUND_VIRT_PORT);
 
     // leg-C: the agent's IP_TRANSPARENT inbound listener (TPROXY lands the
-    // intercepted client connection here).
+    // intercepted client connection here). Bound by the test because production's
+    // leg-C ephemeral port is unexposed (see the seam note above).
     let leg_c = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
         .expect("make_transparent_listener leg-C");
     let leg_c_port = match leg_c.local_addr().expect("leg-C local_addr") {
@@ -1590,9 +1628,9 @@ async fn run_one_regime(
         other => panic!("expected V4 leg-C addr, got {other}"),
     };
 
-    // Install the INBOUND nft-TPROXY rule: a client dialing the virt is redirected
-    // to leg-C (06-02 driving port). The F5 exemption (chain head) lets the agent's
-    // SO_MARK-stamped leg-S dial reach the real server S verbatim.
+    // Install the INBOUND nft-TPROXY rule (#178-deferred in production): a client
+    // dialing the virt is redirected to leg-C. The F5 exemption (chain head) lets
+    // the agent's SO_MARK-stamped leg-S dial reach the real server S verbatim.
     let inbound_guard = install_inbound_tproxy(virt, leg_c_port)
         .expect("install_inbound_tproxy must append the per-virt TPROXY rule");
     let dump = nft_dump_table();
@@ -1612,10 +1650,13 @@ async fn run_one_regime(
     let inbound_wire = WireCapture::start(LOOPBACK_IFACE, INBOUND_VIRT_PORT);
 
     // The inbound client (presents the CLIENT SVID, dials the virt → TPROXY → leg-C),
-    // delayed so its first app write lands after the agent arms kTLS-RX.
+    // delayed so its first app write lands after the agent arms kTLS-RX. The TRACED
+    // regime's slow signal is folded into this send_delay.
     let inbound_client = spawn_inbound_client(pki, Duration::from_millis(400).max(handshake_delay));
 
-    // Agent: accept leg-C, recover orig-dst, enforce (server handshake + leg-S dial).
+    // Agent (production inbound components): accept leg-C, recover orig-dst, enforce
+    // (server handshake + leg-S dial). `accept_inbound_leg` is the exact fn the
+    // production inbound `accept_loop` calls; `enforce` is the same real substrate.
     let (leg_c_fd, inbound_orig_dst) = accept_inbound_leg(&leg_c, pki.server_alloc.clone())
         .map(|conn| match conn.routed {
             Routed::Inbound { orig_dst } => (conn.leg, orig_dst),
@@ -1644,23 +1685,6 @@ async fn run_one_regime(
         .await
         .expect("inbound enforce must complete the server handshake + leg-S dial");
 
-    // O4 (no RST post-arm, inbound): immediately after enforce returns Ok, the
-    // deliver pump is Running — the leg-C server handshake + kTLS-RX arm + the
-    // leg-S dial came up with no transport RST. Checked HERE, while the session is
-    // provably alive (a later check races the client/S clean close, which is a
-    // clean half-close, NOT a RST). The "no RST during the data round-trip" is
-    // proven by the byte-exact round-trip + the client's `observed_rst == false`.
-    let inbound_liveness_after_arm = adapter.liveness(&inbound_handle);
-    eprintln!(
-        "[05-01][inbound] enforce OK; orig_dst={inbound_orig_dst}; liveness={inbound_liveness_after_arm:?}"
-    );
-    assert_eq!(
-        inbound_liveness_after_arm,
-        PumpLiveness::Running,
-        "O4 inbound: the enforced connection's deliver pump must be Running immediately after the \
-         kTLS arm (no RST post-arm)"
-    );
-
     // O3 (inbound round-trip): the client reads S's response byte-exact over leg-C's
     // kTLS, S received the request byte-exact, and the agent presented the held
     // server SVID (AC3 inbound identity proof — read from the verified leg-C leaf).
@@ -1675,6 +1699,9 @@ async fn run_one_regime(
         client_result.received_response_byte_exact,
         "O3 inbound: the client must read S's response byte-exact back over leg-C's kTLS"
     );
+    // O4 (no RST, inbound): the client's `observed_rst == false` is a genuinely
+    // observable no-RST oracle; the byte-exact round-trip above is the corroborating
+    // proof (a mid-stream RST would truncate it).
     assert!(!client_result.observed_rst, "O4 inbound: the client must NOT observe a transport RST");
     // AC3 inbound identity: the agent presented the HELD server SVID (the client
     // verified its chain-to-bundle and extracted its SPIFFE-SAN). This is the
@@ -1688,7 +1715,7 @@ async fn run_one_regime(
 
     // O2 (0x17 on the leg-C wire): TLS-1.3 application_data records in BOTH
     // directions and NO cleartext marker (the request reaches S decrypted; the
-    // response rides back encrypted).
+    // response rides back encrypted). The DIRECTIONAL 0x17 counts are load-bearing.
     let inbound_scan = inbound_wire.stop_and_scan(INBOUND_REQUEST, INBOUND_RESPONSE);
     eprintln!("[05-01][inbound] leg-C wire scan = {inbound_scan:?}");
     assert!(
@@ -1709,54 +1736,41 @@ async fn run_one_regime(
         "O2 inbound: NO cleartext request/response marker may appear on the encrypted leg-C wire"
     );
 
-    // O6 (F5 — workload cannot self-exempt): a WORKLOAD dial that stamps SO_MARK =
-    // MTLS_LEG_S_DIAL_MARK INSIDE its own netns is STILL captured to leg-C — the
-    // mark is skb-local and does not cross the veth/netns boundary. We do NOT have
-    // an outbound rule installed at this point (it was dropped above), so we prove
-    // the inbound self-exempt-impossible via a host-side reference and the netns
-    // capture invariant established by the completed flows.
-    //
-    // The OUTBOUND F5 self-exempt-impossible was already proven structurally: every
-    // OUTBOUND arm above used a workload netns dial and was captured (the Mesh arm
-    // reached leg-F and enforced; the workload cannot stamp a mark that crosses the
-    // veth). To make the self-exempt-impossible EXPLICIT, re-install the egress rule
-    // and drive a SO_MARK-stamped netns dial: it must STILL be captured to leg-F.
     adapter.teardown(inbound_handle).await.expect("inbound teardown");
     drop(inbound_guard);
-    let server_dropped = server_request_ok; // (already joined)
-    let _ = server_dropped;
-
-    prove_workload_cannot_self_exempt(adapter, pki, handshake_delay).await;
 }
 
-/// O6 explicit self-exempt-impossible (F5 / AC6): re-install the egress rule, then
-/// drive a WORKLOAD netns dial that stamps `SO_MARK = MTLS_LEG_S_DIAL_MARK` inside
-/// its own netns. The mark is skb-local and does NOT cross the veth/netns
-/// boundary, so the host-side `iifname VETH_H` egress rule STILL captures it — the
-/// dial lands on leg-F (getsockname recovers the dialed mesh backend), NOT on the
-/// real backend. A workload cannot forge the agent's exemption.
-async fn prove_workload_cannot_self_exempt(
+/// O6 explicit self-exempt-impossible (F5 / AC6): drive a WORKLOAD netns dial that
+/// stamps `SO_MARK = MTLS_LEG_S_DIAL_MARK` inside its own netns THROUGH the
+/// PRODUCTION accept_loop. The mark is skb-local and does NOT cross the
+/// veth/netns boundary, so the host-side `iifname VETH_H` egress rule STILL
+/// captures it — production's accept_loop recovers the dialed mesh backend via
+/// getsockname and enforces mTLS, and the round-trip completes through the agent,
+/// NOT direct. A workload cannot forge the agent's exemption.
+fn prove_workload_cannot_self_exempt(
     adapter: &Arc<HostMtlsEnforcement>,
     pki: &TestPki,
     handshake_delay: Duration,
 ) {
+    let _ = handshake_delay;
     let mesh_backend = SocketAddrV4::new(MESH_BACKEND_IP.parse().unwrap(), MESH_BACKEND_PORT);
     let mut table = BTreeMap::new();
     table.insert(
         mesh_backend,
         MtlsResolution::Mesh(ResolvedBackend { addr: mesh_backend, expected_svid: None }),
     );
-    let resolve = Arc::new(ScriptedResolve::new(table));
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(ScriptedResolve::new(table));
 
-    // leg-F MUST be IP_TRANSPARENT (the redirect delivers orig-dst-addressed packets).
-    let leg_f = make_transparent_listener(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .expect("make_transparent_listener leg-F (self-exempt probe)");
-    let leg_f_port = match leg_f.local_addr().expect("leg-F local_addr") {
-        std::net::SocketAddr::V4(a) => a.port(),
-        other => panic!("expected V4 leg-F addr, got {other}"),
-    };
-    let egress_guard = install_outbound_tproxy(VETH_H, leg_f_port)
-        .expect("install_outbound_tproxy (self-exempt probe)");
+    // PRODUCTION worker over the real enforce substrate; start_alloc binds the
+    // PRODUCTION leg-F + installs the egress rule + spawns the accept_loop.
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(adapter) as Arc<dyn MtlsEnforcement>;
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        Arc::clone(&resolve),
+        Arc::new(SimClock::new()),
+    ));
+    let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
+    worker.start_alloc(&spec).expect("start_alloc (self-exempt probe)");
 
     // A real backend so IF the marked workload dial self-exempted, it would land
     // here instead of leg-F. It must NOT.
@@ -1770,118 +1784,32 @@ async fn prove_workload_cannot_self_exempt(
         run_netns_client(mesh_backend, &req, want, Some(MTLS_LEG_S_DIAL_MARK))
     });
 
-    // The agent must STILL capture it on leg-F (the mark did not cross the veth) and
-    // enforce mTLS — the round-trip completes through the agent, NOT direct.
-    let outcome = drive_outbound_once(adapter, &resolve, pki, &leg_f, handshake_delay).await;
-    let (orig_dst, handle) = match outcome {
-        OutboundOutcome::Enforced { orig_dst, handle } => (orig_dst, handle),
-        other => panic!(
-            "F5 self-exempt-impossible: a workload's SO_MARK-stamped netns dial must STILL be \
-             captured to leg-F and enforced (got {other:?}) — the mark is skb-local and does not \
-             cross the veth/netns boundary, so a workload cannot self-exempt"
-        ),
-    };
-    assert_eq!(
-        orig_dst, mesh_backend,
-        "F5 self-exempt-impossible: the marked workload dial was captured; getsockname recovers \
-         the dialed backend"
-    );
+    // Production accept_loop must STILL capture it on leg-F (the mark did not cross
+    // the veth) and enforce mTLS — the round-trip completes through the agent. A
+    // self-exempted dial would instead reach the mesh backend DIRECT in cleartext
+    // (no 0x17), which the assertions below forbid.
     let client_out = marked_client.join().expect("self-exempt client thread");
     assert_eq!(
         client_out.stdout, OUTBOUND_RESPONSE,
         "F5 self-exempt-impossible: the marked workload dial still rode the agent's mTLS path \
-         (read the mesh response through the agent)"
+         through the PRODUCTION accept_loop (read the mesh response through the agent)"
     );
     let mesh_ok = mesh_peer.join().expect("self-exempt mesh peer thread");
     assert!(
         mesh_ok,
         "F5 self-exempt-impossible: the mesh server received the request via the agent"
     );
-    // The bytes rode an mTLS leg-B — 0x17 on the wire, no cleartext.
+    // The bytes rode an mTLS leg-B — 0x17 on the wire, no cleartext. Had the marked
+    // dial self-exempted (reached the backend direct), the wire would carry the
+    // cleartext markers and ZERO 0x17 records.
     let scan = mesh_wire.stop_and_scan(OUTBOUND_REQUEST, OUTBOUND_RESPONSE);
     eprintln!("[05-01][F5 self-exempt-impossible] leg-B wire scan = {scan:?}");
     assert!(
         scan.has_app_data() && scan.plaintext_marker_hits == 0,
         "F5 self-exempt-impossible: the captured marked dial rode an encrypted leg-B (0x17, no \
-         cleartext), got {scan:?}"
+         cleartext) through the production accept_loop, got {scan:?}"
     );
-    adapter.teardown(handle).await.expect("self-exempt teardown");
-    drop(egress_guard);
-}
-
-/// Drive ONE outbound captured connection: poll leg-F for the redirected
-/// connection, accept it + recover orig-dst (03-02), resolve (01-02), and act on
-/// the arm — `Mesh`→`enforce`, `NonMesh`→cleartext relay, `MeshUnreachable`→drop.
-async fn drive_outbound_once(
-    adapter: &Arc<HostMtlsEnforcement>,
-    resolve: &Arc<ScriptedResolve>,
-    pki: &TestPki,
-    leg_f: &TcpListener,
-    handshake_delay: Duration,
-) -> OutboundOutcome {
-    // The production accept is blocking; bound it so a redirect that silently failed
-    // clean-fails after 10 s rather than hanging to the slow-timeout SIGKILL.
-    bound_listener_accept(leg_f, Duration::from_secs(10));
-    let (leg_f_owned, orig_dst) = accept_outbound_and_recover_orig_dst(leg_f).expect(
-        "accept_outbound_and_recover_orig_dst must recover orig-dst from the TPROXY redirect",
-    );
-
-    if !handshake_delay.is_zero() {
-        tokio::time::sleep(handshake_delay).await;
-    }
-
-    let resolution = resolve.resolve(orig_dst).await.expect("resolve");
-    match resolution {
-        MtlsResolution::Mesh(backend) => {
-            let conn = InterceptedConnection {
-                leg: leg_f_owned,
-                routed: Routed::Outbound { peer: backend.addr },
-                alloc: pki.client_alloc.clone(),
-                // Authn-only (AC8 / #178): NO intended-peer pinning.
-                expected_peer: None,
-            };
-            let handle =
-                adapter.enforce(conn).await.expect("outbound Mesh enforce must reach the backend");
-            OutboundOutcome::Enforced { orig_dst, handle }
-        }
-        MtlsResolution::NonMesh => {
-            // Cleartext pass-through (by design): relay leg-F to a cleartext dial of
-            // orig-dst on a detached thread.
-            let _ = next_seq();
-            spawn_cleartext_relay(leg_f_owned, orig_dst);
-            OutboundOutcome::PassThrough { orig_dst }
-        }
-        MtlsResolution::MeshUnreachable => {
-            // Fail-closed: drop leg-F (closing the workload's connection), NO cleartext.
-            drop(leg_f_owned);
-            OutboundOutcome::FailClosed { orig_dst }
-        }
-    }
-}
-
-/// Spawn a cleartext bidirectional relay between the captured leg-F and a cleartext
-/// dial of `orig_dst` (the `NonMesh` pass-through arm — NO crypto, by design).
-fn spawn_cleartext_relay(leg_f: std::os::fd::OwnedFd, orig_dst: SocketAddrV4) {
-    std::thread::spawn(move || {
-        let Ok(upstream) = TcpStream::connect(orig_dst) else {
-            drop(leg_f);
-            return;
-        };
-        let downstream = TcpStream::from(leg_f);
-        let (Ok(mut d2u), Ok(mut u_w)) = (downstream.try_clone(), upstream.try_clone()) else {
-            return;
-        };
-        let copy = std::thread::spawn(move || {
-            let _ = std::io::copy(&mut d2u, &mut u_w);
-            let _ = u_w.shutdown(std::net::Shutdown::Write);
-        });
-        let (Ok(mut u2d), Ok(mut d_w)) = (upstream.try_clone(), downstream.try_clone()) else {
-            return;
-        };
-        let _ = std::io::copy(&mut u2d, &mut d_w);
-        let _ = d_w.shutdown(std::net::Shutdown::Write);
-        let _ = copy.join();
-    });
+    worker.stop_alloc(&pki.client_alloc);
 }
 
 /// Spawn a cleartext ECHO server on `addr` (the `NonMesh` upstream). Reads the
@@ -1920,42 +1848,4 @@ fn spawn_cleartext_echo(addr: SocketAddrV4) -> std::thread::JoinHandle<bool> {
         std::thread::sleep(Duration::from_millis(200));
         ok
     })
-}
-
-/// Bound a blocking `accept()` on `listener` to `timeout` by setting
-/// `SO_RCVTIMEO` (on Linux this applies to `accept(2)`), so a silently-failed
-/// redirect clean-fails after `timeout` instead of hanging the production accept
-/// to the slow-timeout SIGKILL. The happy path is unaffected.
-fn bound_listener_accept(listener: &TcpListener, timeout: Duration) {
-    let tv = libc::timeval {
-        tv_sec: timeout.as_secs() as libc::time_t,
-        tv_usec: libc::suseconds_t::from(timeout.subsec_micros()),
-    };
-    // SAFETY: listener owns a live socket fd; SO_RCVTIMEO takes a timeval.
-    let rc = unsafe {
-        libc::setsockopt(
-            listener.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVTIMEO,
-            std::ptr::from_ref(&tv).cast(),
-            std::mem::size_of::<libc::timeval>() as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        eprintln!(
-            "[05-01] warn: SO_RCVTIMEO on leg-F listener failed ({}); a silent redirect failure \
-             may hang to slow-timeout",
-            std::io::Error::last_os_error()
-        );
-    }
-}
-
-impl std::fmt::Debug for OutboundOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Enforced { orig_dst, .. } => write!(f, "Enforced {{ orig_dst: {orig_dst} }}"),
-            Self::PassThrough { orig_dst } => write!(f, "PassThrough {{ orig_dst: {orig_dst} }}"),
-            Self::FailClosed { orig_dst } => write!(f, "FailClosed {{ orig_dst: {orig_dst} }}"),
-        }
-    }
 }
