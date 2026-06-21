@@ -1660,17 +1660,27 @@ code") is real and was checked. This accessor clears it on two grounds:
    worker "where is this alloc's inbound intercept listening?" — a genuine
    operability question (ISO 25010 → operability / analysability) for a security
    control that silently terminates client mTLS.
-2. **It is the natural production read-site for #178's own inbound-redirect
-   install.** When #178 lands the production inbound nft-TPROXY rule, *something*
-   must supply leg-C's ephemeral port as the redirect target (symmetric to how the
-   outbound install already reads `leg_f_addr.port()`). `leg_c_addr` is that read
-   point. v1 ships it as the test-observability seam; #178 consumes the SAME
-   accessor for the production install — it does not become dead code, it becomes
-   production-driving. (This is the same lifecycle as `install_inbound_tproxy`,
-   which is "test-callers-only until #178" yet is unambiguously production surface.)
+2. **It is the v1 inbound test-observability seam; #178 is *expected* to reuse it
+   for the production inbound-redirect install — pending that install's site/timing
+   design.** When #178 lands the production inbound nft-TPROXY rule, *something*
+   must supply leg-C's ephemeral port as the redirect target (the outbound install
+   already reads leg-F's port via the **inline local** `leg_f_addr.port()` in
+   `start_alloc` — leg-F has no public accessor). `leg_c_addr` is the *available*
+   read point and the natural candidate. **But whether #178 consumes this public
+   accessor vs an inline `leg_c_addr` local in `start_alloc` (mirroring the leg-F
+   capture pattern) is #178's own unresolved design** — #178 owns the orig-dst →
+   backend resolution, and the inbound-rule install site/timing is not settled
+   here. If #178 mirrors leg-F and installs in `start_alloc`, it would read the
+   inline local, NOT `self.leg_c_addr(alloc)`, and the accessor would remain
+   test-observability-only. v1 does NOT depend on that question: the accessor is
+   independently justified by ground 1 (production-observable operability surface).
+   (`install_inbound_tproxy` is the closest precedent — "test-callers-only until
+   #178" yet unambiguously production surface; `leg_c_addr` is at most the same
+   lifecycle, at least a standing diagnostic.)
 
 So the accessor is production-legitimate observability that v1 *also* uses for
-Tier-3 observability. It is `pub`. It is exempt from the test-only-smell rejection.
+Tier-3 observability. It is `pub`. It is exempt from the test-only-smell rejection —
+ground 1 alone clears it, independent of whether #178 later consumes it.
 
 ### leg-C vs leg-F asymmetry — why leg-C needs this and leg-F does not; NO `leg_f_addr` now
 
@@ -1699,12 +1709,21 @@ accessor, leg-C only.
 
 ### #178 relationship (one line)
 
-This is the **v1 test-observability seam** for the inbound leg; when #178 lands the
-production inbound nft-TPROXY redirect, `leg_c_addr` remains as the production
-read-point that supplies leg-C's ephemeral port to that install (and as a standing
-operator diagnostic) — it is not throwaway. Cites ADR-0071 (authn-only v1 / the
-#178 anti-corruption boundary) + #178 (the inbound orig-dst → real-backend
-redirect, `server_dial_addr` / D-MTLS-15 / GAP-3).
+This is the **v1 test-observability seam** for the inbound leg; #178 is **expected**
+to reuse it for the production inbound-redirect install, **pending that install's
+site/timing design** (#178 may instead read an inline `leg_c_addr` local in
+`start_alloc`, the way the outbound install reads leg-F's inline local — in which
+case `leg_c_addr` stays test-observability-only). Either way it is not throwaway:
+v1's standing operator diagnostic justifies it independent of #178. Cites ADR-0071
+(authn-only v1 / the #178 anti-corruption boundary) + #178 (the inbound orig-dst →
+real-backend redirect, `server_dial_addr` / D-MTLS-15 / GAP-3).
+
+*(2026-06-21 — softening of the "#178 will consume" certainty resolves 05-01
+re-review advisory R1. The production-legitimacy verdict is unchanged: `leg_c_addr`
+stays a `pub` diagnostic justified by ground 1 alone. Only the claim that #178
+consumes the **public accessor** — vs an inline `start_alloc` local, #178's own
+unresolved design — was overstated as settled fact; it is now framed as expected,
+pending #178's install site/timing.)*
 
 ### Scope note + crafter instruction
 

@@ -215,11 +215,13 @@ struct AllocIntercept {
     _tproxy_guard: Option<TproxyInterceptGuard>,
     /// The ephemeral loopback addr leg-C (the inbound `IP_TRANSPARENT`
     /// listener) was bound to in `start_alloc`, captured BEFORE the listener
-    /// was moved into the spawned inbound `accept_loop` (the symmetric twin of
-    /// `leg_f_addr` for the outbound rule). Retained so [`leg_c_addr`] can be a
-    /// pure in-memory read — the listener itself has been consumed by the accept
-    /// task and its `local_addr()` is no longer reachable from here. Private to
-    /// the module; the only public surface is the [`leg_c_addr`] accessor.
+    /// was moved into the spawned inbound `accept_loop` — mirroring the leg-F
+    /// **capture pattern** (leg-F's addr is an inline local in `start_alloc`,
+    /// not a public accessor; see `leg_f_addr` there). Retained so
+    /// [`leg_c_addr`] can be a pure in-memory read — the listener itself has
+    /// been consumed by the accept task and its `local_addr()` is no longer
+    /// reachable from here. Private to the module; the only public surface is
+    /// the [`leg_c_addr`] accessor.
     ///
     /// [`leg_c_addr`]: MtlsInterceptWorker::leg_c_addr
     leg_c_addr: SocketAddrV4,
@@ -437,13 +439,17 @@ impl MtlsInterceptWorker {
                 Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
             };
         // Capture leg-C's bound addr BEFORE the listener moves into the spawned
-        // inbound `accept_loop` — the diagnostic twin of `leg_f_addr` above
-        // (:378-382). Retained on `AllocIntercept` so `leg_c_addr(&self, alloc)`
-        // stays a pure in-memory read (the listener is consumed by the accept
-        // task; its `local_addr()` is no longer reachable from the worker). It is
-        // the EXACT addr the spawned inbound accept loop accepts on, so a redirect
-        // installed at it lands on the production inbound leg (D-TME-13; the
-        // read-site #178's production inbound-redirect install will also use).
+        // inbound `accept_loop` — mirroring the leg-F capture pattern above
+        // (:378-382; leg-F's addr is an inline local consumed inline, with no
+        // public accessor). Retained on `AllocIntercept` so `leg_c_addr(&self,
+        // alloc)` stays a pure in-memory read (the listener is consumed by the
+        // accept task; its `local_addr()` is no longer reachable from the
+        // worker). It is the EXACT addr the spawned inbound accept loop accepts
+        // on, so a redirect installed at it lands on the production inbound leg
+        // (D-TME-13). #178 is *expected* to reuse this read for its production
+        // inbound-redirect install, pending that install's site/timing design;
+        // if #178 mirrors leg-F and installs in `start_alloc` it would read an
+        // inline `leg_c_addr` local, NOT `self.leg_c_addr(alloc)`.
         let leg_c_addr = inbound_listener
             .local_addr()
             .ok()
@@ -824,6 +830,21 @@ impl MtlsInterceptWorker {
     /// the inbound intercept is listening — the diagnostic counterpart to the
     /// outbound leg-F port the egress nft-TPROXY rule already encodes
     /// (`install_outbound_tproxy(host_veth, leg_f_port)`).
+    ///
+    /// # `pub` legitimacy (operability, independent of #178)
+    ///
+    /// This is a production-legitimate diagnostic/observability surface in its own
+    /// right: an operator/diagnostic caller can ask the worker "where is this
+    /// alloc's inbound intercept listening?" — a genuine operability/analysability
+    /// question for a security control that silently terminates client mTLS. That
+    /// alone justifies `pub`; it is NOT a test-only hook. #178 (the production
+    /// inbound-redirect install) is *expected* to reuse this read pending its
+    /// install site/timing design — but whether #178 consumes `self.leg_c_addr(..)`
+    /// or an inline `leg_c_addr` local in `start_alloc` (mirroring the leg-F
+    /// capture pattern, which reads its port via the inline local
+    /// `leg_f_addr.port()` and exposes no accessor) is #178's unresolved design.
+    /// v1 does NOT depend on that question; the accessor stands on the operability
+    /// ground above regardless. See D-TME-13 in `wave-decisions.md`.
     ///
     /// # Preconditions
     ///

@@ -31,8 +31,10 @@
 //!     the architect-pinned accessor `MtlsInterceptWorker::leg_c_addr` (D-TME-13)
 //!     and installs its OWN `install_inbound_tproxy(virt, leg_c_port)` redirect to
 //!     that PRODUCTION leg-C — the production inbound rule is #178-deferred
-//!     (`start_alloc` installs none), and #178's production install will consume
-//!     the SAME accessor. A client's `connect(virt)` → PREROUTING → TPROXY →
+//!     (`start_alloc` installs none), and #178's production install is *expected*
+//!     to reuse this leg-C bound-addr read pending its install site/timing design
+//!     (it may read an inline `start_alloc` local rather than this accessor — see
+//!     D-TME-13). A client's `connect(virt)` → PREROUTING → TPROXY →
 //!     PRODUCTION leg-C → the spawned production inbound `accept_loop`: getsockname
 //!     orig-dst recovery → SERVER handshake on leg-C + the SO_MARK-exempt leg-S
 //!     dial — 0x17 on the leg-C wire. NO test code accepts or enforces on the
@@ -1553,22 +1555,82 @@ fn run_one_regime(
     // MeshUnreachable arm must drop leg-F fail-closed — this sentinel must NOT
     // accept. (Driven END-TO-END through production for the first time.)
     let fc_listener = TcpListener::bind(unreachable).expect("bind fail-closed sentinel listener");
-    fc_listener.set_nonblocking(true).ok();
+    fc_listener.set_nonblocking(true).expect("set_nonblocking on fail-closed sentinel");
     let fc_req = OUTBOUND_REQUEST.to_vec();
     let fc_client = std::thread::spawn(move || {
         // want=0: the workload sends but expects no response (fail-closed drops it).
         run_netns_client(unreachable, &fc_req, 0, None)
     });
-    let _ = fc_client.join();
-    // Give the production accept_loop time to accept → resolve(MeshUnreachable) →
-    // drop fail-closed, then assert NO cleartext reached the should-be-mesh sentinel.
-    std::thread::sleep(Duration::from_millis(600));
-    let accepted = fc_listener.accept();
-    assert!(
-        accepted.is_err(),
-        "O5 fail-closed: production accept_loop's MeshUnreachable arm must drop leg-F fail-closed — \
-         NO connection may reach the should-be-mesh sentinel (no silent cleartext), got {accepted:?}"
+    // POSITIVE interception signal (debugging.md §8/§11 — confirm the producer ran,
+    // do not discard the workload's own connect outcome). Capture, do NOT `let _`,
+    // the workload's connect/read result. Under the PRODUCTION path the TPROXY
+    // divert delivers the workload's SYN to the transparent leg-F, the spawned
+    // `accept_loop` ACCEPTS it (3-way handshake completes → the workload's
+    // `connect()` SUCCEEDS), production then resolves MeshUnreachable and DROPS the
+    // accepted leg-F (no enforce, no upstream dial). A *never-intercepted*
+    // connection would instead see ConnectionRefused / ENETUNREACH on `connect()`
+    // (no SYN-ACK, no transparent socket) → `run_netns_client` emits
+    // `CLIENT-FAIL:...refused`/`unreachable`. The discriminator between
+    // intercepted-then-dropped and never-intercepted is therefore the *connect*
+    // outcome: any post-connect drop (clean EOF for want=0, or a Broken-pipe /
+    // Connection-reset once production drops the accepted leg-F) is the
+    // intercepted-then-fail-closed shape; only a CONNECT-time refusal/unreachability
+    // is never-intercepted. Asserting "connect was not refused" proves interception
+    // HAPPENED, and the silent-sentinel poll below proves fail-closed FIRED — a real
+    // differential against the NonMesh-relays arm.
+    let fc_out = fc_client.join().expect("fail-closed netns client thread");
+    let fc_stderr = String::from_utf8_lossy(&fc_out.stderr);
+    eprintln!(
+        "[05-01][outbound MeshUnreachable] netns client exit={:?} stdout_len={} stderr={}",
+        fc_out.status.code(),
+        fc_out.stdout.len(),
+        fc_stderr.trim(),
     );
+    // Intercepted-then-dropped, NOT refused: the workload's `connect()` must have
+    // SUCCEEDED (leg-F accepted it). A connect-time refusal/unreachability is the
+    // never-intercepted shape; a post-connect EOF/RST is intercepted-then-dropped.
+    let connect_refused = fc_stderr.contains("refused")
+        || fc_stderr.contains("unreachable")
+        || fc_stderr.contains("Errno 111") // ECONNREFUSED
+        || fc_stderr.contains("Errno 101"); // ENETUNREACH
+    assert!(
+        !connect_refused,
+        "O5 fail-closed POSITIVE signal: the workload's connect() must SUCCEED (production leg-F \
+         accepted it → intercepted) before production drops it fail-closed — a connect-time \
+         refusal/unreachability means the connection was never intercepted, not \
+         intercepted-then-dropped. stderr={}",
+        fc_stderr.trim()
+    );
+    // …and fail-closed dropped it with no echo: stdout carries no relayed/echoed
+    // bytes (a silent-cleartext fallback would have relayed the request to the
+    // sentinel below and could have echoed, not returned empty).
+    assert!(
+        fc_out.stdout.is_empty(),
+        "O5 fail-closed POSITIVE signal: the dropped leg-F must yield no echo (empty stdout), \
+         got {} bytes",
+        fc_out.stdout.len()
+    );
+    // NEGATIVE signal (retained, load-bearing as a set): NO cleartext reached the
+    // should-be-mesh sentinel. Bounded poll-loop over a deadline (debugging.md §11 —
+    // not a single poll after one fixed sleep): `accept()` must stay err for the
+    // whole window, proving no connection ever lands on the sentinel.
+    let fc_deadline = std::time::Instant::now() + Duration::from_millis(800);
+    loop {
+        match fc_listener.accept() {
+            Ok((_s, peer)) => panic!(
+                "O5 fail-closed: production accept_loop's MeshUnreachable arm must drop leg-F \
+                 fail-closed — NO connection may reach the should-be-mesh sentinel (no silent \
+                 cleartext), but one arrived from {peer}"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= fc_deadline {
+                    break; // window elapsed with no accept — fail-closed confirmed
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => panic!("fail-closed sentinel accept errored unexpectedly: {e}"),
+        }
+    }
     drop(fc_listener);
 
     // --- OUTBOUND arm 3: NonMesh → cleartext pass-through (by design) ---
@@ -1622,14 +1684,18 @@ fn run_one_regime(
 /// server's virt, an east-west fact v1 has no production source for —
 /// `start_alloc` records `tproxy_guard = None`). So the test discovers leg-C's
 /// ephemeral bound addr via the architect-pinned accessor
-/// [`MtlsInterceptWorker::leg_c_addr`] (D-TME-13 — the diagnostic twin of the
-/// leg-F port the egress rule already encodes; the SAME read-site #178's
-/// production inbound-redirect install will use) and installs its OWN
-/// `install_inbound_tproxy(virt, leg_c_port)` redirect to that PRODUCTION-bound
-/// leg-C. A client's `connect(virt)` → PREROUTING → TPROXY → production leg-C →
-/// the spawned production inbound `accept_loop`. When #178 lands the production
-/// inbound rule it replaces this test redirect; the accessor and the spawned
-/// accept loop are unchanged.
+/// [`MtlsInterceptWorker::leg_c_addr`] (D-TME-13 — a production-legitimate
+/// diagnostic observability surface, mirroring the leg-F **capture pattern** the
+/// egress rule encodes; leg-F has no public accessor — its port is an inline
+/// `start_alloc` local). #178's production inbound-redirect install is *expected*
+/// to reuse this leg-C bound-addr read pending its install site/timing design;
+/// if #178 mirrors leg-F and installs in `start_alloc` it may read an inline
+/// local rather than this accessor, leaving the accessor test-observability-only.
+/// The test installs its OWN `install_inbound_tproxy(virt, leg_c_port)` redirect
+/// to that PRODUCTION-bound leg-C. A client's `connect(virt)` → PREROUTING →
+/// TPROXY → production leg-C → the spawned production inbound `accept_loop`. When
+/// #178 lands the production inbound rule it replaces this test redirect; the
+/// accessor and the spawned accept loop are unchanged.
 ///
 /// All oracles stay observable kernel/wire side effects (O1 orig-dst via the
 /// byte-exact round-trip, O2 `0x17` both directions, O3 byte-exact, O4 no-RST) —
