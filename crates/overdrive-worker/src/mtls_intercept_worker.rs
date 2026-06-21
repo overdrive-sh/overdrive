@@ -236,10 +236,79 @@ struct AllocIntercept {
     /// alloc (and, in a test runtime, blocks the runtime drop forever).
     stop: Arc<AtomicBool>,
     /// The `EnforcedConnection` handles this alloc produced, drained
-    /// through `enforcement.teardown` on stop. Behind the worker's
-    /// per-alloc `Mutex` so the spawned accept task can push as it
-    /// `enforce`s.
-    enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
+    /// through `enforcement.teardown` on stop. An [`EnforcedSet`] (not a raw
+    /// `Arc<Mutex<Vec>>`): its seal+drain is ATOMIC with push, so a
+    /// `spawn_enforce` task that wins the handshake race AFTER `stop_alloc`
+    /// has sealed the set is handed its handle back to tear down inline
+    /// (fail-closed), instead of orphaning a live kTLS-armed handle into a
+    /// vec nothing will drain again. Closes the `stop_alloc`-drain vs
+    /// `spawn_enforce`-push TOCTOU.
+    enforced: EnforcedSet,
+}
+
+/// Per-alloc enforced-connection set with an atomic seal+drain.
+///
+/// A push to a *sealed* set hands the handle back so the caller tears it
+/// down inline (fail-closed) instead of orphaning it. This closes the
+/// race between [`MtlsInterceptWorker::stop_alloc`] draining the set and an
+/// in-flight [`MtlsInterceptWorker::spawn_enforce`] task pushing a freshly
+/// enforced handle: previously the drain was a `std::mem::take` on a raw
+/// `Arc<Mutex<Vec>>` while "stop accepting handles" lived in a *different*
+/// primitive (the `stop` `AtomicBool`), so seal-and-drain and push were not
+/// atomic under one lock (a TOCTOU — `.claude/rules/development.md` §
+/// "Check-and-act must be atomic (no TOCTOU)"). Here the `sealed` flag and
+/// the handle collection live under ONE `parking_lot::Mutex`, so the
+/// check-and-act is a single locked op.
+#[derive(Clone)]
+struct EnforcedSet {
+    inner: Arc<Mutex<EnforcedState>>,
+}
+
+/// The `EnforcedSet` payload: the seal flag and the handle collection,
+/// held together under one lock so push and seal+drain cannot interleave.
+struct EnforcedState {
+    sealed: bool,
+    handles: Vec<EnforcedConnection>,
+}
+
+impl EnforcedSet {
+    /// A fresh, open (unsealed), empty set.
+    fn new() -> Self {
+        Self { inner: Arc::new(Mutex::new(EnforcedState { sealed: false, handles: Vec::new() })) }
+    }
+
+    /// Atomic: push the handle iff the set is open; if the set is SEALED,
+    /// return the handle so the caller tears it down inline (fail-closed).
+    /// One locked op — no separate "is it sealed?" check, so no TOCTOU
+    /// window between the check and the push.
+    #[must_use]
+    fn push_or_reject(&self, handle: EnforcedConnection) -> Option<EnforcedConnection> {
+        let mut st = self.inner.lock();
+        if st.sealed {
+            Some(handle)
+        } else {
+            st.handles.push(handle);
+            None
+        }
+    }
+
+    /// Atomic seal+drain: mark the set sealed (future pushes are rejected by
+    /// [`push_or_reject`](Self::push_or_reject)) and return the handles to
+    /// tear down, in one locked op. Idempotent — a second call drains an
+    /// already-empty, already-sealed set and returns `Vec::new()`.
+    fn seal_and_drain(&self) -> Vec<EnforcedConnection> {
+        let mut st = self.inner.lock();
+        st.sealed = true;
+        std::mem::take(&mut st.handles)
+    }
+
+    /// Test-only count of currently-held (not-yet-drained) handles. Used by
+    /// the per-arm resolve-consumer tests to observe that an enforced handle
+    /// joined the set; NOT production surface (no `pub`, `#[cfg(test)]`).
+    #[cfg(test)]
+    fn held_count(&self) -> usize {
+        self.inner.lock().handles.len()
+    }
 }
 
 /// The worker-side mTLS intercept-and-enforce lifecycle component.
@@ -501,20 +570,20 @@ impl MtlsInterceptWorker {
         inbound_listener: std::net::TcpListener,
         leg_c_addr: SocketAddrV4,
     ) {
-        let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
+        let enforced = EnforcedSet::new();
         // Cooperative stop flag the accept loops observe between poll slices.
         let stop = Arc::new(AtomicBool::new(false));
 
         let outbound_task = self.spawn_accept_loop(
             spec.alloc.clone(),
             AcceptLeg::Outbound { listener: leg_f_listener },
-            Arc::clone(&enforced),
+            enforced.clone(),
             Arc::clone(&stop),
         );
         let inbound_task = self.spawn_accept_loop(
             spec.alloc.clone(),
             AcceptLeg::Inbound { listener: inbound_listener },
-            Arc::clone(&enforced),
+            enforced.clone(),
             Arc::clone(&stop),
         );
 
@@ -549,14 +618,22 @@ impl MtlsInterceptWorker {
             task.abort();
         }
 
-        // Drain the per-connection teardown set fail-closed. `teardown`
-        // is async; spawn a detached task that tears down each handle so
-        // `stop_alloc` (a sync lifecycle hook) does not block. The
-        // cgroup link + TPROXY guard drop synchronously here (their
-        // `Drop` detaches), which is correct: detaching the intercept
-        // stops new connections immediately while in-flight ones are
-        // torn down off-thread.
-        let handles: Vec<EnforcedConnection> = std::mem::take(&mut intercept.enforced.lock());
+        // Seal-and-drain the per-connection teardown set fail-closed.
+        // `teardown` is async; spawn a detached task that tears down each
+        // drained handle so `stop_alloc` (a sync lifecycle hook) does not
+        // block. The cgroup link + TPROXY guard drop synchronously here
+        // (their `Drop` detaches), which is correct: detaching the
+        // intercept stops new connections immediately while in-flight ones
+        // are torn down off-thread.
+        //
+        // The SEAL is the load-bearing change (not the prior `mem::take`):
+        // it atomically rejects any FUTURE push from a `spawn_enforce` task
+        // still in flight (its `enforce` awaits a seconds-wide TLS
+        // handshake + kTLS arm), so a handle produced AFTER this drain is
+        // handed back to `spawn_enforce` and torn down inline rather than
+        // orphaned into a vec nothing drains again. Closes the
+        // `stop_alloc`-drain vs `spawn_enforce`-push TOCTOU.
+        let handles: Vec<EnforcedConnection> = intercept.enforced.seal_and_drain();
         if !handles.is_empty() {
             let enforcement = Arc::clone(&self.enforcement);
             tokio::spawn(async move {
@@ -583,7 +660,7 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         alloc: AllocationId,
         leg: AcceptLeg,
-        enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
+        enforced: EnforcedSet,
         stop: Arc<AtomicBool>,
     ) -> tokio::task::JoinHandle<()> {
         let worker = Arc::clone(self);
@@ -611,7 +688,7 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         alloc: &AllocationId,
         leg: &AcceptLeg,
-        enforced: &Arc<Mutex<Vec<EnforcedConnection>>>,
+        enforced: &EnforcedSet,
         stop: &Arc<AtomicBool>,
     ) {
         loop {
@@ -702,7 +779,7 @@ impl MtlsInterceptWorker {
         alloc: &AllocationId,
         leg_f: std::os::fd::OwnedFd,
         orig_dst: SocketAddrV4,
-        enforced: &Arc<Mutex<Vec<EnforcedConnection>>>,
+        enforced: &EnforcedSet,
     ) {
         // The resolve port is async; this loop runs on a `spawn_blocking`
         // thread (a blocking-pool thread, not a runtime worker), so
@@ -767,15 +844,36 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         alloc: &AllocationId,
         conn: InterceptedConnection,
-        enforced: &Arc<Mutex<Vec<EnforcedConnection>>>,
+        enforced: &EnforcedSet,
     ) {
         let enforcement = Arc::clone(&self.enforcement);
-        let enforced = Arc::clone(enforced);
+        let enforced = enforced.clone();
         let alloc_for_log = alloc.clone();
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
             match enforcement.enforce(conn).await {
-                Ok(handle) => enforced.lock().push(handle),
+                Ok(handle) => {
+                    // Atomic push-or-reject: if `stop_alloc` sealed the set
+                    // while this `enforce` was awaiting its handshake, the
+                    // handle is handed back here and torn down INLINE
+                    // (fail-closed) — never orphaned into a drained vec. The
+                    // `push_or_reject` call returns an OWNED `Option` (the
+                    // lock is released inside the method) BEFORE any `.await`,
+                    // so the lock is never held across the `teardown` await
+                    // (`.claude/rules/development.md` § "Concurrency & async").
+                    if let Some(orphan) = enforced.push_or_reject(handle) {
+                        let orphan_id = orphan.id().clone();
+                        if let Err(source) = enforcement.teardown(orphan).await {
+                            tracing::warn!(
+                                name: "health.mtls.teardown_failed",
+                                alloc = %alloc_for_log,
+                                connection = %orphan_id,
+                                error = %source,
+                                "mTLS enforce won after alloc stop; inline fail-closed teardown failed"
+                            );
+                        }
+                    }
+                }
                 Err(source) => {
                     tracing::warn!(
                         name: "health.mtls.enforce_failed",
@@ -804,7 +902,7 @@ impl MtlsInterceptWorker {
         tproxy_guard: Option<TproxyInterceptGuard>,
         leg_c_addr: SocketAddrV4,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
-        enforced: Arc<Mutex<Vec<EnforcedConnection>>>,
+        enforced: EnforcedSet,
         stop: Arc<AtomicBool>,
     ) {
         self.intercepts.lock().insert(
@@ -1127,7 +1225,7 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use parking_lot::Mutex;
 
-    use super::{MtlsInterceptWorker, OutboundAction, decide_outbound};
+    use super::{EnforcedSet, MtlsInterceptWorker, OutboundAction, decide_outbound};
 
     /// One recorded `enforce` call — the observable driven-port surface the
     /// per-arm assertions read (the `Routed` routing fact + the alloc + whether
@@ -1245,10 +1343,10 @@ mod tests {
         alloc: AllocationId,
         leg_f: std::os::fd::OwnedFd,
         orig_dst: SocketAddrV4,
-    ) -> Arc<Mutex<Vec<EnforcedConnection>>> {
-        let enforced: Arc<Mutex<Vec<EnforcedConnection>>> = Arc::new(Mutex::new(Vec::new()));
+    ) -> EnforcedSet {
+        let enforced = EnforcedSet::new();
         let worker = Arc::clone(worker);
-        let enforced_for_task = Arc::clone(&enforced);
+        let enforced_for_task = enforced.clone();
         tokio::task::spawn_blocking(move || {
             worker.handle_outbound(&alloc, leg_f, orig_dst, &enforced_for_task);
         })
@@ -1336,8 +1434,8 @@ mod tests {
         // The handle is pushed into the teardown set AFTER `enforce` returns Ok
         // (inside the spawned task, after the spy recorded the call) — wait
         // (bounded, real-time) until it lands so the assertion does not race the push.
-        wait_until("enforced handle joins teardown set", || enforced.lock().len() == 1).await;
-        assert_eq!(enforced.lock().len(), 1, "the enforced handle joins the teardown set");
+        wait_until("enforced handle joins teardown set", || enforced.held_count() == 1).await;
+        assert_eq!(enforced.held_count(), 1, "the enforced handle joins the teardown set");
     }
 
     /// Wait (bounded, in real wall-clock time) until `cond` holds. Polls on a
@@ -1513,5 +1611,238 @@ mod tests {
                 "{err:?} must map to stage label {expected_stage:?}"
             );
         }
+    }
+
+    // ---- EnforcedSet: the atomic seal+drain primitive (pure unit) ----------
+
+    /// Build an `EnforcedConnection` with a stable, asserter-readable id so a
+    /// drained / handed-back handle can be matched by id.
+    fn enforced_conn(alloc_name: &str, counter: u64) -> EnforcedConnection {
+        EnforcedConnection::new(EnforcedConnectionId::new(alloc(alloc_name), counter))
+    }
+
+    /// The `EnforcedSet` seal+drain contract — the mutation-gate target for the
+    /// fix. Each clause is the inverse of a way the race could leak:
+    /// - an OPEN `push_or_reject` STORES the handle and returns `None` (the
+    ///   handle is retained for the eventual drain);
+    /// - `seal_and_drain` RETURNS the stored handles AND seals the set;
+    /// - a SEALED `push_or_reject` HANDS THE HANDLE BACK (`Some`) and does NOT
+    ///   store it — the caller tears it down inline rather than orphaning it
+    ///   (this clause is the one a `if st.sealed` mutation flips, and the one
+    ///   the whole fix exists to guarantee);
+    /// - a second `seal_and_drain` is idempotent (drains empty).
+    #[test]
+    fn enforced_set_seals_then_hands_back_pushes_atomically() {
+        let set = EnforcedSet::new();
+
+        // OPEN: push stores and returns None.
+        let h0 = enforced_conn("set-alloc", 0);
+        let h1 = enforced_conn("set-alloc", 1);
+        assert!(
+            set.push_or_reject(h0.clone()).is_none(),
+            "an open set must STORE the handle and return None",
+        );
+        assert!(
+            set.push_or_reject(h1.clone()).is_none(),
+            "an open set must STORE the second handle and return None",
+        );
+        assert_eq!(set.held_count(), 2, "both pushes are retained while the set is open");
+
+        // SEAL + DRAIN: returns exactly the stored handles, in push order.
+        let drained = set.seal_and_drain();
+        let drained_ids: Vec<_> = drained.iter().map(|h| h.id().clone()).collect();
+        assert_eq!(
+            drained_ids,
+            vec![h0.id().clone(), h1.id().clone()],
+            "seal_and_drain must return exactly the handles that were pushed",
+        );
+        assert_eq!(set.held_count(), 0, "the set is empty after draining");
+
+        // SEALED: a post-seal push is HANDED BACK (Some) and NOT stored.
+        let late = enforced_conn("set-alloc", 2);
+        let handed_back = set.push_or_reject(late.clone());
+        assert_eq!(
+            handed_back.map(|h| h.id().clone()),
+            Some(late.id().clone()),
+            "a push to a SEALED set must hand the SAME handle back (fail-closed inline teardown)",
+        );
+        assert_eq!(
+            set.held_count(),
+            0,
+            "a rejected push must NOT be stored — otherwise it orphans into a drained set",
+        );
+
+        // Idempotent: a second seal_and_drain drains an empty, sealed set.
+        assert!(
+            set.seal_and_drain().is_empty(),
+            "a second seal_and_drain drains an already-sealed, already-empty set",
+        );
+    }
+
+    // ---- the orphaned-enforce-task regression (real stop_alloc + spawn_enforce)
+
+    /// Spy [`MtlsEnforcement`] for the orphaned-task regression. `enforce`
+    /// signals it has entered (in-flight), then BLOCKS on a release gate, then
+    /// records and returns `Ok` — recreating the seconds-wide handshake window
+    /// during which `stop_alloc` runs. `teardown` RECORDS the torn-down id so
+    /// the test can prove the post-drain handle was reclaimed (fail-closed)
+    /// rather than orphaned.
+    struct GatedEnforcement {
+        /// Set once `enforce` has entered and is about to block on the gate.
+        entered: Arc<tokio::sync::Notify>,
+        /// Released by the test to let the blocked `enforce` complete its push.
+        release: Arc<tokio::sync::Notify>,
+        /// The ids `teardown` was called with — the falsifiable surface: a
+        /// reclaimed post-drain handle appears here; an orphaned one never does.
+        torn_down: Arc<Mutex<Vec<EnforcedConnectionId>>>,
+        counter: std::sync::atomic::AtomicU64,
+    }
+
+    impl GatedEnforcement {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                entered: Arc::new(tokio::sync::Notify::new()),
+                release: Arc::new(tokio::sync::Notify::new()),
+                torn_down: Arc::new(Mutex::new(Vec::new())),
+                counter: std::sync::atomic::AtomicU64::new(0),
+            })
+        }
+
+        /// Await until `enforce` has entered and is blocked on the release gate.
+        async fn entered(&self) {
+            self.entered.notified().await;
+        }
+
+        /// Release the blocked `enforce` so it completes and attempts its push.
+        fn release(&self) {
+            self.release.notify_one();
+        }
+
+        /// The connection ids `teardown` was called with — the falsifiable
+        /// surface: a reclaimed post-drain handle appears here; an orphaned one
+        /// never does.
+        fn torn_down(&self) -> Vec<EnforcedConnectionId> {
+            self.torn_down.lock().clone()
+        }
+    }
+
+    #[async_trait]
+    impl MtlsEnforcement for GatedEnforcement {
+        async fn probe(&self) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            Ok(())
+        }
+
+        async fn enforce(
+            &self,
+            conn: InterceptedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<EnforcedConnection> {
+            // Announce that enforce is in flight, then block on the release gate
+            // — this models the seconds-wide TLS-handshake + kTLS-arm window the
+            // production race opens between spawn_enforce and stop_alloc.
+            self.entered.notify_one();
+            self.release.notified().await;
+            // `conn.leg` drops here (the spy does not pump) — closing the leg.
+            let counter = self.counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(EnforcedConnection::new(EnforcedConnectionId::new(conn.alloc, counter)))
+        }
+
+        fn liveness(&self, _handle: &EnforcedConnection) -> PumpLiveness {
+            PumpLiveness::Running
+        }
+
+        async fn teardown(
+            &self,
+            handle: EnforcedConnection,
+        ) -> overdrive_core::traits::mtls_enforcement::Result<()> {
+            self.torn_down.lock().push(handle.id().clone());
+            Ok(())
+        }
+    }
+
+    /// REGRESSION (P1, GH #26): a `spawn_enforce` task that wins its handshake
+    /// AFTER `stop_alloc` has drained the alloc's teardown set must NOT orphan
+    /// its kTLS-armed handle — the handle MUST still be torn down (fail-closed).
+    ///
+    /// Drives the real production path: `record_intercept_full` registers an
+    /// alloc sharing an [`EnforcedSet`]; `spawn_enforce` fires an in-flight
+    /// `enforce` (gated mid-handshake); `stop_alloc` then seal-and-drains (the
+    /// set is still empty — the handle has not been pushed yet); the gate is
+    /// released so `enforce` completes and pushes. The assertion: `teardown`
+    /// was called for that connection.
+    ///
+    /// Against the pre-fix code (raw `mem::take` drain, push gated by the
+    /// separate `stop` flag the detached enforce task never reads) the
+    /// post-drain push lands in a vec nothing drains again → `teardown` is
+    /// never called → the bounded wait times out → RED. With the seal+drain
+    /// fix the sealed set hands the handle back to `spawn_enforce`, which tears
+    /// it down inline → GREEN.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn enforce_winning_after_stop_alloc_drain_is_torn_down_not_orphaned() {
+        let spy = GatedEnforcement::new();
+        let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
+        let resolve =
+            resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh);
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(&spy) as Arc<dyn MtlsEnforcement>;
+        let worker = Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock));
+
+        let the_alloc = alloc("alloc-orphan-race");
+        // Register an alloc that shares `enforced` — the SAME set spawn_enforce
+        // pushes into and stop_alloc drains. No real listeners/guards (None /
+        // empty); we drive the enforce + stop path directly, not start_alloc
+        // (which would bind real IP_TRANSPARENT listeners → needs root).
+        let enforced = EnforcedSet::new();
+        worker.record_intercept_full(
+            the_alloc.clone(),
+            None,
+            None,
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+            vec![],
+            enforced.clone(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        );
+
+        // Fire an in-flight enforce through the real spawn_enforce path. The
+        // leg is a real accepted loopback socket (as accepted_leg_f hands back).
+        let (leg, _addr, _client) = accepted_leg_f();
+        let conn = InterceptedConnection {
+            leg,
+            routed: Routed::Outbound { peer: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9) },
+            alloc: the_alloc.clone(),
+            expected_peer: None,
+        };
+        worker.spawn_enforce(&the_alloc, conn, &enforced);
+
+        // Wait until enforce is in flight (blocked on the gate) — the handle is
+        // NOT yet pushed, so stop_alloc's drain sees an empty set.
+        tokio::time::timeout(Duration::from_secs(5), spy.entered())
+            .await
+            .expect("enforce must enter (in-flight) within 5s");
+
+        // T2: stop_alloc seal-and-drains the (still-empty) set.
+        worker.stop_alloc(&the_alloc);
+
+        // T3: release the gate → enforce completes and attempts its push into
+        // the now-sealed set.
+        spy.release();
+
+        // The handle produced post-drain MUST be torn down (handed back to
+        // spawn_enforce by the sealed set, torn down inline). Pre-fix it is
+        // orphaned and teardown is never called → this bounded wait times out.
+        wait_until("post-drain enforce handle is torn down (fail-closed)", || {
+            !spy.torn_down().is_empty()
+        })
+        .await;
+
+        let recorded = spy.torn_down();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the post-drain enforce handle must be torn down exactly once (fail-closed), not orphaned",
+        );
+        assert_eq!(
+            recorded[0].alloc(),
+            &the_alloc,
+            "the torn-down handle must be the alloc's enforced connection",
+        );
     }
 }
