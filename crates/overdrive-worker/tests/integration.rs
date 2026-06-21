@@ -99,6 +99,19 @@ mod integration {
     // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
     mod bidirectional_walking_skeleton;
 
+    // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
+    // invariant (Tier-3 obligation (e) / Q5a / D-TME-9 / D-TME-10): a DNS-returned
+    // service_backends addr IS the addr MtlsResolve recognizes. The workload dials
+    // a KNOWN service_backends addr B (DNS stubbed — #61's responder is NOT built),
+    // egress nft-TPROXY → leg-F → getsockname recovers B, and SimMtlsResolve
+    // recognizes the SAME B as a running mesh backend (`Mesh{addr:B}`) — one
+    // source, two readers, byte-consistent. The 02-03 resolv.conf injection is
+    // asserted present in the netns (the injection mechanism this feature OWNS),
+    // even though the responder is the #61 stub. Carries a kernel-free
+    // SimMtlsResolve companion as the cheap default-lane reproduction. SCOPE: no
+    // #61 daemon, no #167 VIP allocator — headless v1 only.
+    mod name_resolve_enforce_consistency;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
