@@ -93,10 +93,17 @@ use crate::mtls_intercept::{
 /// SURFACED to the action-shim (which drives the alloc to terminal `Failed`),
 /// not swallowed in a `warn!`.
 ///
-/// This enum invents NO new lower-level error surface — it wraps the typed
-/// [`InterceptError`] the install steps already produce (the OUTBOUND egress
-/// nft-TPROXY install + the leg-F and leg-C transparent listeners — both bound
-/// via [`make_transparent_listener`](crate::mtls_intercept::make_transparent_listener)).
+/// This enum invents NO new lower-level error surface. Its three install-step
+/// variants wrap the typed [`InterceptError`] the install steps already produce
+/// (the OUTBOUND egress nft-TPROXY install + the leg-F and leg-C transparent
+/// listeners — both bound via
+/// [`make_transparent_listener`](crate::mtls_intercept::make_transparent_listener)).
+/// The two bound-address capture variants
+/// ([`Self::LegFLocalAddr`] / [`Self::LegCLocalAddr`], D-MTLS-18 sites 2/3) carry
+/// a raw [`std::io::Error`] `#[source]` — the `getsockname` failure
+/// [`TcpListener::local_addr`](std::net::TcpListener::local_addr) returns — which
+/// is a `std` type, not a new lower-level surface. They fail the install closed
+/// rather than defaulting the bound addr to a broken port 0.
 /// Each source `Display` names the privilege / kernel-feature
 /// remediation an operator acts on. (The inbound nft-TPROXY rule install is
 /// #178-deferred — see the module note — so it is not an install step and has
@@ -145,6 +152,27 @@ pub enum MtlsInterceptInstallError {
     /// free function's test callers.)
     #[error("mTLS inbound intercept install failed: {0}")]
     Inbound(#[from] InterceptError),
+
+    /// leg-F (outbound) listener bound-address capture failed (`local_addr()` /
+    /// getsockname on the leg-F transparent listener). Distinct from `LegFBind`
+    /// (the bind itself succeeded): the kernel could not report the bound addr, so
+    /// the OUTBOUND TPROXY redirect target is unknown and the install MUST fail
+    /// closed rather than redirect to port 0 (D-MTLS-18 site 2).
+    #[error("mTLS leg-F listener address capture failed: {source}")]
+    LegFLocalAddr {
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// leg-C (inbound) listener bound-address capture failed (`local_addr()` /
+    /// getsockname on the leg-C transparent listener). Distinct from the `Inbound`
+    /// bind failure: fail closed rather than record a port-0 leg-C addr that would
+    /// silently corrupt the #178 inbound-redirect read (D-MTLS-18 site 3).
+    #[error("mTLS leg-C listener address capture failed: {source}")]
+    LegCLocalAddr {
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 impl MtlsInterceptInstallError {
@@ -168,13 +196,34 @@ impl MtlsInterceptInstallError {
         Self::OutboundTproxyInstall(source)
     }
 
+    /// Associated constructor for the leg-F (outbound) listener bound-address
+    /// capture failure (`local_addr()` getsockname error). Used as the `on_err`
+    /// mapper at the leg-F `project_listener_v4` call site so the failure carries
+    /// the leg-F stage (D-MTLS-18 site 2).
+    #[must_use]
+    const fn leg_f_local_addr(source: std::io::Error) -> Self {
+        Self::LegFLocalAddr { source }
+    }
+
+    /// Associated constructor for the leg-C (inbound) listener bound-address
+    /// capture failure (`local_addr()` getsockname error). Used as the `on_err`
+    /// mapper at the leg-C `project_listener_v4` call site so the failure carries
+    /// the leg-C stage (D-MTLS-18 site 3).
+    #[must_use]
+    const fn leg_c_local_addr(source: std::io::Error) -> Self {
+        Self::LegCLocalAddr { source }
+    }
+
     /// The closed-vocabulary install-stage label for the
     /// [`TransitionReason::MtlsInterceptInstallFailed`] cause-class the shim
-    /// writes. Maps the 3-variant error (and, for [`Self::Inbound`], the
+    /// writes. Maps the 5-variant error (and, for [`Self::Inbound`], the
     /// inner [`InterceptError`] variant) to the four pinned stage strings:
     /// `"outbound_tproxy_install"`, `"leg_f_bind"`,
-    /// `"leg_c_transparent_listener"`, `"inbound_tproxy"`. Internal mapping
-    /// helper — NOT new contract surface.
+    /// `"leg_c_transparent_listener"`, `"inbound_tproxy"`. The leg-F/leg-C
+    /// `local_addr` capture failures (D-MTLS-18 sites 2/3) reuse the EXISTING
+    /// leg-F / leg-C stage strings — the bind and its bound-addr capture are the
+    /// same install stage from the shim's vocabulary perspective. Internal
+    /// mapping helper — NOT new contract surface.
     ///
     /// [`TransitionReason::MtlsInterceptInstallFailed`]:
     ///     overdrive_core::transition_reason::TransitionReason::MtlsInterceptInstallFailed
@@ -182,8 +231,9 @@ impl MtlsInterceptInstallError {
     pub const fn stage(&self) -> &'static str {
         match self {
             Self::OutboundTproxyInstall(_) => "outbound_tproxy_install",
-            Self::LegFBind(_) => "leg_f_bind",
-            Self::Inbound(InterceptError::TransparentListener { .. }) => {
+            Self::LegFBind(_) | Self::LegFLocalAddr { .. } => "leg_f_bind",
+            Self::LegCLocalAddr { .. }
+            | Self::Inbound(InterceptError::TransparentListener { .. }) => {
                 "leg_c_transparent_listener"
             }
             // Every other `InterceptError` reaching the install path is the
@@ -413,10 +463,15 @@ impl MtlsInterceptWorker {
     /// [`MtlsInterceptInstallError::OutboundTproxyInstall`] (site 1),
     /// [`MtlsInterceptInstallError::LegFBind`] (site 2), or
     /// [`MtlsInterceptInstallError::Inbound`] (site 3 — the leg-C transparent
-    /// listener) when the corresponding install step fails. Each source
-    /// `Display` names the privilege / kernel-feature remediation an operator
-    /// acts on. (The inbound nft-TPROXY rule is #178-deferred; it is not
-    /// installed here, so there is no site-4 failure.)
+    /// listener) when the corresponding install step fails. Additionally
+    /// [`MtlsInterceptInstallError::LegFLocalAddr`] (site 2) /
+    /// [`MtlsInterceptInstallError::LegCLocalAddr`] (site 3) when a listener
+    /// binds but its bound-address capture (`local_addr()` / getsockname) fails:
+    /// the install fails CLOSED rather than defaulting the redirect target to a
+    /// broken port 0 (D-MTLS-18). Each source `Display` names the privilege /
+    /// kernel-feature remediation an operator acts on. (The inbound nft-TPROXY
+    /// rule is #178-deferred; it is not installed here, so there is no site-4
+    /// failure.)
     #[allow(
         clippy::similar_names,
         reason = "leg_c_addr (inbound) and leg_f_addr (outbound) are the deliberate \
@@ -464,11 +519,14 @@ impl MtlsInterceptWorker {
         // (`install_outbound_tproxy(host_veth, leg_f_addr.port())` below). It is
         // NOT a dial target — the dial peer is the per-connection RESOLVED
         // backend addr (04-02), recovered in the accept loop, never this slot.
-        let leg_f_addr = leg_f_listener
-            .local_addr()
-            .ok()
-            .and_then(socketaddr_v4)
-            .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
+        // Fail-closed (D-MTLS-18 site 2): a `local_addr()` getsockname error
+        // surfaces as the typed `LegFLocalAddr` rather than defaulting to a
+        // broken port-0 redirect target. `leg_f_listener` (the only guard
+        // acquired so far) drops on the `?` early return → closes.
+        let leg_f_addr = project_listener_v4(
+            leg_f_listener.local_addr(),
+            MtlsInterceptInstallError::leg_f_local_addr,
+        )?;
 
         // OUTBOUND install (D-TME-4 / ADR-0071 Path A, site 1): append the
         // per-veth egress nft-TPROXY rule matching the workload's host-side
@@ -519,11 +577,15 @@ impl MtlsInterceptWorker {
         // inbound-redirect install, pending that install's site/timing design;
         // if #178 mirrors leg-F and installs in `start_alloc` it would read an
         // inline `leg_c_addr` local, NOT `self.leg_c_addr(alloc)`.
-        let leg_c_addr = inbound_listener
-            .local_addr()
-            .ok()
-            .and_then(socketaddr_v4)
-            .unwrap_or_else(|| SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
+        // Fail-closed (D-MTLS-18 site 3): a `local_addr()` getsockname error
+        // surfaces as the typed `LegCLocalAddr` rather than recording a port-0
+        // leg-C addr that would silently corrupt the #178 inbound-redirect read.
+        // `outbound_tproxy_guard` + `leg_f_listener` (the guards acquired so far)
+        // drop on the `?` early return → remove the egress rule / close leg-F.
+        let leg_c_addr = project_listener_v4(
+            inbound_listener.local_addr(),
+            MtlsInterceptInstallError::leg_c_local_addr,
+        )?;
 
         // The inbound nft-TPROXY rule install is #178-DEFERRED, symmetric with
         // the OUTBOUND `MTLS_REDIRECT_DEST` redirect above. The rule's match
@@ -1162,12 +1224,23 @@ fn relay_cleartext(
     Ok(())
 }
 
-/// Narrow `SocketAddr → SocketAddrV4` projection (the legs are bound on
-/// IPv4 loopback; single-node Phase-1 scope is IPv4-only).
-const fn socketaddr_v4(addr: std::net::SocketAddr) -> Option<SocketAddrV4> {
-    match addr {
-        std::net::SocketAddr::V4(v4) => Some(v4),
-        std::net::SocketAddr::V6(_) => None,
+/// Project a listener's `local_addr()` result into the bound `SocketAddrV4`,
+/// failing closed on a genuine `getsockname` error rather than defaulting to a
+/// broken port-0 address (D-MTLS-18). The listener is bound `AF_INET`
+/// (`make_transparent_listener`), so `local_addr()` is always V4 — the V6 arm
+/// is structurally unreachable. `on_err` maps the OS error to the site-specific
+/// typed variant (leg-F vs leg-C) so each site's `Display` names its own stage.
+fn project_listener_v4(
+    local_addr: std::io::Result<std::net::SocketAddr>,
+    on_err: impl FnOnce(std::io::Error) -> MtlsInterceptInstallError,
+) -> Result<SocketAddrV4, MtlsInterceptInstallError> {
+    match local_addr {
+        Ok(std::net::SocketAddr::V4(v4)) => Ok(v4),
+        Ok(std::net::SocketAddr::V6(v6)) => unreachable!(
+            "transparent listener bound AF_INET via make_transparent_listener; \
+             local_addr cannot be V6 (got {v6})"
+        ),
+        Err(source) => Err(on_err(source)),
     }
 }
 
@@ -1611,6 +1684,52 @@ mod tests {
                 "{err:?} must map to stage label {expected_stage:?}"
             );
         }
+    }
+
+    /// Regression (D-MTLS-18): `project_listener_v4` MUST fail closed on a
+    /// `local_addr()`/getsockname error, returning the site-specific typed
+    /// variant — NEVER a broken port-0 `SocketAddrV4`. This is the assertion the
+    /// pre-fix `.ok().and_then(socketaddr_v4).unwrap_or_else(|| ...:0)` chain
+    /// could never satisfy: it swallowed the `Err` and yielded `Ok(127.0.0.1:0)`,
+    /// which flowed into `install_outbound_tproxy(host_veth, 0)` as a silent
+    /// `tproxy to 127.0.0.1:0` install. The Err→typed-variant assertion below is
+    /// the discriminator between the buggy and fixed behaviour; the Ok(V4)
+    /// passthrough pins the success path unchanged.
+    #[test]
+    fn project_listener_v4_fails_closed_on_local_addr_error_never_port_zero() {
+        use super::{MtlsInterceptInstallError, project_listener_v4};
+
+        // --- Err arm: leg-F mapper fails closed to LegFLocalAddr (NOT port 0) ---
+        let leg_f = project_listener_v4(
+            Err(std::io::Error::from(std::io::ErrorKind::Other)),
+            MtlsInterceptInstallError::leg_f_local_addr,
+        );
+        assert!(
+            matches!(leg_f, Err(MtlsInterceptInstallError::LegFLocalAddr { .. })),
+            "a leg-F local_addr() error must fail closed as LegFLocalAddr, never a port-0 addr; got {leg_f:?}",
+        );
+
+        // --- Err arm: leg-C mapper fails closed to LegCLocalAddr (NOT port 0) ---
+        let leg_c = project_listener_v4(
+            Err(std::io::Error::from(std::io::ErrorKind::Other)),
+            MtlsInterceptInstallError::leg_c_local_addr,
+        );
+        assert!(
+            matches!(leg_c, Err(MtlsInterceptInstallError::LegCLocalAddr { .. })),
+            "a leg-C local_addr() error must fail closed as LegCLocalAddr, never a port-0 addr; got {leg_c:?}",
+        );
+
+        // --- Ok(V4) passthrough: the bound addr is returned unchanged ----------
+        let bound = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 54321);
+        let ok = project_listener_v4(
+            Ok(std::net::SocketAddr::V4(bound)),
+            MtlsInterceptInstallError::leg_f_local_addr,
+        );
+        assert_eq!(
+            ok.expect("Ok(V4) must project to the bound addr, not fail"),
+            bound,
+            "the success path must return the exact bound SocketAddrV4 unchanged",
+        );
     }
 
     // ---- EnforcedSet: the atomic seal+drain primitive (pure unit) ----------
