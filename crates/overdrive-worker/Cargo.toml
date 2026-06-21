@@ -102,5 +102,22 @@ tracing-subscriber.workspace = true
 # rustc upgrades.
 trybuild.workspace  = true
 
+# transparent-mtls-enrollment (ADR-0071, step 05-01) — the composed
+# bidirectional Tier-3 walking skeleton
+# (`tests/integration/bidirectional_walking_skeleton.rs`) re-authors a
+# FRESH focused PKI + `HeldIdentities` + 0x17 wire-scan worker-side (the
+# dataplane `tests/helpers/` are a reference to replicate, NOT a
+# cross-crate import — a crate's `tests/` tree is not exported). These
+# are the test-only crypto/TLS primitives the real-mTLS handshakes +
+# the cert-SAN extraction need, workspace-pinned per
+# `.claude/rules/development.md` § Dependencies. The mTLS substrate
+# itself (`HostMtlsEnforcement`) is REUSED from the production
+# `overdrive-dataplane` dep above — these deps mint the test PKI + drive
+# the test-side peers, not a re-implemented TLS stack.
+rcgen.workspace          = true
+rustls.workspace         = true
+rustls-pemfile.workspace = true
+x509-parser.workspace    = true
+
 [lints]
 workspace = true

@@ -1100,6 +1100,111 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-21T05:31:55Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T05:37:58Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T06:43:04Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the destructive path requires a deterministic NON-NotFound io error (EACCES/EIO) on a cgroup.procs/proc-netns read, but the Tier-3 suite runs as root via cargo xtask lima run (DAC bypassed \u2192 chmod 000 yields no EACCES for root) and EIO is not synthesizable in-fixture; behaviour is pinned by the RED_UNIT classifier test (io_error_is_benign_absence) + the typed ?-propagation match arms (NotFound=>default / _ =>Observe=>refuse boot) threaded through adopt_observe. No vacuous AT fabricated.",
+      "t": "2026-06-21T06:44:19Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T06:44:23Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T06:53:01Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:01:53Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:19:55Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: composed bidirectional walking-skeleton AT needs the dataplane mTLS test harness (MtlsTopology netns/veth/nft, TestPki, WireCapture/WireScan 0x17 oracle, InboundServer/InboundWorker + an absent OutboundWorker role) which lives ONLY in crates/overdrive-dataplane/tests/integration/helpers/ and is UNREACHABLE from overdrive-worker's test crate; outbound role harness deleted at 04-01, design names 05-01/05-03 as its re-establishment site in the dataplane tree. Cannot author AT in files_to_modify without inventing API / a parallel ~60KB harness (both forbidden). Crate-home scope decision required from orchestrator.",
+      "t": "2026-06-21T09:20:45Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: gated behind RED_ACCEPTANCE; pure composition step over already-GREEN 02/03/04 seams has no new sub-logic to unit-test, but the AT itself is blocked by the unreachable dataplane mTLS harness (see RED_ACCEPTANCE).",
+      "t": "2026-06-21T09:20:45Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no AT authored (RED_ACCEPTANCE blocked); no Tier-3 run performed. NOT logging a false COMMIT/EXECUTED/PASS \u2014 this feature has a documented false-PASS history (phase-06 01/02). Blocked on the dataplane mTLS test-harness reachability + crate-home scope decision.",
+      "t": "2026-06-21T09:20:45Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing authored or made green; no commit. Blocker returned to orchestrator: composed bidirectional walking skeleton (0x17 wire capture + both-direction mTLS round-trip + SPIFFE authn) requires the overdrive-dataplane mTLS test harness unreachable from overdrive-worker's files_to_modify; needs a crate-home / harness-promotion decision before re-dispatch.",
+      "t": "2026-06-21T09:20:45Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:29:11Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:48:21Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 test-only composition over already-GREEN production seams (install_outbound_tproxy 03-01, accept_outbound_and_recover_orig_dst 03-02, install_inbound_tproxy/accept_inbound_leg 06-02, MtlsResolve 01-02, HostMtlsEnforcement::enforce ADR-0069); each constituent fn is unit/Tier-3-covered in 02/03/04. The composed AT reaches GREEN with no new pure sub-logic; falsifiability proven via litmus (gutted getsockname_orig flips O1 RED) + 3 real fixture bugs each surfacing a distinct business-logic RED.",
+      "t": "2026-06-21T09:48:21Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T09:51:17Z"
     }
   ]
 }

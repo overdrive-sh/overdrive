@@ -90,6 +90,15 @@ mod integration {
     // plus the F5 anti-loop SO_MARK exemption (positive + self-exempt-impossible).
     mod egress_tproxy_capture;
 
+    // transparent-mtls-enrollment (ADR-0071, step 05-01) — THE composed
+    // bidirectional walking skeleton: getsockname → resolve → enforce mTLS in
+    // BOTH directions on the ONE Path-A mechanism (netns + veth + nft-TPROXY +
+    // getsockname), reusing the production worker intercept seams +
+    // `HostMtlsEnforcement::enforce`, with a real 0x17 TLS-1.3 wire capture and no
+    // RST. Proves ADR-0071 Tier-3 obligations (b)+(c)+(d): orig-dst recovery on
+    // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
+    mod bidirectional_walking_skeleton;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
