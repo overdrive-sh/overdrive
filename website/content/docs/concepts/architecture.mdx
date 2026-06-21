@@ -22,7 +22,7 @@ flowchart TB
     direction TB
     subgraph cp["Control plane"]
       api["TLS API<br/>axum + rustls · ephemeral CA"]
-      loop["Convergence loop<br/>5 reconcilers"]
+      loop["Convergence loop<br/>7 reconcilers"]
       views[("ViewStore<br/>redb")]
     end
     intent[("IntentStore<br/>redb")]
@@ -133,7 +133,7 @@ the rest: it persists the reconciler's memory to a redb-backed view store
 (writing and flushing to disk *before* it treats the action as done, so a crash
 mid-tick resumes cleanly), then dispatches the actions.
 
-Six reconcilers run today:
+Seven reconcilers run today:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and emits `StartAllocation`, `StopAllocation`, or `ReleaseServiceVip`. It
@@ -153,6 +153,9 @@ Six reconcilers run today:
   engine: it watches workflow instances and re-emits `StartWorkflow` for one that
   should be running but has no live task, so a workflow resumes after a crash the
   same way a crashed allocation does.
+- **SvidLifecycle** — issues a SPIFFE SVID for every running allocation and drops
+  it when the allocation stops, emitting `IssueSvid` / `DropSvid`. A near-expiry
+  re-issue is a single audited action, not a workflow.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
   it exists to anchor the "reconcilers are pure" invariant the test suite checks.
 

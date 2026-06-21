@@ -145,25 +145,33 @@ debugging detour):
 
 - **Operator / control-plane HTTPS CA** —
   `tls_bootstrap::mint_ephemeral_ca()`
-  (`crates/overdrive-control-plane/src/lib.rs:1237`). Backs the operator
+  (`crates/overdrive-control-plane/src/lib.rs:1392`). Backs the operator
   mTLS surface the CLI connects to (Talos-shape operator auth, D-CA-5 /
   [#81](https://github.com/overdrive-sh/overdrive/issues/81)). **Ephemeral
   by design and staying that way** — it is NOT the workload-identity root
   and is out of scope for any built-in-CA / SVID work.
 - **Workload-identity CA** — `RcgenCa::new(OsEntropy, ca_subject)`
-  (`lib.rs:1595`). Signs the SVIDs issued to workloads. **Currently also
-  ephemeral** — a fresh in-memory P-256 root minted each boot, NO KEK, NO
-  persistence, NOT `boot_ca` (the comment above the line states this
-  verbatim, citing ADR-0067 D3 rev 4). The persistent, KEK-backed,
-  envelope-sealed root (`ca_boot::boot_ca`, ADR-0063) is
-  [#215](https://github.com/overdrive-sh/overdrive/issues/215) — formerly
-  blocked on #35 (now landed), so the `lib.rs:1595` seam is ready to flip.
+  (`lib.rs:1754`), now backed by the **persistent, KEK-sealed root**
+  `ca_boot::boot_ca` (`lib.rs:1768`, ADR-0063 /
+  [#215](https://github.com/overdrive-sh/overdrive/issues/215) boot-side,
+  closes D-OC-4). Signs the SVIDs issued to workloads. On boot, `boot_ca`
+  runs the Earned-Trust probes (KEK-resolve, envelope-decrypt) then
+  generate-or-adopt: the first boot generates the P-256 root, envelope-seals
+  the key under the operator KEK (injected via `config.kek` —
+  `SystemdCredsKeyring` in production, `SimKek` under test) and persists it
+  to the `IntentStore`; every later boot decrypts and adopts the SAME root.
+  A boot failure propagates as the typed `ControlPlaneError::CaBoot` and
+  refuses to start (never flattened to `Internal`). This was a **single-cut
+  replacement of the prior ephemeral per-boot root** — there is no longer an
+  ephemeral workload root; the `RcgenCa` holds the adopted persistent
+  root/intermediate and the `IssueSvid` executor mints leaves off it.
 
 When reasoning about "the persistent CA," "boot the CA," "root key at
 rest," or any SVID-issuance path, the subject is the **workload-identity**
-CA (`1595` / `boot_ca`), never `mint_ephemeral_ca` (`1237`). "`serve`
-boots the ephemeral CA" is true of BOTH lines today — name which one, or
-the distinction is lost.
+CA (`boot_ca` / `RcgenCa`), never `mint_ephemeral_ca`. Only the
+operator/control-plane HTTPS CA is ephemeral now; the workload root is
+persistent and KEK-sealed. "`serve` boots the ephemeral CA" is true ONLY
+of the operator CA — name which one, or the distinction is lost.
 
 ## "Cert rotation workflow" = external ACME, NOT internal SVID reissue
 

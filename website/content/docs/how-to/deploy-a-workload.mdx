@@ -102,7 +102,7 @@ answers "did it succeed?".
 - **A startup probe is inferred by default.** Declare none and the platform
   synthesises a single TCP probe against your first listener, so a service is
   never reported "up" before something is actually listening. Write
-  `[[health_check.startup]] = []` to opt out.
+  `health_check.startup = []` to opt out.
 - **Each probe is tunable.** `timeout_seconds` (default 5), `interval_seconds`
   (startup 2, readiness 2, liveness 10), and `max_attempts` (default 30 — a 60s
   startup deadline), plus `failure_threshold` for liveness (default 3) and
@@ -153,9 +153,10 @@ answers "did it succeed?".
 </Steps>
 
 <Callout type="info" title="Exit codes are script-friendly">
-	`deploy` exits `0` on an `Inserted` or `Unchanged` outcome and `2` on a
-	transport failure or a server-side validation error. A script can branch on
-	the exit code alone without parsing output.
+	`deploy` exits `0` on an `Inserted` or `Unchanged` outcome, `1` when the CLI
+	rejects the spec before sending it, and `2` on a transport or server-side
+	failure. A script can branch on the exit code to tell a bad spec from a
+	request that never landed.
 </Callout>
 
 ## Inspect what you deployed

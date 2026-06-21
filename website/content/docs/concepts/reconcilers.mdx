@@ -142,7 +142,7 @@ one reconciler's output becomes another's trigger.
 
 ## The reconcilers that ship today
 
-Six reconcilers run in `overdrive serve`:
+Seven reconcilers run in `overdrive serve`:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count;
   emits `StartAllocation` / `StopAllocation` and backs off restarts on repeated
@@ -157,6 +157,9 @@ Six reconcilers run in `overdrive serve`:
 - **WorkflowLifecycle** — the bridge to the workflow engine: re-emits
   `StartWorkflow` for a workflow instance that should be running but has no live
   task. See [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+- **SvidLifecycle** — issues a SPIFFE SVID for every running allocation and drops
+  it when the allocation stops, emitting `IssueSvid` / `DropSvid`. A near-expiry
+  re-issue is a single audited action, not a workflow.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick; it
   anchors the "reconcilers are pure" invariant the test suite checks.
 
