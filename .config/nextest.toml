@@ -174,6 +174,15 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# NOTE (transparent-mtls 04-04): the per-alloc-netns Tier-3 tests appended at the
+# end of the filter below join this single-writer group because the 04-04
+# adopt-on-restart boot pass — run by the `serve_restart_*` adopt tests AND by
+# the run_server mtls boot tests already listed above — GCs EVERY `ovd-ns-*`
+# netns not in the current boot's ObservationStore Running set. Run concurrently
+# with any test holding a live per-alloc netns, it would reap that netns (the
+# "global shared kernel resource masked by per-test isolation" defect class —
+# the netns-layer analogue of the bpffs/cgroup state this group already guards).
+# Every per-alloc-netns test must therefore serialize here.
 [[profile.default.overrides]]
 filter = '''
     binary(integration)
@@ -209,6 +218,12 @@ filter = '''
         | test(marked_workload_dial_is_still_intercepted_f5_self_exempt_negative)
         | test(mtls_dataplane_load_attach_per_alloc_program_redirect)
         | test(mtls_dataplane_load_reuses_prepinned_service_map)
+        | test(serve_restart_readopts_surviving_slot_and_gcs_orphan_netns)
+        | test(serve_restart_sweeps_surviving_per_workload_tproxy_rule)
+        | test(alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal)
+        | test(provision_failure_drives_alloc_to_failed_row_not_pending_retry)
+        | test(provision_creates_and_idempotently_converges_per_workload_netns)
+        | test(provision_injects_node_local_responder_into_netns_resolv_conf)
     )
 '''
 test-group = 'host-kernel-shared'
