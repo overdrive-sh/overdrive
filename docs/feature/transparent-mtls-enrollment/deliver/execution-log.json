@@ -1275,6 +1275,34 @@
       "s": "EXECUTED",
       "d": "PASS: composed test GREEN both regimes (NORMAL+TRACED) \u2014 inbound leg-C wire scan 4 records each direction, 0 plaintext, driven through spawned production inbound accept_loop via D-TME-13 leg_c_addr; full worker integration suite 167 passed 0 failed under Lima 7.0.0-22; no kernel-state leak",
       "t": "2026-06-21T11:54:24Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: committed 70266e11 \u2014 D-TME-13 leg_c_addr accessor + inbound re-level to spawned production accept_loop; litmus RED-proven; Lima 7.0.0-22 GREEN both regimes; worker suite 167 passed; mutation 100% kill (11 mutants, 0 missed); pre-commit fmt/doctest/clippy/nextest-affected all green (1702 passed)",
+      "t": "2026-06-21T12:05:16Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T12:06:34Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T12:06:34Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-21T12:06:34Z"
     }
   ]
 }
