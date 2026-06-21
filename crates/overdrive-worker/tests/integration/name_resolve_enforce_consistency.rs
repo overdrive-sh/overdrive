@@ -38,12 +38,21 @@
 //!      `ServiceBackendsResolve` host adapter; the production resolve index 01-03
 //!      is its own DST's job — here the C1 contract is "the addr the capture
 //!      recovers is the addr resolve recognizes", not the index internals.)
-//!   3. **resolv.conf injection is wired** — the per-netns
-//!      `/etc/netns/<netns>/resolv.conf` (02-03 / D-TME-9, the injection
-//!      MECHANISM this feature OWNS) carries the injected `nameserver <responder>`
-//!      line, byte-exact `resolv_conf_contents(responder)`. Even though the
-//!      responder it points at is the #61 stub (no daemon built), the injection
-//!      WIRES correctly — proving the name-layer plumbing without the daemon.
+//!   3. **resolv.conf path/bind-mount convention surfaces the line** — the
+//!      per-netns `/etc/netns/<netns>/resolv.conf` carries a byte-exact
+//!      `nameserver <responder>` line (the D-TME-9 line shape,
+//!      `resolv_conf_contents(responder)`) AND that line is visible inside the
+//!      workload's namespace view via the stock iproute2 per-netns bind-mount.
+//!      This oracle exercises the PATH/BIND-MOUNT plumbing the capture relies on —
+//!      NOT the production injection mechanism itself: it STAGES the file with
+//!      `std::fs::write` (the production writer `resolv_conf_write` is private to
+//!      `veth_provisioner` and runs at the action-shim alloc lifecycle, upstream of
+//!      the worker leg this AT drives). The production injection MECHANISM is
+//!      proven, strictly more strongly, by 02-03's
+//!      `provision_injects_node_local_responder_into_netns_resolv_conf` (drives
+//!      production `provision_workload_netns` → `resolv_conf_write` with a
+//!      non-vacuous host-negative assertion) — cited here, not re-proven. The
+//!      responder the line points at is the #61 stub (no daemon built).
 //!
 //! ## Authn-only boundary (Q4 / #178)
 //!
@@ -53,18 +62,20 @@
 //! `expected_peer` (None until #178), identical authn-only discipline to 05-01's
 //! last criterion.
 //!
-//! ## Default-lane cheap reproduction (the kernel-free pair)
+//! ## Kernel-free cheap reproduction (the genuine default-lane pair)
 //!
 //! The cheap, kernel-free reproduction this step's criterion describes — script
 //! addr B, feed the same B as orig_dst, assert `Mesh(ResolvedBackend { addr: B,
-//! .. })` — ALREADY EXISTS as the default-lane unit test
+//! .. })` — lives in the GENUINE default lane as the unit test
 //! `sim_mtls_resolve_returns_scripted_arm_per_orig_dst` in
-//! `crates/overdrive-sim/src/adapters/mtls_resolve.rs` (cited as the canonical
-//! cheap reproduction). This file ADDITIONALLY carries an in-binary
-//! `single_source_invariant_holds_kernel_free_via_sim_mtls_resolve` companion
-//! (below) that mirrors THIS step's exact single-source scenario with
-//! `SimMtlsResolve` and no netns/root — the cheap reproduction that pairs with
-//! the kernel AT.
+//! `crates/overdrive-sim/src/adapters/mtls_resolve.rs` (that crate's unit tests run
+//! under a plain `cargo nextest run` — this is the canonical default-lane
+//! reproduction the step's criterion is satisfied by). This file ADDITIONALLY
+//! carries an in-binary `single_source_invariant_holds_kernel_free_via_sim_mtls_resolve`
+//! mirror (below) that echoes THIS step's exact single-source scenario with
+//! `SimMtlsResolve` and no netns/root — kernel-free but NOT default-lane (it is
+//! gated with the rest of this integration file, `--features integration-tests`);
+//! it is the in-binary pair to the kernel AT, not the default-lane coverage.
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (IP_TRANSPARENT, nft, ip netns,
 //! ip rule, writing `/etc/netns/`). A non-root run SKIPs. Run via
@@ -126,15 +137,17 @@ const SUBNET_LEN: &str = "24";
 const SERVICE_BACKEND_IP: &str = "10.200.0.1";
 const SERVICE_BACKEND_PORT: u16 = 18821;
 
-/// The node-local DNS responder addr injected into the netns resolv.conf (the #61
-/// stub the injection MECHANISM points at — the daemon itself is NOT built here).
-/// A plausible Fly-style node-local responder address.
+/// The node-local DNS responder addr written into the netns resolv.conf (the #61
+/// stub the injected `nameserver` line points at — the daemon itself is NOT built
+/// here). A plausible Fly-style node-local responder address.
 const RESPONDER_ADDR: Ipv4Addr = Ipv4Addr::new(10, 100, 0, 53);
 
-/// The application bytes the workload sends after connect — read byte-exact by the
-/// real backend to confirm the captured connection genuinely carried the dial (a
-/// POSITIVE interception signal, debugging.md §11: do not infer capture from an
-/// empty observation; confirm the producer ran).
+/// The application bytes the workload sends after connect. Their PRESENCE is the
+/// positive interception signal (debugging.md §11): the netns client prints
+/// `WL-SENT` on a successful connect+send, confirming the producer (the dial) ran.
+/// The bytes are NOT echoed/compared in this topology — the egress redirect starves
+/// the real backend (it never accepts), so there is no reader to compare them
+/// against; the dial's SUCCESS, not a byte-exact echo, is what the oracle asserts.
 const WL_MARKER: &[u8] = b"OVERDRIVE_0502_SINGLE_SOURCE_workload_dialed_B";
 
 // ============================================================================
@@ -232,13 +245,14 @@ fn nft_dump_table() -> String {
 
 /// The host-side per-netns resolv.conf dir (`/etc/netns/<netns>/`) and file —
 /// the stock `ip netns` per-netns convention bind-mounted over `/etc/resolv.conf`
-/// inside the namespace. This MIRRORS `veth_provisioner`'s
-/// `resolv_conf_dir`/`resolv_conf_path` (a private fn there; the path convention
-/// is the SAME — D-TME-9). The test writes the SAME byte-exact body the
-/// production `resolv_conf_write` would (`resolv_conf_contents(responder)`),
-/// standing in for the production converge step (which runs at the action-shim
-/// alloc lifecycle, BEFORE start_alloc — feature-delta C3; this test exercises
-/// the worker leg, so it stages the injection the provisioner would have done).
+/// inside the namespace. The path convention MIRRORS `veth_provisioner`'s private
+/// `resolv_conf_dir`/`resolv_conf_path` (the SAME convention — D-TME-9). The test
+/// STAGES the file with `std::fs::write` (see `inject_resolv_conf`); it does NOT
+/// invoke the production injection — the writer `resolv_conf_write` is private and
+/// runs at the action-shim alloc lifecycle, upstream of the worker leg this AT
+/// drives (feature-delta C3). Oracle 3 therefore exercises the path/bind-mount
+/// convention, not the production mechanism — which 02-03's
+/// `provision_injects_node_local_responder_into_netns_resolv_conf` proves directly.
 fn resolv_conf_dir() -> String {
     format!("/etc/netns/{NS_W}")
 }
@@ -251,12 +265,15 @@ fn resolv_conf_path() -> String {
 /// produces for `responder` — a single `nameserver <responder>` line with a
 /// trailing newline (D-TME-9 / Q5a, the Fly.io `fdaa::3` model). This is the
 /// OBSERVABLE injection contract, asserted directly here rather than imported:
-/// `resolv_conf_contents` lives in `overdrive-control-plane`, which DEPENDS ON
-/// `overdrive-worker` (a runtime dep — `overdrive-control-plane/Cargo.toml`), so
-/// importing it into this worker test tree would form a `worker → control-plane
-/// → worker` dependency cycle Cargo rejects. The line shape is the stable D-TME-9
-/// wire contract (not internal logic), so asserting it verbatim is honest — the
-/// production `resolv_conf_write` writes exactly this body.
+/// the production injection writer `resolv_conf_write` (and the `resolv_conf_dir` /
+/// `resolv_conf_path` helpers) are PRIVATE to `veth_provisioner`; only the pure
+/// `resolv_conf_contents` is `pub`, so the worker test tree cannot drive the
+/// production injection regardless of the dependency graph. The line shape is the
+/// stable D-TME-9 wire contract (not internal logic), so asserting it verbatim is
+/// honest — `resolv_conf_write` writes exactly this body. SSOT for the shape is
+/// `veth_provisioner::resolv_conf_contents`, pinned independently by the
+/// `resolv_conf_contents_is_a_single_nameserver_line` unit test; keep this mirror
+/// in sync (a production format change reddens that test, alerting the maintainer).
 fn resolv_conf_contents(responder: Ipv4Addr) -> String {
     format!("nameserver {responder}\n")
 }
@@ -346,17 +363,22 @@ fn setup_topology() {
         .status();
 }
 
-/// Inject the per-netns resolv.conf EXACTLY as the 02-03 `veth_provisioner`
-/// converge step does (D-TME-9 / Q5a): create `/etc/netns/<netns>/` and write
-/// `resolv_conf_contents(RESPONDER_ADDR)` (`"nameserver <responder>\n"`). The
-/// production injection runs at the action-shim alloc lifecycle BEFORE
-/// `start_alloc` (feature-delta C3); this test stages it here (the worker leg this
-/// AT drives is downstream of the provisioner). The injection MECHANISM is this
-/// feature's (02-03); the responder it points at is the #61 stub (no daemon).
+/// STAGE the per-netns resolv.conf for Oracle 3: create `/etc/netns/<netns>/` and
+/// write the byte-exact D-TME-9 line `resolv_conf_contents(RESPONDER_ADDR)`
+/// (`"nameserver <responder>\n"`) with `std::fs::write`. This is a TEST FIXTURE
+/// stand-in, NOT the production injection: the production writer `resolv_conf_write`
+/// is private and runs at the action-shim alloc lifecycle, upstream of the worker
+/// leg this AT drives (feature-delta C3). Oracle 3 then asserts the path/bind-mount
+/// convention surfaces this line inside the netns view; the production injection
+/// MECHANISM is proven by 02-03's
+/// `provision_injects_node_local_responder_into_netns_resolv_conf`. The responder
+/// the line points at is the #61 stub (no daemon built).
 fn inject_resolv_conf() {
     std::fs::create_dir_all(resolv_conf_dir()).expect("create per-netns resolv.conf dir");
-    std::fs::write(resolv_conf_path(), resolv_conf_contents(RESPONDER_ADDR))
-        .expect("write per-netns resolv.conf (the 02-03 injection mechanism)");
+    std::fs::write(resolv_conf_path(), resolv_conf_contents(RESPONDER_ADDR)).expect(
+        "stage per-netns resolv.conf fixture (test stand-in; production injection is the private \
+         resolv_conf_write, proven by 02-03)",
+    );
 }
 
 /// Run a `/dev/tcp` client INSIDE the workload netns: connect to `dst`, send
@@ -476,19 +498,24 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     let b = service_backend_addr();
 
     // ----------------------------------------------------------------
-    // Oracle 3 (resolv.conf injection, 02-03 / D-TME-9): inject the per-netns
-    // resolv.conf and assert it carries the byte-exact `nameserver <responder>`
-    // line. This proves the name-layer injection MECHANISM wires correctly even
-    // though the responder it points at is the #61 stub (no daemon built).
+    // Oracle 3 (resolv.conf path/bind-mount convention, D-TME-9 line shape): STAGE
+    // the per-netns resolv.conf (test fixture, NOT the production writer) and assert
+    // it carries the byte-exact `nameserver <responder>` line AND that the stock
+    // iproute2 per-netns bind-mount surfaces it inside the workload's namespace
+    // view. This exercises the path/bind-mount plumbing the capture relies on — NOT
+    // the production injection mechanism (private `resolv_conf_write`, proven by
+    // 02-03's provision_injects_node_local_responder_into_netns_resolv_conf). The
+    // responder the line points at is the #61 stub (no daemon built).
     // ----------------------------------------------------------------
     inject_resolv_conf();
     let injected = std::fs::read_to_string(resolv_conf_path())
-        .expect("the per-netns resolv.conf must be readable after injection");
+        .expect("the per-netns resolv.conf must be readable after staging");
     let want_line = resolv_conf_contents(RESPONDER_ADDR);
     assert_eq!(
         injected, want_line,
-        "Oracle 3: the per-netns /etc/netns/{NS_W}/resolv.conf must carry the byte-exact injected \
-         `nameserver {RESPONDER_ADDR}` line (02-03 / D-TME-9 injection mechanism), got {injected:?}"
+        "Oracle 3: the staged per-netns /etc/netns/{NS_W}/resolv.conf must carry the byte-exact \
+         `nameserver {RESPONDER_ADDR}` line (the D-TME-9 line shape; the production injection \
+         MECHANISM is proven by 02-03's provision_workload_netns test), got {injected:?}"
     );
     // And the namespace bind-mounts it: `ip netns exec` reading /etc/resolv.conf
     // inside the netns sees the SAME injected line (the stock per-netns
@@ -647,15 +674,17 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
 // Default-lane cheap reproduction (kernel-free, pairs with the Tier-3 AT)
 // ============================================================================
 
-/// The kernel-free companion (ADR-025 RED_UNIT / the criterion's default-lane DST
-/// companion): mirror THIS step's exact single-source scenario with
-/// `SimMtlsResolve` and NO netns/root. Script addr B → `Mesh(ResolvedBackend {
-/// addr: B })`, feed the SAME B as the orig_dst (the addr the capture would have
-/// recovered), and assert resolve recognizes it byte-identically. This is the
-/// cheap in-binary reproduction that pairs with the kernel AT; the canonical
-/// cheap reproduction is `sim_mtls_resolve_returns_scripted_arm_per_orig_dst` in
-/// `crates/overdrive-sim/src/adapters/mtls_resolve.rs` (cited in the module
-/// docstring). No kernel, no root — runs unconditionally.
+/// The kernel-free in-binary mirror (ADR-025 RED_UNIT): mirror THIS step's exact
+/// single-source scenario with `SimMtlsResolve` and NO netns/root. Script addr
+/// B → `Mesh(ResolvedBackend { addr: B })`, feed the SAME B as the orig_dst (the
+/// addr the capture would have recovered), and assert resolve recognizes it
+/// byte-identically. This is kernel-free but NOT default-lane — it is gated with
+/// the rest of this integration file (`--features integration-tests`), so it runs
+/// only under that feature, not a plain `cargo nextest run`. The GENUINE
+/// default-lane cheap reproduction is the canonical
+/// `sim_mtls_resolve_returns_scripted_arm_per_orig_dst` in
+/// `crates/overdrive-sim/src/adapters/mtls_resolve.rs`; this mirror is the
+/// in-binary pair to the kernel AT, not the default-lane coverage.
 #[tokio::test]
 async fn single_source_invariant_holds_kernel_free_via_sim_mtls_resolve() {
     // B is the single source: the addr DNS would return AND the addr the capture
