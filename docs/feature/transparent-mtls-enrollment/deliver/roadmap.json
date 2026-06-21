@@ -400,10 +400,12 @@
           "files_to_modify": [
             "crates/overdrive-control-plane/src/veth_provisioner.rs",
             "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/error.rs",
             "crates/overdrive-control-plane/tests/integration/adopt_on_restart.rs",
-            "crates/overdrive-control-plane/tests/integration.rs"
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-worker/src/mtls_intercept.rs"
           ],
-          "implementation_notes": "Was '02-06' — renumbered to 04-04 (its true position: depends on 04-01's merged C3 wiring being live). Design pinned in design/wave-decisions.md 'Amended 2026-06-18 (02-06 adopt-on-restart)'; spike-validated PROCEED (spike/findings-adopt-restart.md + spike/wave-decisions.md increment-c, kernel 7.0.0). NetSlotAllocator::adopt is ADDITIVE to the 02-04 allocator. The boot pass mirrors the IdentityMgr held-state-rebuild shape but is the ONLY trigger (SPIKE-B: the reconciler does not re-drive survivors). #26-coupled mTLS-material survival is OUT of scope (recovers the netns/slot binding only, never the kTLS crypto). SPIKE-D (nft-rule survival + by-handle sweep on a guard-less survivor) is un-probed; ground-truth before the rule-sweep leg."
+          "implementation_notes": "Was '02-06' — renumbered to 04-04 (its true position: depends on 04-01's merged C3 wiring being live). Design pinned in design/wave-decisions.md 'Amended 2026-06-18 (02-06 adopt-on-restart)'; spike-validated PROCEED (spike/findings-adopt-restart.md + spike/wave-decisions.md increment-c, kernel 7.0.0). NetSlotAllocator::adopt is ADDITIVE to the 02-04 allocator. The boot pass mirrors the IdentityMgr held-state-rebuild shape but is the ONLY trigger (SPIKE-B: the reconciler does not re-drive survivors). #26-coupled mTLS-material survival is OUT of scope (recovers the netns/slot binding only, never the kTLS crypto). SPIKE-D (nft-rule survival + by-handle sweep on a guard-less survivor) is un-probed; ground-truth before the rule-sweep leg. [PHASE-04 §5 SCOPE EXPANSION, user-approved 2026-06-21: the boot pass also sweeps surviving per-workload nft-TPROXY rules (the D2 dead-weight hazard). SPIKE-D ground-truthed POSITIVE (rules survive a restart; by-handle delete fires on a guard-less survivor), so §5 added `pub fn sweep_per_workload_tproxy_rules` in `crates/overdrive-worker/src/mtls_intercept.rs` — OUTSIDE the original control-plane-only files_to_modify. The expansion was surfaced as a boundary blocker and user-approved before landing (commit bbd5361d); `error.rs` carries the new `NetnsRecovery`/`NftRuleSweep` typed variants. Both files added to files_to_modify above to reconcile the design contract with the landed reality.]"
         }
       ]
     },
