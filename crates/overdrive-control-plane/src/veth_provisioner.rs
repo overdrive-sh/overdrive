@@ -1851,6 +1851,22 @@ pub enum NetnsRecoveryError {
         #[from]
         source: VethProvisionError,
     },
+    /// A boot-recovery observe read (`cgroup.procs` / a netns handle `stat` /
+    /// `/proc/<pid>/ns/net`) failed for a NON-absent reason (EACCES, EIO,
+    /// transient). Refuses the boot rather than misclassify a live workload's
+    /// netns as an orphan and destructively tear it down — the fail-closed
+    /// posture the rest of 04-04 holds. (A genuine `NotFound` is NOT this — it
+    /// is the legitimate "no live PID / scope reaped" signal handled inline by
+    /// [`io_error_is_benign_absence`].) Distinct from [`Self::Observe`], which
+    /// wraps an `ip(8)` shell-out failure, so the Display verb names the actual
+    /// operation (a direct cgroup/proc read, not an `ip` invocation).
+    #[error("adopt-on-restart observe read failed (non-absent): {source}")]
+    ObserveRead {
+        /// The underlying non-absent `cgroup.procs` / netns-handle /
+        /// `/proc/<pid>/ns/net` read failure.
+        #[source]
+        source: std::io::Error,
+    },
     /// Reading the ObservationStore Running set failed.
     #[error("adopt-on-restart could not read alloc_status rows: {source}")]
     Observation {
@@ -1860,26 +1876,66 @@ pub enum NetnsRecoveryError {
     },
 }
 
+/// True iff `err` is the BENIGN "the thing is genuinely absent" signal
+/// (`NotFound`) — distinct from a genuine read failure (EACCES, EIO,
+/// transient). The orphan-GC observe path treats a benign absence as
+/// "legitimately no live PID / no handle" (orphan-eligible / skip-this-PID)
+/// but MUST propagate every other `io::ErrorKind` rather than silently degrade
+/// into the destructive `ip netns del` branch. Pure so a unit test pins the
+/// classification without a real fs.
+fn io_error_is_benign_absence(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::NotFound
+}
+
 /// Read the netns inode from a `/proc/<pid>/ns/net` symlink target. The symlink
-/// resolves to `net:[<inode>]`; parse out the inode. `None` when the PID is
-/// gone or the link is unreadable (a benign "no longer a live owner" signal).
+/// resolves to `net:[<inode>]`; parse out the inode.
+///
+/// Returns `Ok(None)` for the BENIGN cases: the PID died between the
+/// `cgroup.procs` read and now (`NotFound` on the symlink — a common,
+/// legitimate race → skip this PID), or a malformed symlink target (a parse
+/// guard for the should-never-happen shape, NOT the swallowed-io case). Returns
+/// `Err(NetnsRecoveryError::ObserveRead)` for a NON-absent read failure (EACCES,
+/// EIO, …) so the recovery pass refuses the boot rather than misclassify a live
+/// workload's netns as an orphan and destructively tear it down (the
+/// fail-closed posture the rest of 04-04 holds).
 ///
 /// Production copy of the proven in-tree mechanism (the
 /// `overdrive-worker/tests/.../netns_entry.rs` precedent, SPIKE-C); the
 /// recovery pass MUST NOT depend on a test module.
-fn read_proc_netns_inode(pid: u32) -> Option<u64> {
-    let link = std::fs::read_link(format!("/proc/{pid}/ns/net")).ok()?;
+fn read_proc_netns_inode(pid: u32) -> Result<Option<u64>, NetnsRecoveryError> {
+    let link = match std::fs::read_link(format!("/proc/{pid}/ns/net")) {
+        Ok(link) => link,
+        // The PID died between the cgroup.procs read and now — a common,
+        // legitimate race. Skip this PID.
+        Err(e) if io_error_is_benign_absence(&e) => return Ok(None),
+        Err(e) => return Err(NetnsRecoveryError::ObserveRead { source: e }),
+    };
     let s = link.to_string_lossy();
-    let inner = s.strip_prefix("net:[")?.strip_suffix(']')?;
-    inner.parse::<u64>().ok()
+    // `strip_prefix`/`strip_suffix`/`parse` are PARSE guards (a malformed
+    // symlink target — should never happen), NOT the swallowed-io case: a
+    // genuinely unparseable target is "no resolvable inode here", skip the PID.
+    Ok(s.strip_prefix("net:[")
+        .and_then(|s| s.strip_suffix(']'))
+        .and_then(|n| n.parse::<u64>().ok()))
 }
 
 /// Read the inode of a named netns handle at `/var/run/netns/<netns>` (the
 /// same inode `/proc/<pid>/ns/net` resolves to when a PID lives in it — the
-/// `ip netns identify` mechanism). `None` when the handle is absent.
-fn netns_file_inode(netns: &str) -> Option<u64> {
+/// `ip netns identify` mechanism).
+///
+/// Returns `Ok(None)` when the handle is genuinely absent (`NotFound`).
+/// Returns `Err(NetnsRecoveryError::ObserveRead)` for a NON-absent `stat`
+/// failure (EACCES, EIO, …): a surviving netns whose inode cannot be read must
+/// NOT silently fall out of the `by_inode` map (which would leave it
+/// `owner: None` → orphan → destructive `ip netns del` of a live workload's
+/// netns). Refuse the boot instead — fail-closed.
+fn netns_file_inode(netns: &str) -> Result<Option<u64>, NetnsRecoveryError> {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(format!("/var/run/netns/{netns}")).ok().map(|m| m.ino())
+    match std::fs::metadata(format!("/var/run/netns/{netns}")) {
+        Ok(m) => Ok(Some(m.ino())),
+        Err(e) if io_error_is_benign_absence(&e) => Ok(None),
+        Err(e) => Err(NetnsRecoveryError::ObserveRead { source: e }),
+    }
 }
 
 /// Parse the slot back from an `ovd-ns-<4hex>` netns name (the inverse of
@@ -1913,18 +1969,31 @@ fn list_workload_netns_slots() -> Result<Vec<NetSlot>, VethProvisionError> {
 
 /// Read the live PIDs of an allocation from its cgroup scope's `cgroup.procs`
 /// (`overdrive.slice/workloads.slice/<alloc>.scope/cgroup.procs`, resolved
-/// under `cgroup_root`). An absent / unreadable scope yields an EMPTY pid list
-/// (the alloc has no live process here — a benign "not an owner via this
-/// scope" signal), NOT an error: a Running row whose scope is gone is exactly a
-/// survivor that died, which the orphan-GC path then handles.
-fn alloc_scope_pids(alloc: &AllocationId, cgroup_root: &std::path::Path) -> Vec<u32> {
+/// under `cgroup_root`).
+///
+/// An ABSENT scope (`NotFound`) yields an EMPTY pid list: a Running row whose
+/// cgroup scope was reaped is exactly a survivor that died → legitimately no
+/// live PID here → the orphan-GC path then handles it. But a NON-absent read
+/// failure (EACCES, EIO, a transient, or a cgroup-path regression) is NOT the
+/// same as "empty scope" — swallowing it into `Vec::new()` would make a LIVE,
+/// Running workload look like an orphan and drive a destructive `ip netns del`
+/// against its netns. Propagate every non-`NotFound` io error as
+/// [`NetnsRecoveryError::ObserveRead`] so the boot refuses rather than mass-GC
+/// live workloads (`.claude/rules/development.md` § "Distinct failure modes get
+/// distinct error variants. Never silently absorb a `Result` into a default").
+fn alloc_scope_pids(
+    alloc: &AllocationId,
+    cgroup_root: &std::path::Path,
+) -> Result<Vec<u32>, NetnsRecoveryError> {
     let procs = overdrive_worker::cgroup_manager::CgroupPath::for_alloc(alloc)
         .resolve(cgroup_root)
         .join("cgroup.procs");
-    let Ok(body) = std::fs::read_to_string(&procs) else {
-        return Vec::new();
+    let body = match std::fs::read_to_string(&procs) {
+        Ok(body) => body,
+        Err(e) if io_error_is_benign_absence(&e) => return Ok(Vec::new()),
+        Err(e) => return Err(NetnsRecoveryError::ObserveRead { source: e }),
     };
-    body.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect()
+    Ok(body.lines().filter_map(|l| l.trim().parse::<u32>().ok()).collect())
 }
 
 /// Observe the surviving slot↔alloc bindings at boot (D-TME-12 §1) — a thin
@@ -1952,7 +2021,10 @@ async fn adopt_observe(
     let mut owner: BTreeMap<NetSlot, Option<AllocationId>> = BTreeMap::new();
     for slot in slots {
         let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
-        if let Some(ino) = netns_file_inode(&plan.netns) {
+        // `?`: a NON-absent inode `stat` failure refuses the boot — a surviving
+        // netns that silently fell out of `by_inode` would be misclassified as
+        // an orphan and destructively torn down.
+        if let Some(ino) = netns_file_inode(&plan.netns)? {
             by_inode.insert(ino, slot);
         }
         owner.entry(slot).or_insert(None);
@@ -1978,10 +2050,17 @@ async fn adopt_observe(
     // (`adopt_conflicts_when_slot_held_by_a_different_alloc`); do not mistake
     // criterion-3's "adopt-conflict refuses boot" for a live production path.
     for alloc in running {
-        for pid in alloc_scope_pids(&alloc, cgroup_root) {
-            if let Some(ino) = read_proc_netns_inode(pid)
-                && let Some(&slot) = by_inode.get(&ino)
-            {
+        // `?`: a NON-absent `cgroup.procs` read failure refuses the boot — a
+        // Running alloc that silently contributed zero PIDs would let its live
+        // netns be misclassified as an orphan and destructively torn down.
+        for pid in alloc_scope_pids(&alloc, cgroup_root)? {
+            // `?`: a NON-absent `/proc/<pid>/ns/net` read failure refuses the
+            // boot; a benign `NotFound` (PID died in the read window) skips
+            // this PID (`Ok(None) => continue`), which is correct.
+            let Some(ino) = read_proc_netns_inode(pid)? else {
+                continue;
+            };
+            if let Some(&slot) = by_inode.get(&ino) {
                 owner.insert(slot, Some(alloc.clone()));
                 break;
             }
@@ -2606,9 +2685,9 @@ mod tests {
         AdoptPlan, NET_SLOT_MAX, NetSlot, NetSlotAdoptConflict, NetSlotAllocator, NetSlotExhausted,
         ObservedAdoptNetns, ObservedVeth, ObservedWorkloadVeth, VethProvisionPlan, VethStep,
         WORKLOAD_SUBNET_BASE, WorkloadNetnsPlan, WorkloadVethStep, converge_steps,
-        derive_veth_plan, derive_workload_netns_plan, link_absent, plan_adopt_actions,
-        resolv_conf_contents, smallest_free_slot, tx_checksumming_on, tx_offload_benign,
-        workload_converge_steps,
+        derive_veth_plan, derive_workload_netns_plan, io_error_is_benign_absence, link_absent,
+        plan_adopt_actions, resolv_conf_contents, smallest_free_slot, tx_checksumming_on,
+        tx_offload_benign, workload_converge_steps,
     };
     use ipnet::{IpAdd, Ipv4Net};
     use overdrive_core::AllocationId;
@@ -4225,5 +4304,50 @@ mod tests {
     fn plan_adopt_actions_on_empty_is_empty() {
         let plan = plan_adopt_actions(&[]);
         assert_eq!(plan, AdoptPlan::default(), "no survivors → no adopt, no gc");
+    }
+
+    /// The orphan-GC observe path classifies a `NotFound` io error as the
+    /// BENIGN "the thing is genuinely absent" signal (legitimately no live
+    /// PID / scope reaped → orphan-eligible), and EVERY other io error
+    /// (EACCES, EIO, transient, …) as a genuine read failure that MUST
+    /// propagate (refuse the boot, fail-closed) rather than silently degrade
+    /// into the destructive `ip netns del` branch. This pins the
+    /// classification the three swallow-site fixes rely on — without it a
+    /// swallowed read could tear down a LIVE workload's netns (the
+    /// `development.md` "never absorb a Result into a default" rule applied to
+    /// a DESTRUCTIVE action). Pure → no real fs needed.
+    #[test]
+    fn io_error_is_benign_absence_only_classifies_not_found_as_benign() {
+        use std::io::{Error, ErrorKind};
+
+        // The ONE benign kind: the resource is genuinely gone.
+        assert!(
+            io_error_is_benign_absence(&Error::from(ErrorKind::NotFound)),
+            "NotFound is the benign absence signal → orphan-eligible / skip-this-PID"
+        );
+
+        // Every genuine read failure MUST be classified non-benign so the
+        // observe path propagates it and refuses the boot.
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::Other,
+            ErrorKind::InvalidData,
+            ErrorKind::ConnectionRefused,
+            ErrorKind::WouldBlock,
+            ErrorKind::TimedOut,
+            ErrorKind::Interrupted,
+        ] {
+            assert!(
+                !io_error_is_benign_absence(&Error::from(kind)),
+                "{kind:?} is a genuine read failure → must propagate (fail-closed), not benign"
+            );
+        }
+
+        // An OS-code-shaped EIO (raw_os_error path, not a from-kind synthetic)
+        // is also non-benign — the read failed for a real reason.
+        assert!(
+            !io_error_is_benign_absence(&Error::from_raw_os_error(libc::EIO)),
+            "EIO (a genuine I/O failure) is non-benign → must propagate"
+        );
     }
 }

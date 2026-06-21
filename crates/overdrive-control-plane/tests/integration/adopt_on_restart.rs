@@ -281,20 +281,17 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     // holding a live `ovd-ns-<other-slot>` at the recovery instant would, in
     // principle, be classified as an orphan and torn down.
     //
-    // Empirically this does NOT fire: the full `-p overdrive-control-plane
-    // --features integration-tests` suite is GREEN on kernel 7.0.0, AND a forced
-    // `--test-threads 8` 5× stress of THIS test interleaved with
-    // `alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal` (which holds
-    // a live `ovd-ns-0000`) is 5/5 GREEN — the fast in-process recovery pass and
-    // the slow `/bin/sleep`+setns landing window do not overlap at the GC instant
-    // in practice. That is a TIMING observation, NOT a structural guarantee:
-    // neither this test nor the netns-lifecycle tests are in the
-    // `host-kernel-shared` `max-threads = 1` group (`.config/nextest.toml`),
-    // which is the only cross-PROCESS single-writer guard. The structural fix
-    // (adding the netns-touching Tier-3 tests to `host-kernel-shared`) lives in
-    // the nextest config and is tracked as the seam-vs-infra serialization gap
-    // surfaced in the 04-04 revision (see reviews/04-04.md cross-test GC item);
-    // it is out of this test file's scope to land.
+    // This hazard is now STRUCTURALLY guarded, not merely timing-lucky: commit
+    // `64c05b32` added all six per-alloc-netns Tier-3 tests (this one and the
+    // `alloc_netns_lifecycle` family) to the `host-kernel-shared`
+    // `max-threads = 1` test-group in `.config/nextest.toml` (verified via
+    // `nextest show-config test-groups`). That group is the single-writer
+    // cross-PROCESS guard, so no sibling test holds a live `ovd-ns-<other-slot>`
+    // while this test's recovery pass runs its global netns scan — the
+    // false-orphan GC cannot interleave. (Before `64c05b32` the suite passed
+    // empirically — full suite GREEN on kernel 7.0.0 plus a 5/5 `--test-threads
+    // 8` stress — but that was a TIMING observation; the serialization makes it
+    // a guarantee.) See reviews/04-04.md cross-test GC item.
 
     // Choose distinct slots well away from 0 so a fresh-assign collision is
     // unambiguous: survivor at slot S, orphan at slot O. The fresh allocator
