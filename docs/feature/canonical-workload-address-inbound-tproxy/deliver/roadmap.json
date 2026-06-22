@@ -218,8 +218,29 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "TODO",
-    "approved_at": "TODO"
+    "status": "approved",
+    "reviewer": "nw-solution-architect-reviewer",
+    "reviewer_model": "opus",
+    "approved_at": "2026-06-22T18:14:08Z",
+    "verdict": "APPROVED",
+    "blocking_issues": 0,
+    "non_blocking_findings": 5,
+    "summary": "Strong, anchor-accurate roadmap. Every load-bearing source citation verified against the actual tree (not just the design docs) and all are precise to the line. Design-fidelity, vertical-slice, sequencing, tier-assignment, rkyv-6-step, GATE-reconciliation, and deferral-hygiene checks all pass. The keystone (03-02 S-WS) genuinely closes the serve+deploy loop and REMOVES the test-installed install_inbound_tproxy + synthetic INBOUND_VIRT_IP/PORT (verified at bidirectional_walking_skeleton.rs:177-178,1742) rather than retaining a mechanism-without-wiring.",
+    "dimension_verdicts": {
+      "A_design_fidelity": "PASS",
+      "B_vertical_slice": "PASS",
+      "C_sequencing_dag": "PASS",
+      "D_ac_testability_tiers": "PASS",
+      "E_rkyv_6_step": "PASS",
+      "F_gate_adr_reconciliation": "PASS",
+      "G_source_anchor_accuracy": "PASS",
+      "H_scope_deferral_hygiene": "PASS"
+    },
+    "non_blocking_dispatch_refinements": [
+      "02-01 / S-PORTSET (thought): the two read paths are structurally asymmetric — project_service_listen_ports collects svc.listeners (Vec) while the bridge iterates desired.listeners as a (service_id, listener) map (backend_discovery_bridge.rs:336). The property is sound only if both bottom out in the same svc.listeners source; crafter should assert equality over a genuine N>=2-listener single Service flowing through BOTH paths so the generator can't mask a shape mismatch.",
+      "02-02 (suggestion): name the concrete partition site in the crafter dispatch — pre-filter addr.ip() in workload_subnet OUT of the backend slice BEFORE the service_map_hydrator.rs:341 .partition() call; do NOT widen the partition closure's bool into a 3-way (a malformed impl could still pass the three S-GATE arms if mesh backends leak into remote).",
+      "02-02 (question): pin the exact hydrator-construction line that passes WORKLOAD_SUBNET_BASE — it is the single anchor the roadmap leaves unpinned by file:line (implementation_scope lists reconciler_runtime.rs but no line). WORKLOAD_SUBNET_BASE lives in overdrive-control-plane veth_provisioner.rs."
+    ],
+    "review_notes": "effort_hours (4/6/6/5/7/8 = 36h) confirmed advisory-only, not scope-gating (CLAUDE.md No effort/time budget cuts). All out-of-scope forward-pointers cite real OPEN issues: intended-peer pinning #242, DNS daemon #243, dialable-VIP #61; ServiceBackendRow.vip UNCHANGED is correct (#61 territory), not a hidden gap. The three non-blocking refinements are worth folding into the 02-01/02-02 crafter dispatches but do NOT gate handoff to DELIVER execution."
   }
 }
