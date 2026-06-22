@@ -144,6 +144,8 @@ fn build_row(
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 

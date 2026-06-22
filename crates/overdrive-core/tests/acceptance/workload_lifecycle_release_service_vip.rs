@@ -108,6 +108,8 @@ fn alloc_terminal_operator_stopped(
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 

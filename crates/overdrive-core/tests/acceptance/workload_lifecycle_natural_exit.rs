@@ -102,6 +102,8 @@ fn alloc_clean_exit(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocSt
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -133,6 +135,8 @@ fn alloc_crashed_with_exit(
         listeners: Vec::new(),
         // GAP-1 subsidiary: Failed-after-crash state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 

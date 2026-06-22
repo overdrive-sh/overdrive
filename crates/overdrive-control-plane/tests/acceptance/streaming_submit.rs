@@ -183,6 +183,8 @@ async fn write_row(
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
@@ -1071,6 +1073,8 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 

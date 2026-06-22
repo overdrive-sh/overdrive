@@ -114,6 +114,8 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 

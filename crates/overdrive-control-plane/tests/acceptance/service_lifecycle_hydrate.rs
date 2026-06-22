@@ -192,6 +192,8 @@ fn make_alloc_status_row(
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         started_at,
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 

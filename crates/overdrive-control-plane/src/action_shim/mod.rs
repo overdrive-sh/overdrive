@@ -314,6 +314,13 @@ fn build_alloc_status_row(
         kind,
         listeners: Vec::new(),
         started_at,
+        // canonical-workload-address-inbound-tproxy (GH #241 /
+        // AllocStatusRowV2): `None` at this row-builder seam for
+        // every current alloc shape (host-netns). The Path-A
+        // population off `plan.workload_addr` at the C3 provision
+        // seam lands in a later BLOCKER-2 slice; this additive field
+        // defaults absent until then.
+        workload_addr: None,
     }
 }
 
