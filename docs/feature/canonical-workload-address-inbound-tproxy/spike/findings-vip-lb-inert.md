@@ -168,7 +168,8 @@ Confirmed by code inspection cross-checked against the running system:
    advertised to it.
 2. **No name→VIP resolution path in v1.** The DNS responder that would map a
    service name to its VIP is **deferred (#243)**; VIP-dial-by-name is
-   **#167/#61, also deferred**. No `resolv.conf` injection maps a name to a VIP
+   **#61, also deferred** (the VIP *allocator* #167 has shipped, but VIPs are
+   not dialed in headless v1). No `resolv.conf` injection maps a name to a VIP
    in the production worker path.
 3. **The egress mTLS path resolves the DIALED addr, not a VIP.** The worker's
    outbound accept loop recovers each captured connection's `orig_dst` via
@@ -211,7 +212,7 @@ Evidence chain: (a) deploy converged, single backend classified LOCAL,
 `LOCAL_BACKEND_MAP` got the only entry, **XDP maps stayed empty** [real
 `bpftool` dump]; (b) the cgroup rewrite is mechanically live but only fires on
 a VIP dial [Pop-A/Pop-B getsockname diff]; (c) **no v1 production path dials a
-VIP** [no VIP injection / DNS #243 / VIP-dial #167-#61 deferred; egress resolves
+VIP** [no VIP injection / DNS #243 / VIP-dial #61 deferred; egress resolves
 `orig_dst`, not VIP]. ⇒ the LB/VIP path is **INERT on the production path**;
 B2 is **safe**.
 
@@ -231,7 +232,8 @@ B2 is **safe**.
 - **TEACH is NOT required.** Teaching the LB partition that `workload_addr` is
   host-local (so LB + mTLS coexist) buys nothing in v1 — there is no VIP-dial
   consumer to keep serving. TEACH only becomes relevant if/when a live VIP-dial
-  path ships (DNS responder #243 + VIP-dial #167/#61); that is a separate,
+  path ships (the VIP territory #61; the VIP allocator #167 already shipped);
+  that is a separate,
   later, independently-drivable slice and should gate its own spike then.
 - **increment-b reconciled:** increment-b's "cgroup_connect4 FIRES → GATE/TEACH,
   do NOT retire" stands. increment-c sharpens it: FIRES-and-rewrites, yes, but
@@ -246,7 +248,7 @@ B2 is **safe**.
 neither registered into `LOCAL_BACKEND_MAP` nor programmed into the XDP
 `SERVICE_MAP` (the cgroup hook then misses → nft-TPROXY owns mesh delivery),
 because the VIP/LB path has **no live v1 consumer** under a real `serve` +
-`deploy`; TEACH is unnecessary until a VIP-dial path ships (#243 / #167 / #61).
+`deploy`; TEACH is unnecessary until a VIP-dial path ships (#61).
 
 ---
 
@@ -280,4 +282,5 @@ B2 shifts a backend off it without any VIP-dial consumer to break.
   `overdrive-mtls` table deleted, bpffs `SERVICE_MAP` pin removed, serve + nc
   processes killed. Verified post-teardown.
 - **No GitHub issues created; no new deferrals surfaced** (the VIP-dial-path
-  deferrals #243 / #167 / #61 are pre-existing and cited, not invented).
+  deferrals #243 / #61 are pre-existing and cited, not invented; the VIP
+  allocator #167 already shipped and is NOT a future-deferral home).

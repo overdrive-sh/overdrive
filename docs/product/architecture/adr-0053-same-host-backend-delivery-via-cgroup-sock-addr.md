@@ -2307,7 +2307,9 @@ by real Tier-3 connects, not review):
   So "the LB path is inert under Path-A, just retire it" is **FALSIFIED.**
 - **increment-c:** under a real `serve` + `deploy`, is the VIP/LB path a LIVE
   consumer? **NO — INERT.** No production code hands a VIP to a workload, no DNS
-  maps a name to a VIP (#243/#167/#61 deferred), and the egress mTLS path
+  maps a name to a VIP (the headless name responder #243 returns the
+  `workload_addr`, not a VIP; the dialable-VIP path #61 is deferred — the VIP
+  *allocator* #167 already shipped), and the egress mTLS path
   resolves `orig_dst`, never a VIP. The XDP maps stood up with ZERO entries
   under a fully-converged deploy.
 
@@ -2337,7 +2339,8 @@ WORKLOAD_SUBNET_BASE` by construction; (c) it is deterministic and content-deriv
 (increment-b); the gate makes it find a `LOCAL_BACKEND_MAP` **miss** so the dial
 falls through to nft-TPROXY, which owns mesh delivery. The hook + the XDP programs
 are NOT retired — they remain reserved for a genuine remote-backend / VIP-LB case
-(multi-node, #167/#61). ADR-0053 §5 ("XDP programs reserved for the Phase 2
+(multi-node — the dialable-VIP territory #61; the VIP *allocator* #167 already
+shipped). ADR-0053 §5 ("XDP programs reserved for the Phase 2
 remote-backend case") is REFINED, not reversed: the gate keeps them empty for
 Path-A mesh; it does not delete them.
 
@@ -2352,17 +2355,22 @@ Path-A mesh; it does not delete them.
 - **TEACH is unnecessary** (increment-c): teaching the LB partition that
   `workload_addr` is host-local (so LB + mTLS coexist) buys nothing in v1 — there
   is no VIP-dial consumer to keep serving. TEACH becomes relevant only if/when a
-  live VIP-dial path ships (DNS responder #243 + VIP-dial #167/#61); that is a
-  separate, later, independently-drivable slice that gates its own spike then.
+  live dialable-VIP path ships (#61; the VIP *allocator* #167 already shipped, and
+  this amendment is the durable GATE→TEACH record — note the headless name responder
+  #243 returns the `workload_addr`, NOT a VIP, so it is not itself a VIP-dial
+  trigger); that is a separate, later, independently-drivable slice that gates its
+  own spike then.
 
 ### Scope / deferrals
 
 - **In-scope for #241:** the gate lands with B2 — shipping B2 without it ships
   dead XDP writes in the slice (the "don't ship dead writes in your slice" trap).
 - **Deferred:** the full retire of the same-host cgroup LB for Path-A, and any
-  TEACH, wait on a live VIP-dial path — **#243** (in-agent name responder, OPEN),
-  **#167 / #61** (VIP allocator / multi-node VIP-dial). The
-  `WORKLOAD_SUBNET_BASE` tunable is **#239** (OPEN, phase/2+).
+  TEACH, wait on a live dialable-VIP path — **#61** (multi-node dialable VIP, OPEN;
+  the VIP *allocator* #167 already shipped, so it is not a deferral home). The
+  in-agent name responder **#243** (OPEN) is a separate dial-by-name deferral and
+  returns the `workload_addr`, not a VIP. The `WORKLOAD_SUBNET_BASE` tunable is
+  **#239** (OPEN, phase/2+).
 
 ### Compliance
 
@@ -2385,4 +2393,4 @@ Path-A mesh; it does not delete them.
 ## Changelog
 
 - 2026-05-22 — Initial proposed version. Same-host backend delivery via `cgroup_sock_addr` connect-time destination rewrite. Resolves the walking-skeleton TCP round-trip data-path gap.
-- 2026-06-22 — ADR-0053↔ADR-0071 boundary amendment (#241): GATE `ServiceMapHydrator` off Path-A `workload_addr` backends (subnet-membership predicate) so the firing `cgroup_connect4_service` hook misses and nft-TPROXY owns mesh delivery. Hook + XDP programs stay attached (reserved for remote/VIP-LB). Empirically proven safe by increment-b (hook FIRES) + increment-c (VIP/LB INERT, no live consumer). TEACH/full-retire deferred to a live VIP-dial path (#243/#167/#61). — Morgan.
+- 2026-06-22 — ADR-0053↔ADR-0071 boundary amendment (#241): GATE `ServiceMapHydrator` off Path-A `workload_addr` backends (subnet-membership predicate) so the firing `cgroup_connect4_service` hook misses and nft-TPROXY owns mesh delivery. Hook + XDP programs stay attached (reserved for remote/VIP-LB). Empirically proven safe by increment-b (hook FIRES) + increment-c (VIP/LB INERT, no live consumer). TEACH/full-retire deferred to a live dialable-VIP path (#61; the VIP *allocator* #167 already shipped, this amendment is the durable GATE→TEACH record). — Morgan.

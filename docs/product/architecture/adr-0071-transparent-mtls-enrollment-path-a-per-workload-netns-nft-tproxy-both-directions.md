@@ -1025,9 +1025,9 @@ intercept all key on one declared port.
 `BackendDiscoveryBridge` advertises `Backend.addr = workload_addr:port` instead of
 `host_ipv4:port`. This is what makes the egress `ServiceBackendsResolve` index
 (C4) classify a dial to the canonical `workload_addr` as `Mesh` (else the inbound
-leg fails closed). **`ServiceBackendRow.vip` is UNCHANGED** — ServiceVip is
-#167/#61 territory, orthogonal. The bridge reads the per-alloc `workload_addr` as
-an OBSERVED input (BLOCKER2).
+leg fails closed). **`ServiceBackendRow.vip` is UNCHANGED** — the dialable-VIP path
+is #61 territory, orthogonal (the VIP *allocator* #167 already shipped). The bridge
+reads the per-alloc `workload_addr` as an OBSERVED input (BLOCKER2).
 
 ### BLOCKER2 — `workload_addr` is an observed input, persisted on `AllocStatusRow` V2
 
@@ -1054,4 +1054,5 @@ The ADR-0053↔ADR-0071 same-host-LB reconciliation (the D-GATE decision — gat
 recorded as an **ADR-0053 amendment** (2026-06-22), since it governs ADR-0053's
 classifier. It is empirically proven safe by `findings-vip-lb-inert.md`
 (no live v1 VIP-LB consumer → B2 safe, GATE sufficient, TEACH unnecessary until a
-VIP-dial path ships — #243/#167/#61).
+dialable-VIP path ships — #61; the VIP *allocator* #167 already shipped, and this
+ADR-0053 amendment is the durable GATE→TEACH record).

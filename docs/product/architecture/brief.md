@@ -1359,8 +1359,11 @@ a real deploy). Full design:
   `addr.ip() ∈ WORKLOAD_SUBNET_BASE (10.99.0.0/16)` program NEITHER
   `LOCAL_BACKEND_MAP` NOR the XDP maps — the firing `cgroup_connect4_service` hook
   then misses and nft-TPROXY owns mesh delivery. The hook + XDP programs stay
-  attached (reserved for remote/VIP-LB, #167/#61). Empirically safe (no live VIP-LB
-  consumer); TEACH/full-retire deferred to a live VIP-dial path (#243/#167/#61).
+  attached (reserved for remote/VIP-LB — the dialable-VIP territory #61; the VIP
+  *allocator* #167 already shipped). Empirically safe (no live VIP-LB consumer);
+  TEACH/full-retire deferred to a live dialable-VIP path (#61; the headless name
+  responder #243 returns the `workload_addr`, NOT a VIP, so it is not a VIP-dial
+  trigger; the ADR-0053 amendment is the durable GATE→TEACH record).
 
 `ip_forward` + /30 routes + `rp_filter` and `ensure_shared_routing_infra` are
 already converged/reused (no new boot call site; Bar-2 → #234). Driven end-to-end
