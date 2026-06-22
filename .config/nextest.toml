@@ -79,28 +79,44 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # trybuild fixtures compile). This override is retained for the
 # default profile so a developer running these tests directly via
 # `cargo nextest run` still gets a sensible budget.
+#
+# The filter matches by BINARY name only, NOT by test-function name.
+# Every `tests/compile_fail.rs` / `tests/compile_pass.rs` file contains
+# exactly one trybuild `#[test]` fn, so `binary(...)` is sufficient —
+# and robust against per-crate naming. A prior test-name conjunct
+# (`& (test(compile_fail_cases) | test(compile_pass_cases))`) silently
+# excluded `overdrive-store-local::compile_fail` (fn `compile_fail`) and
+# `overdrive-worker::compile_fail` (fn `compile_fail_fixtures`), so those
+# two got neither this slow-timeout extension nor the serialization
+# group below — they fell back to the CI default 180s budget, ran
+# unserialized, contended for the target-dir lock, and TIMED OUT.
 [[profile.default.overrides]]
-filter = '(binary(compile_fail) | binary(compile_pass)) & (test(compile_fail_cases) | test(compile_pass_cases))'
+filter = 'binary(compile_fail) | binary(compile_pass)'
 slow-timeout = { period = "60s", terminate-after = 4 }
 
 # Serialize trybuild binaries against each other. Each trybuild
 # `TestCases` invocation spawns `cargo build` internally to compile
-# its fixtures into a private workspace; three trybuild binaries
-# (`overdrive-core::compile_fail`, `overdrive-control-plane::compile_fail`,
-# `overdrive-control-plane::compile_pass`) running in parallel contend
-# for the cargo target-dir file lock. Under that contention the
-# inner cargo invocations block on `Blocking waiting for file lock
-# on build directory` and the per-test slow-timeout fires before any
-# of them finish — the symptom the timeout-only fix in commit
+# its fixtures into a private workspace; the six trybuild binaries
+# (`overdrive-core::{compile_fail,compile_pass}`,
+# `overdrive-control-plane::{compile_fail,compile_pass}`,
+# `overdrive-store-local::compile_fail`, `overdrive-worker::compile_fail`)
+# running in parallel contend for the cargo target-dir file lock. Under
+# that contention the inner cargo invocations block on `Blocking waiting
+# for file lock on build directory` and the per-test slow-timeout fires
+# before any of them finish — the symptom the timeout-only fix in commit
 # e4e6fb8 did not address. Serializing at the nextest layer
 # (cross-process, since trybuild binaries are separate test
 # processes — `serial_test` cannot reach across them) gives each
 # binary uninterrupted access to the lock.
+#
+# Match by BINARY name only — see the slow-timeout override above for why
+# the prior test-name conjunct silently dropped `store-local::compile_fail`
+# and `worker::compile_fail` from the group and let them time out.
 [test-groups.trybuild]
 max-threads = 1
 
 [[profile.default.overrides]]
-filter = '(binary(compile_fail) | binary(compile_pass)) & (test(compile_fail_cases) | test(compile_pass_cases))'
+filter = 'binary(compile_fail) | binary(compile_pass)'
 test-group = 'trybuild'
 
 # Unified serialization domain for EVERY test that touches shared,
