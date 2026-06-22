@@ -327,3 +327,153 @@ holds it. Every change is additive-on-existing or a pure reuse.
 **No NEW deferral surfaced.** No hand-wavy forward pointers; every cited issue is
 verified OPEN/CLOSED per the dispatch. If a crafter finds a genuine gap needing a
 new issue, surface it as a blocker — do not invent.
+
+---
+
+## Wave: DISTILL
+
+**Density:** lean (Tier-1 `[REF]` sections) · **No `discuss/`/`devops/` dir**
+(feature started at SPIKE) — ACs derived from `feature-delta.md` +
+`design/wave-decisions.md` + the three `spike/findings*.md`; no story
+traceability. **Project override:** per `.claude/rules/testing.md` there are
+**no `.feature` files** — Gherkin GIVEN/WHEN/THEN lives only in
+`distill/test-scenarios.md` (specification, never executed); all tests are Rust
+`#[test]` / `#[tokio::test]`; RED scaffolds are
+`#[should_panic(expected = "RED scaffold")]` pure-panic placeholders.
+
+### [REF] Scenario list with tags
+
+| ID | Title | Tier | Tags |
+|---|---|---|---|
+| **S-WS** | A workload reached at its canonical address terminates mTLS end to end | Tier-3 (real serve+deploy) | `@walking_skeleton @driving_port @real-io @tier3` |
+| S-NRULES | A service with two declared ports installs an inbound capture for each | Tier-3 (real nft) | `@real-io @tier3 @us-A1` |
+| S-DPORT | The inbound capture matches the port a peer actually dials | Tier-3 | `@real-io @tier3 @us-BLOCKER1 @error` |
+| S-JOB0 | A workload that offers no service installs no inbound capture | Tier-3 | `@real-io @tier3 @error` |
+| S-BRIDGE | Bridge advertises canonical addr when present, host addr otherwise | Tier-1 DST | `@in-memory @us-B2` (None arm = `@error`) |
+| S-GATE | Hydrator gates mesh backends; local/remote arms unchanged | Tier-1 DST | `@in-memory @us-GATE` (two non-mesh arms = `@error`) |
+| S-PORTSET | Every captured port is an advertised port (N≥2) | Tier-1 DST | `@in-memory @us-portset @property` |
+| S-V2 | `AllocStatusRow` V2: V1 golden decodes through, V2 roundtrips | default-lane | `@property @schema-evolution` |
+
+**Error/edge ratio: 6 / 13 discrete behaviours ≈ 46%** (S-DPORT, S-JOB0, the
+S-BRIDGE `None` arm, the two non-mesh S-GATE arms, the S-V2 V1-backward-compat
+arm) — above the 40% floor.
+
+### [REF] WS strategy (Mandate 5)
+
+**Real `overdrive serve` + `overdrive deploy` (Strategy C — real local
+resources, production composition root).** S-WS drives two real `deploy`-ed mesh
+workloads through a real `serve` boot; the client dials the server's canonical
+`workload_addr:service_port` directly (no DNS), and the **production-installed**
+inbound nft-TPROXY rule (from `start_alloc` off `spec.{workload_addr,
+service_ports}`) captures it. **NO test-installed `install_inbound_tproxy`, NO
+synthetic loopback virt** — both REMOVED from the existing
+`bidirectional_walking_skeleton.rs`. This is the vertical-slice gate (CLAUDE.md
+§ "Build vertical slices through production entry points"): no test-only wiring
+stands in for a production call site. MERGE-BLOCKING on the pinned-6.18 Tier-3
+matrix (ADR-0068; dev-Lima 7.0 is necessary-but-not-sufficient).
+
+### [REF] Adapter coverage table (Mandate 6)
+
+| Driven adapter | `@real-io`/`@property`? | Covered by |
+|---|---|---|
+| Inbound nft-TPROXY install (`install_inbound_tproxy` → `nft`/`ip` CLI), per-port from `start_alloc` | **YES** (`@real-io @tier3`) | S-WS (real capture e2e), S-NRULES, S-DPORT, S-JOB0 |
+| Gated `Dataplane`/`ServiceMapHydrator` (`register_local_backend`/`update_service` NOT called for mesh) | YES (`@in-memory` Tier-1 reconciler; real kernel consequence proven transitively by S-WS) | S-GATE |
+| `BackendDiscoveryBridge` advertise (`Backend.addr` source) | YES (`@in-memory`/`@property`) | S-BRIDGE, S-PORTSET |
+| `AllocStatusRow` rkyv codec (`AllocStatusRowEnvelope::V2`) | **YES** (`@property @schema-evolution`) | S-V2 |
+
+Every driven adapter has ≥1 real-I/O or property scenario. The inbound nft
+adapter meets the "real" bar (the test FAILs if the production install is
+absent); the reconciler-logic adapters' real kernel effect is proven
+transitively by S-WS (a gated mesh backend must MISS `LOCAL_BACKEND_MAP` so the
+dial falls through to nft-TPROXY — what S-WS's capture requires).
+
+### [REF] Scaffolds (RED-ready, `#[should_panic(expected = "RED scaffold")]`)
+
+| Scenario | Scaffold path | Fn(s) |
+|---|---|---|
+| S-WS | `crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs` | `workload_reached_at_canonical_address_terminates_mtls_end_to_end` |
+| S-NRULES | `crates/overdrive-worker/tests/integration/inbound_rules_per_listener.rs` | `two_declared_listeners_install_exactly_two_inbound_capture_rules` |
+| S-DPORT | `crates/overdrive-worker/tests/integration/inbound_rule_keys_declared_port.rs` | `inbound_capture_rule_matches_declared_service_port_not_ephemeral_leg_c_port` |
+| S-JOB0 | `crates/overdrive-worker/tests/integration/job_kind_installs_no_inbound_rule.rs` | `job_kind_workload_with_no_listeners_installs_no_inbound_capture_rule` |
+| S-BRIDGE | `crates/overdrive-core/tests/canonical_address_bridge_advertise.rs` | `bridge_advertises_canonical_workload_address_when_present` · `bridge_falls_back_to_host_address_for_host_netns_workload` |
+| S-GATE | `crates/overdrive-core/tests/mesh_backend_lb_gate.rs` | `mesh_subnet_backend_programs_neither_local_nor_remote_lb_path` · `host_address_backend_still_registers_as_local_backend` · `non_mesh_non_host_backend_still_drives_dataplane_service_update` |
+| S-PORTSET | `crates/overdrive-core/tests/capture_advertise_port_set_equality.rs` | `every_captured_port_is_an_advertised_port_for_a_multi_listener_service` |
+| S-V2 | `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs` (appended; `FIXTURE_V1` untouched) | `alloc_status_row_v1_golden_bytes_decode_to_v2_with_absent_workload_addr` · `alloc_status_row_v2_with_workload_addr_round_trips_archive_access_deserialize` |
+
+8 scaffold functions / 6 files. All bodies are pure panic placeholders naming
+the scenario — **no production-API references** (so they compile + PASS today;
+DELIVER replaces each body with real assertions). Discoverable via
+`grep -rn 'should_panic.*RED scaffold' crates/`. The existing
+`bidirectional_walking_skeleton.rs` body is **NOT modified** — the keystone
+lands as its own file (DELIVER folds the synthetic-virt skeleton into it).
+
+### [REF] Test placement (with precedent)
+
+- **Tier-3 (S-WS/S-NRULES/S-DPORT/S-JOB0):**
+  `crates/overdrive-worker/tests/integration/<scenario>.rs`, wired into the
+  existing `tests/integration.rs` inline `mod integration { ... }` block.
+  Precedent: the sibling `bidirectional_walking_skeleton.rs` /
+  `egress_tproxy_capture.rs` (`.claude/rules/testing.md` § "Layout —
+  integration tests live under `tests/integration/`"). Gated `--features
+  integration-tests`.
+- **Tier-1 DST (S-BRIDGE/S-GATE/S-PORTSET):**
+  `crates/overdrive-core/tests/<name>.rs` — standalone default-lane test
+  binaries (each `tests/*.rs` is its own Cargo binary root; no entrypoint
+  wrapper). Precedent: `tests/backend_discovery_bridge_types.rs`,
+  `tests/service_vip.rs`. (NOT the inline `src/` `mod tests` — DISTILL must not
+  touch `crates/**/src/`.)
+- **Schema-evolution (S-V2):** appended to the **existing**
+  `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs` (wired via
+  the existing `tests/schema_evolution.rs` `mod alloc_status_row;`). Precedent:
+  the file's own `FIXTURE_V1` pattern + `development.md` § "Version-bump
+  procedure" (FIXTURE_V1 pinned untouched, FIXTURE_V2 + offset re-pin added same
+  commit in DELIVER).
+
+### [REF] Driving-adapter coverage (RCA P1)
+
+| Driving adapter | Protocol | Scenario |
+|---|---|---|
+| `overdrive serve` | subprocess (boot composition root) | S-WS |
+| `overdrive deploy <SPEC>` | subprocess (deploy a TOML spec) | S-WS (×2), S-NRULES/S-DPORT/S-JOB0 (deploy → observe installed rule) |
+
+S-WS exercises the full operator invocation path as real subprocesses (not a
+`#[test]` assembling `start_alloc` by hand), satisfying RCA-P1 + the
+vertical-slice rule. The rule install itself MUST be the production `start_alloc`
+call site, never a test-installed `install_inbound_tproxy`.
+
+### [REF] DELIVER-obligation → scenario map
+
+| # | Obligation | Scenario / note |
+|---|---|---|
+| 1 | Port-set equality AC (N≥2 Service) | **S-PORTSET** (`@property`, byte-set equality) |
+| 2 | Pin the two wiring seams in the crafter dispatch (`RunningAllocSet` Set→Map; `service_ports` threaded at the `probe_descriptors` site, no new `ObservationStore` method) | Dispatch-pinning note (not a test); S-BRIDGE exercises the map read transitively, S-V2 confirms the V2 observation surface |
+| 3 | Pinned-6.18 Tier-3 AC (MERGE-BLOCKING) | **S-WS** (noted: dev-Lima 7.0 necessary-but-not-sufficient; roadmap AC names the pinned-6.18 matrix) |
+| 4 | Crate-path nit (`mtls_resolve_adapter` in `overdrive-control-plane`) | FIXED in DESIGN; recorded so a scaffold doc-comment doesn't reintroduce the wrong crate |
+| 5 | Rustdoc on `AllocStatusRowV2.workload_addr` (materialized `slot×base` join + #239 single-cut) | Production-code doc obligation (DELIVER, `src/`); S-V2 scaffold doc-comment flags it (NOT a DISTILL `src/` edit) |
+
+### [REF] Pre-requisites
+
+- `integration-tests` feature on `overdrive-worker` (Tier-3 gate) — already
+  declared.
+- **Pinned-6.18 Tier-3 matrix** (ADR-0068) — merge-blocking signal for S-WS.
+  Inner loop: `cargo xtask lima run -- cargo nextest run -p overdrive-worker
+  --features integration-tests` (dev-Lima 7.0); gate: the appliance-kernel
+  matrix.
+- Root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN` for Tier-3 (non-root SKIPs).
+- Default lane (no gate) for the Tier-1 DST + schema-evolution scenarios
+  (`cargo nextest run -p overdrive-core`, Lima-routed).
+
+### [REF] Verification-catalogue note (`.claude/rules/verification.md`)
+
+**S-WS is the operator-observable `E`-surface expectation** ("a workload is
+reachable at its canonical address over mTLS") that should **graduate into
+`verification/expectations/` at DELIVER/DEVOPS**, captured against the built
+`overdrive` binary. **NOT built now** — flagged for DELIVER.
+
+### [REF] Reconciliation (HARD GATE) result
+
+No DISCUSS/DESIGN/DEVOPS triad (feature started at SPIKE). The three spikes are
+mutually reconciled (increment-b LB hook FIRES → cannot retire; increment-c
+VIP/LB INERT → GATE sufficient, TEACH unnecessary; increment-a inbound recipe =
+existing production triple → no new primitive). **Zero contradictions —
+Reconciliation passed.**

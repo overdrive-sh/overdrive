@@ -99,6 +99,20 @@ mod integration {
     // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
     mod bidirectional_walking_skeleton;
 
+    // canonical-workload-address-inbound-tproxy (GH #241) — DISTILL RED scaffolds.
+    // The keystone slice: production-installed inbound nft-TPROXY (from
+    // `start_alloc` off `spec.{workload_addr, service_ports}`), NO test-installed
+    // rule, NO synthetic loopback virt. S-WS is the mandatory acceptance gate
+    // (real serve+deploy, MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix);
+    // S-NRULES/S-DPORT/S-JOB0 observe the production-installed nft rule shape.
+    // Production bodies (the per-port `install_inbound_tproxy` in `start_alloc`,
+    // the `AllocationSpec.{workload_addr,service_ports}` channel) land in DELIVER;
+    // these scaffolds are `#[should_panic(expected = "RED scaffold")]` placeholders.
+    mod canonical_address_inbound_walking_skeleton;
+    mod inbound_rule_keys_declared_port;
+    mod inbound_rules_per_listener;
+    mod job_kind_installs_no_inbound_rule;
+
     // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
     // invariant (Tier-3 obligation (e) / Q5a / D-TME-9 / D-TME-10): a DNS-returned
     // service_backends addr IS the addr MtlsResolve recognizes. The workload dials

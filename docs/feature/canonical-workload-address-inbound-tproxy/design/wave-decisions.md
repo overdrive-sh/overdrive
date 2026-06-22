@@ -242,3 +242,53 @@ they are not lost.
    lives in **`overdrive-control-plane`**, not `overdrive-worker`. The egress-resolve
    `[REF]` sites in feature-delta.md (lines 54, 72) now carry the explicit crate
    qualifier.
+
+### Re-review 2026-06-22 (post-citation-fix)
+
+**Reviewer:** `nw-solution-architect-reviewer` (read-only design critique).
+**Date:** 2026-06-22. **Verdict: APPROVED** (0 critical / 0 high / 0 blocking,
+no fixes required). The second cycle confirms the citation-fix revision cleared
+the only blocking defect; no new blocking issues surfaced.
+
+**What it confirmed:**
+
+- **Prior blocking defect fully fixed.** The stale **#167** forward-pointer (cited
+  as a *future* VIP-dial deferral when #167 is the already-shipped VIP *allocator*)
+  is resolved. Orchestrator re-verified issue states at review time:
+  **#167 CLOSED** (described as shipped everywhere, never pending), **#61 OPEN**
+  (the dialable-VIP TEACH trigger), **#234 / #239 / #242 / #243 OPEN**,
+  **#178 CLOSED**. Every deferral citation scope-matches its issue.
+- **Vertical-slice discipline (the #236 lesson) satisfied.** Every leg of the
+  inbound loop sits on the production path: C3 `provision_and_inject_netns` sets
+  `workload_addr`; `WorkloadLifecycle::project_service_listen_ports` sets
+  `service_ports`; `start_alloc` installs the per-port inbound rule (replacing
+  `tproxy_guard = None`); the bridge advertises `workload_addr:port`; the gated
+  hydrator. No test-only wiring stands in for a missing production call site.
+- **Zero CREATE-NEW verified** (all EXTEND / REUSE). **D-GATE / D-GATE-PRED
+  reconciliation empirically sound** — the subnet-membership predicate is
+  deterministic and cannot misfire (increment-c proved no live VIP-LB consumer);
+  GATE is sufficient, TEACH is deferred to #61.
+- **D-BLOCKER2 persist-materialized-addr exception judged honest-scoped.** The
+  core-relocation cost plus the #239 slot×base join hazard justify persisting the
+  materialized join over the `NetSlot` input; the "base change = redeploy, not
+  live re-tune" single-cut-greenfield boundary is load-bearing and explicitly
+  stated.
+
+**The 4 prior DELIVER obligations stand** (port-set equality AC; the two
+wiring-seam pins; pinned-6.18 Tier-3 AC; crate-path fix). The re-review
+independently re-derived obligations #1 and #3 and flagged the **pinned-6.18
+Tier-3 AC as mandatory / merge-blocking**: dev-Lima 7.0 is necessary-but-not-
+sufficient, and the built-in-ca-operator-composition slice is the precedent for
+an "expected to work on 6.18" change that did not.
+
+### DELIVER obligation 5 (NEW, non-blocking — from the re-review)
+
+5. **Strengthen the D-BLOCKER2 record so `AllocStatusRowV2.workload_addr` is not
+   treated as a normal, independently-derived field.** Add a rustdoc comment on
+   the field naming it a **materialized `slot × base-at-provision` join** (a
+   frozen snapshot; its inputs are immutable except under redeploy) and stating
+   the **#239** Phase-1 single-cut constraint: a base change is a full
+   redeploy / re-provision / re-observe, **not** a live re-tune. This prevents a
+   future "just recompute it at the bridge" refactor from silently reintroducing
+   the install / advertise divergence the design rejected (the #239 base_t0 vs
+   base_t1 hazard in § "BLOCKER-2 rationale").

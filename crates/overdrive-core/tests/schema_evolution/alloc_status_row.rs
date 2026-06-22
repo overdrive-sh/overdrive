@@ -271,3 +271,59 @@ fn print_fixture_v1_bytes() {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
     println!("FIXTURE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
 }
+
+// ---------------------------------------------------------------------
+// S-V2 — `AllocStatusRowEnvelope::V2` schema-evolution scaffolds
+// (canonical-workload-address-inbound-tproxy, GH #241; DISTILL RED).
+//
+// D-BLOCKER2: persist `workload_addr: Option<Ipv4Addr>` directly on the row
+// (the materialized `slot x base-at-provision` join the inbound nft rule was
+// keyed on), via an additive `AllocStatusRowEnvelope::V2`. Mandatory per
+// `.claude/rules/testing.md` § "Archive schema-evolution roundtrip" and
+// `development.md` § "rkyv schema evolution" 6-step procedure.
+//
+// DELIVER fills these bodies and lands the bump as a SINGLE commit:
+//   1. Append `V2(AllocStatusRowV2)`; re-alias `AllocStatusRow = AllocStatusRowV2`.
+//   2. `AllocStatusRowLatest = AllocStatusRowV2`.
+//   3. `latest(p) -> Self::V2(p)`.
+//   4. `From<AllocStatusRowV1> for AllocStatusRowV2` (additive: `workload_addr:
+//      None`); `into_latest()` chains `V1 => Ok(v1.into())`, `V2 => Ok(v2)`.
+//   5. Add `FIXTURE_V2` (regenerated via the `print_fixture_v1_bytes`-shaped
+//      aid) WITHOUT touching `FIXTURE_V1` (the existing fixture stays verbatim —
+//      it is the V1-backward-compat error/edge guard: old bytes must still read).
+//   6. Re-pin `GOLDEN_DISCRIMINANT_OFFSET_V1` via the triangulation test
+//      (adding `Option<Ipv4Addr>` — 4 bytes behind the `Option` discriminant —
+//      shifts the trailing root footprint).
+//
+// DELIVER obligation #5 (from `design/wave-decisions.md`): the
+// `AllocStatusRowV2.workload_addr` field carries a rustdoc comment naming it a
+// materialized `slot x base-at-provision` join (a frozen snapshot, immutable
+// except under redeploy) + the #239 Phase-1 single-cut constraint (a base change
+// is a full redeploy / re-provision / re-observe, NOT a live re-tune) — so a
+// future "just recompute it at the bridge" refactor cannot silently reintroduce
+// the install/advertise divergence the design rejected.
+//
+// Spec: `docs/feature/canonical-workload-address-inbound-tproxy/distill/test-scenarios.md` § S-V2.
+// ---------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn alloc_status_row_v1_golden_bytes_decode_to_v2_with_absent_workload_addr() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-V2 / the pinned FIXTURE_V1 golden \
+         bytes decode through the envelope + into_latest() to a V2 with \
+         workload_addr == None (additive From<V1> for V2); every other field \
+         matches the canonical V1 payload -- FIXTURE_V1 untouched)"
+    );
+}
+
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn alloc_status_row_v2_with_workload_addr_round_trips_archive_access_deserialize() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-V2 / a V2 payload carrying \
+         Some(workload_addr) round-trips archive -> access -> deserialize -> \
+         into_latest() equal to the original; FIXTURE_V2 added same commit, \
+         discriminant offset re-pinned)"
+    );
+}
