@@ -96,10 +96,10 @@
 //! evidence would vanish, and the forward-copy marker would never appear in a
 //! `write`/`sendto` into a kTLS-TX leg.
 //!
-//! ## Authn-only boundary (Q4 / #178)
+//! ## Authn-only boundary (Q4 / #242)
 //!
 //! `expected_peer` stays `None` for the enforced connection (v1 authn-only; the
-//! intended-peer pinning is #178). This AT asserts encryption + the substrate
+//! intended-peer pinning is #242). This AT asserts encryption + the substrate
 //! asymmetry — it MUST NOT assert intended-peer "protection". Identical authn-only
 //! discipline to mtls_inbound_enforce.rs and 05-01's last criterion.
 //!
@@ -1160,7 +1160,7 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
 
     // The scripted resolve table the PRODUCTION accept_loop consumes:
     // mesh_backend → Mesh(backend.addr = mesh_backend, expected_svid = None). The
-    // `expected_svid` None is the authn-only boundary (Q4 / #178) carried into the
+    // `expected_svid` None is the authn-only boundary (Q4 / #242) carried into the
     // resolved arm — production enforces with `expected_peer = None`.
     let mut table = BTreeMap::new();
     table.insert(
@@ -1440,7 +1440,7 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
          leg-B → leg-F) is a splice pinned to the leg-B source fd (>=1 splice(2) out of leg-B's \
          kTLS-RX). Encryption asserted (0x17 both directions, no cleartext on the leg-B wire). \
          Authn-only honoured (expected_svid None on the resolved arm; no intended-peer protection \
-         claim, #178)."
+         claim, #242)."
     );
 
     // Teardown is panic-safe (F3): the `TopologyGuard` Drop scrubs the node-global

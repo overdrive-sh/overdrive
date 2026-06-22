@@ -1,5 +1,5 @@
 //! [`MtlsResolve`] — the per-connection enrollment-resolve driven port
-//! (ADR-0071, the #178 anti-corruption boundary).
+//! (ADR-0071, the #242 anti-corruption boundary).
 //!
 //! Path A's transparent-mTLS enrollment model replaces the retired
 //! per-destination redirect map (`MTLS_REDIRECT_DEST` /
@@ -16,16 +16,16 @@
 //! ambiguity the enrollment model exists to remove (CLAUDE.md § "Type-driven
 //! design — sum types over sentinels / make invalid states unrepresentable").
 //!
-//! This port is the **#178 anti-corruption boundary**. THIS feature owns: the
+//! This port is the **#242 anti-corruption boundary**. THIS feature owns: the
 //! port trait + the 3-variant [`MtlsResolution`] + the 2-field
 //! [`ResolvedBackend`], a v1 host adapter (`ServiceBackendsResolve`) reading
 //! `service_backends` via [`ObservationStore`](crate::traits::ObservationStore),
 //! a sim adapter, and the fail-closed semantic + the Earned-Trust [`probe`]. The
 //! expected-SVID join (`service_backends` × identity facts), the multi-backend
 //! candidate-set + LB-pick policy, and the SAN-match wiring of `expected_peer`
-//! are **#178** (so v1 returns `expected_svid = None`, authn-only, consistent
+//! are **#242** (so v1 returns `expected_svid = None`, authn-only, consistent
 //! with ADR-0069). The VIP/DNS name → virt resolution upstream of `orig_dst`
-//! (the responder daemon) is **#61**.
+//! (the responder daemon) is **#243**.
 //!
 //! Per `.claude/rules/development.md` § "Trait definitions specify behavior, not
 //! just signature": the per-arm enforce/pass-through/fail-closed semantics
@@ -65,7 +65,7 @@ pub type Result<T, E = MtlsResolveError> = std::result::Result<T, E>;
 pub enum MtlsResolution {
     /// **mesh → ENFORCE.** `orig_dst` mapped to a `running` mesh backend.
     /// The worker sets `Routed::Outbound { peer: backend.addr }` (+
-    /// `expected_peer` when #178's join supplies it) and calls `enforce`
+    /// `expected_peer` when #242's join supplies it) and calls `enforce`
     /// (mTLS to that backend). The only arm that drives a handshake.
     Mesh(ResolvedBackend),
 
@@ -86,7 +86,7 @@ pub enum MtlsResolution {
 
 /// A single `running` mesh backend the captured connection resolves to.
 /// Bounded to EXACTLY two fields — no more. Multi-backend candidate sets +
-/// LB-pick are #178's concern, not this struct's.
+/// LB-pick are #242's concern, not this struct's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedBackend {
     /// The concrete `running` backend address (v1 headless: the same
@@ -95,9 +95,9 @@ pub struct ResolvedBackend {
     /// The peer's expected SPIFFE identity for SAN-pinning. **v1 = `None`**
     /// for every backend: the v1 `ServiceBackendsResolve` adapter is
     /// authn-only (chain-to-bundle) and does NOT join identity facts. The
-    /// expected-SVID join is **#178**; filling it in here = boundary
+    /// expected-SVID join is **#242**; filling it in here = boundary
     /// divergence across the anti-corruption boundary. The field exists so the
-    /// SAN-pin wires the moment #178 supplies the join (Q4 / D-TME-8).
+    /// SAN-pin wires the moment #242 supplies the join (Q4 / D-TME-8).
     pub expected_svid: Option<SpiffeId>,
 }
 
@@ -142,7 +142,7 @@ pub enum MtlsResolveError {
     },
 }
 
-/// The per-connection enrollment-resolve driven port (ADR-0071), the #178
+/// The per-connection enrollment-resolve driven port (ADR-0071), the #242
 /// anti-corruption boundary. `#[async_trait]` at the boundary (mirroring
 /// [`MtlsEnforcement`](crate::traits::MtlsEnforcement) / `Dataplane` — async
 /// only where the contract genuinely awaits store I/O; the trait lives in
@@ -199,7 +199,7 @@ pub trait MtlsResolve: Send + Sync + 'static {
     /// DST equivalence test exercises every arm):
     /// - **[`Mesh(ResolvedBackend)`](MtlsResolution::Mesh) → ENFORCE** — a
     ///   `running` mesh backend resolved. The worker sets `Routed::Outbound {
-    ///   peer: backend.addr }` (+ `expected_peer` when #178 supplies it) and
+    ///   peer: backend.addr }` (+ `expected_peer` when #242 supplies it) and
     ///   calls `enforce` (mTLS to that backend). The only arm that drives a
     ///   handshake.
     /// - **[`NonMesh`](MtlsResolution::NonMesh) → PASS-THROUGH (cleartext, by
@@ -225,7 +225,7 @@ pub trait MtlsResolve: Send + Sync + 'static {
     /// - **v1 `expected_svid` is always `None`** in every
     ///   [`Mesh`](MtlsResolution::Mesh) arm: the v1 `ServiceBackendsResolve`
     ///   adapter is authn-only (chain-to-bundle) and does NOT join identity
-    ///   facts. The expected-SVID join is #178 (filling it here is boundary
+    ///   facts. The expected-SVID join is #242 (filling it here is boundary
     ///   divergence across the anti-corruption boundary).
     /// - A store-read failure AT RESOLVE TIME that is NOT a per-connection
     ///   classification (poisoned handle, corrupt table) returns an `Err` of

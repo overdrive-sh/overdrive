@@ -46,7 +46,7 @@ pub mod mtls_enforcement;
 // `orig_dst` against a scripted `BTreeMap<SocketAddrV4, MtlsResolution>` table;
 // the `mtls_resolve_equivalence` structural guard (DELIVER) drives both this and
 // the v1 host `ServiceBackendsResolve` adapter through the same sequence
-// (ADR-0071; GH #178 anti-corruption boundary).
+// (ADR-0071; GH #242 anti-corruption boundary).
 pub mod mtls_resolve;
 pub mod observation_store;
 pub mod transport;

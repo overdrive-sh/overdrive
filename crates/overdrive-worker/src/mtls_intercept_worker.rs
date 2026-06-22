@@ -15,7 +15,7 @@
 //!   redirecting the workload's egress TCP to leg-F; stands up the agent's
 //!   leg-F (outbound, plaintext) + leg-C (inbound, `IP_TRANSPARENT`)
 //!   listeners, and spawns the accept→`enforce` tasks. The INBOUND nft-TPROXY
-//!   rule stays #178-deferred (its match key is the server workload's logical
+//!   rule stays #241-deferred (its match key is the server workload's logical
 //!   virt address — an east-west service-resolution fact v1 has no production
 //!   source for); the leg-C listener + accept loop ARE production. See the
 //!   module-level note below.
@@ -36,7 +36,7 @@
 //! liveness registry, NOT a `supervise_tick`, NOT a tick cadence. The
 //! retired central `MtlsSupervisor` (shape (A)) is deleted.
 //!
-//! ## Outbound interception (ADR-0071 Path A) + inbound #178-deferral
+//! ## Outbound interception (ADR-0071 Path A) + inbound #241-deferral
 //!
 //! The OUTBOUND intercept is the per-veth egress nft-TPROXY rule: every TCP
 //! flow the workload emits on its host-side veth (`iifname spec.host_veth`)
@@ -60,7 +60,7 @@
 //! which is an east-west service-resolution fact with no v1 production source.
 //! So `start_alloc` installs NO inbound TPROXY rule (it records
 //! `tproxy_guard = None`); the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
-//! free function stays the named #178 production-install site, exercised today
+//! free function stays the named #241 production-install site, exercised today
 //! only by the worker integration tests (which supply a real, distinct virt).
 //! Everything else (the outbound egress rule + leg-F + leg-C listeners + both
 //! accept loops + `enforce` + the wire) is production.
@@ -106,7 +106,7 @@ use crate::mtls_intercept::{
 /// rather than defaulting the bound addr to a broken port 0.
 /// Each source `Display` names the privilege / kernel-feature
 /// remediation an operator acts on. (The inbound nft-TPROXY rule install is
-/// #178-deferred — see the module note — so it is not an install step and has
+/// #241-deferred — see the module note — so it is not an install step and has
 /// no failure site here; the [`InterceptError::TproxyInstall`] variant still
 /// flows through `Inbound` from the [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
 /// free function's own callers.)
@@ -145,7 +145,7 @@ pub enum MtlsInterceptInstallError {
     /// INBOUND leg-C transparent listener bind failed (site 3,
     /// [`InterceptError::TransparentListener`]). Source `Display` names the
     /// privilege / kernel-feature remediation. (The inbound nft-TPROXY rule
-    /// install is #178-deferred and not performed by `start_alloc`, so
+    /// install is #241-deferred and not performed by `start_alloc`, so
     /// [`InterceptError::TproxyInstall`] does not reach this variant from the
     /// production path — it flows only from the
     /// [`install_inbound_tproxy`](crate::mtls_intercept::install_inbound_tproxy)
@@ -167,7 +167,7 @@ pub enum MtlsInterceptInstallError {
     /// leg-C (inbound) listener bound-address capture failed (`local_addr()` /
     /// getsockname on the leg-C transparent listener). Distinct from the `Inbound`
     /// bind failure: fail closed rather than record a port-0 leg-C addr that would
-    /// silently corrupt the #178 inbound-redirect read (D-MTLS-18 site 3).
+    /// silently corrupt the #241 inbound-redirect read (D-MTLS-18 site 3).
     #[error("mTLS leg-C listener address capture failed: {source}")]
     LegCLocalAddr {
         #[source]
@@ -260,7 +260,7 @@ struct AllocIntercept {
     _outbound_tproxy_guard: Option<TproxyInterceptGuard>,
     /// The inbound nft-TPROXY redirect guard. Dropping it removes the
     /// per-virt rule from the shared chain. `None` while the inbound rule is
-    /// #178-deferred (the leg-C listener + accept loop ARE production; only
+    /// #241-deferred (the leg-C listener + accept loop ARE production; only
     /// the inbound nft rule has no v1 virt source).
     _tproxy_guard: Option<TproxyInterceptGuard>,
     /// The ephemeral loopback addr leg-C (the inbound `IP_TRANSPARENT`
@@ -376,7 +376,7 @@ pub struct MtlsInterceptWorker {
     enforcement: Arc<dyn MtlsEnforcement>,
     /// The per-connection enrollment-resolve port (`ServiceBackendsResolve` in
     /// production; `SimMtlsResolve` under test composition; ADR-0071 fact 4,
-    /// the #178 anti-corruption boundary). The outbound accept loop resolves
+    /// the #242 anti-corruption boundary). The outbound accept loop resolves
     /// each captured connection's `getsockname`-recovered `orig_dst` against
     /// the mesh through this port and branches on the returned
     /// [`MtlsResolution`] variant (the C1 3-arm decision —
@@ -447,7 +447,7 @@ impl MtlsInterceptWorker {
     /// observation the reconciler consumes; an mTLS-install failure produces
     /// no such feedback loop, so "log and continue" would silently leave the
     /// confidentiality guarantee broken. (The INBOUND nft-TPROXY rule install
-    /// is #178-deferred — see the module note — so it is not an install step
+    /// is #241-deferred — see the module note — so it is not an install step
     /// here and has no fail-closed site.)
     ///
     /// **Partial-teardown on the `Err` path.** Every guard acquired before
@@ -470,7 +470,7 @@ impl MtlsInterceptWorker {
     /// the install fails CLOSED rather than defaulting the redirect target to a
     /// broken port 0 (D-MTLS-18). Each source `Display` names the privilege /
     /// kernel-feature remediation an operator acts on. (The inbound nft-TPROXY
-    /// rule is #178-deferred; it is not installed here, so there is no site-4
+    /// rule is #241-deferred; it is not installed here, so there is no site-4
     /// failure.)
     #[allow(
         clippy::similar_names,
@@ -552,7 +552,7 @@ impl MtlsInterceptWorker {
 
         // INBOUND install: the agent's leg-C IP_TRANSPARENT listener. The
         // accompanying nft-TPROXY redirect that would aim real client traffic
-        // at this listener is #178-DEFERRED (see below) — production stands up
+        // at this listener is #241-DEFERRED (see below) — production stands up
         // the listener + accept loop, but installs NO production TPROXY rule.
         // Fail-closed (D-MTLS-18 site 3): a server workload with no leg-C
         // inbound listener accepts cleartext client connections — a
@@ -573,13 +573,13 @@ impl MtlsInterceptWorker {
         // accept task; its `local_addr()` is no longer reachable from the
         // worker). It is the EXACT addr the spawned inbound accept loop accepts
         // on, so a redirect installed at it lands on the production inbound leg
-        // (D-TME-13). #178 is *expected* to reuse this read for its production
+        // (D-TME-13). #241 is *expected* to reuse this read for its production
         // inbound-redirect install, pending that install's site/timing design;
-        // if #178 mirrors leg-F and installs in `start_alloc` it would read an
+        // if #241 mirrors leg-F and installs in `start_alloc` it would read an
         // inline `leg_c_addr` local, NOT `self.leg_c_addr(alloc)`.
         // Fail-closed (D-MTLS-18 site 3): a `local_addr()` getsockname error
         // surfaces as the typed `LegCLocalAddr` rather than recording a port-0
-        // leg-C addr that would silently corrupt the #178 inbound-redirect read.
+        // leg-C addr that would silently corrupt the #241 inbound-redirect read.
         // `outbound_tproxy_guard` + `leg_f_listener` (the guards acquired so far)
         // drop on the `?` early return → remove the egress rule / close leg-F.
         let leg_c_addr = project_listener_v4(
@@ -587,24 +587,24 @@ impl MtlsInterceptWorker {
             MtlsInterceptInstallError::leg_c_local_addr,
         )?;
 
-        // The inbound nft-TPROXY rule install is #178-DEFERRED, symmetric with
+        // The inbound nft-TPROXY rule install is #241-DEFERRED, symmetric with
         // the OUTBOUND `MTLS_REDIRECT_DEST` redirect above. The rule's match
         // key is the server workload's logical (virt) address — the loopback
         // addr/port clients actually dial — and v1 has NO production source for
         // that value: `AllocationSpec` carries no listen-addr field and the
         // workload binds its own socket at runtime (the same east-west
         // service-resolution gap that defers the outbound peer set;
-        // [#178](https://github.com/overdrive-sh/overdrive/issues/178), whose
+        // [#241](https://github.com/overdrive-sh/overdrive/issues/241), whose
         // thread names the inbound orig-dst→real-backend resolution and the
-        // `server_dial_addr` / D-MTLS-15 replacement site as #178's job).
+        // `server_dial_addr` / D-MTLS-15 replacement site as #241's job).
         // So `start_alloc` records `tproxy_guard = None` and installs no rule;
-        // the [`install_inbound_tproxy`] free function stays the named #178
+        // the [`install_inbound_tproxy`] free function stays the named #241
         // production-install site, exercised today only by the worker
         // integration tests (which supply a real, distinct virt). A `virt`
         // synthesised from the agent's own ephemeral leg-C port (the prior
         // shape) installed a self-referential rule that matched no real inbound
         // connection — inert in production while reading as "inbound mTLS
-        // works". (The OUTBOUND direction is NOT #178-gated: it resolves
+        // works". (The OUTBOUND direction is NOT #241-gated: it resolves
         // orig_dst per-connection via the `MtlsResolve` consumer wired in the
         // accept loop below — see [`Self::handle_outbound`].)
         self.spawn_legs_and_record(
@@ -818,7 +818,7 @@ impl MtlsInterceptWorker {
     /// inferred from a sentinel:
     /// - [`Mesh(backend)`](MtlsResolution::Mesh) → build
     ///   `InterceptedConnection { routed: Outbound { peer: backend.addr } }`
-    ///   (`expected_peer` stays `None` until #178 — v1 authn-only) and hand it
+    ///   (`expected_peer` stays `None` until #242 — v1 authn-only) and hand it
     ///   to `enforce` (mTLS to the resolved backend). The peer is the RESOLVED
     ///   backend addr, NOT `orig_dst` (v1 headless: they coincide, but the
     ///   worker uses the resolved addr so #167/#61 wires here unchanged).
@@ -873,7 +873,7 @@ impl MtlsInterceptWorker {
                     leg: leg_f,
                     routed: Routed::Outbound { peer },
                     alloc: alloc.clone(),
-                    // v1 authn-only (F5 / #178): the expected-peer SAN-match is
+                    // v1 authn-only (F5 / #242): the expected-peer SAN-match is
                     // supplied downstream by east-west SPIFFE-ID resolution.
                     expected_peer: None,
                 };
@@ -991,18 +991,18 @@ impl MtlsInterceptWorker {
     /// outbound leg-F port the egress nft-TPROXY rule already encodes
     /// (`install_outbound_tproxy(host_veth, leg_f_port)`).
     ///
-    /// # `pub` legitimacy (operability, independent of #178)
+    /// # `pub` legitimacy (operability, independent of #241)
     ///
     /// This is a production-legitimate diagnostic/observability surface in its own
     /// right: an operator/diagnostic caller can ask the worker "where is this
     /// alloc's inbound intercept listening?" — a genuine operability/analysability
     /// question for a security control that silently terminates client mTLS. That
-    /// alone justifies `pub`; it is NOT a test-only hook. #178 (the production
+    /// alone justifies `pub`; it is NOT a test-only hook. #241 (the production
     /// inbound-redirect install) is *expected* to reuse this read pending its
-    /// install site/timing design — but whether #178 consumes `self.leg_c_addr(..)`
+    /// install site/timing design — but whether #241 consumes `self.leg_c_addr(..)`
     /// or an inline `leg_c_addr` local in `start_alloc` (mirroring the leg-F
     /// capture pattern, which reads its port via the inline local
-    /// `leg_f_addr.port()` and exposes no accessor) is #178's unresolved design.
+    /// `leg_f_addr.port()` and exposes no accessor) is #241's unresolved design.
     /// v1 does NOT depend on that question; the accessor stands on the operability
     /// ground above regardless. See D-TME-13 in `wave-decisions.md`.
     ///
@@ -1027,12 +1027,12 @@ impl MtlsInterceptWorker {
     /// and is the EXACT addr the spawned inbound `accept_loop` is accepting on — so a
     /// redirect installed at the returned addr lands on the production inbound leg.
     ///
-    /// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #178)
+    /// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #242)
     ///
     /// This exposes ONLY a bound socket address — NO SVID, NO key, NO identity
     /// material of any kind. It is a bound-addr read, not an identity read. Workloads
     /// hold nothing and the worker exposes nothing about *who* leg-C will mTLS as; the
-    /// expected-SVID / intended-peer join is strictly #178's (the
+    /// expected-SVID / intended-peer join is strictly #242's (the
     /// `MtlsResolve.expected_svid` anti-corruption field, `None` in v1). The accessor
     /// is therefore inside the authn-only v1 boundary by construction.
     #[must_use]
@@ -1278,7 +1278,7 @@ mod tests {
     //! Authn-only boundary (Q4 / D-TME-8): the test asserts the
     //! enforce/pass-through/fail-closed routing only — it does NOT call the
     //! wrong-but-valid-peer case "protected" and does NOT thread `IdentityRead`
-    //! (`expected_peer` is `None` until #178).
+    //! (`expected_peer` is `None` until #242).
 
     use std::collections::BTreeMap;
     use std::io::{Read as _, Write as _};

@@ -1,5 +1,5 @@
 //! `ServiceBackendsResolve` — the v1 host [`MtlsResolve`] adapter
-//! (transparent-mtls-enrollment, ADR-0071; GH #178 anti-corruption boundary).
+//! (transparent-mtls-enrollment, ADR-0071; GH #242 anti-corruption boundary).
 //!
 //! # Adapter home (criterion 7)
 //!
@@ -18,13 +18,13 @@
 //!   per-connection resolve that reads an observation surface).
 //! - A NEW crate is rejected (Reuse Analysis: EXTEND, do not CREATE-NEW).
 //!
-//! # What it is (the #178 v1 SHELL)
+//! # What it is (the #242 v1 SHELL)
 //!
 //! `ServiceBackendsResolve` implements the [`MtlsResolve`] driven port by
 //! resolving each captured connection's `orig_dst` against the mesh's `running`
 //! backend set, read from `service_backends` via [`ObservationStore`]. It is the
 //! v1 SHELL: it returns `expected_svid: None` for EVERY backend and does NOT
-//! thread `IdentityRead` (the expected-SVID join is GH #178 — threading it here
+//! thread `IdentityRead` (the expected-SVID join is GH #242 — threading it here
 //! is a boundary-divergence rejection per CLAUDE.md § "Implement to the design",
 //! consistent with the C2 sub-decision and the shipped 01-01 port rustdoc).
 //!
@@ -272,7 +272,7 @@ impl BackendIndex {
     ///
     /// - ANY contributing service has a `running`-and-`healthy` backend at the
     ///   addr → `Mesh { addr, expected_svid: None }` (`expected_svid` is
-    ///   `None` for every backend in v1 — the identity join is #178). This is
+    ///   `None` for every backend in v1 — the identity join is #242). This is
     ///   the **any-healthy-at-addr** rule (F-A): a deterministic disjunction
     ///   over the contributing services, NOT last-writer-wins. If two services
     ///   claim the addr and at least one is healthy, the addr is `Mesh`

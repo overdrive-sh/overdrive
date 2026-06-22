@@ -1,5 +1,5 @@
 //! `SimMtlsResolve` — in-memory [`MtlsResolve`] double for DST
-//! (transparent-mtls-enrollment, ADR-0071; GH #178 anti-corruption boundary).
+//! (transparent-mtls-enrollment, ADR-0071; GH #242 anti-corruption boundary).
 //!
 //! The sim counterpart to the v1 host `ServiceBackendsResolve`
 //! (`overdrive-control-plane`, step 01-03). It models the per-connection

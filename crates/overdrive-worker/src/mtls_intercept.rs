@@ -25,7 +25,7 @@
 //! `rp_filter` relax) that fakes a distinct server-real-listener hop for the
 //! netns test topology — that is TEST-ONLY and does NOT productionise. The
 //! production adapter dials orig-dst verbatim (`server_dial_addr` in
-//! `mtls/inbound.rs`, #178-deferred — NOT touched here).
+//! `mtls/inbound.rs`, #241-deferred — NOT touched here).
 
 #![allow(
     clippy::cast_possible_truncation,
@@ -237,7 +237,7 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
 /// Productionises the PRODUCTION HALF of
 /// `mtls_netns_topology.rs::install_tproxy` ONLY — the GAP-3 netns
 /// DNAT/masquerade is TEST-ONLY and does NOT productionise (the adapter dials
-/// orig-dst verbatim, #178).
+/// orig-dst verbatim, #241).
 ///
 /// # Errors
 ///
@@ -1375,7 +1375,7 @@ table ip overdrive-mtls {
         // TWO inbound rules (# handle 3, # handle 9). The classifier recognises
         // inbound rules by the SAME `tproxy to ` redirect, so it must yield
         // {3, 9} — proving it is not egress-only (which would miss the
-        // #178-forward inbound survivor the sweep must also cover).
+        // #241-forward inbound survivor the sweep must also cover).
         let mut handles = per_workload_rule_handles_in_dump(CHAIN_DUMP);
         handles.sort_unstable();
         assert_eq!(

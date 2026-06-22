@@ -1196,7 +1196,7 @@ async fn dispatch_single(
                 // (D-MTLS-15: the predicate is `DriverType::Exec`, true on
                 // the worker's exec path) — `start_alloc` installs the
                 // intercept but does NOT program `MTLS_REDIRECT_DEST`
-                // (#178-deferred). `ExecDriver` is UNTOUCHED.
+                // (#241-deferred). `ExecDriver` is UNTOUCHED.
                 //
                 // Fail-closed (D-MTLS-18): the install is a security
                 // control, not a best-effort hook. On `Err` the alloc MUST

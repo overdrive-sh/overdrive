@@ -30,8 +30,8 @@
 //!     enforce`). The test discovers the production-bound leg-C ephemeral addr via
 //!     the architect-pinned accessor `MtlsInterceptWorker::leg_c_addr` (D-TME-13)
 //!     and installs its OWN `install_inbound_tproxy(virt, leg_c_port)` redirect to
-//!     that PRODUCTION leg-C — the production inbound rule is #178-deferred
-//!     (`start_alloc` installs none), and #178's production install is *expected*
+//!     that PRODUCTION leg-C — the production inbound rule is #241-deferred
+//!     (`start_alloc` installs none), and #241's production install is *expected*
 //!     to reuse this leg-C bound-addr read pending its install site/timing design
 //!     (it may read an inline `start_alloc` local rather than this accessor — see
 //!     D-TME-13). A client's `connect(virt)` → PREROUTING → TPROXY →
@@ -74,13 +74,13 @@
 //!      SO_MARK-stamped dial is STILL captured — the mark is skb-local and does
 //!      not cross the veth/netns boundary).
 //!
-//! ## Authn-only boundary (AC8, Q4 / #178)
+//! ## Authn-only boundary (AC8, Q4 / #242)
 //!
 //! `expected_peer`/`expected_svid` stay `None` for every connection. This test
 //! asserts (a) 0x17 on the wire, (b) the handshake authenticates the backend's
 //! chain to the bundle, (c) the correct backend was dialed — it MUST NOT assert
 //! intended-peer "protection". The wrong-but-valid-peer case is NOT called
-//! "protected" (it is the #178 upgrade).
+//! "protected" (it is the #242 upgrade).
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN. A non-root run SKIPs. Run via
 //! `cargo xtask lima run -- cargo nextest run -p overdrive-worker
@@ -601,7 +601,7 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
 /// SERVER alloc id (so production's `enforce` selects the held server SVID for the
 /// leg-C SERVER handshake). `host_veth = None`: the inbound nft-TPROXY rule is the
 /// test-installed redirect to the production-bound leg-C (the production inbound
-/// rule is #178-deferred — `start_alloc` installs none), NOT an egress rule, so no
+/// rule is #241-deferred — `start_alloc` installs none), NOT an egress rule, so no
 /// veth match is needed.
 fn build_server_spec(pki: &TestPki) -> AllocationSpec {
     AllocationSpec {
@@ -1678,8 +1678,8 @@ fn run_one_regime(
 /// → the real `HostMtlsEnforcement::enforce`). NO test code touches the inbound
 /// accept/enforce path — production owns it, exactly as the outbound half does.
 ///
-/// **How the client reaches production leg-C (D-TME-13 + #178).** The inbound
-/// nft-TPROXY redirect that routes a client's virt to leg-C is #178-deferred:
+/// **How the client reaches production leg-C (D-TME-13 + #241).** The inbound
+/// nft-TPROXY redirect that routes a client's virt to leg-C is #241-deferred:
 /// production `start_alloc` installs NO inbound rule (its match key is the
 /// server's virt, an east-west fact v1 has no production source for —
 /// `start_alloc` records `tproxy_guard = None`). So the test discovers leg-C's
@@ -1687,19 +1687,19 @@ fn run_one_regime(
 /// [`MtlsInterceptWorker::leg_c_addr`] (D-TME-13 — a production-legitimate
 /// diagnostic observability surface, mirroring the leg-F **capture pattern** the
 /// egress rule encodes; leg-F has no public accessor — its port is an inline
-/// `start_alloc` local). #178's production inbound-redirect install is *expected*
+/// `start_alloc` local). #241's production inbound-redirect install is *expected*
 /// to reuse this leg-C bound-addr read pending its install site/timing design;
-/// if #178 mirrors leg-F and installs in `start_alloc` it may read an inline
+/// if #241 mirrors leg-F and installs in `start_alloc` it may read an inline
 /// local rather than this accessor, leaving the accessor test-observability-only.
 /// The test installs its OWN `install_inbound_tproxy(virt, leg_c_port)` redirect
 /// to that PRODUCTION-bound leg-C. A client's `connect(virt)` → PREROUTING →
 /// TPROXY → production leg-C → the spawned production inbound `accept_loop`. When
-/// #178 lands the production inbound rule it replaces this test redirect; the
+/// #241 lands the production inbound rule it replaces this test redirect; the
 /// accessor and the spawned accept loop are unchanged.
 ///
 /// All oracles stay observable kernel/wire side effects (O1 orig-dst via the
 /// byte-exact round-trip, O2 `0x17` both directions, O3 byte-exact, O4 no-RST) —
-/// none read program-internal state. authn-only v1 (AC8 / #178): the client
+/// none read program-internal state. authn-only v1 (AC8 / #242): the client
 /// asserts chain-to-bundle + held-server-SVID, never an intended-peer
 /// "protection" claim; `expected_peer`/`expected_svid` stay `None`.
 fn drive_inbound_leg(adapter: &Arc<HostMtlsEnforcement>, pki: &TestPki, handshake_delay: Duration) {
@@ -1713,7 +1713,7 @@ fn drive_inbound_leg(adapter: &Arc<HostMtlsEnforcement>, pki: &TestPki, handshak
     // port is unused by the inbound arm (it goes straight to `spawn_enforce`), but
     // is a mandatory `new()` param — an empty `ScriptedResolve` suffices. No
     // `host_veth`: the inbound rule is the test-installed redirect below
-    // (#178-deferred), not the egress rule.
+    // (#241-deferred), not the egress rule.
     let resolve: Arc<dyn MtlsResolve> = Arc::new(ScriptedResolve::new(BTreeMap::new()));
     let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(adapter) as Arc<dyn MtlsEnforcement>;
     let worker = Arc::new(MtlsInterceptWorker::new(
@@ -1734,7 +1734,7 @@ fn drive_inbound_leg(adapter: &Arc<HostMtlsEnforcement>, pki: &TestPki, handshak
         .expect("leg_c_addr must expose the production-bound leg-C for a live intercept");
     let leg_c_port = leg_c_addr.port();
 
-    // Install the INBOUND nft-TPROXY rule (#178-deferred in production): a client
+    // Install the INBOUND nft-TPROXY rule (#241-deferred in production): a client
     // dialing the virt is redirected to the PRODUCTION leg-C. The F5 exemption
     // (chain head) lets the agent's SO_MARK-stamped leg-S dial reach the real
     // server S verbatim. This redirect is the ONLY test-supplied plumbing; the

@@ -62,7 +62,7 @@
 //!
 //! Authn-only boundary (AC8): `expected_peer`/`expected_svid` stay `None`; the
 //! scenario asserts the connection reached enforce with the correct routed peer,
-//! never that a wrong-but-valid peer was "protected" (that is the #178 upgrade).
+//! never that a wrong-but-valid peer was "protected" (that is the #242 upgrade).
 //!
 //! Requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (nft, ip rule, ip link,
 //! IP_TRANSPARENT). A non-root run SKIPs. Run via
@@ -714,10 +714,10 @@ async fn start_alloc_legf_must_be_ip_transparent_for_real_tproxy_traffic() {
         "the recorded enforce must carry the client workload's alloc id {alloc}, got {}",
         call.alloc
     );
-    // Authn-only boundary (AC8 / #178): v1 supplies NO expected_peer SAN-pin.
+    // Authn-only boundary (AC8 / #242): v1 supplies NO expected_peer SAN-pin.
     assert!(
         !call.expected_peer_is_some,
-        "AC8 authn-only: expected_peer must be None in v1 (the SAN-pin is the #178 upgrade)"
+        "AC8 authn-only: expected_peer must be None in v1 (the SAN-pin is the #242 upgrade)"
     );
 
     // The control backend must NOT have accepted — the divert took the connect to

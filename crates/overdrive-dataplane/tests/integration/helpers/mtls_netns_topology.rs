@@ -178,7 +178,7 @@ impl MtlsTopology {
     /// same port on [`Self::server_netns_ip`], and the harness DNATs the agent's
     /// marked leg-S dial (`VIRT_IP:VIRT_PORT → server_netns_ip:VIRT_PORT`) so the
     /// verbatim orig-dst dial reaches S over the veth — closing GAP-3-inbound purely
-    /// in the harness, with NO change to the reserved `server_dial_addr` (#178).
+    /// in the harness, with NO change to the reserved `server_dial_addr` (#241).
     pub const VIRT_PORT: u16 = 18443;
 
     /// The netns-side veth IPv4 — where the cgroup-isolated server workload S binds
@@ -371,7 +371,7 @@ impl MtlsTopology {
     /// DNAT + masquerade route the agent's verbatim orig-dst dial to the netns server:
     /// S binds `SERVER_NETNS_IP:VIRT_PORT`, but the production adapter dials the orig-dst
     /// VERBATIM (`server_dial_addr(orig_dst) == orig_dst == VIRT_IP:VIRT_PORT`, reserved
-    /// for #178, NOT touched), so the harness DNATs the marked leg-S dial
+    /// for #241, NOT touched), so the harness DNATs the marked leg-S dial
     /// `VIRT_IP:VIRT_PORT → SERVER_NETNS_IP:VIRT_PORT` in `nat OUTPUT` and masquerades
     /// the loopback source to the host veth on egress, so the dial reaches S over the
     /// veth and conntrack un-NATs S's reply — the "non-trivial netns routing in the

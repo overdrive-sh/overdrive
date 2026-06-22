@@ -74,7 +74,7 @@ pub struct TestPki {
 impl TestPki {
     /// Mint the CA + the client and server leaves. The SANs are SPIFFE-shaped
     /// (`spiffe://overdrive.local/...`) so the verified peer identity is a real
-    /// `SpiffeId` (authn — chain-to-bundle; `expected_peer` pinning is #178).
+    /// `SpiffeId` (authn — chain-to-bundle; `expected_peer` pinning is #242).
     /// The DNS SAN the OUTBOUND peer presents (matches the SNI the adapter's leg-B
     /// client handshake uses in `mtls::outbound::client_handshake`).
     pub const PEER_SNI: &'static str = "peer.overdrive.local";

@@ -3,7 +3,7 @@
 //! D-TME-10: **a DNS-returned `service_backends` addr IS the addr `MtlsResolve`
 //! recognizes** — one source, two readers, byte-consistent.
 //!
-//! The whole point: when the #61 responder lands it will return a
+//! The whole point: when the #243 responder lands it will return a
 //! `service_backends` addr (headless v1, D-TME-10 — a `running` backend addr,
 //! NOT a VIP); `MtlsResolve` ALSO reads a `service_backends` addr; there is NO
 //! translation layer between them (feature-delta § "DNS-return contract
@@ -13,14 +13,14 @@
 //! dialed == what DNS would return) is byte-identical to the addr the resolve
 //! port recognizes as a `running` mesh backend.
 //!
-//! ## DNS is STUBBED — the responder daemon (#61) is NOT built here
+//! ## DNS is STUBBED — the responder daemon (#243) is NOT built here
 //!
-//! Per ADR-0071 § Enforcement obligation (e) "Until #61's responder lands, this
+//! Per ADR-0071 § Enforcement obligation (e) "Until #243's responder lands, this
 //! is exercised with the DNS step stubbed." The workload connects to a KNOWN
 //! `service_backends` addr **B** directly (the `getaddrinfo → connect(B)` DNS
-//! step is the #61 stub), so the resolve-recognizes-orig_dst half is validated
+//! step is the #243 stub), so the resolve-recognizes-orig_dst half is validated
 //! INDEPENDENTLY of the responder. SCOPE GUARDRAIL (hard): this step builds NO
-//! #61 DNS responder daemon and NO #167 VIP allocator. Headless v1 only.
+//! #243 DNS responder daemon and NO #167 VIP allocator. Headless v1 only.
 //!
 //! ## What this AT proves (the single-source consistency oracle)
 //!
@@ -52,14 +52,14 @@
 //!      `provision_injects_node_local_responder_into_netns_resolv_conf` (drives
 //!      production `provision_workload_netns` → `resolv_conf_write` with a
 //!      non-vacuous host-negative assertion) — cited here, not re-proven. The
-//!      responder the line points at is the #61 stub (no daemon built).
+//!      responder the line points at is the #243 stub (no daemon built).
 //!
-//! ## Authn-only boundary (Q4 / #178)
+//! ## Authn-only boundary (Q4 / #242)
 //!
 //! `expected_svid` stays `None` for the resolved backend (v1 authn-only; the
-//! expected-SVID join is #178). This AT asserts the addr is recognized (the
+//! expected-SVID join is #242). This AT asserts the addr is recognized (the
 //! single-source invariant) — it MUST NOT assert intended-peer "protection" /
-//! `expected_peer` (None until #178), identical authn-only discipline to 05-01's
+//! `expected_peer` (None until #242), identical authn-only discipline to 05-01's
 //! last criterion.
 //!
 //! ## Kernel-free cheap reproduction (the genuine default-lane pair)
@@ -129,7 +129,7 @@ const WL_ADDR: &str = "10.99.0.2";
 const SUBNET_LEN: &str = "24";
 
 /// The KNOWN `service_backends` addr **B** the workload dials (DNS stubbed — the
-/// workload connects to it directly, standing in for the #61
+/// workload connects to it directly, standing in for the #243
 /// `getaddrinfo → connect(B)` step). A host-side lo-bound addr the workload
 /// routes to via the gateway, so its egress genuinely INGRESSES vethH and hits
 /// PREROUTING. This is the addr the capture's `getsockname` recovers AND the addr
@@ -137,7 +137,7 @@ const SUBNET_LEN: &str = "24";
 const SERVICE_BACKEND_IP: &str = "10.200.0.1";
 const SERVICE_BACKEND_PORT: u16 = 18821;
 
-/// The node-local DNS responder addr written into the netns resolv.conf (the #61
+/// The node-local DNS responder addr written into the netns resolv.conf (the #243
 /// stub the injected `nameserver` line points at — the daemon itself is NOT built
 /// here). A plausible Fly-style node-local responder address.
 const RESPONDER_ADDR: Ipv4Addr = Ipv4Addr::new(10, 100, 0, 53);
@@ -372,7 +372,7 @@ fn setup_topology() {
 /// convention surfaces this line inside the netns view; the production injection
 /// MECHANISM is proven by 02-03's
 /// `provision_injects_node_local_responder_into_netns_resolv_conf`. The responder
-/// the line points at is the #61 stub (no daemon built).
+/// the line points at is the #243 stub (no daemon built).
 fn inject_resolv_conf() {
     std::fs::create_dir_all(resolv_conf_dir()).expect("create per-netns resolv.conf dir");
     std::fs::write(resolv_conf_path(), resolv_conf_contents(RESPONDER_ADDR)).expect(
@@ -468,9 +468,9 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// THE single-source invariant (ADR-0071 Tier-3 obligation (e)): a DNS-returned
 /// `service_backends` addr B is what `getsockname` recovers from the captured
 /// connection AND what `MtlsResolve.resolve` recognizes — one source, two
-/// readers, byte-consistent. DNS STUBBED (the workload dials B directly; #61's
+/// readers, byte-consistent. DNS STUBBED (the workload dials B directly; #243's
 /// responder is not built). The resolv.conf injection (02-03) is asserted present
-/// in the netns even though the responder is the #61 stub.
+/// in the netns even though the responder is the #243 stub.
 #[test]
 fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     if !is_root() {
@@ -505,7 +505,7 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     // view. This exercises the path/bind-mount plumbing the capture relies on — NOT
     // the production injection mechanism (private `resolv_conf_write`, proven by
     // 02-03's provision_injects_node_local_responder_into_netns_resolv_conf). The
-    // responder the line points at is the #61 stub (no daemon built).
+    // responder the line points at is the #243 stub (no daemon built).
     // ----------------------------------------------------------------
     inject_resolv_conf();
     let injected = std::fs::read_to_string(resolv_conf_path())
@@ -562,7 +562,7 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
     let backend = TcpListener::bind(b).expect("bind real service backend B");
     backend.set_nonblocking(true).ok();
 
-    // The workload dials B directly (DNS stubbed — the #61 getaddrinfo→connect
+    // The workload dials B directly (DNS stubbed — the #243 getaddrinfo→connect
     // step). Its egress ingresses vethH → PREROUTING → egress TPROXY → leg-F.
     let client = std::thread::spawn(move || run_client_in_netns(b, WL_MARKER));
 
@@ -634,7 +634,7 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
         "Oracle 2 (single-source invariant): MtlsResolve must recognize the getsockname-recovered \
          orig_dst as the SAME `running` mesh backend B — `Mesh(ResolvedBackend {{ addr: B, \
          expected_svid: None }})`. The addr resolve returns IS byte-identical to the captured \
-         orig_dst (one source, two readers); expected_svid stays None (v1 authn-only, #178)."
+         orig_dst (one source, two readers); expected_svid stays None (v1 authn-only, #242)."
     );
     // The addr the resolve port returns is byte-identical to the captured orig_dst
     // — stated explicitly so the single-source invariant is the load-bearing
@@ -648,7 +648,7 @@ fn dns_returned_service_backends_addr_is_recognized_by_mtls_resolve() {
         );
         assert!(
             backend.expected_svid.is_none(),
-            "authn-only boundary (Q4 / #178): v1 expected_svid stays None — this AT asserts the \
+            "authn-only boundary (Q4 / #242): v1 expected_svid stays None — this AT asserts the \
              addr is RECOGNIZED, never intended-peer protection"
         );
     } else {
@@ -715,5 +715,5 @@ async fn single_source_invariant_holds_kernel_free_via_sim_mtls_resolve() {
         "single-source invariant: the resolved backend addr is byte-identical to the recovered \
          orig_dst — one source (service_backends), two readers (DNS-return + resolve)"
     );
-    assert!(backend.expected_svid.is_none(), "v1 authn-only: expected_svid stays None (#178)");
+    assert!(backend.expected_svid.is_none(), "v1 authn-only: expected_svid stays None (#242)");
 }

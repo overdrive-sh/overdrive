@@ -29,8 +29,8 @@ pub mod llm;
 // `Dataplane`). `HostMtlsEnforcement` extends `overdrive-dataplane`;
 // `SimMtlsEnforcement` will extend `overdrive-sim`.
 pub mod mtls_enforcement;
-// transparent-mtls-enrollment (ADR-0071, GH #26 / #178). The per-connection
-// enrollment-resolve driven port (the #178 anti-corruption boundary): resolve a
+// transparent-mtls-enrollment (ADR-0071, GH #26 / #242). The per-connection
+// enrollment-resolve driven port (the #242 anti-corruption boundary): resolve a
 // captured connection's `orig_dst` into a 3-variant `MtlsResolution`
 // (Mesh/NonMesh/MeshUnreachable), fail-closed not silent-cleartext. Pure trait +
 // `#[async_trait]` boundary (a declarative macro, no runtime — off the `core`

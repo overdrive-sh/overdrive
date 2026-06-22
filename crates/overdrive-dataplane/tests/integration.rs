@@ -50,7 +50,7 @@ mod integration {
     /// (Stalled → worker teardown → Gone, no leak), the F5 intercept-exemption
     /// negatives (agent dial not re-intercepted; workload cannot self-exempt), and
     /// the honest v1 authn boundary (chain-to-bundle ONLY; the wrong-but-valid-peer
-    /// PeerIdentityMismatch case is #[ignore]-gated on #178). Drives the
+    /// PeerIdentityMismatch case is #[ignore]-gated on #242). Drives the
     /// `MtlsEnforcement` driving port; observables are REAL kernel/subprocess (0
     /// cleartext bytes at the server via a real capture, the distinct reason strings,
     /// the concrete limit values, real teardown → Gone).
