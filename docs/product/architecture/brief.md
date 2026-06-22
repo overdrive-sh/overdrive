@@ -1319,6 +1319,55 @@ C4Container
 
 ---
 
+### 35a. Canonical-workload-address inbound TPROXY production install (#241, ADR-0071 + ADR-0053 amendments 2026-06-22)
+
+The keystone slice that closes the **inbound** half of §35's loop — productionises
+the inbound nft-TPROXY install ADR-0071 deferred (`start_alloc` recorded
+`tproxy_guard = None`) and flips the bridge advertise addr to the canonical
+`workload_addr`. Settled by three Tier-3 spikes (no new routing primitive; the
+`cgroup_connect4_service` LB hook FIRES for Path-A; the VIP/LB path is INERT under
+a real deploy). Full design:
+`docs/feature/canonical-workload-address-inbound-tproxy/{feature-delta,design/wave-decisions}.md`.
+
+**Production wiring (all EXTEND/REUSE — zero new component):**
+
+- **A1 — keystone install.** `AllocationSpec` gains pure in-memory
+  `workload_addr: Option<Ipv4Addr>` + `service_ports: Vec<NonZeroU16>` (same
+  no-serde/no-rkyv channel as `netns`/`host_veth`). `workload_addr` set at the C3
+  `provision_and_inject_netns` site from `plan.workload_addr`; `service_ports` set
+  by `WorkloadLifecycle` via `project_service_listen_ports` (mirrors
+  `project_probe_descriptors`). `start_alloc` installs one
+  `install_inbound_tproxy(SocketAddrV4::new(workload_addr, port), leg_c_addr.port())`
+  per declared listener (N listeners → N RAII guards; Job-kind → 0).
+- **BLOCKER1 — dport contract.** The inbound rule keys on `ip daddr <workload_addr>
+  tcp dport <service_port>`, `service_port` = the declared Service listener port
+  (D-TME-10 one-source/two-readers — the same value `service_backends` advertises
+  and `MtlsResolve` keys on), NOT the ephemeral leg-C port.
+- **B2 — canonical advertise.** `BackendDiscoveryBridge` advertises
+  `Backend.addr = workload_addr:port` (was `host_ipv4:port`); `ServiceBackendRow.vip`
+  UNCHANGED. The egress `MtlsResolve` `by_addr` index (§35) now classifies a dial
+  to the canonical addr as `Mesh`.
+- **BLOCKER2 — observed-input persistence.** `workload_addr` is persisted directly
+  on `AllocStatusRow` (an `AllocStatusRowEnvelope::V2` additive bump) and read by
+  the bridge as an observed fact — NOT recomputed from `NetSlot` (the derivation +
+  `WORKLOAD_SUBNET_BASE` live in `overdrive-control-plane`, and recompute against a
+  future-tunable base (#239) would diverge from the addr the inbound rule was
+  installed on). `RunningAllocSet.running` widens to
+  `BTreeMap<AllocationId, Option<Ipv4Addr>>`.
+- **GATE — ADR-0053↔ADR-0071 boundary.** `ServiceMapHydrator` gains a
+  `workload_subnet: Ipv4Net` ctor param and a third partition arm: backends whose
+  `addr.ip() ∈ WORKLOAD_SUBNET_BASE (10.99.0.0/16)` program NEITHER
+  `LOCAL_BACKEND_MAP` NOR the XDP maps — the firing `cgroup_connect4_service` hook
+  then misses and nft-TPROXY owns mesh delivery. The hook + XDP programs stay
+  attached (reserved for remote/VIP-LB, #167/#61). Empirically safe (no live VIP-LB
+  consumer); TEACH/full-retire deferred to a live VIP-dial path (#243/#167/#61).
+
+`ip_forward` + /30 routes + `rp_filter` and `ensure_shared_routing_infra` are
+already converged/reused (no new boot call site; Bar-2 → #234). Driven end-to-end
+through `overdrive serve` + `overdrive deploy`.
+
+---
+
 ### C4 Level 1 — System Context
 
 ```mermaid

@@ -2276,6 +2276,113 @@ do so.
 |---|---|
 | 2026-06-05 | **Deregister is retry-safe via a caller-supplied backend (reconciles ADR to shipped commit `3559e4e2`).** `Dataplane::deregister_local_backend` gains `backend: SocketAddrV4`; the forward-entry read-back that derived the reverse key is deleted; the reverse `REVERSE_LOCAL_MAP` removal is now unconditional and idempotent, keyed on the caller-supplied backend. Forward-THEN-reverse teardown ordering preserved. Root cause of the superseded design: the reverse key was derivable only from the forward entry the teardown destroys, so a retry after a partial failure (forward removed, reverse errored) read `None`, skipped the reverse removal, and permanently stranded a stale reverse entry that mis-rewrote reply source addresses to a deregistered VIP (GH #211). `Action::DeregisterLocalBackend` gains `backend: SocketAddrV4` (mirrors `RegisterLocalBackend`). Idempotency clause corrected: on real aya 0.13 a deleted absent key surfaces as EITHER `MapError::KeyNotFound` OR `MapError::SyscallError(ENOENT)`; the shared `is_absent_key` classifier (`maps/mod.rs`) swallows both as the single SSOT. Consumer stack exists ahead of its producer; #211 (workload deletion + teardown) will wire the producer against this signature. — Morgan (documents shipped code). |
 
+## Revision 2026-06-22 — ADR-0053↔ADR-0071 boundary: Path-A `workload_addr` backends yield the same-host LB to nft-TPROXY (GATE the hydrator)
+
+### Status
+
+**Accepted** (2026-06-22). Drafted by Morgan. The ADR-0053↔ADR-0071 boundary
+decision for GH #241 (canonical-workload-address inbound TPROXY). An **amendment**
+to ADR-0053's §4 classifier, NOT a new ADR (it governs ADR-0053's
+LOCAL/REMOTE partition directly). Companion to the ADR-0071 amendment 2026-06-22
+(the inbound-install / B2 production wiring). Settled by THREE Tier-3 spikes —
+**`docs/feature/canonical-workload-address-inbound-tproxy/spike/findings-cgroup-firing-scope.md`**
+(increment-b) and **`…/findings-vip-lb-inert.md`** (increment-c), kernel 7.0.
+
+### Context — the collision ADR-0071 Path A surfaces
+
+ADR-0071 (Path A) gives each exec workload its own netns + veth + canonical
+`workload_addr` (`WORKLOAD_SUBNET_BASE.network() + slot*4 + 2`). The #241 B2
+change flips `BackendDiscoveryBridge.Backend.addr` from `host_ipv4:port` to
+`workload_addr:port` (so the egress `MtlsResolve` index classifies a dial to the
+canonical addr as Mesh). That collides with ADR-0053 §4's classifier
+(`backends.partition(|b| b.addr.ip() == host_ipv4)`): after B2, `workload_addr ≠
+host_ipv4`, so a Path-A backend reclassifies LOCAL → REMOTE and would start
+programming the XDP `SERVICE_MAP`/`REVERSE_NAT_MAP`. Two empirical questions
+governed the reconciliation, both with no `BPF_PROG_TEST_RUN` backstop (settled
+by real Tier-3 connects, not review):
+
+- **increment-b:** does ADR-0053's `cgroup_connect4_service` hook FIRE for a
+  Path-A netns+cgroup connect? **YES — it FIRES** (the attach cgroup
+  `overdrive.slice` is an ancestor of the workload scope; netns is orthogonal).
+  So "the LB path is inert under Path-A, just retire it" is **FALSIFIED.**
+- **increment-c:** under a real `serve` + `deploy`, is the VIP/LB path a LIVE
+  consumer? **NO — INERT.** No production code hands a VIP to a workload, no DNS
+  maps a name to a VIP (#243/#167/#61 deferred), and the egress mTLS path
+  resolves `orig_dst`, never a VIP. The XDP maps stood up with ZERO entries
+  under a fully-converged deploy.
+
+### Decision — GATE the hydrator off Path-A `workload_addr` backends
+
+`ServiceMapHydrator` is gated so a backend whose `addr.ip()` is within
+`WORKLOAD_SUBNET_BASE` (`10.99.0.0/16`) is registered into **NEITHER**
+`LOCAL_BACKEND_MAP` (no `RegisterLocalBackend`) **NOR** the XDP
+`SERVICE_MAP`/`REVERSE_NAT_MAP`/`BACKEND_MAP` (no `DataplaneUpdateService`). The
+§4 partition gains a third arm applied BEFORE the existing LOCAL/REMOTE split:
+
+```text
+mesh   = backends where addr.ip() ∈ workload_subnet → emit NOTHING (nft-TPROXY owns delivery)
+local  = remaining where addr.ip() == host_ipv4     → RegisterLocalBackend  (unchanged)
+remote = remaining otherwise                         → DataplaneUpdateService (unchanged)
+```
+
+The hydrator gains a `workload_subnet: Ipv4Net` MANDATORY constructor parameter
+(the same `WORKLOAD_SUBNET_BASE` the provisioner uses — ONE source) per
+`development.md` § "Port-trait dependencies — Required, not defaulted." The
+predicate is **subnet-membership** because (a) no per-backend "mesh flag" exists —
+the addr's subnet IS the classification, exactly as `== host_ipv4` IS the LOCAL
+classification today; (b) with B2 every Path-A backend is `workload_addr ∈
+WORKLOAD_SUBNET_BASE` by construction; (c) it is deterministic and content-derived.
+
+**The `cgroup_connect4_service` hook stays attached.** It FIRES for Path-A connects
+(increment-b); the gate makes it find a `LOCAL_BACKEND_MAP` **miss** so the dial
+falls through to nft-TPROXY, which owns mesh delivery. The hook + the XDP programs
+are NOT retired — they remain reserved for a genuine remote-backend / VIP-LB case
+(multi-node, #167/#61). ADR-0053 §5 ("XDP programs reserved for the Phase 2
+remote-backend case") is REFINED, not reversed: the gate keeps them empty for
+Path-A mesh; it does not delete them.
+
+### Why GATE and not TEACH or retire
+
+- **Retire is FALSIFIED** (increment-b): the hook fires, so the LB path is not
+  inert under Path-A.
+- **GATE is sufficient and SAFE** (increment-c): the VIP/LB path has no live v1
+  consumer, so gating the hydrator off mesh backends breaks no working delivery.
+  Without the gate, B2 reclassifies mesh backends REMOTE → **dead XDP writes** no
+  dial consults — gating them prevents the dead writes AND the future-reader trap.
+- **TEACH is unnecessary** (increment-c): teaching the LB partition that
+  `workload_addr` is host-local (so LB + mTLS coexist) buys nothing in v1 — there
+  is no VIP-dial consumer to keep serving. TEACH becomes relevant only if/when a
+  live VIP-dial path ships (DNS responder #243 + VIP-dial #167/#61); that is a
+  separate, later, independently-drivable slice that gates its own spike then.
+
+### Scope / deferrals
+
+- **In-scope for #241:** the gate lands with B2 — shipping B2 without it ships
+  dead XDP writes in the slice (the "don't ship dead writes in your slice" trap).
+- **Deferred:** the full retire of the same-host cgroup LB for Path-A, and any
+  TEACH, wait on a live VIP-dial path — **#243** (in-agent name responder, OPEN),
+  **#167 / #61** (VIP allocator / multi-node VIP-dial). The
+  `WORKLOAD_SUBNET_BASE` tunable is **#239** (OPEN, phase/2+).
+
+### Compliance
+
+- **`feedback_single_cut_greenfield_migrations.md`** — honored: no parallel LB
+  path, no feature flag; the gate is a single classifier change.
+- **`development.md` § "Persist inputs, not derived state"** — the GATE predicate
+  reads the live `Backend.addr` (an input) against the live `workload_subnet`
+  policy each tick; nothing derived is persisted.
+- **`development.md` § "Port-trait dependencies — Required, not defaulted"** —
+  `workload_subnet` is a mandatory ctor param, not defaulted.
+
+### References
+
+- `docs/feature/canonical-workload-address-inbound-tproxy/spike/findings-cgroup-firing-scope.md` (increment-b — hook FIRES).
+- `docs/feature/canonical-workload-address-inbound-tproxy/spike/findings-vip-lb-inert.md` (increment-c — VIP/LB INERT under real serve+deploy; GATE safe).
+- `docs/feature/canonical-workload-address-inbound-tproxy/{feature-delta,design/wave-decisions}.md` (full design).
+- ADR-0071 amendment 2026-06-22 (the inbound-install / B2 production wiring this gate reconciles with).
+- `docs/analysis/root-cause-analysis-convergence-dataplane-gap.md` (single-node local-vs-remote backend delivery; consistent with the INERT verdict).
+
 ## Changelog
 
 - 2026-05-22 — Initial proposed version. Same-host backend delivery via `cgroup_sock_addr` connect-time destination rewrite. Resolves the walking-skeleton TCP round-trip data-path gap.
+- 2026-06-22 — ADR-0053↔ADR-0071 boundary amendment (#241): GATE `ServiceMapHydrator` off Path-A `workload_addr` backends (subnet-membership predicate) so the firing `cgroup_connect4_service` hook misses and nft-TPROXY owns mesh delivery. Hook + XDP programs stay attached (reserved for remote/VIP-LB). Empirically proven safe by increment-b (hook FIRES) + increment-c (VIP/LB INERT, no live consumer). TEACH/full-retire deferred to a live VIP-dial path (#243/#167/#61). — Morgan.
