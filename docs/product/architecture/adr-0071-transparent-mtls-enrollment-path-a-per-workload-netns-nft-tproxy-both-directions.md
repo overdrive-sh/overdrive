@@ -29,7 +29,7 @@ UNCHANGED**: the universal agent-light L4 proxy model, the fold of #222 into
 copy encrypt; `mtls/splice.rs`), the no-psock invariant, the F4/F7 resource
 limits, the kTLS-arm probe sentinel, the (C)+(B) supervision shape (ADR-0070),
 and the **authn-only v1 boundary** (chain-to-bundle authn + encryption, no
-intended-peer pinning; #178 upgrade). The `Routed::Outbound { peer }` input to
+intended-peer pinning; #242 upgrade). The `Routed::Outbound { peer }` input to
 `enforce` is UNCHANGED — only how the worker *obtains* `peer` changes
 (`getsockname`, not a declared-peer slot). **No new `MtlsEnforcement` method or
 variant is added.**
@@ -42,7 +42,7 @@ spike-gated question. The shipped outbound path is *documented-lossy*: the
 in place, and the original destination is **NOT recoverable** from the accepted
 leg-F socket. Production never armed the per-destination `MTLS_REDIRECT_DEST`
 map (an empty map = cleartext passthrough); a test-only
-`program_declared_peer_redirect` seam *supplied* `real_peer` as the #178
+`program_declared_peer_redirect` seam *supplied* `real_peer` as the #242
 stand-in. The enrollment model (#236) requires the agent to *learn* the dialed
 destination per-connection with no pre-programmed entry.
 
@@ -173,11 +173,13 @@ The structural facts, binding on DELIVER:
      reachable by construction as the default route, ZERO new converge step,
      collision-free as the slot's own /30 host addr). The rejected alternative —
      a single fixed constant — would have required an additional idempotent
-     per-netns route + a new `WorkloadVethStep`/`ObservedWorkloadVeth` fact. #61's
-     daemon answers on each host-veth gateway. **#61 is NOT a wiring blocker:** the
+     per-netns route + a new `WorkloadVethStep`/`ObservedWorkloadVeth` fact. #243's
+     in-agent name responder (an in-agent name-answering listener sharing the
+     `ServiceBackendsResolve` index, NOT a separate daemon, NOT in-kernel) answers
+     on each host-veth gateway. **#243 is NOT a wiring blocker:** the
      provision + resolv.conf injection land behind the existing mTLS composition
      gate and write a correct, reachable `nameserver` line; only end-to-end DNS
-     resolution waits on #61 shipping.
+     resolution waits on #243 shipping.
    - **G2 — provision SEAM CORRECTION.** The "`on_alloc_running` hook" naming in
      the original C3 fact above (and at the per-host `NetSlot` allocator paragraph)
      was **WRONG and is struck** — that callback fires AFTER `driver.start()`
@@ -204,7 +206,7 @@ The structural facts, binding on DELIVER:
      builder, which is DELETED single-cut with its two test fixtures rewritten onto
      the new channel) and reuses the existing `DriverError::NetnsEntry` variant on
      a missing/unopenable netns. Tier-3 acceptance: a real workload LANDS in
-     `ovd-ns-<slot>` (`ip netns identify <pid>` or veth egress; DNS is #61-gated and
+     `ovd-ns-<slot>` (`ip netns identify <pid>` or veth egress; DNS is #243-gated and
      NOT part of the proof). Full pinned shapes: `design/wave-decisions.md` D-TME-12
      § "Amended 2026-06-18 (join folded into C3-wiring step)" JOIN-1..JOIN-5.
    - **G3 — allocator plumbing.** `NetSlotAllocator` (already `Clone+Default`,
@@ -263,7 +265,7 @@ The structural facts, binding on DELIVER:
    a binary `Option`), filtered to `running` (read from `service_backends`):
    - **`Mesh(ResolvedBackend)` → ENFORCE** — `orig_dst` mapped to a `running`
      mesh backend. The worker sets `Routed::Outbound { peer: backend.addr }`
-     (+ `expected_peer` when #178's join supplies it) and calls `enforce`.
+     (+ `expected_peer` when #242's join supplies it) and calls `enforce`.
    - **`NonMesh` → PASS-THROUGH** — the dialed dst is genuinely not a mesh peer;
      egress proceeds in cleartext, by design (the classification arm, not an
      error).
@@ -299,7 +301,7 @@ The structural facts, binding on DELIVER:
    variant. (Designing a NEW port — `MtlsResolve` — for the resolve concern is
    the correct move; smuggling resolve into `MtlsEnforcement` is forbidden.)
 
-### The new driven port — `MtlsResolve` (the #178 anti-corruption boundary)
+### The new driven port — `MtlsResolve` (the #242 expected-SVID-join anti-corruption boundary)
 
 A new driven port in `overdrive-core/src/traits/` carries the enrollment
 resolve. The existing `MtlsEnforcement` does NOT fit (it is the per-connection
@@ -326,7 +328,7 @@ pub enum MtlsResolution {
 
 pub struct ResolvedBackend {           // bounded to EXACTLY two fields
     pub addr: SocketAddrV4,
-    pub expected_svid: Option<SpiffeId>, // v1 adapter returns None (join = #178)
+    pub expected_svid: Option<SpiffeId>, // v1 adapter returns None (join = #242)
 }
 ```
 
@@ -334,7 +336,7 @@ pub struct ResolvedBackend {           // bounded to EXACTLY two fields
 fail-closed semantic; reproduced verbatim on the trait method's rustdoc):**
 - **`Mesh(ResolvedBackend)` → ENFORCE** — a `running` mesh backend resolved.
   The worker sets `Routed::Outbound { peer: backend.addr }` (+ `expected_peer`
-  when #178 supplies it) and calls `enforce`. The only arm that drives a
+  when #242 supplies it) and calls `enforce`. The only arm that drives a
   handshake.
 - **`NonMesh` → PASS-THROUGH** — `orig_dst` is genuinely not a mesh peer; egress
   proceeds in cleartext, by design. The classification arm — not an error, not a
@@ -348,9 +350,9 @@ fail-closed semantic; reproduced verbatim on the trait method's rustdoc):**
 third field. **The v1 `ServiceBackendsResolve` adapter returns
 `expected_svid: None`** for every `running` backend — it is a SHELL that reads
 `service_backends` filtered to `running` and does NOT join identity facts. The
-expected-SVID join is **#178**; filling it in this feature's adapter is boundary
+expected-SVID join is **#242**; filling it in this feature's adapter is boundary
 divergence across the anti-corruption boundary (consistent with Q4 / authn-only
-v1). The field exists so the SAN-pin wires the moment #178 supplies the join.
+v1). The field exists so the SAN-pin wires the moment #242 supplies the join.
 
 **C4 — resolve READ MECHANISM: an in-RAM, address-keyed reverse index, NOT a
 per-`ServiceId` point query.** ADR-0071 (and the feature-delta) pinned the
@@ -517,7 +519,7 @@ unchanged.
   decision ADDS the read mechanism, it does NOT re-classify:
   - `orig_dst` **hits** a `running` mesh backend in the index →
     `Mesh(ResolvedBackend { addr, expected_svid: None })` (v1 `expected_svid` is
-    `None` for every backend — the identity join is #178; C2).
+    `None` for every backend — the identity join is #242; C2).
   - `orig_dst` **misses** (no `running` mesh backend), index readable → `NonMesh`
     (cleartext pass-through, by design). **A miss is `NonMesh`, NOT
     `MeshUnreachable`.**
@@ -635,7 +637,7 @@ convenience):**
   A5–A6). This is precisely the List-then-Watch + relist-on-loss mechanism C4 now
   pins. Cilium also splits `addr→identity` (ipcache) from `identity→peer-material`
   (auth map / SVID store) — which independently validates v1's
-  `expected_svid: None` two-stage deferral of the identity join to #178.
+  `expected_svid: None` two-stage deferral of the identity join to #242.
 - **Our own interception research already states this in words.**
   `docs/research/networking/transparent-mtls-interception-mechanism-2026-research.md`
   §4.1 (refuting the "per-connection resolve is a bottleneck" attack): the
@@ -644,7 +646,7 @@ convenience):**
   no network hop." That is an in-RAM lookup, NOT a per-service point query.
 - `docs/research/networking/stable-service-naming-and-transparent-mtls-comprehensive-research.md`
   (resolve-then-pin pattern; SPIFFE identity / naming split) corroborates the
-  two-stage shape (addr→backend, then backend→identity at #178).
+  two-stage shape (addr→backend, then backend→identity at #242).
 
 - **This feature owns**: the port trait + the 3-variant `MtlsResolution` type +
   the 2-field `ResolvedBackend`, a v1 host adapter (`ServiceBackendsResolve`)
@@ -655,18 +657,21 @@ convenience):**
   footgun). The adapter classifies the store-read outcome into the type: a
   no-`running`-mesh-backend lookup is `NonMesh`; a store-read failure at resolve
   time, or a present-but-unreachable mesh backend, is `MeshUnreachable`.
-- **#178 owns** (NOT designed here): the expected-SVID join (`service_backends`
+- **#242 owns** (NOT designed here): the expected-SVID join (`service_backends`
   × identity facts), the multi-backend candidate-set + LB-pick policy, the
   SAN-match wiring of `expected_peer` (so v1 returns `expected_svid = None`,
   authn-only, consistent with ADR-0069).
-- **#61 owns** (NOT designed here): the VIP/DNS name → virt resolution upstream
-  of `orig_dst` (the responder *daemon*); this ADR designs only the *integration*
-  of that responder into the per-workload netns (Q5a, next section).
+- **#243 owns** (NOT designed here): the node-local name → backend resolution
+  upstream of `orig_dst` — an **in-agent name-answering listener** sharing the
+  `ServiceBackendsResolve` index (NOT a separate daemon, NOT in-kernel); this ADR
+  designs only the *integration* of that responder into the per-workload netns
+  (Q5a, next section).
 
 ### Name-layer integration (Q5a) — node-local DNS responder injected into the per-workload netns
 
 Q5a folds the **integration** of the DNS name layer into this design (NOT the
-#61 daemon implementation, NOT the #167 VIP allocator). Path A's per-workload
+#243 responder implementation — an in-agent name-answering listener, NOT a
+separate daemon — NOT the #167 VIP allocator). Path A's per-workload
 netns (Q2) IS the injection point.
 
 8. **Injection mechanism = resolv.conf injection (the Fly.io `fdaa::3` model).**
@@ -678,7 +683,9 @@ netns (Q2) IS the injection point.
    IP of that DNS server into your `resolv.conf` … always `fdaa::3`"). Overdrive
    ships its own appliance OS (ADR-0068), so it can do this for every workload
    netns sidecarlessly. **THIS feature owns** the injection step (one idempotent
-   converge step on the Q2 provisioner). **#61 owns** the responder daemon.
+   converge step on the Q2 provisioner). **#243 owns** the responder — an in-agent
+   name-answering listener sharing the `ServiceBackendsResolve` index (NOT a
+   separate daemon, NOT in-kernel).
 
 9. **DNS-return shape = HEADLESS for v1 (recommended; the single open item).**
    What the responder returns IS the `orig_dst` that `MtlsResolve.resolve` later
@@ -692,11 +699,11 @@ netns (Q2) IS the injection point.
    - **No new v1 dependency.** Headless needs no VIP allocator. A VIP return
      would pull **#167** (allocate `fdc2::/16` virts) into v1 PLUS the VIP×
      intercept ordering hazard (research §3.3 R5 / §3.5 Q1).
-   - **Keeps `MtlsResolve` v1 honest with the #178-deferred LB boundary.** v1
+   - **Keeps `MtlsResolve` v1 honest with the #242-deferred LB boundary.** v1
      resolve is an identity-only lookup (addr → expected_svid; `expected_svid =
-     None` until #178). A VIP return would force the resolve port to own a
+     None` until #242). A VIP return would force the resolve port to own a
      VIP→backend LB-pick — the multi-backend policy this ADR explicitly defers to
-     #178 (Q4).
+     #242 (Q4).
    - **Single-node v1 makes VIP indirection valueless** (all backends local —
      research §1.6).
    - **Forward-compatible.** Multi-node can add a VIP shape *alongside* headless
@@ -715,9 +722,10 @@ netns (Q2) IS the injection point.
     enforce mTLS to B` is coherent: B is recognized by `MtlsResolve` precisely
     because DNS returned the same `service_backends` addr. The C4 Container
     diagram (brief.md §35) shows this end-to-end. **Scope boundary kept**: the
-    responder daemon (#61) and the VIP allocator (#167) are named dependencies,
-    not builds in this feature — only the injection + the return-shape contract
-    alignment + the `MtlsResolve` composition live here.
+    name responder (#243 — an in-agent name-answering listener) and the VIP
+    allocator (#167) are named dependencies, not builds in this feature — only the
+    injection + the return-shape contract alignment + the `MtlsResolve`
+    composition live here.
 
 ## Alternatives Considered
 
@@ -767,7 +775,7 @@ fdc2:…::N`), and `MtlsResolve` (or the XDP `SERVICE_MAP`) LB-picks a backend.
 v1 scope as a NEW hard dependency, plus the VIP×agent-light-intercept ordering
 hazard (research §3.3 R5 / §3.5 Q1 — the trickiest wiring, needing its own Tier-3
 ordering spike); it forces the v1 resolve port to own a VIP→backend LB-pick that
-Q4 explicitly defers to #178; and single-node v1 (all backends local) gets zero
+Q4 explicitly defers to #242; and single-node v1 (all backends local) gets zero
 value from VIP indirection. VIP is the cleaner **multi-node** stable-handle UX
 and can be added alongside headless later (K8s ships both) without reworking the
 v1 enforce path. (See § "Name-layer integration (Q5a)" fact 9.)
@@ -816,13 +824,14 @@ v1 enforce path. (See § "Name-layer integration (Q5a)" fact 9.)
   assumption. The architect amends ADR-0069's outbound framing via this ADR;
   `jobs.yaml` re-grounding (if any) is flagged for the product-owner, not
   edited here.
-- **The name-layer integration depends on an unbuilt responder daemon (#61).**
-  This ADR designs the injection + the return-shape contract, but the process
-  that answers `<job>.svc.overdrive.local` by reading `service_backends` is the
-  #61 build. v1 enforcement (resolve port + interception) does NOT block on #61 —
-  `MtlsResolve` works against any `orig_dst` the workload connects to (responder,
-  hard-coded addr, or future VIP); the name layer is the ergonomic front-end, not
-  a correctness dependency.
+- **The name-layer integration depends on an unbuilt responder (#243).**
+  This ADR designs the injection + the return-shape contract, but the
+  **in-agent name-answering listener** that answers `<job>.svc.overdrive.local` by
+  reading the shared `ServiceBackendsResolve` index (NOT a separate daemon, NOT
+  in-kernel) is the #243 build. v1 enforcement (resolve port + interception) does
+  NOT block on #243 — `MtlsResolve` works against any `orig_dst` the workload
+  connects to (responder, hard-coded addr, or future VIP); the name layer is the
+  ergonomic front-end, not a correctness dependency.
 - **One open recommendation remains (DNS-return shape).** The headless-vs-VIP
   call (§ Name-layer fact 9) is recommended-headless and adds no new v1
   dependency, so it is not a blocker; a VIP choice would add #167 and needs
@@ -866,15 +875,16 @@ full rationale.
   `service_backends`-reading host adapter**; **fail-closed (not silent)** at the
   boundary. A resolve adapter that cannot read the store refuses boot
   (`health.startup.refused`); it does NOT silently return empty (silent-empty =
-  the silent-cleartext footgun the enrollment model exists to remove). #178 owns
-  the expected-SVID join + multi-backend LB-pick; #61 owns the name layer.
+  the silent-cleartext footgun the enrollment model exists to remove). #242 owns
+  the expected-SVID join + multi-backend LB-pick; #243 owns the name layer (the
+  in-agent name responder).
 - **Q4 (RATIFIED) = BOTH directions in v1**; intended-peer SVID pinning
-  (`expected_peer`/`PeerIdentityMismatch`) **deferred to #178** (v1 = authn-only,
+  (`expected_peer`/`PeerIdentityMismatch`) **deferred to #242** (v1 = authn-only,
   chain-to-bundle). Path A's point is symmetry on one mechanism; the inbound
   nft-TPROXY install is the proven template the outbound mirrors. The resolve
-  port carries `expected_svid` so the pin wires the moment #178 supplies the
+  port carries `expected_svid` so the pin wires the moment #242 supplies the
   join; docs/tests MUST NOT call the wrong-but-valid-peer case "protected" until
-  #178.
+  #242.
 
 ## Enforcement
 
@@ -908,18 +918,18 @@ full rationale.
     drives mTLS to that backend; a connection resolving to no mesh peer is
     classified (pass-through/fail-closed per Q3, fail-closed ratified); NEVER
     silent cleartext to a should-be-mesh peer.
-  - Name→resolve→enforce consistency (Q5a, DELIVER — needs the #61 responder or a
+  - Name→resolve→enforce consistency (Q5a, DELIVER — needs the #243 responder or a
     test stand-in): a workload `getaddrinfo("<job>.svc.overdrive.local")` against
     the injected resolv.conf returns a `running` `service_backends` addr B
     (headless), and `MtlsResolve.resolve(getsockname-recovered B)` returns
     `Some{B, …}` — i.e. the DNS-returned addr IS the addr the resolve port
-    recognizes (the single-source invariant). Until #61's responder lands, this
+    recognizes (the single-source invariant). Until #243's responder lands, this
     is exercised with the DNS step stubbed (the workload connects to a known
     `service_backends` addr directly) so the resolve-recognizes-orig_dst half is
     validated independently of the responder.
-- **Authn-only v1 boundary (UNCHANGED, F1/F5/#178)**: chain-to-bundle authn +
-  encryption; `expected_peer` stays `None` until #178's join supplies it; docs
-  and tests MUST NOT call the wrong-but-valid-peer case "protected" until #178.
+- **Authn-only v1 boundary (UNCHANGED, F1/F5/#242)**: chain-to-bundle authn +
+  encryption; `expected_peer` stays `None` until #242's join supplies it; docs
+  and tests MUST NOT call the wrong-but-valid-peer case "protected" until #242.
 
 ## References
 
@@ -939,11 +949,20 @@ full rationale.
   superseded), `overdrive-worker/src/driver.rs:181-198` (setns hook),
   `overdrive-core/src/traits/mtls_enforcement.rs` (4-method port, unchanged).
 - Named dependencies (NOT designed here):
-  [#178](https://github.com/overdrive-sh/overdrive/issues/178) (east-west
-  SPIFFE-ID resolution — the expected-SVID join + SAN-match),
-  [#61](https://github.com/overdrive-sh/overdrive/issues/61) (VIP/DNS name layer
-  — the **DNS responder daemon**; Q5a integrates its injection + return shape, it
-  does not build the daemon),
+  [#241](https://github.com/overdrive-sh/overdrive/issues/241) (Path-A canonical
+  workload address + production inbound mTLS TPROXY install — the inbound
+  orig-dst→virt resolution),
+  [#242](https://github.com/overdrive-sh/overdrive/issues/242) (intended-peer SVID
+  pinning, authn→authz — the expected-SVID join + SAN-match),
+  [#243](https://github.com/overdrive-sh/overdrive/issues/243) (in-agent node-local
+  name responder for dial-by-name `svc.overdrive.local` — an in-agent
+  name-answering listener sharing the `ServiceBackendsResolve` index, NOT a separate
+  daemon, NOT in-kernel; Q5a integrates its injection + return shape, it does not
+  build the responder),
+  [#244](https://github.com/overdrive-sh/overdrive/issues/244) (client-side
+  SPIFFE-ID resolution library — the native-caller path),
+  [#61](https://github.com/overdrive-sh/overdrive/issues/61) (VIP / non-native path
+  — `fdc2::/16` + XDP `SERVICE_MAP`; NOT the name responder),
   [#167](https://github.com/overdrive-sh/overdrive/issues/167) (VIP allocator —
   NOT a v1 dependency under the headless return shape; enters only with the
   multi-node VIP evolution / a VIP return choice),
@@ -951,3 +970,8 @@ full rationale.
   routing infra Bar-2 reconciler), [#236](https://github.com/overdrive-sh/overdrive/issues/236)
   (this feature), [#26](https://github.com/overdrive-sh/overdrive/issues/26)
   (transparent kernel mTLS).
+  *(REVISED 2026-06-22: #178 was CLOSED and split into #241 (inbound orig-dst→virt
+  + production inbound TPROXY install), #242 (intended-peer SVID pinning /
+  expected-SVID join), #243 (in-agent name responder — reframed from "DNS responder
+  daemon"), and #244 (client-side SPIFFE-ID library). #61 stays the VIP/non-native
+  path, NOT the name responder.)*

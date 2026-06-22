@@ -5,6 +5,21 @@
 (nw-solution-architect) · **Supersedes the OUTBOUND framing of:**
 `transparent-mtls-host-socket` (2026-06-16)
 
+> **Issue-tree note (2026-06-22):** the original umbrella issue **#178** was
+> closed and split by concern. Forward-references below are remapped:
+> the **expected-SVID / intended-peer join** (`expected_svid`, `expected_peer`,
+> the `MtlsResolve` anti-corruption boundary, authn→authz) is now **#242**; the
+> **inbound orig-dst→virt / production inbound TPROXY install** is **#241**; the
+> **client-side SPIFFE-ID library** is **#244**. The **node-local name
+> responder** moved from **#61 → #243** and is reframed: it is an **in-agent
+> name-answering listener** inside the node agent (sidecarless, userspace —
+> NOT a separate daemon, NOT in-kernel) sharing the same `ServiceBackendsResolve`
+> in-RAM index the interception path reads (one source, three readers: outbound
+> resolve + inbound install + name answers). The injection (D-TME-9,
+> `resolv.conf`) and headless return shape (D-TME-10) are UNCHANGED in substance.
+> `#61` is preserved only where it genuinely means the VIP / non-native path
+> (`fdc2::/16` + XDP `SERVICE_MAP`, depends on #167).
+
 ---
 
 ## Feature summary
@@ -37,8 +52,9 @@ the port contract.
 
 **Pinned scope:** v1 is **process/exec only**, **both directions**, **single
 node**, **authn-only** (the workload presents its SVID; intended-peer SVID
-*pinning* is #178-deferred). DNS name-layer *integration* (resolv.conf injection)
-is in scope; the DNS responder *daemon* is #61.
+*pinning* is #242-deferred). DNS name-layer *integration* (resolv.conf injection)
+is in scope; the node-local name responder (an in-agent name-answering listener,
+NOT a separate daemon) is #243.
 
 ## Business context
 
@@ -63,14 +79,14 @@ carries cryptographic workload identity") for the OUTBOUND path, provable by
 | D-TME-3 | `cgroup/connect4`-rewrite + `MTLS_REDIRECT_DEST` map + `program_declared_peer_redirect` **RETIRED** | Probe A DOESN'T-WORK on the appliance kernel. |
 | D-TME-4 | `accept_outbound_leg` recovers `peer` via `getsockname`; `real_peer` slot deleted | Symmetric with inbound; follows D-TME-1. |
 | D-TME-5 | 4-method `MtlsEnforcement` port **UNCHANGED**; `Routed::Outbound { peer }` still the input | ADR-0069/0070 frozen core. |
-| D-TME-6 | New **`MtlsResolve`** driven port = the **#178** anti-corruption boundary; v1 `service_backends`-reading host adapter, **fail-closed (not silent)** | Enrollment needs a per-connection resolve consumer; entangling it into the frozen `MtlsEnforcement` is forbidden. |
+| D-TME-6 | New **`MtlsResolve`** driven port = the **#242** expected-SVID-join anti-corruption boundary; v1 `service_backends`-reading host adapter, **fail-closed (not silent)** | Enrollment needs a per-connection resolve consumer; entangling it into the frozen `MtlsEnforcement` is forbidden. |
 | D-TME-7 | Egress nft-TPROXY (unvalidated, no Tier-2 backstop) **validated via a thin Tier-3 spike NOW** (`increment-b/`) before DELIVER | Cheapest place to find an ip-rule/route/F5 collision. |
-| D-TME-8 | v1 = both directions, **authn-only**; intended-peer pinning (`expected_peer`/`PeerIdentityMismatch`) deferred to **#178** | Resolve port carries `expected_svid` so the pin wires when #178 supplies the join. |
-| D-TME-9 | **Name-layer integration (Q5a)**: node-local DNS responder injected into the per-workload netns `resolv.conf` (Fly `fdaa::3` model); responder addr = the **per-netns gateway** (`plan.host_addr`); responder daemon is **#61** | The per-workload netns IS the DNS injection point; gateway addr is collision-free by construction, zero new converge step. |
+| D-TME-8 | v1 = both directions, **authn-only**; intended-peer pinning (`expected_peer`/`PeerIdentityMismatch`) deferred to **#242** | Resolve port carries `expected_svid` so the pin wires when #242 supplies the join. |
+| D-TME-9 | **Name-layer integration (Q5a)**: node-local name responder injected into the per-workload netns `resolv.conf` (Fly `fdaa::3` model); responder addr = the **per-netns gateway** (`plan.host_addr`); responder is **#243** — an **in-agent name-answering listener** (sidecarless, userspace; NOT a separate daemon, NOT in-kernel) sharing the `ServiceBackendsResolve` index | The per-workload netns IS the DNS injection point; gateway addr is collision-free by construction, zero new converge step. |
 | D-TME-10 | DNS-return shape = **HEADLESS for v1**: responder returns a `running` `service_backends` addr — that address IS the `orig_dst` `MtlsResolve` recognizes (one source, two readers); **no #167 VIP dependency** | Keeps v1 `MtlsResolve` thin (identity-only, no LB); VIP was REJECTED (adds #167 + ordering hazard). |
 | D-TME-11 | Resolve READ MECHANISM = `ServiceBackendsResolve` over an in-RAM, address-keyed, **ownership-aware** reverse index (`addr → {service → Backend}`), built **List-then-Watch + relist-on-`Lagged`** | Cilium `ipcache` precedent; the model was pinned but the read mechanism wasn't. Closes #237 cold-start; the lossy `subscribe_all` was deleted single-cut for `subscribe_all_events()`. |
 | D-TME-12 | **Per-allocation `NetSlot(u16)` (`0..=4095`)** model: netns name, both veth names, AND the /30 subnet all derive from one bounded slot — collision-free **by construction**, **NOT a hash of `AllocationId`**; allocator = `NetSlotAllocator` (smallest-free / release) | Pigeonhole: a 253-char id cannot map collision-free into 15-char IFNAMSIZ / 255-char NAME_MAX. Carries the C3-wiring, ExecDriver→netns JOIN, and adopt-on-restart amendments. |
-| D-TME-13 | `MtlsInterceptWorker::leg_c_addr(&AllocationId) -> Option<SocketAddrV4>` diagnostic accessor (inbound twin of the observable leg-F port) | Lets a Tier-3 test drive the spawned production inbound `accept_loop` (the inbound nft rule is #178-deferred). Exposes a socket addr only, no identity material. |
+| D-TME-13 | `MtlsInterceptWorker::leg_c_addr(&AllocationId) -> Option<SocketAddrV4>` diagnostic accessor (inbound twin of the observable leg-F port) | Lets a Tier-3 test drive the spawned production inbound `accept_loop` (the inbound nft rule is #241-deferred). Exposes a socket addr only, no identity material. |
 
 **Scope / sequencing decisions** (design-log, not D-TME-numbered):
 
@@ -136,7 +152,7 @@ The mechanism was settled empirically before DELIVER (`.claude/rules/spike.md` w
 | ~~04-03~~ | **TOMBSTONE** — merged into 04-01; retained as the detailed C3 reference. |
 | 04-04 | Adopt-on-restart: `NetSlotAllocator::adopt` + `run_server` boot recovery pass + §5 by-handle nft sweep; `ChainAbsent` typed split (fail-closed, `f021b701`); destructive-GC `NotFound`-vs-genuine-error split (`f57623e9`). |
 | 05-01 | Composed bidirectional walking skeleton (Tier-3) — drives production `start_alloc`/`accept_loop` for both halves (replica deleted, `70266e11`); D-TME-13 `leg_c_addr` drives the inbound leg. |
-| 05-02 | name→resolve→enforce consistency (Tier-3, DNS stubbed until #61): the **genuine getsockname-recovered** addr fed into `resolve` is the single-source invariant (Oracle 3 reframed honestly, `1b10f115`). |
+| 05-02 | name→resolve→enforce consistency (Tier-3, DNS stubbed until #243): the **genuine getsockname-recovered** addr fed into `resolve` is the single-source invariant (Oracle 3 reframed honestly, `1b10f115`). |
 | 05-03 | Outbound enforce-substrate per-direction asymmetry (Tier-3) — forward `write_all` copy / return `splice`, re-established on Path-A egress; race-free clone-tree TID partition + panic-safe teardown (`7de8e0ac`). |
 
 ## Quality gates
@@ -238,16 +254,19 @@ The mechanism was settled empirically before DELIVER (`.claude/rules/spike.md` w
 
 ## Deferrals / residual scope (issue-tracked)
 
-- **DNS responder daemon — #61.** This feature wires only the `resolv.conf`
-  injection + the return-shape contract (D-TME-9/10); the daemon that answers
-  `<job>.svc.overdrive.local` by reading `service_backends` is a separate build that
-  must answer on each per-workload host-veth **gateway** address.
-- **Intended-peer / expected-SVID join, and the inbound production `virt` source —
-  #178.** v1 is authn-only (`expected_svid: None`). `MtlsResolve` is the #178
-  anti-corruption boundary. The INBOUND production nft-TPROXY rule's `virt` match-key
-  has no v1 source and stays test-callers-only until #178 (the leg-C listener +
-  inbound accept loop ARE production). `leg_c_addr` (D-TME-13) is the read-point #178
-  is *expected* (not certain) to consume.
+- **Node-local name responder — #243.** This feature wires only the `resolv.conf`
+  injection + the return-shape contract (D-TME-9/10); the responder that answers
+  `<job>.svc.overdrive.local` by reading `service_backends` is a separate build — an
+  **in-agent name-answering listener** (sidecarless, userspace; NOT a separate
+  daemon, NOT in-kernel) sharing the same `ServiceBackendsResolve` in-RAM index the
+  interception path reads (one source, three readers) — that must answer on each
+  per-workload host-veth **gateway** address.
+- **Expected-SVID / intended-peer join — #242; inbound production `virt` source —
+  #241.** v1 is authn-only (`expected_svid: None`). `MtlsResolve` is the #242
+  expected-SVID-join anti-corruption boundary. The INBOUND production nft-TPROXY
+  rule's `virt` match-key has no v1 source and stays test-callers-only until **#241**
+  (the leg-C listener + inbound accept loop ARE production). `leg_c_addr` (D-TME-13)
+  is the read-point #241 is *expected* (not certain) to consume.
 - **Fail-toward-handshake — #236.** The irreducible convergence window where a
   resolve miss could classify a should-be-mesh peer as `NonMesh` (cleartext) is the
   **(a) fail-toward-handshake** v1 SECURITY invariant, whose code lands under #236

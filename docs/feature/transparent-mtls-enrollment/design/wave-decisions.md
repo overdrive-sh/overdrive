@@ -11,8 +11,9 @@ enrollment mechanism: **per-workload netns+veth + nft-TPROXY + `IP_TRANSPARENT`
 resolve replacing the retired per-destination map. The agent-light kTLS
 enforcement substrate (ADR-0069/0070) is reused UNCHANGED. Q1–Q4 are RATIFIED;
 Q5a (the DNS name-layer **integration** — resolv.conf injection into the
-per-workload netns, **headless** DNS-return for v1) is folded in (the #61
-responder daemon and the #167 VIP allocator remain separate builds / dependencies).
+per-workload netns, **headless** DNS-return for v1) is folded in (the #243
+name responder — an in-agent name-answering listener, NOT a separate daemon —
+and the #167 VIP allocator remain separate builds / dependencies).
 
 ## SETTLED (designed around; not relitigated)
 
@@ -29,11 +30,11 @@ responder daemon and the #167 VIP allocator remain separate builds / dependencie
 | # | Decision | Rationale |
 |---|---|---|
 | D-TME-2 | v1 moves OFF host-netns ONTO per-workload netns+veth; shape = **extend `veth_provisioner`** (Q2 ratified). | TPROXY+`getsockname` needs an agent-controlled routing point per workload (Cilium topology). |
-| D-TME-6 | New `MtlsResolve` driven port = the #178 anti-corruption boundary; this feature defines the contract + a v1 `service_backends`-reading host adapter, **fail-closed (not silent)** (Q3 ratified). | The enrollment model requires a per-connection resolve consumer; no existing port fits; entangling it into `MtlsEnforcement` (frozen at 4 methods) is forbidden; a silent-empty resolve re-introduces the silent-cleartext footgun. |
+| D-TME-6 | New `MtlsResolve` driven port = the #242 expected-SVID-join anti-corruption boundary; this feature defines the contract + a v1 `service_backends`-reading host adapter, **fail-closed (not silent)** (Q3 ratified). *(REVISED 2026-06-22: boundary owner #178 → #242 per the #178 split.)* | The enrollment model requires a per-connection resolve consumer; no existing port fits; entangling it into `MtlsEnforcement` (frozen at 4 methods) is forbidden; a silent-empty resolve re-introduces the silent-cleartext footgun. |
 | D-TME-7 | Egress-on-per-workload-veth nft-TPROXY is UNVALIDATED + has no Tier-2 backstop → **validate via a thin Tier-3 spike NOW (`increment-b/`)** before DELIVER (Q1 ratified). | Single novel piece; cheapest place to find an `ip rule`/route/F5-exemption collision (the research's Probe B falsification path). |
-| D-TME-8 | v1 scope = **BOTH directions**; intended-peer SVID pinning (`expected_peer`/`PeerIdentityMismatch`) **deferred to #178** (v1 = authn-only) (Q4 ratified). | Path A's point is symmetry on one mechanism; the inbound nft-TPROXY install is the proven template the outbound mirrors; the resolve port carries `expected_svid` so the pin wires the moment #178 supplies the join. |
-| D-TME-9 | **Name-layer integration (Q5a)**: a node-local DNS responder is injected into the per-workload netns `resolv.conf` (Fly.io `fdaa::3` model); the responder *daemon* is #61 (separate build), only the injection + return-shape contract live here. **Responder ADDRESS pinned 2026-06-18 (02-04 C3-wiring gaps, G1): `responder_addr` = the per-netns gateway (`plan.host_addr = subnet.network()+1`)** — the Overdrive analogue of Fly's single `fdaa::3` (one well-known node-local address *per netns*, reachable by construction as the default route, zero new converge step, collision-free as the slot's own /30 host addr). #61's daemon answers on each host-veth gateway. See the G1 amendment under D-TME-12 for the full rationale + the rejected fixed-constant alternative. | The per-workload netns (Q2) IS the DNS injection point — one topology, two wins; sidecarless (Overdrive ships its own appliance OS, ADR-0068). |
-| D-TME-10 | **DNS-return shape = HEADLESS for v1**: the responder returns a `running` backend addr from `service_backends` — that address IS the `orig_dst` `MtlsResolve.resolve` recognizes (one source, two readers, byte-consistent). **No #167 (VIP allocator) v1 dependency.** VIP is the multi-node evolution. | Headless keeps `MtlsResolve` v1 thin (identity-only, no LB — LB-pick is the #178-deferred policy), pulls no new v1 dependency, and is forward-compatible (VIP arm added alongside later, K8s ships both). VIP for v1 was REJECTED (would add #167 + the VIP×intercept ordering hazard). |
+| D-TME-8 | v1 scope = **BOTH directions**; intended-peer SVID pinning (`expected_peer`/`PeerIdentityMismatch`) **deferred to #242** (v1 = authn-only) (Q4 ratified). *(REVISED 2026-06-22: deferral target #178 → #242 per the #178 split.)* | Path A's point is symmetry on one mechanism; the inbound nft-TPROXY install is the proven template the outbound mirrors; the resolve port carries `expected_svid` so the pin wires the moment #242 supplies the join. |
+| D-TME-9 | **Name-layer integration (Q5a)**: a node-local name responder is injected into the per-workload netns `resolv.conf` (Fly.io `fdaa::3` model); the responder is **#243** — an **in-agent name-answering listener** sharing the `ServiceBackendsResolve` index (NOT a separate daemon, NOT in-kernel), only the injection + return-shape contract live here. **Responder ADDRESS pinned 2026-06-18 (02-04 C3-wiring gaps, G1): `responder_addr` = the per-netns gateway (`plan.host_addr = subnet.network()+1`)** — the Overdrive analogue of Fly's single `fdaa::3` (one well-known node-local address *per netns*, reachable by construction as the default route, zero new converge step, collision-free as the slot's own /30 host addr). #243's in-agent listener answers on each host-veth gateway. See the G1 amendment under D-TME-12 for the full rationale + the rejected fixed-constant alternative. *(REVISED 2026-06-22: #178 split — the responder is now #243 and reframed daemon → in-agent listener; the injection mechanism + responder ADDRESS substance UNCHANGED.)* | The per-workload netns (Q2) IS the DNS injection point — one topology, two wins; sidecarless (Overdrive ships its own appliance OS, ADR-0068). |
+| D-TME-10 | **DNS-return shape = HEADLESS for v1**: the responder returns a `running` backend addr from `service_backends` — that address IS the `orig_dst` `MtlsResolve.resolve` recognizes (one source, two readers, byte-consistent). **No #167 (VIP allocator) v1 dependency.** VIP is the multi-node evolution. | Headless keeps `MtlsResolve` v1 thin (identity-only, no LB — LB-pick is the #242-deferred policy), pulls no new v1 dependency, and is forward-compatible (VIP arm added alongside later, K8s ships both). VIP for v1 was REJECTED (would add #167 + the VIP×intercept ordering hazard). |
 | D-TME-12 | **Per-allocation network SLOT model (resolves the 02-01 review B1+S1+S2, and B3 from the 02-01 re-review; refines D-TME-2/C3)**: the per-allocation netns name, the two veth-end iface names, AND the point-to-point /30 subnet are ALL derived from a single **host-unique bounded network slot** — a new `NetSlot` newtype (`overdrive-control-plane`), NOT a hash of the `AllocationId`. **A hash is WRONG by pigeonhole** (`AllocationId` is `LABEL_MAX`=253-bounded; a Linux iface name is `IFNAMSIZ`=15-usable-bounded; no pure function of a 253-char id can collision-free-map into a 15-char name — a hash makes collisions merely *unlikely*, the exact hand-wave CLAUDE.md § "One shared length ceiling for label-shaped ids" forbids). The slot makes collision-freedom **structural**: distinct slot ⇒ distinct names ⇒ distinct /30 (single-source). **Slot domain**: `NetSlot(u16)`, valid range `0..=4095` (4096 concurrent per-alloc netns slots — single-node bounded concurrency; ample, and 4 hex chars renders ≤15). **Rendering**: 4-char lowercase zero-padded hex (`{:04x}`), so `ovd-hv-<4hex>` / `ovd-wl-<4hex>` = 11 chars ≤ 15 IFNAMSIZ by construction; the 4-char ceiling is DERIVED from `IFNAMSIZ - PREFIX.len()` (15−7=8 budget; 4 used), not a magic number. **/30 derivation**: the slot indexes a /30 block inside a fixed per-host `WORKLOAD_SUBNET_BASE` (`10.99.0.0/16`): subnet = base + `slot * 4` as a /30 → `host_addr` = base+slot*4+1, `workload_addr` = +2, `gateway` = `host_addr`. 4096 /30s = 16384 addresses = a **/18** within the `/16` base (slots 0–4095 occupy `10.99.0.0`–`10.99.63.255`), leaving 3/4 of the `/16` unused; the slot ceiling is the 4-hex IFNAMSIZ budget (`< 0x1000`), NOT the `/16` size (the `/16` could carry up to 16383 /30s, so `NET_SLOT_MAX = 4095` is a deliberate conservative cap with ample headroom — single-node bounded concurrency). **netns name is ALSO slot-keyed: `ovd-ns-<4hex>`** (11 chars ≤ `NAME_MAX`=255 AND ≤ IFNAMSIZ, bounded by construction, identical to the two veth names). **All THREE derived names (netns + both veths) are uniformly slot-keyed** — the slot is the iface/subnet/netns axis; the alloc id is the human axis, held in the allocator's slot↔alloc map (02-04), NOT embedded in any kernel/filesystem name. `ip netns list` now shows `ovd-ns-<4hex>` (hex, like the veths); the human-readable alloc identity is rendered by tooling against the slot↔alloc map — the Cilium `lxc<hex>` + `cilium endpoint list` model. This is a deliberate, accepted ergonomics shift (B3 resolution, ratified option (a) 2026-06-17), not an oversight. **`derive_workload_netns_plan` is PURELY slot-derived** (`(slot, responder_addr) -> WorkloadNetnsPlan`); the `alloc_id` parameter is DROPPED — with the netns name slot-keyed, the alloc id no longer derives anything (netns + both veths + subnet are all slot-keyed; `responder_addr` is passthrough), so carrying it would be a speculative unused parameter (the alloc↔slot binding's correct home is the 02-04 allocator map). The subnet is also no longer a caller parameter (S1 resolved: the derivation owns slot→/30, the allocator owns slot assignment). The STATEFUL slot allocator (assign-smallest-free / release-on-teardown, a per-host free-list — NOT distributed IPAM, NOT the #167 VIP allocator) lives at the **C3 `on_alloc_running` lifecycle hook** (release at `on_alloc_terminal`), the same hook that owns netns creation and holds the `alloc_id`. S2 resolved: a /30 always has two usable hosts, so `workload_addr` is non-degenerate by construction (no `Option`, no `network()` fallback). | The 02-01 review (B1) ground-truthed that the literal `ovd-hv-<alloc>` overflows IFNAMSIZ for any alloc id ≥ 9 chars (the golden test's own `ovd-hv-payments-0` = 17 chars is uncreatable) and a naïve truncation collides two allocs onto one veth. B1+S1+S2 are one problem: the missing host-unique handle that both names AND the /30 must derive from. The 02-01 re-review (B3) found the FIRST cut of D-TME-12 left the netns name embedding the unbounded `AllocationId` (`ovd-ns-<alloc>`) with an arithmetically false "≤255" reassurance (7-char prefix + 253-char alloc id = 260 > 255 → `ENAMETOOLONG` from `ip netns add` for any alloc id ≥ 249 chars, reachable via a ~244-char workload name through `reconcilers/workload_lifecycle.rs:838`'s `alloc-{workload_id}-{attempt}` mint) — the IDENTICAL pigeonhole/ceiling defect class as B1, on the one derived name the first cut left out. Resolved by slot-keying the netns name too (option (a)), making the overflow unrepresentable by construction — the same lever the slot used to beat the hash for B1. No existing host-unique per-alloc integer exists (`alloc-{workload_id}-{attempt}` is workload-scoped, not host-unique; the cgroup scope keys on the full id string). The slot model makes collision-freedom by-construction and resolves all four findings in one coherent decision. (Ratified by the user 2026-06-17; resolves review `deliver/reviews/02-01.md` B1+S1+S2 and the re-review B3.) |
 | D-TME-11 | **Resolve READ MECHANISM (C4; refines D-TME-6)**: `ServiceBackendsResolve` resolves `orig_dst` against an **in-RAM, address-keyed, ownership-aware reverse index** of the `running` `service_backends` set (`addr → {service → Backend}`, NOT a flat `addr → Backend` with global last-writer-wins — see F-A below) — NOT a per-`ServiceId` point query (the `ServiceId`-keyed `service_backends_rows` is the wrong surface; the adapter holds no `ServiceId`). **REVISED 2026-06-17 (resolve-index-coherence research):** built via **List-then-Watch + relist-on-`Lagged`** (the prior observe-only / "no new trait method" constraint is REVERSED). List leg = the keyless `all_service_backends_rows()` enumerate (SHIPPED `25e7acf3`); List-at-probe closes #237 cold-start; single-owner drain dissolves the F2 take/restore TOCTOU. **F4 / relist-trigger REFINED 2026-06-17 (ratified — option 2, surface `Lagged`):** the lossy `subscribe_all()` (item type `ObservationSubscription = Box<dyn Stream<Item = ObservationRow>>`) could not carry the loss signal — both adapters stripped `RecvError::Lagged` internally — so closing F4 needed a lag-surfacing surface `subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError>` delivering `SubscriptionEvent::{Row, Lagged { missed: u64 }}` (a DOMAIN event; adapter maps `RecvError::Lagged(n) → missed`; no tokio leak); the single-owner drain consumes it and re-Lists on `Lagged`, closing F4 with a *completeness* guarantee. **F-B (reconciled 2026-06-17): `subscribe_all_events()` is now the SOLE observation-subscription surface — the lossy `subscribe_all()` + `ObservationSubscription` alias were DELETED single-cut in commit `36a79762` and every consumer migrated** (superseding the earlier "dedicated method bounds blast radius / ~20 consumers stay untouched / not a shared-type change" framing, which the single-cut overtook — that framing is preserved only as dated honest history in the C4 condition row below). **F-A (ratified 2026-06-17 — option (b)): ownership-aware index** — keyed per contributing service at an addr; a service's backend-set shrink evicts only THAT service's contribution; classification is `any-healthy-at-addr` (deterministic, NOT last-writer-wins). This removes the unstated "one `(IP:port)` belongs to at most one service" cross-component invariant and the LWW healthy-disagreement determinism smell; v1 single-node is structurally addr-exclusive (per-addr service set size-1 today), so the shape is defensive against multi-node / future writers, NOT a behaviour change. The structure is adapter-internal; the public `MtlsResolve` contract + the `NonMesh`/`MeshUnreachable`/`Err` arms are UNCHANGED. **A miss = `NonMesh`** (cleartext pass-through), NOT `MeshUnreachable`; the residual irreducible convergence window is the **(a) fail-toward-handshake** v1 SECURITY invariant, tracked in **#236**. **#237 CLOSED by this revision** (List-at-probe + relist). PUBLIC `MtlsResolve` API unchanged; growth confined to the `ObservationStore` driven port. | D-TME-6 pinned the resolve *model* but not the *read mechanism*; a DELIVER step surfaced that `resolve(orig_dst)` has no `ServiceId` and no addr→service surface exists. Cilium's `ipcache` (in-RAM addr→identity reverse index, subscribe-populated, List-before-Watch, relist-on-loss) is the canonical precedent; research §4.1 describes the resolve as an in-RAM `service_backends` lookup. Making a miss fail-closed would break legitimate `NonMesh` external egress — forbidden. (Ratified 2026-06-16; read-mechanism REVISED 2026-06-17; F4/relist-trigger REFINED 2026-06-17; F-A ownership-aware index + F-B `subscribe_all` single-cut reconciled 2026-06-17.) |
 
@@ -74,9 +75,10 @@ separate from the pure-allocator 02-04 already landed) builds to.
 `Ipv4Addr`; the design pinned the *model* (a fixed node-local responder, à la
 Fly's `fdaa::3`) but never an Overdrive IPv4 constant, and the only supplier of a
 value today is a test fixture (`responder()`). feature-delta:594-597 places the
-responder's *address* in-scope for THIS feature (only the *daemon* — #61 — is
-out of scope). **Decision:** **`responder_addr == plan.host_addr == plan.gateway
-== subnet.network()+1`** — the per-netns gateway (host-side veth end).
+responder's *address* in-scope for THIS feature (only the responder build itself —
+#243, the in-agent name-answering listener — is out of scope). **Decision:**
+**`responder_addr == plan.host_addr == plan.gateway == subnet.network()+1`** — the
+per-netns gateway (host-side veth end).
 
 The C3 call site computes the gateway from the slot and passes it as
 `responder_addr`. To keep the call site from re-deriving the `base + slot*4 + 1`
@@ -128,23 +130,24 @@ cosmetic:
   global constant is cosmetic: each netns still has exactly ONE responder address,
   and it is the most-reachable one.
 
-**Cost, stated explicitly (the #61 binding implication):** the #61 responder
-daemon must answer on each per-workload host-veth gateway address (or bind the
-host-side wildcard and reply on whichever gateway the query arrived at) — it is
-NOT a single global listen address. This is a #61-daemon concern, recorded here so
-#61's build knows its listen surface; it does NOT change the wiring step. **No
+**Cost, stated explicitly (the #243 binding implication):** the #243 in-agent
+name responder must answer on each per-workload host-veth gateway address (or bind
+the host-side wildcard and reply on whichever gateway the query arrived at) — it is
+NOT a single global listen address. This is a #243 listener concern, recorded here so
+#243's build knows its listen surface; it does NOT change the wiring step. **No
 route converge step is in scope for the C3-wiring step** (the gateway needs none).
 
-**#61 is NOT a wiring blocker.** The provisioning + resolv.conf injection land
+**#243 is NOT a wiring blocker.** The provisioning + resolv.conf injection land
 behind the existing mTLS composition gate (`mtls_worker.is_some()` — `Some` only
 on the production mTLS boot, `run_server` lib.rs:1925-1933). The `resolv.conf`
 write (`nameserver <gateway>`) is an idempotent converge step that does not
-require a live daemon at the address; only **end-to-end DNS resolution** (a
-workload's `getaddrinfo` getting an answer) is gated on #61 shipping. The wiring +
-injection do not wait on #61 — they write a correct, reachable `nameserver`
-line that #61 will answer once it lands. (#61 is the pre-existing, design-cited
-name-layer responder daemon — D-TME-9; cited here consistent with that existing
-scope, not newly introduced.)
+require a live listener at the address; only **end-to-end DNS resolution** (a
+workload's `getaddrinfo` getting an answer) is gated on #243 shipping. The wiring +
+injection do not wait on #243 — they write a correct, reachable `nameserver`
+line that #243 will answer once it lands. (#243 is the design-cited node-local
+name responder — an in-agent name-answering listener sharing the
+`ServiceBackendsResolve` index, NOT a separate daemon, NOT in-kernel — D-TME-9;
+cited here consistent with that existing scope, not newly introduced.)
 
 #### G2 (provision seam) — provision at the TOP of each alloc arm, BEFORE `driver.start()`
 
@@ -209,7 +212,7 @@ the per-alloc `driver.start(&spec)`. **The folded-in block below closes both** �
 it adds the channel (an `AllocationSpec` netns field), the injection (at the
 action-shim C3 site), and the per-spec `ExecDriver::start` setns refactor. No GH
 issue is created (the work is now in-scope, not a deferral). The end-to-end mTLS
-interception path remains independently gated on #61 (DNS resolution) and the
+interception path remains independently gated on #243 (DNS resolution) and the
 Tier-3 egress spike (D-TME-7) — the join makes the workload LAND in its netns; it
 does not by itself complete the interception datapath.
 
@@ -488,7 +491,7 @@ the **observable kernel/ns side effect**, never on program-internal reachability
 - the workload's traffic egressing through the per-alloc veth (e.g. a raw-IP
   `connect()` from inside the workload reaching the host-side veth gateway).
 
-**DNS resolution is NOT part of this proof** (gated on #61) — use a raw-IP connect
+**DNS resolution is NOT part of this proof** (gated on #243) — use a raw-IP connect
 or `ip netns identify`, never a `getaddrinfo`/DNS round-trip. Record `uname -r` in
 the test (the verdict is kernel-pinned per `.claude/rules/spike.md` / ADR-0068).
 This is the end-to-end proof the join works; it lives in the consolidated step's
@@ -784,9 +787,9 @@ surviving-resource-plus-lost-in-RAM-handle shape:
   `:591-613`). On a restart it ALSO leaves a stale survivor (lost guard) and, when re-run
   for the same `virt` with a changed leg-C port, appends a fresh rule alongside the
   survivor. **Caveat (verified):** the inbound *production* install is currently
-  **#178-DEFERRED** — at 04-01 `start_alloc` records `tproxy_guard = None` and installs NO
+  **#241-DEFERRED** — at 04-01 `start_alloc` records `tproxy_guard = None` and installs NO
   production inbound rule (`mtls_intercept_worker.rs:391-417`), so the inbound survivor is
-  not reachable until #178 lands the production virt source. But it shares the survivor
+  not reachable until #241 lands the production virt source. But it shares the survivor
   CLASS exactly, so the reconcile this sub-section pins must cover BOTH directions to be
   forward-correct.
 
@@ -1090,10 +1093,11 @@ run an `nw-spike` PROBE before dispatching the 02-06 crafter.
 
 **1 CREATE-NEW** (`MtlsResolve` port — justified: no existing port returns
 `orig_dst → {backend_addr, expected_svid}` filtered to `running`; it is the
-#178 boundary). The Q5a name-layer integration adds **zero** new CREATE-NEW:
+#242 expected-SVID-join boundary). The Q5a name-layer integration adds **zero** new CREATE-NEW:
 **resolv.conf injection** is an EXTEND of the Q2 netns provisioner (one
-idempotent converge step), and the **DNS responder daemon (#61)** + **VIP
-allocator (#167)** are named DEPENDENCIES, not builds here. Everything else is
+idempotent converge step), and the **node-local name responder (#243 — an
+in-agent name-answering listener)** + **VIP allocator (#167)** are named
+DEPENDENCIES, not builds here. Everything else is
 **EXTEND** (`MtlsInterceptWorker`, `install_inbound_tproxy`+shared routing infra
 → `install_outbound_tproxy`, `accept_outbound_leg`/`getsockname_orig`,
 `veth_provisioner` + resolv.conf injection, the `ExecDriver` setns hook, the
@@ -1114,7 +1118,8 @@ the architect.
 
 - Egress nft-TPROXY Tier-3 validation (Q1) — RATIFIED: thin Tier-3 spike NOW
   (`increment-b/`) before DELIVER (D-TME-7). NOT a new issue.
-- The #178 expected-SVID join, #61 name-layer **responder daemon**, #167 VIP
+- The #242 expected-SVID join, #243 name-layer **responder** (an in-agent
+  name-answering listener, NOT a separate daemon), #167 VIP
   allocator (NOT a v1 dependency under headless, D-TME-10), #234 Bar-2 reconciler
   are PRE-EXISTING named dependencies (cited, not created).
 - No new GitHub issues created (per project rule — agents do not create issues
@@ -1132,7 +1137,7 @@ brief.md §35** (and recorded here):
 | Cond | What was pinned | Where |
 |---|---|---|
 | **C1** | `MtlsResolve.resolve` returns a **3-variant sum type** `MtlsResolution::{Mesh(ResolvedBackend), NonMesh, MeshUnreachable}` (NOT a binary `Option`), with per-arm enforce / pass-through / fail-closed rustdoc semantics. A binary `Option` cannot distinguish non-mesh pass-through from unreachable-mesh fail-closed; the type makes the Q3 "fail-closed not silent-cleartext" decision structural (CLAUDE.md § "sum types over sentinels"). | feature-delta § "`MtlsResolve` port contract" + Driven ports + DDD terms + component rows; ADR-0071 fact 4 + § "The new driven port" + Consequences; brief.md §35 prose + Q3 + C4 L2. |
-| **C2** | `ResolvedBackend` bounded to **exactly `{ addr, expected_svid }`**; the v1 `ServiceBackendsResolve` adapter returns **`expected_svid: None`** (authn-only shell; the expected-SVID join is **#178** — filling it here = boundary divergence; consistent with Q4/D-TME-8). | feature-delta § "`MtlsResolve` port contract" (C2) + Driven ports; ADR-0071 § "The new driven port" (C2); brief.md §35 prose + C4 L2. |
+| **C2** | `ResolvedBackend` bounded to **exactly `{ addr, expected_svid }`**; the v1 `ServiceBackendsResolve` adapter returns **`expected_svid: None`** (authn-only shell; the expected-SVID join is **#242** — filling it here = boundary divergence; consistent with Q4/D-TME-8). | feature-delta § "`MtlsResolve` port contract" (C2) + Driven ports; ADR-0071 § "The new driven port" (C2); brief.md §35 prose + C4 L2. |
 | **C3** | Netns creation at the action-shim alloc lifecycle, **BEFORE `MtlsInterceptWorker::start_alloc` and BEFORE `Driver::start`** — the netns+veth must exist before the `ExecDriver` `setns` seam (which ENTERS, never creates) spawns the workload into it. Teardown at the terminal arms (`StopAllocation`/`FinalizeFailed`), teardown-then-release. Replaces the prior unspecified-owner / "lifecycle OPEN (Q2)" wording. **SEAM CORRECTED 2026-06-18 (02-04 C3-wiring gaps, G2):** the original "at the `on_alloc_running` hook" naming was WRONG and is struck — that callback fires AFTER `driver.start()` (verified `action_shim/mod.rs` StartAllocation :1002 / RestartAllocation :1152), contradicting "BEFORE `Driver::start`". The provision seam is the **TOP of each `StartAllocation`/`RestartAllocation` arm, before `driver.start()`** (StartAllocation before :887; RestartAllocation before :1045). The "BEFORE `Driver::start`" ordering requirement was always correct and is authoritative; only the hook name was wrong. See the G2 amendment under D-TME-12 for the full pinned seams (provision + teardown) and the `ExecDriver`→netns-join separate-concern disposition. | feature-delta § "Driving ports" + provisioner component row + Q2 ratified row; ADR-0071 fact 1 + Q2 ratified; brief.md §35 component row + Q2 sub-decision. (Seam-naming correction propagates to those sites on next touch; the authoritative seam is the D-TME-12 G2 amendment.) |
 | **C4** (added 2026-06-16; read-mechanism REVISED 2026-06-17; F4/relist-trigger REFINED 2026-06-17; F-A ownership-aware index + F-B `subscribe_all` single-cut reconciled 2026-06-17 — all post-DESIGN amendments) | `ServiceBackendsResolve` resolves `orig_dst` against an **in-RAM, address-keyed, ownership-aware reverse index** of the `running` `service_backends` set (`addr → {service → Backend}`, NOT a flat `addr → Backend` with global last-writer-wins — see "F-A" below), built via **List-then-Watch + relist-on-`Lagged`** over the `ObservationStore` — NOT a per-`ServiceId` point query. **REVISED 2026-06-17 (resolve-index-coherence research): the prior observe-only / "MUST NOT add a new trait method" constraint is REVERSED.** The mechanism now (1) ADDS a keyless List enumerate `all_service_backends_rows(&self) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>` — symmetric with `alloc_status_rows()`/`node_health_rows()`, SHIPPED `25e7acf3`; (2) **Lists-at-probe** before the Earned-Trust gate opens (closes **#237** cold-start, SHIPPED `25e7acf3`); (3) uses a **single-owner drain** (dissolves the **F2** take/restore TOCTOU per `development.md` § "Check-and-act must be atomic", SHIPPED `25e7acf3`); (4) **relists on a `Lagged` loss signal** to close **F4** lag-drop. **F4 / relist-trigger REFINED 2026-06-17 (ratified — option 2, surface `Lagged`):** the prior wording "relists on `broadcast::RecvError::Lagged`" assumed the loss signal was reachable, but `subscribe_all()` returns the lossy `ObservationSubscription = Box<dyn Stream<Item = ObservationRow>>` and BOTH store adapters strip `RecvError::Lagged` internally — so closing F4 requires a NEW lag-surfacing surface: **`subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError>`** delivering **`SubscriptionEvent::{Row(ObservationRow), Lagged { missed: u64 }}`** (a DOMAIN event; adapter maps `RecvError::Lagged(n) → missed`; the core trait never names a tokio type). The single-owner drain consumes `subscribe_all_events()`; on `Lagged { missed }` it re-Lists via `all_service_backends_rows()` and rebuilds/merges the index — closing F4 with a *completeness* guarantee. **F-B reconciliation (dated honest history, 2026-06-17):** this refinement was authored (commit `36652ace`) with the rationale that a **dedicated method** (not a shared-type change to `ObservationSubscription`) **bounds blast radius** — only `ServiceBackendsResolve` would consume it, the ~20 existing `subscribe_all()` consumers stay untouched. **The very next commit `36a79762` superseded that decision and is the SHIPPED, intended state: `subscribe_all` and the `ObservationSubscription` alias were DELETED single-cut and ALL ~20 consumers were migrated to `subscribe_all_events()`** (now the SOLE observation-subscription surface, yielding `SubscriptionEvent`). Keeping the lossy `subscribe_all()` beside the lag-aware surface would have been the deprecated-parallel-path anti-pattern the project forbids (`feedback_single_cut_greenfield_migrations` / `feedback_delete_dont_gate`). The "bounded blast radius / ~20 consumers untouched / not a shared-type change" framing was a point-in-time decision the single-cut overtook; it is preserved here only as history. There is **no remaining "migrate the other consumers" follow-up** — that work is DONE (`36a79762`), not deferred. **F-A (ratified 2026-06-17 — option (b)): the index is ownership-aware** — keyed `addr → {service → Backend}` so each contributing service's backend at an addr is tracked separately; a service's backend-set shrink evicts only THAT service's contribution; an addr stays resolvable as long as ANY service still claims a healthy backend there; classification is `any-healthy-at-addr` (deterministic, NOT last-writer-wins). This removes the unstated "one `(IP:port)` belongs to at most one service" cross-component invariant the flat index relied on (and the LWW healthy-disagreement determinism smell). v1 single-node is structurally addr-exclusive (per-addr service set size-1 today), so the ownership-aware shape is defensive against multi-node / future writers, NOT a behaviour change; it is adapter-internal — the public `MtlsResolve` contract + the `NonMesh`/`MeshUnreachable`/`Err` arms are UNCHANGED. Miss-classification scoping: a **miss = `NonMesh`** (cleartext pass-through, by design), NOT `MeshUnreachable`; the residual irreducible convergence window is covered by **(a) fail-toward-handshake** — the v1 SECURITY invariant *"a resolve miss must never silently emit cleartext to a should-be-mesh peer,"* whose code lands under **#236**. **#237 CLOSED by this revision**; residual → (a)/#236. **PUBLIC `MtlsResolve` API unchanged** (growth confined to the `ObservationStore` driven port). | feature-delta § "`MtlsResolve` port contract" (C4) + § "C4 — F-A: ownership-aware index" + § "C4 — F4 / relist-trigger refinement" (→ "F-B reconciliation") + D-TME-11 row; ADR-0071 § "The new driven port" (C4 + F-A ownership-aware index + F-B reconciliation + F4/relist-trigger refinement); this file (D-TME-11). Consistent with the shipped 01-01 port rustdoc (`crates/overdrive-core/src/traits/mtls_resolve.rs`) — ADDS the read mechanism, does NOT re-classify. Revision evidence: `docs/research/networking/transparent-mtls-resolve-index-coherence-research.md`; F4-trigger evidence: ground-truth `subscribe_all` lossy surface (`observation_backend.rs:506`, `redb_backend.rs:368-373`, `ObservationSubscription` at `observation_store.rs:1149`); F-B evidence: commit `36a79762` (delete + migrate). |
 
@@ -1200,8 +1205,13 @@ the architect does not edit `roadmap.json` / `execution-log.json` / code.
   § "Deletion discipline" + `feedback_single_cut_greenfield_migrations`): orphan
   the cgroup path AND delete it AND wire its replacement, atomically.
 
-**Inversion 2 — the production TPROXY install is NOT #178-entangled for OUTBOUND;
-INBOUND's production `virt` source IS #178-gated (but is not a merge blocker).**
+**Inversion 2 — the production TPROXY install is NOT #241-entangled for OUTBOUND;
+INBOUND's production `virt` source IS #241-gated (but is not a merge blocker).**
+
+*(REVISED 2026-06-22: #178 was split — the inbound orig-dst→virt resolution +
+production inbound TPROXY install is now **#241**; the expected-SVID/intended-peer
+join is **#242**. References below are remapped by concern: inbound-virt → #241,
+expected-SVID pin → #242. No verdict changes.)*
 
 This was the load-bearing question. Settled definitively against the code:
 
@@ -1215,15 +1225,15 @@ This was the load-bearing question. Settled definitively against the code:
   agent recovers per-flow via `getsockname` downstream (03-02)" (rustdoc
   :289-292). The destination is then classified **per-connection** by THIS
   feature's own v1 resolve adapter (D-TME-6 / `ServiceBackendsResolve`, built
-  01-03; consumed `04-02`) — NOT at install time, NOT from #178. **`04-01`
+  01-03; consumed `04-02`) — NOT at install time, NOT from #241. **`04-01`
   installs the outbound rule + the leg-F/leg-C listeners + the accept loop; the
   outbound traffic path does not complete until `04-02` wires that resolve
   consumer — until then `real_peer` is `None` and leg-F traffic
   fail-closed-drops.** (Honesty clarification 2026-06-20, per the 04-01 review.) The `host_veth` is
   the only input the outbound install needs, and it comes from the merged step's
-  C3 wiring (`derive_workload_netns_plan(slot).host_veth`). **No #178 source is
+  C3 wiring (`derive_workload_netns_plan(slot).host_veth`). **No #241 source is
   required for the outbound production install.**
-- **INBOUND production install is #178-gated for its `virt` match-key.**
+- **INBOUND production install is #241-gated for its `virt` match-key.**
   `install_inbound_tproxy(virt, agent_port)` keys on `ip daddr <virt> tcp dport
   <vport>` (`mtls_intercept.rs:240,256-261`) — it needs the server workload's
   listen `virt` at install time. HEAD `start_alloc` is explicit that v1 has NO
@@ -1231,22 +1241,24 @@ This was the load-bearing question. Settled definitively against the code:
   workload binds its own socket at runtime (the same east-west service-resolution
   gap that defers the outbound peer set; #178 … names the inbound
   orig-dst→real-backend resolution and the `server_dial_addr` / D-MTLS-15
-  replacement site as #178's job)" (`mtls_intercept_worker.rs:398-416`). So HEAD
+  replacement site as #178's job)" (`mtls_intercept_worker.rs:398-416`) — the
+  quoted HEAD code comment predates the #178 split; that inbound orig-dst→virt
+  scope is now **#241** (the code-comment reference updates on next touch). So HEAD
   records `tproxy_guard = None` and installs NO inbound rule; the
-  `install_inbound_tproxy` free fn "stays the named #178 production-install site,
-  exercised today only by the worker integration tests (which supply a real,
+  `install_inbound_tproxy` free fn "stays the named production-install site" (now
+  #241), "exercised today only by the worker integration tests (which supply a real,
   distinct virt)" (module rustdoc :53-59).
 - **What this means for the merged step's ACs.** The leg-C `IP_TRANSPARENT`
   listener + the inbound accept→`enforce` loop ARE production and ARE wired by the
   merged step (unchanged from HEAD `start_alloc`). The *production inbound nft
-  rule* is the only inbound piece with no v1 source — it stays test-only-until-#178
+  rule* is the only inbound piece with no v1 source — it stays test-only-until-#241
   exactly as HEAD already has it. **The merged step does NOT regress inbound** (it
-  preserves the existing inbound-listener-production / inbound-rule-#178-deferred
+  preserves the existing inbound-listener-production / inbound-rule-#241-deferred
   posture) and **fully lands the OUTBOUND production path**. The walking skeletons
   (05-*) drive the inbound rule via the worker integration tests' real distinct
-  virt (the established "only test callers until #178" shape), and exercise the
+  virt (the established "only test callers until #241" shape), and exercise the
   outbound path as a genuine production flow. This is consistent with D-TME-8 / Q4
-  (v1 = authn-only; `expected_peer` / intended-peer pinning deferred to #178) and
+  (v1 = authn-only; `expected_peer` / intended-peer pinning deferred to #242) and
   ADR-0071 fact 3 (inbound UNCHANGED from ADR-0069: per-`virt`, not `iifname`).
 
   **Scope note on the merged step's AC wording.** The feature-delta line 89 / ADR
@@ -1254,38 +1266,41 @@ This was the load-bearing question. Settled definitively against the code:
   inbound on the workload virt)" describes the *eventual* both-directions
   production shape. For v1 the *inbound* production rule has no virt source, so the
   merged step's AC must read: **install the OUTBOUND rule as production
-  (`iifname host_veth`, no #178 dependency); stand up the leg-C listener + inbound
-  accept loop as production; the INBOUND production nft rule stays #178-deferred
-  (`install_inbound_tproxy` remains the named #178 install site, test-callers
+  (`iifname host_veth`, no #241 dependency); stand up the leg-C listener + inbound
+  accept loop as production; the INBOUND production nft rule stays #241-deferred
+  (`install_inbound_tproxy` remains the named #241 install site, test-callers
   only), exactly as HEAD.** The merged step DELETES the cgroup outbound surface
   and the declared-peer surface; it does NOT invent an inbound virt source. Stating
   "installs BOTH rules in production" as a v1 AC would force inventing a `virt`
   source — forbidden (CLAUDE.md § "Implement to the design — never invent API
   surface").
 
-**#178 verdict (one line):** the OUTBOUND production install is **fully buildable
+**Inbound-virt verdict (one line; #241):** the OUTBOUND production install is **fully buildable
 now within this feature**, authn-only, using this feature's own v1
 `ServiceBackendsResolve` (04-02) for per-connection classification — it needs NO
-#178 source. The INBOUND production *nft-rule* `virt` source IS genuinely
-#178-gated and stays test-only-until-#178 (unchanged from HEAD); the leg-C
+#241 source. The INBOUND production *nft-rule* `virt` source IS genuinely
+#241-gated and stays test-only-until-#241 (unchanged from HEAD); the leg-C
 listener + accept loop are production. The expected-SVID / intended-peer pin is
-separately #178 (authn-only v1 is fine, D-TME-8). **The merged step (`04-01`)
+separately #242 (authn-only v1 is fine, D-TME-8). **The merged step (`04-01`)
 installs the OUTBOUND production rule + the leg-F/leg-C listeners + the accept
 loop; the outbound *traffic path* completes once `04-02` wires the per-connection
 resolve consumer (`ServiceBackendsResolve` → `Mesh`/`NonMesh`/`MeshUnreachable`).
 Until `04-02`, `real_peer` is always `None` and leg-F traffic fail-closed-drops —
 so "production outbound path" means realized within THIS feature across `04-01` +
-`04-02`, NOT complete after `04-01` alone, with NO #178 dependency.**
+`04-02`, NOT complete after `04-01` alone, with NO #241 dependency.**
 *(Honesty clarification 2026-06-20, prompted by the 04-01 review: the prior
 "LANDS NOW as a working outbound production path" wording was misreadable as
 "complete after 04-01 alone." It is not — 04-01 lands the install + listeners +
 accept loop; 04-02 lands the per-connection classification that completes the
 traffic path. The load-bearing point — the whole outbound path is buildable
-WITHIN this feature with NO #178 source — is unchanged.)* *(Orchestrator: before landing, confirm #178's
-scope with `gh issue view 178 --comments` per CLAUDE.md — the inbound-virt
-attribution is from the HEAD code comment + this feature's design framing; #178's
+WITHIN this feature with NO #241 source — is unchanged.)* *(REVISED 2026-06-22: #178
+was split — the inbound orig-dst→virt resolution + production inbound TPROXY install is
+**#241**, the expected-SVID/intended-peer join is **#242**; references remapped by
+concern, no verdict change.)* *(Orchestrator: before landing, confirm #241's
+scope with `gh issue view 241 --comments` per CLAUDE.md — the inbound-virt
+attribution is from the HEAD code comment + this feature's design framing; #241's
 own body/comments should be checked to confirm it covers the inbound
-orig-dst→virt resolution and not only the expected-SVID join. The architect could
+orig-dst→virt resolution. The architect could
 not run `gh` in this doc-only dispatch.)*
 
 ### Corrected phase-04 step structure (acyclic)
@@ -1299,7 +1314,7 @@ merged `04-01`). The spike-validated 02-06 adopt-on-restart becomes **`04-04`**
 
 | id | name | deps | one-line scope |
 |---|---|---|---|
-| `04-01` | **Merged production rewire + C3 netns wiring + single-cut deletions** | `02-03`, `03-01`, `03-02` | The atomic resolution of Inversion 1. Re-apply `wip/02-05 @ a4c2a61d` (G1+G2+G3 + JOIN-1..JOIN-5 + review findings 1&2) for the per-alloc netns/veth C3 wiring + `AllocationSpec.netns` channel + ExecDriver per-spec `setns` (delete `with_netns_path`); swap `start_alloc` to install the OUTBOUND `install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` rule as production (the `host_veth` value reaches `start_alloc` via the JOIN-1-sibling `AllocationSpec.host_veth: Option<String>` field — see JOIN-6 below) + stand up leg-F/leg-C listeners + accept loops (inbound nft rule stays #178-deferred per Inversion 2); single-cut DELETE the cgroup surface (`cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, the whole `MtlsDataplane` struct, `attach_alloc`/`program_redirect`/`MtlsCgroupLink`, the orphaned `MtlsBootError::Load`/`OutboundAttach` error variants) AND delete the `mtls_production_activation` e2e + `mtls_e2e_helpers` + the OLD-mechanism test files (the 04-01 deletion list) it breaks, in the SAME commit. Tier-3: JOIN-5 (workload lands in netns) + start_alloc installs the outbound rule on a real alloc; re-run boot fixtures under Lima (NOT `--no-run`). |
+| `04-01` | **Merged production rewire + C3 netns wiring + single-cut deletions** | `02-03`, `03-01`, `03-02` | The atomic resolution of Inversion 1. Re-apply `wip/02-05 @ a4c2a61d` (G1+G2+G3 + JOIN-1..JOIN-5 + review findings 1&2) for the per-alloc netns/veth C3 wiring + `AllocationSpec.netns` channel + ExecDriver per-spec `setns` (delete `with_netns_path`); swap `start_alloc` to install the OUTBOUND `install_outbound_tproxy(host_veth=plan.host_veth, leg_f_port)` rule as production (the `host_veth` value reaches `start_alloc` via the JOIN-1-sibling `AllocationSpec.host_veth: Option<String>` field — see JOIN-6 below) + stand up leg-F/leg-C listeners + accept loops (inbound nft rule stays #241-deferred per Inversion 2); single-cut DELETE the cgroup surface (`cgroup_connect4_mtls`, `MTLS_REDIRECT_DEST`, the whole `MtlsDataplane` struct, `attach_alloc`/`program_redirect`/`MtlsCgroupLink`, the orphaned `MtlsBootError::Load`/`OutboundAttach` error variants) AND delete the `mtls_production_activation` e2e + `mtls_e2e_helpers` + the OLD-mechanism test files (the 04-01 deletion list) it breaks, in the SAME commit. Tier-3: JOIN-5 (workload lands in netns) + start_alloc installs the outbound rule on a real alloc; re-run boot fixtures under Lima (NOT `--no-run`). |
 | `04-02` | Per-connection resolve consumer + DELETE declared-peer surface | `01-02`, `03-02`, `04-01` | Unchanged from the existing 04-02 EXCEPT `deps` drops the now-merged `04-01`-as-cgroup-deleter (still `04-01`, now the merged step) — wire `MtlsResolve` (mandatory `new()` param) into the outbound accept loop: `Mesh`→enforce, `NonMesh`→pass-through, `MeshUnreachable`→fail-closed; single-cut DELETE `program_declared_peer_redirect`, `real_peer`/`leg_f_addr` slots, `AcceptOutcome::Dropped`, `accept_drop_outbound`, the `MtlsInterceptError` enum + inline tests; fix the `lib.rs:981-986` broken doc link. Default-lane DST + mutation ≥80% on the 3-arm decision. |
 | `04-03` | *(removed — merged into `04-01`)* | — | The old `04-03` C3-wiring step is the second half of the merged `04-01`; it no longer exists as a separate step. |
 | `04-04` | Adopt-on-restart cross-restart slot+rule rebuild (the former "02-06") | `04-01` | The spike-validated (PROCEED-AS-DESIGNED, kernel 7.0.0, `spike/findings-adopt-restart.md`) adopt-on-restart pass: `NetSlotAllocator::adopt` (additive, atomic) + `adopt_observe` (cgroup→PID→`/proc/ns/net` slot recovery) + a `run_server` boot recovery pass (adopt-then-GC-then-serve, BEFORE the convergence loop) + the §5 surviving-nft-rule sweep. Depends on `04-01` because the C3 wiring (the `NetSlotAllocator` on `AppState`, the provision/teardown seams, the per-workload nft rules) must be LIVE for there to be slots/rules to adopt/reap. Tier-3 under Lima. |
@@ -1528,8 +1543,8 @@ the wall is documented in-code at
   :416) at an **ephemeral loopback port**, then moves that listener into the
   spawned inbound `accept_loop` (`spawn_legs_and_record` → `AcceptLeg::Inbound`).
 - The inbound nft-TPROXY redirect that would route a client's connection to leg-C
-  is **#178-deferred** (`start_alloc` records `tproxy_guard = None` and installs no
-  inbound rule — verified at `mtls_intercept_worker.rs` :406-441; #178 / D-MTLS-15
+  is **#241-deferred** (`start_alloc` records `tproxy_guard = None` and installs no
+  inbound rule — verified at `mtls_intercept_worker.rs` :406-441; #241 / D-MTLS-15
   "GAP-3", `server_dial_addr` named replacement site). So a Tier-3 test must install
   its OWN redirect to leg-C to drive the production inbound `accept_loop`.
 - To install that redirect, the test must know **leg-C's ephemeral bound addr** —
@@ -1579,12 +1594,12 @@ block records the architect-pinned exact shape, contract, and rationale.
 /// and is the EXACT addr the spawned inbound `accept_loop` is accepting on — so a
 /// redirect installed at the returned addr lands on the production inbound leg.
 ///
-/// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #178)
+/// # Identity boundary (authn-only v1 — ADR-0071 / D-TME-8 / #242)
 ///
 /// This exposes ONLY a bound socket address — NO SVID, NO key, NO identity
 /// material of any kind. It is a bound-addr read, not an identity read. Workloads
 /// hold nothing and the worker exposes nothing about *who* leg-C will mTLS as; the
-/// expected-SVID / intended-peer join is strictly #178's (the
+/// expected-SVID / intended-peer join is strictly #242's (the
 /// `MtlsResolve.expected_svid` anti-corruption field, `None` in v1). The accessor
 /// is therefore inside the authn-only v1 boundary by construction.
 pub fn leg_c_addr(&self, alloc: &AllocationId) -> Option<SocketAddrV4>;
@@ -1655,32 +1670,32 @@ code") is real and was checked. This accessor clears it on two grounds:
    nft-TPROXY rule (`install_outbound_tproxy(host_veth, leg_f_port)`) and recoverable
    from the kernel via the nft chain dump (`find_egress_rule_handle`). leg-C's
    ephemeral port has no such production-observable encoding today *only because*
-   its redirect is #178-deferred (no inbound rule encodes it yet). `leg_c_addr`
+   its redirect is #241-deferred (no inbound rule encodes it yet). `leg_c_addr`
    restores symmetric observability: a diagnostic / operator surface can ask the
    worker "where is this alloc's inbound intercept listening?" — a genuine
    operability question (ISO 25010 → operability / analysability) for a security
    control that silently terminates client mTLS.
-2. **It is the v1 inbound test-observability seam; #178 is *expected* to reuse it
+2. **It is the v1 inbound test-observability seam; #241 is *expected* to reuse it
    for the production inbound-redirect install — pending that install's site/timing
-   design.** When #178 lands the production inbound nft-TPROXY rule, *something*
+   design.** When #241 lands the production inbound nft-TPROXY rule, *something*
    must supply leg-C's ephemeral port as the redirect target (the outbound install
    already reads leg-F's port via the **inline local** `leg_f_addr.port()` in
    `start_alloc` — leg-F has no public accessor). `leg_c_addr` is the *available*
-   read point and the natural candidate. **But whether #178 consumes this public
+   read point and the natural candidate. **But whether #241 consumes this public
    accessor vs an inline `leg_c_addr` local in `start_alloc` (mirroring the leg-F
-   capture pattern) is #178's own unresolved design** — #178 owns the orig-dst →
+   capture pattern) is #241's own unresolved design** — #241 owns the orig-dst →
    backend resolution, and the inbound-rule install site/timing is not settled
-   here. If #178 mirrors leg-F and installs in `start_alloc`, it would read the
+   here. If #241 mirrors leg-F and installs in `start_alloc`, it would read the
    inline local, NOT `self.leg_c_addr(alloc)`, and the accessor would remain
    test-observability-only. v1 does NOT depend on that question: the accessor is
    independently justified by ground 1 (production-observable operability surface).
    (`install_inbound_tproxy` is the closest precedent — "test-callers-only until
-   #178" yet unambiguously production surface; `leg_c_addr` is at most the same
+   #241" yet unambiguously production surface; `leg_c_addr` is at most the same
    lifecycle, at least a standing diagnostic.)
 
 So the accessor is production-legitimate observability that v1 *also* uses for
 Tier-3 observability. It is `pub`. It is exempt from the test-only-smell rejection —
-ground 1 alone clears it, independent of whether #178 later consumes it.
+ground 1 alone clears it, independent of whether #241 later consumes it.
 
 ### leg-C vs leg-F asymmetry — why leg-C needs this and leg-F does not; NO `leg_f_addr` now
 
@@ -1695,7 +1710,7 @@ real and load-bearing, not an oversight:
   reaches leg-F through the veth, not by dialing the port). The 05-01 OUTBOUND half
   proves this: it drives the production `accept_loop` with zero need for a
   `leg_f_addr` accessor.
-- **INBOUND (leg-C):** the redirect is #178-deferred, so production installs NO
+- **INBOUND (leg-C):** the redirect is #241-deferred, so production installs NO
   inbound rule. A Tier-3 test must therefore install its **own** redirect to leg-C
   to route a client through the production inbound `accept_loop` — and to install
   that redirect it must know leg-C's ephemeral addr. Hence the accessor.
@@ -1707,23 +1722,25 @@ need for outbound leg-F observability arises (e.g. an outbound diagnostic surfac
 deliberately named to make that future addition read consistently. Until then: ONE
 accessor, leg-C only.
 
-### #178 relationship (one line)
+### #241 relationship (one line)
 
-This is the **v1 test-observability seam** for the inbound leg; #178 is **expected**
+This is the **v1 test-observability seam** for the inbound leg; #241 is **expected**
 to reuse it for the production inbound-redirect install, **pending that install's
-site/timing design** (#178 may instead read an inline `leg_c_addr` local in
+site/timing design** (#241 may instead read an inline `leg_c_addr` local in
 `start_alloc`, the way the outbound install reads leg-F's inline local — in which
 case `leg_c_addr` stays test-observability-only). Either way it is not throwaway:
-v1's standing operator diagnostic justifies it independent of #178. Cites ADR-0071
-(authn-only v1 / the #178 anti-corruption boundary) + #178 (the inbound orig-dst →
+v1's standing operator diagnostic justifies it independent of #241. Cites ADR-0071
+(authn-only v1 / the #242 expected-SVID-join anti-corruption boundary) + #241 (the inbound orig-dst →
 real-backend redirect, `server_dial_addr` / D-MTLS-15 / GAP-3).
 
-*(2026-06-21 — softening of the "#178 will consume" certainty resolves 05-01
+*(2026-06-21 — softening of the "will consume" certainty resolves 05-01
 re-review advisory R1. The production-legitimacy verdict is unchanged: `leg_c_addr`
-stays a `pub` diagnostic justified by ground 1 alone. Only the claim that #178
-consumes the **public accessor** — vs an inline `start_alloc` local, #178's own
+stays a `pub` diagnostic justified by ground 1 alone. Only the claim that #241
+consumes the **public accessor** — vs an inline `start_alloc` local, #241's own
 unresolved design — was overstated as settled fact; it is now framed as expected,
-pending #178's install site/timing.)*
+pending #241's install site/timing.)* *(REVISED 2026-06-22: #178 split — the inbound
+orig-dst→virt redirect install is now #241, the expected-SVID-join anti-corruption
+boundary is now #242; references remapped by concern.)*
 
 ### Scope note + crafter instruction
 
@@ -1731,8 +1748,8 @@ This amendment adds EXACTLY ONE public item
 (`MtlsInterceptWorker::leg_c_addr(&self, &AllocationId) -> Option<SocketAddrV4>`)
 plus the private `AllocIntercept.leg_c_addr` field and its `start_alloc` →
 `spawn_legs_and_record` → `record_intercept_full` threading required to feed it. It
-reopens no D-TME / C / G / JOIN decision and does NOT design the #178 production
-inbound redirect (that stays #178's job).
+reopens no D-TME / C / G / JOIN decision and does NOT design the #241 production
+inbound redirect (that stays #241's job).
 
 **The crafter MUST implement this signature EXACTLY — `pub fn leg_c_addr(&self,
 alloc: &AllocationId) -> Option<SocketAddrV4>` — and MUST NOT deviate from it or add
