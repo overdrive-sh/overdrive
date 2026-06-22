@@ -24,16 +24,23 @@ crate_class = "adapter-host"
 # `.claude/rules/testing.md` § Workspace convention.
 #
 # Forwards to `overdrive-dataplane/integration-tests` so the worker's
-# mTLS intercept component (`mtls_intercept_worker`) compiles its
-# `#[cfg(feature = "integration-tests")]` #178 redirect-stand-in seam
-# in lock-step with the dataplane surface it drives (step 06-03).
+# mTLS intercept component (`mtls_intercept_worker`) compiles in
+# lock-step with the dataplane surface it drives (the `HostMtlsEnforcement`
+# binding). The former `#[cfg(feature = "integration-tests")]` declared-peer
+# redirect-stand-in seam was deleted at step 04-02 (the per-connection
+# `MtlsResolve` consumer superseded it); the forward remains because the
+# Tier-3 worker intercept-install suite is gated on it.
 integration-tests = ["overdrive-dataplane/integration-tests"]
 
 [dependencies]
 overdrive-core.workspace = true
-# transparent-mtls-host-socket (D-MTLS-17, GH #26; step 06-03) — the
-# `MtlsInterceptWorker` drives `overdrive_dataplane::mtls::MtlsDataplane`
-# (load/attach_alloc/program_redirect) per allocation. No cycle:
+# transparent-mtls-host-socket (GH #26) — provides the production
+# `HostMtlsEnforcement` binding the worker composes against the
+# `overdrive_core::traits::mtls_enforcement::MtlsEnforcement` port, plus the
+# `integration-tests` feature-forward above. (The old cgroup_connect4_mtls
+# `MtlsDataplane` surface was removed at step 04-01; the worker now installs
+# the nft-TPROXY outbound intercept via its OWN `crate::mtls_intercept`
+# (`install_outbound_tproxy`), not a dataplane call.) No cycle:
 # `overdrive-dataplane` does NOT depend on `overdrive-worker`.
 overdrive-dataplane.path = "../overdrive-dataplane"
 async-trait.workspace    = true
@@ -94,6 +101,23 @@ tracing-subscriber.workspace = true
 # (trybuild)" — pin exactly to keep `.stderr` fixtures stable across
 # rustc upgrades.
 trybuild.workspace  = true
+
+# transparent-mtls-enrollment (ADR-0071, step 05-01) — the composed
+# bidirectional Tier-3 walking skeleton
+# (`tests/integration/bidirectional_walking_skeleton.rs`) re-authors a
+# FRESH focused PKI + `HeldIdentities` + 0x17 wire-scan worker-side (the
+# dataplane `tests/helpers/` are a reference to replicate, NOT a
+# cross-crate import — a crate's `tests/` tree is not exported). These
+# are the test-only crypto/TLS primitives the real-mTLS handshakes +
+# the cert-SAN extraction need, workspace-pinned per
+# `.claude/rules/development.md` § Dependencies. The mTLS substrate
+# itself (`HostMtlsEnforcement`) is REUSED from the production
+# `overdrive-dataplane` dep above — these deps mint the test PKI + drive
+# the test-side peers, not a re-implemented TLS stack.
+rcgen.workspace          = true
+rustls.workspace         = true
+rustls-pemfile.workspace = true
+x509-parser.workspace    = true
 
 [lints]
 workspace = true

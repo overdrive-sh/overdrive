@@ -2124,7 +2124,10 @@ dependencies = [
  "overdrive-sim",
  "parking_lot",
  "proptest",
+ "rcgen",
  "rkyv",
+ "rustls",
+ "rustls-pemfile",
  "serde",
  "serial_test",
  "tempfile",
@@ -2134,6 +2137,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trybuild",
+ "x509-parser",
 ]
 
 [[package]]

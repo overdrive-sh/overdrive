@@ -110,7 +110,7 @@ pub(super) fn establish(
 /// The server workload's real plaintext listener addr the agent dials leg S to.
 /// For the single-node walking skeleton the harness binds S on the recovered
 /// original destination's loopback addr; the control-plane orig-dst → server-
-/// listener map is the production source (#178-adjacent). Here the orig-dst's
+/// listener map is the production source (#241-adjacent). Here the orig-dst's
 /// address+port IS the server's listener (the harness arranges this).
 const fn server_dial_addr(orig_dst: SocketAddrV4) -> SocketAddrV4 {
     orig_dst

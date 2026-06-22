@@ -69,7 +69,8 @@ use overdrive_core::AllocationId;
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_core::traits::mtls_enforcement::{Direction, Routed};
 use overdrive_worker::mtls_intercept::{
-    accept_inbound_leg, accept_outbound_leg, install_inbound_tproxy, make_transparent_listener,
+    accept_inbound_leg, accept_outbound_and_recover_orig_dst, install_inbound_tproxy,
+    make_transparent_listener,
 };
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state.
@@ -336,12 +337,16 @@ fn alloc(name: &str) -> AllocationId {
     AllocationId::new(name).expect("valid allocation id")
 }
 
-/// AC1 + AC4: outbound leg acquire. `make_transparent_listener` is NOT used
-/// for leg F (leg F is a plain loopback listener — the design states leg F
+/// AC1–AC4: outbound leg acquire recovers the dialed orig-dst via `getsockname`
+/// (symmetric with `accept_inbound_leg`). `make_transparent_listener` is NOT
+/// used for leg F (leg F is a plain loopback listener — the design states leg F
 /// needs no IP_TRANSPARENT), so this scenario stands up a plain
 /// `std::net::TcpListener` on `127.0.0.1:0`, dials it, and drives
-/// `accept_outbound_leg`, asserting the routing fact is `Outbound { peer }`
-/// with the pre-programmed peer and the leg is handed by value (an OwnedFd).
+/// `accept_outbound_and_recover_orig_dst`. The recovered `orig_dst` is the
+/// dialed addr (== the listener's `leg_f_addr`) and the leg is handed by value
+/// (an OwnedFd) — the worker's resolve consumer (04-02) then classifies
+/// `orig_dst` and stamps the resolved backend addr into `Routed::Outbound` on
+/// the `Mesh` arm; the routing peer is NO LONGER built here.
 #[test]
 fn worker_intercept_install_leg_acquire_outbound() {
     if !is_root() {
@@ -357,11 +362,6 @@ fn worker_intercept_install_leg_acquire_outbound() {
         other => panic!("expected V4 leg-F addr, got {other}"),
     };
 
-    // The pre-programmed real peer leg B would dial (handed verbatim into
-    // accept_outbound_leg). Arbitrary stable addr; not actually connected to.
-    let peer = SocketAddrV4::new(Ipv4Addr::new(10, 9, 8, 7), 4443);
-    let alloc_id = alloc("alloc-outbound-leg");
-
     // A client thread dials the leg-F listener so the production accept has a
     // pending connection. The byte exchange proves the returned OwnedFd is the
     // genuine accepted leg (we write through it and the client reads it back).
@@ -372,31 +372,30 @@ fn worker_intercept_install_leg_acquire_outbound() {
         buf
     });
 
-    let intercepted = accept_outbound_leg(&leg_f, alloc_id.clone(), peer)
-        .expect("accept_outbound_leg must build InterceptedConnection");
+    let (leg, orig_dst) = accept_outbound_and_recover_orig_dst(&leg_f)
+        .expect("accept_outbound_and_recover_orig_dst must recover orig-dst");
 
-    // AC4: routing fact is Outbound { peer } with the pre-programmed peer.
-    match intercepted.routed {
-        Routed::Outbound { peer: got } => assert_eq!(got, peer, "Outbound peer must round-trip"),
-        Routed::Inbound { orig_dst } => panic!("expected Outbound, got Inbound {{ {orig_dst} }}"),
-    }
-    assert_eq!(intercepted.routed.direction(), Direction::Outbound);
-    assert_eq!(intercepted.alloc, alloc_id, "alloc must round-trip");
-    assert!(intercepted.expected_peer.is_none(), "v1 authn-only: expected_peer is None");
+    // AC1/AC3: the recovered orig-dst is the dialed addr (== leg_f_addr) via
+    // getsockname on the accepted socket.
+    assert_eq!(
+        orig_dst, leg_f_addr,
+        "recovered orig_dst must be the getsockname-recovered dialed addr (leg_f_addr)"
+    );
 
     // Prove the owned leg is the genuine accepted socket: write through a dup
     // of it (an independent fd), the client reads it back byte-exact. We dup
-    // so the production type keeps owning `intercepted.leg`.
+    // so the production type keeps owning `leg`.
     {
-        let dup_fd = raw_dup(intercepted.leg.as_raw_fd());
+        let dup_fd = raw_dup(leg.as_raw_fd());
         // SAFETY: dup_fd is an independent owned fd over the accepted TCP leg.
-        let mut leg = unsafe { TcpStream::from_raw_fd(dup_fd) };
-        leg.write_all(b"PING").expect("write through owned leg F");
-        leg.flush().ok();
-        // `leg` drops here, closing the dup; `intercepted.leg` stays owned.
+        let mut stream = unsafe { TcpStream::from_raw_fd(dup_fd) };
+        stream.write_all(b"PING").expect("write through owned leg F");
+        stream.flush().ok();
+        // `stream` drops here, closing the dup; `leg` stays owned.
     }
     let echoed = client.join().expect("client thread");
     assert_eq!(&echoed, b"PING", "client must read the byte written through the owned leg");
+    drop(leg);
 }
 
 /// Duplicate a raw fd (so the test can write through a copy without consuming

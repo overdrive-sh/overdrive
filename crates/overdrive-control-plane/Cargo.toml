@@ -34,11 +34,12 @@ path = "src/bin/openapi.rs"
 # `.claude/rules/testing.md` §"Integration vs unit gating".
 #
 # Forwards to `overdrive-worker/integration-tests` so the worker's
-# `#[cfg(feature = "integration-tests")]` #178 declared-peer redirect
-# stand-in seam (`MtlsInterceptWorker::program_declared_peer_redirect`)
-# is compiled IN when the control-plane Tier-3 production-activation gate
-# (transparent-mtls-host-socket step 06-03 criteria[1]) drives it through
-# the booted `ServerHandle::mtls_worker()` accessor.
+# Tier-3 mTLS intercept surface compiles in lock-step with the
+# control-plane boot path that composes it. (The former declared-peer
+# redirect stand-in — `MtlsInterceptWorker::program_declared_peer_redirect`
+# — was deleted: the cgroup surface at step 04-01, and the per-connection
+# `MtlsResolve` consumer that superseded it at step 04-02. The forward
+# remains because the worker's gated intercept-install tests need it.)
 integration-tests = [
     "overdrive-dataplane/integration-tests",
     "overdrive-worker/integration-tests",

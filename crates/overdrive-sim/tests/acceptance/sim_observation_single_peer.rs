@@ -25,8 +25,8 @@ use futures::StreamExt;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
-    ObservationSubscription,
+    AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, ObservationRow,
+    ObservationStore, SubscriptionEvent,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -64,8 +64,8 @@ async fn written_alloc_status_is_observable_on_same_peer() {
 
     // Given a subscription opened before the write so no event is
     // silently dropped on the peer's fan-out.
-    let mut subscription: ObservationSubscription =
-        store.subscribe_all().await.expect("subscribe succeeds");
+    let mut subscription: LagAwareSubscription =
+        store.subscribe_all_events().await.expect("subscribe succeeds");
 
     // When the peer writes an alloc_status row for alloc/a1b2c3.
     let row = sample_alloc_status();
@@ -80,6 +80,11 @@ async fn written_alloc_status_is_observable_on_same_peer() {
         .expect("subscription delivers within deadline")
         .expect("subscription stream is not closed");
 
+    // Single write, immediate drain — lag is structurally impossible; a
+    // `Lagged` here is a real bug, surfaced loudly rather than skipped.
+    let SubscriptionEvent::Row(delivered) = delivered else {
+        panic!("subscription lagged draining a single written row: {delivered:?}");
+    };
     assert_eq!(
         delivered,
         ObservationRow::AllocStatus(Box::new(row)),

@@ -37,7 +37,9 @@ use overdrive_control_plane::workflow_runtime::{
 
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::testing::workflow::ProvisionRecordWithSleep;
-use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::observation_store::{
+    ObservationRow, ObservationStore, SubscriptionEvent,
+};
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowStatus};
 
@@ -219,7 +221,7 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
     //      recorded deadline, and the post-sleep run fires live. ----
     let (engine, clock, mut resume_pre_inbox, mut resume_post_inbox) =
         engine_on(Arc::clone(&journal), Arc::clone(&obs)).await;
-    let mut sub = obs.subscribe_all().await.expect("subscribe resume");
+    let mut sub = obs.subscribe_all_events().await.expect("subscribe resume");
     engine.start(&spec, &correlation, &workflow_id).await.expect("start resume");
     drive_to_terminal(&engine, &clock).await;
 
@@ -270,9 +272,10 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
     for _ in 0..8 {
         match tokio::time::timeout(Duration::from_secs(1), futures::StreamExt::next(&mut sub)).await
         {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
-                if got == correlation =>
-            {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation: got,
+                status,
+            }))) if got == correlation => {
                 assert!(
                     matches!(status, WorkflowStatus::Completed { .. }),
                     "the resumed run terminates Completed, got {status:?}"
@@ -280,7 +283,13 @@ async fn crash_during_sleep_window_does_not_repeat_the_pre_sleep_step() {
                 terminal_seen = true;
                 break;
             }
-            Ok(Some(_)) => {}
+            Ok(Some(SubscriptionEvent::Row(_))) => {}
+            // Single-workflow drain — lag is structurally impossible; surface it
+            // loudly rather than skipping (a real lag would silently drop the
+            // terminal row and fail the test for the wrong reason).
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                panic!("subscription lagged ({missed}) draining a single workflow terminal row")
+            }
             Ok(None) | Err(_) => break,
         }
     }

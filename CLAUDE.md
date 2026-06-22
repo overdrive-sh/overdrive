@@ -145,25 +145,33 @@ debugging detour):
 
 - **Operator / control-plane HTTPS CA** —
   `tls_bootstrap::mint_ephemeral_ca()`
-  (`crates/overdrive-control-plane/src/lib.rs:1237`). Backs the operator
+  (`crates/overdrive-control-plane/src/lib.rs:1392`). Backs the operator
   mTLS surface the CLI connects to (Talos-shape operator auth, D-CA-5 /
   [#81](https://github.com/overdrive-sh/overdrive/issues/81)). **Ephemeral
   by design and staying that way** — it is NOT the workload-identity root
   and is out of scope for any built-in-CA / SVID work.
 - **Workload-identity CA** — `RcgenCa::new(OsEntropy, ca_subject)`
-  (`lib.rs:1595`). Signs the SVIDs issued to workloads. **Currently also
-  ephemeral** — a fresh in-memory P-256 root minted each boot, NO KEK, NO
-  persistence, NOT `boot_ca` (the comment above the line states this
-  verbatim, citing ADR-0067 D3 rev 4). The persistent, KEK-backed,
-  envelope-sealed root (`ca_boot::boot_ca`, ADR-0063) is
-  [#215](https://github.com/overdrive-sh/overdrive/issues/215) — formerly
-  blocked on #35 (now landed), so the `lib.rs:1595` seam is ready to flip.
+  (`lib.rs:1754`), now backed by the **persistent, KEK-sealed root**
+  `ca_boot::boot_ca` (`lib.rs:1768`, ADR-0063 /
+  [#215](https://github.com/overdrive-sh/overdrive/issues/215) boot-side,
+  closes D-OC-4). Signs the SVIDs issued to workloads. On boot, `boot_ca`
+  runs the Earned-Trust probes (KEK-resolve, envelope-decrypt) then
+  generate-or-adopt: the first boot generates the P-256 root, envelope-seals
+  the key under the operator KEK (injected via `config.kek` —
+  `SystemdCredsKeyring` in production, `SimKek` under test) and persists it
+  to the `IntentStore`; every later boot decrypts and adopts the SAME root.
+  A boot failure propagates as the typed `ControlPlaneError::CaBoot` and
+  refuses to start (never flattened to `Internal`). This was a **single-cut
+  replacement of the prior ephemeral per-boot root** — there is no longer an
+  ephemeral workload root; the `RcgenCa` holds the adopted persistent
+  root/intermediate and the `IssueSvid` executor mints leaves off it.
 
 When reasoning about "the persistent CA," "boot the CA," "root key at
 rest," or any SVID-issuance path, the subject is the **workload-identity**
-CA (`1595` / `boot_ca`), never `mint_ephemeral_ca` (`1237`). "`serve`
-boots the ephemeral CA" is true of BOTH lines today — name which one, or
-the distinction is lost.
+CA (`boot_ca` / `RcgenCa`), never `mint_ephemeral_ca`. Only the
+operator/control-plane HTTPS CA is ephemeral now; the workload root is
+persistent and KEK-sealed. "`serve` boots the ephemeral CA" is true ONLY
+of the operator CA — name which one, or the distinction is lost.
 
 ## "Cert rotation workflow" = external ACME, NOT internal SVID reissue
 
@@ -235,6 +243,86 @@ When dispatching `@nw-solution-architect` (or any DESIGN-wave agent) for a featu
 ## Roadmap validator warnings
 
 `des.cli.roadmap validate` flags length-limit warnings (`STEP_NAME_TOO_LONG`, `CRITERIA_TOO_LONG`, `DESCRIPTION_TOO_LONG`) that are cosmetic and non-blocking — the validator exits 0 anyway. Overdrive roadmap ACs deliberately carry scenario-level specificity (test names, invariant names, proptest targets, kill-rate thresholds), and tightening them to the defaults would lose traceability. Ignore these warnings; do not ask the crafter to trim them.
+
+## Build vertical slices through production entry points — never isolated mechanisms
+
+Every feature must be **driven end-to-end through the production entry
+points** — `overdrive serve` (the node boot / composition root,
+`run_server`) and `overdrive deploy <SPEC>` (the only operator workload
+verb) — by the time it lands. "Done" is NOT "the components compile,
+pass their tests, and are *proven to compose in a test harness*." Done
+is: a real `overdrive serve` + `overdrive deploy` exercises the
+behaviour on the production path, with **no test-only wiring standing in
+for a missing production call site.**
+
+This is the **vertical-slice vs horizontal-layer** distinction, and it
+is load-bearing. A vertical slice closes a real loop through production,
+however thin. A horizontal layer builds a mechanism (a listener, a map,
+a reconciler, a kernel program) and *defers the wiring that connects it
+to a production path* — leaving infrastructure that stands up in
+`run_server` and then receives nothing in a deploy. Build vertical
+slices. A mechanism no production entry point can reach is dead code
+wearing a green test suite.
+
+The bar is specific and falsifiable, not a vibe:
+
+- The behaviour runs in the binary's real composition (`run_server` /
+  the action-shim / `start_alloc`), not only in a `#[test]` that
+  assembles the pieces by hand.
+- **No integration test installs a rule, binds a socket, programs a
+  map, or supplies an address that production does not
+  install/bind/program/supply itself.** A test that hand-installs the
+  one production call site the feature left out is *the tell*: the
+  mechanism was built, the wiring was not, and the feature is dead on
+  the production path. (A `Sim*` adapter injected at a port boundary is
+  fine — that is the port contract. Hand-installing a *missing
+  production effect* is not.)
+
+**If a feature cannot be driven through `serve` + `deploy`, that is
+scope creep — not an acceptable deferral.** The corrective is to
+**reduce the feature** until what remains closes a real loop through the
+production paths, and push the rest into a *separate, later slice that
+is itself production-drivable*. A feature whose end-to-end value is
+gated on an un-built dependency is mis-sized: it has built more
+infrastructure than any production path can exercise. Slice it so the
+first cut is usable (the walking-skeleton discipline — `nw-spike`), even
+when that loop is thinner than the grand design. Thinner-but-live beats
+complete-but-dead.
+
+This **complements** "No effort/time budget cuts" below — it does not
+contradict it. This rule governs how a feature is *shaped and sized up
+front* (vertically, around a production-drivable loop); that rule
+forbids *abandoning committed step scope mid-execution*. Size the slice
+to a real loop here; do not cut the sized scope there.
+
+**Precedent** (transparent-mtls-enrollment, #236): the inbound
+interception path (the leg-C `IP_TRANSPARENT` listener + accept loop +
+server-side mTLS handshake + kTLS + splice) and the dial-by-name DNS
+path (per-netns `resolv.conf` injection) were built, wired into
+`start_alloc`, and exercised end-to-end by integration tests — yet
+**neither could be driven through a real `serve` + `deploy`**. The
+production inbound nft-TPROXY rule that feeds leg-C was deferred
+(`start_alloc` records `tproxy_guard = None`), and the DNS responder
+daemon was deferred. The bidirectional Tier-3 test had to hand-install
+`install_inbound_tproxy(virt, leg_c_port)` itself — *the exact
+production call site the feature omitted* — so in a deploy the listener
+stood up per allocation and received nothing. The mechanism composed in
+a test; it was dead on the production path. The honest re-size: a thin
+"canonical-address" slice (advertise the per-workload `workload_addr`,
+install the inbound rule for it, route between the `/30`s) is the loop
+that makes inbound *usable* through `serve` + `deploy`; intended-peer
+pinning and the DNS daemon become later, independently-drivable slices.
+
+**Symptoms during review:**
+
+- An integration test that installs/binds/programs/supplies something
+  `run_server` does not — and the feature ships anyway.
+- A component wired into `run_server` / `start_alloc` that no production
+  path ever feeds — "stands up per allocation," then receives nothing.
+- "Proven to compose" / "the walking skeleton drives it" where the
+  skeleton is a `#[test]`, not `overdrive serve`.
+- A feature-delta whose "end-to-end flow" carries a `deferred` /
+  `(#NNN daemon)` step on the *only* path that moves real traffic.
 
 ## No effort/time budget cuts
 

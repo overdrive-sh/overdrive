@@ -1106,10 +1106,27 @@ reviewed per-PR, not aggregated across releases.
 - **Scoped per PR.** `cargo xtask mutants --diff origin/main` runs
   only mutations that overlap the PR diff. Full-corpus runs are nightly;
   per-PR budget is tight.
-- **One-line skip with justification.** Use `// mutants: skip` above
-  blocks that are genuinely untestable (panic paths, trivial getters
-  wrapping opaque state, FFI shims). Every skip carries a comment
-  explaining *why* — an unjustified skip is a review rejection.
+- **Skip via the `#[mutants::skip]` attribute or an `exclude_re`
+  entry — NOT a comment.** cargo-mutants has exactly three skip
+  mechanisms (verified against v27.1.0 and the docs at
+  <https://mutants.rs/attrs.html> + <https://mutants.rs/skip.html>):
+  the `#[mutants::skip]` attribute (incl. `#[cfg_attr(test,
+  mutants::skip)]` and the file-level `#![mutants::skip]`), path
+  filtering (`exclude_globs`), and description-regex filtering
+  (`exclude_re`). **There is NO comment-based skip — a bare
+  `// mutants: skip` line suppresses nothing** (a function carrying
+  only that comment, with no attribute and no `exclude_re` entry, is
+  still mutated and counted as missed). For a genuinely untestable
+  block (panic paths, trivial getters wrapping opaque state, or I/O /
+  FFI shims reachable only from integration or Tier-2/3 tests) either
+  mark it `#[mutants::skip]` **or** add an `exclude_re` entry to
+  `.cargo/mutants.toml` — the latter is this repo's standard mechanism
+  (see the existing entries there, which carry the per-exclusion
+  justification). Every skip carries a justification (in the
+  attribute's adjacent comment or the `exclude_re` block) explaining
+  *why*; an unjustified skip is a review rejection. A `// mutants:
+  skip` comment may remain as human-facing documentation *alongside*
+  the real suppression, but it is never itself the mechanism.
 - **Missed mutations are actionable, not aspirational.** A PR that
   introduces a missed mutation either adds a test or documents the
   reason inline. "We'll fix it later" is rejected.

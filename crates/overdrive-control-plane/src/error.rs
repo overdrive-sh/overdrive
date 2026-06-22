@@ -347,38 +347,20 @@ pub enum DataplaneBootError {
 /// Boot-time failure of the production transparent-mTLS layer
 /// (transparent-mtls-host-socket, D-MTLS-17, GH #26; step 06-03).
 ///
-/// Mirrors [`DataplaneBootError`]'s `Construct`/`Probe` shape: the mTLS
-/// layer is wired AFTER `IdentityMgr` (so `HostMtlsEnforcement` can read
-/// the held identity), `probe()`d under the wire→probe→use invariant, and
-/// only then used. A failure happens BEFORE the listener binds, so the
-/// `to_response` arm on the embedding [`ControlPlaneError::MtlsBoot`]
-/// variant is exhaustiveness-only. Pass-through `#[from]` per
-/// `.claude/rules/development.md` § "Never flatten a typed error to
-/// `Internal(String)`": each cause keeps its own variant so the
+/// The mTLS layer is wired AFTER `IdentityMgr` (so `HostMtlsEnforcement` can
+/// read the held identity), `probe()`d under the wire→probe→use invariant,
+/// and only then used. A failure happens BEFORE the listener binds, so the
+/// `to_response` arm on the embedding [`ControlPlaneError::MtlsBoot`] variant
+/// is exhaustiveness-only. As of step 04-01 (ADR-0071 Path A) the only boot
+/// failure mode is the `probe()` step: the OUTBOUND intercept is a per-veth
+/// egress nft-TPROXY rule installed per-alloc at `start_alloc`, not a
+/// boot-time BPF load, so the former `Load` variant (`MtlsDataplane::load`)
+/// is gone. Per `.claude/rules/development.md` § "Never flatten a typed error
+/// to `Internal(String)`" the `Probe` cause keeps its own variant so the
 /// composition root can `matches!(e, ControlPlaneError::MtlsBoot(_))` for
 /// structured boot diagnostics without `Display`-grepping.
 #[derive(Debug, Error)]
 pub enum MtlsBootError {
-    /// `MtlsDataplane::load` failed — the shared `overdrive_bpf.o` could
-    /// not be loaded, `cgroup_connect4_mtls` / `MTLS_REDIRECT_DEST` was
-    /// absent (a build/embed regression), or the program's verifier load
-    /// was rejected. The node MUST refuse to start (fail-closed for
-    /// confidentiality — NO degrade to a cleartext path).
-    #[error(
-        "transparent-mTLS dataplane load failed; refusing to boot \
-         (no cleartext fallback): {source}\n\
-         \n\
-         Try:\n\
-           - `mount | grep bpffs` to verify /sys/fs/bpf is mounted.\n\
-           - `dmesg | tail` for kernel-side BPF verifier errors.\n\
-           - Confirm CAP_BPF / CAP_NET_ADMIN for the running process."
-    )]
-    Load {
-        /// Underlying typed `MtlsDataplaneError` from `MtlsDataplane::load`.
-        #[from]
-        source: overdrive_dataplane::mtls::MtlsDataplaneError,
-    },
-
     /// `MtlsEnforcement::probe` failed — the kTLS-arm + agent-light
     /// forward-encrypt substrate did not round-trip clean on the loopback
     /// sentinel (D-MTLS-11/12). The proxy is not trustworthy; the node
@@ -392,6 +374,26 @@ pub enum MtlsBootError {
         /// Underlying `MtlsEnforcementError` from `MtlsEnforcement::probe`.
         #[source]
         source: overdrive_core::traits::mtls_enforcement::MtlsEnforcementError,
+    },
+
+    /// `MtlsResolve::probe` failed — the per-connection enrollment-resolve
+    /// adapter (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) could not read
+    /// its backing `service_backends` surface at boot (a failed List or a
+    /// failed watch-open). The Earned-Trust gate (wire → probe → use) refuses
+    /// to start: an adapter that cannot read `service_backends` would degrade
+    /// to silent `NonMesh`-everywhere → silent cleartext — the exact footgun
+    /// the enrollment model exists to remove. Distinct from [`Self::Probe`]
+    /// (the enforcement substrate) so the operator sees WHICH boot probe
+    /// refused; the node refuses with `health.startup.refused` either way
+    /// (fail-closed, no cleartext fallback).
+    #[error(
+        "transparent-mTLS resolve probe failed; refusing to boot \
+         (no cleartext fallback): {source}"
+    )]
+    ResolveProbe {
+        /// Underlying `MtlsResolveError` from `MtlsResolve::probe`.
+        #[source]
+        source: overdrive_core::traits::mtls_resolve::MtlsResolveError,
     },
 }
 
@@ -499,6 +501,42 @@ pub enum ControlPlaneError {
     /// refuses to start (NO degrade to a cleartext path).
     #[error(transparent)]
     MtlsBoot(#[from] MtlsBootError),
+
+    /// Adopt-on-restart boot-recovery failure (transparent-mtls-enrollment
+    /// step 04-04, D-TME-12 §1–§4). The boot pass that rebuilds the lost
+    /// in-RAM `NetSlotAllocator` map from the surviving `ovd-ns-<slot>` netns
+    /// (and GCs orphan netns) failed: a slot-correlation conflict (two
+    /// survivors on one slot — impossible by construction), an `ip netns` /
+    /// procfs observe failure, or an obs-store read failure. Pass-through
+    /// `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
+    /// error to `Internal(String)`" so the composition root can `matches!(e,
+    /// ControlPlaneError::NetnsRecovery(_))` and branch on the inner
+    /// `NetnsRecoveryError` cause without `Display`-grepping. Same boot-path
+    /// shape as `MtlsBoot` / `DataplaneBoot`: happens BEFORE the listener
+    /// binds (the `to_response` arm is exhaustiveness-only) and is fail-closed
+    /// — the node refuses to start (`health.startup.refused`, reason
+    /// `netns.adopt`) rather than serve with a half-rebuilt allocator that
+    /// would collide a fresh alloc onto a survivor.
+    #[error(transparent)]
+    NetnsRecovery(#[from] crate::veth_provisioner::NetnsRecoveryError),
+
+    /// Adopt-on-restart §5 nft-rule-sweep failure (transparent-mtls-enrollment
+    /// step 04-04, D-TME-12 §5; folds 03-01 review finding D2). After the netns
+    /// adopt+GC, the boot pass sweeps every surviving per-workload nft-TPROXY
+    /// rule from the shared `overdrive-mtls prerouting` chain (their in-RAM RAII
+    /// guards were lost on the CP restart, so the rules are dead-weight
+    /// survivors); a by-handle `nft delete rule` failing surfaces here.
+    /// Pass-through `#[from]` per `.claude/rules/development.md` § "Never flatten
+    /// a typed error to `Internal(String)`" — NOT `internal(...)` — so the
+    /// composition root can `matches!(e, ControlPlaneError::NftRuleSweep(_))` and
+    /// branch on the inner `InterceptError` cause without `Display`-grepping.
+    /// Same boot-path shape as `NetnsRecovery` / `MtlsBoot`: happens BEFORE the
+    /// listener binds (the `to_response` arm is exhaustiveness-only) and is
+    /// fail-closed — the node refuses to start (`health.startup.refused`, reason
+    /// `nft.sweep`) rather than serve with stale per-workload rules that would
+    /// duplicate-stack on the next per-alloc re-install.
+    #[error(transparent)]
+    NftRuleSweep(#[from] overdrive_worker::mtls_intercept::InterceptError),
 
     /// `[dataplane.vip_allocator]` TOML parser refusal per
     /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
@@ -797,6 +835,24 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // (`matches!(e, ControlPlaneError::MtlsBoot(_))`) to emit
             // `health.startup.refused` and refuse to boot fail-closed;
             // this arm exists only for enum exhaustiveness.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::NetnsRecovery(e) => (
+            // Same boot-path shape as `MtlsBoot` / `DataplaneBoot` above:
+            // adopt-on-restart recovery runs AFTER `AppState` and BEFORE
+            // the listener binds (step 04-04), emitting `health.startup.
+            // refused` (reason `netns.adopt`) itself; this arm is
+            // exhaustiveness-only.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::NftRuleSweep(e) => (
+            // Same boot-path shape as `NetnsRecovery` above: the §5
+            // per-workload nft-rule sweep runs AFTER `AppState` and BEFORE
+            // the listener binds (step 04-04 §5), emitting `health.startup.
+            // refused` (reason `nft.sweep`) itself; this arm is
+            // exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

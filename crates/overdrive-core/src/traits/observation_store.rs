@@ -1137,16 +1137,67 @@ impl VersionedEnvelope for ReconcileConflictRowEnvelope {
 }
 
 // ---------------------------------------------------------------------------
-// Subscription stream alias
+// Subscription stream — lag-surfacing
 // ---------------------------------------------------------------------------
 
-/// A subscription stream over all observation rows written to or
-/// gossiped into this peer.
+/// A single item on a [`LagAwareSubscription`]: either an observation row
+/// delivered in order, or a gap signal telling the consumer it missed
+/// `missed` rows and MUST re-acquire an authoritative snapshot before it
+/// can trust its derived view again.
 ///
-/// Phase 2+ introduces a filter parameter (`prefix` / predicate) once
-/// there are enough row variants to justify it; the Phase 1 sim surface
-/// is intentionally "subscribe to everything."
-pub type ObservationSubscription = Box<dyn Stream<Item = ObservationRow> + Send + Unpin>;
+/// This is the etcd-`ErrCompacted` / k8s-reflector-`Gone` recovery
+/// contract applied to the in-process broadcast: a consumer that
+/// maintains a coherent local cache over the forward-only watch is told,
+/// explicitly, when it has fallen behind — rather than silently missing
+/// rows. It is a **domain** event: the adapter maps the underlying
+/// `tokio::sync::broadcast::error::RecvError::Lagged(n)` to
+/// [`Lagged { missed: n }`](SubscriptionEvent::Lagged) at the adapter
+/// boundary, so the core trait never names a tokio type.
+///
+/// This is the **only** subscription item shape in the trait: there is no
+/// lossy `Row`-only sibling that strips the gap signal. Every consumer —
+/// the mTLS resolve index, DST invariants, the store conformance harness —
+/// sees `Lagged` and MUST handle it (relist, or fail loudly where lag is a
+/// structural impossibility); none may silently discard it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubscriptionEvent {
+    /// An observation row delivered in order — the steady-state item. Fold
+    /// it into the derived view.
+    Row(ObservationRow),
+    /// A gap: `missed` rows were dropped because the consumer lagged past
+    /// the broadcast capacity. The consumer MUST relist (re-acquire the
+    /// authoritative snapshot and rebuild/merge its derived view) — it MUST
+    /// NOT silently discard this signal, or its view goes permanently
+    /// stale on the dropped rows. The stream continues with subsequent
+    /// `Row`s after the gap.
+    Lagged {
+        /// The number of rows the broadcast layer dropped before this
+        /// signal — surfaced for diagnostics; the relist recovery does not
+        /// depend on the exact count (any loss triggers a full
+        /// re-acquire).
+        missed: u64,
+    },
+}
+
+/// The subscription over all observation rows written to or gossiped into
+/// this peer, yielding [`SubscriptionEvent`] so a consumer that maintains a
+/// coherent local cache is TOLD when it lagged (via
+/// [`SubscriptionEvent::Lagged`]) instead of silently missing rows.
+///
+/// Opened by [`ObservationStore::subscribe_all_events`] — the single
+/// subscription surface on the trait. Every consumer (the
+/// `ServiceBackendsResolve` mTLS resolve index, the DST workflow invariants,
+/// the store conformance harness) reads this stream and handles `Lagged`
+/// explicitly: a cache-maintaining consumer relists; a consumer for which
+/// lag is structurally impossible (controlled write rate, prompt drain)
+/// fails loudly on `Lagged` rather than masking a real lag bug. There is no
+/// lossy `Row`-only sibling — the gap signal is never stripped at the trait
+/// boundary.
+///
+/// Phase 2+ introduces a filter parameter (`prefix` / predicate) once there
+/// are enough row variants to justify it; the Phase 1 surface is
+/// intentionally "subscribe to everything."
+pub type LagAwareSubscription = Box<dyn Stream<Item = SubscriptionEvent> + Send + Unpin>;
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -1197,8 +1248,75 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// append-only one.
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
 
-    /// Subscribe to every observation row written to this peer.
-    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError>;
+    /// Subscribe to every observation row written to this peer, **surfacing
+    /// broadcast lag** as [`SubscriptionEvent::Lagged`] instead of silently
+    /// dropping it.
+    ///
+    /// This is the single subscription surface on the trait. A consumer that
+    /// maintains a derived local view over the forward-only watch (today,
+    /// `ServiceBackendsResolve`'s mTLS resolve index) and MUST re-acquire an
+    /// authoritative snapshot on loss gets the etcd-`ErrCompacted` /
+    /// k8s-reflector-`Gone` recovery contract; a consumer for which lag is
+    /// structurally impossible (controlled write rate, prompt drain) treats a
+    /// `Lagged` as a loud failure rather than masking a real lag bug. No
+    /// consumer may silently discard the gap signal.
+    ///
+    /// # Preconditions
+    ///
+    /// None beyond a readable store. A store that cannot open a
+    /// subscription returns [`ObservationStoreError`] (e.g.
+    /// [`ObservationStoreError::Unreachable`] for a gossip backend); a
+    /// successful return yields a live stream.
+    ///
+    /// # Postconditions / completeness contract (the load-bearing clause)
+    ///
+    /// A consumer of the returned [`LagAwareSubscription`] either:
+    /// - receives EVERY row written after the subscription opened, as an
+    ///   in-order [`SubscriptionEvent::Row`]; OR
+    /// - is told, via [`SubscriptionEvent::Lagged { missed }`](SubscriptionEvent::Lagged),
+    ///   that `missed` rows were dropped because it lagged past the
+    ///   broadcast capacity — at which point it MUST relist.
+    ///
+    /// It is NEVER silently missing a row: every row is delivered or its
+    /// loss is signalled. The stream continues delivering subsequent `Row`s
+    /// after a `Lagged`.
+    ///
+    /// # Edge cases
+    ///
+    /// - **No rows ever written** — the stream simply never yields; it
+    ///   parks.
+    /// - **Sender dropped (watch closed)** — the stream ends (`next()`
+    ///   yields `None`). A consumer treats end-of-stream as a terminal
+    ///   watch failure (it can no longer be kept current).
+    /// - **Repeated lag** — each lag episode yields its own
+    ///   [`SubscriptionEvent::Lagged`]; the consumer relists on each (a
+    ///   relist is idempotent — it re-acquires the whole snapshot).
+    /// - **`missed` count** — surfaced for diagnostics only; relist
+    ///   recovery does not depend on the exact value (any loss triggers a
+    ///   full re-acquire).
+    ///
+    /// # Observable invariants every adapter MUST preserve
+    ///
+    /// 1. A row accepted by [`Self::write`] (LWW/append-only winner) after
+    ///    the subscription opened is delivered as exactly one
+    ///    [`SubscriptionEvent::Row`] UNLESS it was dropped by lag, in which
+    ///    case a [`SubscriptionEvent::Lagged`] is yielded before the next
+    ///    delivered `Row` (the loss is never silent).
+    /// 2. A row REJECTED by [`Self::write`] (LWW loser, append-only
+    ///    duplicate) is NEVER delivered on this stream.
+    /// 3. Broadcast lag is mapped to [`SubscriptionEvent::Lagged`] at the
+    ///    adapter boundary; the core trait never names a tokio error type.
+    ///
+    /// # No default impl
+    ///
+    /// This method is REQUIRED — there is no default that adapts a lossy
+    /// `Row`-only stream into a never-lag one (such an adapter could never
+    /// yield `Lagged`, silently re-introducing the completeness gap this
+    /// surface exists to close). Both production adapters in this workspace
+    /// (`SimObservationStore`, `LocalObservationStore`) implement it directly
+    /// by mapping `RecvError::Lagged(n)` to
+    /// [`SubscriptionEvent::Lagged { missed: n }`](SubscriptionEvent::Lagged).
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError>;
 
     /// Read a deterministic snapshot of every `alloc_status` row this
     /// peer currently holds as LWW winner. Intended for point-in-time
@@ -1207,7 +1325,7 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// `AllocationId`.
     ///
     /// Phase 1 motivation: the REST observation-read handlers land in
-    /// step 03-03; the existing `subscribe_all` surface is suited to
+    /// step 03-03; the [`Self::subscribe_all_events`] surface is suited to
     /// long-lived reactive consumers (reconcilers, dataplane hydration),
     /// not one-shot HTTP handlers. A typed snapshot is the honest read
     /// primitive for request/response handlers.
@@ -1383,6 +1501,62 @@ pub trait ObservationStore: Send + Sync + 'static {
     async fn service_backends_rows(
         &self,
         service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
+
+    /// Read a deterministic snapshot of EVERY LWW-winner `service_backends`
+    /// row this peer currently holds — across ALL services, with NO
+    /// `ServiceId` key. This is the keyless enumerate sibling of the
+    /// `ServiceId`-keyed [`Self::service_backends_rows`]; it is symmetric
+    /// with the existing unkeyed enumerators [`Self::alloc_status_rows`] and
+    /// [`Self::node_health_rows`] (no-arg, returns the full LWW-winner set),
+    /// and follows the same `*_rows()`-no-arg naming convention with an
+    /// `all_`-prefix to avoid colliding with the keyed method.
+    ///
+    /// # Motivation (the List leg of List-then-Watch)
+    ///
+    /// The transparent-mTLS `ServiceBackendsResolve` adapter (ADR-0071,
+    /// C4 / D-TME-11) resolves an arbitrary `orig_dst: SocketAddrV4` against
+    /// an in-RAM `addr → Backend` reverse index. It holds NO `ServiceId`, so
+    /// the keyed [`Self::service_backends_rows`] is the wrong surface for a
+    /// boot-time snapshot. This method is the **List** leg of its
+    /// List-then-Watch: at `probe()` it bulk-loads the current snapshot into
+    /// the index BEFORE the Earned-Trust gate opens (so the index is never
+    /// empty-but-trusted), and on a watch-loss (`broadcast::RecvError::Lagged`)
+    /// it re-Lists the authoritative snapshot. This is the same List-before-
+    /// Watch shape the reconciler runtime's `bulk_load` already uses.
+    ///
+    /// # Preconditions
+    /// None.
+    ///
+    /// # Postconditions on `Ok(rows)`
+    /// `rows` is every `service_backends` row this peer currently holds as
+    /// LWW winner — at most one row per `ServiceId` (the table is keyed by
+    /// `ServiceId` alone). For each returned row, calling
+    /// [`Self::service_backends_rows`] with that row's `service_id` returns
+    /// the same row. The two surfaces are coherent: this method is the union
+    /// of the keyed reads over every present service.
+    ///
+    /// # Edge cases
+    /// - **Empty store** → `Ok(vec![])` (no services have written backends).
+    /// - A row whose envelope bytes fail to decode (corrupt / unknown future
+    ///   version) is skipped with a structured `tracing::warn!` per ADR-0048
+    ///   § 3 (observation log-and-skip; asymmetric vs intent fail-fast) and
+    ///   the surviving rows are returned — convergence proceeds.
+    ///
+    /// # Observable invariants
+    /// Iteration order is deterministic — ascending by `ServiceId` under the
+    /// adapter's storage shape (a [`std::collections::BTreeMap`] for the sim
+    /// adapter; ascending key bytes for the redb-backed local adapter), so
+    /// repeated calls against unchanged state return byte-identical ordered
+    /// snapshots (K3 reproducibility). The method is read-only: it mutates no
+    /// store state.
+    ///
+    /// # Errors
+    /// [`ObservationStoreError::Io`] on a backing-store read failure. A
+    /// per-row envelope-decode failure does NOT error — it is logged and the
+    /// row skipped.
+    async fn all_service_backends_rows(
+        &self,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
 
     /// Read every LWW-winner `reconcile_conflict` row for the given

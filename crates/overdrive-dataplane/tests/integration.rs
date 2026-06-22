@@ -42,21 +42,6 @@ mod integration {
     /// asserts the presented leaf chains to the root + its URI SAN is the workload
     /// SPIFFE id, from the captured handshake at the test tier.
     mod mtls_agent_handshake;
-    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 01-01, F2 — the
-    /// FIRST, BLOCKING DELIVER slice). The composed bidirectional proxy walking
-    /// skeleton over real netns/veth + cgroup-isolated workloads, NO RST. Drives
-    /// the scenario through the `MtlsEnforcement` driving port. Its shared PKI +
-    /// role test fixtures live at `helpers::mtls_pki` / `helpers::mtls_roles`
-    /// (promoted out of the per-test subdir in step 02-02 so the agent-handshake
-    /// acceptance test shares ONE role harness — no parallel implementation).
-    mod mtls_composed_walking_skeleton;
-    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 06-01, D-MTLS-17 item 1) —
-    /// the PRODUCTION OUTBOUND BPF integration surface `MtlsDataplane`: load +
-    /// per-alloc-attach `cgroup_connect4_mtls` + program `MTLS_REDIRECT_DEST`.
-    /// Drives the production handle; observables are REAL kernel state (`bpftool
-    /// cgroup show` per-alloc attach, `bpftool map dump` redirect entry, a real
-    /// cgroup-isolated connect rewritten onto leg-F, link-drop detach).
-    mod mtls_dataplane_outbound_install;
     /// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F1/F4/F5/F6/F7) —
     /// the guardrails AT: fail-closed cause-distinct (inbound nocert/wrongca DISTINCT
     /// reasons before any splice, server gets 0 bytes), the F4/F7 limits at their
@@ -65,7 +50,7 @@ mod integration {
     /// (Stalled → worker teardown → Gone, no leak), the F5 intercept-exemption
     /// negatives (agent dial not re-intercepted; workload cannot self-exempt), and
     /// the honest v1 authn boundary (chain-to-bundle ONLY; the wrong-but-valid-peer
-    /// PeerIdentityMismatch case is #[ignore]-gated on #178). Drives the
+    /// PeerIdentityMismatch case is #[ignore]-gated on #242). Drives the
     /// `MtlsEnforcement` driving port; observables are REAL kernel/subprocess (0
     /// cleartext bytes at the server via a real capture, the distinct reason strings,
     /// the concrete limit values, real teardown → Gone).
@@ -79,13 +64,6 @@ mod integration {
     /// 0x17-only (cleartext-hits=0), and splice-only deliver (strace), through the
     /// `MtlsEnforcement` driving port.
     mod mtls_inbound_enforce;
-    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 02-03, F3/F5/D-MTLS-13) —
-    /// OUTBOUND-isolated per-direction wire/syscall observables: the forward
-    /// `read→write_all` COPY into leg B's kTLS-TX vs the return zero-copy `splice` out
-    /// of leg B's kTLS-RX. Drives `HostMtlsEnforcement::enforce(Outbound)` and asserts
-    /// the mechanism asymmetry from REAL strace + ss -tie ULP + the AF_PACKET wire
-    /// oracle, through the `MtlsEnforcement` driving port.
-    mod mtls_outbound_enforce;
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;

@@ -55,7 +55,7 @@ use overdrive_control_plane::workflow_runtime::{
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::testing::workflow::ProvisionRecord;
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationSubscription,
+    LagAwareSubscription, ObservationRow, ObservationStore, SubscriptionEvent,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{JournalCursor, WorkflowCtx, WorkflowStatus};
@@ -94,17 +94,24 @@ async fn engine_on(
 /// Drain the `WorkflowTerminal` row for `correlation` off a subscription
 /// taken BEFORE the run drove to terminal. Returns the terminal status.
 async fn terminal_status(
-    subscription: &mut ObservationSubscription,
+    subscription: &mut LagAwareSubscription,
     correlation: &CorrelationKey,
 ) -> WorkflowStatus {
     for _ in 0..8 {
         match tokio::time::timeout(Duration::from_secs(1), subscription.next()).await {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
-                if &got == correlation =>
-            {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation: got,
+                status,
+            }))) if &got == correlation => {
                 return status;
             }
-            Ok(Some(_)) => {}
+            Ok(Some(SubscriptionEvent::Row(_))) => {}
+            // Single-workflow drain — lag is structurally impossible; surface it
+            // loudly rather than skipping (a real lag would silently drop the
+            // terminal row and fail the test for the wrong reason).
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                panic!("subscription lagged ({missed}) draining a single workflow terminal row")
+            }
             Ok(None) | Err(_) => break,
         }
     }
@@ -136,7 +143,7 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
     let obs_a: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node"), 0));
     let (engine_a, mut inbox_a) = engine_on(Arc::clone(&journal_a), Arc::clone(&obs_a)).await;
-    let mut sub_a = obs_a.subscribe_all().await.expect("subscribe");
+    let mut sub_a = obs_a.subscribe_all_events().await.expect("subscribe");
 
     engine_a.start(&spec, &correlation, &workflow_id).await.expect("start A");
     engine_a.join_all().await;
@@ -197,7 +204,7 @@ async fn killing_after_step_records_does_not_repeat_the_effect_on_resume() {
     //      The engine load_journals the RunResult into the replay buffer;
     //      ctx.run short-circuits (replay) WITHOUT re-firing the effect. ----
     let (engine_c, mut inbox_c) = engine_on(Arc::clone(&journal_b), Arc::clone(&obs_b)).await;
-    let mut sub_c = obs_b.subscribe_all().await.expect("subscribe C");
+    let mut sub_c = obs_b.subscribe_all_events().await.expect("subscribe C");
 
     engine_c.start(&spec, &correlation, &workflow_id).await.expect("start C (resume)");
     engine_c.join_all().await;

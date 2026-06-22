@@ -61,7 +61,7 @@ use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry
 
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ObservationSubscription,
+    LagAwareSubscription, ObservationRow, ObservationStore, SubscriptionEvent,
 };
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{
@@ -153,8 +153,8 @@ async fn undecodable_input_terminates_failed_malformed_input_without_running_the
     let workflow_id = WorkflowId::new("wf-malformed-0001").expect("valid workflow id");
 
     // Subscribe BEFORE driving so the terminal row is observed on the stream.
-    let mut subscription: ObservationSubscription =
-        obs.subscribe_all().await.expect("subscribe succeeds");
+    let mut subscription: LagAwareSubscription =
+        obs.subscribe_all_events().await.expect("subscribe succeeds");
 
     engine.start(&spec, &correlation, &workflow_id).await.expect("engine start succeeds");
     engine.join_all().await;
@@ -165,13 +165,20 @@ async fn undecodable_input_terminates_failed_malformed_input_without_running_the
     for _ in 0..8 {
         let next = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
         match next {
-            Ok(Some(ObservationRow::WorkflowTerminal { correlation: got, status }))
-                if got == correlation =>
-            {
+            Ok(Some(SubscriptionEvent::Row(ObservationRow::WorkflowTerminal {
+                correlation: got,
+                status,
+            }))) if got == correlation => {
                 found = Some(status);
                 break;
             }
-            Ok(Some(_)) => {}
+            Ok(Some(SubscriptionEvent::Row(_))) => {}
+            // Single-workflow drain — lag is structurally impossible; surface it
+            // loudly rather than skipping (a real lag would silently drop the
+            // terminal row and fail the test for the wrong reason).
+            Ok(Some(SubscriptionEvent::Lagged { missed })) => {
+                panic!("subscription lagged ({missed}) draining a single workflow terminal row")
+            }
             Ok(None) | Err(_) => break,
         }
     }

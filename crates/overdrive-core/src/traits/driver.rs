@@ -153,6 +153,46 @@ pub struct AllocationSpec {
     /// `ServiceSpec.health_check` (per ADR-0057) into the
     /// reconciler-emitted `AllocationSpec`.
     pub probe_descriptors: Vec<ProbeDescriptor>,
+
+    /// Target network namespace NAME this allocation's workload is spawned
+    /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
+    /// already exist — the action-shim C3 site provisions it before
+    /// `Driver::start`). `Some(plan.netns)` only when the C3 site provisioned
+    /// a per-workload netns (the production mTLS boot); `None` for every
+    /// non-netns workload (every current test fixture, and any boot where the
+    /// mTLS composition gate is off). The driver opens `/var/run/netns/<name>`
+    /// when `Some`; a `None` spec yields the pre-join host-netns behaviour.
+    ///
+    /// `Option<String>`, NOT a `NetnsName` newtype: the value is already a
+    /// validated, bounded, slot-derived name (`ovd-ns-<4hex>`, 11 chars ≤
+    /// NAME_MAX) minted ONLY by `derive_workload_netns_plan` — it has no parse
+    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
+    /// defend (see the JOIN-1 newtype rationale in
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`
+    /// D-TME-12). Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": `AllocationSpec` derives only
+    /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
+    /// each reconcile tick (never persisted), so this field is a pure
+    /// in-memory channel with no schema-evolution discipline attached.
+    pub netns: Option<String>,
+
+    /// Host-side veth interface NAME for this allocation's per-workload veth
+    /// pair (`ovd-hv-<4hex-slot>`), the `iifname` the outbound nft-TPROXY rule
+    /// matches to redirect the workload's egress to leg-F
+    /// (`MtlsInterceptWorker::start_alloc` →
+    /// `install_outbound_tproxy(host_veth, leg_f_port)`). `Some(plan.host_veth)`
+    /// ONLY when the action-shim C3 site provisioned a per-workload netns/veth
+    /// (the production mTLS-composed boot); `None` for every non-netns workload
+    /// (every current test fixture, and any boot where the mTLS composition gate
+    /// is off) — the pre-join host-netns behaviour, exactly like `netns`.
+    ///
+    /// `Option<String>`, NOT a newtype — the SAME rationale as `netns` (JOIN-1):
+    /// the value is already a validated, bounded, slot-derived name minted ONLY
+    /// by `derive_workload_netns_plan` (a pure projection of the already-newtyped
+    /// `NetSlot`); it has no parse surface, no operator-typed entry point, and no
+    /// `FromStr` round-trip to defend (JOIN-6,
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`).
+    pub host_veth: Option<String>,
 }
 
 /// Opaque handle returned by the driver at start. The node agent does not

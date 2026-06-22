@@ -35,7 +35,7 @@
 //!   the bypass on its OWN socket is STILL intercepted (the bypass is agent-private,
 //!   unreachable from the workload). v1 verifies chain-to-bundle ONLY in both
 //!   directions; the wrong-but-valid-peer `PeerIdentityMismatch` negative is present
-//!   but `#[ignore]`-gated on #178 — NOTHING calls that case 'protected'. [ADR-0069
+//!   but `#[ignore]`-gated on #242 — NOTHING calls that case 'protected'. [ADR-0069
 //!   'intercept-recursion / agent-leg-B exemption' + 'The honest v1 security claim']
 //!
 //! **Litmus (falsifiability / port-to-port)**: delete the `InFlightLedger` gate in
@@ -680,21 +680,21 @@ fn outbound_peer_serve(
 }
 
 // =====================================================================
-// PeerIdentityMismatch — the wrong-but-valid-peer negative, #[ignore]-gated on #178.
+// PeerIdentityMismatch — the wrong-but-valid-peer negative, #[ignore]-gated on #242.
 // =====================================================================
 
 /// `#[ignore]` — the wrong-but-valid-peer (chains to the bundle but is NOT the
 /// intended destination) negative. v1 is authn-only: `expected_peer == None`, so
-/// `PeerIdentityMismatch` is NEVER produced. This case wires the moment #178 supplies
+/// `PeerIdentityMismatch` is NEVER produced. This case wires the moment #242 supplies
 /// `expected_peer` (east-west SPIFFE-ID resolution). Until then NOTHING calls the
 /// wrong-but-valid-peer case 'protected' — this gate stays ignored.
 #[tokio::test]
-#[ignore = "gated on #178 supplying expected_peer (v1 is authn-only; expected_peer stays None)"]
+#[ignore = "gated on #242 supplying expected_peer (v1 is authn-only; expected_peer stays None)"]
 async fn wrong_but_valid_peer_is_peer_identity_mismatch() {
-    // When #178 lands: set conn.expected_peer = Some(intended_spiffe) and a peer
+    // When #242 lands: set conn.expected_peer = Some(intended_spiffe) and a peer
     // presenting a DIFFERENT valid-chain SVID; assert Err(PeerIdentityMismatch). v1
-    // does NOT wire SAN-match — this body asserts nothing protected until #178.
-    panic!("Not yet implemented -- RED scaffold (04-01 / PeerIdentityMismatch gated on #178)");
+    // does NOT wire SAN-match — this body asserts nothing protected until #242.
+    panic!("Not yet implemented -- RED scaffold (04-01 / PeerIdentityMismatch gated on #242)");
 }
 
 // =====================================================================

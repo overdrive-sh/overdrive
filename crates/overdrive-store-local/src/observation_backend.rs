@@ -81,15 +81,17 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
-    ObservationStore, ObservationStoreError, ObservationSubscription, ReconcileConflictRow,
-    ReconcileConflictRowEnvelope, ServiceBackendRow, ServiceBackendRowEnvelope,
-    ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, NodeHealthRow,
+    NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
+    ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
+    ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    SubscriptionEvent,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 /// Holds the rkyv-archived bytes of every `AllocStatusRow`, keyed by
 /// canonical `AllocationId` bytes.
@@ -262,11 +264,11 @@ const fn encode_reconcile_conflict_prefix(service_id: ServiceId) -> [u8; 8] {
 }
 
 /// Capacity of the in-process broadcast channel used for
-/// `subscribe_all`. Sized to absorb a short-lived reader stall on a
-/// single-node workload without backing memory to the moon. Subscribers
-/// that lag past this silently lose the dropped notifications and keep
-/// receiving subsequent ones — the stream does not close on lag (see
-/// module docs).
+/// `subscribe_all_events`. Sized to absorb a short-lived reader stall on a
+/// single-node workload without backing memory to the moon. A subscriber
+/// that lags past this is told via [`SubscriptionEvent::Lagged`] (the gap
+/// signal is surfaced, never silently stripped) and keeps receiving
+/// subsequent rows — the stream does not close on lag (see module docs).
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 1024;
 
 /// Redb-backed `ObservationStore`. Cheap to clone via `Arc`; safe to
@@ -278,7 +280,7 @@ pub struct LocalObservationStore {
 struct Inner {
     /// `redb::Database` handles its own internal locking.
     db: Database,
-    /// Fan-out channel for `subscribe_all` subscribers. Every
+    /// Fan-out channel for `subscribe_all_events` subscribers. Every
     /// successful `write` emits the row on this channel after the redb
     /// commit succeeds — subscribers never observe a phantom row that
     /// failed to persist.
@@ -293,7 +295,7 @@ struct Inner {
     /// record is the engine-side redb+CBOR journal (`JournalCommand::Terminal`,
     /// K5); the observation row is the LIVE convergence signal only, so a
     /// process-local in-memory index is the correct shape here — it
-    /// matches what `subscribe_all` already provides (live, not
+    /// matches what `subscribe_all_events` already provides (live, not
     /// cold-boot-durable) without minting a versioned rkyv envelope per
     /// ADR-0048 for a non-durable signal. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § "Ordered-collection
@@ -501,10 +503,20 @@ impl ObservationStore for LocalObservationStore {
         Ok(())
     }
 
-    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError> {
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        // The single subscription surface: map `Ok(row) → Row` and SURFACE the
+        // loss `Err(Lagged(n)) → Lagged { missed: n }` at this adapter boundary
+        // so the core trait never names a tokio error type. Every consumer
+        // handles `Lagged` — `ServiceBackendsResolve` relists; the DST
+        // invariants and store conformance harness fail loudly (C4 / D-TME-11
+        // completeness contract — a dropped row is always either delivered or
+        // signalled, never silently missed).
         let rx = self.inner.subscription_tx.subscribe();
-        let stream = BroadcastStream::new(rx).filter_map(Result::ok);
-        Ok(Box::new(SubscriptionStream { inner: Box::pin(stream) }))
+        let stream = BroadcastStream::new(rx).map(|item| match item {
+            Ok(row) => SubscriptionEvent::Row(row),
+            Err(BroadcastStreamRecvError::Lagged(missed)) => SubscriptionEvent::Lagged { missed },
+        });
+        Ok(Box::new(SubscriptionEventStream { inner: Box::pin(stream) }))
     }
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
@@ -805,6 +817,44 @@ impl ObservationStore for LocalObservationStore {
                 }
             }
             Ok::<_, ObservationStoreError>((rows, failures))
+        })
+        .await
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_service_backends",
+            "skipping service-backend row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
+    }
+
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        // Full-table scan over `SERVICE_BACKENDS_TABLE` — the keyless List
+        // leg (C4 / D-TME-11). Mirrors the `alloc_status_rows` /
+        // `node_health_rows` enumerators: iterate the whole table, log +
+        // skip per ADR-0048 § 3 on a per-row envelope-decode failure, and
+        // return the surviving LWW-winner rows. Decode failures are
+        // collected inside the blocking task and emitted on the calling
+        // async thread so per-test thread-local `tracing` guards observe
+        // them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<ServiceBackendRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            let iter = table.iter().map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<ServiceBackendRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
         .map_err(map_to_io)??;
@@ -1164,13 +1214,15 @@ fn apply_issued_certificate(
     Ok(true)
 }
 
-/// Thin `Unpin` wrapper so we can return a `Box<dyn Stream + Unpin>`.
-struct SubscriptionStream {
-    inner: Pin<Box<dyn Stream<Item = ObservationRow> + Send>>,
+/// Thin `Unpin` wrapper for the lag-surfacing [`LagAwareSubscription`]
+/// returned by [`LocalObservationStore::subscribe_all_events`] — lets us
+/// return a `Box<dyn Stream<Item = SubscriptionEvent> + Send + Unpin>`.
+struct SubscriptionEventStream {
+    inner: Pin<Box<dyn Stream<Item = SubscriptionEvent> + Send>>,
 }
 
-impl Stream for SubscriptionStream {
-    type Item = ObservationRow;
+impl Stream for SubscriptionEventStream {
+    type Item = SubscriptionEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.as_mut().poll_next(cx)

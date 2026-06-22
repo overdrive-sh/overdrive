@@ -272,6 +272,9 @@ async fn dispatch_release(
         None,
         // transparent-mtls-host-socket step 06-03: no mTLS worker in this fixture.
         None,
+        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
+        // allocator — this fixture exercises no netns provisioning.
+        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
     )
     .await
     .expect("dispatch must succeed");

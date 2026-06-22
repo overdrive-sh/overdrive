@@ -1,43 +1,45 @@
-//! Agent mutual-TLS handshake presents the held SVID — client leg B + server
-//! leg C (transparent-mtls-host-socket step 02-02, ADR-0069 F1/F3; GH #26).
+//! Agent mutual-TLS handshake presents the held SVID — server leg C
+//! (transparent-mtls-host-socket step 02-02, ADR-0069 F1/F3; GH #26).
 //!
 //! Step 01-01 (the composed walking skeleton) already proved the full
 //! bidirectional handshake end-to-end on the real netns/veth topology. THIS test
-//! is the focused **handshake-identity** acceptance test that isolates the four
-//! identity properties the step's acceptance criteria name, for BOTH directions,
-//! through the SAME `MtlsEnforcement` driving port:
+//! is the focused **handshake-identity** acceptance test that isolates the
+//! identity properties the step's acceptance criteria name for the INBOUND
+//! (server-role) direction, through the `MtlsEnforcement` driving port:
 //!
-//! - **AC1 (outbound, client role)**: the agent completes a TLS 1.3 CLIENT
-//!   handshake on leg B presenting `client_alloc`'s HELD SVID, and the real peer's
-//!   `WebPkiClientVerifier` (REQUIRE+VERIFY) accepts it as chaining to the trust
-//!   bundle root — surfaced to the test via `OutboundPeer::presented_client_spiffe`.
 //! - **AC2 (inbound, server role)**: the agent completes a TLS 1.3 SERVER
 //!   handshake on leg C presenting `server_alloc`'s HELD SVID and REQUIRE+VERIFYs
 //!   the client's SVID chains to the bundle; a VALID client cert ⇒ the handshake
 //!   succeeds (the inbound client reads S's byte-exact response over leg C).
-//! - **AC3 (both directions)**: the presented leaf chains to the root AND its sole
-//!   URI SAN is the workload's SPIFFE id — proven from the captured handshake at
-//!   the test tier (`OutboundPeer::presented_client_spiffe` /
-//!   `InboundClientResult::presented_server_spiffe`, each read from chain position 0
-//!   of the peer's verified certificate chain).
-//! - **AC4 (both directions)**: BOTH workloads hold NO cert and NO key — the agent
-//!   reads the leaf material through the `IdentityRead` port; nothing crosses into
-//!   the workloads. Expressed structurally: the workloads (outbound cgroup-isolated
-//!   subprocess / inbound plaintext server) are handed no SVID material — only the
-//!   agent's `HeldIdentities` double carries it.
+//! - **AC3 (server role)**: the presented SERVER leaf chains to the root AND its
+//!   sole URI SAN is the server workload's SPIFFE id — proven from the captured
+//!   handshake at the test tier (`InboundClientResult::presented_server_spiffe`,
+//!   read from chain position 0 of the inbound client's verified certificate chain).
+//! - **AC4 (server role)**: the server workload holds NO cert and NO key — the
+//!   agent reads the leaf material through the `IdentityRead` port; nothing crosses
+//!   into the workload. Expressed structurally: the inbound plaintext server is
+//!   handed no SVID material — only the agent's `HeldIdentities` double carries it.
 //! - **AC5**: `HostMtlsEnforcement::new` takes the `IdentityRead` read-port as a
 //!   REQUIRED constructor parameter (no builder, no default) — proven by
 //!   construction (the adapter cannot be built without injecting the port).
 //!
+//! **The outbound (client-role) half (AC1) was dropped at step 04-01.** It
+//! exercised the now-deleted `cgroup_connect4_mtls` outbound mechanism (via the
+//! removed `OutboundPeer`/`OutboundWorkload` harness); per the deletion discipline
+//! (delete tests of deleted code), the outbound scenario is removed here and fresh
+//! client-role coverage on the nft-TPROXY outbound path is re-established in steps
+//! 05-01/05-03 (AC10 pattern). The surviving inbound half exercises the leg-C
+//! handshake-identity path, which the worker rewire did NOT touch.
+//!
 //! **Litmus (falsifiability)**: if the call-site that wires the identity-read cert
-//! resolver were deleted (the agent presented no leaf, or the wrong leaf), the
-//! peer's REQUIRE+VERIFY (outbound) / the SPIFFE-SAN assertions (both directions)
-//! would go RED — the handshake-identity properties are asserted from the CAPTURED
+//! resolver were deleted (the agent presented no server leaf, or the wrong leaf),
+//! the inbound client's server-cert REQUIRE+VERIFY / the SPIFFE-SAN assertion would
+//! go RED — the handshake-identity property is asserted from the CAPTURED
 //! handshake, not from the agent's own bookkeeping.
 //!
-//! Tier 3 ONLY (sockops/cgroup_connect4/TPROXY/kTLS have no `BPF_PROG_TEST_RUN`):
+//! Tier 3 ONLY (sockops/TPROXY/kTLS have no `BPF_PROG_TEST_RUN`):
 //! `cargo xtask lima run -- cargo nextest run -p overdrive-dataplane --features
-//! integration-tests -E 'test(agent_handshake_presents_held_svid_client_and_server_roles)'`,
+//! integration-tests -E 'test(agent_handshake_presents_held_svid_server_role)'`,
 //! ACTUALLY EXECUTING on the real 6.18 kernel (a `--no-run` gate is green even when
 //! every fixture refuses at boot).
 
@@ -63,7 +65,7 @@ use overdrive_dataplane::mtls::HostMtlsEnforcement;
 
 use super::helpers::mtls_netns_topology::{MtlsTopology, TopologyError};
 use super::helpers::mtls_pki::TestPki;
-use super::helpers::mtls_roles::{InboundServer, InboundWorker, OutboundPeer, OutboundWorkload};
+use super::helpers::mtls_roles::{InboundServer, InboundWorker};
 
 /// The agent's held-identity store — the ONLY holder of SVID material (AC4). The
 /// workloads hold nothing; the agent reads through THIS `IdentityRead` port and
@@ -94,12 +96,13 @@ fn held_identities(pki: &TestPki) -> HeldIdentities {
     HeldIdentities { svids, bundle: pki.trust_bundle() }
 }
 
-/// The focused handshake-identity acceptance gate (step 02-02). Drives BOTH the
-/// outbound (client role) and inbound (server role) handshakes through
-/// `HostMtlsEnforcement::enforce` on the real netns/veth + cgroup topology, and
-/// asserts the handshake-identity properties (AC1–AC5) from the captured handshake.
+/// The focused handshake-identity acceptance gate (step 02-02, inbound half). Drives
+/// the inbound (server role) handshake through `HostMtlsEnforcement::enforce` on the
+/// real netns/veth + nft-TPROXY topology, and asserts the handshake-identity
+/// properties (AC2–AC5) from the captured handshake. The outbound (client-role) half
+/// was dropped at step 04-01 — see the module docstring.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn agent_handshake_presents_held_svid_client_and_server_roles() {
+async fn agent_handshake_presents_held_svid_server_role() {
     let tag = format!("hs{}", std::process::id());
     // The canonical gate runs `cargo xtask lima run -- …` as root on the real 6.18
     // kernel, where the topology is ALWAYS supported. A `TopologyError::Unsupported`
@@ -134,72 +137,8 @@ async fn agent_handshake_presents_held_svid_client_and_server_roles() {
     topo.install_tproxy(inbound_agent_port)
         .expect("inbound TPROXY + leg-S routing must install on the real 6.18 kernel");
 
-    assert_outbound_handshake_presents_held_client_svid(&adapter, &pki, &topo).await;
     assert_inbound_handshake_presents_held_server_svid(&adapter, &pki, &topo, inbound_agent_port)
         .await;
-}
-
-/// AC1 + AC3 + AC4 (outbound, client role): drive `enforce` on leg F; the agent's
-/// leg-B CLIENT handshake must present `client_alloc`'s held SVID, and the real
-/// peer's `WebPkiClientVerifier` (REQUIRE+VERIFY against the bundle root) must
-/// accept it with the expected SPIFFE-SAN (the verified leaf at chain position 0).
-async fn assert_outbound_handshake_presents_held_client_svid(
-    adapter: &HostMtlsEnforcement,
-    pki: &TestPki,
-    topo: &MtlsTopology,
-) {
-    // The real outbound mTLS peer the agent's leg B dials — REQUIRE+VERIFYs the
-    // client SVID and surfaces the verified client SPIFFE.
-    let peer = OutboundPeer::spawn(pki);
-
-    // WORKER role (test harness): owns the leg-F listener + cgroup_connect4 intercept.
-    // The cgroup-isolated workload holds NOTHING — it opens an ordinary socket; only
-    // the accepted leg F crosses into the adapter (AC4).
-    let mut workload = OutboundWorkload::run(topo, peer.addr(), Duration::ZERO);
-    let leg_f = workload.accept_leg_f();
-
-    let conn = InterceptedConnection {
-        leg: leg_f,
-        routed: Routed::Outbound { peer: peer.addr() },
-        alloc: pki.client_alloc.clone(),
-        expected_peer: None, // v1 authn-only (#178 is the intended-peer-pinning upgrade)
-    };
-    assert_eq!(conn.routed.direction(), Direction::Outbound);
-
-    let handle = adapter
-        .enforce(conn)
-        .await
-        .expect("outbound enforce must complete the client handshake (steady-state-established)");
-    assert_eq!(adapter.liveness(&handle), PumpLiveness::Running);
-
-    // Complete the round-trip so the peer's handshake has finished and its verified
-    // identity is observable.
-    let round_trip = workload.join();
-    assert!(
-        round_trip.forward_delivered_byte_exact,
-        "outbound forward F→B must deliver byte-exact (the client handshake completed and \
-         steady state is live)"
-    );
-
-    // AC1 + AC3 (the load-bearing handshake-identity assertion): the peer's
-    // REQUIRE+VERIFY accepted the presented client leaf as chaining to the bundle
-    // root, AND the SPIFFE-SAN it extracted from chain position 0 IS the held client
-    // SVID's SPIFFE. If the identity-read cert-resolver wiring were deleted, the
-    // agent would present no client leaf and the peer's REQUIRE+VERIFY would fail —
-    // this assertion goes RED. (chain-to-root is implied: a leaf that did not chain
-    // would have been rejected by the peer's `WebPkiClientVerifier` and
-    // `presented_client_spiffe` would be `None`.)
-    assert_eq!(
-        peer.presented_client_spiffe().as_ref(),
-        Some(&pki.client_leaf.spiffe),
-        "AC1/AC3: the agent's leg-B CLIENT handshake must present client_alloc's HELD SVID; \
-         the peer's WebPkiClientVerifier must accept it (chains to the bundle root) and the \
-         verified leaf's URI SAN must be the workload's SPIFFE id"
-    );
-
-    adapter.teardown(handle.clone()).await.expect("outbound teardown");
-    assert_eq!(adapter.liveness(&handle), PumpLiveness::Gone);
-    peer.shutdown();
 }
 
 /// AC2 + AC3 + AC4 (inbound, server role): drive `enforce` on leg C; the agent's

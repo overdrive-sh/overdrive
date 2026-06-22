@@ -29,6 +29,13 @@ pub mod llm;
 // `Dataplane`). `HostMtlsEnforcement` extends `overdrive-dataplane`;
 // `SimMtlsEnforcement` will extend `overdrive-sim`.
 pub mod mtls_enforcement;
+// transparent-mtls-enrollment (ADR-0071, GH #26 / #242). The per-connection
+// enrollment-resolve driven port (the #242 anti-corruption boundary): resolve a
+// captured connection's `orig_dst` into a 3-variant `MtlsResolution`
+// (Mesh/NonMesh/MeshUnreachable), fail-closed not silent-cleartext. Pure trait +
+// `#[async_trait]` boundary (a declarative macro, no runtime — off the `core`
+// I/O surface, exactly as `MtlsEnforcement` / `Dataplane`).
+pub mod mtls_resolve;
 pub mod observation_store;
 // SCAFFOLD: true — service-health-check-probes feature.
 // Three port traits (`TcpProber` / `HttpProber` / `ExecProber`) per
@@ -53,5 +60,6 @@ pub use mtls_enforcement::{
     InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, MtlsLimits, ProbeSentinel,
     PumpLiveness, Routed,
 };
+pub use mtls_resolve::{MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend};
 pub use observation_store::ObservationStore;
 pub use transport::Transport;

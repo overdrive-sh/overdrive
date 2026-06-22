@@ -41,6 +41,13 @@ pub mod llm;
 // `SimIdentityRead`; the `mtls_enforcement_equivalence` structural guard drives
 // both this and the host adapter through the same sequence (ADR-0069 F3).
 pub mod mtls_enforcement;
+// transparent-mtls-enrollment step 01-02 — `SimMtlsResolve`, the in-memory
+// `overdrive_core::traits::mtls_resolve::MtlsResolve` double. Classifies each
+// `orig_dst` against a scripted `BTreeMap<SocketAddrV4, MtlsResolution>` table;
+// the `mtls_resolve_equivalence` structural guard (DELIVER) drives both this and
+// the v1 host `ServiceBackendsResolve` adapter through the same sequence
+// (ADR-0071; GH #242 anti-corruption boundary).
+pub mod mtls_resolve;
 pub mod observation_store;
 pub mod transport;
 // reconciler-memory-redb step 01-03 — `SimViewStore` impl of
@@ -61,3 +68,4 @@ pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
+pub use mtls_resolve::SimMtlsResolve;

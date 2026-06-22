@@ -90,7 +90,7 @@ fn agent_leg() -> OwnedFd {
 }
 
 /// Build an `InterceptedConnection` in the given direction for `alloc`, carrying a
-/// real owned leg. `expected_peer` is `None` (v1 authn-only — #178 is the upgrade).
+/// real owned leg. `expected_peer` is `None` (v1 authn-only — #242 is the upgrade).
 fn intercepted(direction: Direction, alloc: AllocationId) -> InterceptedConnection {
     let routed = match direction {
         Direction::Outbound => {

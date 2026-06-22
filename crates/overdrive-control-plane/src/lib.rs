@@ -85,6 +85,16 @@ pub mod journal;
 // projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)
 // per-tick cluster scan with an O(1) keyed read off a maintained view.
 pub mod listener_facts;
+// transparent-mtls-enrollment step 01-03 (ADR-0071, GH #242) —
+// `ServiceBackendsResolve`, the v1 host `MtlsResolve` adapter. Resolves
+// `orig_dst` against an in-RAM, ownership-aware `addr → {service → Backend}`
+// reverse index of the `running` `service_backends` set (C4), maintained by
+// List-then-Watch over the `ObservationStore` `all_service_backends_rows` +
+// `subscribe_all_events` surfaces; classifies into the 3-variant `MtlsResolution`
+// (Mesh / NonMesh / MeshUnreachable). v1 SHELL: `expected_svid: None`, no
+// `IdentityRead` (the identity join is #242). Earned-Trust `probe` refuses on
+// an unreadable store. Composition-root probe wiring lands in step 04-02.
+pub mod mtls_resolve_adapter;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
 // + drift detection. Paired with the `openapi` binary in `src/bin/`.
@@ -316,6 +326,20 @@ pub struct AppState {
     /// `SimDataplane`-override boot (no real BPF to intercept on). The
     /// action-shim reads `state.mtls_worker` and fires `if let Some`.
     pub mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+    /// Per-host network-slot free-list (transparent-mtls-enrollment, D-TME-12
+    /// G3; step 04-01). Hands out the host-unique, collision-free-by-
+    /// construction [`veth_provisioner::NetSlot`] each live allocation's
+    /// netns/veth/subnet is keyed from, at the action-shim C3 provision seam.
+    ///
+    /// NOT an `Option`: unlike `mtls_worker`, the allocator is harmless on the
+    /// non-mTLS fixture surface (it just hands out slots nobody provisions),
+    /// so a non-optional `Default`-constructed field keeps every fixture
+    /// ripple-free. The type is already `#[derive(Clone, Default)]` and holds
+    /// its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY (it self-shares on clone,
+    /// exactly like `IdentityMgr`), so the field is a plain value — no outer
+    /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
+    /// on a fresh process boot nothing is held (criterion 6).
+    pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -533,6 +557,15 @@ impl AppState {
             ca,
             identity,
             mtls_worker,
+            // Default-construct the per-host slot allocator INSIDE the
+            // constructor (transparent-mtls-enrollment D-TME-12 G3, step
+            // 04-01) — NOT a constructor parameter. This is the same
+            // ripple-avoidance `mtls_worker` (`None`) + `workflow_engine`
+            // (empty registry) use: the ~42 non-mTLS fixtures and the
+            // `reconciler_runtime`/`listener_facts` callers need no change.
+            // On a fresh process boot nothing is held; still-Running allocs
+            // re-assign on their next lifecycle pass (criterion 6).
+            net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
         }
     }
 }
@@ -893,14 +926,6 @@ impl ServerConfig {
 /// down or the process exits.
 pub struct ServerHandle {
     inner: AxumHandle,
-    /// The booted (β) transparent-mTLS intercept worker, surfaced for the
-    /// Tier-3 production-activation e2e (transparent-mtls-host-socket,
-    /// step 06-03). `Some` only on a real-dataplane boot that composed the
-    /// mTLS layer; `None` otherwise. Test-gated — production callers never
-    /// reach for it (the action-shim reaches `state.mtls_worker` directly,
-    /// not through the handle). Exposed via [`ServerHandle::mtls_worker`].
-    #[cfg(feature = "integration-tests")]
-    mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
     /// the `EvaluationBroker` and dispatches actions through the
@@ -969,27 +994,6 @@ impl ServerHandle {
     /// notification; resolves as soon as the listener is bound.
     pub async fn local_addr(&self) -> Option<SocketAddr> {
         self.inner.listening().await
-    }
-
-    /// The booted (β) transparent-mTLS intercept worker, if the boot
-    /// composed the mTLS layer (`Some` on a real-dataplane boot;
-    /// `None` otherwise).
-    ///
-    /// Test-only (transparent-mtls-host-socket, step 06-03 criteria[1]):
-    /// the Tier-3 production-activation e2e reaches the booted worker
-    /// through this accessor to drive the #178 declared-peer stand-in
-    /// ([`MtlsInterceptWorker::program_declared_peer_redirect`]). The
-    /// production action-shim reads `AppState.mtls_worker` directly —
-    /// it never needs the handle.
-    ///
-    /// [`MtlsInterceptWorker::program_declared_peer_redirect`]:
-    ///     overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::program_declared_peer_redirect
-    #[cfg(feature = "integration-tests")]
-    #[must_use]
-    pub fn mtls_worker(
-        &self,
-    ) -> Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> {
-        self.mtls_worker.clone()
     }
 
     /// Trigger graceful shutdown with a drain deadline. In-flight
@@ -1807,40 +1811,22 @@ pub async fn run_server_with_obs_and_driver(
     // refusal. The 42 non-mTLS fixtures call `AppState::new` directly
     // (bypassing this boot path) and are unaffected either way.
     //
-    // wire → probe → use (fail-closed): `MtlsDataplane::load` +
-    // `HostMtlsEnforcement::probe()`. On either failure the node REFUSES
-    // to boot with `health.startup.refused` — it does NOT degrade to a
-    // cleartext path (the confidentiality invariant the feature rests on).
+    // wire → probe → use (fail-closed): construct `HostMtlsEnforcement` +
+    // `HostMtlsEnforcement::probe()`. On probe failure the node REFUSES to
+    // boot with `health.startup.refused` — it does NOT degrade to a cleartext
+    // path (the confidentiality invariant the feature rests on). As of step
+    // 04-01 (ADR-0071 Path A) there is no `MtlsDataplane::load` step: the
+    // OUTBOUND intercept is the per-veth egress nft-TPROXY rule installed
+    // per-alloc by `start_alloc`, NOT a cgroup-attached BPF program, so the
+    // worker holds no BPF object to load at boot. SERVICE_MAP is pinned
+    // independently and earlier by `EbpfDataplane::new_with_pin_dir`.
     #[cfg(feature = "integration-tests")]
     let compose_mtls = config.dataplane_override.is_none() || config.mtls_probe_fault.is_some();
     #[cfg(not(feature = "integration-tests"))]
     let compose_mtls = config.dataplane_override.is_none();
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
-            let pin_dir: std::path::PathBuf = config
-                .dataplane_pin_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from(overdrive_dataplane::DEFAULT_PIN_DIR));
-
-            // (1) load — its own `aya::Ebpf` (D-MTLS-17 item 1): recover
-            // `cgroup_connect4_mtls` + `MTLS_REDIRECT_DEST`, reuse the
-            // pinned-by-name SERVICE_MAP. Fail-closed on load failure.
-            let mtls_dataplane = match overdrive_dataplane::mtls::MtlsDataplane::load(&pin_dir) {
-                Ok(dp) => dp,
-                Err(source) => {
-                    tracing::warn!(
-                        name: "health.startup.refused",
-                        reason = "dataplane.mtls",
-                        error = %source,
-                        "transparent-mTLS dataplane load failed; refusing to boot (no cleartext fallback)"
-                    );
-                    return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Load {
-                        source,
-                    }));
-                }
-            };
-
-            // (2) construct the enforcement port over the held identity +
+            // (1) construct the enforcement port over the held identity +
             // the F7 limits. `IdentityMgr` impls `IdentityRead`.
             //
             // PKI-SEAM (transparent-mtls-host-socket step 06-03,
@@ -1866,7 +1852,7 @@ pub async fn run_server_with_obs_and_driver(
                     overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
                 ));
 
-            // (3) probe (Earned Trust): the test-only `mtls_probe_fault` seam
+            // (2) probe (Earned Trust): the test-only `mtls_probe_fault` seam
             // forces a probe failure so criteria[0] exercises the fail-closed
             // refusal without a real substrate fault; otherwise the real
             // `probe()` runs. Either failure → refuse to boot.
@@ -1904,18 +1890,45 @@ pub async fn run_server_with_obs_and_driver(
                 }));
             }
 
-            // (4) construct the worker with both ports as REQUIRED params
-            // (mandatory `new()`, no builder) and the shared cgroup root. The
-            // root is the same `DEFAULT_CGROUP_ROOT` the driver-composition
-            // and the workloads-slice bootstrap use above — re-derived here
-            // (rather than threaded through the intervening dataplane block)
-            // so the mTLS worker resolves per-alloc `.scope` paths under the
-            // identical root.
-            let mtls_cgroup_root = std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT);
+            // (3) construct the per-connection enrollment-resolve adapter
+            // (`ServiceBackendsResolve`, ADR-0071 / D-TME-11) over the
+            // `ObservationStore` and run its Earned-Trust probe BEFORE the
+            // worker (and therefore before any connection is resolved). The
+            // List-at-probe leg seeds the in-RAM addr→Backend index from the
+            // authoritative `service_backends` snapshot (capturing rows written
+            // before boot — e.g. on a control-plane restart) and opens the
+            // single-owner watch; on an unreadable store the probe refuses to
+            // boot fail-closed (`health.startup.refused`) rather than serve an
+            // empty-but-trusted index that would degrade to silent cleartext.
+            // wire → probe → use (principle 12).
+            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> = Arc::new(
+                crate::mtls_resolve_adapter::ServiceBackendsResolve::new(Arc::clone(&obs)),
+            );
+            if let Err(source) = resolve.probe().await {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "mtls.resolve.probe",
+                    error = %source,
+                    "transparent-mTLS resolve probe failed; refusing to boot (no cleartext fallback)"
+                );
+                return Err(error::ControlPlaneError::MtlsBoot(
+                    error::MtlsBootError::ResolveProbe { source },
+                ));
+            }
+
+            // (4) construct the worker with all three ports as REQUIRED params
+            // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
+            // A) the worker holds no `MtlsDataplane` and no cgroup root — the
+            // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
+            // `start_alloc` against the host-veth NAME carried on
+            // `AllocationSpec.host_veth` (set at the action-shim C3 provision
+            // seam, JOIN-6). As of step 04-02 the worker also holds the
+            // probed-Ok `MtlsResolve` adapter — the outbound accept loop
+            // resolves each captured connection's recovered `orig_dst` through
+            // it (the C1 3-arm decision).
             Some(Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
                 enforcement,
-                mtls_dataplane,
-                mtls_cgroup_root,
+                resolve,
                 config.clock.clone(),
             )))
         } else {
@@ -1942,6 +1955,74 @@ pub async fn run_server_with_obs_and_driver(
         // `SimDataplane` override.
         mtls_worker,
     );
+
+    // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
+    // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
+    // is reconstructed EMPTY, but workloads SURVIVE in their old
+    // `ovd-ns-<slot>` netns (setsid + kill_on_drop(false) + own cgroup scope —
+    // SPIKE-A) and `WorkloadLifecycle::reconcile` does NOT re-drive a Running
+    // survivor (SPIKE-B), so this dedicated boot pass is the ONLY trigger that
+    // rebuilds the lost slot↔alloc map. It runs AFTER `AppState` construction
+    // (so `state.net_slot_allocator` / `state.obs` are available) and BEFORE
+    // the convergence loop / exit-observer spawn (so the first smallest-free
+    // `assign` cannot hand a surviving slot to a new alloc — the cross-restart
+    // B1 collision). Gated by `state.mtls_worker.is_some()` — the same
+    // composition gate G1 uses — so it is a no-op on a non-mTLS boot where no
+    // per-alloc netns exist. A `NetSlotAdoptConflict` (two survivors on one
+    // slot — a fatal correlation bug) refuses the boot via
+    // `health.startup.refused`, reason `netns.adopt`.
+    if state.mtls_worker.is_some() {
+        if let Err(source) = veth_provisioner::adopt_on_restart_recovery(
+            state.obs.as_ref(),
+            &state.net_slot_allocator,
+            std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
+        )
+        .await
+        {
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason = "netns.adopt",
+                error = %source,
+                "adopt-on-restart boot recovery failed; refusing to boot \
+                 (a surviving slot↔alloc map could not be rebuilt)"
+            );
+            return Err(error::ControlPlaneError::NetnsRecovery(source));
+        }
+
+        // §5 (D-TME-12; folds 03-01 review finding D2): after the netns
+        // adopt+GC, SWEEP every surviving per-workload nft-TPROXY rule from the
+        // shared `overdrive-mtls prerouting` chain. Each per-workload rule was
+        // appended once and is NEVER torn down per-workload, so it SURVIVES the
+        // restart — but its in-RAM RAII guard was lost (the CP died; `Drop`
+        // never ran), and the rule now redirects to a dead leg-C/leg-F listener.
+        // Unlike the surviving netns (ADOPTED above — the workload lives in it),
+        // the surviving rule is DEAD weight (it points at a dead listener), so
+        // the boot pass REAPS it, leaving the shared infra (F5 exemption,
+        // table+chain) untouched. The clean re-install at `start_alloc` then
+        // appends exactly one rule per direction. PINNED order: adopt → GC →
+        // sweep → serve. A sweep failure (a by-handle `nft delete` error)
+        // refuses the boot, same fail-closed posture as the adopt conflict.
+        match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
+            Ok(swept) => {
+                tracing::info!(
+                    name: "mtls.boot.swept_per_workload_rules",
+                    swept,
+                    "adopt-on-restart §5: swept {swept} surviving per-workload nft-TPROXY \
+                     rule(s) from the shared chain (shared infra left intact)"
+                );
+            }
+            Err(source) => {
+                tracing::warn!(
+                    name: "health.startup.refused",
+                    reason = "nft.sweep",
+                    error = %source,
+                    "adopt-on-restart §5 nft-rule sweep failed; refusing to boot \
+                     (surviving per-workload TPROXY rules could not be reaped)"
+                );
+                return Err(error::ControlPlaneError::NftRuleSweep(source));
+            }
+        }
+    }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`
@@ -2000,13 +2081,6 @@ pub async fn run_server_with_obs_and_driver(
     let emit_drain_task =
         spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
 
-    // Capture the booted (β) mTLS worker handle for the Tier-3 e2e
-    // (step 06-03) BEFORE `.with_state(state)` moves `state` into the
-    // router. Test-gated; the action-shim still reads `state.mtls_worker`
-    // through the router state, this is a parallel clone for the handle.
-    #[cfg(feature = "integration-tests")]
-    let mtls_worker_for_handle = state.mtls_worker.clone();
-
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -2055,11 +2129,6 @@ pub async fn run_server_with_obs_and_driver(
 
     Ok(ServerHandle {
         inner: axum_handle,
-        // Surface the booted (β) mTLS worker for the Tier-3 e2e
-        // (step 06-03). Captured from `AppState` before the router move;
-        // `None` on a non-mTLS boot. Test-gated.
-        #[cfg(feature = "integration-tests")]
-        mtls_worker: mtls_worker_for_handle,
         server_task,
         convergence_task,
         exit_observer_task,

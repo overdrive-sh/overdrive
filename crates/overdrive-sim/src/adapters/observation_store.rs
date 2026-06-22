@@ -53,6 +53,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::dataplane::backend_key::Proto;
@@ -62,8 +63,9 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationRow, ObservationStore,
+    ObservationStoreError, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    SubscriptionEvent,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -191,7 +193,7 @@ impl PeerState {
             ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
             // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out so the
             // workflow-lifecycle reconciler (and tests subscribing via
-            // `subscribe_all`) observe the terminal off the live stream.
+            // `subscribe_all_events`) observe the terminal off the live stream.
             // Accepted unconditionally: the correlation key is unique per
             // instance terminal, so no LWW collision is possible. The row
             // is pushed to `rows` + broadcast by the shared accept branch
@@ -491,10 +493,20 @@ impl ObservationStore for SimObservationStore {
         Ok(())
     }
 
-    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError> {
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        // The single subscription surface (C4 / D-TME-11): map the broadcast
+        // `Ok(row) → Row` and SURFACE the loss `Err(Lagged(n)) → Lagged {
+        // missed: n }` at the adapter boundary so the core trait never names a
+        // tokio error type. Every consumer handles `Lagged` — the resolve
+        // index relists; the DST invariants and store conformance harness fail
+        // loudly (lag is structurally impossible there, so a `Lagged` is a real
+        // bug, never something to swallow).
         let rx = self.inner.fan_out.subscribe();
-        let stream = BroadcastStream::new(rx).filter_map(ok_or_skip);
-        Ok(Box::new(Box::pin(stream)) as ObservationSubscription)
+        let stream = BroadcastStream::new(rx).map(|item| match item {
+            Ok(row) => SubscriptionEvent::Row(row),
+            Err(BroadcastStreamRecvError::Lagged(missed)) => SubscriptionEvent::Lagged { missed },
+        });
+        Ok(Box::new(Box::pin(stream)) as LagAwareSubscription)
     }
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
@@ -576,6 +588,16 @@ impl ObservationStore for SimObservationStore {
         Ok(by_sb.get(service_id).cloned().into_iter().collect())
     }
 
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        // Every LWW winner across all services — the keyless List leg
+        // (C4 / D-TME-11). Deterministic iteration via the `BTreeMap`
+        // ordering on `ServiceId`, mirroring `alloc_status_rows`.
+        let by_sb = self.inner.by_service_backends.lock();
+        Ok(by_sb.values().cloned().collect())
+    }
+
     async fn reconcile_conflict_rows(
         &self,
         service_id: &ServiceId,
@@ -646,16 +668,6 @@ impl ObservationStore for SimObservationStore {
         // `ctx.wait_for_signal` path parks on — never an error.
         Ok(self.inner.by_signal.lock().get(key).cloned())
     }
-}
-
-/// Helper for [`SimObservationStore::subscribe_all`]'s stream: drops any
-/// `Lagged` signal emitted by `BroadcastStream` when the subscriber has
-/// fallen behind the `DEFAULT_FANOUT_CAPACITY` window. A lagged
-/// subscriber in a DST run is a test-author bug (capacity should be
-/// sized for the workload); surfacing it as a stream value would force
-/// every caller to handle a variant they cannot do anything about.
-fn ok_or_skip<T, E>(item: Result<T, E>) -> futures::future::Ready<Option<T>> {
-    futures::future::ready(item.ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,20 +1123,5 @@ impl GossipRouter {
                 recipient.inner.apply(row);
             }
         }
-    }
-}
-
-// Small sanity check that the public types line up. Not a replacement
-// for the acceptance test; exists so that renaming
-// `ObservationSubscription` fails the compile here first.
-#[cfg(test)]
-mod static_wiring_check {
-    use super::*;
-    use futures::Stream;
-    #[allow(dead_code)]
-    fn _assert_observation_subscription_is_stream(
-        s: &ObservationSubscription,
-    ) -> &(dyn Stream<Item = ObservationRow> + Send + Unpin) {
-        &**s
     }
 }

@@ -54,6 +54,24 @@ mod integration {
     mod ca_boot_and_audit;
     mod ca_equivalence;
 
+    /// transparent-mtls-enrollment step 04-04 (D-TME-12 § "Amended 2026-06-18
+    /// (02-06 adopt-on-restart)", §1–§4) — Tier-3 acceptance for the
+    /// `run_server` boot-recovery pass. Drives the PRODUCTION
+    /// `veth_provisioner::adopt_on_restart_recovery` seam against a real
+    /// surviving netns + spawned PID + cgroup scope + Running obs row and a
+    /// real orphan netns: the fresh (post-restart) allocator ADOPTS the
+    /// survivor's slot (a later `assign` cannot collide) and the orphan netns
+    /// is GC'd. Root + CAP_NET_ADMIN; SKIP otherwise.
+    mod adopt_on_restart;
+    /// transparent-mtls-enrollment step 04-01 (Path A / ADR-0071, D-TME-12 /
+    /// AC14) — Tier-3 acceptance for the C3 action-shim seam. Drives the
+    /// PRODUCTION `action_shim::dispatch` with `mtls_worker: Some(...)` (the
+    /// ACTIVE seam path) + a real `NetSlotAllocator`: provision-before-spawn +
+    /// lands-in-`ovd-ns-<slot>` (`ip netns identify`) + terminal teardown
+    /// (root-gated, SKIP otherwise), and provision-failure → `Failed` row
+    /// carrying `WorkloadNetnsProvisionFailed` (deterministic, slot exhaustion,
+    /// no root — mirrors `fail_closed_on_mtls_install`).
+    mod alloc_netns_lifecycle;
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state
@@ -70,17 +88,6 @@ mod integration {
     /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
     /// in `run_server_with_obs_and_driver` writes the row. See
     /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
-    // transparent-mtls-host-socket (GH #26; step 06-03) — Tier-3
-    // production-activation gate: `run_server` composes the (β) mTLS
-    // worker (real dataplane → post-`IdentityMgr` compose →
-    // `AppState.mtls_worker` → action-shim `start_alloc`/`stop_alloc`)
-    // and refuses to boot fail-closed on an injected probe fault.
-    /// Focused control-plane-local mTLS e2e helpers (TestPki +
-    /// HeldIdentities `IdentityRead` double + the real `OutboundPeer`
-    /// mTLS server + AF_PACKET `0x17` wire oracle) consumed by
-    /// `mtls_production_activation` criteria[1].
-    pub mod mtls_e2e_helpers;
-    mod mtls_production_activation;
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
@@ -125,6 +132,14 @@ mod integration {
     /// `veth_provisioner::provision`: creates-when-absent +
     /// adopts-pre-existing-without-recreating.
     mod veth_provision_idempotent;
+    /// transparent-mtls-enrollment step 02-02 (Path A / ADR-0071) — Tier-3
+    /// per-allocation netns + veth provision. Drives real `ip netns` /
+    /// `ip -n <ns>` / `sysctl` / `ethtool` through
+    /// `veth_provisioner::provision_workload_netns` + `teardown_workload_netns`:
+    /// fresh-create (netns + pair, all three up-states, addresses, default
+    /// route, ip_forward, rp_filter, tx-off) + idempotent re-converge +
+    /// half-provisioned heal + zero-residue teardown.
+    mod workload_netns_provision;
     /// workflow-primitive DISTILL (GH #39, J-PLAT-005) — `@real-io`
     /// journal-persistence scenario S-WP-01-04 (US-WP-2 AC1/AC2, K5/O6).
     /// Exercises a REAL `RedbJournalStore` (real redb file) per

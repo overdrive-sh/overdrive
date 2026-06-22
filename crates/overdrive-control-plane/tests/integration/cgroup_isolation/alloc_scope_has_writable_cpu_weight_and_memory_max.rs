@@ -147,6 +147,9 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
+        // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
+        netns: None,
+        host_veth: None,
     }
 }
 

@@ -677,6 +677,13 @@ impl WorkloadLifecycle {
                             // canonical role order. See
                             // `WorkloadLifecycleState::probe_descriptors`.
                             probe_descriptors: desired.probe_descriptors.clone(),
+                            // The reconciler stays netns/veth-AGNOSTIC (JOIN-2):
+                            // the slot-derived netns name + host-veth name are
+                            // runtime slot state injected ONLY at the action-shim
+                            // C3 site, never carried in intent (criterion 6's
+                            // rebuilt-on-restart model).
+                            netns: None,
+                            host_veth: None,
                         },
                         kind: desired.workload_kind,
                         // Crash-loop restart pathway — the restart cause is
@@ -760,6 +767,10 @@ impl WorkloadLifecycle {
                                 // → liveness in canonical order. See
                                 // `WorkloadLifecycleState::probe_descriptors`.
                                 probe_descriptors: desired.probe_descriptors.clone(),
+                                // Netns/veth-agnostic reconciler (JOIN-2) — see
+                                // the RestartAllocation spec above.
+                                netns: None,
+                                host_veth: None,
                             },
                             kind: desired.workload_kind,
                         };

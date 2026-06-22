@@ -73,11 +73,57 @@ mod integration {
     // outbound/inbound leg-acquire → `InterceptedConnection` build.
     mod mtls_intercept_install;
 
-    // fix-mtls-intercept-fail-open (D-MTLS-18) — Tier 3 regression gate that
-    // `MtlsInterceptWorker::start_alloc` fails CLOSED (returns `Err`) when an
-    // install step fails, rather than swallowing the failure and leaving the
-    // alloc running with cleartext egress.
-    mod mtls_intercept_fail_closed;
+    // transparent-mtls-enrollment (ADR-0071, step 04-01) — Tier-3 AT that
+    // `MtlsInterceptWorker::start_alloc` installs BOTH the OUTBOUND egress
+    // nft-TPROXY rule (on the alloc's host-side veth, `spec.host_veth`) AND
+    // the leg-F + leg-C IP_TRANSPARENT listeners + accept loops, with NO
+    // cgroup-attach step (the retired `cgroup_connect4_mtls` mechanism is
+    // gone). Port-to-port through `start_alloc`.
+    mod start_alloc_installs_both_tproxy;
+
+    // transparent-mtls-enrollment (ADR-0071, step 03-03) — Tier-3 EGRESS
+    // capture walking proof: composes `install_outbound_tproxy` (03-01) +
+    // `accept_outbound_leg` getsockname recovery (03-02) +
+    // `make_transparent_listener` on the REAL kernel via the increment-b spike
+    // topology (netns + veth + nft-TPROXY). Proves the ADR-0071 Tier-3 (a)+(b)
+    // obligations: workload egress → leg-F redirect → getsockname == dialed-dst,
+    // plus the F5 anti-loop SO_MARK exemption (positive + self-exempt-impossible).
+    mod egress_tproxy_capture;
+
+    // transparent-mtls-enrollment (ADR-0071, step 05-01) — THE composed
+    // bidirectional walking skeleton: getsockname → resolve → enforce mTLS in
+    // BOTH directions on the ONE Path-A mechanism (netns + veth + nft-TPROXY +
+    // getsockname), reusing the production worker intercept seams +
+    // `HostMtlsEnforcement::enforce`, with a real 0x17 TLS-1.3 wire capture and no
+    // RST. Proves ADR-0071 Tier-3 obligations (b)+(c)+(d): orig-dst recovery on
+    // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
+    mod bidirectional_walking_skeleton;
+
+    // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
+    // invariant (Tier-3 obligation (e) / Q5a / D-TME-9 / D-TME-10): a DNS-returned
+    // service_backends addr IS the addr MtlsResolve recognizes. The workload dials
+    // a KNOWN service_backends addr B (DNS stubbed — #243's responder is NOT built),
+    // egress nft-TPROXY → leg-F → getsockname recovers B, and SimMtlsResolve
+    // recognizes the SAME B as a running mesh backend (`Mesh{addr:B}`) — one
+    // source, two readers, byte-consistent. The 02-03 resolv.conf injection is
+    // asserted present in the netns (the injection mechanism this feature OWNS),
+    // even though the responder is the #243 stub. Carries a kernel-free
+    // SimMtlsResolve companion as the cheap default-lane reproduction. SCOPE: no
+    // #243 daemon, no #167 VIP allocator — headless v1 only.
+    mod name_resolve_enforce_consistency;
+
+    // transparent-mtls-enrollment (ADR-0071, step 05-03) — RE-ESTABLISHES FRESH the
+    // OUTBOUND enforce-substrate per-direction agent-light ASYMMETRY (ADR-0069,
+    // carried forward VERBATIM by Path A) that the DELETED dataplane
+    // `mtls_outbound_enforce.rs` (deleted whole in 04-01, coupled to the deleted
+    // cgroup-rewrite mechanism) provided. Drives ONE outbound flow through the
+    // PRODUCTION `start_alloc`/`accept_loop` on the Path-A egress nft-TPROXY topology
+    // and asserts, via a `strace` syscall oracle on the agent's pump threads, that
+    // the FORWARD direction (workload → backend, leg-F → leg-B) is a `write_all` COPY
+    // and the RETURN direction (backend → workload, leg-B → leg-F) is a `splice`.
+    // Structural mirror of the SURVIVING dataplane `mtls_inbound_enforce.rs` (the
+    // inverse direction). Q4 authn-only (encryption + asymmetry, NOT intended-peer).
+    mod outbound_enforce_substrate_asymmetry;
 
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.

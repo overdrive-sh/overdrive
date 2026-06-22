@@ -27,7 +27,9 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
-use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
+use overdrive_core::traits::driver::{
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType,
+};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -39,6 +41,13 @@ use tokio::sync::broadcast;
 use crate::api::{AllocStateWire, TransitionSource};
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
+// transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
+// lifecycle wiring: per-host slot allocator, slot→plan derivation, the
+// gateway-as-responder helper, and the netns provision/teardown executors.
+use crate::veth_provisioner::{
+    NetSlotAllocator, NetSlotExhausted, VethProvisionError, derive_workload_netns_plan,
+    provision_workload_netns, responder_addr_for_slot, teardown_workload_netns,
+};
 use crate::workflow_runtime::WorkflowEngine;
 // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
 // (β) lifecycle component the shim fires alongside the driver hooks.
@@ -414,6 +423,89 @@ async fn fail_closed_on_mtls_install(
     Ok(())
 }
 
+/// Classify a [`ShimError`] surfaced from the C3 PROVISION SEAM
+/// ([`provision_and_inject_netns`]) into the
+/// [`TransitionReason::WorkloadNetnsProvisionFailed`] cause-class, or `None`
+/// when the error is NOT a provision-seam failure (a different `dispatch_single`
+/// error that should propagate as `Err` unchanged).
+///
+/// The two provision-seam error variants map to the closed `stage` vocabulary:
+/// - [`ShimError::NetSlotExhausted`] → `"net_slot_assign"` (no free slot)
+/// - [`ShimError::WorkloadNetnsProvision`] → `"netns_provision"` (the netns/veth
+///   shell-out failed)
+///
+/// `detail` carries the verbatim `Display` of the underlying error so the
+/// operator sees the privilege / capacity remediation. Mirrors
+/// [`MtlsInterceptInstallError::stage`]'s closed-vocabulary shape.
+fn netns_provision_cause(err: &ShimError) -> Option<TransitionReason> {
+    let stage = match err {
+        ShimError::NetSlotExhausted(_) => "net_slot_assign",
+        ShimError::WorkloadNetnsProvision(_) => "netns_provision",
+        _ => return None,
+    };
+    Some(TransitionReason::WorkloadNetnsProvisionFailed {
+        stage: stage.to_owned(),
+        detail: err.to_string(),
+    })
+}
+
+/// Fail-closed handling for a per-alloc netns/veth PROVISION failure at the C3
+/// seam (transparent-mtls-enrollment D-TME-12 / AC14, step 04-01). Shared by the
+/// `StartAllocation` and `RestartAllocation` arms.
+///
+/// Unlike [`fail_closed_on_mtls_install`] — which fires AFTER a `Running` row is
+/// committed and so must STOP the spawned driver and SUPERSEDE that row — this
+/// fires at the PRE-`Running` provision seam: the provision precedes
+/// `Driver::start`, so nothing was spawned and there is no `Running` row to
+/// supersede. It writes a FRESH `Failed` `AllocStatusRow` carrying the
+/// [`TransitionReason::WorkloadNetnsProvisionFailed`] cause-class (so a
+/// persistent provision failure — slot exhaustion, EPERM creating the
+/// netns/veth — reaches the `Failed` terminal instead of looping `Pending`
+/// forever as the reconciler re-emits StartAllocation each tick) and emits the
+/// lifecycle event for the transition.
+///
+/// `started_at` is `None`: the alloc never reached Running, mirroring the
+/// `StartRejected → Failed` arm's `None`. `terminal: None`: a single provision
+/// failure is not a terminal claim — the `WorkloadLifecycle` reconciler owns the
+/// `BackoffExhausted` terminal across attempts (same rationale as the
+/// `StartRejected → Failed` and mTLS-install fail-closed arms).
+///
+/// Returns `Ok(())`: like the `StartRejected → Failed` arm, the dispatch itself
+/// succeeded (the alloc is durably recorded `Failed`); the obs-store write is
+/// the one fallible step propagated as `ShimError`. Returning `Ok` (not the
+/// provision `Err`) is the whole point — it stops the indefinite Pending retry
+/// loop the bare `?` produced.
+#[allow(clippy::too_many_arguments)]
+async fn fail_closed_on_netns_provision(
+    obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    alloc_id: AllocationId,
+    workload_id: WorkloadId,
+    node_id: NodeId,
+    kind: overdrive_core::aggregate::WorkloadKind,
+    prior_state: AllocStateWire,
+    cause: TransitionReason,
+) -> Result<(), ShimError> {
+    let detail = cause.human_readable();
+    let failed_row = build_alloc_status_row(
+        alloc_id,
+        workload_id,
+        node_id,
+        AllocState::Failed,
+        tick,
+        Some(cause),
+        Some(detail),
+        None,
+        None,
+        kind,
+        None,
+    );
+    obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
+    emit_event(bus, build_lifecycle_event(&failed_row, prior_state, TransitionSource::Reconciler));
+    Ok(())
+}
+
 /// Render a `LogicalTimestamp` as `counter@writer` for the wire/event
 /// surface. Phase 1 keeps it stringly-typed because the CLI renders it
 /// verbatim and never round-trips through arithmetic.
@@ -469,7 +561,7 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 /// write itself.
 #[allow(
     clippy::too_many_arguments,
-    reason = "Action-shim ports (Driver, ObservationStore, Dataplane, LifecycleEvent bus, ServiceVipAllocator) are required at dispatch per .claude/rules/development.md § Port-trait dependencies; bundling into a struct would make individual deps optional and defeat the explicit-injection invariant."
+    reason = "Action-shim ports (Driver, ObservationStore, Dataplane, LifecycleEvent bus, ServiceVipAllocator, NetSlotAllocator) are required at dispatch per .claude/rules/development.md § Port-trait dependencies; bundling into a struct would make individual deps optional and defeat the explicit-injection invariant."
 )]
 pub async fn dispatch(
     actions: Vec<Action>,
@@ -486,6 +578,7 @@ pub async fn dispatch(
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    net_slot_allocator: &NetSlotAllocator,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
@@ -505,6 +598,7 @@ pub async fn dispatch(
             broker,
             workflow_engine,
             mtls_worker,
+            net_slot_allocator,
         )
         .await;
         if let Err(err) = result {
@@ -663,6 +757,7 @@ pub async fn dispatch_with_workflow_intent(
         state.runtime.broker_mutex(),
         Some(state.workflow_engine.as_ref()),
         state.mtls_worker.as_ref(),
+        &state.net_slot_allocator,
     )
     .await;
 
@@ -670,6 +765,101 @@ pub async fn dispatch_with_workflow_intent(
     // dispatch result (which itself carries dispatch()'s own first_error
     // aggregation over the surviving actions).
     preflight_err.map_or(dispatch_result, Err)
+}
+
+/// C3 PROVISION SEAM (transparent-mtls-enrollment D-TME-12 G1/G2/G3 + JOIN-2,
+/// step 04-01). At the TOP of each `Start`/`RestartAllocation` arm, BEFORE
+/// `Driver::start`: assign the per-host network slot, derive the netns+veth
+/// plan (responder = the per-netns gateway, G1), provision the netns+veth
+/// (fail-closed — G2), and inject the slot-derived netns NAME onto `spec.netns`
+/// (JOIN-2) + the host-veth NAME onto `spec.host_veth` (JOIN-6) so
+/// `ExecDriver::start` spawns the workload INTO the netns and
+/// `MtlsInterceptWorker::start_alloc` installs the outbound TPROXY rule on the
+/// right host-side veth.
+///
+/// Gated by the existing mTLS composition gate (`mtls_worker.is_some()`, G1):
+/// `None` on every non-mTLS boot, where the call is a no-op and `spec.netns` /
+/// `spec.host_veth` stay `None` (pre-join host-netns behaviour). The slot is
+/// assigned and the provision performed ONLY on the mTLS-composed production
+/// boot.
+///
+/// # Errors
+///
+/// - [`ShimError::NetSlotExhausted`] — no free slot (the alloc is refused
+///   rather than dropped onto a shared veth/subnet).
+/// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth provision failed
+///   (fail-closed: the workload must not spawn without its netns).
+fn provision_and_inject_netns(
+    spec: &mut AllocationSpec,
+    net_slot_allocator: &NetSlotAllocator,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+) -> Result<(), ShimError> {
+    // Gate: only the mTLS-composed production boot provisions per-workload
+    // netns. Off the gate the workload spawns in the host netns (spec.netns /
+    // spec.host_veth stay None) — the pre-join behaviour every fixture relies
+    // on.
+    if mtls_worker.is_none() {
+        return Ok(());
+    }
+    // G3: assign the smallest-free slot (idempotent re-entry for an already-
+    // held alloc — a Restart reuses the same slot). Exhaustion REFUSES.
+    let slot = net_slot_allocator.assign(spec.alloc.clone())?;
+    // G1: responder == the per-netns gateway (plan.host_addr).
+    let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    debug_assert_eq!(
+        plan.responder_addr, plan.host_addr,
+        "G1: the responder address MUST be the per-netns gateway (plan.host_addr)"
+    );
+    // G2: provision the netns + veth BEFORE Driver::start. Fail-closed — a
+    // provision failure aborts the start (the `?` surfaces
+    // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
+    // re-provision under the same slot (Restart) is a no-op.
+    provision_workload_netns(&plan)?;
+    // JOIN-2 + JOIN-6: inject the slot-derived netns NAME so ExecDriver::start
+    // enters it via setns(CLONE_NEWNET), and the host-veth NAME so
+    // start_alloc's install_outbound_tproxy matches the right iifname. Read
+    // both off `plan` before it is dropped.
+    spec.netns = Some(plan.netns.clone());
+    spec.host_veth = Some(plan.host_veth);
+    Ok(())
+}
+
+/// C3 TEARDOWN SEAM (transparent-mtls-enrollment D-TME-12 G2, step 04-01). At
+/// the terminal arms, AFTER the driver stop: tear down the per-alloc netns +
+/// veth, THEN release the slot (release-AFTER-teardown, so a crash between the
+/// two leaves the slot HELD = the resource still exists and is reclaimable,
+/// never a released-but-undestroyed leak).
+///
+/// Both halves are idempotent: teardown swallows "absent" (converge-on-boot
+/// shape), `release` is a `BTreeMap::remove` of a possibly-absent key. A
+/// terminal for an alloc that never provisioned (no held slot) is a benign
+/// no-op. Gated by `mtls_worker.is_some()` symmetric with the provision seam.
+///
+/// # Errors
+///
+/// [`ShimError::WorkloadNetnsProvision`] only on a NON-benign teardown failure
+/// (e.g. permission denied removing the netns); "absent" is swallowed. The
+/// slot is released only AFTER a successful teardown.
+fn teardown_and_release_netns(
+    alloc_id: &AllocationId,
+    net_slot_allocator: &NetSlotAllocator,
+    mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+) -> Result<(), ShimError> {
+    if mtls_worker.is_none() {
+        return Ok(());
+    }
+    // Find the slot this alloc holds (if any). An alloc that never reached the
+    // provision seam holds no slot — teardown + release are then no-ops.
+    let Some(slot) = net_slot_allocator.snapshot().get(alloc_id).copied() else {
+        return Ok(());
+    };
+    let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    // Teardown FIRST (idempotent — swallows "absent"); release the slot only
+    // after teardown succeeds, so a crash between the two leaves the slot HELD
+    // (the netns still exists and is reclaimable on the next terminal).
+    teardown_workload_netns(&plan)?;
+    net_slot_allocator.release(alloc_id);
+    Ok(())
 }
 
 /// Dispatch a single action. Each variant is independent; the caller
@@ -694,6 +884,7 @@ async fn dispatch_single(
     broker: &parking_lot::Mutex<EvaluationBroker>,
     workflow_engine: Option<&WorkflowEngine>,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
+    net_slot_allocator: &NetSlotAllocator,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop) and the Phase 3 HttpCall placeholder are
@@ -856,6 +1047,11 @@ async fn dispatch_single(
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id);
             }
+            // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
+            // per-alloc netns + veth, THEN release the slot — AFTER the driver
+            // stop. Idempotent; no-op for an alloc that never provisioned or
+            // off the mTLS gate.
+            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -863,7 +1059,7 @@ async fn dispatch_single(
         // Running AllocStatusRow on success. On StartRejected, write
         // a `Failed` row recording the typed cause-class
         // (ADR-0032 §5 + §4 Amendment).
-        Action::StartAllocation { alloc_id, workload_id, node_id, spec, kind } => {
+        Action::StartAllocation { alloc_id, workload_id, node_id, mut spec, kind } => {
             // Read prior obs row before the driver call so we capture
             // the allocation's state before this transition. For first-
             // seen allocs (no prior row) default to Pending — consistent
@@ -871,6 +1067,44 @@ async fn dispatch_single(
             let prior_state: AllocStateWire = find_prior_alloc_row(obs, &alloc_id)
                 .await?
                 .map_or(AllocStateWire::Pending, |r| r.state.into());
+
+            // C3 PROVISION SEAM (D-TME-12 G1/G2/G3 + JOIN-2/6 + AC14, step
+            // 04-01): assign the slot, provision the per-workload netns + veth,
+            // and inject `spec.netns` + `spec.host_veth` — all BEFORE
+            // `driver.start` so the workload is spawned INTO its netns. Fail-
+            // closed: a provision failure (or slot exhaustion) aborts the start.
+            // No-op off the mTLS gate.
+            //
+            // AC14 sub-claim 4: a PERSISTENT provision failure (slot exhaustion,
+            // EPERM creating the netns/veth) must drive the alloc to a `Failed`
+            // terminal — NOT bubble `Err` and loop `Pending` forever as the
+            // reconciler re-emits StartAllocation each tick. Mirror the
+            // `StartRejected → Failed` + mTLS-install fail-closed precedents: on
+            // a provision-seam error, write a fresh `Failed` row carrying the
+            // `WorkloadNetnsProvisionFailed` cause-class and return `Ok(())`. The
+            // provision precedes `driver.start`, so nothing was spawned and the
+            // "never Running-with-no-netns" safety invariant is preserved (the
+            // alloc is Pending → Failed, never Running). A non-provision
+            // `ShimError` (unreachable here, but kept exhaustive) propagates
+            // unchanged.
+            if let Err(err) = provision_and_inject_netns(&mut spec, net_slot_allocator, mtls_worker)
+            {
+                let Some(cause) = netns_provision_cause(&err) else {
+                    return Err(err);
+                };
+                return fail_closed_on_netns_provision(
+                    obs,
+                    bus,
+                    tick,
+                    alloc_id,
+                    workload_id,
+                    node_id,
+                    kind,
+                    prior_state,
+                    cause,
+                )
+                .await;
+            }
 
             let driver_kind = driver.r#type();
             // Per ADR-0032 §4 Amendment 2026-04-30: classify the
@@ -962,7 +1196,7 @@ async fn dispatch_single(
                 // (D-MTLS-15: the predicate is `DriverType::Exec`, true on
                 // the worker's exec path) — `start_alloc` installs the
                 // intercept but does NOT program `MTLS_REDIRECT_DEST`
-                // (#178-deferred). `ExecDriver` is UNTOUCHED.
+                // (#241-deferred). `ExecDriver` is UNTOUCHED.
                 //
                 // Fail-closed (D-MTLS-18): the install is a security
                 // control, not a best-effort hook. On `Err` the alloc MUST
@@ -1018,7 +1252,7 @@ async fn dispatch_single(
         // RestartAllocation never carries a terminal claim. The cause
         // surfaces to operators through the reconciler's own
         // observation/render path, not the shim's stop+start.
-        Action::RestartAllocation { alloc_id, spec, kind, reason: _ } => {
+        Action::RestartAllocation { alloc_id, mut spec, kind, reason: _ } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
             // and `NotFound` is silently absorbed (the alloc may have
@@ -1026,11 +1260,46 @@ async fn dispatch_single(
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             let _ = driver.stop(&handle).await;
 
+            // Recover `(workload_id, node_id)` for the AllocStatusRow write
+            // BEFORE the provision seam — the AC14 provision-failure → Failed-row
+            // path needs the alloc's identity to write its `Failed` row, and a
+            // restart with no prior row is a HandleMissing error regardless.
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Err(ShimError::HandleMissing { alloc_id });
             };
             // Extract prior_state before prior_row moves into build_alloc_status_row.
             let prior_state: AllocStateWire = prior_row.state.into();
+
+            // C3 PROVISION SEAM (D-TME-12 G2/G3 + JOIN-2/6 + AC14, step 04-01):
+            // after the stop-half, before the start-half. `assign` is idempotent
+            // for an already-held alloc (a Restart reuses the same slot) and
+            // `provision_workload_netns` is idempotent converge-on-boot, so a
+            // restart re-converges its existing netns rather than recreating it.
+            // Fail-closed before `driver.start`. No-op off the mTLS gate.
+            //
+            // AC14 sub-claim 4: a persistent provision failure drives the alloc
+            // to `Failed` (carrying `WorkloadNetnsProvisionFailed`) instead of
+            // bubbling `Err` → indefinite Pending retry. Symmetric with the
+            // StartAllocation arm above; the prior row supplies the identity for
+            // the Failed-row write.
+            if let Err(err) = provision_and_inject_netns(&mut spec, net_slot_allocator, mtls_worker)
+            {
+                let Some(cause) = netns_provision_cause(&err) else {
+                    return Err(err);
+                };
+                return fail_closed_on_netns_provision(
+                    obs,
+                    bus,
+                    tick,
+                    alloc_id,
+                    prior_row.workload_id.clone(),
+                    prior_row.node_id.clone(),
+                    kind,
+                    prior_state,
+                    cause,
+                )
+                .await;
+            }
 
             let driver_kind = driver.r#type();
             // Failed restart — same cause-class classification path
@@ -1231,6 +1500,11 @@ async fn dispatch_single(
             if let Some(worker) = mtls_worker {
                 worker.stop_alloc(&row.alloc_id);
             }
+            // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
+            // per-alloc netns + veth, THEN release the slot — AFTER the driver
+            // stop. Symmetric with the StopAllocation arm. Idempotent; no-op
+            // for an alloc that never provisioned or off the mTLS gate.
+            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -1436,6 +1710,24 @@ pub enum ShimError {
         /// Cause string from the `IntentStore` error.
         message: String,
     },
+
+    /// The per-allocation netns + veth could not be provisioned at the C3
+    /// seam BEFORE `Driver::start` (transparent-mtls-enrollment D-TME-12 G2,
+    /// step 04-01). Fail-closed: the workload MUST NOT spawn into the host
+    /// netns when its per-workload netns could not be created — the
+    /// confidentiality boundary the netns establishes would be absent.
+    /// Pass-through `#[from]` per `.claude/rules/development.md` § Errors so
+    /// the typed per-step `VethProvisionError` cause is preserved.
+    #[error("workload netns provisioning failed")]
+    WorkloadNetnsProvision(#[from] VethProvisionError),
+
+    /// Every per-host network slot (`0..=NET_SLOT_MAX`) is held, so a NEW
+    /// allocation cannot be assigned a collision-free slot at the C3 seam
+    /// (transparent-mtls-enrollment D-TME-12 G3, step 04-01). The alloc is
+    /// REFUSED rather than dropped onto a shared veth/subnet (the B1
+    /// collision the slot model exists to prevent). Pass-through `#[from]`.
+    #[error("network slot exhausted")]
+    NetSlotExhausted(#[from] NetSlotExhausted),
 }
 
 #[cfg(test)]

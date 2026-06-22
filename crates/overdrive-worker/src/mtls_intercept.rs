@@ -25,7 +25,7 @@
 //! `rp_filter` relax) that fakes a distinct server-real-listener hop for the
 //! netns test topology — that is TEST-ONLY and does NOT productionise. The
 //! production adapter dials orig-dst verbatim (`server_dial_addr` in
-//! `mtls/inbound.rs`, #178-deferred — NOT touched here).
+//! `mtls/inbound.rs`, #241-deferred — NOT touched here).
 
 #![allow(
     clippy::cast_possible_truncation,
@@ -100,8 +100,15 @@ pub enum InterceptError {
         /// Human-readable cause (the failing `nft` / `ip` command + stderr).
         reason: String,
     },
-    /// `accept_inbound_leg` / `accept_outbound_leg` could not accept the
-    /// redirected connection on the intercept listener.
+    /// `nft list chain` reported the shared table/chain absent — a benign
+    /// "nothing installed yet / nothing to sweep" signal on a fresh boot,
+    /// distinct from a genuine `nft` failure (binary missing, EPERM, transient
+    /// lock). Callers that treat absence as empty (the §5 boot sweep) map this
+    /// to a no-op; callers that require the chain propagate it.
+    #[error("the shared nft table/chain does not exist (nothing to sweep)")]
+    ChainAbsent,
+    /// `accept_inbound_leg` / `accept_outbound_and_recover_orig_dst` could not
+    /// accept the redirected connection on the intercept listener.
     #[error("leg accept failed on the {direction} intercept listener: {source}")]
     Accept {
         /// `"inbound"` or `"outbound"` — which intercept listener accept failed on.
@@ -110,8 +117,10 @@ pub enum InterceptError {
         #[source]
         source: std::io::Error,
     },
-    /// `accept_inbound_leg` could not recover the original destination via
-    /// `getsockname` on the TPROXY-redirected accepted leg.
+    /// `accept_inbound_leg` (inbound orig-dst) or
+    /// `accept_outbound_and_recover_orig_dst` (outbound orig-dst recovery) could
+    /// not recover the original destination via `getsockname` on the
+    /// TPROXY-redirected accepted leg.
     #[error("getsockname original-destination recovery failed: {source}")]
     OrigDst {
         /// The originating `getsockname` error.
@@ -228,7 +237,7 @@ pub fn make_transparent_listener(addr: SocketAddrV4) -> Result<std::net::TcpList
 /// Productionises the PRODUCTION HALF of
 /// `mtls_netns_topology.rs::install_tproxy` ONLY — the GAP-3 netns
 /// DNAT/masquerade is TEST-ONLY and does NOT productionise (the adapter dials
-/// orig-dst verbatim, #178).
+/// orig-dst verbatim, #241).
 ///
 /// # Errors
 ///
@@ -274,6 +283,210 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
     // teardown.
     let handle = find_virt_rule_handle(virt, agent_port)?;
     Ok(TproxyInterceptGuard { handle })
+}
+
+/// Install the OUTBOUND nft-TPROXY prerouting intercept for one workload's
+/// host-side veth.
+///
+/// The active-side mirror of [`install_inbound_tproxy`] (ADR-0071 Path A
+/// unifies inbound + outbound on the ONE nft-TPROXY mechanism). Where the
+/// inbound rule matches a specific *destination* (`ip daddr <vip>` +
+/// `tcp dport <vport>`), the egress rule matches the *ingress interface* —
+/// `iifname <host_veth>` — capturing ALL of the workload's outbound TCP as it
+/// ingresses the per-workload host-side veth, and TPROXY-redirecting it to the
+/// agent's leg-F `IP_TRANSPARENT` listener on `agent_leg_f_port`. There is no
+/// per-destination match because the workload's destination is unknown at
+/// install time; TPROXY preserves the original destination, which the agent
+/// recovers per-flow via `getsockname` downstream (03-02). This is the
+/// production shape per the feature-delta / ADR-0071 fact 2 (*"OUTBOUND
+/// interception = nft-TPROXY at the host-side veth"* — the active-side mirror
+/// of inbound) — NOT the single-known-backend `ip daddr/tcp dport` shape the
+/// egress spike used. The spike proved the routing MECHANISM (PREROUTING on
+/// host-veth ingress + fwmark + `ip rule` + local route + `IP_TRANSPARENT`
+/// leg-F + `getsockname` recovery), not the `iifname`-match clause literally;
+/// the real-kernel fire of the iifname clause is the Tier-3 03-01→03-03
+/// obligation (roadmap criterion 5).
+///
+/// Like the inbound install, this APPENDS exactly one rule to the SHARED
+/// `prerouting` chain (after the F5 exemption) and returns a
+/// [`TproxyInterceptGuard`] whose `Drop` removes ONLY that one rule by its
+/// kernel-assigned handle; the node-global shared routing infra
+/// ([`ensure_shared_routing_infra`]) is ensured idempotently and never torn
+/// down per-workload.
+///
+/// # Idempotency
+///
+/// The egress rule is keyed on `(host_veth, agent_leg_f_port)` — both the
+/// ingress interface AND the leg-F redirect target — because the egress rule
+/// has no unique `ip daddr`/`tcp dport` of its own to distinguish it. Before
+/// appending, the shared chain is presence-checked for an existing egress rule
+/// matching THIS exact `(host_veth, agent_leg_f_port)`; only when such a rule
+/// is already present is the append skipped and a guard for the existing
+/// rule's handle returned. On the normal teardown path the returned guard's
+/// [`TproxyInterceptGuard`] `Drop` removes the rule by handle, so the next
+/// install for that veth starts from a clean chain. (The inbound install does
+/// not need this presence-check — distinct virts produce distinct rule text.)
+///
+/// # Caller contract — leg-F port is part of the key
+///
+/// Because `agent_leg_f_port` is part of the dedup key, the skip fires only for
+/// the same `(host_veth, port)` pair. leg-F binds a worker-chosen *ephemeral*
+/// port per alloc (`mtls_intercept_worker.rs` `leg_f_addr`), so it is NOT
+/// node-stable across re-binds. A caller that re-installs a `host_veth` whose
+/// PRIOR egress rule SURVIVED in the kernel — e.g. a control-plane restart that
+/// left the kernel rule but dropped the in-memory guard, the surviving-veth
+/// re-install at `start_alloc` (04-01) / adopt-on-restart (02-06) — with a
+/// DIFFERENT leg-F port will NOT match the old `(veth, oldPort)` rule and WILL
+/// append a second rule. Such a caller MUST remove the prior rule first (or pin
+/// a stable-per-veth leg-F port) before re-installing.
+///
+/// # Errors
+///
+/// Returns [`InterceptError::TproxyInstall`] if ensuring the shared infra
+/// fails for a reason other than "already present", if appending the egress
+/// rule fails, or if the rule's handle cannot be recovered from the chain dump.
+pub fn install_outbound_tproxy(
+    host_veth: &str,
+    agent_leg_f_port: u16,
+) -> Result<TproxyInterceptGuard> {
+    // (1) Ensure the SHARED, node-global routing infra idempotently — exactly
+    // as the inbound install does. Add-if-missing converges; a pre-existing
+    // shared rule/route/table/exemption is the success case, left untouched.
+    ensure_shared_routing_infra()?;
+
+    // (2) Idempotent append: the egress rule is keyed on
+    // `(host_veth, agent_leg_f_port)` — both the ingress interface AND the
+    // leg-F redirect target — since it has no unique daddr/dport. If a rule for
+    // THIS exact `(host_veth, agent_leg_f_port)` is already in the shared chain,
+    // recover and return a guard for the EXISTING rule's handle instead of
+    // appending a second copy. (A surviving rule for the same veth but a
+    // DIFFERENT leg-F port is NOT matched here — see the "Caller contract" in
+    // the rustdoc above.)
+    let dump = list_chain()?;
+    if dump_has_egress_rule(&dump, host_veth, agent_leg_f_port)
+        && let Some(existing) = find_egress_rule_handle_in_dump(&dump, host_veth, agent_leg_f_port)
+    {
+        return Ok(TproxyInterceptGuard { handle: existing });
+    }
+
+    // (3) Append exactly ONE egress rule to the shared chain, after the F5
+    // exemption. Match on the ingress interface (`iifname <host_veth>`) +
+    // `meta l4proto tcp`; redirect ALL the workload's egress TCP to leg F.
+    // TPROXY preserves orig-dst → recovered per-flow downstream (03-02), so a
+    // single shared fwmark routes every flow (same as inbound).
+    run_nft(&[
+        "add",
+        "rule",
+        "ip",
+        NFT_TABLE,
+        NFT_CHAIN,
+        "iifname",
+        host_veth,
+        "meta",
+        "l4proto",
+        "tcp",
+        "tproxy",
+        "to",
+        &format!("127.0.0.1:{agent_leg_f_port}"),
+        "meta",
+        "mark",
+        "set",
+        &format!("{TPROXY_FWMARK:#x}"),
+        "accept",
+    ])?;
+
+    // (4) Recover the kernel-assigned handle of the rule we just appended so
+    // Drop can delete EXACTLY that rule (siblings, the exemption, and the
+    // shared infra all untouched).
+    let handle = find_egress_rule_handle(host_veth, agent_leg_f_port)?.ok_or_else(|| {
+        InterceptError::TproxyInstall {
+            reason: format!(
+                "could not recover nft rule handle for egress host_veth {host_veth} → 127.0.0.1:{agent_leg_f_port} after append"
+            ),
+        }
+    })?;
+    Ok(TproxyInterceptGuard { handle })
+}
+
+/// Boot-recovery sweep (adopt-on-restart §5, D-TME-12; folds 03-01 finding D2).
+///
+/// Removes EVERY per-workload TPROXY rule — egress (`iifname`-matched) AND
+/// inbound (`ip daddr`/`tcp dport`-matched) — from the shared `overdrive-mtls`
+/// `prerouting` chain by handle, leaving the shared infra (the F5 `meta mark
+/// <MTLS_LEG_S_DIAL_MARK> accept` exemption, the table+chain, the chain
+/// policy/type/hook line) UNTOUCHED — so a subsequent per-alloc re-install
+/// appends exactly one clean rule per direction.
+///
+/// # Why a sweep (not an adopt)
+///
+/// On a `serve` restart each per-workload rule SURVIVES in the shared chain
+/// (it is appended once and NEVER torn down per-workload — [`NFT_TABLE`]
+/// rustdoc), but its in-RAM RAII [`TproxyInterceptGuard`] is LOST (the CP died;
+/// `Drop` never ran). The surviving rule redirects to a now-dead leg-C/leg-F
+/// listener port → DEAD weight; a later re-install with a NEW ephemeral port
+/// does NOT match the stale `(veth, oldPort)` rule and would APPEND A SECOND
+/// rule (duplicate-stack, finding D2). Unlike the surviving netns (which the
+/// boot pass ADOPTS, because the workload still lives in it), the surviving
+/// rule has nothing to preserve — it points at a dead listener — so the boot
+/// pass REAPS it. The clean re-install at `start_alloc` restores a correct
+/// rule. (Scope: this is CLEANUP only — it does NOT re-bind legs, re-spawn
+/// listeners, or re-install rules to "restore" a survivor's interception; a
+/// still-Running survivor legitimately ends with no rule until reschedule,
+/// the accepted #26-coupled limitation.)
+///
+/// # Idempotency
+///
+/// A no-op (returns `Ok(0)`) when the chain carries only shared infra. Safe to
+/// run on every boot.
+///
+/// # Errors
+///
+/// Fail-CLOSED on every genuine failure (matching the by-handle delete path):
+/// the ONLY swallowed case is the shared table/chain being absent
+/// ([`InterceptError::ChainAbsent`] from [`list_chain`]) → `Ok(0)`, the benign
+/// "nothing to sweep" signal on a fresh boot. A spawn error or a genuine `nft`
+/// failure on the `list chain` (binary missing, EPERM, transient lock —
+/// surfaced by [`list_chain`] as [`InterceptError::TproxyInstall`]) propagates
+/// and refuses the boot, as does a by-handle `nft delete rule` failure.
+// mutants: skip — thin nft-I/O shim (`list_chain` + by-handle `run_nft delete`);
+// the pure decision is `per_workload_rule_handles_in_dump` (unit + mutation
+// covered). Body-replacement mutants (`Ok(0)`/`Ok(1)`) are killable only by the
+// real-kernel Tier-3 AT `serve_restart_sweeps_surviving_per_workload_tproxy_rule`
+// (overdrive-control-plane), which the worker-package default-lane mutants suite
+// cannot run.
+pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
+    // The shared table/chain may not exist on a first boot (no mTLS workload has
+    // ever installed a rule). `list_chain` distinguishes that benign
+    // chain-absent case (`InterceptError::ChainAbsent`) — "nothing to sweep",
+    // the dominant cause on a boot where no rule was ever installed — from a
+    // GENUINE `nft` failure (binary missing, EPERM, transient lock).
+    //
+    // Absent → `Ok(0)`. A genuine failure PROPAGATES and refuses the boot
+    // (fail-CLOSED, matching the by-handle delete path below). It must NOT be
+    // swallowed: a still-Running survivor does NOT trigger a `start_alloc`
+    // (SPIKE-B — the reconciler does not re-drive survivors), so there is no
+    // downstream install to catch a stranded guard-less survivor rule (the D2
+    // dead-weight §5 exists to reap) if the list fails — fail-closed is the only
+    // posture that does not leave it stranded.
+    let dump = match list_chain() {
+        Ok(dump) => dump,
+        Err(InterceptError::ChainAbsent) => return Ok(0),
+        Err(e) => return Err(e),
+    };
+
+    // Classify (pure): collect the handle of every per-workload TPROXY rule,
+    // leaving the shared infra (chain header / type-policy line / F5 exemption)
+    // — none of which carry a `tproxy to ` redirect — untouched.
+    let handles = per_workload_rule_handles_in_dump(&dump);
+
+    // Delete each by handle — the SAME by-handle `nft delete rule … handle <N>`
+    // the guard's `Drop` uses. A delete failure (a real `nft` error, not an
+    // absent rule) refuses the boot: surface it as `TproxyInstall`.
+    for handle in &handles {
+        let h = handle.to_string();
+        run_nft(&["delete", "rule", "ip", NFT_TABLE, NFT_CHAIN, "handle", &h])?;
+    }
+    Ok(handles.len())
 }
 
 /// Ensure the SHARED node-global TPROXY routing infrastructure exists,
@@ -433,8 +646,20 @@ fn dump_has_leg_s_exemption(dump: &str) -> bool {
     dump.lines().any(|l| l.trim().contains(&nft_rendered))
 }
 
+/// True iff `nft`'s stderr for a `list chain` of an ABSENT table/chain
+/// (the benign "nothing to sweep" case), distinct from a genuine failure.
+/// nft emits "No such file or directory" / "does not exist" for the
+/// absent case. Pure so a unit test pins the classification without nft.
+fn stderr_reports_absent_chain(stderr: &str) -> bool {
+    stderr.contains("No such file or directory") || stderr.contains("does not exist")
+}
+
 /// `nft -a list chain ip <table> <chain>` (with handles). Returns the dump on
-/// success; maps a spawn / non-zero exit to [`InterceptError::TproxyInstall`].
+/// success; maps a non-zero exit whose stderr reports the table/chain absent to
+/// [`InterceptError::ChainAbsent`] (the benign "nothing to sweep" signal), and
+/// every other failure (spawn error, or a non-success whose stderr is a genuine
+/// `nft` error — EPERM, missing binary, transient lock) to
+/// [`InterceptError::TproxyInstall`].
 fn list_chain() -> Result<String> {
     let out = Command::new("nft")
         .args(["-a", "list", "chain", "ip", NFT_TABLE, NFT_CHAIN])
@@ -445,16 +670,22 @@ fn list_chain() -> Result<String> {
             reason: format!("spawn nft list chain: {e}"),
         })?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-    } else {
-        Err(InterceptError::TproxyInstall {
-            reason: format!(
-                "nft -a list chain ip {NFT_TABLE} {NFT_CHAIN} exited {:?}: {}",
-                out.status.code(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        })
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr_reports_absent_chain(&stderr) {
+        // Benign: the shared table/chain has never been created (fresh boot, no
+        // mTLS workload has installed a rule). Callers that tolerate absence (the
+        // §5 sweep) map this to a no-op; callers that require the chain propagate.
+        return Err(InterceptError::ChainAbsent);
+    }
+    Err(InterceptError::TproxyInstall {
+        reason: format!(
+            "nft -a list chain ip {NFT_TABLE} {NFT_CHAIN} exited {:?}: {}",
+            out.status.code(),
+            stderr.trim()
+        ),
+    })
 }
 
 /// Recover this virt's TPROXY rule handle from the `nft -a list chain` dump.
@@ -489,10 +720,92 @@ fn find_virt_rule_handle(virt: SocketAddrV4, agent_port: u16) -> Result<u64> {
     })
 }
 
+/// Recover this host-veth's EGRESS TPROXY rule handle from the live shared
+/// chain, or `None` if no such rule is present.
+///
+/// Thin shell-out shim over [`find_egress_rule_handle_in_dump`] (the pure
+/// parse, unit-tested there) — `Ok(None)` means "no egress rule for this veth
+/// yet" (the first-install / append case), `Ok(Some(handle))` means "already
+/// present" (the idempotent re-install case), and an `Err` means the chain
+/// dump itself could not be obtained.
+// mutants: skip
+fn find_egress_rule_handle(host_veth: &str, agent_leg_f_port: u16) -> Result<Option<u64>> {
+    Ok(find_egress_rule_handle_in_dump(&list_chain()?, host_veth, agent_leg_f_port))
+}
+
+/// Pure: parse the kernel-assigned handle of the egress rule for `host_veth` +
+/// `agent_leg_f_port` from an `nft -a list chain` dump, or `None` if absent.
+///
+/// The egress rule matches BOTH `iifname "<host_veth>"` AND the
+/// `tproxy to 127.0.0.1:<agent_leg_f_port>` redirect on the SAME line — both
+/// conjuncts are required so an inbound `ip daddr`/`tcp dport` rule sharing the
+/// redirect target, or a different veth's egress rule sharing the redirect, is
+/// NOT mistaken for this veth's rule. The handle is read off the trailing
+/// `# handle <N>`. Pure so a unit test can pin the conjunction + parse against
+/// captured nft output without a kernel.
+fn find_egress_rule_handle_in_dump(
+    dump: &str,
+    host_veth: &str,
+    agent_leg_f_port: u16,
+) -> Option<u64> {
+    let iifname = format!("iifname \"{host_veth}\"");
+    let redirect = format!("tproxy to 127.0.0.1:{agent_leg_f_port}");
+    dump.lines()
+        .filter(|l| l.contains(&iifname) && l.contains(&redirect) && l.contains("# handle "))
+        .find_map(parse_handle)
+}
+
+/// Pure: true iff the `nft -a list chain` dump already carries the egress rule
+/// for `host_veth` + `agent_leg_f_port` — used so the idempotent
+/// [`install_outbound_tproxy`] append fires only when the rule is missing
+/// (otherwise a repeat install for the same veth stacks a duplicate, since the
+/// egress rule has no unique daddr/dport to distinguish it).
+///
+/// Requires BOTH the `iifname "<host_veth>"` match AND the
+/// `tproxy to 127.0.0.1:<agent_leg_f_port>` redirect on the SAME line: an
+/// inbound daddr/dport rule, or a different veth's egress rule, must not be
+/// read as this veth's egress rule. Pure so a unit test pins the conjunction
+/// against captured nft output.
+fn dump_has_egress_rule(dump: &str, host_veth: &str, agent_leg_f_port: u16) -> bool {
+    let iifname = format!("iifname \"{host_veth}\"");
+    let redirect = format!("tproxy to 127.0.0.1:{agent_leg_f_port}");
+    dump.lines().any(|l| l.contains(&iifname) && l.contains(&redirect))
+}
+
 /// Extract the `<N>` from a trailing `# handle <N>` on an `nft -a` rule line.
 fn parse_handle(line: &str) -> Option<u64> {
     let (_, after) = line.rsplit_once("# handle ")?;
     after.split_whitespace().next()?.parse::<u64>().ok()
+}
+
+/// Pure: collect the kernel-assigned handle of EVERY per-workload TPROXY rule in
+/// an `nft -a list chain` dump, port-blind (§5 boot-recovery sweep).
+///
+/// A per-workload rule — egress (`iifname "<veth>" … tproxy to …`) OR inbound
+/// (`ip daddr <vip> tcp dport <vport> … tproxy to …`) — is recognised by the
+/// `tproxy to ` redirect it carries, paired with a trailing `# handle <N>`. The
+/// SHARED infra is recognised-and-KEPT by the absence of `tproxy to `: the chain
+/// header (`chain prerouting { # handle 1`), the type/policy line, and the F5
+/// `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption all carry NO `tproxy to `,
+/// so none is collected. Port-blind by design: a restart loses the dead
+/// leg-C/leg-F ports, so the port-keyed predicates ([`find_egress_rule_handle_in_dump`],
+/// [`find_virt_rule_handle`]) cannot drive the sweep — the sweep removes ALL
+/// per-workload rules regardless of redirect port.
+///
+/// Pure so a unit test can pin the keep/collect partition against the verbatim
+/// captured nft fixtures without a kernel.
+fn per_workload_rule_handles_in_dump(dump: &str) -> Vec<u64> {
+    dump.lines()
+        // A per-workload rule is the only chain line carrying a `tproxy to `
+        // redirect: egress (`iifname … tproxy to …`) and inbound
+        // (`ip daddr … tcp dport … tproxy to …`) both have it; the shared infra
+        // (chain header, type/policy line, F5 `meta mark … accept` exemption)
+        // never does. The trailing `# handle <N>` is parsed by `parse_handle`;
+        // a `tproxy to` line without a handle marker (a non-`-a` / truncated
+        // dump) yields nothing to delete and is skipped by `filter_map`.
+        .filter(|line| line.contains("tproxy to "))
+        .filter_map(parse_handle)
+        .collect()
 }
 
 /// RAII guard removing ONLY this virt's per-virt TPROXY rule on `Drop`.
@@ -520,31 +833,40 @@ impl Drop for TproxyInterceptGuard {
 }
 
 /// Accept the redirected OUTBOUND workload connection on the agent's leg-F
-/// listener.
+/// listener and recover the workload's dialed original destination
+/// (`orig_dst`).
 ///
-/// Builds [`InterceptedConnection`] (`Routed::Outbound { peer }`); the owned
-/// leg F is handed by value. Productionises `roles.rs::accept_leg_f`.
+/// Recovers `orig_dst` via `getsockname` on the TPROXY-intercepted leg-F socket
+/// — symmetric with [`accept_inbound_leg`], which recovers inbound orig-dst the
+/// same way. Under TPROXY the dialed destination IS the accepted socket's local
+/// addr (D-TME-4; symmetric with the inbound `findings-inbound-intercept.md` §1
+/// — NOT `SO_ORIGINAL_DST`). Returns the OWNED leg-F fd plus the recovered
+/// `orig_dst` so the worker can RESOLVE `orig_dst` against the mesh
+/// (`MtlsResolve`, 04-02) BEFORE deciding the connection's fate — the resolve
+/// outcome (`Mesh` / `NonMesh` / `MeshUnreachable`), not a declared-peer slot,
+/// now drives whether the leg is enforced over mTLS, passed through cleartext,
+/// or fail-closed. The peer leg B dials on the `Mesh` arm is the RESOLVED
+/// backend addr (`ResolvedBackend.addr`), which the worker stamps into
+/// `Routed::Outbound { peer }` itself — NOT `orig_dst` (v1 headless: the two
+/// coincide, but the worker uses the resolved addr so #167/#61 VIP→backend
+/// translation wires without touching this seam).
 ///
 /// # Errors
 ///
-/// Returns [`InterceptError::Accept`] if the leg-F accept fails.
-pub fn accept_outbound_leg(
+/// Returns [`InterceptError::Accept`] if the leg-F accept fails, or
+/// [`InterceptError::OrigDst`] if `getsockname` orig-dst recovery fails.
+pub fn accept_outbound_and_recover_orig_dst(
     leg_f_listener: &std::net::TcpListener,
-    alloc: AllocationId,
-    peer: SocketAddrV4,
-) -> Result<InterceptedConnection> {
-    let (leg_f, _peer) = leg_f_listener
+) -> Result<(OwnedFd, SocketAddrV4)> {
+    let (leg_f, _accept_peer) = leg_f_listener
         .accept()
         .map_err(|source| InterceptError::Accept { direction: "outbound", source })?;
     leg_f.set_nodelay(true).ok();
-    Ok(InterceptedConnection {
-        leg: OwnedFd::from(leg_f),
-        routed: Routed::Outbound { peer },
-        alloc,
-        // v1 = authn-only (F5 / #178): the expected-peer SAN-match is
-        // supplied downstream by east-west SPIFFE-ID resolution, never here.
-        expected_peer: None,
-    })
+    // Symmetric with `accept_inbound_leg`: the dialed orig-dst IS the
+    // TPROXY-intercepted accepted socket's local addr, recovered via the shared
+    // `getsockname_orig` helper.
+    let orig_dst = getsockname_orig(leg_f.as_raw_fd())?;
+    Ok((OwnedFd::from(leg_f), orig_dst))
 }
 
 /// Accept the TPROXY-redirected INBOUND connection on leg-C.
@@ -698,7 +1020,10 @@ mod tests {
     //! 8-hex marks, trailing `# handle <N>`), so a drift in nft's format OR a
     //! regression in the parse is caught here without a kernel.
 
-    use super::{dump_has_leg_s_exemption, ip_rule_dump_has_fwmark, parse_handle};
+    use super::{
+        dump_has_egress_rule, dump_has_leg_s_exemption, find_egress_rule_handle_in_dump,
+        ip_rule_dump_has_fwmark, parse_handle, per_workload_rule_handles_in_dump,
+    };
 
     // --- `ip rule show` fwmark-routing predicate (extracted from the
     // `ip`-shelling shim so the conjunction is unit-killable; mirrors the
@@ -826,5 +1151,385 @@ table ip overdrive-mtls {
     fn handle_parse_rejects_a_line_with_no_handle_marker() {
         let header = "\t\ttype filter hook prerouting priority mangle; policy accept;";
         assert_eq!(parse_handle(header), None, "a line with no `# handle` marker yields None");
+    }
+
+    // --- egress (`install_outbound_tproxy`) dump-parse helpers ---
+    //
+    // The egress rule differs from the inbound one ONLY in its match: it has
+    // NO `ip daddr` / `tcp dport` (the workload's destination is unknown at
+    // install — per-flow orig-dst recovery is 03-02), so it matches on the
+    // ingress interface `iifname "<host_veth>"` and TPROXY-redirects ALL of
+    // the workload's egress TCP to the agent's leg-F listener. The dedup
+    // predicate keys on `(host_veth, agent_leg_f_port)` — both the ingress
+    // interface AND the leg-F redirect target on the same line — because the
+    // egress rule has no `ip daddr` / `tcp dport` of its own to distinguish a
+    // repeat install for the same veth from a fresh one; a presence-check on
+    // both conjuncts is what skips a literal-duplicate append, which the
+    // inbound (distinct daddr/dport per virt) does not need.
+
+    /// A verbatim-shaped `nft -a list chain ip overdrive-mtls prerouting` dump
+    /// carrying the F5 exemption at the head, ONE inbound per-virt tproxy rule,
+    /// and TWO egress (iifname-matched) tproxy rules for distinct host veths —
+    /// each rendered as nft renders it (quoted iifname, zero-padded
+    /// `0x00000001` set-mark, trailing `# handle <N>`).
+    const EGRESS_CHAIN_DUMP: &str = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 7
+\t\tiifname \"ovh-bbbb1\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 12
+\t}
+}";
+
+    #[test]
+    fn egress_rule_shape_is_recognised_and_handle_parsed_in_shared_chain_dump() {
+        // Headline (RED_ACCEPTANCE-level) scenario for this default-lane step.
+        // This test exercises ONLY the pure predicates against a static fixture
+        // — it does NOT call `install_outbound_tproxy` and proves no append (the
+        // orchestration that wires ensure → presence-check → append → handle-
+        // recover shells out and is the Tier-3 03-03 obligation, the symmetric
+        // companion to inbound AC2). What it pins default-lane: the egress rule
+        // that `install_outbound_tproxy(host_veth, port)` appends to the SHARED
+        // `prerouting` chain has the design-pinned shape — `iifname
+        // "<host_veth>" ... tproxy to 127.0.0.1:<port> ...` — and is recognised
+        // in the chain dump, with its kernel-assigned handle parsed off the
+        // trailing `# handle <N>`. The dedup/teardown MECHANICS (the predicates
+        // that DRIVE the skip-append and by-handle-delete decisions) are proven
+        // here; the real kernel CAPTURE is Tier-3 03-03.
+        assert!(
+            dump_has_egress_rule(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            "the egress rule appended for host_veth `ovh-aaaa0` → 127.0.0.1:41000 must be \
+             recognised in the shared-chain dump (iifname match + redirect)"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            Some(7),
+            "the egress rule's kernel-assigned handle must parse off the trailing `# handle 7`"
+        );
+    }
+
+    #[test]
+    fn egress_rule_present_only_for_its_own_host_veth() {
+        // Idempotency presence-check: a chain that ALREADY carries this veth's
+        // egress rule reads as present (so re-install skips the append); a
+        // chain WITHOUT it reads as absent (so the first install appends).
+        assert!(
+            dump_has_egress_rule(EGRESS_CHAIN_DUMP, "ovh-bbbb1", 41000),
+            "ovh-bbbb1's egress rule IS in the dump → present → re-install must skip"
+        );
+        let no_egress = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:36533 meta mark set 0x00000001 accept # handle 3
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(no_egress, "ovh-aaaa0", 41000),
+            "a chain with no egress rule for ovh-aaaa0 must read as absent → first install appends"
+        );
+    }
+
+    #[test]
+    fn egress_rule_requires_iifname_and_redirect_to_match_the_same_rule() {
+        // Discriminating case that KILLS the `&&`→`||` and wrong-needle mutants
+        // on the egress predicate. Line A carries OUR iifname but a DIFFERENT
+        // redirect target (41999, not 41000); line B carries OUR redirect but a
+        // DIFFERENT iifname (ovh-other2). Under correct `&&` neither qualifies
+        // for (ovh-aaaa0, 41000): false. Under the `||` mutant, line A
+        // satisfies the iifname conjunct and line B satisfies the redirect
+        // conjunct → the mutant wrongly returns true and a duplicate is left
+        // unappended (or, on the handle path, the wrong handle recovered).
+        let cross = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41999 meta mark set 0x00000001 accept # handle 5
+\t\tiifname \"ovh-other2\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 6
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(cross, "ovh-aaaa0", 41000),
+            "no single line both matches iifname `ovh-aaaa0` AND redirects to 127.0.0.1:41000; \
+             the rule is absent and the predicate must return false (the `||` mutant would \
+             wrongly report it present and skip the needed append)"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(cross, "ovh-aaaa0", 41000),
+            None,
+            "with no line matching BOTH conjuncts, no handle is recoverable for (ovh-aaaa0, 41000)"
+        );
+    }
+
+    #[test]
+    fn egress_handle_parsed_per_host_veth_in_a_multi_rule_chain() {
+        // Handle-recovery: distinct host veths in a multi-rule fixture yield
+        // distinct handles, so two egress installs capture distinct handles
+        // and each guard's Drop deletes EXACTLY its own rule.
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-aaaa0", 41000),
+            Some(7),
+            "ovh-aaaa0's egress rule handle must parse to 7"
+        );
+        assert_eq!(
+            find_egress_rule_handle_in_dump(EGRESS_CHAIN_DUMP, "ovh-bbbb1", 41000),
+            Some(12),
+            "ovh-bbbb1's egress rule handle must parse to 12"
+        );
+    }
+
+    #[test]
+    fn egress_handle_path_yields_none_for_a_matching_line_without_a_handle_marker() {
+        // T1: pins the handle-recovery contract for a line that matches BOTH
+        // `iifname "ovh-aaaa0"` AND the `tproxy to 127.0.0.1:41000` redirect but
+        // carries NO trailing `# handle <N>` marker (e.g. an `nft list chain`
+        // dump taken WITHOUT `-a`, or a truncated capture). The handle path must
+        // read `None` — there is no kernel-assigned handle to recover — while
+        // the presence-check `dump_has_egress_rule` (which does NOT require the
+        // marker) still reads `true` for the SAME line. This distinguishes the
+        // two predicates: presence = `iifname` + `redirect`; handle-recovery =
+        // presence + a recoverable `# handle <N>`. (Note: the `# handle `
+        // conjunct in the `find_egress_rule_handle_in_dump` filter is
+        // belt-and-suspenders with the downstream `parse_handle`, which is
+        // itself a `# handle ` guard — so this test pins the observable
+        // None-on-marker-less CONTRACT, not an independent mutant kill of the
+        // conjunct; the conjunct cannot diverge from `parse_handle` while
+        // `parse_handle` stays the handle extractor.)
+        let no_handle = "\
+table ip overdrive-mtls {
+\tchain prerouting {
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept
+\t}
+}";
+        assert_eq!(
+            find_egress_rule_handle_in_dump(no_handle, "ovh-aaaa0", 41000),
+            None,
+            "a matching egress line with no `# handle <N>` marker yields no recoverable handle"
+        );
+        assert!(
+            dump_has_egress_rule(no_handle, "ovh-aaaa0", 41000),
+            "the SAME marker-less line IS recognised as present by `dump_has_egress_rule` \
+             (iifname + redirect, no marker required) — presence and handle-recovery are \
+             distinct contracts"
+        );
+    }
+
+    #[test]
+    fn egress_predicate_does_not_mistake_an_inbound_daddr_rule_for_an_egress_rule() {
+        // The inbound rule (ip daddr/tcp dport, NO iifname) must NOT be read as
+        // any veth's egress rule — guards against an over-broad needle that
+        // matches on the shared `tproxy to 127.0.0.1:<port>` tail alone.
+        let inbound_only = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tip daddr 127.0.0.5 tcp dport 18555 tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept # handle 3
+\t}
+}";
+        assert!(
+            !dump_has_egress_rule(inbound_only, "ovh-aaaa0", 41000),
+            "an inbound daddr/dport rule (no iifname) must NOT be read as ovh-aaaa0's egress rule"
+        );
+    }
+
+    // --- §5 boot-recovery sweep classifier (`per_workload_rule_handles_in_dump`) ---
+    //
+    // The sweep is port-BLIND (a restart loses the dead leg-C/leg-F ports, so the
+    // port-keyed predicates above cannot drive it). The classifier walks the
+    // shared-chain dump and collects the `# handle <N>` of every per-workload
+    // TPROXY rule (egress `iifname`-matched AND inbound `daddr`/`dport`-matched),
+    // recognising both by the `tproxy to ` redirect they share, while KEEPING the
+    // shared infra (chain header, type/policy line, and the F5 `meta mark … accept`
+    // exemption — none of which carry `tproxy to `). This is the §5 mutation
+    // target: pinned against the verbatim fixtures the egress/inbound tests reuse.
+
+    #[test]
+    fn classifier_collects_every_per_workload_handle_and_no_shared_infra_handle() {
+        // `EGRESS_CHAIN_DUMP` = F5 exemption (# handle 2) + chain header
+        // (# handle 1) + ONE inbound rule (# handle 3) + TWO egress rules
+        // (# handle 7, # handle 12). The classifier must yield EXACTLY the three
+        // per-workload handles {3, 7, 12} and NEVER the chain-header (1) or
+        // exemption (2) handle.
+        let mut handles = per_workload_rule_handles_in_dump(EGRESS_CHAIN_DUMP);
+        handles.sort_unstable();
+        assert_eq!(
+            handles,
+            vec![3, 7, 12],
+            "the classifier must collect every per-workload (egress + inbound) handle and \
+             NEVER the chain-header (1) or F5-exemption (2) handle"
+        );
+        assert!(
+            !handles.contains(&1),
+            "the chain-header `# handle 1` must NEVER be swept (it is the chain itself, not a rule)"
+        );
+        assert!(
+            !handles.contains(&2),
+            "the F5 exemption `# handle 2` must NEVER be swept (it is shared infra)"
+        );
+    }
+
+    #[test]
+    fn classifier_collects_both_inbound_per_workload_handles() {
+        // `CHAIN_DUMP` = F5 exemption (# handle 2) + chain header (# handle 1) +
+        // TWO inbound rules (# handle 3, # handle 9). The classifier recognises
+        // inbound rules by the SAME `tproxy to ` redirect, so it must yield
+        // {3, 9} — proving it is not egress-only (which would miss the
+        // #241-forward inbound survivor the sweep must also cover).
+        let mut handles = per_workload_rule_handles_in_dump(CHAIN_DUMP);
+        handles.sort_unstable();
+        assert_eq!(
+            handles,
+            vec![3, 9],
+            "the classifier must collect inbound (`ip daddr`/`tcp dport`) per-workload handles too, \
+             not only egress — both share the `tproxy to` redirect that distinguishes a rule \
+             from the F5 exemption"
+        );
+    }
+
+    #[test]
+    fn classifier_is_a_noop_on_a_chain_with_only_shared_infra() {
+        // A chain carrying ONLY the shared infra (chain header, type/policy line,
+        // F5 exemption) — no per-workload TPROXY rule — must yield ZERO handles,
+        // so the sweep is an idempotent no-op (the re-run / clean-boot case).
+        let infra_only = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\ttype filter hook prerouting priority mangle; policy accept;
+\t\tmeta mark 0x00000002 accept # handle 2
+\t}
+}";
+        assert!(
+            per_workload_rule_handles_in_dump(infra_only).is_empty(),
+            "a chain carrying only shared infra (header + policy + F5 exemption) must yield NO \
+             sweepable handles → the sweep is an idempotent no-op"
+        );
+    }
+
+    #[test]
+    fn classifier_does_not_collect_a_per_workload_line_lacking_a_handle_marker() {
+        // A `tproxy to` rule line WITHOUT a trailing `# handle <N>` (e.g. a dump
+        // taken without `-a`, or truncated) yields no handle — there is nothing
+        // to delete by handle. KILLS a mutant that would collect a sentinel /
+        // panic on a marker-less rule line.
+        let no_handle = "\
+table ip overdrive-mtls {
+\tchain prerouting { # handle 1
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tiifname \"ovh-aaaa0\" meta l4proto tcp tproxy to 127.0.0.1:41000 meta mark set 0x00000001 accept
+\t}
+}";
+        assert!(
+            per_workload_rule_handles_in_dump(no_handle).is_empty(),
+            "a `tproxy to` rule with NO trailing `# handle <N>` marker yields no sweepable handle \
+             (nothing to delete by handle); the chain-header/exemption handles are still excluded"
+        );
+    }
+
+    // --- §5 sweep absent-chain classifier (`stderr_reports_absent_chain`) ---
+    //
+    // The §5 boot sweep treats the shared table/chain being ABSENT as the benign
+    // "nothing to sweep" signal (`Ok(0)`), distinct from a genuine `nft` failure
+    // (binary missing, EPERM, transient lock) which must propagate and refuse the
+    // boot (fail-CLOSED, matching the by-handle delete path). The discriminator is
+    // this pure classifier over `nft`'s stderr — pinned here without a kernel.
+
+    #[test]
+    fn stderr_reports_absent_chain_classifies_absent_vs_genuine_failures() {
+        use super::stderr_reports_absent_chain;
+        // ABSENT-table / absent-chain shapes nft emits when the table or chain
+        // does not exist — the benign fresh-boot "nothing to sweep" case → true.
+        for absent in [
+            "Error: No such file or directory",
+            "Error: No such file or directory\nlist chain ip overdrive-mtls prerouting\n      ^^^^^^^^^^^^",
+            "Error: chain `prerouting` does not exist in table `overdrive-mtls`",
+            "table `overdrive-mtls` does not exist",
+        ] {
+            assert!(
+                stderr_reports_absent_chain(absent),
+                "absent-table/chain stderr must classify as absent (→ Ok(0), nothing to sweep): {absent:?}"
+            );
+        }
+        // GENUINE failures — these are NOT "absent"; the sweep must propagate them
+        // and refuse the boot. KILLS a mutant that flips the predicate to a
+        // constant `true` (which would re-open the swallow the fix closes).
+        for genuine in [
+            "Error: Operation not permitted",
+            "nft: command not found",
+            "Error: Could not process rule: Resource temporarily unavailable",
+            "",
+        ] {
+            assert!(
+                !stderr_reports_absent_chain(genuine),
+                "a genuine nft failure (EPERM / missing binary / transient lock / empty) must NOT \
+                 classify as absent — it propagates and refuses the boot: {genuine:?}"
+            );
+        }
+    }
+
+    // --- `accept_outbound_and_recover_orig_dst` getsockname recovery (D-TME-4) ---
+
+    #[test]
+    fn accept_outbound_and_recover_orig_dst_returns_the_getsockname_dialed_addr() {
+        // `accept_outbound_and_recover_orig_dst` recovers the dialed orig-dst via
+        // `getsockname` on the accepted leg-F socket (symmetric with
+        // `accept_inbound_leg`). `accept` + `getsockname` + `set_nodelay` do no
+        // privileged syscall, so this is default-lane (no root / no TPROXY): on a
+        // plain loopback listener `getsockname` of the accepted socket returns the
+        // dialed local addr. The real TPROXY orig-dst==dialed-dst on a live
+        // intercepted connect is the Tier-3 03-03 / 05-01 obligation; here we pin
+        // that the recovered orig_dst is the getsockname addr and the owned leg is
+        // the genuine accepted socket.
+        use std::io::{Read as _, Write as _};
+        use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+        use std::os::fd::{AsRawFd as _, FromRawFd as _};
+        use std::time::Duration;
+
+        use super::accept_outbound_and_recover_orig_dst;
+
+        let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+            .expect("bind plain loopback leg-F listener");
+        let dialed_addr = match listener.local_addr().expect("local_addr") {
+            std::net::SocketAddr::V4(a) => a,
+            v6 @ std::net::SocketAddr::V6(_) => panic!("expected V4 addr, got {v6}"),
+        };
+
+        // Client dials so the production `accept()` has a pending connection, then
+        // reads one byte written back through the recovered owned leg — proving
+        // the returned fd IS the genuine accepted socket.
+        let client = std::thread::spawn(move || {
+            let mut s = TcpStream::connect_timeout(&dialed_addr.into(), Duration::from_secs(5))
+                .expect("dial loopback leg-F");
+            let mut buf = [0u8; 1];
+            s.read_exact(&mut buf).expect("read echoed byte");
+            buf
+        });
+
+        let (leg, orig_dst) = accept_outbound_and_recover_orig_dst(&listener)
+            .expect("accept_outbound_and_recover_orig_dst must recover orig-dst");
+
+        assert_eq!(
+            orig_dst, dialed_addr,
+            "recovered orig_dst must be the getsockname-recovered dialed addr"
+        );
+
+        // Write a byte through the owned leg; the client reads it back byte-exact.
+        // SAFETY: a fresh owned fd over the accepted TCP leg; dropped at scope end.
+        let mut stream = unsafe { TcpStream::from_raw_fd(libc_dup(leg.as_raw_fd())) };
+        stream.write_all(b"X").expect("write through the owned leg");
+        stream.flush().ok();
+        drop(stream);
+
+        assert_eq!(&client.join().expect("client thread"), b"X");
+        drop(leg);
+    }
+
+    /// `dup(2)` a raw fd so the test can write through a copy while production
+    /// keeps owning the original `OwnedFd`.
+    fn libc_dup(fd: i32) -> i32 {
+        // SAFETY: dup of a live fd; the returned fd is owned by the caller.
+        let new = unsafe { libc::dup(fd) };
+        assert!(new >= 0, "dup: {}", std::io::Error::last_os_error());
+        new
     }
 }

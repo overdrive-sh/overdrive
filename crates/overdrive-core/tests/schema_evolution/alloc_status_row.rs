@@ -191,6 +191,61 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
     );
 }
 
+/// Forward-roundtrip pin for the `TransitionReason::WorkloadNetnsProvisionFailed`
+/// variant (transparent-mtls-enrollment D-TME-12 / AC14, step 04-01).
+/// Constructs a `Failed` `AllocStatusRow` whose `reason` carries the new
+/// cause-class variant, archives through the *current* `AllocStatusRowEnvelope`
+/// (V1 — the rkyv layout is unchanged because the new variant is appended at the
+/// tail of `TransitionReason`'s discriminant space), deserialises, and asserts
+/// `Eq` against the source.
+///
+/// This is NOT a `FIXTURE_V<N>` constant — appending an enum variant does not
+/// bump the envelope version per `.claude/rules/development.md` § "rkyv schema
+/// evolution"; the existing `FIXTURE_V1` test (which pins `reason: None`)
+/// continues to defend the discriminant layout of pre-existing variants. This
+/// test pins that the new variant encodes/decodes through the same envelope.
+///
+/// Mutation-killability: a mutant swapping the `stage`/`detail` strings in the
+/// constructor below fails the equality assertion.
+#[test]
+fn fresh_alloc_status_row_workload_netns_provision_failed_round_trips_through_v1_envelope() {
+    use overdrive_core::transition_reason::TransitionReason;
+
+    let payload = AllocStatusRowV1 {
+        alloc_id: AllocationId::new("alloc-netns-fail-01").expect("valid alloc id"),
+        workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        state: AllocState::Failed,
+        updated_at: LogicalTimestamp {
+            counter: 3,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+        reason: Some(TransitionReason::WorkloadNetnsProvisionFailed {
+            stage: "net_slot_assign".to_owned(),
+            detail: "no free network slot (capacity 4096 exhausted)".to_owned(),
+        }),
+        detail: Some("no free network slot (capacity 4096 exhausted)".to_owned()),
+        terminal: None,
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        // The provision seam fires PRE-Running, so a Failed row from this cause
+        // never reached Running — `started_at` is `None`.
+        started_at: None,
+    };
+    let envelope = AllocStatusRowEnvelope::latest(payload.clone());
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    let decoded: AllocStatusRowEnvelope =
+        rkyv::from_bytes::<AllocStatusRowEnvelope, rkyv::rancor::Error>(bytes.as_ref())
+            .expect("rkyv deserialize");
+    let projected: AllocStatusRowLatest =
+        decoded.into_latest().expect("envelope into_latest projection");
+    assert_eq!(
+        projected, payload,
+        "AllocStatusRow with WorkloadNetnsProvisionFailed must round-trip through the current V1 envelope unchanged"
+    );
+}
+
 // ---------------------------------------------------------------------
 // Bootstrap helper — generates the canonical V1 bytes on demand for the
 // crafter to paste into `FIXTURE_V1` above. Run via:

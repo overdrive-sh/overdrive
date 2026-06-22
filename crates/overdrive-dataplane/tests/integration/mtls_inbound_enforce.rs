@@ -209,7 +209,7 @@ async fn inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server() {
     // workload's allocation; by the time `enforce` runs `conn.alloc` IS that selected
     // server allocation (SD-1 — the orig-dst → alloc resolution is the worker's job).
     // Inside the adapter "orig-dst → identity" is `svid_for(&conn.alloc)` via the
-    // identity port. `expected_peer` is `None` (v1 authn-only — #178 is the
+    // identity port. `expected_peer` is `None` (v1 authn-only — #242 is the
     // intended-peer-pinning upgrade).
     let conn = InterceptedConnection {
         leg: leg_c,

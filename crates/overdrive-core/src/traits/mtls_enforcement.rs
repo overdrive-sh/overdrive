@@ -67,13 +67,13 @@
 //! subsystem this port MUST NOT duplicate (no policy engine, no Regorus, no
 //! `policy_verdicts` read here). It also does NOT pin the *intended* peer:
 //! expected-destination identity pinning (`expected_peer` + `PeerIdentityMismatch`)
-//! is the [#178](https://github.com/overdrive-sh/overdrive/issues/178) UPGRADE
+//! is the [#242](https://github.com/overdrive-sh/overdrive/issues/242) UPGRADE
 //! (east-west SPIFFE-ID resolution supplies the expected peer); **v1 is authn-only**
 //! (`expected_peer == None`). **A routing bug / VIP collision / malicious
 //! in-cluster endpoint presenting a valid-but-unintended SVID is NOT prevented in
 //! v1** — the honest v1 claim is "chain-to-bundle transport authn + encryption, no
 //! intended-peer pinning." Docs/tests MUST NOT call the wrong-but-valid-peer case
-//! "protected" until #178 lands (F5).
+//! "protected" until #242 lands (F5).
 //!
 //! Resource-bounded by [`MtlsLimits`] (F4/F7): bounded pre-arm buffer (256 KiB),
 //! handshake deadline (5 s), per-allocation in-flight ceiling (128), pump-stall
@@ -191,10 +191,10 @@ pub struct InterceptedConnection {
     /// destination). **v1 leaves this `None` (authn-only)** in BOTH directions:
     /// #26 enforces chain-to-trust-bundle authentication only, and the
     /// expected-peer identity is supplied DOWNSTREAM by east-west SPIFFE-ID
-    /// resolution ([#178](https://github.com/overdrive-sh/overdrive/issues/178),
+    /// resolution ([#242](https://github.com/overdrive-sh/overdrive/issues/242),
     /// which "terminates in SPIFFE mTLS via sockops (#26)"). The field + the
     /// `PeerIdentityMismatch` variant are reserved now so the SAN-match wires
-    /// the moment #178 supplies it — no contract change later. This is NOT
+    /// the moment #242 supplies it — no contract change later. This is NOT
     /// authorization (allow/deny is #27's BPF-LSM `socket_connect` hook fed by
     /// #38's `policy_verdicts`); it is *identity pinning* of an
     /// already-authenticated peer. **v1 = chain-to-bundle transport authn +
@@ -467,7 +467,7 @@ pub enum MtlsEnforcementError {
     /// #27's BPF-LSM `socket_connect` hook). Reserved now; **v1 never produces it
     /// because `expected_peer` is `None`** — it wires the moment east-west
     /// SPIFFE-ID resolution
-    /// ([#178](https://github.com/overdrive-sh/overdrive/issues/178)) supplies the
+    /// ([#242](https://github.com/overdrive-sh/overdrive/issues/242)) supplies the
     /// expected peer. Distinct from `PeerVerificationFailed` (authn) so the
     /// "valid peer, wrong destination" case is diagnosable on its own.
     #[error("peer identity mismatch: authenticated peer is not the expected destination: {reason}")]
@@ -694,7 +694,7 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   SPIFFE-SAN is additionally matched against `id` (expected-destination
     ///   pinning); a mismatch is fail-closed (`PeerIdentityMismatch`). In **v1
     ///   `expected_peer` is `None`** (authn-only) — the expected-peer identity is
-    ///   the #178 UPGRADE; this clause is a no-op until then. A
+    ///   the #242 UPGRADE; this clause is a no-op until then. A
     ///   valid-but-unintended SVID is NOT rejected in v1.
     ///
     /// # Edge cases (all FAIL-CLOSED — no cleartext, connection refused) — both directions
@@ -710,7 +710,7 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// - `conn.expected_peer == Some(id)` and the authenticated peer's SPIFFE-SAN
     ///   does NOT match `id` (a wrong-but-valid peer — chains to the bundle but
     ///   is not the intended destination) ⇒ `Err(PeerIdentityMismatch)`; refused,
-    ///   leg closed. **v1: unreachable while `expected_peer` is `None`** — the #178
+    ///   leg closed. **v1: unreachable while `expected_peer` is `None`** — the #242
     ///   UPGRADE (F1/F5). A valid-but-unintended SVID is NOT rejected in v1.
     /// - The peer/workload streamed more than `limits.max_prearm_bytes` of pre-arm
     ///   plaintext before kTLS armed ⇒ `Err(BufferLimitExceeded)`: the buffer is

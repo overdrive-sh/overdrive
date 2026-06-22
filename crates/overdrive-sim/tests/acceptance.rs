@@ -18,6 +18,11 @@ mod acceptance {
     mod sim_observation_lww_converges;
     mod sim_observation_row_readers;
     mod sim_observation_single_peer;
+    // transparent-mtls-enrollment 01-03 (F-D) — the REAL broadcast-overflow →
+    // `SubscriptionEvent::Lagged` mapping in `SimObservationStore::
+    // subscribe_all_events`, the production trigger the resolve-adapter's
+    // synthetic doubles bypass.
+    mod sim_observation_lagged_overflow;
 
     // Step 01-01 — LWW conformance harness invocation. RED scaffold;
     // GREEN counterpart is step 01-02 (lands the harness in

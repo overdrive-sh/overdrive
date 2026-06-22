@@ -79,28 +79,44 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # trybuild fixtures compile). This override is retained for the
 # default profile so a developer running these tests directly via
 # `cargo nextest run` still gets a sensible budget.
+#
+# The filter matches by BINARY name only, NOT by test-function name.
+# Every `tests/compile_fail.rs` / `tests/compile_pass.rs` file contains
+# exactly one trybuild `#[test]` fn, so `binary(...)` is sufficient —
+# and robust against per-crate naming. A prior test-name conjunct
+# (`& (test(compile_fail_cases) | test(compile_pass_cases))`) silently
+# excluded `overdrive-store-local::compile_fail` (fn `compile_fail`) and
+# `overdrive-worker::compile_fail` (fn `compile_fail_fixtures`), so those
+# two got neither this slow-timeout extension nor the serialization
+# group below — they fell back to the CI default 180s budget, ran
+# unserialized, contended for the target-dir lock, and TIMED OUT.
 [[profile.default.overrides]]
-filter = '(binary(compile_fail) | binary(compile_pass)) & (test(compile_fail_cases) | test(compile_pass_cases))'
+filter = 'binary(compile_fail) | binary(compile_pass)'
 slow-timeout = { period = "60s", terminate-after = 4 }
 
 # Serialize trybuild binaries against each other. Each trybuild
 # `TestCases` invocation spawns `cargo build` internally to compile
-# its fixtures into a private workspace; three trybuild binaries
-# (`overdrive-core::compile_fail`, `overdrive-control-plane::compile_fail`,
-# `overdrive-control-plane::compile_pass`) running in parallel contend
-# for the cargo target-dir file lock. Under that contention the
-# inner cargo invocations block on `Blocking waiting for file lock
-# on build directory` and the per-test slow-timeout fires before any
-# of them finish — the symptom the timeout-only fix in commit
+# its fixtures into a private workspace; the six trybuild binaries
+# (`overdrive-core::{compile_fail,compile_pass}`,
+# `overdrive-control-plane::{compile_fail,compile_pass}`,
+# `overdrive-store-local::compile_fail`, `overdrive-worker::compile_fail`)
+# running in parallel contend for the cargo target-dir file lock. Under
+# that contention the inner cargo invocations block on `Blocking waiting
+# for file lock on build directory` and the per-test slow-timeout fires
+# before any of them finish — the symptom the timeout-only fix in commit
 # e4e6fb8 did not address. Serializing at the nextest layer
 # (cross-process, since trybuild binaries are separate test
 # processes — `serial_test` cannot reach across them) gives each
 # binary uninterrupted access to the lock.
+#
+# Match by BINARY name only — see the slow-timeout override above for why
+# the prior test-name conjunct silently dropped `store-local::compile_fail`
+# and `worker::compile_fail` from the group and let them time out.
 [test-groups.trybuild]
 max-threads = 1
 
 [[profile.default.overrides]]
-filter = '(binary(compile_fail) | binary(compile_pass)) & (test(compile_fail_cases) | test(compile_pass_cases))'
+filter = 'binary(compile_fail) | binary(compile_pass)'
 test-group = 'trybuild'
 
 # Unified serialization domain for EVERY test that touches shared,
@@ -174,6 +190,15 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# NOTE (transparent-mtls 04-04): the per-alloc-netns Tier-3 tests appended at the
+# end of the filter below join this single-writer group because the 04-04
+# adopt-on-restart boot pass — run by the `serve_restart_*` adopt tests AND by
+# the run_server mtls boot tests already listed above — GCs EVERY `ovd-ns-*`
+# netns not in the current boot's ObservationStore Running set. Run concurrently
+# with any test holding a live per-alloc netns, it would reap that netns (the
+# "global shared kernel resource masked by per-test isolation" defect class —
+# the netns-layer analogue of the bpffs/cgroup state this group already guards).
+# Every per-alloc-netns test must therefore serialize here.
 [[profile.default.overrides]]
 filter = '''
     binary(integration)
@@ -209,6 +234,12 @@ filter = '''
         | test(marked_workload_dial_is_still_intercepted_f5_self_exempt_negative)
         | test(mtls_dataplane_load_attach_per_alloc_program_redirect)
         | test(mtls_dataplane_load_reuses_prepinned_service_map)
+        | test(serve_restart_readopts_surviving_slot_and_gcs_orphan_netns)
+        | test(serve_restart_sweeps_surviving_per_workload_tproxy_rule)
+        | test(alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal)
+        | test(provision_failure_drives_alloc_to_failed_row_not_pending_retry)
+        | test(provision_creates_and_idempotently_converges_per_workload_netns)
+        | test(provision_injects_node_local_responder_into_netns_resolv_conf)
     )
 '''
 test-group = 'host-kernel-shared'
