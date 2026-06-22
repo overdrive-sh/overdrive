@@ -1,0 +1,225 @@
+{
+  "roadmap": {
+    "project_id": "canonical-workload-address-inbound-tproxy",
+    "created_at": "2026-06-22T17:45:51Z",
+    "total_steps": 6
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Per-alloc canonical-address plumbing",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "AllocStatusRow V1->V2 rkyv envelope (additive workload_addr)",
+          "description": "Add AllocStatusRowEnvelope::V2 carrying workload_addr: Option<Ipv4Addr> per the development.md rkyv 6-step version-bump procedure (D-BLOCKER2). This is the persisted observation surface the BackendDiscoveryBridge hydrates the per-alloc canonical address from; persisting the materialized slot*base-at-provision addr (not the NetSlot to recompute) keeps install/observe/advertise byte-identical.",
+          "criteria": [
+            "S-V2: the existing FIXTURE_V1 golden bytes decode through AllocStatusRowEnvelope::into_latest() to an AllocStatusRowV2 whose workload_addr is None (additive From<AllocStatusRowV1> for AllocStatusRowV2 defaults the new field absent); every other field equals the canonical V1 payload byte-for-byte.",
+            "S-V2: an AllocStatusRowV2 carrying Some(Ipv4Addr) round-trips archive -> access -> deserialize -> into_latest() equal to the original.",
+            "Envelope shape complete per the 6-step: V2 appended to the enum (V1 discriminant unmoved), pub type AllocStatusRow re-aliased to AllocStatusRowV2, pub type AllocStatusRowLatest = AllocStatusRowV2, latest(p) -> Self::V2(p), From<V1> for V2 additive (workload_addr: None), into_latest() chains V1 => Ok(v1.into()) / V2 => Ok(v2).",
+            "Golden discipline held: FIXTURE_V1 is NOT touched; FIXTURE_V2 added in the same commit; GOLDEN_DISCRIMINANT_OFFSET_V1 / discriminant_offset_from_end() re-pinned via the triangulation test (adding Option<Ipv4Addr> = 4 bytes behind the Option discriminant shifts the trailing root footprint; the offset is empirical).",
+            "Obligation #5: AllocStatusRowV2.workload_addr carries a rustdoc comment naming it a materialized slot x base-at-provision join (a frozen snapshot whose inputs are immutable except under redeploy) and stating the #239 Phase-1 single-cut constraint: a base change is a full redeploy / re-provision / re-observe, NOT a live re-tune.",
+            "Mutation gate >=80% on the V2 codec surface (latest / From<V1> / into_latest projection) via cargo xtask mutants --diff origin/main --features integration-tests (Lima-routed on macOS)."
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+          "scenario_name": "S-V2",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/traits/observation_store.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+              "crates/overdrive-core/tests/schema_evolution.rs"
+            ]
+          },
+          "dependencies": [],
+          "effort_hours": 4,
+          "implementation_notes": "Rust test paradigm: this is a schema-evolution golden-fixture step (.claude/rules/testing.md 'Archive schema-evolution roundtrip', mandatory call site). UNSKIP the two committed RED scaffolds (#[should_panic(expected=\"RED scaffold\")], bb63d878) -- replace each panic body with real assertions and add the production API the envelope needs. Default-lane (no integration-tests feature, pure in-process rkyv, no I/O). proptest is eligible for the V2 Some(addr) round-trip arm (generate an arbitrary Ipv4Addr -> archive -> access -> deserialize -> assert eq); the V1 arm is example-pinned (the golden FIXTURE_V1 bytes ARE the pinned example). Follow development.md 'rkyv schema evolution' -> 'Version-bump procedure' steps 1-6 in a SINGLE commit. Mutation-gate target = the V2 codec (latest / From<V1> for V2 / into_latest) -- a mutant flipping the additive None default or dropping a match arm must be caught."
+        },
+        {
+          "id": "01-02",
+          "name": "AllocationSpec fields + C3 injection + listen-port projection + exit-observer copy",
+          "description": "Add the pure in-memory per-alloc channel for the canonical address and declared service ports (D-A1 plumbing). Set workload_addr at the C3 provision seam off plan.workload_addr (same channel as netns/host_veth, no serde/rkyv); project the declared Service listener ports via a new WorkloadLifecycle::project_service_listen_ports mirroring project_probe_descriptors; copy spec.workload_addr into the written AllocStatusRowV2 in the exit-observer write path.",
+          "criteria": [
+            "AllocationSpec gains pub workload_addr: Option<Ipv4Addr> and pub service_ports: Vec<NonZeroU16> (pure in-memory; derives Debug/Clone/PartialEq/Eq only -- NO serde, NO rkyv -- symmetric with the existing netns/host_veth slot-derived channels). Both default None/empty for host-netns workloads (every current fixture).",
+            "C3 seam: provision_and_inject_netns sets spec.workload_addr = Some(plan.workload_addr) beside the existing spec.netns / spec.host_veth injection, off the same plan (action_shim/mod.rs:792-824).",
+            "New WorkloadLifecycle::project_service_listen_ports(intent) -> Vec<NonZeroU16>: Service(svc) => svc.listeners.iter().map(|l| l.port).collect(); Job/Schedule => Vec::new() (mirrors project_probe_descriptors at workload_lifecycle.rs:1078-1094). Unit-tested: a Service projects its listener ports; a Job and a Schedule each project the empty vec.",
+            "service_ports threaded into the emitted AllocationSpec.service_ports at the IDENTICAL hydrate-desired site/shape as probe_descriptors (reconciler_runtime.rs:2317) -- Obligation #2b: pin this seam, do NOT improvise a new site or a new ObservationStore method.",
+            "Exit-observer / alloc-status write path copies spec.workload_addr into the written AllocStatusRowV2.workload_addr (an observed input: the addr the node provisioned this alloc into).",
+            "Mutation gate >=80% on project_service_listen_ports (the Service-arm vs Job/Schedule-empty-arm partition is a canonical mutation surface)."
+          ],
+          "test_file": "crates/overdrive-core/tests/canonical_address_bridge_advertise.rs",
+          "scenario_name": "S-BRIDGE",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/traits/driver.rs",
+              "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-worker/src/exit_observer.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/canonical_address_bridge_advertise.rs"
+            ]
+          },
+          "dependencies": ["01-01"],
+          "effort_hours": 6,
+          "implementation_notes": "Rust test paradigm: Tier-1 DST / default-lane unit. project_service_listen_ports is a pure function -- unit-test the three kind arms directly (Service -> ports, Job -> empty, Schedule -> empty); proptest is eligible over an arbitrary non-empty NonZeroU16 listener set asserting the projected set equals the declared set (this is the producer side of S-PORTSET, finalized in 02-01). Per CLAUDE.md 'implement to the design': add ONLY the two AllocationSpec fields + the one projection fn + the named injection assignments -- do NOT invent a new spec type, a new ObservationStore method, or a builder override (the dependency must be set at the C3 site, not defaulted). The exit-observer copy is an observed-input write, not a derived value. Depends on 01-01 for the AllocStatusRowV2.workload_addr field the exit-observer writes."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Canonical advertise + LB gate",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Bridge advertises workload_addr:port + RunningAllocSet Set->Map + hydrate_actual",
+          "description": "Flip the BackendDiscoveryBridge advertise address from host_ipv4 to the canonical per-workload workload_addr when present (D-B2), widen RunningAllocSet.running from BTreeSet to BTreeMap<AllocationId, Option<Ipv4Addr>> to carry the per-alloc addr, and populate that map in hydrate_actual from the V2 observation row. ServiceBackendRow.vip is UNCHANGED (dialable-VIP is #61 territory).",
+          "criteria": [
+            "S-BRIDGE (Some arm): when actual.running[alloc] is Some(workload_addr), the emitted Backend.addr == workload_addr:listener_port; the emitted service vip is UNCHANGED.",
+            "S-BRIDGE (None arm, error/edge): when actual.running[alloc] is None (host-netns / non-Path-A alloc), the emitted Backend.addr == host_ipv4:listener_port (fallback behaviour UNCHANGED); the emitted service vip is UNCHANGED.",
+            "RunningAllocSet.running widened BTreeSet<AllocationId> -> BTreeMap<AllocationId, Option<Ipv4Addr>> (BTreeMap not HashMap -- the bridge fingerprints the iterated backend set deterministically, per development.md 'Ordered-collection choice').",
+            "Obligation #2a: hydrate_actual populates RunningAllocSet.running from each Running V2 alloc-status row's workload_addr (pin WHERE the per-alloc workload_addr is read into the map; obs.alloc_status_rows() already carries the V2 row -- NO new ObservationStore method).",
+            "S-PORTSET (@property): for an N>=2-listener Service, the inbound-capture port-set (project_service_listen_ports -> AllocationSpec.service_ports, from 01-02) equals the advertise port-set (the bridge reading desired.listeners ports) -- byte-set equality, no captured port missing from the advertised set and no advertised port missing from the captured set (DELIVER obligation #1).",
+            "Mutation gate >=80% on the bridge advertise addr-source selection and the hydrate_actual map population."
+          ],
+          "test_file": "crates/overdrive-core/tests/canonical_address_bridge_advertise.rs",
+          "scenario_name": "S-BRIDGE",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/canonical_address_bridge_advertise.rs",
+              "crates/overdrive-core/tests/capture_advertise_port_set_equality.rs"
+            ]
+          },
+          "dependencies": ["01-01", "01-02"],
+          "effort_hours": 6,
+          "implementation_notes": "Rust test paradigm: Tier-1 DST (in-process, default lane -- BackendDiscoveryBridge::reconcile is the pure reconciler driving port, reconcile()->(Vec<Action>,View)). UNSKIP the two S-BRIDGE scaffolds + the S-PORTSET scaffold (#[should_panic(expected=\"RED scaffold\")]) -- replace panic bodies with real assertions. S-PORTSET is the @property case: proptest over an arbitrary non-empty NonZeroU16 listener set (N>=2) asserting set equality across the projection path (01-02) and the advertise path; @example-pin the canonical mesh row (Some(10.99.0.6)) and host row (None). Assert only on the port-exposed observable universe (emitted Backend.addr, emitted service vip, the advertised fingerprint) -- never the bridge's private fields. Depends on 01-01 (V2 row) + 01-02 (workload_addr on the row + service_ports projection). Mutation-gate the addr-source branch (Some -> workload_addr vs None -> host_ipv4) and the hydrate_actual read."
+        },
+        {
+          "id": "02-02",
+          "name": "ServiceMapHydrator GATE — three-way subnet-membership split",
+          "description": "Gate the ServiceMapHydrator so Path-A/mesh backends (addr in WORKLOAD_SUBNET_BASE) program NEITHER the cgroup LOCAL_BACKEND_MAP (no RegisterLocalBackend) NOR the XDP SERVICE_MAP/REVERSE_NAT_MAP (no DataplaneUpdateService) -- nft-TPROXY owns delivery (D-GATE / D-GATE-PRED). Adds a workload_subnet: Ipv4Net mandatory ctor param wired from WORKLOAD_SUBNET_BASE (one source) at the construction site. B2 (02-01) reclassifies these backends LOCAL->REMOTE, so without this gate the slice ships dead XDP writes -- the gate is the cost of B2's correctness and lands with it.",
+          "criteria": [
+            "S-GATE (mesh arm, happy): a backend whose addr.ip() is within WORKLOAD_SUBNET_BASE (10.99.0.0/16) emits NEITHER RegisterLocalBackend NOR DataplaneUpdateService (mesh -> skip; nft-TPROXY owns delivery).",
+            "S-GATE (local arm, error/edge -- gate must NOT over-fire): a backend whose addr == host_ipv4 still emits RegisterLocalBackend (LOCAL arm UNCHANGED).",
+            "S-GATE (remote arm, error/edge -- gate must NOT over-fire): a backend whose addr is neither host_ipv4 nor within WORKLOAD_SUBNET_BASE still emits DataplaneUpdateService (REMOTE arm UNCHANGED).",
+            "The three-way split is applied BEFORE the existing LOCAL/REMOTE partition (mesh -> skip / local -> RegisterLocalBackend / remote -> DataplaneUpdateService); the existing partition logic for the two non-mesh arms is byte-for-byte unchanged.",
+            "ServiceMapHydrator gains workload_subnet: Ipv4Net as a MANDATORY constructor parameter (required, not defaulted, per development.md 'Port-trait dependencies'); the construction site in overdrive-control-plane passes WORKLOAD_SUBNET_BASE -- the SAME source the provisioner uses (one source).",
+            "Mutation gate >=80% on the hydrator partition (the three-way subnet split is a canonical mutation surface -- a mutant gating everything, gating nothing, or swapping an arm must be caught by the mesh + the two non-mesh S-GATE arms)."
+          ],
+          "test_file": "crates/overdrive-core/tests/mesh_backend_lb_gate.rs",
+          "scenario_name": "S-GATE",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/reconcilers/service_map_hydrator.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/mesh_backend_lb_gate.rs"
+            ]
+          },
+          "dependencies": ["02-01"],
+          "effort_hours": 5,
+          "implementation_notes": "Rust test paradigm: Tier-1 DST (in-process, default lane -- ServiceMapHydrator::reconcile is the pure reconciler driving port). UNSKIP the three S-GATE scaffolds (mesh / local / remote arms) -- replace panic bodies with real assertions. PBT-eligible over the three address classes (@example-pin one representative per arm: 10.99.0.6 mesh / host_ipv4 local / 10.96.0.50 remote). Assert on the port-exposed observable universe (register_local_backend_count, dataplane_update_service_count, the programmed fingerprint) -- never the hydrator's private fields. The two non-mesh arms are the load-bearing error/edge coverage: they prove the gate does not over-fire. Per CLAUDE.md 'implement to the design': add ONLY the workload_subnet ctor param + the third (mesh) partition arm -- do NOT invent a mesh-flag field or a new predicate input; the addr's subnet membership IS the classification. Mutation gate is mandatory here (the partition is the named canonical mutation surface). Depends on 02-01 (B2 produces the workload_addr backends this gate classifies)."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Inbound install + keystone e2e",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "start_alloc per-port inbound install (replace tproxy_guard = None)",
+          "description": "Close the D-A1 keystone install / D-BLOCKER1: replace start_alloc's tproxy_guard = None with one install_inbound_tproxy(SocketAddrV4::new(addr, port.get()), leg_c_addr.port()) per declared service port when spec.workload_addr is Some(addr), retaining the returned guards in AllocIntercept for the alloc lifetime. N declared ports -> N inbound rules; 0 listeners / None addr -> 0 rules. The rule match dport is the declared service port (D-BLOCKER1, one-source/two-readers), NOT the ephemeral leg-C listener port. Reuses install_inbound_tproxy AS-IS (signature unchanged) and the inline leg_c_addr local (mtls_intercept_worker.rs:585).",
+          "criteria": [
+            "S-NRULES (Tier-3, real nft): a Service deployed with two declared service ports installs exactly two inbound capture rules; each rule matches ip daddr <workload_addr> tcp dport <port_i> for one of the two declared ports; both rules are released (RAII guards dropped) when the workload is torn down -- no leftover nft state after the alloc ends.",
+            "S-DPORT (Tier-3, error/edge): the installed rule's match dport is the DECLARED service port, NOT the agent's ephemeral leg-C transparent-listener port (leg_c_addr.port()); a peer dialing workload_addr:service_port is captured; the rule's tproxy-to target is the ephemeral leg-C port (the redirect destination, not the match key). The inert self-referential 'virt from ephemeral leg-C port' shape the design rejected is structurally absent.",
+            "S-JOB0 (Tier-3, error/edge): a Job-kind workload deployed with no declared service ports (empty service_ports / None workload_addr) installs ZERO inbound capture rules; no spurious all-TCP or hardcoded-port rule; no TproxyInterceptGuard retained.",
+            "AllocIntercept._tproxy_guard: Option<TproxyInterceptGuard> becomes _inbound_tproxy_guards: Vec<TproxyInterceptGuard> (N listeners -> N RAII guards, all dropped on alloc teardown).",
+            "The install is the production start_alloc call site -- no test-installed install_inbound_tproxy stands in for it."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/inbound_rules_per_listener.rs",
+          "scenario_name": "S-NRULES",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/mtls_intercept_worker.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-worker/tests/integration/inbound_rules_per_listener.rs",
+              "crates/overdrive-worker/tests/integration/inbound_rule_keys_declared_port.rs",
+              "crates/overdrive-worker/tests/integration/job_kind_installs_no_inbound_rule.rs",
+              "crates/overdrive-worker/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-02"],
+          "effort_hours": 7,
+          "implementation_notes": "Rust test paradigm: Tier-3 real-kernel (Lima, gated --features integration-tests; non-root SKIPs; record uname -r). UNSKIP the three Tier-3 scaffolds (S-NRULES / S-DPORT / S-JOB0) -- replace panic bodies with real assertions that observe the live nft ruleset (real nft dump) after the production start_alloc install. Single-example per scenario is correct for real-kernel wiring (proptest is the wrong tool for I/O). Each runs via cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests; the rule install MUST be the production start_alloc call site, never a test-installed install_inbound_tproxy (vertical-slice rule, CLAUDE.md). Per CLAUDE.md 'implement to the design': reuse install_inbound_tproxy AS-IS (signature (virt: SocketAddrV4, agent_port: u16) unchanged) and the inline leg_c_addr local -- do NOT add a new install primitive or a new arg. dport = declared service port (D-BLOCKER1), tproxy-to = ephemeral leg-C port. Depends on 01-02 (spec.workload_addr + spec.service_ports feed the loop)."
+        },
+        {
+          "id": "03-02",
+          "name": "Keystone Tier-3 bidirectional mesh e2e on the production inbound rule (S-WS)",
+          "description": "The vertical-slice gate: a real overdrive serve + two overdrive deploy-ed mesh workloads, client dials the server's canonical workload_addr:service_port directly (no name lookup), the PRODUCTION-installed inbound rule (from start_alloc off spec.{workload_addr,service_ports}) captures the dial, mTLS terminates, request bytes reach the server and reply bytes return byte-for-byte. REMOVES the test-installed install_inbound_tproxy(virt, leg_c_port) AND the synthetic INBOUND_VIRT_IP/INBOUND_VIRT_PORT loopback virt from the existing bidirectional_walking_skeleton.rs -- no test-only wiring stands in for a production call site.",
+          "criteria": [
+            "S-WS: given a node started with overdrive serve and two overdrive deploy-ed mesh workloads (a server offering a service on its declared port, a client in the same mesh), when the client dials the server at its canonical workload_addr:service_port directly with no name lookup, then the node's own PRODUCTION inbound capture (installed when the server started, from spec.{workload_addr,service_ports}) diverts the dial to the server's transparent listener; the connection is authenticated with mutual TLS; the client's request bytes arrive at the server byte-for-byte; the server's reply bytes return to the client byte-for-byte.",
+            "MERGE-BLOCKING (DELIVER obligation #3): the bidirectional mesh loop passes the pinned-6.18 appliance-kernel Tier-3 matrix (ADR-0068), not merely 'tests pass' -- dev-Lima 7.0 is necessary-but-not-sufficient (the built-in-ca-operator-composition cold-boot regression is the precedent for an 'expected to work on 6.18' change that did not).",
+            "The test installs NO inbound rule, supplies NO address, and stands in for NO production call site: the synthetic INBOUND_VIRT_IP/INBOUND_VIRT_PORT virt and the test-installed install_inbound_tproxy are REMOVED from the skeleton; the C3 seam supplies workload_addr, WorkloadLifecycle::project_service_listen_ports supplies service_ports, start_alloc installs the rule. If the production install were absent, the dial is NOT captured and the round-trip FAILS -- the signal the keystone exists to give.",
+            "Driven through the real operator verbs as subprocesses (overdrive serve + overdrive deploy x2), not a #[test] assembling start_alloc by hand (RCA-P1 driving-adapter requirement + vertical-slice rule); requires root + CAP_NET_ADMIN/CAP_SYS_ADMIN (non-root SKIPs); uname -r recorded.",
+            "Verification-catalogue note: S-WS is the operator-observable E-surface expectation ('a workload is reachable at its canonical address over mTLS') flagged to graduate into verification/expectations/ at DELIVER/DEVOPS (captured against the built overdrive binary) -- flagged, not built in this step."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs",
+          "scenario_name": "S-WS",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/mtls_intercept_worker.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs",
+              "crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs",
+              "crates/overdrive-worker/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-01", "01-02", "02-01", "02-02", "03-01"],
+          "effort_hours": 8,
+          "implementation_notes": "Rust test paradigm: Tier-3 real-kernel keystone, single example (real serve + deploy subprocesses; proptest is the wrong tool here). UNSKIP the S-WS scaffold in the NEW canonical_address_inbound_walking_skeleton.rs and REMOVE the synthetic virt + the test-installed install_inbound_tproxy from the existing bidirectional_walking_skeleton.rs (the issue removes BOTH -- the keystone captures on the production-installed rule only). MERGE-BLOCKING signal is the pinned-6.18 appliance-kernel Tier-3 matrix (ADR-0068), NOT dev-Lima 7.0 -- name the pinned-6.18 matrix in the AC verbatim. Inner loop: cargo xtask lima run -- cargo nextest run -p overdrive-worker --features integration-tests (dev-Lima 7.0, necessary-but-not-sufficient). This is the final vertical-slice gate: it depends on ALL prior steps (01-01 V2 row, 01-02 spec plumbing, 02-01 B2 advertise, 02-02 hydrator gate, 03-01 inbound install) because a gated mesh backend must MISS LOCAL_BACKEND_MAP so the dial falls through to the production nft-TPROXY rule -- exactly what the successful capture requires. Flag S-WS for the verification/expectations/ E-surface catalogue (do NOT build the entry in this step)."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/traits/observation_store.rs",
+      "crates/overdrive-core/src/traits/driver.rs",
+      "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+      "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
+      "crates/overdrive-core/src/reconcilers/service_map_hydrator.rs",
+      "crates/overdrive-control-plane/src/action_shim/mod.rs",
+      "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+      "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+      "crates/overdrive-worker/src/exit_observer.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+      "crates/overdrive-core/tests/canonical_address_bridge_advertise.rs",
+      "crates/overdrive-core/tests/mesh_backend_lb_gate.rs",
+      "crates/overdrive-core/tests/capture_advertise_port_set_equality.rs",
+      "crates/overdrive-worker/tests/integration/inbound_rules_per_listener.rs",
+      "crates/overdrive-worker/tests/integration/inbound_rule_keys_declared_port.rs",
+      "crates/overdrive-worker/tests/integration/job_kind_installs_no_inbound_rule.rs",
+      "crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs"
+    ],
+    "excluded_patterns": [
+      "target/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  }
+}
