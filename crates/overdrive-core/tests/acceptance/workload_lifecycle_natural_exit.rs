@@ -164,6 +164,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -174,6 +175,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -220,6 +222,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -230,6 +233,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -278,6 +282,7 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -288,6 +293,7 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -331,6 +337,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -341,6 +348,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     // Budget remaining: attempts == 0 < ceiling.
     let mut restart_counts = BTreeMap::new();

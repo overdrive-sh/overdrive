@@ -133,6 +133,7 @@ fn placement_actions(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: wid,
@@ -143,6 +144,7 @@ fn placement_actions(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

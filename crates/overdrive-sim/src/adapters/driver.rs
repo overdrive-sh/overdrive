@@ -499,6 +499,8 @@ mod release_for_exit_emission_tests {
             probe_descriptors: Vec::new(),
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         }
     }
 

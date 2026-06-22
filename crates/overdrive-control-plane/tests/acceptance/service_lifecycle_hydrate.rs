@@ -557,6 +557,8 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         },
     };
     let mut allocs = BTreeMap::new();
@@ -656,6 +658,8 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         },
     };
     let mut allocs = BTreeMap::new();

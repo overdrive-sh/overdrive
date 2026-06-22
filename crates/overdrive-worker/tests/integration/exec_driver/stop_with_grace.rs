@@ -60,6 +60,8 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

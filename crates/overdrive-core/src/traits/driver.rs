@@ -8,6 +8,8 @@
 //! See `docs/whitepaper.md` §6 for the driver catalogue.
 
 use std::fmt::{self, Display, Formatter};
+use std::net::Ipv4Addr;
+use std::num::NonZeroU16;
 use std::str::FromStr;
 
 use async_trait::async_trait;
@@ -193,6 +195,42 @@ pub struct AllocationSpec {
     /// `FromStr` round-trip to defend (JOIN-6,
     /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`).
     pub host_veth: Option<String>,
+
+    /// Canonical per-workload IPv4 address this allocation was provisioned
+    /// INTO (the in-netns end of the per-workload veth, `plan.workload_addr`)
+    /// for the canonical-workload-address inbound-TPROXY path (D-A1, GH
+    /// #241). `Some(plan.workload_addr)` ONLY when the action-shim C3 site
+    /// provisioned a per-workload netns/veth (the production mTLS-composed
+    /// boot); `None` for every non-netns workload (every current test
+    /// fixture, and any boot where the mTLS composition gate is off) — the
+    /// pre-join host-netns behaviour, exactly like `netns` / `host_veth`.
+    ///
+    /// The third member of the slot-derived channel beside `netns` /
+    /// `host_veth`, injected at the SAME C3 provision seam off the SAME
+    /// `plan`. Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": `AllocationSpec` derives only
+    /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
+    /// each reconcile tick (never persisted), so this is a pure in-memory
+    /// channel with no schema-evolution discipline attached.
+    pub workload_addr: Option<Ipv4Addr>,
+
+    /// Declared Service listener ports projected from the live intent at
+    /// hydrate-desired time via
+    /// [`crate::reconcilers::project_service_listen_ports`] (D-A1 /
+    /// D-BLOCKER1, GH #241). Consumed by the inbound-TPROXY rule install
+    /// (step 03-01) — one `install_inbound_tproxy` per declared port, keyed
+    /// on `workload_addr`. Empty for Job-kind / Schedule-kind / host-netns
+    /// workloads (every current fixture); a Service projects its
+    /// `listeners[].port` set in declaration order.
+    ///
+    /// D-BLOCKER1 — this is the SAME single source the
+    /// `BackendDiscoveryBridge` advertise path reads (step 02-01); the two
+    /// readers MUST agree, so the value bottoms out in `svc.listeners`.
+    /// Threaded through `WorkloadLifecycleState.service_ports` and cloned
+    /// into the emitted `AllocationSpec` at the IDENTICAL site/shape as
+    /// `probe_descriptors`. Same pure-in-memory derive discipline as the
+    /// fields above (no serde / rkyv).
+    pub service_ports: Vec<NonZeroU16>,
 }
 
 /// Opaque handle returned by the driver at start. The node agent does not

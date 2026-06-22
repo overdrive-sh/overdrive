@@ -922,6 +922,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
@@ -932,6 +933,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     });
 
     // Single TickContext shared across both reconcile calls — same

@@ -381,6 +381,8 @@ fn liveness_restart_spec_default() -> overdrive_core::traits::driver::Allocation
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     }
 }
 

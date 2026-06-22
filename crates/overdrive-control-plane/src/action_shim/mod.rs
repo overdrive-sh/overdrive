@@ -315,11 +315,14 @@ fn build_alloc_status_row(
         listeners: Vec::new(),
         started_at,
         // canonical-workload-address-inbound-tproxy (GH #241 /
-        // AllocStatusRowV2): `None` at this row-builder seam for
-        // every current alloc shape (host-netns). The Path-A
-        // population off `plan.workload_addr` at the C3 provision
-        // seam lands in a later BLOCKER-2 slice; this additive field
-        // defaults absent until then.
+        // AllocStatusRowV2): default `None` at this shared row-builder
+        // seam. The INITIAL population is the Running-row write site's
+        // responsibility (the StartAllocation / RestartAllocation arms
+        // copy `spec.workload_addr` onto the row after building it,
+        // step 01-02 D-A1 / D-BLOCKER2). Successor / terminal writers
+        // (FinalizeFailed, exit observer) forward-carry the prior row's
+        // value. Stays `None` for host-netns allocs (every current
+        // fixture, where the C3 seam never provisioned an address).
         workload_addr: None,
     }
 }
@@ -828,6 +831,12 @@ fn provision_and_inject_netns(
     // both off `plan` before it is dropped.
     spec.netns = Some(plan.netns.clone());
     spec.host_veth = Some(plan.host_veth);
+    // D-A1 (canonical-workload-address-inbound-tproxy, GH #241): inject the
+    // canonical per-workload address — the third member of the slot-derived
+    // channel, off the SAME plan as netns/host_veth. The Running-row write
+    // (below) copies this onto `AllocStatusRowV2.workload_addr` (the observed
+    // input), and step 03-01 consumes it as the inbound-rule destination.
+    spec.workload_addr = Some(plan.workload_addr);
     Ok(())
 }
 
@@ -1163,7 +1172,7 @@ async fn dispatch_single(
             // EarlyExit / StartupProbeFailed / Stable gates branch
             // on `None` explicitly (no silent-zero collapse).
             let started_at = if state == AllocState::Running { Some(tick.now_unix) } else { None };
-            let row = build_alloc_status_row(
+            let mut row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
@@ -1176,6 +1185,20 @@ async fn dispatch_single(
                 kind,
                 started_at,
             );
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): the StartAllocation Running write is the INITIAL
+            // population of the canonical workload address. Copy
+            // `spec.workload_addr` (injected at the C3 provision seam off
+            // `plan.workload_addr`) straight onto the row — an OBSERVED INPUT,
+            // the materialised slot×base-at-provision snapshot the node
+            // provisioned this alloc into (no recompute, no derivation). On a
+            // failed start (`state == Failed`) the alloc never reached the
+            // provisioned netns, so the absent value carries forward; the
+            // builder already defaults `None`. Successor / terminal writers
+            // (exit observer, FinalizeFailed) forward-carry `prior.workload_addr`.
+            if state == AllocState::Running {
+                row.workload_addr = spec.workload_addr;
+            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites
@@ -1369,7 +1392,7 @@ async fn dispatch_single(
                 // ever reached Running.
                 prior_row.started_at
             };
-            let row = build_alloc_status_row(
+            let mut row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
@@ -1382,6 +1405,18 @@ async fn dispatch_single(
                 kind,
                 started_at,
             );
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): a restart re-provisions the netns/veth under the same
+            // slot (idempotent converge-on-boot) — `spec.workload_addr` is
+            // re-injected at the C3 seam. On reaching Running, populate the
+            // row's canonical address from the freshly-provisioned spec, same
+            // observed-input semantics as the StartAllocation arm above. A
+            // rejected restart (`state == Failed`) carries the builder's
+            // `None`; the prior generation's address (if any) is irrelevant to
+            // a never-Running attempt.
+            if state == AllocState::Running {
+                row.workload_addr = spec.workload_addr;
+            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites

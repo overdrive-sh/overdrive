@@ -60,6 +60,8 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
             // mTLS-composed boot gate — no provisioned netns/veth.
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         };
 
         let handle = driver.start(&spec).await.expect("start succeeds");

@@ -53,6 +53,8 @@ async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     // Action — through driving port.

@@ -170,6 +170,8 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

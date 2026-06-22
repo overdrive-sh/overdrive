@@ -115,6 +115,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
@@ -125,6 +126,7 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = AnyReconcilerView::WorkloadLifecycle(
         overdrive_core::reconcilers::WorkloadLifecycleView::default(),

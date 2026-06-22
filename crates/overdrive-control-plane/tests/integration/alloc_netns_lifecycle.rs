@@ -155,6 +155,8 @@ fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> Allocat
         // seam's own assign/provision/inject is exercised, not pre-set.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     }
 }
 

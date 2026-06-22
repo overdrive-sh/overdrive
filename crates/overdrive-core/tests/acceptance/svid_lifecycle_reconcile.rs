@@ -888,6 +888,7 @@ fn start_allocation_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -898,6 +899,7 @@ fn start_allocation_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = wl_tick();
@@ -933,6 +935,7 @@ fn stop_allocation_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -943,6 +946,7 @@ fn stop_allocation_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = wl_tick();
@@ -978,6 +982,7 @@ fn finalize_failed_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -988,6 +993,7 @@ fn finalize_failed_transition_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let mut view = WorkloadLifecycleView::default();
     view.restart_counts.insert(wl_alloc("alloc-payments-0"), RESTART_BACKOFF_CEILING);
@@ -1026,6 +1032,7 @@ fn job_kind_transition_still_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -1036,6 +1043,7 @@ fn job_kind_transition_still_enqueues_svid_lifecycle() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = wl_tick();
@@ -1071,6 +1079,7 @@ fn converged_tick_emits_no_svid_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -1081,6 +1090,7 @@ fn converged_tick_emits_no_svid_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = wl_tick();

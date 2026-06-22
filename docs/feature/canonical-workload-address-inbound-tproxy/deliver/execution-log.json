@@ -36,6 +36,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-22T18:57:58Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-22T19:43:08Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-BRIDGE AT finalized in 02-01 (bridge advertise + RunningAllocSet Set->Map); 01-02 producer-side plumbing, RED surface is project_service_listen_ports unit partition",
+      "t": "2026-06-22T19:43:14Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-22T19:45:18Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-22T19:57:32Z"
     }
   ]
 }

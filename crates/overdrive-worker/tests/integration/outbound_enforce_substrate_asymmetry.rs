@@ -612,6 +612,8 @@ fn build_client_spec(pki: &TestPki, host_veth: Option<String>) -> AllocationSpec
         probe_descriptors: Vec::new(),
         netns: None,
         host_veth,
+        service_ports: Vec::new(),
+        workload_addr: None,
     }
 }
 

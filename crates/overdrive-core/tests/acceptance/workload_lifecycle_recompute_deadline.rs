@@ -156,6 +156,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -166,6 +167,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     (desired, actual)
 }
