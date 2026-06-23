@@ -108,9 +108,13 @@ mod integration {
     // Production bodies (the per-port `install_inbound_tproxy` in `start_alloc`,
     // the `AllocationSpec.{workload_addr,service_ports}` channel) land in DELIVER;
     // these scaffolds are `#[should_panic(expected = "RED scaffold")]` placeholders.
+    // Shared Tier-3 fixture for S-NRULES / S-DPORT / S-JOB0 (step 03-01): the
+    // kernel-state lock, shared-infra scrub, chain dump, and `AllocationSpec`
+    // builder all three inbound-rule scenarios drive `start_alloc` through.
     mod canonical_address_inbound_walking_skeleton;
     mod inbound_rule_keys_declared_port;
     mod inbound_rules_per_listener;
+    mod inbound_tproxy_harness;
     mod job_kind_installs_no_inbound_rule;
 
     // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
