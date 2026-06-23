@@ -250,6 +250,16 @@ pub struct ServiceMapHydrator {
     name: ReconcilerName,
     /// Host's primary IPv4 — the classifier input per ADR-0053 § 4.
     host_ipv4: std::net::Ipv4Addr,
+    /// Per-host Path-A workload subnet (`WORKLOAD_SUBNET_BASE`,
+    /// `10.99.0.0/16`). A backend whose V4 address is a member of this
+    /// subnet is a Path-A/mesh backend: it is gated out of BOTH
+    /// load-balancer paths (no `RegisterLocalBackend`, no
+    /// `DataplaneUpdateService`) because nft-TPROXY owns its delivery
+    /// (D-GATE / D-GATE-PRED; reconciles ADR-0053 ↔ ADR-0071). The
+    /// SSOT is the provisioner's `WORKLOAD_SUBNET_BASE` const — the
+    /// production wiring crate passes it; core takes the generic
+    /// `Ipv4Net` value (core MUST NOT depend on the wiring crate).
+    workload_subnet: ipnet::Ipv4Net,
 }
 
 impl ServiceMapHydrator {
@@ -258,24 +268,33 @@ impl ServiceMapHydrator {
     /// # Preconditions
     ///
     /// `host_ipv4` MUST be the same value
-    /// `BackendDiscoveryBridge` was constructed with.
+    /// `BackendDiscoveryBridge` was constructed with. `workload_subnet`
+    /// MUST be the same `WORKLOAD_SUBNET_BASE` the provisioner carves
+    /// per-allocation `/30`s from — one source (D-GATE-PRED).
     ///
     /// # Panics
     ///
     /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
-    pub fn canonical(host_ipv4: std::net::Ipv4Addr) -> Self {
+    pub fn canonical(host_ipv4: std::net::Ipv4Addr, workload_subnet: ipnet::Ipv4Net) -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
-        Self { name, host_ipv4 }
+        Self { name, host_ipv4, workload_subnet }
     }
 
     /// The host IPv4 the classifier compares backends against.
     #[must_use]
     pub const fn host_ipv4(&self) -> std::net::Ipv4Addr {
         self.host_ipv4
+    }
+
+    /// The Path-A/mesh workload subnet the gate compares backends
+    /// against.
+    #[must_use]
+    pub const fn workload_subnet(&self) -> ipnet::Ipv4Net {
+        self.workload_subnet
     }
 }
 
@@ -337,10 +356,26 @@ impl Reconciler for ServiceMapHydrator {
                     }
                 };
 
+                // D-GATE / D-GATE-PRED — three-way subnet-membership split
+                // applied BEFORE the existing LOCAL/REMOTE partition. A
+                // Path-A/mesh backend (V4 addr ∈ `workload_subnet`,
+                // 10.99.0.0/16) is gated out of BOTH LB paths: nft-TPROXY
+                // owns its delivery (reconciles ADR-0053 ↔ ADR-0071). The
+                // mesh filter runs FIRST (`is_mesh_backend`) so a mesh
+                // backend never reaches the local/remote partition; the
+                // surviving non-mesh backends feed the unchanged partition.
+                let workload_subnet = self.workload_subnet;
+                let is_mesh_backend = |b: &&Backend| match b.addr.ip() {
+                    std::net::IpAddr::V4(v4) => workload_subnet.contains(&v4),
+                    std::net::IpAddr::V6(_) => false,
+                };
+
                 let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
-                    desired_svc.backends.iter().partition(|b| match b.addr.ip() {
-                        std::net::IpAddr::V4(v4) => v4 == host_ipv4,
-                        std::net::IpAddr::V6(_) => false,
+                    desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).partition(|b| {
+                        match b.addr.ip() {
+                            std::net::IpAddr::V4(v4) => v4 == host_ipv4,
+                            std::net::IpAddr::V6(_) => false,
+                        }
                     });
 
                 let remote_is_empty = remote.is_empty();
@@ -374,12 +409,20 @@ impl Reconciler for ServiceMapHydrator {
                     },
                 );
 
-                let _ = (local_is_empty, remote_is_empty);
-
-                let entry = next_view.retries.entry(*service_id).or_default();
-                entry.attempts = entry.attempts.saturating_add(1);
-                entry.last_failure_seen_at = tick.now_unix;
-                entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
+                // Only count this tick as a dispatch when at least one LB
+                // path actually emitted an action. A service whose entire
+                // backend set was gated out as Path-A/mesh
+                // (`local_is_empty && remote_is_empty`) programmed NOTHING
+                // — nft-TPROXY owns its delivery — so it must NOT record an
+                // attempted fingerprint or bump the retry budget (else the
+                // backoff gate would throttle a phantom dispatch and the
+                // View would falsely claim the service was programmed).
+                if !(local_is_empty && remote_is_empty) {
+                    let entry = next_view.retries.entry(*service_id).or_default();
+                    entry.attempts = entry.attempts.saturating_add(1);
+                    entry.last_failure_seen_at = tick.now_unix;
+                    entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
+                }
             } else if let Some(ServiceHydrationStatus::Completed { fingerprint, .. }) =
                 actual_status
                 && *fingerprint == desired_svc.fingerprint

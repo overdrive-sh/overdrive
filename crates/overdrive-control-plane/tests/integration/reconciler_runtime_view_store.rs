@@ -310,6 +310,7 @@ async fn runtime_skips_write_through_when_service_map_hydrator_view_equals_in_me
     runtime
         .register(AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
             std::net::Ipv4Addr::UNSPECIFIED,
+            overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
         )))
         .await
         .expect("register service-map-hydrator");

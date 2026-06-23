@@ -70,7 +70,10 @@ async fn build_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState 
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime
-        .register(AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(HOST_IPV4)))
+        .register(AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
+            HOST_IPV4,
+            overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+        )))
         .await
         .expect("register service-map-hydrator");
     let store_path = tmp.path().join("intent.redb");

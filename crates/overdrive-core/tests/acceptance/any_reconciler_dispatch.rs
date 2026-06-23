@@ -160,6 +160,7 @@ fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
     // 965 by the QUALITY_GATE wave's mutation run.
     let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
         std::net::Ipv4Addr::UNSPECIFIED,
+        ipnet::Ipv4Net::new(std::net::Ipv4Addr::new(10, 99, 0, 0), 16).expect("valid /16"),
     ));
     let now = Instant::now();
     let tick = TickContext {

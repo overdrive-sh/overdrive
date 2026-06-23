@@ -85,7 +85,10 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
         Ok(s) => s,
         Err(reason) => return fail(NAME, reason),
     };
-    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+    let reconciler = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
     let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
 
     let mut state = scenario.state;
@@ -198,7 +201,10 @@ pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
         },
     );
 
-    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+    let reconciler = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
     let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
 
     let mut view = ServiceMapHydratorView::default();
@@ -509,7 +515,10 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
 
     // ---- Step 4: tick the hydrator against the projected desired
     //      with empty actual (no prior service_hydration_results row).
-    let hydrator = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+    let hydrator = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
     let any_hydrator = AnyReconciler::ServiceMapHydrator(hydrator);
     let hydrator_state = ServiceMapHydratorState { desired: desired_map, actual: BTreeMap::new() };
     let hydrator_view = ServiceMapHydratorView::default();
@@ -742,7 +751,10 @@ mod retry_budget_proptest {
             // `now_secs` is strictly BEFORE the backoff deadline.
             now_delta in 0u64..backoff_for_attempt(0).as_secs(),
         ) {
-            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+            let r = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
@@ -818,7 +830,10 @@ mod retry_budget_proptest {
             // Additional seconds beyond the deadline (0 = exactly at boundary).
             extra_secs in 0u64..=60u64,
         ) {
-            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+            let r = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
