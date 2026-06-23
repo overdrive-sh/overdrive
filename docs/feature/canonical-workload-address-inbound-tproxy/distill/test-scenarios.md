@@ -62,10 +62,29 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
   workload and its reply returns — a complete mTLS-terminated round-trip reached
   *by canonical workload address*, driven through the **production composition
   root in-process** (real `run_server` boot + real in-process deploy submit
-  handler) with **no test-only wiring**. The `mtls_identity_override` test-PKI
-  seam and a `dataplane_override` are injected at the in-process composition
-  boundary (the only place they are reachable); everything else is production
-  wiring.
+  handler) with **no test-only wiring**. The keystone drives the **real
+  production `EbpfDataplane`** — there is **no `dataplane_override`**
+  (`dataplane_override = None`). This is load-bearing, not incidental: the
+  production boot gate `compose_mtls = config.dataplane_override.is_none() ||
+  config.mtls_probe_fault.is_some()` (`overdrive-control-plane/src/lib.rs:1824`)
+  switches the **mTLS worker OFF** whenever a `dataplane_override` is present,
+  and the only override-compatible compose path (`mtls_probe_fault`) forces a
+  fail-closed boot refusal — so a `dataplane_override` and a working mTLS worker
+  cannot coexist. The keystone needs the composed mTLS worker for the leg-B
+  handshake, so it MUST use the real dataplane. The **only** test seam injected
+  at the in-process composition boundary is the `mtls_identity_override` test-PKI
+  source (read on the `compose_mtls = true` path for the leg-B handshake at
+  `lib.rs:1841-1845`); everything else is production wiring.
+- **Litmus is the transitive round-trip — no map inspection.** A successful
+  canonical-address mTLS round-trip IS the proof that the LB gate fell through to
+  nft-TPROXY: a gated mesh backend MISSES `LOCAL_BACKEND_MAP` (so the dial is not
+  short-circuited by the cgroup LB path) and the production-installed inbound
+  rule diverts it. The keystone asserts on the round-trip, NOT on
+  `LOCAL_BACKEND_MAP` contents — exactly the transitive-proof model the adapter
+  coverage section already states (see "their **real** kernel consequence is
+  proven transitively by S-WS …" in § "Adapter coverage" below). That paragraph
+  stays as the load-bearing proof model; this bullet is its statement at the
+  keystone.
 - **What #241 REMOVES from the existing skeleton
   (`bidirectional_walking_skeleton.rs`):** the test-installed
   `install_inbound_tproxy(virt, leg_c_port)` redirect AND the synthetic
@@ -95,18 +114,22 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
   as a `pending` stub: the `README.md` (scenario + `- Anchor:` lines + a
   `verification` block + `Status: pending`), a `runner.sh` skeleton, and the
   `INDEX.md` row. Its real **black-box `overdrive serve` + `overdrive deploy`
-  subprocess evidence capture is DEFERRED** — it cannot run today because, on the
-  dev-Lima VM, `overdrive serve`'s production dataplane fails to boot fully (the
-  `EbpfDataplane` XDP attach to `lo` fails at boot — documented in
-  `verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh`),
-  so there is no converged full-system deployment to capture against. The
-  deferral is anchored to **GH #227** (EDD harness: a disposable full-system Lima
-  VM on the immutable OS for end-to-end captures — its body states the whole `E`
-  surface is blocked until such a deployment can be stood up) on **GH #75** (the
-  Image Factory MVP that produces the immutable node OS image #227 needs). DELIVER
-  authors the stub `pending` and does NOT capture/satisfy it; the subprocess
-  capture lands when #227/#75 unblock the EDD harness.
-- **Placement:** `crates/overdrive-control-plane/tests/integration/canonical_address_inbound_walking_skeleton.rs`, wired into `crates/overdrive-control-plane/tests/integration.rs`. The keystone lands in the **control-plane** test tree because in-process `run_server` / `ServerConfig` / `mtls_identity_override` / `dataplane_override` all live in `overdrive-control-plane` (`src/lib.rs`), and `overdrive-control-plane` depends-on `overdrive-worker` — a reverse edge is a Cargo-rejected cycle, so a worker-crate test physically **cannot** reach in-process `run_server`. The direct in-repo precedent (`backend_discovery_bridge/walking_skeleton.rs`) lives in this same control-plane test tree. The **synthetic-virt removal** (deleting the test-installed `install_inbound_tproxy(virt, leg_c_port)` and the `INBOUND_VIRT_IP`/`INBOUND_VIRT_PORT` loopback virt) STAYS in `crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs` (worker tree); the existing skeleton's body is otherwise **not modified** beyond de-wiring the moved scaffold.
+  subprocess evidence capture is DEFERRED** — and the deferral STANDS, but its
+  technical grounds are corrected here. The earlier premise ("`overdrive
+  serve`'s `EbpfDataplane` XDP attach to `lo` fails at boot on dev-Lima") is
+  **FALSE** per committed O03 evidence: post-ADR-0061, `serve` no longer attaches
+  XDP to `lo` — it auto-provisions a `ovd-veth-cli`/`ovd-veth-bk` veth pair and
+  binds there, so `serve` boots cleanly and `deploy` exits 0 on dev-Lima. The
+  honest deferral grounds are that the **black-box** mesh-mTLS `E`-surface
+  capture (real `serve` + real `deploy`×2, **no test PKI**) requires a converged
+  full-system two-workload deployment AND the production CA→SVID→leg-C mTLS path
+  proven black-box (no `mtls_identity_override` seam) — which is precisely what
+  **GH #227** (EDD harness: a disposable full-system Lima VM on the immutable OS
+  for end-to-end captures) provides, on **GH #75** (the Image Factory MVP that
+  produces the immutable node OS image #227 needs). DELIVER authors the stub
+  `pending` and does NOT capture/satisfy it; the subprocess capture lands when
+  #227/#75 unblock the EDD harness.
+- **Placement:** `crates/overdrive-control-plane/tests/integration/canonical_address_inbound_walking_skeleton.rs`, wired into `crates/overdrive-control-plane/tests/integration.rs`. The keystone lands in the **control-plane** test tree because in-process `run_server` / `ServerConfig` / `mtls_identity_override` all live in `overdrive-control-plane` (`src/lib.rs`), and `overdrive-control-plane` depends-on `overdrive-worker` — a reverse edge is a Cargo-rejected cycle, so a worker-crate test physically **cannot** reach in-process `run_server`. The direct in-repo precedent (`backend_discovery_bridge/walking_skeleton.rs`) lives in this same control-plane test tree. The **synthetic-virt removal** (deleting the test-installed `install_inbound_tproxy(virt, leg_c_port)` and the `INBOUND_VIRT_IP`/`INBOUND_VIRT_PORT` loopback virt) STAYS in `crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs` (worker tree); the existing skeleton's body is otherwise **not modified** beyond de-wiring the moved scaffold.
 - **Strategy:** the **production composition root in-process** — real `run_server`
   boot + the real in-process deploy submit handler for the two mesh workloads,
   capturing on the 03-01 production-installed inbound rule. Direct in-repo
@@ -115,9 +138,11 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
   This is NOT a `#[test]` that hand-assembles `start_alloc` — `run_server` + the
   deploy submit handler ARE the production composition root; the litmus is
   preserved (delete the 03-01 production install and the keystone goes RED —
-  the dial is not captured and the round-trip fails). The `mtls_identity_override`
-  test PKI and a `dataplane_override` are injected at the in-process composition
-  boundary. Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`; a non-root run SKIPs.
+  the dial is not captured and the round-trip fails). The keystone runs the
+  **real production `EbpfDataplane`** (NO `dataplane_override`) so the boot gate
+  `compose_mtls` composes the mTLS worker; the **only** test seam injected at the
+  in-process composition boundary is the `mtls_identity_override` test PKI.
+  Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`; a non-root run SKIPs.
   `uname -r` recorded; the merge-blocking signal is the pinned-6.18 appliance-kernel
   Tier-3 matrix (DELIVER obligation #3).
 
@@ -148,7 +173,7 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
 >
 > **R1 (2026-06-23 — keystone relocates to the control-plane test tree).** The
 > in-process choice above surfaced a hard crate-graph fact at execution: in-process
-> `run_server` / `ServerConfig` / `mtls_identity_override` / `dataplane_override`
+> `run_server` / `ServerConfig` / `mtls_identity_override`
 > all live in `overdrive-control-plane` (`src/lib.rs`), and `overdrive-control-plane`
 > depends-on `overdrive-worker` (runtime dep). A reverse edge is a Cargo-rejected
 > cycle, so a **worker-crate test physically cannot reach in-process `run_server`**.
@@ -161,8 +186,30 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
 > The **synthetic-virt REMOVAL** (the test-installed `install_inbound_tproxy(virt,
 > leg_c_port)` + the `INBOUND_VIRT_IP`/`INBOUND_VIRT_PORT` loopback virt) STAYS in
 > the worker tree (`bidirectional_walking_skeleton.rs`), where that code lives.
-> Nothing else about Option A changes — same litmus, same `mtls_identity_override` /
-> `dataplane_override` injection, same E04 `pending` stub.
+> Nothing else about Option A changes — same litmus, same `mtls_identity_override`
+> test-PKI injection (and NO `dataplane_override` — the keystone runs the real
+> `EbpfDataplane` so `compose_mtls` composes the mTLS worker; see the S-WS
+> observable-outcome bullet), same E04 `pending` stub.
+>
+> **R2 (2026-06-23 — keystone uses the real `EbpfDataplane`; drop the
+> contradictory `dataplane_override`).** Option A's original wording injected
+> BOTH `mtls_identity_override` AND a `dataplane_override` at the in-process
+> composition boundary. That is **contradictory with the production code**: the
+> boot gate `compose_mtls = config.dataplane_override.is_none() ||
+> config.mtls_probe_fault.is_some()` (`overdrive-control-plane/src/lib.rs:1824`)
+> switches the **mTLS worker OFF** when a `dataplane_override` is present, and the
+> only override-compatible compose path (`mtls_probe_fault`) forces a fail-closed
+> boot refusal — so a `dataplane_override` and the working mTLS worker the
+> keystone depends on cannot coexist. The fix: the keystone runs with the **real
+> production `EbpfDataplane`** (`dataplane_override = None`) so `compose_mtls =
+> true` composes the mTLS worker, and KEEPS only `mtls_identity_override =
+> Some(TestPki)` (read on the compose-true path for the leg-B handshake). The
+> litmus is proven **transitively** — the design already states this in the
+> adapter-coverage section (~L424-432): a gated mesh backend must MISS
+> `LOCAL_BACKEND_MAP` so the dial falls through to nft-TPROXY, which is exactly
+> what a successful canonical-address capture requires. So a successful mTLS
+> round-trip IS the proof; no `LOCAL_BACKEND_MAP` inspection, no
+> `dataplane_override`. This invents ZERO production API.
 
 ---
 
