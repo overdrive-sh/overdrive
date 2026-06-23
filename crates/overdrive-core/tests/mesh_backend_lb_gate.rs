@@ -208,6 +208,172 @@ fn non_mesh_non_host_backend_still_drives_dataplane_service_update() {
     );
 }
 
+/// Build a `ServiceDesired` carrying the given V4 backend addresses (each
+/// at port 8080) on one VIP. Unlike [`desired_with_backend`], this packs
+/// MULTIPLE backends into one service so per-backend filtering inside a
+/// single mixed service is observable. The VIP (10.0.0.1) is itself NOT in
+/// the mesh subnet, so only the backends' classes are under test.
+fn desired_with_backends(backend_ips: &[Ipv4Addr]) -> ServiceDesired {
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let backends: Vec<Backend> = backend_ips
+        .iter()
+        .map(|ip| Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
+            weight: 1,
+            healthy: true,
+        })
+        .collect();
+    let fp = fingerprint(&vip, &backends);
+    ServiceDesired {
+        vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: Proto::Tcp,
+        backends,
+        fingerprint: fp,
+    }
+}
+
+/// D2 (mixed service, per-backend filtering) — the single test that
+/// observes the EMITTED `backends` vector content, not just action counts.
+/// One service, THREE backends spanning all three address classes against a
+/// `host_ipv4 = 10.0.0.1` that is itself NOT in the mesh subnet:
+///
+///   - `10.99.0.6:8080`   — mesh (∈ 10.99.0.0/16) -> EXCLUDED from both paths;
+///   - `10.96.0.50:8080`  — remote (≠ `host_ipv4`, ∉ subnet) -> survives into
+///     `DataplaneUpdateService.backends`;
+///   - `10.0.0.1:8080`    — local (== `host_ipv4`) -> `RegisterLocalBackend`.
+///
+/// Pins per-backend filtering: the mesh backend must NOT leak into the
+/// emitted remote vector, the local backend must NOT leak into it either,
+/// and no emitted action may reference the mesh address. Every existing
+/// gate test is single-backend and asserts only action COUNTS — this is the
+/// only test observing the surviving `backends` vector.
+#[test]
+fn mixed_service_excludes_mesh_keeps_remote_backend_and_registers_local() {
+    let host = Ipv4Addr::new(10, 0, 0, 1);
+    let mesh = Ipv4Addr::new(10, 99, 0, 6);
+    let remote = Ipv4Addr::new(10, 96, 0, 50);
+    // local == host, exercised below.
+    assert!(workload_subnet().contains(&mesh), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
+    assert!(!workload_subnet().contains(&remote), "fixture precondition: 10.96.0.50 ∉ mesh subnet");
+    assert!(!workload_subnet().contains(&host), "fixture precondition: host_ipv4 ∉ mesh subnet");
+
+    let r = ServiceMapHydrator::canonical(host, workload_subnet());
+    let s_id = make_service_id(1);
+    let mut desired = BTreeMap::new();
+    desired.insert(s_id, desired_with_backends(&[mesh, remote, host]));
+    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    let view = ServiceMapHydratorView::default();
+
+    let (actions, _next_view) = r.reconcile(&state, &state, &view, &make_tick(0));
+
+    // Exactly one DataplaneUpdateService carrying EXACTLY the remote backend.
+    let dataplane: Vec<&Action> =
+        actions.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).collect();
+    assert_eq!(
+        dataplane.len(),
+        1,
+        "exactly one DataplaneUpdateService for the surviving remote backend"
+    );
+    match dataplane[0] {
+        Action::DataplaneUpdateService { backends, .. } => {
+            assert_eq!(
+                backends.len(),
+                1,
+                "the remote path must carry EXACTLY one backend (mesh + local partitioned out)"
+            );
+            assert_eq!(
+                backends[0].addr,
+                SocketAddr::new(IpAddr::V4(remote), 8080),
+                "the surviving remote backend must be 10.96.0.50:8080 — the mesh backend did NOT leak in"
+            );
+        }
+        other => panic!("expected DataplaneUpdateService, got {other:?}"),
+    }
+
+    // Exactly one RegisterLocalBackend for the host-address backend.
+    let register: Vec<&Action> =
+        actions.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).collect();
+    assert_eq!(register.len(), 1, "exactly one RegisterLocalBackend for the local (host) backend");
+    match register[0] {
+        Action::RegisterLocalBackend { backend, .. } => {
+            assert_eq!(
+                *backend,
+                std::net::SocketAddrV4::new(host, 8080),
+                "the local backend registered must be host_ipv4:8080 (10.0.0.1:8080)"
+            );
+        }
+        other => panic!("expected RegisterLocalBackend, got {other:?}"),
+    }
+
+    // The mesh backend leaks into NO emitted action's address surface.
+    for action in &actions {
+        match action {
+            Action::DataplaneUpdateService { backends, .. } => {
+                for b in backends {
+                    assert_ne!(
+                        b.addr,
+                        SocketAddr::new(IpAddr::V4(mesh), 8080),
+                        "mesh backend 10.99.0.6 must NOT appear in any DataplaneUpdateService"
+                    );
+                }
+            }
+            Action::RegisterLocalBackend { backend, .. } => {
+                assert_ne!(
+                    backend.ip(),
+                    &mesh,
+                    "mesh backend 10.99.0.6 must NOT appear in any RegisterLocalBackend"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// D3 (≥2-tick all-mesh retry-guard) — an all-mesh service records NOTHING
+/// in the View and does not bump the retry budget, across two consecutive
+/// ticks. Without the all-mesh guard the service records a phantom
+/// fingerprint and re-dispatches + fsyncs a View row ~once/sec forever
+/// (the ratified-correct behavior the orchestrator's trace established).
+/// Both backends ∈ 10.99.0.0/16; `host_ipv4 = 10.0.0.1`.
+///
+/// Tick 2 feeds `view1` forward with a later `tick.now_unix` to prove the
+/// emptiness is stable across ticks — a phantom dispatch on tick 1 would
+/// have populated `view1.retries` and the guard would never re-engage.
+#[test]
+fn all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks() {
+    let host = Ipv4Addr::new(10, 0, 0, 1);
+    let m1 = Ipv4Addr::new(10, 99, 0, 6);
+    let m2 = Ipv4Addr::new(10, 99, 0, 10);
+    assert!(workload_subnet().contains(&m1), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
+    assert!(workload_subnet().contains(&m2), "fixture precondition: 10.99.0.10 ∈ mesh subnet");
+
+    let r = ServiceMapHydrator::canonical(host, workload_subnet());
+    let s_id = make_service_id(1);
+    let mut desired = BTreeMap::new();
+    desired.insert(s_id, desired_with_backends(&[m1, m2]));
+    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+
+    // Tick 1 — default View, empty actual.
+    let view0 = ServiceMapHydratorView::default();
+    let (actions1, view1) = r.reconcile(&state, &state, &view0, &make_tick(0));
+    assert!(actions1.is_empty(), "tick 1: an all-mesh service must emit NO actions");
+    assert!(
+        view1.retries.is_empty(),
+        "tick 1: an all-mesh service must record NOTHING in the View (no phantom retry budget)"
+    );
+
+    // Tick 2 — feed view1 forward, later now_unix.
+    let (actions2, view2) = r.reconcile(&state, &state, &view1, &make_tick(2));
+    assert!(actions2.is_empty(), "tick 2: an all-mesh service must STILL emit NO actions");
+    assert!(
+        view2.retries.is_empty(),
+        "tick 2: retries must STAY empty — no phantom dispatch re-engaged the backoff gate"
+    );
+}
+
 proptest! {
     /// PBT over the three address classes: for any backend address, the
     /// three-way subnet split routes it to exactly one disposition, and

@@ -335,6 +335,12 @@ impl Reconciler for ServiceMapHydrator {
                 let host_ipv4 = self.host_ipv4;
                 let vip_v4 = match desired_svc.vip.get() {
                     std::net::IpAddr::V4(v4) => v4,
+                    // Phase-1-unreachable arm: Phase-1 services are V4-only, so
+                    // a V6 VIP never occurs and this gate-bypass (emit
+                    // `DataplaneUpdateService` with ALL backends + `continue`,
+                    // skipping the `is_mesh_backend` filter below) has no live
+                    // exposure. Uniform `is_mesh_backend` application to the V6
+                    // path is deferred to if/when V6 VIPs ship.
                     std::net::IpAddr::V6(_) => {
                         actions.push(Action::DataplaneUpdateService {
                             service_id: *service_id,

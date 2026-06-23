@@ -752,9 +752,9 @@ mod retry_budget_proptest {
             now_delta in 0u64..backoff_for_attempt(0).as_secs(),
         ) {
             let r = ServiceMapHydrator::canonical(
-        std::net::Ipv4Addr::UNSPECIFIED,
-        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
-    );
+                std::net::Ipv4Addr::UNSPECIFIED,
+                overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+            );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
@@ -831,9 +831,9 @@ mod retry_budget_proptest {
             extra_secs in 0u64..=60u64,
         ) {
             let r = ServiceMapHydrator::canonical(
-        std::net::Ipv4Addr::UNSPECIFIED,
-        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
-    );
+                std::net::Ipv4Addr::UNSPECIFIED,
+                overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+            );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
