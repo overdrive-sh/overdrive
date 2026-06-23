@@ -1236,17 +1236,24 @@ mod project_service_listen_ports_tests {
 
     #[test]
     fn service_projects_its_declared_listener_ports() {
-        let intent = service_with_ports(&[8080, 9090]);
+        // Declared in DESCENDING order on purpose: an ascending input
+        // (e.g. [8080, 9090]) cannot distinguish an order-PRESERVING
+        // projection from one that sorts its output — both yield the
+        // same vec. A descending declaration makes the "declaration
+        // order" claim falsifiable: a sorting projection would yield
+        // [8080, 9090] and fail this assertion.
+        let intent = service_with_ports(&[9090, 8080]);
 
         let projected = project_service_listen_ports(&intent);
 
         let expected: Vec<NonZeroU16> = vec![
-            NonZeroU16::new(8080).expect("8080 is non-zero"),
             NonZeroU16::new(9090).expect("9090 is non-zero"),
+            NonZeroU16::new(8080).expect("8080 is non-zero"),
         ];
         assert_eq!(
             projected, expected,
-            "Service must project its listener ports in declaration order",
+            "Service must project its listener ports in declaration order \
+             (a sorting projection would yield [8080, 9090] and fail here)",
         );
     }
 
