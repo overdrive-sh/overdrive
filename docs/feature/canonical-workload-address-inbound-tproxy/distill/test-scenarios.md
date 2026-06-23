@@ -106,7 +106,7 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
   Image Factory MVP that produces the immutable node OS image #227 needs). DELIVER
   authors the stub `pending` and does NOT capture/satisfy it; the subprocess
   capture lands when #227/#75 unblock the EDD harness.
-- **Placement:** `crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs`, sibling to `bidirectional_walking_skeleton.rs`, wired into the existing `tests/integration.rs` inline `mod integration { ... }` block. The existing skeleton's body is **not modified** — the keystone lands as its own file (DELIVER folds/replaces the synthetic-virt skeleton).
+- **Placement:** `crates/overdrive-control-plane/tests/integration/canonical_address_inbound_walking_skeleton.rs`, wired into `crates/overdrive-control-plane/tests/integration.rs`. The keystone lands in the **control-plane** test tree because in-process `run_server` / `ServerConfig` / `mtls_identity_override` / `dataplane_override` all live in `overdrive-control-plane` (`src/lib.rs`), and `overdrive-control-plane` depends-on `overdrive-worker` — a reverse edge is a Cargo-rejected cycle, so a worker-crate test physically **cannot** reach in-process `run_server`. The direct in-repo precedent (`backend_discovery_bridge/walking_skeleton.rs`) lives in this same control-plane test tree. The **synthetic-virt removal** (deleting the test-installed `install_inbound_tproxy(virt, leg_c_port)` and the `INBOUND_VIRT_IP`/`INBOUND_VIRT_PORT` loopback virt) STAYS in `crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs` (worker tree); the existing skeleton's body is otherwise **not modified** beyond de-wiring the moved scaffold.
 - **Strategy:** the **production composition root in-process** — real `run_server`
   boot + the real in-process deploy submit handler for the two mesh workloads,
   capturing on the 03-01 production-installed inbound rule. Direct in-repo
@@ -145,6 +145,24 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
 > subprocess proof is not dropped — it graduates into the `verification/`
 > catalogue as `E04` (authored `pending` in DELIVER; subprocess capture deferred
 > to #227/#75, per the verification-catalogue note above).
+>
+> **R1 (2026-06-23 — keystone relocates to the control-plane test tree).** The
+> in-process choice above surfaced a hard crate-graph fact at execution: in-process
+> `run_server` / `ServerConfig` / `mtls_identity_override` / `dataplane_override`
+> all live in `overdrive-control-plane` (`src/lib.rs`), and `overdrive-control-plane`
+> depends-on `overdrive-worker` (runtime dep). A reverse edge is a Cargo-rejected
+> cycle, so a **worker-crate test physically cannot reach in-process `run_server`**.
+> The keystone test therefore relocates from
+> `crates/overdrive-worker/tests/integration/` to
+> `crates/overdrive-control-plane/tests/integration/canonical_address_inbound_walking_skeleton.rs`
+> — the ONLY crate from which in-process `run_server` is reachable, and the same
+> tree as the named precedent
+> `crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/walking_skeleton.rs`.
+> The **synthetic-virt REMOVAL** (the test-installed `install_inbound_tproxy(virt,
+> leg_c_port)` + the `INBOUND_VIRT_IP`/`INBOUND_VIRT_PORT` loopback virt) STAYS in
+> the worker tree (`bidirectional_walking_skeleton.rs`), where that code lives.
+> Nothing else about Option A changes — same litmus, same `mtls_identity_override` /
+> `dataplane_override` injection, same E04 `pending` stub.
 
 ---
 
