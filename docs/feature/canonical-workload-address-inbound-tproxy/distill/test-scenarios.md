@@ -16,10 +16,12 @@ load-bearing question)
 This is the **keystone slice** of the transparent-mtls-enrollment arc. It
 productionises the inbound nft-TPROXY install ADR-0071's `start_alloc` deferred
 (`tproxy_guard = None`) and flips the `BackendDiscoveryBridge` advertise addr to
-the canonical per-workload `workload_addr`. The acceptance gate (S-WS) is a real
-`overdrive serve` + two `overdrive deploy`-ed mesh workloads, with **no
-test-installed inbound rule and no synthetic loopback virt** — the production
-`start_alloc` install captures the dial.
+the canonical per-workload `workload_addr`. The acceptance gate (S-WS) drives the
+**production composition root in-process** — real `run_server` boot + the real
+in-process deploy submit handler for two mesh workloads — with **no
+test-installed inbound rule and no synthetic loopback virt**; the production
+`start_alloc` install captures the dial. (See the reconciliation note under S-WS
+for why this is in-process rather than `serve`/`deploy` subprocesses.)
 
 ---
 
@@ -46,9 +48,9 @@ inbound-capture behaviour they were missing.
 
 ```gherkin
 Scenario: A workload reached at its canonical address terminates mTLS end to end
-  Given an operator has started the node with `overdrive serve`
-  And the operator has deployed a server workload offering a service on its declared port
-  And the operator has deployed a client workload in the same mesh
+  Given the node has been brought up through its production boot composition root
+  And a server workload offering a service on its declared port has been deployed through the production deploy submit handler
+  And a client workload in the same mesh has been deployed through the production deploy submit handler
   When the client workload dials the server workload at its canonical workload address and declared service port — directly, with no name lookup
   Then the node's own production inbound capture (installed when the server workload started) diverts the dial to the server's transparent listener
   And the connection is authenticated with mutual TLS
@@ -58,8 +60,12 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
 
 - **Observable outcome:** the client's application request reaches the server
   workload and its reply returns — a complete mTLS-terminated round-trip reached
-  *by canonical workload address*, driven through `serve` + `deploy` with **no
-  test-only wiring**.
+  *by canonical workload address*, driven through the **production composition
+  root in-process** (real `run_server` boot + real in-process deploy submit
+  handler) with **no test-only wiring**. The `mtls_identity_override` test-PKI
+  seam and a `dataplane_override` are injected at the in-process composition
+  boundary (the only place they are reachable); everything else is production
+  wiring.
 - **What #241 REMOVES from the existing skeleton
   (`bidirectional_walking_skeleton.rs`):** the test-installed
   `install_inbound_tproxy(virt, leg_c_port)` redirect AND the synthetic
@@ -82,12 +88,63 @@ Scenario: A workload reached at its canonical address terminates mTLS end to end
   built-in-ca-operator-composition cold-boot regression is the precedent for an
   "expected to work on 6.18" change that did not).
 - **`E`-surface verification-catalogue note (per `.claude/rules/verification.md`):**
-  S-WS is the operator-observable end-to-end expectation that should **graduate
-  into `verification/expectations/` at DELIVER/DEVOPS** (an `E`-surface
-  expectation: "a workload is reachable at its canonical address over mTLS").
-  **Do NOT build the catalogue entry now** — flag for DELIVER.
+  S-WS graduates into the verification catalogue as
+  `verification/expectations/E04-workload-reachable-at-canonical-address-mtls/`
+  (an `E`-surface expectation: "a workload is reachable at its canonical address
+  over mTLS"). The catalogue entry **IS authored in DELIVER** (03-02) — but only
+  as a `pending` stub: the `README.md` (scenario + `- Anchor:` lines + a
+  `verification` block + `Status: pending`), a `runner.sh` skeleton, and the
+  `INDEX.md` row. Its real **black-box `overdrive serve` + `overdrive deploy`
+  subprocess evidence capture is DEFERRED** — it cannot run today because, on the
+  dev-Lima VM, `overdrive serve`'s production dataplane fails to boot fully (the
+  `EbpfDataplane` XDP attach to `lo` fails at boot — documented in
+  `verification/expectations/E02-udp-service-reverse-path-vip-sourced/runner.sh`),
+  so there is no converged full-system deployment to capture against. The
+  deferral is anchored to **GH #227** (EDD harness: a disposable full-system Lima
+  VM on the immutable OS for end-to-end captures — its body states the whole `E`
+  surface is blocked until such a deployment can be stood up) on **GH #75** (the
+  Image Factory MVP that produces the immutable node OS image #227 needs). DELIVER
+  authors the stub `pending` and does NOT capture/satisfy it; the subprocess
+  capture lands when #227/#75 unblock the EDD harness.
 - **Placement:** `crates/overdrive-worker/tests/integration/canonical_address_inbound_walking_skeleton.rs`, sibling to `bidirectional_walking_skeleton.rs`, wired into the existing `tests/integration.rs` inline `mod integration { ... }` block. The existing skeleton's body is **not modified** — the keystone lands as its own file (DELIVER folds/replaces the synthetic-virt skeleton).
-- **Strategy:** real `serve` + `deploy` subprocesses (per `.claude/rules/spike.md` + the increment-c precedent — real production binaries, not a `#[test]` harness composing the pieces by hand). Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`; a non-root run SKIPs. `uname -r` recorded.
+- **Strategy:** the **production composition root in-process** — real `run_server`
+  boot + the real in-process deploy submit handler for the two mesh workloads,
+  capturing on the 03-01 production-installed inbound rule. Direct in-repo
+  precedent: `crates/overdrive-control-plane/tests/integration/backend_discovery_bridge/walking_skeleton.rs`
+  (drives the production boot composition root in-process, not a subprocess).
+  This is NOT a `#[test]` that hand-assembles `start_alloc` — `run_server` + the
+  deploy submit handler ARE the production composition root; the litmus is
+  preserved (delete the 03-01 production install and the keystone goes RED —
+  the dial is not captured and the round-trip fails). The `mtls_identity_override`
+  test PKI and a `dataplane_override` are injected at the in-process composition
+  boundary. Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`; a non-root run SKIPs.
+  `uname -r` recorded; the merge-blocking signal is the pinned-6.18 appliance-kernel
+  Tier-3 matrix (DELIVER obligation #3).
+
+> **Reconciliation note (2026-06-23 — corrects the original subprocess mandate).**
+> S-WS was authored mandating real `overdrive serve` + `overdrive deploy`
+> subprocesses (grounded in the RCA-P1 driving-adapter requirement + the spike
+> increment-c precedent). At execution time that collided with two
+> higher-priority project rules, so the keystone is reshaped to drive the
+> production composition root **in-process** (Option A):
+>
+> 1. **`crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess"** —
+>    a firm rule: do not spawn `overdrive` as a subprocess in tests; call the CLI
+>    command handlers directly as Rust functions. The "invoke the binary via
+>    `Command::spawn`" pattern is explicitly rejected for this crate.
+> 2. **`CLAUDE.md` § "Implement to the design — never invent API surface"** — the
+>    test-PKI seam (`mtls_identity_override` on `run_server` / `ServerConfig`)
+>    that makes the mesh mTLS round-trip work is reachable **only in-process**. A
+>    real `serve` subprocess would use the production workload CA, against which
+>    the test workloads hold no SVID, and wiring a test trust bundle into
+>    `overdrive serve` would require inventing test-only production CLI surface
+>    (forbidden).
+>
+> The in-process composition root honours both rules, invents **zero** new
+> production API, and PRESERVES THE LITMUS. The full black-box `serve` + `deploy`
+> subprocess proof is not dropped — it graduates into the `verification/`
+> catalogue as `E04` (authored `pending` in DELIVER; subprocess capture deferred
+> to #227/#75, per the verification-catalogue note above).
 
 ---
 
@@ -356,22 +413,29 @@ requires).
 
 ---
 
-## Driving-adapter coverage (subprocess / CLI entry — RCA P1)
+## Driving-adapter coverage (production composition root / CLI entry — RCA P1)
 
 | Driving adapter | Protocol | Scenario |
 |---|---|---|
-| `overdrive serve` | subprocess (boot composition root) | S-WS |
-| `overdrive deploy <SPEC>` | subprocess (deploy a TOML spec) | S-WS (×2 deploys), S-NRULES / S-DPORT / S-JOB0 (deploy a spec, observe the installed rule) |
+| `run_server` (the `overdrive serve` boot composition root) | in-process production boot composition root | S-WS |
+| in-process deploy submit handler (the `overdrive deploy <SPEC>` handler, called directly as a Rust function — `overdrive-cli/CLAUDE.md` § "no subprocess") | in-process production deploy submit handler | S-WS (×2 deploys), S-NRULES / S-DPORT / S-JOB0 (deploy a spec, observe the installed rule) |
 
-S-WS exercises the full operator invocation path (`serve` + `deploy` as real
-subprocesses), not a `#[test]` that assembles `start_alloc` by hand — satisfying
-CLAUDE.md § "Build vertical slices through production entry points" and the
-RCA-P1 driving-adapter requirement. The Tier-3 supporting scenarios
-(S-NRULES/S-DPORT/S-JOB0) MAY observe the installed rule via a real `deploy` +
-nft dump, or (crafter's discretion under the determinism contract) drive
-`start_alloc` directly through the production worker seam if a full `serve` +
-`deploy` per scenario is too costly — but the **rule install itself must be the
-production call site**, never a test-installed `install_inbound_tproxy`.
+S-WS exercises the full operator invocation path through the **production
+composition root in-process** (real `run_server` boot + the real in-process
+deploy submit handler), not a `#[test]` that assembles `start_alloc` by hand —
+satisfying CLAUDE.md § "Build vertical slices through production entry points"
+and the RCA-P1 driving-adapter requirement (an in-process `run_server` + deploy
+submit handler IS a production composition root, not hand-assembled
+`start_alloc`). The subprocess shape was relaxed to honour
+`overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" and CLAUDE.md
+§ "never invent API surface" (the `mtls_identity_override` test-PKI seam is
+in-process-only) — see the reconciliation note under S-WS. The Tier-3 supporting
+scenarios (S-NRULES/S-DPORT/S-JOB0) MAY observe the installed rule via a real
+in-process deploy + nft dump, or (crafter's discretion under the determinism
+contract) drive `start_alloc` directly through the production worker seam if a
+full boot + deploy per scenario is too costly — but the **rule install itself
+must be the production call site**, never a test-installed
+`install_inbound_tproxy`.
 
 ---
 
