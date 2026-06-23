@@ -443,7 +443,7 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
         .desired
         .listeners
         .insert(svc_id, ProjectedListener { vip, port, protocol: Proto::Tcp });
-    bridge_state.actual.running.insert(alloc);
+    bridge_state.actual.running.insert(alloc, None);
     let bridge_view = BackendDiscoveryBridgeView::default();
     let tick0 = make_tick(0);
     let (bridge_actions, _bridge_next_view) =

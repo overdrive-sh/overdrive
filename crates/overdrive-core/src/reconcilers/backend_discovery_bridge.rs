@@ -44,7 +44,7 @@
 //! invariants assert on observed iteration order, so the per-process
 //! random hash-seed of `HashMap` is structurally banned.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
 
@@ -140,12 +140,20 @@ pub struct RunningAllocSet {
     /// downstream consumers do not need to thread the workload id
     /// through a separate channel.
     pub workload_id: WorkloadId,
-    /// Running alloc identifiers. `BTreeSet` per
+    /// Running allocs keyed by id, each carrying the per-alloc
+    /// canonical `workload_addr` materialized at provision time
+    /// (D-BLOCKER2, GH #241): `Some(addr)` for a Path-A mesh alloc,
+    /// `None` for a host-netns / non-Path-A alloc. The bridge selects
+    /// the advertised `Backend.addr` source per-alloc from this value
+    /// (D-B2) — `Some` advertises `workload_addr:port`, `None` falls
+    /// back to `host_ipv4:port`.
+    ///
+    /// `BTreeMap` (NOT `HashMap`) per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
-    /// — the bridge's reconcile body iterates this set to assemble
+    /// — the bridge's reconcile body iterates this map to assemble
     /// the `Vec<Backend>` it fingerprints, and the fingerprint MUST
     /// be deterministic across DST seeds.
-    pub running: BTreeSet<AllocationId>,
+    pub running: BTreeMap<AllocationId, Option<Ipv4Addr>>,
 }
 
 /// Merged state per ADR-0036 — the runtime stitches the desired and
@@ -187,7 +195,7 @@ impl BackendDiscoveryBridgeState {
                 workload_id: workload_id.clone(),
                 listeners: BTreeMap::new(),
             },
-            actual: RunningAllocSet { workload_id, running: BTreeSet::new() },
+            actual: RunningAllocSet { workload_id, running: BTreeMap::new() },
         }
     }
 }
@@ -344,9 +352,19 @@ impl Reconciler for BackendDiscoveryBridge {
                 .actual
                 .running
                 .iter()
-                .map(|alloc_id| Backend {
+                .map(|(alloc_id, workload_addr)| Backend {
                     alloc: SpiffeId::for_allocation(&actual.actual.workload_id, alloc_id),
-                    addr: SocketAddr::new(IpAddr::V4(self.host_ipv4), listener.port.get()),
+                    // D-B2 (GH #241): advertise the canonical per-alloc
+                    // `workload_addr` when present (Path-A mesh alloc),
+                    // else fall back to `host_ipv4` (host-netns /
+                    // non-Path-A alloc — fallback UNCHANGED). The addr is
+                    // the materialized value read off the V2 observation
+                    // row at hydrate time (D-BLOCKER2); the bridge never
+                    // recomputes it from `NetSlot`.
+                    addr: SocketAddr::new(
+                        IpAddr::V4(workload_addr.unwrap_or(self.host_ipv4)),
+                        listener.port.get(),
+                    ),
                     weight: 1,
                     healthy: true, // GH #170 ships real health
                 })
@@ -513,7 +531,7 @@ mod tests {
         let sid = service_id(1);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 1), 8080));
-        state.actual.running.insert(alloc_id("alloc-a"));
+        state.actual.running.insert(alloc_id("alloc-a"), None);
         let view = BackendDiscoveryBridgeView::default();
 
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(7));
@@ -564,7 +582,7 @@ mod tests {
         let sid = service_id(2);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 2), 9000));
-        state.actual.running.insert(alloc_id("alloc-b"));
+        state.actual.running.insert(alloc_id("alloc-b"), None);
 
         // First tick — write happens, next_view records fingerprint.
         // UI-05: dual emit — one WriteServiceBackendRow + one
@@ -616,9 +634,9 @@ mod tests {
         let sid = service_id(3);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 3), 8080));
-        state.actual.running.insert(alloc_id("alloc-x"));
-        state.actual.running.insert(alloc_id("alloc-y"));
-        state.actual.running.insert(alloc_id("alloc-z"));
+        state.actual.running.insert(alloc_id("alloc-x"), None);
+        state.actual.running.insert(alloc_id("alloc-y"), None);
+        state.actual.running.insert(alloc_id("alloc-z"), None);
         let view = BackendDiscoveryBridgeView::default();
 
         let (actions, _) = bridge.reconcile(&state, &state, &view, &tick(1));
@@ -645,8 +663,8 @@ mod tests {
         let sid = service_id(4);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 4), 8080));
-        state.actual.running.insert(alloc_id("alloc-m"));
-        state.actual.running.insert(alloc_id("alloc-n"));
+        state.actual.running.insert(alloc_id("alloc-m"), None);
+        state.actual.running.insert(alloc_id("alloc-n"), None);
 
         // First tick — write with two backends. UI-05 dual emit.
         let (actions_first, view_after_first) =
@@ -678,7 +696,7 @@ mod tests {
         let sid = service_id(5);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 5), 8080));
-        state.actual.running.insert(alloc_id("alloc-determ"));
+        state.actual.running.insert(alloc_id("alloc-determ"), None);
         let view = BackendDiscoveryBridgeView::default();
 
         let (_, view_a) = bridge.reconcile(&state, &state, &view, &tick(1));

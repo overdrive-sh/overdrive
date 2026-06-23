@@ -64,6 +64,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-22T19:57:32Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-22T20:00:07Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T06:52:57Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T06:58:27Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS: S-PORTSET property passes with current production (one-source/two-readers D-TME-10 already holds: project_service_listen_ports + bridge advertise read agree on port-set). Non-triviality PROVEN via falsification probe (advertise drops one listener -> proptest+example-pin FAIL, shrunk to [1,2]). The port-set is addr-source-independent; the addr-flip RED is carried by S-BRIDGE (RED_ACCEPTANCE).",
+      "t": "2026-06-23T07:01:38Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T07:11:09Z"
     }
   ]
 }

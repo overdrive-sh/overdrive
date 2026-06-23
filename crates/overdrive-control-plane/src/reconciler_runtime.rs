@@ -1807,7 +1807,7 @@ async fn hydrate_desired(
                         },
                     actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
                         workload_id,
-                        running: std::collections::BTreeSet::new(),
+                        running: BTreeMap::new(),
                     },
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
@@ -2639,13 +2639,20 @@ async fn hydrate_actual(
                 .alloc_status_rows()
                 .await
                 .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            let running: std::collections::BTreeSet<AllocationId> = rows
+            // Obligation #2a (GH #241): populate the per-alloc canonical
+            // `workload_addr` into the map VALUE. The V2 alloc-status row
+            // already carries `workload_addr` (a frozen `slot × base`
+            // join materialized at provision time, D-BLOCKER2) — read it
+            // verbatim; the bridge does NOT recompute from `NetSlot`. A
+            // `None` here is a host-netns / non-Path-A alloc; the bridge
+            // falls back to `host_ipv4` for those (D-B2).
+            let running: BTreeMap<AllocationId, Option<std::net::Ipv4Addr>> = rows
                 .into_iter()
                 .filter(|r| {
                     r.workload_id == workload_id
                         && r.state == overdrive_core::traits::observation_store::AllocState::Running
                 })
-                .map(|r| r.alloc_id)
+                .map(|r| (r.alloc_id, r.workload_addr))
                 .collect();
             let s =
                 overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
@@ -3291,6 +3298,22 @@ mod tests {
             alloc_state: AllocState,
             counter: u64,
         ) {
+            write_alloc_status_with_addr(state, alloc, alloc_state, counter, None).await;
+        }
+
+        /// Variant carrying an explicit per-alloc canonical `workload_addr`
+        /// (AllocStatusRowV2 additive field, GH #241). The `None`-default
+        /// `write_alloc_status` delegates here; the bridge-population
+        /// mutation-gate test passes `Some(addr)` to assert the
+        /// `hydrate_actual` read threads the V2 row's `workload_addr` into
+        /// the `RunningAllocSet.running` map value (Obligation #2a).
+        async fn write_alloc_status_with_addr(
+            state: &AppState,
+            alloc: &str,
+            alloc_state: AllocState,
+            counter: u64,
+            workload_addr: Option<std::net::Ipv4Addr>,
+        ) {
             let row = AllocStatusRow {
                 alloc_id: AllocationId::new(alloc).expect("alloc id"),
                 workload_id: workload_id(),
@@ -3308,8 +3331,8 @@ mod tests {
                     AllocState::Pending => None,
                     _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
                 },
-                // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
-                workload_addr: None,
+                // Per-alloc canonical workload address (AllocStatusRowV2 additive field, GH #241).
+                workload_addr,
             };
             state
                 .obs
@@ -3510,9 +3533,62 @@ mod tests {
                 panic!("expected BackendDiscoveryBridge variant");
             };
             assert_eq!(s.actual.running.len(), 2, "only Running rows must pass the filter");
-            assert!(s.actual.running.contains(&AllocationId::new("payments-0").expect("alloc id")));
-            assert!(s.actual.running.contains(&AllocationId::new("payments-2").expect("alloc id")));
+            assert!(
+                s.actual.running.contains_key(&AllocationId::new("payments-0").expect("alloc id"))
+            );
+            assert!(
+                s.actual.running.contains_key(&AllocationId::new("payments-2").expect("alloc id"))
+            );
             assert_eq!(s.actual.workload_id, workload_id());
+        }
+
+        /// Obligation #2a (GH #241) — `hydrate_actual` threads each Running
+        /// V2 row's per-alloc `workload_addr` into the `RunningAllocSet.running`
+        /// map VALUE. Mutation-gate for the population read
+        /// (`.map(|r| (r.alloc_id, r.workload_addr))`): a mesh alloc carries
+        /// `Some(10.99.0.6)`; a host-netns alloc carries `None`. A mutant that
+        /// drops the read (`-> None`) or swaps the field is killed by the
+        /// `Some` assertion below.
+        #[tokio::test]
+        async fn hydrate_actual_populates_per_alloc_workload_addr() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let state = build_state(&tmp, None).await;
+
+            let mesh_addr = std::net::Ipv4Addr::new(10, 99, 0, 6);
+            // Mesh (Path-A) alloc — carries the canonical workload_addr.
+            write_alloc_status_with_addr(
+                &state,
+                "payments-mesh",
+                AllocState::Running,
+                1,
+                Some(mesh_addr),
+            )
+            .await;
+            // Host-netns alloc — no canonical workload address.
+            write_alloc_status_with_addr(&state, "payments-host", AllocState::Running, 2, None)
+                .await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &bridge_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::BackendDiscoveryBridge(s) = result else {
+                panic!("expected BackendDiscoveryBridge variant");
+            };
+            assert_eq!(
+                s.actual.running.get(&AllocationId::new("payments-mesh").expect("alloc id")),
+                Some(&Some(mesh_addr)),
+                "mesh alloc must carry Some(workload_addr) read verbatim from the V2 row",
+            );
+            assert_eq!(
+                s.actual.running.get(&AllocationId::new("payments-host").expect("alloc id")),
+                Some(&None),
+                "host-netns alloc must carry None (no canonical workload address)",
+            );
         }
 
         // -------------------------------------------------------------
