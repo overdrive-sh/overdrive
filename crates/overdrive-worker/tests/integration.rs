@@ -102,16 +102,17 @@ mod integration {
     // canonical-workload-address-inbound-tproxy (GH #241) — DISTILL RED scaffolds.
     // The keystone slice: production-installed inbound nft-TPROXY (from
     // `start_alloc` off `spec.{workload_addr, service_ports}`), NO test-installed
-    // rule, NO synthetic loopback virt. S-WS is the mandatory acceptance gate
-    // (real serve+deploy, MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix);
-    // S-NRULES/S-DPORT/S-JOB0 observe the production-installed nft rule shape.
-    // Production bodies (the per-port `install_inbound_tproxy` in `start_alloc`,
-    // the `AllocationSpec.{workload_addr,service_ports}` channel) land in DELIVER;
-    // these scaffolds are `#[should_panic(expected = "RED scaffold")]` placeholders.
+    // rule, NO synthetic loopback virt. The S-WS keystone
+    // (`canonical_address_inbound_walking_skeleton`) RELOCATED to the
+    // `overdrive-control-plane` test tree (R1): it drives in-process `run_server`,
+    // which lives in `overdrive-control-plane` (`overdrive-control-plane`
+    // depends-on `overdrive-worker`, so a worker-crate test cannot reach
+    // `run_server` — a reverse edge is a Cargo-rejected cycle). The remaining
+    // worker-tree scenarios observe the production-installed nft rule shape via
+    // `start_alloc` directly: S-NRULES/S-DPORT/S-JOB0.
     // Shared Tier-3 fixture for S-NRULES / S-DPORT / S-JOB0 (step 03-01): the
     // kernel-state lock, shared-infra scrub, chain dump, and `AllocationSpec`
     // builder all three inbound-rule scenarios drive `start_alloc` through.
-    mod canonical_address_inbound_walking_skeleton;
     mod inbound_rule_keys_declared_port;
     mod inbound_rules_per_listener;
     mod inbound_tproxy_harness;

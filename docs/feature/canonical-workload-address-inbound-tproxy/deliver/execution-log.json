@@ -211,6 +211,202 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-23T11:14:29Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T11:16:32Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T11:41:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: design specifies real serve+deploy subprocesses for S-WS, but overdrive-cli/CLAUDE.md firmly forbids subprocess CLI tests AND the test-PKI injection seam (mtls_identity_override) is in-process-run_server-only, not CLI-injectable. Cannot author the AT as specified without inventing test-only production CLI surface (forbidden). Surfaced to orchestrator.",
+      "t": "2026-06-23T11:42:32Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: step gated on a design decision (S-WS specified as real serve+deploy subprocesses, which overdrive-cli/CLAUDE.md firmly forbids AND the test-PKI seam mtls_identity_override is in-process-run_server-only, not CLI-injectable). No production code may be authored without inventing forbidden test-only CLI surface. Surfaced to orchestrator; awaiting (A) in-process re-scope vs (B) authorise new surface.",
+      "t": "2026-06-23T11:43:27Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot reach GREEN without an authored AT (RED_ACCEPTANCE blocked) and a settled keystone driving shape. Removing the synthetic virt + test-installed install_inbound_tproxy from bidirectional_walking_skeleton.rs now would break a green test with no replacement (Test Integrity violation), so it is deferred to the (A)/(B) decision. No code changed; working tree clean.",
+      "t": "2026-06-23T11:43:35Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing to commit \u2014 no production or test code was authored (the step is blocked at RED_ACCEPTANCE on a design decision above crafter authority). Committing would either be an empty commit or require fabricating work. Awaiting orchestrator decision (A in-process re-scope / B authorise new CLI surface) before re-dispatch.",
+      "t": "2026-06-23T11:43:43Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T12:07:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: in-process run_server keystone unreachable from overdrive-worker test crate (circular dep \u2014 control-plane depends on worker); design/boundary contradiction surfaced to orchestrator",
+      "t": "2026-06-23T12:07:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: in-process run_server keystone unreachable from overdrive-worker test crate (circular dep \u2014 control-plane depends on worker); design/boundary contradiction surfaced to orchestrator",
+      "t": "2026-06-23T12:07:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: in-process run_server keystone unreachable from overdrive-worker test crate (circular dep \u2014 control-plane depends on worker); design/boundary contradiction surfaced to orchestrator",
+      "t": "2026-06-23T12:07:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: in-process run_server keystone unreachable from overdrive-worker test crate (circular dep \u2014 control-plane depends on worker); design/boundary contradiction surfaced to orchestrator",
+      "t": "2026-06-23T12:07:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T12:36:46Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T13:44:01Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T14:05:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single real-kernel Tier-3 keystone driving the production composition root in-process; no pure decision branch to PBT and mutation gate inapplicable",
+      "t": "2026-06-23T14:05:28Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T17:32:40Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T17:32:50Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single real-kernel Tier-3 keystone; PBT is the wrong tool for a one-shot wiring/round-trip proof; no new production code authored this step (consistent with 03-01 \u2014 no mutation gate)",
+      "t": "2026-06-23T17:32:50Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: keystone diagnostics removed + compiles clean on Lima 7.0; real run surfaced a NEW wall distinct from the f034f38f convergence fix \u2014 connect now SUCCEEDS (Leg-1 routing fixed: netns/inbound-rule survive) but the leg-C mTLS round-trip reply does not return byte-exact (no RST observed, second assert fires) and teardown blocks to the 120s slow-timeout. STOP-and-surface per dispatch; NOT masked, NOT improvised.",
+      "t": "2026-06-23T17:38:02Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: keystone is RED on a SECOND production wall (leg-C mTLS round-trip reply does not return byte-exact; connect now succeeds so Leg-1 routing is fixed by f034f38f). Per dispatch STOP-and-surface + CLAUDE.md (no partial COMMIT PASS against an incomplete deliverable, no masking), NOT committing 'S-WS GREEN'. Diagnostics-removal + worker stale-doc fixes + E04 pending stub are staged-ready but left uncommitted pending the user's decision on the new wall. VM left clean.",
+      "t": "2026-06-23T17:41:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T18:24:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T18:24:23Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single real-kernel Tier-3 keystone example; PBT is the wrong tool (no equivalence-class input space \u2014 one fixed mTLS round-trip); no production source changed so no mutation gate applies",
+      "t": "2026-06-23T18:24:26Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: fixture fix (1) succeeded \u2014 keystone assertions PASS byte-exact (VERDICT:WORKS on dev-Lima 7.0.0-22). Teardown hang is NOT in Keystone::drop/shutdown (both bounded; fn body completes fully) but in the tokio multi-thread runtime drop blocking on the per-alloc mTLS inbound accept_loop spawn_blocking thread (mtls_intercept_worker.rs:749/776) that ServerHandle::shutdown does not stop_alloc. Requires a PRODUCTION change (wire stop_alloc into the alloc-teardown/shutdown path) \u2014 out of bounds for this test-only step. Surfaced to orchestrator.",
+      "t": "2026-06-23T18:40:43Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T18:47:21Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T18:47:30Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: single real-kernel keystone example; PBT is the wrong tool for a Tier-3 mTLS round-trip; the fix is a test-side StopAllocation-teardown gap requiring no new production behavior, hence no decomposing unit test",
+      "t": "2026-06-23T18:47:30Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-23T18:58:26Z"
     }
   ]
 }
