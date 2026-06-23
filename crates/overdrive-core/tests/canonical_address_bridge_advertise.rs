@@ -17,9 +17,11 @@
 //! Mandate 8 (Universe — port-exposed names only): the reconcile-returned
 //! actions' `backend_addr` + `service_vip` + the `View`'s advertised
 //! fingerprint; NEVER the bridge's private fields.
-//! Mandate 9: Tier-1 in-memory acceptance -> PBT-eligible (proptest over
-//! `{Some(addr) | None} x listener_port`), with an `@example`-pinned canonical
-//! mesh row + host row preserved for the reviewer.
+//! Mandate 9: Tier-1 in-memory acceptance. PBT-eligible over
+//! `{Some(addr) | None} x listener_port`, but shipped here as `@example`-pinned
+//! `#[test]` arms (the canonical mesh row + host row) — no proptest in this
+//! file. The capture/advertise port-set property coverage lives in S-PORTSET
+//! (`capture_advertise_port_set_equality.rs`).
 //!
 //! Spec: `docs/feature/canonical-workload-address-inbound-tproxy/distill/test-scenarios.md` § S-BRIDGE.
 
