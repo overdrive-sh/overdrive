@@ -1132,8 +1132,9 @@ pub fn project_probe_descriptors(
 /// Per-variant projection:
 ///
 /// - [`crate::aggregate::WorkloadIntent::Service(svc)`] →
-///   `svc.listeners.iter().map(|l| l.port).collect()` — the operator's
-///   declared listener ports in declaration order.
+///   `svc.listen_ports()` — the operator's declared listener ports in
+///   declaration order, read through the single
+///   [`crate::aggregate::ServiceV1::listen_ports`] source (D-BLOCKER1).
 /// - [`crate::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
 ///   Service-kind concern, same boundary as probes per ADR-0054 §3).
@@ -1146,9 +1147,7 @@ pub fn project_service_listen_ports(
     match intent {
         crate::aggregate::WorkloadIntent::Job(_)
         | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
-        crate::aggregate::WorkloadIntent::Service(svc) => {
-            svc.listeners.iter().map(|l| l.port).collect()
-        }
+        crate::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
     }
 }
 

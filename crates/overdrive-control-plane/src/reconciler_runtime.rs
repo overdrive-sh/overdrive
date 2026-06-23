@@ -2968,9 +2968,10 @@ fn liveness_restart_spec(
             .cloned()
             .collect(),
         // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
-        // #241): the declared Service listener ports — same single source
-        // (`spec.listeners`) the hydrate-desired projection reads.
-        service_ports: spec.listeners.iter().map(|l| l.port).collect(),
+        // #241): the declared Service listener ports — read through the
+        // single `ServiceV1::listen_ports` source the hydrate-desired
+        // projection also reads, so the two sets stay structurally identical.
+        service_ports: spec.listen_ports(),
         // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
         // slot-derived netns name, host-veth name, and canonical workload_addr
         // are injected ONLY at the action-shim C3 site, never here.
