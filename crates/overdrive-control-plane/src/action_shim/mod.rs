@@ -1021,11 +1021,18 @@ async fn dispatch_single(
             // written verbatim onto the row + lifecycle event, so the
             // streaming layer's `ServiceSubmitEvent::Stable` projection
             // (which reads `event.terminal`, not the state) is unchanged.
-            let finalized_state = if matches!(terminal, Some(TerminalCondition::Stable { .. })) {
-                prior_row.state
-            } else {
-                AllocState::Failed
-            };
+            //
+            // The SAME `Stable` discriminator gates the destructive
+            // infrastructure teardowns below (canonical-address inbound
+            // RCA §9, GH #241): a `Stable` FinalizeFailed is a SUCCESS
+            // claim that keeps the alloc Running and still serving on its
+            // netns/leg-C, so it MUST NOT tear down the per-workload
+            // netns/veth/nft or detach the mTLS intercept. Only a
+            // genuine terminal (the `finalized_state == Failed` set) reaps
+            // the alloc. Hoisted once here and reused at both teardown
+            // sites so the row-state and teardown decisions cannot drift.
+            let is_stable = matches!(terminal, Some(TerminalCondition::Stable { .. }));
+            let finalized_state = if is_stable { prior_row.state } else { AllocState::Failed };
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
@@ -1055,19 +1062,32 @@ async fn dispatch_single(
             // so any probe supervisor spawned earlier in the alloc's
             // lifetime is cleaned up. Default no-op when no
             // ProbeRunner is wired.
+            // Probe-supervisor cleanup is correct for BOTH a Stable and a
+            // genuine terminal (a Stable alloc has indeed passed startup, so
+            // its supervisor hook is benign-or-correct) — NOT gated on
+            // `is_stable`. Only the two DESTRUCTIVE infrastructure teardowns
+            // below are gated (canonical-address inbound RCA §9, GH #241).
             driver.on_alloc_terminal(&row.alloc_id);
-            // transparent-mtls-host-socket (step 06-03): tear down the
-            // alloc's mTLS intercept (detach the cgroup program, remove
-            // the TPROXY rule, drain the per-connection teardown set
-            // fail-closed). Idempotent for an alloc with no intercept.
-            if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id);
+            // The mTLS-intercept detach and the C3 netns teardown are both
+            // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
+            // claim (the alloc stays Running and keeps serving on leg-C / its
+            // netns), so detaching the intercept or reaping the netns would
+            // leave a healthy workload running but UNREACHABLE. Both fire only
+            // for a genuine terminal (the `finalized_state == Failed` set).
+            if !is_stable {
+                // transparent-mtls-host-socket (step 06-03): tear down the
+                // alloc's mTLS intercept (detach the cgroup program, remove
+                // the TPROXY rule, drain the per-connection teardown set
+                // fail-closed). Idempotent for an alloc with no intercept.
+                if let Some(worker) = mtls_worker {
+                    worker.stop_alloc(&row.alloc_id);
+                }
+                // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
+                // per-alloc netns + veth, THEN release the slot — AFTER the
+                // driver stop. Idempotent; no-op for an alloc that never
+                // provisioned or off the mTLS gate.
+                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             }
-            // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
-            // per-alloc netns + veth, THEN release the slot — AFTER the driver
-            // stop. Idempotent; no-op for an alloc that never provisioned or
-            // off the mTLS gate.
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
