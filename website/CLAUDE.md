@@ -50,3 +50,17 @@ Document **only real, implemented behaviour** — never describe features as
 shipped that do not exist. Source from the whitepaper / `docs/product/` /
 verified runtime behaviour. The technical-writer skill produces the writing;
 this accuracy constraint is non-negotiable on top of it.
+
+### Current state only — describe what is, not what was (C-7)
+
+Write every page as a description of the system **as it is now**. This is a
+greenfield project with no users, so a feature's previous state is not content
+anyone needs. Do **not** narrate evolution: no "was staged, now ships," no
+"previously X, now Y," no "this used to require Z," and no "now" / "today"
+markers whose only job is to contrast with a past. When behaviour changes,
+rewrite the affected prose to the new current state and delete the description
+of the old one — do not layer a "what changed" note on top of it. Genuine
+current boundaries — what the system does **not** do yet — are current state and
+belong in plain present tense ("the ingress gateway is unbuilt"), not framed as a
+transition. This mirrors the Rust workspace's single-cut greenfield discipline:
+removed is removed, and the docs track head state, not its history.

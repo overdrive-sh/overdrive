@@ -15,11 +15,11 @@ the set of held identities against the set of running allocations.
 	every running allocation gets an SVID issued, held, audited, re-issued near
 	expiry, and dropped on stop. It is backed by the
 	[built-in CA](/docs/concepts/identity)'s **persistent**, envelope-encrypted root
-	— adopted at boot, the same root across restarts. A production consumer now
+	— adopted at boot, the same root across restarts. A production consumer
 	**reads** a held SVID to present it on a connection:
 	[transparent mTLS](/docs/concepts/transparent-mtls) reads it through the port
-	below to run the outbound mesh handshake. The ingress gateway and the telemetry
-	sink are still unbuilt, and the inbound path is staged. See
+	below to run the mesh handshake in both directions. The ingress gateway and the
+	telemetry sink are still unbuilt. See
 	[Where it stands](#where-it-stands).
 </Callout>
 
@@ -199,12 +199,12 @@ honest boundary:
   under the operator KEK — the same root across restarts. A certificate issued
   today verifies under the same anchor after a restart; the held set is rebuilt by
   re-issuing, but the root that signs it does not change.
-- **A consumer now presents it:** the [transparent mTLS](/docs/concepts/transparent-mtls)
-  proxy reads a held SVID through the port and presents it on outbound mesh
-  connections, encrypting them with TLS 1.3 — proven by a packet capture. The
+- **A consumer presents it:** the [transparent mTLS](/docs/concepts/transparent-mtls)
+  proxy reads a held SVID through the port and presents it on inbound and outbound
+  mesh connections, encrypting them with TLS 1.3 — proven by a packet capture. The
   ingress gateway and the telemetry sink that would also read the held SVID are
-  unbuilt, and the inbound data path is staged, so identity is read and presented
-  on the outbound path but not yet on every path.
+  unbuilt, so identity is read and presented across the mesh but not yet on those
+  paths.
 - **One inspection verb, no issue verb:** holding and dropping identity is an
   internal mechanism with no operator command to mint one. `overdrive alloc status`
   does report the current certificate for each running allocation — serial, SPIFFE
