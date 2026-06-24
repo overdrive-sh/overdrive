@@ -467,3 +467,38 @@ exists to prevent.
   (`10.96.0.11:53`), `local_backend_proto_connect.rs` (`10.99.0.1:5353`),
   `reverse_nat_udp_e2e.rs`, `multi_listener_tcp_udp_e2e.rs`.
 ```
+
+---
+
+## Addendum — completeness extension (post-RCA cross-crate audit)
+
+This RCA's reproduction used the *dataplane* same-`VIP:53` interferers and so
+named seven dataplane modules. A follow-up workspace-wide audit of the
+necessary condition — *any* test that constructs a real `EbpfDataplane`, since
+`EbpfDataplane::new` / `new_with_pin_dir` attaches `connect4`/`sendmsg4`/
+`recvmsg4` at the root `/sys/fs/cgroup` **unconditionally** — found three more
+root-attachers still outside the group that would re-open the same race against
+the (now-serialised) UDP tests:
+
+- `crates/overdrive-dataplane/.../redirect_neigh_attach.rs:131,135` —
+  `new_with_pin_dir(..., Path::new("/sys/fs/cgroup"))`, runs (not `#[ignore]`).
+- `crates/overdrive-control-plane/.../serve_boot_provisions_veth.rs:307` —
+  `new_with_pin_dir(..., Path::new("/sys/fs/cgroup"))`.
+- `crates/overdrive-control-plane/.../backend_discovery_bridge/test_server.rs:111`
+  (the helper used by `boot_composition` + `walking_skeleton`) — attaches at
+  `/sys/fs/cgroup`; `walking_skeleton.rs:319` documents the default IS root.
+
+Audited and **excluded** (verified non-interfering): `veth_attach`
+(`#[ignore]`), `veth_provision_idempotent` (no `EbpfDataplane` —
+`VethProvisionPlan` only), `convergence_loop_spawned_in_production_boot`
+(`dataplane_cgroup_attach_path: None`), and the `run_server` tests that wire no
+dataplane or attach at the default `overdrive.slice` (`submit_round_trip`,
+`server_lifecycle`, `serve_persistent_ca`, …) — a different cgroup node whose
+programs do not fire for the dataplane tests' (root-cgroup) clients.
+
+The landed fix therefore serialises **ten** modules (seven dataplane UDP +
+`redirect_neigh_attach` + `serve_boot_provisions_veth` + `backend_discovery_bridge`),
+growing `host-kernel-shared` from 49 → 92 members with nothing previously
+serialised dropped. The agent's prevention recommendation — an xtask guard that
+fails CI when a real-`EbpfDataplane` integration test lacks group membership —
+would have caught all three structurally and remains the durable follow-up.
