@@ -21,7 +21,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{IdParseError, MeshServiceName, NodeId, WorkloadId};
+use overdrive_core::id::{IdParseError, LABEL_MAX, MeshServiceName, NodeId, WorkloadId};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -322,24 +322,26 @@ fn mesh_service_name_rejects_multi_label_job_prefix() {
 #[test]
 fn mesh_service_name_label_length_boundary_is_label_max() {
     // Max-valid: a single-label all-alphanumeric <job> at exactly LABEL_MAX
-    // (253) chars is ACCEPTED. (LABEL_MAX is not re-exported as a path const;
-    // the value is pinned at 253 here and named in the comment, matching the
-    // existing WorkloadId boundary test's literal.)
-    let max_job = "a".repeat(253);
+    // chars is ACCEPTED. The boundary is derived from the shared
+    // `overdrive_core::id::LABEL_MAX` const (no bespoke literal), per the
+    // development.md "one shared length ceiling" rule.
+    let max_job = "a".repeat(LABEL_MAX);
     let full_max = format!("{max_job}.{}", MeshServiceName::SUFFIX);
     let accepted = MeshServiceName::new(&full_max);
     assert!(
-        matches!(&accepted, Ok(name) if name.as_str().len() == 253),
-        "a 253-char single-label <job> must be accepted at the LABEL_MAX boundary; got {accepted:?}"
+        matches!(&accepted, Ok(name) if name.as_str().len() == LABEL_MAX),
+        "a {LABEL_MAX}-char single-label <job> must be accepted at the LABEL_MAX boundary; got {accepted:?}"
     );
 
-    // Max+1: a 254-char <job> is REJECTED with TooLong (the ceiling, not a
-    // silent truncation).
-    let over_job = "a".repeat(254);
+    // Max+1: a (LABEL_MAX + 1)-char <job> is REJECTED with TooLong (the
+    // ceiling, not a silent truncation). The `max` field is bound and compared
+    // against LABEL_MAX in the guard — a bare const in the pattern position
+    // would bind a fresh variable rather than match by value.
+    let over_job = "a".repeat(LABEL_MAX + 1);
     let full_over = format!("{over_job}.{}", MeshServiceName::SUFFIX);
     let rejected = MeshServiceName::new(&full_over);
     assert!(
-        matches!(rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max: 253 })),
-        "a 254-char <job> must be rejected as TooLong at the LABEL_MAX boundary; got {rejected:?}"
+        matches!(&rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == LABEL_MAX),
+        "a (LABEL_MAX + 1)-char <job> must be rejected as TooLong at the LABEL_MAX boundary; got {rejected:?}"
     );
 }
