@@ -189,6 +189,18 @@ pub struct ServiceMapHydratorView {
     /// Per-service retry inputs.
     #[serde(default)]
     pub retries: BTreeMap<ServiceId, RetryMemory>,
+    /// Fingerprint of the LOCAL backend set most recently driven via
+    /// `RegisterLocalBackend` (mechanism L-a, convergence-model.md § 8.3).
+    /// Persists the INPUT (the applied local-set fingerprint), not a derived
+    /// "needs re-drive" boolean — the re-drive decision is recomputed every
+    /// tick from this input + the freshly-computed `local_fingerprint`
+    /// (`.claude/rules/development.md` § "Persist inputs, not derived state").
+    ///
+    /// Additive CBOR schema evolution (§ "Reconciler I/O → Schema evolution"):
+    /// a V1-written View (no field) deserialises with an empty map — tolerant,
+    /// NO versioned envelope, NO migration. GC'd in lockstep with `retries`.
+    #[serde(default)]
+    pub last_applied_local_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
 /// Reasons a backend address is rejected by the hydrator's
@@ -353,6 +365,7 @@ impl Reconciler for ServiceMapHydrator {
                         }
                 });
             let remote_survivors: Vec<Backend> = remote.iter().map(|b| (*b).clone()).collect();
+            let local_survivors: Vec<Backend> = local.iter().map(|b| (*b).clone()).collect();
 
             // The post-gate REMOTE survivors are the ONLY backends the
             // dataplane (XDP/REVERSE_NAT) is driven to program. The programmed
@@ -402,24 +415,6 @@ impl Reconciler for ServiceMapHydrator {
                     correlation: CorrelationKey::derive(&target_str, &spec_hash, "update-service"),
                 });
 
-                // The LOCAL path (V4 VIP only — `local` is empty for a V6 VIP)
-                // emits one RegisterLocalBackend per surviving LOCAL backend.
-                // Unchanged from before the realignment.
-                if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
-                    push_register_local_backend_actions(
-                        &mut actions,
-                        &local,
-                        &LocalBackendEmit {
-                            service_id: *service_id,
-                            vip_v4,
-                            vip_port: desired_svc.port.get(),
-                            proto: desired_svc.proto,
-                            target_str: &target_str,
-                            spec_hash: &spec_hash,
-                        },
-                    );
-                }
-
                 // A dispatch ALWAYS emitted a DataplaneUpdateService now (incl.
                 // the empty purge), so it always has a programmable fingerprint
                 // to record. Record the PROGRAMMED fingerprint (matches what the
@@ -438,10 +433,52 @@ impl Reconciler for ServiceMapHydrator {
             {
                 next_view.retries.remove(service_id);
             }
+
+            // L-a local-churn re-drive (convergence-model.md § 8.3). The
+            // RegisterLocalBackend emission is DECOUPLED from the remote-keyed
+            // `need_dispatch` above: it runs every tick on its OWN convergence
+            // signal — a per-service `local_fingerprint` diff against the
+            // persisted `last_applied_local_fingerprint`. A local-backend churn
+            // whose REMOTE projection is unchanged (so `programmed_fingerprint`
+            // is invariant and `need_dispatch` is false once settled) still
+            // re-emits RegisterLocalBackend for the CURRENT local set. For a V6
+            // VIP `local_survivors` is empty (no LOCAL partition), so
+            // `local_fingerprint = fingerprint(vip, [])` and the seam is a no-op
+            // once recorded. `local_fingerprint` is derived, recomputed every
+            // tick from inputs, NEVER persisted — only its last-applied VALUE
+            // is (the View field). Gated SOLELY on the local diff, NOT on
+            // `need_dispatch` / `programmed_fingerprint` / the Completed row.
+            let local_fingerprint =
+                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &local_survivors);
+            if next_view.last_applied_local_fingerprint.get(service_id) != Some(&local_fingerprint)
+            {
+                if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
+                    let target_str = format!("service-map-hydrator/{service_id}");
+                    let spec_hash =
+                        ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
+                    push_register_local_backend_actions(
+                        &mut actions,
+                        &local,
+                        &LocalBackendEmit {
+                            service_id: *service_id,
+                            vip_v4,
+                            vip_port: desired_svc.port.get(),
+                            proto: desired_svc.proto,
+                            target_str: &target_str,
+                            spec_hash: &spec_hash,
+                        },
+                    );
+                }
+                next_view.last_applied_local_fingerprint.insert(*service_id, local_fingerprint);
+            }
         }
 
-        // GC: drop retry memory for services no longer in `desired`.
+        // GC: drop retry memory AND last-applied local fingerprints for
+        // services no longer in `desired` — kept in lockstep (L-a, § 8.3).
         next_view.retries.retain(|service_id, _| desired.desired.contains_key(service_id));
+        next_view
+            .last_applied_local_fingerprint
+            .retain(|service_id, _| desired.desired.contains_key(service_id));
 
         (actions, next_view)
     }

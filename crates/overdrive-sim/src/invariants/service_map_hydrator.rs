@@ -248,7 +248,21 @@ fn drive_one_shape_steady_state(shape: &ShapeFixture) -> Result<(), String> {
         );
     }
 
+    // Complete the converged precondition for the DECOUPLED local seam
+    // (mechanism L-a, convergence-model.md § 8.3): a converged View must
+    // already carry the last-applied LOCAL fingerprint per service, mirroring
+    // how `actual` above carries the applied PROGRAMMED-remote fingerprint. An
+    // empty `last_applied_local_fingerprint` would (correctly) make the
+    // hydrator's local seam see `local_fingerprint != None` and emit the
+    // tick-0 `RegisterLocalBackend` install — the DESIGNED first-tick behavior,
+    // not a steady-state action. For all-mesh / remote-only shapes
+    // `local_subset` is empty, so `last_applied[sid] = fingerprint(vip, [])`.
     let mut view = ServiceMapHydratorView::default();
+    for (service_id, desired) in &shape.state.desired {
+        let local = local_subset(desired);
+        view.last_applied_local_fingerprint.insert(*service_id, fingerprint(&desired.vip, &local));
+    }
+
     for tick_idx in 0..STEADY_STATE_TICKS {
         let tick = make_tick(tick_idx);
         let (actions, next_view) = any_reconciler.reconcile(
@@ -297,6 +311,27 @@ fn programmed_subset(desired: &ServiceDesired) -> Vec<Backend> {
         .filter(|b| match b.addr.ip() {
             IpAddr::V4(v4) => !subnet.contains(&v4) && v4 != host,
             IpAddr::V6(_) => true,
+        })
+        .cloned()
+        .collect()
+}
+
+/// The LOCAL survivors of a service's backends — the exact set the
+/// hydrator's `local` arm computes and `RegisterLocalBackend` carries
+/// (mechanism L-a, convergence-model.md § 8.3). Keeps ONLY the LOCAL,
+/// non-mesh V4 backends (`addr.ip() == host_ipv4`); drops mesh
+/// (`∈ workload_subnet`), remote, and V6. For all-mesh / remote-only
+/// shapes the result is empty, so a converged View records
+/// `last_applied_local_fingerprint[sid] = fingerprint(vip, [])` and the
+/// hydrator's decoupled local seam sees no diff on tick 0.
+fn local_subset(desired: &ServiceDesired) -> Vec<Backend> {
+    let host = host_ipv4();
+    desired
+        .backends
+        .iter()
+        .filter(|b| match b.addr.ip() {
+            IpAddr::V4(v4) => v4 == host,
+            IpAddr::V6(_) => false,
         })
         .cloned()
         .collect()

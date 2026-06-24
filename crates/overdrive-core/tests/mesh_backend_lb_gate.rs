@@ -637,6 +637,197 @@ fn v6_vip_all_mesh_service_settles_via_empty_remote_purge() {
     );
 }
 
+/// Convergence-model realignment — local-churn re-drive (mechanism L-a,
+/// convergence-model.md § 8.3 / § 11.4; `fix-mesh-only-reconcile-loop` step
+/// 01-02, B5 = build-now). Pins the guarantee this fix newly provides: the
+/// `RegisterLocalBackend` emission is driven on its OWN convergence signal — a
+/// per-service `local_fingerprint` diff against the View's
+/// `last_applied_local_fingerprint` map — DECOUPLED from the remote-keyed
+/// `need_dispatch`. A local-backend churn whose REMOTE projection is unchanged
+/// (so `programmed_fingerprint` is invariant and `should_dispatch` stays
+/// `false`) MUST still re-emit `RegisterLocalBackend` for the new local set.
+///
+/// Three-evaluation fixture threading `next_view` forward, local-only service
+/// (single LOCAL backend at `host_ipv4`, ∉ mesh subnet) — the local set churns
+/// by PORT (`host_ipv4:8080` → `host_ipv4:9090`), keeping the backend LOCAL
+/// (`addr.ip() == host_ipv4`) while changing `fingerprint(vip,
+/// local_survivors)`. Because both local sets project to an EMPTY remote set,
+/// `programmed_fingerprint = fingerprint(vip, [])` is invariant across all three
+/// ticks → `should_dispatch` is `false` on tick 3 → the OLD (`need_dispatch`-
+/// gated) local emit fires NOTHING on tick 3. Under L-a, tick 3 re-emits.
+///
+/// - **Tick 1**: local `{host_ipv4:8080}`, `actual = None`, `view = default`
+///   → ONE `RegisterLocalBackend` for the `{8080}` set, records the applied
+///   local fingerprint.
+/// - **Tick 2** (settled steady-state probe): same `{host_ipv4:8080}`, `actual
+///   = Completed{fp(vip,[])}` (remote settled), `view` = tick-1 `next_view`
+///   → ZERO `RegisterLocalBackend` AND ZERO `DataplaneUpdateService` — a
+///   settled local-only service does zero I/O.
+/// - **Tick 3** (the load-bearing churn): local `{host_ipv4:9090}` (remote
+///   projection UNCHANGED → `programmed_fingerprint` unchanged →
+///   `should_dispatch` STILL `false`), `actual = Completed{fp(vip,[])}`, `view`
+///   = tick-2 `next_view` → MUST emit a fresh `RegisterLocalBackend` for the
+///   `{9090}` set via the decoupled `local_fingerprint != last_applied` signal.
+///
+/// Against the post-01-01 code (local emit still inside `if need_dispatch`),
+/// tick 3 emits NOTHING — RED for the right reason (the local churn is silently
+/// dropped, the same defect class L-a fixes on the local/cgroup axis).
+///
+/// Observes `reconcile`'s OWN emitted actions, NOT an external observation row
+/// (the cgroup external-observation surface is the B2 deferral, GH #246).
+#[test]
+#[allow(clippy::too_many_lines)] // three sequential ticks + per-tick assertions
+fn local_backend_churn_redrives_register_local_backend_independent_of_remote_gate() {
+    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+
+    // A local-only service whose single LOCAL backend lives at `host_ipv4`.
+    // The churn changes the backend's PORT (8080 → 9090) — both addresses are
+    // `host_ipv4`, so both remain LOCAL and the remote projection is EMPTY for
+    // both, but `fingerprint(vip, local_survivors)` differs.
+    fn local_only_desired(host: Ipv4Addr, backend_port: u16) -> ServiceDesired {
+        let vip =
+            ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+        let backends = vec![Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(host), backend_port),
+            weight: 1,
+            healthy: true,
+        }];
+        let fp = fingerprint(&vip, &backends);
+        ServiceDesired {
+            vip,
+            port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+            proto: Proto::Tcp,
+            backends,
+            fingerprint: fp,
+        }
+    }
+
+    fn count_register(actions: &[Action]) -> usize {
+        actions.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).count()
+    }
+    fn count_dataplane(actions: &[Action]) -> usize {
+        actions.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).count()
+    }
+
+    let host = host_ipv4();
+    assert!(
+        !workload_subnet().contains(&host),
+        "fixture precondition: host_ipv4 must NOT be inside the mesh subnet (it is the LOCAL arm)"
+    );
+
+    let r = ServiceMapHydrator::canonical(host, workload_subnet());
+    let s_id = make_service_id(1);
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let empty_fp = fingerprint(&vip, &[]);
+
+    // ---- Tick 1: first install, default View, empty actual. ----
+    let mut desired1 = BTreeMap::new();
+    desired1.insert(s_id, local_only_desired(host, 8080));
+    let state1 = ServiceMapHydratorState { desired: desired1, actual: BTreeMap::new() };
+    let view0 = ServiceMapHydratorView::default();
+    let (actions1, view1) = r.reconcile(&state1, &state1, &view0, &make_tick(0));
+    assert_eq!(
+        count_register(&actions1),
+        1,
+        "tick 1: first-install local-only service emits ONE RegisterLocalBackend for {{8080}}"
+    );
+    let local_fp_8080 = {
+        let b = Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(host), 8080),
+            weight: 1,
+            healthy: true,
+        };
+        fingerprint(&vip, std::slice::from_ref(&b))
+    };
+    assert_eq!(
+        view1.last_applied_local_fingerprint.get(&s_id),
+        Some(&local_fp_8080),
+        "tick 1: the L-a seam records the applied local-set fingerprint for the {{8080}} set"
+    );
+
+    // ---- Tick 2: settled steady-state. Same local set, Completed{fp(vip,[])}
+    // row in `actual` (remote axis settled), View fed forward. ----
+    let mut desired2 = BTreeMap::new();
+    desired2.insert(s_id, local_only_desired(host, 8080));
+    let mut actual2 = BTreeMap::new();
+    actual2.insert(
+        s_id,
+        ServiceHydrationStatus::Completed {
+            fingerprint: empty_fp,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+        },
+    );
+    let state2 = ServiceMapHydratorState { desired: desired2, actual: actual2 };
+    let (actions2, view2) = r.reconcile(&state2, &state2, &view1, &make_tick(2));
+    assert_eq!(
+        count_register(&actions2),
+        0,
+        "tick 2: a settled local-only service re-emits ZERO RegisterLocalBackend (local set unchanged)"
+    );
+    assert_eq!(
+        count_dataplane(&actions2),
+        0,
+        "tick 2: a settled local-only service emits ZERO DataplaneUpdateService (remote settled)"
+    );
+
+    // ---- Tick 3: the load-bearing churn. Local set {8080} -> {9090}; remote
+    // projection UNCHANGED (still empty) so programmed_fingerprint is invariant
+    // and should_dispatch stays false. The L-a seam MUST still re-emit. ----
+    let mut desired3 = BTreeMap::new();
+    desired3.insert(s_id, local_only_desired(host, 9090));
+    let mut actual3 = BTreeMap::new();
+    actual3.insert(
+        s_id,
+        ServiceHydrationStatus::Completed {
+            fingerprint: empty_fp,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+        },
+    );
+    let state3 = ServiceMapHydratorState { desired: desired3, actual: actual3 };
+    let (actions3, view3) = r.reconcile(&state3, &state3, &view2, &make_tick(3));
+    assert_eq!(
+        count_dataplane(&actions3),
+        0,
+        "tick 3: the remote projection is unchanged (still empty) — no DataplaneUpdateService re-fires"
+    );
+    assert_eq!(
+        count_register(&actions3),
+        1,
+        "tick 3 (THE FIX): a LOCAL-set churn whose remote projection is unchanged MUST re-emit \
+         RegisterLocalBackend for the new local set, via the decoupled local_fingerprint signal — \
+         NOT gated on need_dispatch. Against need_dispatch-gated code this is ZERO (RED)."
+    );
+    match actions3.iter().find(|a| matches!(a, Action::RegisterLocalBackend { .. })) {
+        Some(Action::RegisterLocalBackend { backend, .. }) => {
+            assert_eq!(
+                backend.port(),
+                9090,
+                "tick 3: the re-emitted RegisterLocalBackend must carry the NEW local backend (port 9090)"
+            );
+        }
+        _ => panic!("tick 3: expected a re-emitted RegisterLocalBackend for the churned local set"),
+    }
+    let local_fp_9090 = {
+        let b = Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(host), 9090),
+            weight: 1,
+            healthy: true,
+        };
+        fingerprint(&vip, std::slice::from_ref(&b))
+    };
+    assert_eq!(
+        view3.last_applied_local_fingerprint.get(&s_id),
+        Some(&local_fp_9090),
+        "tick 3: the L-a seam records the NEW applied local-set fingerprint for the {{9090}} set"
+    );
+}
+
 proptest! {
     /// PBT over the three address classes (convergence-model.md § 11.1):
     /// every single-backend service emits EXACTLY ONE `DataplaneUpdateService`
