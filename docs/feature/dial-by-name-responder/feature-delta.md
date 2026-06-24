@@ -91,13 +91,15 @@ as the J-SEC-002 analysis warned.
       I want an in-agent name-answering listener (in the same process that owns
       the agent-light L4 proxy and the ServiceBackendsResolve index — NOT a
       separate daemon, NOT in-kernel) to answer A for <job>.svc.overdrive.local
-      with the running backend's IPv4 address from the shared resolve index (the
+      with the running-and-healthy backend's IPv4 address read as a sibling
+      name-keyed reader over the SAME service_backends rows MtlsResolve folds
+      (NOT the addr-keyed intercept-index struct; refined by DESIGN ADR-0072) (the
       v1 substrate is IPv4 — the MtlsResolve addr is SocketAddrV4, the per-netns
       responder addr is Ipv4Addr), returning the SAME address MtlsResolve
       recognizes (headless, no VIP, D-TME-10); answer AAAA as NODATA (the name is
       currently resolvable, no IPv6 record — a real IPv6 backend story is out of
-      v1 scope); and NXDOMAIN when no backend is running (declared-but-empty and
-      unknown are indistinguishable — the responder reads the running resolve
+      v1 scope); and NXDOMAIN when no backend is running-and-healthy (declared-but-empty and
+      unknown are indistinguishable — the responder reads the running-and-healthy resolve
       index) — never a stale address,
     outcome: >
       so an unmodified workload can DIAL a mesh peer BY NAME and land at a live
@@ -123,8 +125,8 @@ as the J-SEC-002 analysis warned.
 |---|---|---|
 | **D-TME-9** | `resolv.conf` injection SHIPPED — each per-netns `/etc/resolv.conf` carries `nameserver <responder_addr>`; `responder_addr` = per-netns gateway (`plan.host_addr`, Fly `fdaa::3` model, collision-free by construction). `veth_provisioner.rs` `WriteResolvConf`. | **Shipped, do not touch** |
 | **D-TME-10** | Return shape = **HEADLESS** — answer with a `running` `service_backends` addr, the **same** address `MtlsResolve.resolve` recognizes (one source, byte-consistent). **NO VIP, NO #167, NO #61.** | **Pinned** |
-| **D-TME-11** | Read mechanism = the shared **`ServiceBackendsResolve`** index (in-RAM, address-keyed, ownership-aware reverse index, List-then-Watch + relist-on-`Lagged`). This feature makes it **"one source, THREE readers"** (outbound resolve + inbound install + **name answers**). | **Exists; this feature adds the 3rd reader** |
-| **v1 address family** | The shipped resolve/intercept substrate is **IPv4**: `ResolvedBackend.addr` is `SocketAddrV4` (`mtls_resolve.rs`), and `responder_addr` + the netns addrs are `Ipv4Addr` (`veth_provisioner.rs`). **v1 answers `A` with the running IPv4 backend addr; answers `AAAA` as NODATA** when the name is currently resolvable; **a name with 0 running backends → NXDOMAIN** (declared-but-empty and unknown both collapse — the responder reads only the running index). See § *The v1 DNS answer contract* above for the canonical table. A real IPv6 backend story (widening the `SocketAddrV4`/`Ipv4Addr` substrate) is **OUT of v1 scope**. | **Pinned (forced by the shipped types)** |
+| **D-TME-11** | Read mechanism = a **sibling name-keyed reader over the SAME `service_backends` rows** (same `ObservationStore`, same List-then-Watch + relist-on-`Lagged` pattern as `ServiceBackendsResolve`) — **NOT** the addr-keyed intercept-index *struct*. This feature makes the `ObservationStore` `service_backends` **surface** **"one source, THREE readers"** (outbound resolve + inbound install + **name answers**). Byte-consistency = same rows, not a shared struct (DESIGN DDN-1; the security-critical `ServiceBackendsResolve` struct stays untouched). | **Surface exists; this feature adds the 3rd reader (a sibling, not a widening)** |
+| **v1 address family** | The shipped resolve/intercept substrate is **IPv4**: `ResolvedBackend.addr` is `SocketAddrV4` (`mtls_resolve.rs`), and `responder_addr` + the netns addrs are `Ipv4Addr` (`veth_provisioner.rs`). **v1 answers `A` with the running-AND-healthy IPv4 backend addr; answers `AAAA` as NODATA** when the name is currently resolvable; **a name with 0 running-and-healthy backends → NXDOMAIN** (declared-but-not-running, unhealthy, and unknown all collapse — the responder reads only the running-AND-healthy set; DESIGN DDN-2). See § *The v1 DNS answer contract* above for the canonical table. A real IPv6 backend story (widening the `SocketAddrV4`/`Ipv4Addr` substrate) is **OUT of v1 scope**. | **Pinned (forced by the shipped types)** |
 | **Implement-to-design** | This feature describes **behavior + the pinned contracts**. It does NOT invent the responder's API surface, new public types, or the `MtlsResolve` shape — those are DESIGN-wave decisions. | **Hard constraint (CLAUDE.md)** |
 
 **Today's gap (the thing this feature closes):** nothing answers on `responder_addr`.
@@ -134,23 +136,26 @@ connection at all.
 
 ### `[REF]` The v1 DNS answer contract (canonical — every artifact matches this)
 
-| Query | Name has ≥1 running IPv4 backend | Name has 0 running backends\* |
+| Query | Name has ≥1 running-AND-healthy IPv4 backend | Name has 0 running-and-healthy backends\* |
 |---|---|---|
-| `A` | **NOERROR + A** (the running IPv4 addr) | **NXDOMAIN** |
+| `A` | **NOERROR + A** (the running-and-healthy IPv4 addr) | **NXDOMAIN** |
 | `AAAA` | **NOERROR / NODATA** (resolvable name, no IPv6 record — v1 is IPv4) | **NXDOMAIN** |
 
-\* *0 running backends covers BOTH a declared-but-not-running service AND an
-unknown name — v1 does **not** distinguish them, because the responder reads only
-the running `ServiceBackendsResolve` set, so both collapse to **NXDOMAIN**. A
-stale / cached / guessed address is **never** returned. The NXDOMAIN carries a
-short negative-TTL so a retrying dialer re-resolves promptly once a backend reaches
-Running (DESIGN pins the exact TTL). A future refinement could return NODATA for a
+\* *0 running-and-healthy backends covers declared-but-not-running, unhealthy /
+not-ready, AND unknown names alike — v1 does **not** distinguish them, because the
+responder reads only the **running-AND-healthy** set (the `by_name` index gates on
+`Backend.healthy == true`, matching the intercept's `Mesh` set — DESIGN DDN-2), so
+all collapse to **NXDOMAIN**. A stale / cached / guessed / unhealthy address is
+**never** returned. The NXDOMAIN carries a short negative-TTL so a retrying dialer
+re-resolves promptly once a backend reaches running-and-healthy (DESIGN pins the
+exact TTL — 1 s, DDN-8). A future refinement could return NODATA for a
 declared-but-empty service IF the responder gains a declared-service view distinct
-from the running index — that is **not** v1.*
+from the running-and-healthy index — that is **not** v1.*
 
-- **NODATA** = the name **is** currently resolvable but has no record of the queried
-  type (only `AAAA` in v1, since the substrate is IPv4).
-- **NXDOMAIN** = no currently-resolvable backend for the name.
+- **NODATA** = the name **is** currently resolvable (≥1 running-and-healthy
+  backend) but has no record of the queried type (only `AAAA` in v1, since the
+  substrate is IPv4).
+- **NXDOMAIN** = no currently-resolvable (running-and-healthy) backend for the name.
 
 This table is the single contract US-DBN-2 / US-DBN-4, slice-03, the KPIs, and the
 product journey all reference. (Resolves the empty-answer ambiguity flagged in
@@ -203,44 +208,47 @@ one listener receives and answers all of them on a real kernel under Lima as roo
 - [ ] Promotion-gate decision (PROMOTE / DISCARD / PIVOT) recorded in `spike/wave-decisions.md`.
 - [ ] Probe code is in `spike-scratch/`, **never** in `crates/`; eBPF (if any) is aya-rs Rust, never C.
 
-### US-DBN-2 — Walking skeleton: responder answers ONE name → ONE running backend, end-to-end through serve+deploy
+### US-DBN-2 — Walking skeleton: responder answers ONE name → ONE running-and-healthy backend, end-to-end through serve+deploy
 
 **Job:** `J-MESH-001`
 
 **Elevator Pitch:**
 - **Before:** An operator deploys a mesh workload that another workload must dial by name; the dialing workload's `getaddrinfo("<peer>.svc.overdrive.local")` reaches the injected resolver, **nothing answers**, resolution fails, and the connection never starts.
-- **After:** `overdrive serve` (one node) + `overdrive deploy <server-spec>` + `overdrive deploy <client-spec>` → the client workload's `getaddrinfo("<server>.svc.overdrive.local")` resolves to the server's **running** `service_backends` addr, the client connects, and the connection is **intercepted + mTLS'd end-to-end** (TLS 1.3 `0x17` records on the peer wire) — the dial-by-name path closes through the production entry points.
+- **After:** `overdrive serve` (one node) + `overdrive deploy <server-spec>` + `overdrive deploy <client-spec>` → the client workload's `getaddrinfo("<server>.svc.overdrive.local")` resolves to the server's **running-and-healthy** `service_backends` addr, the client connects, and the connection is **intercepted + mTLS'd end-to-end** (TLS 1.3 `0x17` records on the peer wire) — the dial-by-name path closes through the production entry points.
 - **Decision enabled:** Sam can tell a reviewer "an unmodified workload reaches its mesh peer by name and the hop is encrypted, proven through `serve` + `deploy`, not a `#[test]` seam."
 
 **Problem:** Sam (and Ana's unmodified workload) need name resolution to actually work
 in a deploy. The injection is shipped; the answer is missing.
 
 **Solution (behavior; DESIGN owns the API):** The in-agent name-answering listener
-answers `A` for `<job>.svc.overdrive.local` with the running **IPv4** backend addr by
-reading `service_backends ∩ running` from the shared `ServiceBackendsResolve` index
-(D-TME-11) and returning a `running` backend addr — the **same** address
-`MtlsResolve.resolve` recognizes (`SocketAddrV4`, D-TME-10); it answers `AAAA` as
-**NODATA** (name exists, no IPv6 record — the v1 substrate is IPv4). Thin: the
-**A→B direction only** first (one name, one running backend), driven end-to-end
-through `overdrive serve` + `overdrive deploy`, proven by the intercept landing.
+answers `A` for `<job>.svc.overdrive.local` with the **running-AND-healthy IPv4**
+backend addr by reading `service_backends ∩ running-and-healthy` as a **sibling
+name-keyed reader over the SAME `service_backends` rows** (same `ObservationStore`,
+same List-then-Watch pattern as `ServiceBackendsResolve`, D-TME-11) — NOT the
+addr-keyed intercept-index struct — and returning a running-and-healthy backend addr
+— the **same** address `MtlsResolve.resolve` recognizes and classifies `Mesh`
+(`SocketAddrV4`, D-TME-10); it answers `AAAA` as **NODATA** (name exists, no IPv6
+record — the v1 substrate is IPv4). Thin: the **A→B direction only** first (one
+name, one running-and-healthy backend), driven end-to-end through `overdrive serve`
++ `overdrive deploy`, proven by the intercept landing.
 
 **Domain Examples:**
-1. **Happy path (A→B):** Sam deploys `server` (`server.toml`, replicas=1) and `client` (`client.toml`). `server` reaches Running with backend addr `10.x.y.2:8080`. `client`'s `getaddrinfo("server.svc.overdrive.local")` → `10.x.y.2`; `client` connects; tcpdump on the peer leg shows TLS 1.3 records.
+1. **Happy path (A→B):** Sam deploys `server` (`server.toml`, replicas=1) and `client` (`client.toml`). `server` reaches running-and-healthy with backend addr `10.x.y.2:8080`. `client`'s `getaddrinfo("server.svc.overdrive.local")` → `10.x.y.2`; `client` connects; tcpdump on the peer leg shows TLS 1.3 records.
 2. **Headless single-source:** the addr the responder returns for `server.svc.overdrive.local` is **byte-identical** to the addr `MtlsResolve.resolve` recognizes for the same flow (the name answer and the intercept read the same single source — two of the one-source / **three**-readers contract) — no VIP, no translation layer.
-3. **Boundary (not-yet-running):** Sam deploys `server` and *immediately* (before it reaches Running) `client` queries `server.svc.overdrive.local` → NXDOMAIN (no running backend; covered fully by US-DBN-4), never a half-provisioned or guessed addr.
+3. **Boundary (not-yet-running / not-yet-healthy):** Sam deploys `server` and *immediately* (before it reaches running-and-healthy) `client` queries `server.svc.overdrive.local` → NXDOMAIN (no running-and-healthy backend; covered fully by US-DBN-4), never a half-provisioned, unhealthy, or guessed addr.
 
 **UAT Scenarios (BDD):**
 
 ```gherkin
 Scenario: An unmodified workload resolves its mesh peer by name and the hop is encrypted
   Given Sam has run "overdrive serve" on a single node
-  And Sam has run "overdrive deploy server.toml" and the server allocation is Running with a service_backends addr
+  And Sam has run "overdrive deploy server.toml" and the server allocation is Running-AND-HEALTHY with a service_backends addr
   When Sam runs "overdrive deploy client.toml" and the client workload calls getaddrinfo("server.svc.overdrive.local")
-  Then the query resolves to the server's running service_backends addr (the same addr MtlsResolve recognizes)
+  Then the query resolves to the server's running-and-healthy service_backends addr (the same addr MtlsResolve recognizes)
   And the client's subsequent connection is intercepted and the peer wire carries TLS 1.3 application_data records
 
 Scenario: The name answer is byte-consistent with the intercept path's source
-  Given a server allocation is Running with a service_backends addr A
+  Given a server allocation is Running-AND-HEALTHY with a service_backends addr A classified Mesh
   When the responder answers "server.svc.overdrive.local"
   Then the answer addr equals A byte-for-byte
   And no VIP and no #167 allocator is involved
@@ -248,11 +256,11 @@ Scenario: The name answer is byte-consistent with the intercept path's source
 
 **Acceptance Criteria:**
 - [ ] Driven through production `overdrive serve` + `overdrive deploy` — NOT a hand-rolled harness. No test installs a rule / binds a socket / supplies an address production does not itself install/bind/supply (CLAUDE.md vertical-slice rule).
-- [ ] A deployed workload's `getaddrinfo("<server>.svc.overdrive.local")` resolves to the server's `running` `service_backends` addr.
-- [ ] The resolved addr is byte-identical to the addr `MtlsResolve.resolve` recognizes (D-TME-10 single-source).
+- [ ] A deployed workload's `getaddrinfo("<server>.svc.overdrive.local")` resolves to the server's `running`-and-healthy `service_backends` addr.
+- [ ] The resolved addr is byte-identical to the addr `MtlsResolve.resolve` recognizes AND classifies `Mesh` (D-TME-10 single-source; an unhealthy addr would classify `MeshUnreachable`, so it is never answered).
 - [ ] The subsequent connection is intercepted + mTLS'd (Tier-3 capture: TLS 1.3 `0x17`, zero payload cleartext on the peer leg).
-- [ ] The resolve read goes through the shared `ServiceBackendsResolve` index (the 3rd reader, D-TME-11) — no second source of backend truth.
-- [ ] `AAAA` for a name with a running (IPv4) backend returns **NODATA** (NOERROR, no IPv6 record) — NOT NXDOMAIN, NOT a fabricated v6 addr (the v1 substrate is IPv4).
+- [ ] The resolve read is a **sibling name-keyed reader over the SAME `service_backends` rows** (the 3rd reader of the `ObservationStore` surface, D-TME-11) — no second source of backend truth, and the addr-keyed intercept-index struct is untouched.
+- [ ] `AAAA` for a name with a running-and-healthy (IPv4) backend returns **NODATA** (NOERROR, no IPv6 record) — NOT NXDOMAIN, NOT a fabricated v6 addr (the v1 substrate is IPv4).
 
 ### US-DBN-3 — Runnable ping-pong demo: two services dial each other by name
 
@@ -302,40 +310,42 @@ Scenario: Two services ping-pong by name, each hop intercepted and mTLS'd
 - [ ] The demo is driven by `overdrive deploy` (two commands) against `overdrive serve` — a real serve+deploy loop, not a `#[test]`.
 - [ ] Graduated to a `verification/expectations/` EDD expectation (see Outcome KPIs / EDD).
 
-### US-DBN-4 — Empty-candidate honesty: no running backend → honest NXDOMAIN, never a stale address
+### US-DBN-4 — Empty-candidate honesty: no running-and-healthy backend → honest NXDOMAIN, never a stale address
 
 **Job:** `J-MESH-001`
 
 **Elevator Pitch:**
-- **Before:** A name query for a service with **no running backend** risks returning a stale or last-known address — pointing an unmodified workload at a dead instance, producing a confusing connection failure two layers downstream.
-- **After:** `overdrive deploy <server-spec>` then querying `<server>.svc.overdrive.local` **before it reaches Running** (or after all backends stop) → **NXDOMAIN** (no running backend) — the workload sees "no such name right now," not a wrong address. (No new operator verb; the observable is the query result inside a deployed workload + the absence of a bogus connection.)
-- **Decision enabled:** Sam can tell a reviewer "the name layer is fail-honest — it never points a workload at a backend that isn't running," matching the arc's fail-closed discipline.
+- **Before:** A name query for a service with **no running-and-healthy backend** risks returning a stale or last-known address — pointing an unmodified workload at a dead instance, producing a confusing connection failure two layers downstream.
+- **After:** `overdrive deploy <server-spec>` then querying `<server>.svc.overdrive.local` **before it reaches running-and-healthy** (or after all backends stop) → **NXDOMAIN** (no running-and-healthy backend) — the workload sees "no such name right now," not a wrong address. (No new operator verb; the observable is the query result inside a deployed workload + the absence of a bogus connection.)
+- **Decision enabled:** Sam can tell a reviewer "the name layer is fail-honest — it never points a workload at a backend that isn't running-and-healthy," matching the arc's fail-closed discipline.
 
 **Problem:** A stale address is worse than no address — it sends an unmodified workload
 to a dead instance. The arc's whole posture is fail-closed/fail-honest; the name layer
 must match it.
 
-**Solution (behavior):** When `service_backends ∩ running` is empty for the queried
-name, the responder returns **NXDOMAIN** (per § *The v1 DNS answer contract*) — **never** a stale, cached, or
-last-known address. (Mirrors the arc's "never absorb a fallible read into a default"
-discipline and the K8s-headless/Fly `.internal` empty-endpoint-set shape.)
+**Solution (behavior):** When `service_backends ∩ running-and-healthy` is empty for
+the queried name (no backend running-and-healthy, OR all backends unhealthy / not-ready, OR
+unknown name), the responder returns **NXDOMAIN** (per § *The v1 DNS answer
+contract*) — **never** a stale, cached, unhealthy, or last-known address. (Mirrors
+the arc's "never absorb a fallible read into a default" discipline and the
+K8s-headless/Fly `.internal` empty-endpoint-set shape.)
 
 **Domain Examples:**
-1. **No backend yet:** `server` deployed but Pending; query `server.svc.overdrive.local` → NXDOMAIN; the workload retries later and succeeds once `server` is Running.
-2. **All backends stopped:** `server` was Running, then `overdrive job stop` removes it; a subsequent query → NXDOMAIN, NOT the old `10.x.y.2`.
+1. **No backend yet:** `server` deployed but Pending; query `server.svc.overdrive.local` → NXDOMAIN; the workload retries later and succeeds once `server` is running-and-healthy.
+2. **All backends stopped:** `server` was running-and-healthy, then `overdrive job stop` removes it; a subsequent query → NXDOMAIN, NOT the old `10.x.y.2`.
 3. **Unknown name:** query `nonexistent.svc.overdrive.local` → NXDOMAIN.
 
 **UAT Scenarios (BDD):**
 
 ```gherkin
-Scenario: No running backend yields NXDOMAIN, never a stale address
-  Given a "server" service has been deployed but has no running backend
+Scenario: No running-and-healthy backend yields NXDOMAIN, never a stale address
+  Given a "server" service has been deployed but has no running-and-healthy backend
   When a workload queries "server.svc.overdrive.local"
   Then the responder returns NXDOMAIN
   And no previously-known or guessed address is returned
 
 Scenario: A name that drops all backends stops resolving
-  Given "server" was Running and resolved to addr A
+  Given "server" was running-and-healthy and resolved to addr A
   When all of "server"'s backends stop
   And a workload queries "server.svc.overdrive.local"
   Then the responder returns NXDOMAIN
@@ -343,10 +353,10 @@ Scenario: A name that drops all backends stops resolving
 ```
 
 **Acceptance Criteria:**
-- [ ] Empty `running` candidate set → **NXDOMAIN** (never a stale/cached/guessed addr).
-- [ ] After all backends stop, the name stops resolving (no stale addr).
+- [ ] Empty `running-and-healthy` candidate set → **NXDOMAIN** (never a stale/cached/unhealthy/guessed addr).
+- [ ] After all backends stop (or go unhealthy), the name stops resolving (no stale addr).
 - [ ] Unknown name → NXDOMAIN.
-- [ ] Proven through a deployed workload's query against `overdrive serve` + `overdrive deploy` (Tier-3), consistent with the resolve-index `running` filter — no second source of liveness truth.
+- [ ] Proven through a deployed workload's query against `overdrive serve` + `overdrive deploy` (Tier-3), consistent with the index's `running-and-healthy` filter — no second source of liveness truth.
 
 ---
 
@@ -354,9 +364,9 @@ Scenario: A name that drops all backends stops resolving
 
 - **Single-node, Phase 2.** No multi-node, no cross-node name resolution. One node's workloads.
 - **Headless only.** No VIP, no `fdc2::/16`, no XDP `SERVICE_MAP`, no #167/#61 dependency (D-TME-10).
-- **IPv4 substrate (v1).** The resolve/intercept addr is `SocketAddrV4`; the responder + netns addrs are `Ipv4Addr`. `A` answers carry the running IPv4 backend; `AAAA` answers are **NODATA**. A real IPv6 story (widening the substrate) is out of v1 scope.
+- **IPv4 substrate (v1).** The resolve/intercept addr is `SocketAddrV4`; the responder + netns addrs are `Ipv4Addr`. `A` answers carry the running-AND-healthy IPv4 backend; `AAAA` answers are **NODATA**. A real IPv6 story (widening the substrate) is out of v1 scope.
 - **In-agent, userspace.** Same process as the agent-light L4 proxy + the `ServiceBackendsResolve` index. NOT a separate daemon, NOT in-kernel (D-TME-11 / arc reframe).
-- **One source, three readers.** The responder is the THIRD reader of `ServiceBackendsResolve` (outbound resolve + inbound install + name answers). No second source of backend truth.
+- **One source, three readers.** The responder is the THIRD reader of the `ObservationStore` `service_backends` **surface** — a sibling name-keyed reader over the SAME rows (outbound resolve + inbound install + name answers), NOT a widening of the addr-keyed `ServiceBackendsResolve` intercept-index struct. No second source of backend truth.
 - **Implement-to-design.** Behavior + pinned contracts only; the responder API surface, the listener type, and the resolve accessor signatures are DESIGN-wave decisions. Surface gaps as blockers, never improvise API (CLAUDE.md).
 - **Vertical slices through production entry points.** Every slice closes a real loop through `overdrive serve` + `overdrive deploy`. No slice ships if it only composes in a `#[test]` (CLAUDE.md).
 
@@ -365,9 +375,9 @@ Scenario: A name that drops all backends stops resolving
 ## `[REF]` Definition of Done
 
 - US-DBN-1 spike verdict + promotion-gate decision recorded; the one-listener-many-netns assumption is PROMOTED (or the design pivots before the walking skeleton).
-- US-DBN-2 walking skeleton: a deployed workload resolves ONE peer name → ONE running backend through `serve` + `deploy`, proven by the intercept landing.
+- US-DBN-2 walking skeleton: a deployed workload resolves ONE peer name → ONE running-and-healthy backend through `serve` + `deploy`, proven by the intercept landing.
 - US-DBN-3 ping-pong demo: `examples/dial-by-name-responder/{a,b}.toml` + program; two `overdrive deploy`s produce an observable advancing counter/date, each hop mTLS'd; graduated to EDD.
-- US-DBN-4 empty-candidate honesty: no running backend → NXDOMAIN, never stale; proven Tier-3 through a deployed workload.
+- US-DBN-4 empty-candidate honesty: no running-and-healthy backend → NXDOMAIN, never stale; proven Tier-3 through a deployed workload.
 - The resolve index is a verified "one source, three readers" — the name layer is byte-consistent with the intercept path.
 - All four DoR-passing stories trace to J-MESH-001.
 
@@ -386,10 +396,10 @@ Scenario: A name that drops all backends stops resolving
 ## `[REF]` Walking-skeleton strategy
 
 **The thinnest serve+deploy loop:** `overdrive serve` (one node) + `overdrive deploy
-<server-spec>` (reaches Running, gets a `service_backends` addr) + `overdrive deploy
+<server-spec>` (reaches running-and-healthy, gets a `service_backends` addr) + `overdrive deploy
 <client-spec>` whose workload does `getaddrinfo("<server>.svc.overdrive.local")` →
-resolves to the server's running backend addr → connects → the existing intercept path
-mTLS's the hop. **A→B direction only** (one name, one running backend) — the thinnest
+resolves to the server's running-and-healthy backend addr → connects → the existing intercept path
+mTLS's the hop. **A→B direction only** (one name, one running-and-healthy backend) — the thinnest
 slice that closes a real dial-by-name loop through production entry points and is
 proven by the intercept landing. The bidirectional ping-pong (US-DBN-3) and
 empty-candidate honesty (US-DBN-4) build outward from this spine.
@@ -403,7 +413,7 @@ first slice (`spike.md`).
 ## `[REF]` Driving ports (for DESIGN — named, not designed)
 
 - The **name-answering listener** that receives `getaddrinfo` queries on each per-netns gateway addr (the new surface; its concrete type/shape is a DESIGN decision).
-- The shared **`ServiceBackendsResolve`** read surface (`subscribe_all_events()`, `all_service_backends_rows()`) — EXISTS; this feature adds the third reader.
+- The shared **`ObservationStore` `service_backends`** read surface (`subscribe_all_events()`, `all_service_backends_rows()`, the same surface `ServiceBackendsResolve` reads) — EXISTS; this feature adds a third **sibling** reader over the SAME rows, NOT a widening of the addr-keyed intercept-index struct.
 - **`overdrive serve`** (composition root / `run_server`) and **`overdrive deploy <SPEC>`** — the production entry points every slice drives through.
 
 ---
@@ -424,8 +434,8 @@ integration risk, validation. (Addresses `review-discuss.md` High #3.)
 
 | Artifact | Source of truth | Consumers | Owner | Integration risk | Validation |
 |---|---|---|---|---|---|
-| `service_backends_running_set` | The shared `ServiceBackendsResolve` index (`service_backends ∩ running`, D-TME-11) — in-RAM, ownership-aware, List-then-Watch + relist-on-`Lagged` | outbound resolve · inbound install · **name answers (this feature)** | transparent-mtls arc owns the index; this feature is the 3rd **reader** | a second source of backend truth (a cache, a stale snapshot) would let the name layer drift from the intercept path | K-DBN-1 / K-DBN-4 (Tier-3): name answers drawn ONLY from this index's running rows; no separate cache |
-| `answered_backend_addr` | the `running` `service_backends` row (`SocketAddrV4`, headless D-TME-10) | the workload's `getaddrinfo` + `connect`; then `MtlsResolve.resolve` (the intercept) | this feature (the responder reads + answers) | a non-byte-identical addr vs what `MtlsResolve` recognizes → the resolved peer is not the intercepted peer | K-DBN-4 single-source oracle: feed the answered addr into `resolve`; assert byte-equality |
+| `service_backends_running_set` | The `ObservationStore` `service_backends` **surface** (`service_backends ∩ running-AND-healthy`, D-TME-11) — the SAME rows `ServiceBackendsResolve` folds, read via the same List-then-Watch + relist-on-`Lagged` pattern; the responder keeps its OWN name-keyed `by_name` index (a sibling reader, NOT the addr-keyed struct) | outbound resolve · inbound install · **name answers (this feature)** | transparent-mtls arc owns the addr-keyed struct; this feature is a 3rd sibling **reader** over the same rows | a second source of backend truth (a cache, a stale snapshot), OR widening the addr-keyed intercept struct, would let the name layer drift from / couple into the security path | K-DBN-1 / K-DBN-4 (Tier-3): name answers drawn ONLY from the surface's running-and-healthy rows; no separate cache; `mtls_resolve_adapter.rs` untouched |
+| `answered_backend_addr` | the `running`-AND-healthy `service_backends` row (`SocketAddrV4`, headless D-TME-10) | the workload's `getaddrinfo` + `connect`; then `MtlsResolve.resolve` (the intercept) | this feature (the responder reads + answers) | a non-byte-identical addr, OR an unhealthy addr (→ `MeshUnreachable`), vs what `MtlsResolve` recognizes as `Mesh` → the resolved peer is not the intercepted peer | K-DBN-4 single-source oracle: feed the answered addr into `resolve`; assert byte-equality AND `Mesh` classification |
 | `responder_addr` | `WorkloadNetnsPlan.host_addr` (per-netns gateway, `Ipv4Addr`, D-TME-9) — written to `resolv.conf` by `veth_provisioner.rs` `WriteResolvConf` (SHIPPED) | the workload's stub resolver (the `nameserver` it queries); the in-agent listener (the addr it must answer on, for EVERY netns) | transparent-mtls arc (injection shipped); this feature answers on it | one listener may NOT be able to answer on N per-netns gateway addrs (the load-bearing unvalidated routing assumption) | **Slice 00 (the spike)** — real-kernel one-listener-many-netns probe; BLOCKING |
 | `mesh_dns_name` | the `<job>.svc.overdrive.local` grammar (job name ← the deploy spec `[service].id`) | the workload's query; the responder's name→backend lookup | this feature (the responder parses + matches the suffix) | name-grammar drift (suffix, case, label limits) vs what workloads dial | US-DBN-2 / US-DBN-4 ACs: `getaddrinfo("<server>.svc.overdrive.local")` resolves; unknown name → NXDOMAIN |
 | `ping_pong_command_path` | the staged tiny Rust ping-pong bin's on-disk path in the deploy env (decided 2026-06-24); referenced by `examples/dial-by-name-responder/{a,b}.toml` `[exec].command` | `overdrive deploy` (the two specs); the workloads at runtime | this feature (the demo) | a phantom `command` path → the alloc never reaches Running → the demo silently can't run (the `dns-resolver.toml` collision class) | US-DBN-3 AC: `command` points at a real on-disk binary present in the deploy env, verified before the demo runs |
@@ -437,8 +447,8 @@ integration risk, validation. (Addresses `review-discuss.md` High #3.)
 
 | KPI | Who | Does what (behavior change) | By how much (target) | Measured by | Baseline |
 |---|---|---|---|---|---|
-| **K-DBN-1 — name resolves to a live backend** | A deployed mesh workload | `getaddrinfo("<peer>.svc.overdrive.local")` resolves to a **running** backend addr | **100%** of queries where ≥1 backend is Running resolve to a running backend addr (0 stale, 0 timeout) across the Tier-3 acceptance matrix | Tier-3 test: query from inside a deployed workload's netns; assert resolved addr ∈ running `service_backends`; assert byte-equal to the `MtlsResolve`-recognized addr | Today: **0%** — nothing answers; resolution fails in every deploy |
-| **K-DBN-2 — empty-candidate honesty** | A deployed workload querying a name with no running backend | Receives **NXDOMAIN** (no running backend) | **0** stale/guessed addresses returned across the no-backend / all-stopped / unknown-name cases; **100%** NXDOMAIN | Tier-3: deploy-then-query-before-Running, stop-then-query, unknown-name — assert NXDOMAIN, assert never the prior addr | Today: N/A (no answer at all) — target is "honest NXDOMAIN," not "wrong addr" |
+| **K-DBN-1 — name resolves to a live backend** | A deployed mesh workload | `getaddrinfo("<peer>.svc.overdrive.local")` resolves to a **running-AND-healthy** backend addr | **100%** of queries where ≥1 backend is running-AND-healthy resolve to a running-and-healthy backend addr (0 stale, 0 unhealthy, 0 timeout) across the Tier-3 acceptance matrix | Tier-3 test: query from inside a deployed workload's netns; assert resolved addr ∈ running-and-healthy `service_backends`; assert byte-equal to the `MtlsResolve`-recognized addr AND that `resolve` classifies it `Mesh` | Today: **0%** — nothing answers; resolution fails in every deploy |
+| **K-DBN-2 — empty-candidate honesty** | A deployed workload querying a name with no running-and-healthy backend | Receives **NXDOMAIN** (no running-and-healthy backend) | **0** stale/unhealthy/guessed addresses returned across the no-backend / all-stopped / all-unhealthy / unknown-name cases; **100%** NXDOMAIN | Tier-3: deploy-then-query-before-running-and-healthy, stop-then-query, all-unhealthy, unknown-name — assert NXDOMAIN, assert never the prior addr | Today: N/A (no answer at all) — target is "honest NXDOMAIN," not "wrong addr" |
 | **K-DBN-3 — operator-runnable ping-pong advances** | Sam (operator) | Watches the demo advance via two `overdrive deploy`s | Both counters increment **≥1** within **~15s** of the second deploy and continue advancing on a **~10s ±5s** cadence over a 60s observation window | EDD expectation capture: deploy a.toml + b.toml, observe counter/date advancing in the workload output/logs; different-fox adversarial review of captured evidence | Today: **0** — demo cannot run (responder absent) |
 | **K-DBN-4 — single-source consistency** | The mesh data plane | Name answers match the intercept path's backend truth | **100%** of name-answered addrs are byte-identical to the addr `MtlsResolve.resolve` recognizes for the same flow (one source, three readers) | Tier-3 single-source oracle: feed the responder's answered addr into `resolve`; assert equality (the 05-02 single-source discipline) | Today: N/A — no name answers exist |
 
@@ -502,11 +512,11 @@ journey:
   goal: >
     An unmodified, identity-unaware workload calls
     getaddrinfo("<job>.svc.overdrive.local") and connects; an in-agent
-    name-answering listener (sharing the ServiceBackendsResolve index, D-TME-11)
-    answers A with a running IPv4 service_backends addr (headless, D-TME-10) — the
-    same addr MtlsResolve recognizes (SocketAddrV4) — and AAAA as NODATA (v1 substrate
-    is IPv4), or NXDOMAIN when no backend is running (declared-but-empty and unknown
-    collapse in v1); the existing intercept path then mTLS's the hop. Operator-observable
+    name-answering listener (a sibling name-keyed reader over the SAME service_backends rows the ServiceBackendsResolve index reads — NOT the addr-keyed struct, D-TME-11)
+    answers A with a running-AND-healthy IPv4 service_backends addr (headless, D-TME-10) — the
+    same addr MtlsResolve recognizes and classifies Mesh (SocketAddrV4) — and AAAA as NODATA (v1 substrate
+    is IPv4), or NXDOMAIN when no running-and-healthy backend exists (declared-but-not-running,
+    unhealthy, and unknown collapse in v1); the existing intercept path then mTLS's the hop. Operator-observable
     via the dial-by-name-responder ping-pong demo.
   persona: >
     Sam (sam-platform-security-engineer.yaml) — reachability lens. Verifies an
@@ -514,12 +524,12 @@ journey:
     and that the name layer never returns a stale address.
   emotional_arc:
     start: "Skeptical — 'the wire is enforceable, but can an unmodified workload even FIND its peer by name in a deploy, and will the platform ever hand it a dead address?'"
-    middle: "Reassured — the walking skeleton resolves one name to one running backend through serve+deploy and the hop goes TLS 1.3; the ping-pong demo advances counters he watches himself."
+    middle: "Reassured — the walking skeleton resolves one name to one running-and-healthy backend through serve+deploy and the hop goes TLS 1.3; the ping-pong demo advances counters he watches himself."
     end: "Confident — 'an ordinary workload dials by name and lands at a LIVE peer the mesh then mTLS's, and a no-backend query returns NOTHING, never a stale addr. I ran the proof myself with two overdrive deploys.'"
   steps:
     - id: 1
-      name: "An unmodified workload resolves its peer by name to a running backend"
-      command: "(workload getaddrinfo; in-agent responder answers from service_backends ∩ running via the shared resolve index)"
+      name: "An unmodified workload resolves its peer by name to a running-and-healthy backend"
+      command: "(workload getaddrinfo; in-agent responder answers from service_backends ∩ running-and-healthy as a sibling name-keyed reader over the SAME ObservationStore rows — the third reader of the surface, NOT the addr-keyed intercept struct)"
     - id: 2
       name: "The resolved addr is the one the intercept path recognizes (headless, one source)"
       command: "(internal — D-TME-10 single-source; no VIP)"
@@ -528,12 +538,12 @@ journey:
       command: "overdrive deploy examples/dial-by-name-responder/a.toml + b.toml"
   error_paths:
     - step: 1
-      failure: "No running backend for the queried name"
-      recovery: "NXDOMAIN (no running backend; declared-but-empty and unknown collapse in v1) — never a stale/cached/guessed addr (mirrors the arc's fail-honest discipline)."
+      failure: "No running-and-healthy backend for the queried name"
+      recovery: "NXDOMAIN (no running-and-healthy backend; declared-but-not-running, unhealthy, and unknown collapse in v1) — never a stale/cached/unhealthy/guessed addr (mirrors the arc's fail-honest discipline)."
   related_jobs: [J-MESH-001]
   related_features:
     - id: dial-by-name-responder
-      role: "Ships the in-agent name responder (GH #243). The reachability leg of the mesh; reads the ServiceBackendsResolve index as the third reader."
+      role: "Ships the in-agent name responder (GH #243). The reachability leg of the mesh; a third sibling reader of the ObservationStore service_backends surface (the SAME rows ServiceBackendsResolve folds, NOT the addr-keyed struct)."
     - id: transparent-mtls-enrollment
       role: "Ships the intercept + MtlsResolve + resolve index this journey's name answers feed into (one source, three readers)."
 ```
@@ -541,10 +551,256 @@ journey:
 ### Anti-pattern scan (clean)
 - No "Implement X" stories (all open from user pain). ✓
 - No generic data (real names: Sam, Ana, server/client, a/b, `b.svc.overdrive.local`, `/usr/bin/socat`). ✓
-- No technical AC / technical scenario titles (outcomes: "resolves to a running backend," "ping-pong advances," "honest NXDOMAIN"). ✓
+- No technical AC / technical scenario titles (outcomes: "resolves to a running-and-healthy backend," "ping-pong advances," "honest NXDOMAIN"). ✓
 - No oversized story (each ≤7 scenarios, single behavior). ✓
 - No abstract requirements without examples (3+ per story). ✓
 
 ### Risks / notes
 - **No DIVERGE artifacts** for this feature (`docs/feature/dial-by-name-responder/diverge/` absent) — consistent with the jobs.yaml header precedent (JTBD distilled from issue/arc, not interviews). Noted as a non-blocking risk; the parent arc's DISCUSS/DESIGN/spike history grounds the contracts.
 - The EDD ping-pong capture may be `pending` until #227/#75 (full-system Lima EDD harness) — mirror E04's honest `pending` posture rather than fabricate a capture.
+
+---
+
+# Wave: DESIGN (ADR-0072, GH #243) — Morgan, 2026-06-25
+
+> The single authoritative DESIGN narrative for this feature, compact `[REF]`
+> form (no separate `design/wave-decisions.md` — the wave-decisions are folded
+> here per the feature's compact-form posture). The Pass-1 user-ratified decision
+> points (A1/B/C1/D1/E1/F/H1) are carried here under the stable `DDN-1..DDN-8`
+> scheme (one ID per concern; see the Decisions table); this DESIGN pass pins the
+> EXACT signatures, the running-AND-healthy gate, and the fallback source. Full
+> decision record + alternatives: **ADR-0072**. SSOT
+> components/C4: `docs/product/architecture/brief.md` § "Phase 2
+> dial-by-name-responder extension (ADR-0072, GH #243)".
+
+## Wave: DESIGN / [REF] DDD — strategic + tactical
+
+- **D-DBN-1 (bounded context).** The name layer is a NEW reader bounded context
+  over the EXISTING `service_backends` observation surface — NOT a new write
+  surface and NOT a widening of the intercept (enforcement) context. The
+  responder is the **third reader** (outbound resolve · inbound install · name
+  answers); the addr-keyed `ServiceBackendsResolve` index is an *anti-corruption
+  sibling*, untouched (A1).
+- **D-DBN-2 (ubiquitous language).** `MeshServiceName` (the dialed
+  `<job>.svc.overdrive.local` grammar) is the name layer's core domain term —
+  modeled as a validated newtype, never a raw `String`. `NameAnswer` is the
+  domain result of a query (`Records | NoData | NxDomain`), not a wire `Message`.
+- **D-DBN-3 (aggregate / consistency boundary).** The `by_name` index is the
+  read model; its consistency boundary is the List-then-Watch contract over the
+  ObservationStore (eventually consistent, relist-on-`Lagged`). No transactional
+  invariant spans the responder and the writer (`BackendDiscoveryBridge`).
+- **D-DBN-4 (verified mapping).** `<job>` ← the SVID job segment of
+  `Backend.alloc: SpiffeId` = `WorkloadId` = deploy `[service].id`. The
+  "∩ running" filter is satisfied by construction (the bridge builds rows from
+  `actual.actual.running` only); the `by_name` index additionally gates on
+  `Backend.healthy == true` (running-AND-healthy, DDN-2) so an answered addr is
+  always the `Mesh` set the intercept recognizes — the name layer derives no
+  second liveness truth.
+- **D-DBN-5 (anti-corruption to the wire).** `hickory-proto` is the wire codec
+  behind a `wire.rs` translation boundary; the domain core (`answer_for`,
+  `NameAnswer`, `MeshServiceName`) never names a hickory type in its signature
+  (the QType crosses the boundary in `answer_for`; `NameAnswer` is hickory-free).
+
+## Wave: DESIGN / [REF] Component decomposition
+
+| Component | Path | Change | Responsibility |
+|---|---|---|---|
+| `MeshServiceName` newtype | `crates/overdrive-core/src/id.rs` | **CREATE NEW** | The `<job>.svc.overdrive.local` grammar; validated, case-insensitive, label ≤ `LABEL_MAX` |
+| `NameAnswer` enum | `crates/overdrive-core/src/` (`id.rs` or small `dns` module) | **CREATE NEW** | Pure query result: `Records(Vec<SocketAddrV4>) \| NoData \| NxDomain` |
+| `dns_responder` module root | `crates/overdrive-control-plane/src/dns_responder/mod.rs` | **CREATE NEW** | Module wiring + re-exports |
+| `name_index.rs` | `…/dns_responder/name_index.rs` | **CREATE NEW** | `by_name: BTreeMap<MeshServiceName, BTreeSet<SocketAddrV4>>`; List-then-Watch + relist-on-`Lagged` + single-owner drain + `probe()` (mirror `ServiceBackendsResolve`) |
+| `answer.rs` | `…/dns_responder/answer.rs` | **CREATE NEW** | Pure `answer_for(name, qtype, &index) -> NameAnswer` (the mutation-gate target) |
+| `wire.rs` | `…/dns_responder/wire.rs` | **CREATE NEW** | `hickory-proto` decode (query) + encode (`NameAnswer` → bytes: A / NODATA-SOA / NXDOMAIN-SOA); separately proptested |
+| `responder.rs` | `…/dns_responder/responder.rs` | **CREATE NEW** | `DnsResponder` host adapter: bind (wildcard→per-addr fallback), `IP_PKTINFO` recv/sendmsg loop, `probe()`, `serve()` |
+| `DnsResponderError` | `…/dns_responder/` | **CREATE NEW** | Typed `thiserror`; no `Internal(String)` |
+| composition root | `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver`, ~1893-1957) | **EXTEND** | Construct after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure |
+| `hickory-proto` dep | root `Cargo.toml` `[workspace.dependencies]` | **ADD** | Apache-2.0/MIT |
+| `nix` features | `overdrive-control-plane` + workspace `nix` (`socket`, `uio`) | **EXTEND** | `recvmsg`/`sendmsg`/`ControlMessage::Ipv4PacketInfo` (no new public API) |
+
+## Wave: DESIGN / [REF] Driving + driven ports
+
+**Driving (inbound):**
+- The **UDP DNS socket** (`0.0.0.0:53` wildcard, or N per-gateway-addr on
+  fallback) — the workload's `getaddrinfo` query arrives here. NOT a Rust port
+  trait (D4 / C1: the socket is irreducibly Tier-3, no Tier-2 backstop; a Sim
+  adapter would simulate exactly the substrate the spike proved cannot be
+  honestly simulated). The driving "seam" for test is the pure
+  `answer_for(name, qtype, &index)` + the `wire.rs` codec.
+
+**Driven (outbound):**
+- `Arc<dyn ObservationStore>` — `all_service_backends_rows()` (List at probe +
+  relist) and `subscribe_all_events() -> LagAwareSubscription` (single-owner
+  drain). EXISTING port; the responder is its third reader.
+- `Arc<dyn Clock>` — for the SOA `SERIAL`. EXISTING port, injected.
+- The live gateway-set source (for the per-addr bind fallback only) — PINNED
+  (DDN-5) as `veth_provisioner::NetSlotAllocator` (`state.net_slot_allocator`,
+  the SAME map that owns every live `alloc → NetSlot` binding). The responder
+  derives each gateway via the existing pure `responder_addr_for_slot(slot)`.
+  Read ONLY if the wildcard bind `EADDRINUSE`s; never read on the wildcard path.
+  `NetSlotAllocator` exposes no change-subscription (`snapshot()` only), so the
+  fallback **re-derives the desired gateway set on the converge tick** and diffs
+  it against the bound per-addr socket set (add-if-missing / drop-if-absent —
+  `reconcilers.md` Bar-1 converge), keeping sockets tracking the live slot set.
+
+**Required-deps discipline:** `DnsResponder::new(store, clock, slots:
+NetSlotAllocator)` — all mandatory constructor params, no builder, no default
+(`development.md` § "Port-trait dependencies"). The `NetSlotAllocator` handle is
+a cheap `Arc`-shared clone; it is NOT a port trait (it is concrete host state,
+the single source of slot truth — a second source would be the anti-pattern).
+
+## Wave: DESIGN / [REF] Pinned signatures (implement to the design — do NOT invent surface)
+
+```rust
+// overdrive-core::id — NEW newtype, full completeness + proptest round-trip
+pub struct MeshServiceName(/* validated <job> label */);
+impl MeshServiceName {
+    pub const SUFFIX: &'static str = "svc.overdrive.local";
+    pub fn new(raw: &str) -> Result<Self, IdParseError>; // validates + canonicalises
+    pub fn as_str(&self) -> &str;                         // canonical <job> label
+}
+// + Display (lowercase canonical), FromStr (case-insensitive), Serialize/
+//   Deserialize (matching Display/FromStr), TryFrom<String>/<&str>.
+//   Exact internal shape (store the <job> label vs the full name) is a DELIVER
+//   detail; the public surface above is the contract.
+
+// overdrive-core — NEW pure result type (PINNED — variant names are the contract)
+pub enum NameAnswer {
+    Records(Vec<SocketAddrV4>), // ≥1 running-AND-healthy IPv4 backend → A
+    NoData,                     // live name, no record of the queried type (AAAA v1)
+    NxDomain,                   // 0 running-and-healthy backends (declared-not-running OR unhealthy OR unknown)
+}
+
+// dns_responder::answer — pure, the mutation-gate target.
+// qtype is PINNED to hickory_proto::rr::RecordType (reuse the codec's vocabulary —
+// no redundant local QType enum; NameAnswer itself stays hickory-free).
+pub fn answer_for(
+    name: &MeshServiceName,
+    qtype: hickory_proto::rr::RecordType,
+    index: &NameIndex,
+) -> NameAnswer;
+
+// dns_responder::responder — host adapter
+impl DnsResponder {
+    pub fn new(
+        store: Arc<dyn ObservationStore>,
+        clock: Arc<dyn Clock>,
+        slots: veth_provisioner::NetSlotAllocator, // PINNED gateway source for the
+                                                   // per-addr fallback (DDN-5):
+                                                   // re-derive responder_addr_for_slot
+                                                   // over snapshot() on the converge tick
+    ) -> Self;                                    // required deps, no builder
+    pub async fn probe(&self) -> Result<(), DnsResponderError>; // bind + List-seed + watch; refuse-boot on failure
+    pub async fn serve(self: Arc<Self>);          // IP_PKTINFO recv/answer_for/encode/sendmsg loop
+}
+
+// dns_responder — typed errors; NO Internal(String); each → distinct
+// health.startup.refused reason (mirrors MtlsResolveError::{Probe,StoreUnreadable})
+pub enum DnsResponderError {
+    Bind { addr: SocketAddr, source: std::io::Error },
+    ListSeed { reason: String },
+    Probe { reason: String },
+    Socket { source: std::io::Error },
+}
+```
+
+## Wave: DESIGN / [REF] Technology choices (OSS-first)
+
+| Choice | Pin | License | Rationale |
+|---|---|---|---|
+| DNS wire codec | **`hickory-proto`** (`hickory-proto.workspace = true`; add to `[workspace.dependencies]`) | Apache-2.0/MIT | OSS-first, mature, well-maintained; removes the DNS-encoding bug class (name compression, EDNS, SOA RDATA). Hand-rolled DNS REJECTED. |
+| DNS server | `hickory-server` **REJECTED** | — | No per-packet reply-source control on a multi-homed wildcard socket; cannot satisfy the spike-mandatory `ipi_spec_dst` source-pin. |
+| Socket / `IP_PKTINFO` | **own loop** via `nix` (`socket`, `uio` features) + `libc` (both already in workspace) | (nix MIT) | The spike-validated `ipi_spec_dst` source-pinning shape on one wildcard `0.0.0.0:53` socket; `getaddrinfo` rejects wrong-source replies. |
+| Index collection | `BTreeMap`/`BTreeSet` | — | Iteration observed under test → deterministic across seeds (`development.md` § "Ordered-collection choice"). |
+| Errors | `thiserror` typed `DnsResponderError` | — | No `Internal(String)` flatten; each variant → a distinct `health.startup.refused` reason. |
+
+## Wave: DESIGN / [REF] Decisions table
+
+> IDs are the stable `DDN-*` scheme (one per concern, consistent with ADR-0072).
+> The user-ratified Pass-1 decision point each implements is shown in parens; the
+> `F` point spanned two concerns (mapping + newtype), split into DDN-2 and DDN-7.
+
+| ID | Decision | Alternatives rejected (see ADR-0072 for full rationale) |
+|---|---|---|
+| **DDN-1** (A1) | NEW sibling name-keyed reader over the `ObservationStore` `service_backends` surface (own `by_name` index, same rows + same List-then-Watch pattern as `ServiceBackendsResolve`) — byte-consistency is the shared rows, not a shared struct | A2: extend the addr-keyed intercept index struct (couples the name layer to the security-critical enforcement path) |
+| **DDN-2** (F, mapping) | `<job>` ← SVID job segment; `by_name` index gates on **`Backend.healthy == true`** (running-AND-healthy), matching the intercept's `Mesh` set — mandatory, since an unhealthy addr is `MeshUnreachable` and answering it breaks byte-consistency | a declared-service view keyed by `[service].id` (needs a second observation surface to split declared-empty from unknown — not v1) |
+| **DDN-3** (B) | `hickory-proto` codec + OWN `IP_PKTINFO` socket loop | hand-rolled DNS; `hickory-server` `RequestHandler` (no per-packet reply-source control — spike-verified) |
+| **DDN-4** (C1) | Pure `answer_for` + separately-proptested encoder; NO port trait / NO Sim adapter | a `NameResponder` port + `SimNameResponder` (false confidence — sims the irreducibly-Tier-3 substrate; no second prod impl / no scheduling concern) |
+| **DDN-5** (D1) | Bind `0.0.0.0:53` wildcard first; per-gateway-addr fallback on `EADDRINUSE`, source = `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick (add/drop sockets as slots come/go) | wildcard-only (node-image coupled); N per-addr only (wasteful, scales with allocs) |
+| **DDN-6** (E1) | `run_server` owns it: after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure | lazy spawn outside the composition root (breaks wire→probe→use); a standalone daemon (second source of truth; D-TME-11 in-agent reframe) |
+| **DDN-7** (F, newtype) | NEW `MeshServiceName` newtype (`SUFFIX = svc.overdrive.local`, single `<job>` label v1, full completeness + proptest) | raw `String` parse (newtype violation); reuse `WorkloadId` as the name key (it is the job label, not the dialed name grammar) |
+| **DDN-8** (H1) | NXDOMAIN(+1s-MINIMUM SOA) for 0-running-and-healthy; NODATA(+same SOA) for AAAA-on-live; pinned SOA fields (SERIAL via `Clock`) | no-SOA negative answers (implementation-default negative cache; stale negative window); longer negative TTL (delays deploy-then-dial re-resolve) |
+
+## Wave: DESIGN / [REF] Reuse Analysis (mandatory hard gate — carried from Pass 1)
+
+| Capability needed | Existing? | Verdict | Evidence |
+|---|---|---|---|
+| List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` over `ObservationStore` | YES — `ServiceBackendsResolve` (`mtls_resolve_adapter.rs`) | **REUSE the PATTERN** (mirror it as a sibling), do not REUSE the struct (A1 keeps the security path untouched) | `all_service_backends_rows`, `subscribe_all_events`, `LagAwareSubscription`, `SubscriptionEvent::{Row,Lagged}` consumed identically |
+| `service_backends ∩ running-AND-healthy` rows | YES — `BackendDiscoveryBridge` builds rows from `actual.actual.running` only; `Backend.healthy` is on the row | **REUSE** (read the rows; ∩-running holds by construction; the index gates `healthy == true` per DDN-2) | `backend_discovery_bridge.rs` ~351; `mtls_resolve_adapter.rs:124-135` (the `Mesh`/`MeshUnreachable` healthy split) |
+| Name→backend mapping (`<job>` ← SVID) | PARTIAL — `SpiffeId::path()` exists; NO job-segment accessor | **EXTEND** (surface OQ-1: pin the accessor in DISTILL/DELIVER, do NOT improvise) | `id.rs` `SpiffeId::path() -> "/job/<wk>/alloc/<id>"`; `for_allocation`; `WorkloadId` = `[service].id` |
+| Label-shaped newtype machinery | YES — `define_label_newtype!` macro, `LABEL_MAX`, `validate_label` | **REUSE** (model `MeshServiceName` on it; suffix grammar needs a bespoke `FromStr`, so likely a hand-written newtype using the same validators) | `id.rs` lines 65-214 |
+| DNS wire codec | NO | **CREATE NEW** (via `hickory-proto`, OSS-first) | no DNS dep in workspace |
+| `IP_PKTINFO` recv/sendmsg socket | NO (but `nix`/`libc` present; spike has the shape) | **CREATE NEW** (own loop) | spike `increment-a` validated `ipi_spec_dst` |
+| Composition-root probe-then-spawn-then-hold-handle | YES — the `resolve.probe()` + `mtls_worker.is_some()` block | **EXTEND** | `lib.rs` ~1893-1957 |
+| `Clock` injection | YES — `Arc<dyn Clock>` on `AppState` (`config.clock`) | **REUSE** | `lib.rs` `config.clock.clone()` |
+
+**Gate verdict: PASS.** Every capability is REUSE/EXTEND except the two genuinely
+novel surfaces (DNS codec via OSS `hickory-proto`; the `IP_PKTINFO` socket loop),
+each justified by "no existing alternative." The security-critical intercept
+index is provably untouched.
+
+## Wave: DESIGN / [REF] Open questions (deferred to DISTILL/DELIVER)
+
+- **OQ-1 — the `SpiffeId` → `<job>` accessor signature.** The mapping is verified
+  (D-DBN-4 / DDN-2), but no existing `SpiffeId` accessor returns the job segment. The
+  exact accessor (a new `SpiffeId::job_segment() -> Option<&str>` on the newtype,
+  or a parse helper local to the index) is a small surface decision left to
+  DISTILL/DELIVER per CLAUDE.md "Implement to the design — never invent API
+  surface." The crafter MUST surface and pin it, not improvise. **This is the
+  one remaining gap the DESIGN decisions did not cover; it is named, not improvised.**
+
+> **Resolved in this DESIGN pass (no longer open):**
+> - **`NameAnswer` variant names + the `answer_for` qtype type are PINNED** —
+>   `enum NameAnswer { Records(Vec<SocketAddrV4>), NoData, NxDomain }` and
+>   `qtype: hickory_proto::rr::RecordType` (see Pinned signatures + ADR DDN-4).
+> - **The per-addr-fallback gateway-set source is PINNED** —
+>   `veth_provisioner::NetSlotAllocator` + `responder_addr_for_slot`, re-derived
+>   on the converge tick (see Driven ports + ADR DDN-5).
+
+## Wave: DESIGN / [REF] DEVOPS / Tier-3 obligation (for platform-architect)
+
+- **Re-confirm the spike verdict on the 6.18 appliance kernel (ADR-0068) in the
+  DELIVER Tier-3 matrix.** The Slice-00 PROMOTE is pinned to dev-Lima
+  `7.0.0-22-generic`; the exercised surfaces (`IP_PKTINFO`, multi-homed UDP,
+  per-netns `resolv.conf`, `SO_REUSEADDR` wildcard coexistence) are long-stable
+  (well pre-6.18), so the verdict is expected to hold but is not separately
+  confirmed there.
+- **Acceptance SIGNAL is `getaddrinfo`/`getent`, never `dig @gw` alone** —
+  `dig @gw` is lenient and masks a missing `ipi_spec_dst` source-pin.
+- **`ip_forward=1` prerequisite** (already modeled as the converge-on-boot
+  `EnableIpForward` step).
+- **No external third-party API** — no consumer-driven contract tests apply
+  (the only "external" surface is the kernel UDP/`IP_PKTINFO` substrate, covered
+  by Tier-3, not Pact).
+
+## Wave: DESIGN / [REF] Wave-decisions (DESIGN — folded, compact form)
+
+1. **All ratified decision points carried into the stable `DDN-1..DDN-8` scheme**
+   (one ID per concern; the Pass-1 points A1/B/C1/D1/E1/F/H1 map in, with `F`
+   split across DDN-2 mapping + DDN-7 newtype — eight concerns, no duplicate
+   labels). This DESIGN pass pinned signatures + the healthy gate + the fallback
+   source; no decision re-opened.
+2. **ADR-0072 minted** (`docs/product/architecture/adr-0072-dial-by-name-responder-node-local-dns.md`),
+   next free platform-track number (0071 was the prior highest).
+3. **brief.md SSOT** extended with a NEW `## Phase 2 dial-by-name-responder
+   extension (ADR-0072, GH #243)` section (§36) + an ADR-0072 index row — the
+   per-feature-section convention, NOT a rewrite of `## Application Architecture`.
+4. **No separate `design/wave-decisions.md`** — folded here per the feature's
+   compact-form posture (consistent with the DISCUSS compact form).
+5. **One gap surfaced, not improvised** (OQ-1: the `SpiffeId` → `<job>`
+   accessor) — per CLAUDE.md "Implement to the design — never invent API surface."
+   The two former open questions (the `NameAnswer`/qtype signatures and the
+   fallback gateway source) are now PINNED in DESIGN, not deferred.
+6. **Ready for DISTILL handoff** (acceptance-designer): the contract table
+   (running-AND-healthy throughout), the pinned signatures, the C4, and the Reuse
+   gate are complete; OQ-1 is the sole named gap for the crafter to pin (not a
+   blocker to DISTILL).

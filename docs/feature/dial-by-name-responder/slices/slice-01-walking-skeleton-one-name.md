@@ -6,29 +6,33 @@
 ## Goal (one line)
 
 A deployed workload's `getaddrinfo("<server>.svc.overdrive.local")` resolves to the
-server's **running** `service_backends` addr and the connection is intercepted +
-mTLS'd — driven end-to-end through `overdrive serve` + `overdrive deploy`.
+server's **running-AND-healthy** `service_backends` addr and the connection is
+intercepted + mTLS'd — driven end-to-end through `overdrive serve` + `overdrive
+deploy`.
 
 ## Learning hypothesis
 
-The in-agent listener can answer A (IPv4) from `service_backends ∩ running` via the
-shared `ServiceBackendsResolve` index (third reader, D-TME-11), returning the SAME
-addr `MtlsResolve.resolve` recognizes (D-TME-10), and the existing intercept path then
-mTLS's the hop. **Predicted:** the resolved addr is byte-identical to the intercept
-path's source and the peer wire goes TLS 1.3.
+The in-agent listener can answer A (IPv4) from `service_backends ∩
+running-and-healthy` as a **sibling name-keyed reader over the SAME
+`service_backends` rows** (same `ObservationStore`, same List-then-Watch pattern as
+`ServiceBackendsResolve`, third reader of the surface, D-TME-11 — NOT the addr-keyed
+intercept struct), returning the SAME addr `MtlsResolve.resolve` recognizes and
+classifies `Mesh` (D-TME-10), and the existing intercept path then mTLS's the hop.
+**Predicted:** the resolved addr is byte-identical to the intercept path's source and
+the peer wire goes TLS 1.3.
 
 ## Thinnest serve+deploy loop
 
-`overdrive serve` (one node) + `overdrive deploy server.toml` (→ Running, gets a
-backend addr) + `overdrive deploy client.toml` (workload does
+`overdrive serve` (one node) + `overdrive deploy server.toml` (→ running-and-healthy,
+gets a backend addr) + `overdrive deploy client.toml` (workload does
 `getaddrinfo("server.svc.overdrive.local")` → resolves → connects → intercept mTLS's).
-**A→B direction only** — one name, one running backend.
+**A→B direction only** — one name, one running-and-healthy backend.
 
 ## Behavior (DESIGN owns API)
 
-- Add the **name-answering listener** as the third reader of `ServiceBackendsResolve`.
-- Answer `A` for `<job>.svc.overdrive.local` from `service_backends ∩ running` with the running **IPv4** backend addr (`SocketAddrV4`, headless, D-TME-10); answer `AAAA` as **NODATA** (v1 substrate is IPv4).
-- Single-source: the answered addr == the addr `MtlsResolve.resolve` recognizes.
+- Add the **name-answering listener** as a third **sibling** reader over the SAME `service_backends` rows (the `ObservationStore` surface, NOT the addr-keyed `ServiceBackendsResolve` struct).
+- Answer `A` for `<job>.svc.overdrive.local` from `service_backends ∩ running-and-healthy` with the running-and-healthy **IPv4** backend addr (`SocketAddrV4`, headless, D-TME-10; the index gates `Backend.healthy == true`); answer `AAAA` as **NODATA** (v1 substrate is IPv4).
+- Single-source: the answered addr == the addr `MtlsResolve.resolve` recognizes and classifies `Mesh`.
 
 ## Carpaccio taste tests
 
@@ -38,10 +42,10 @@ backend addr) + `overdrive deploy client.toml` (workload does
 
 ## Acceptance (= US-DBN-2 ACs)
 
-- [ ] `getaddrinfo("server.svc.overdrive.local")` from a deployed workload → the server's `running` backend addr.
-- [ ] Answered addr byte-identical to the `MtlsResolve`-recognized addr (single source).
+- [ ] `getaddrinfo("server.svc.overdrive.local")` from a deployed workload → the server's `running`-and-healthy backend addr.
+- [ ] Answered addr byte-identical to the `MtlsResolve`-recognized addr AND `resolve` classifies it `Mesh` (single source; an unhealthy addr would classify `MeshUnreachable`, so it is never answered).
 - [ ] Subsequent connection intercepted + mTLS'd (Tier-3 capture: TLS 1.3 `0x17`, zero payload cleartext on the peer leg).
-- [ ] Resolve read goes through the shared index — no second source of backend truth.
+- [ ] Resolve read is a sibling reader over the SAME `service_backends` rows — no second source of backend truth; the addr-keyed intercept struct is untouched.
 - [ ] Driven by `overdrive serve` + `overdrive deploy`, not a `#[test]`.
 
 ## Dependencies

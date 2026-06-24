@@ -34,7 +34,7 @@ address `MtlsResolve` recognizes. Closes the dial-by-name path through
   `WriteResolvConf`; `responder_addr` = the per-netns gateway
   (`plan.host_addr`, the Fly `fdaa::3` model — collision-free by
   construction). (D-TME-9)
-- **Return shape — PINNED HEADLESS.** Return a `running` backend addr
+- **Return shape — PINNED HEADLESS.** Return a `running-and-healthy` backend addr
   from `service_backends` — the **same** address `MtlsResolve.resolve`
   recognizes (one source, many readers, byte-consistent). No VIP, no
   #167. (D-TME-10)
@@ -53,12 +53,14 @@ in a deploy.
 
 - In-agent name-answering listener on each per-netns gateway
   `responder_addr`, answering A/AAAA for `<job>.svc.overdrive.local`
-  from `service_backends ∩ running` via the shared resolve index
+  from `service_backends ∩ running-and-healthy` via a sibling name-keyed
+  reader over the SAME service_backends rows (NOT the addr-keyed intercept
+  index; refined by DESIGN ADR-0072)
   (K8s-headless / Fly `.internal` endpoint-set shape).
-- Empty-candidate (no running backend) surfaced honestly (NXDOMAIN /
+- Empty-candidate (no running-and-healthy backend) surfaced honestly (NXDOMAIN /
   empty answer) — **never** a stale address.
 - Tier-3: a deployed workload's
-  `getaddrinfo("<peer>.svc.overdrive.local")` resolves to a running
+  `getaddrinfo("<peer>.svc.overdrive.local")` resolves to a running-and-healthy
   backend and the connection is then intercepted + mTLS'd end-to-end
   through `serve` + `deploy`.
 

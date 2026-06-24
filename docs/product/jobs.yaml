@@ -561,14 +561,17 @@ jobs:
       I want an in-agent name-answering listener (in the same process that owns
       the agent-light L4 proxy and the ServiceBackendsResolve index — NOT a
       separate daemon, NOT in-kernel) to answer A for <job>.svc.overdrive.local
-      with the running backend's IPv4 address from the shared resolve index (the
-      v1 substrate is IPv4 — the MtlsResolve addr is SocketAddrV4, the per-netns
-      responder addr is Ipv4Addr), returning the SAME address MtlsResolve
-      recognizes (headless, no VIP, D-TME-10); answer AAAA as NODATA (the name is
-      currently resolvable, no IPv6 record — a real IPv6 backend story is out of
-      v1 scope); and NXDOMAIN when no backend is running (declared-but-empty and
-      unknown are indistinguishable — the responder reads the running resolve
-      index) — never a stale address,
+      with the running-AND-healthy backend's IPv4 address — read as a sibling
+      name-keyed reader over the SAME service_backends rows the intercept reads
+      (the v1 substrate is IPv4 — the MtlsResolve addr is SocketAddrV4, the
+      per-netns responder addr is Ipv4Addr), returning the SAME address MtlsResolve
+      recognizes and classifies Mesh (headless, no VIP, D-TME-10); answer AAAA as
+      NODATA (the name is currently resolvable, no IPv6 record — a real IPv6
+      backend story is out of v1 scope); and NXDOMAIN when no running-AND-healthy
+      backend exists (declared-but-not-running, unhealthy, and unknown are
+      indistinguishable — the responder reads only the running-and-healthy set, so
+      an unhealthy backend, which the intercept treats as MeshUnreachable, is never
+      answered) — never a stale or unhealthy address,
     outcome: >
       so an unmodified workload can DIAL a mesh peer BY NAME and land at a live
       instance the existing intercept path then mTLS's — closing the dial-by-name
@@ -879,10 +882,12 @@ changelog:
       J-OPS-004 is operator-trust in the Service-submit wire signal, a different
       actor-circumstance than a workload dialing a peer. J-MESH-001 is the
       deferred in-agent DNS-responder leg of the transparent-mtls arc (#236): the
-      responder answers <job>.svc.overdrive.local from service_backends ∩ running
-      via the shared ServiceBackendsResolve index (D-TME-11), returning the
-      headless addr MtlsResolve recognizes (D-TME-10) — making the resolve index
-      "one source, THREE readers." Distilled from the issue + the finalized arc
+      responder answers <job>.svc.overdrive.local from service_backends ∩
+      running-AND-healthy via a sibling name-keyed reader over the SAME
+      service_backends rows (NOT the addr-keyed intercept index; refined by
+      DESIGN ADR-0072) (D-TME-11), returning the headless addr MtlsResolve
+      recognizes (D-TME-10) — making the resolve index "one source, THREE
+      readers." Distilled from the issue + the finalized arc
       (docs/evolution/2026-06-22-transparent-mtls-enrollment.md), not from user
       interviews (per the header precedent). served_by_phase: 2. Created the
       journey docs/product/journeys/dial-a-mesh-peer-by-name.yaml; personas
