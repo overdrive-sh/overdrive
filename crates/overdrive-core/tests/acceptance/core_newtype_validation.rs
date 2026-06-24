@@ -21,7 +21,8 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{IdParseError, NodeId, WorkloadId};
+use overdrive_core::id::{IdParseError, MeshServiceName, NodeId, WorkloadId};
+use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
 // §2.2 — scenario 1: Empty identifier input is rejected at the constructor.
@@ -163,4 +164,104 @@ fn leading_hyphen_is_rejected_with_invalid_format_naming_the_rule() {
         Err(other) => panic!("expected IdParseError::InvalidFormat, got {other:?}"),
         Ok(value) => panic!("leading-hyphen input must not construct a NodeId; got {value}"),
     }
+}
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-03 — Suffix grammar accepts `<job>.svc.overdrive.local`, rejects
+// wrong / missing suffix.
+//
+// The bespoke FromStr the design notes `validate_label` alone cannot provide
+// (validate_label permits `.`, id.rs:102) — it accepts the canonical mesh-DNS
+// name and rejects every malformation of the `.svc.overdrive.local` suffix.
+// Which IdParseError variant each rejection maps to is a DELIVER detail; the
+// scenario asserts is_err() for rejections and pins the accepted-case <job>
+// extraction via as_str(). (ADR-0072 / US-DBN-2.)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
+    // Accepted: canonical names yield Ok with as_str() == the expected <job>.
+    let accepted: &[(&str, &str)] = &[
+        ("server.svc.overdrive.local", "server"),
+        ("payments-api.svc.overdrive.local", "payments-api"),
+    ];
+    for (input, expected_job) in accepted {
+        let name = MeshServiceName::new(input)
+            .unwrap_or_else(|e| panic!("{input:?} must be accepted; got {e:?}"));
+        assert_eq!(
+            name.as_str(),
+            *expected_job,
+            "as_str() must extract the <job> label for {input:?}"
+        );
+        // Display reconstructs the canonical full name.
+        assert_eq!(name.to_string(), *input);
+    }
+
+    // Rejected: every malformation of the suffix grammar. The return type is
+    // Result<_, IdParseError>, so is_err() proves the error is an IdParseError;
+    // the per-case variant is a GREEN refinement.
+    let rejected: &[(&str, &str)] = &[
+        ("server.svc.example.com", "wrong suffix"),
+        ("server.svc.overdrive.local.evil", "suffix not terminal"),
+        ("server", "missing suffix"),
+        ("server.overdrive.local", "missing .svc segment"),
+        (".svc.overdrive.local", "empty <job> label"),
+    ];
+    for (input, why) in rejected {
+        let outcome = MeshServiceName::new(input);
+        assert!(outcome.is_err(), "{input:?} must be rejected ({why}); got {outcome:?}");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-04 — Over-long label and empty / malformed `<job>` are rejected
+// with a typed IdParseError.
+//
+// PROPERTY: for every <job> label L that violates the DNS-1123-label rules
+// (empty, > LABEL_MAX, leading/trailing non-alphanumeric, out-of-class char),
+// "<L>.svc.overdrive.local" returns Err(IdParseError::<variant>) — never
+// panics, never silently truncates. The ceiling is sized off LABEL_MAX (253),
+// never a bespoke smaller magic number (the "one shared length ceiling" rule,
+// development.md § "One shared length ceiling for label-shaped ids"; reuse
+// validate_label). Hebert ch.6 negative testing: relax the happy-path
+// assumption to surface any under-specified accept path.
+// -----------------------------------------------------------------------------
+
+proptest! {
+    /// S-DBN-NAME-04: malformed `<job>` labels are rejected with a typed
+    /// IdParseError, never accepted, never panic.
+    #[test]
+    fn mesh_service_name_rejects_malformed_job_labels(
+        malformed in malformed_job_label(),
+    ) {
+        let full = format!("{malformed}.{}", MeshServiceName::SUFFIX);
+        let outcome = MeshServiceName::new(&full);
+        prop_assert!(
+            outcome.is_err(),
+            "malformed <job> label {malformed:?} must be rejected; got {outcome:?}"
+        );
+    }
+}
+
+/// A `<job>` label that violates at least one DNS-1123-label rule:
+/// empty, over-long (> `LABEL_MAX`), leading/trailing non-alphanumeric, or
+/// containing an out-of-class character. Each arm targets a distinct
+/// `validate_label` reject branch.
+fn malformed_job_label() -> impl Strategy<Value = String> {
+    // LABEL_MAX is 253; an over-long label exceeds it. Use 254..=300 to stay
+    // bounded while crossing the ceiling.
+    prop_oneof![
+        // Empty label (-> Empty variant).
+        Just(String::new()),
+        // Over-long label (-> TooLong variant): sized against LABEL_MAX (253),
+        // never a bespoke smaller ceiling.
+        (254usize..=300).prop_map(|n| "a".repeat(n)),
+        // Leading non-alphanumeric (-> InvalidFormat).
+        "[-_.][a-z0-9]{1,10}",
+        // Trailing non-alphanumeric (-> InvalidFormat).
+        "[a-z0-9]{1,10}[-_.]",
+        // Out-of-class character (space / uppercase-after-fold is still ascii,
+        // so use chars outside [a-z0-9._-]: e.g. `!`, `/`, `:` ) (-> InvalidChar).
+        "[a-z0-9]{0,5}[!/:@ ][a-z0-9]{0,5}",
+    ]
 }

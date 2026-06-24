@@ -778,6 +778,124 @@ impl From<CorrelationKey> for String {
 use std::fmt::Write as _;
 
 // -----------------------------------------------------------------------------
+// MeshServiceName — `<job>.svc.overdrive.local` mesh-DNS grammar.
+// -----------------------------------------------------------------------------
+
+/// Mesh service name — the `<job>.svc.overdrive.local` grammar a workload
+/// dials to reach another workload by name (dial-by-name-responder,
+/// ADR-0072 / US-DBN-2).
+///
+/// The newtype carries a validated `<job>` label; the fixed
+/// [`SUFFIX`](Self::SUFFIX) is grammar, not stored state. [`as_str`](Self::as_str)
+/// returns the canonical lowercase `<job>` label; [`Display`] renders the
+/// full `<job>.svc.overdrive.local` name.
+///
+/// # Grammar
+///
+/// The bespoke [`FromStr`] enforces a suffix grammar that the shared
+/// [`validate_label`] cannot: `validate_label` permits `.` (so `JobId` may
+/// be `region.eu-west-1`), which means it would accept any dotted string —
+/// it cannot reject the wrong suffix. `MeshServiceName::new` therefore
+/// case-folds, strips the terminal `.svc.overdrive.local`, and validates
+/// the remaining `<job>` label through `validate_label` (reusing the shared
+/// DNS-1123 character-class + [`LABEL_MAX`] ceiling — no bespoke smaller
+/// magic number, per `.claude/rules/development.md` § "One shared length
+/// ceiling for label-shaped ids").
+///
+/// # Completeness
+///
+/// Case-insensitive parse, lowercase canonical `Display`, serde matching
+/// `Display`/`FromStr` exactly — the standard human-typed-id shape.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
+pub struct MeshServiceName(String);
+
+impl MeshServiceName {
+    /// The fixed mesh-DNS suffix — note NO leading dot; the separator is the
+    /// `.` between the `<job>` label and this suffix.
+    pub const SUFFIX: &'static str = "svc.overdrive.local";
+
+    /// Construct from a full `<job>.svc.overdrive.local` name, validating the
+    /// suffix grammar and canonicalising the `<job>` label to lowercase.
+    ///
+    /// Case-folds, strips the terminal `.svc.overdrive.local` (the wrong /
+    /// missing / non-terminal suffix all surface as an
+    /// [`IdParseError::InvalidFormat`]), then validates the remaining `<job>`
+    /// label through the shared [`validate_label`] — reusing the DNS-1123
+    /// character class, the start/end-alphanumeric rule, and the single
+    /// [`LABEL_MAX`] ceiling (no bespoke smaller magic number; an empty,
+    /// over-long, or out-of-class label maps to the existing `Empty` /
+    /// `TooLong` / `InvalidChar` / `InvalidFormat` variants).
+    pub fn new(raw: &str) -> Result<Self, IdParseError> {
+        const KIND: &str = "MeshServiceName";
+        let lowered = raw.to_ascii_lowercase();
+        // The separator-plus-suffix that a valid name must end with:
+        // ".svc.overdrive.local". Stripping it leaves the `<job>` label.
+        let job = lowered.strip_suffix(Self::SUFFIX).and_then(|s| s.strip_suffix('.')).ok_or(
+            IdParseError::InvalidFormat { kind: KIND, expected: "<job>.svc.overdrive.local" },
+        )?;
+        // `validate_label` re-lowercases (a no-op here) and enforces the
+        // DNS-1123 label rules + the shared LABEL_MAX ceiling on the `<job>`
+        // part. The reported `kind` is "MeshServiceName" so the error names
+        // the rejecting newtype, not the inner helper.
+        validate_label(KIND, job).map(Self)
+    }
+
+    /// Borrow the canonical lowercase `<job>` label.
+    #[inline]
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for MeshServiceName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.0, Self::SUFFIX)
+    }
+}
+
+impl FromStr for MeshServiceName {
+    type Err = IdParseError;
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::new(raw)
+    }
+}
+
+impl TryFrom<String> for MeshServiceName {
+    type Error = IdParseError;
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(&raw)
+    }
+}
+
+impl TryFrom<&str> for MeshServiceName {
+    type Error = IdParseError;
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        Self::new(raw)
+    }
+}
+
+impl From<MeshServiceName> for String {
+    fn from(v: MeshServiceName) -> Self {
+        v.to_string()
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Phase 2.2 newtypes — `ServiceVip`, `ServiceId`, `BackendId`.
 // RED scaffolds per `docs/feature/phase-2-xdp-service-map/distill/
 // wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them
