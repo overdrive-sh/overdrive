@@ -4449,6 +4449,54 @@ decomposed Phase-05 (D-MTLS-17). Evolution record:
 > kernel-invisible progress-stall watchdog [#232](https://github.com/overdrive-sh/overdrive/issues/232),
 > inbound-TPROXY shared-routing Bar-2 reconciler [#234](https://github.com/overdrive-sh/overdrive/issues/234).
 
+### Shipped — Component Inventory (FINALIZE 2026-06-24) — canonical-workload-address-inbound-tproxy
+
+The **inbound keystone** of ADR-0071 Path A (GH #241): the canonical
+per-workload `workload_addr` becomes the advertised routable inbound identity,
+and `start_alloc` installs a per-listener inbound nft-TPROXY rule on it that
+feeds the leg-C mTLS interception path — productionising the
+`tproxy_guard = None` deferral #236 left and closing the inbound half of the
+Path-A loop, driven end-to-end through `overdrive serve` + `overdrive deploy`.
+**Zero CREATE-NEW components** — every change is additive-on-existing or pure
+reuse. DELIVER complete (6 steps 01-01…03-02 all COMMIT/PASS).
+
+> **STATUS — NOT YET MERGED.** Implementation complete; all 6 steps GREEN on
+> **dev-Lima 7.0.0-22**; the S-WS keystone is **MERGE-GATED on the pinned-6.18
+> appliance-kernel Tier-3 CI matrix (ADR-0068) — not yet observed.** dev-Lima
+> 7.0 is necessary-but-not-sufficient; the 6.18 signal has NOT passed. Evolution
+> record: `docs/evolution/2026-06-24-canonical-workload-address-inbound-tproxy.md`.
+
+| Component | Path | Disposition |
+|---|---|---|
+| `AllocStatusRowEnvelope::V2` + `AllocStatusRowV2.workload_addr: Option<Ipv4Addr>` (additive field, `From<V1> for V2`, golden FIXTURE_V1 untouched + FIXTURE_V2, re-pinned discriminant offset) | `crates/overdrive-core/src/traits/observation_store.rs` | EXTEND (additive rkyv V2 envelope) |
+| `AllocationSpec.{workload_addr: Option<Ipv4Addr>, service_ports: Vec<NonZeroU16>}` (pure in-memory, no serde/rkyv — same slot-derived channel as `netns`/`host_veth`) | `crates/overdrive-core/src/traits/driver.rs` | EXTEND (two additive fields) |
+| `WorkloadLifecycle::project_service_listen_ports` (mirrors `project_probe_descriptors`); `service_ports` threaded into the emitted spec | `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` | EXTEND (one projection fn) |
+| `ServiceV1::listen_ports()` single declared-listener-port source (both port-set readers read through it — D-BLOCKER1 one-source/two-readers) | `crates/overdrive-core/src/aggregate/mod.rs` | EXTEND |
+| `BackendDiscoveryBridge` advertises `Backend.addr = workload_addr:port` when `Some` (D-B2); `ServiceBackendRow.vip` UNCHANGED; `RunningAllocSet.running` widened `BTreeSet<AllocationId>` → `BTreeMap<AllocationId, Option<Ipv4Addr>>` | `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs` | EXTEND (advertise addr source; Set→Map) |
+| `ServiceMapHydrator` three-way subnet-membership mesh gate (mesh ∈ `WORKLOAD_SUBNET_BASE` → skip LB; local/remote arms unchanged); `workload_subnet: Ipv4Net` mandatory ctor param (D-GATE / D-GATE-PRED) | `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs` | EXTEND (third partition arm + ctor param) |
+| C3 seam injects `spec.workload_addr = Some(plan.workload_addr)`; **convergence fix** — `FinalizeFailed{Stable}` must NOT tear down a live Running alloc's netns/slot (`is_stable` gate) | `crates/overdrive-control-plane/src/action_shim/mod.rs` | EXTEND (C3 injection + convergence fix) |
+| `hydrate_actual` populates the per-alloc `workload_addr` map (Obligation #2a); L3 extraction `hydrate_workload_lifecycle_actual` | `crates/overdrive-control-plane/src/reconciler_runtime.rs` | EXTEND |
+| `WORKLOAD_SUBNET_BASE` threaded into the hydrator ctor (one source, D-GATE-PRED) | `crates/overdrive-control-plane/src/lib.rs` | EXTEND |
+| `start_alloc` per-port `install_inbound_tproxy` (replaces `tproxy_guard = None`); `AllocIntercept._inbound_tproxy_guards: Vec<TproxyInterceptGuard>` (N listeners → N RAII guards; 0 listeners / `None` addr → 0 rules) | `crates/overdrive-worker/src/mtls_intercept_worker.rs` | EXTEND (named #241 install site) / REUSE `install_inbound_tproxy` AS-IS |
+| Exit-observer / status write path forward-carries `spec.workload_addr` into the written `AllocStatusRowV2` (an observed input) | `crates/overdrive-control-plane/src/worker/exit_observer.rs` | EXTEND |
+
+> **DEFERRED — later, independently-drivable slices (NOT part of this thin
+> canonical-address slice; per the CLAUDE.md vertical-slice precedent #236):**
+> **intended-peer SVID pinning** (`expected_peer` SAN-match; v1 is authn-only)
+> → [#242](https://github.com/overdrive-sh/overdrive/issues/242); the **in-agent
+> DNS / name-responder daemon** for dial-by-name (this slice dials the concrete
+> `workload_addr` directly — no DNS needed to prove the loop) →
+> [#243](https://github.com/overdrive-sh/overdrive/issues/243). Also deferred:
+> the inbound-TPROXY shared-routing Bar-2 reconciler
+> [#234](https://github.com/overdrive-sh/overdrive/issues/234), operator-tunable
+> `WORKLOAD_SUBNET_BASE` [#239](https://github.com/overdrive-sh/overdrive/issues/239),
+> and the dialable-VIP TEACH trigger [#61](https://github.com/overdrive-sh/overdrive/issues/61)
+> (the VIP *allocator* #167 already shipped). The **E04** black-box mesh-mTLS
+> capture (real `serve` + real `deploy` ×2, no test PKI) is `pending`, deferred
+> to [#227](https://github.com/overdrive-sh/overdrive/issues/227) (EDD harness)
+> on [#75](https://github.com/overdrive-sh/overdrive/issues/75) (Image Factory
+> MVP).
+
 ---
 
 ### 88. Listener-fact in-memory view extension (ADR-0062)

@@ -477,3 +477,172 @@ mutually reconciled (increment-b LB hook FIRES → cannot retire; increment-c
 VIP/LB INERT → GATE sufficient, TEACH unnecessary; increment-a inbound recipe =
 existing production triple → no new primitive). **Zero contradictions —
 Reconciliation passed.**
+
+---
+
+## Wave: DELIVER
+
+**Status (honest, load-bearing):** implementation complete; all 6 steps GREEN on
+**dev-Lima 7.0.0-22**; **MERGE-GATED on the pinned-6.18 appliance-kernel Tier-3
+CI run (ADR-0068) — not yet observed.** The S-WS keystone is APPROVED *conditional*
+on that 6.18 Tier-3 matrix; the only evidence on record is dev-Lima 7.0. This
+feature is **not** merged, **not** fully accepted, and the 6.18 signal has **not**
+passed. Mirror of the `03-02-review.md` conditional-approval framing.
+
+### [REF] Implementation Summary
+
+Productionises the inbound nft-TPROXY install that ADR-0071 Path A deferred
+(`start_alloc` recorded `tproxy_guard = None`) and flips the
+`BackendDiscoveryBridge` advertise address from `host_ipv4:port` to the canonical
+per-workload `workload_addr:port`, so a workload becomes reachable at its
+canonical `workload_addr:service_port` over mTLS — the inbound half of the
+Path-A loop. The canonical `workload_addr` is threaded as a pure in-memory
+`AllocationSpec` channel (set at the C3 provision seam off `plan.workload_addr`),
+persisted as an observed input on a new `AllocStatusRow` V2 envelope, and the
+declared service ports are single-sourced through a new
+`WorkloadLifecycle::project_service_listen_ports` mirroring
+`project_probe_descriptors`. `start_alloc` now installs one inbound capture rule
+per declared service port (N ports → N rules; Job-kind / 0 listeners → 0 rules),
+keyed on the declared service port (D-BLOCKER1 one-source/two-readers).
+`ServiceMapHydrator` gains a three-way subnet-membership gate so Path-A/mesh
+backends program neither the cgroup `LOCAL_BACKEND_MAP` nor the XDP path (nft-TPROXY
+owns delivery), preventing the dead XDP writes B2 would otherwise introduce. A
+production convergence fix lands alongside: the `action_shim` `FinalizeFailed{Stable}`
+arm must NOT tear down a live Running alloc's netns/slot (`f034f38f`). Zero
+CREATE-NEW components — every change is additive-on-existing (`AllocationSpec`
+fields, the V2 envelope field, one projection fn, one mandatory ctor param) or a
+pure reuse.
+
+### [REF] Files Modified
+
+Derived from `git diff --stat origin/main..HEAD`.
+
+**Production (`src/`):**
+
+- `crates/overdrive-core/src/traits/observation_store.rs` — `AllocStatusRowEnvelope::V2` + `AllocStatusRowV2 { …, workload_addr: Option<Ipv4Addr> }` + `From<V1> for V2` + re-pinned discriminant offset (D-BLOCKER2).
+- `crates/overdrive-core/src/traits/driver.rs` — `AllocationSpec.{workload_addr: Option<Ipv4Addr>, service_ports: Vec<NonZeroU16>}` (pure in-memory, no serde/rkyv).
+- `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` — new `project_service_listen_ports` (mirrors `project_probe_descriptors`); `service_ports` threaded into the emitted spec.
+- `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs` — advertise `workload_addr:port` when `Some` (D-B2); `RunningAllocSet.running` widened `BTreeSet` → `BTreeMap<AllocationId, Option<Ipv4Addr>>`.
+- `crates/overdrive-core/src/reconcilers/service_map_hydrator.rs` — three-way subnet-membership mesh gate before the unchanged local/remote partition; `workload_subnet: Ipv4Net` mandatory ctor param (D-GATE / D-GATE-PRED).
+- `crates/overdrive-core/src/aggregate/mod.rs` — single-source `ServiceV1::listen_ports()` read by both port-set readers.
+- `crates/overdrive-core/src/reconcilers/mod.rs` — one re-export line.
+- `crates/overdrive-control-plane/src/action_shim/mod.rs` — C3 seam injects `spec.workload_addr`; **convergence fix** — `FinalizeFailed{Stable}` must not reap a live Running alloc (`is_stable` gate, `f034f38f`).
+- `crates/overdrive-control-plane/src/reconciler_runtime.rs` — `hydrate_actual` populates the per-alloc `workload_addr` map (Obligation #2a); L3 extraction `hydrate_workload_lifecycle_actual`.
+- `crates/overdrive-control-plane/src/lib.rs` — threads `WORKLOAD_SUBNET_BASE` into the hydrator ctor (one source).
+- `crates/overdrive-control-plane/src/streaming.rs`, `src/worker/exit_observer.rs` — `workload_addr` forward-carry / host-netns `None` fixtures.
+- `crates/overdrive-worker/src/mtls_intercept_worker.rs` — `start_alloc` per-port `install_inbound_tproxy` (replaces `tproxy_guard = None`); `AllocIntercept._inbound_tproxy_guards: Vec<TproxyInterceptGuard>` (N RAII guards); de-wired stale shutdown teardown.
+- `crates/overdrive-worker/src/driver.rs`, `crates/overdrive-sim/src/adapters/driver.rs`, `crates/overdrive-sim/src/invariants/{backend_discovery_bridge,service_map_hydrator,evaluators,svid_running_set}.rs` — `service_ports`/`workload_addr`/`WORKLOAD_SUBNET_BASE` ctor threading on test/sim spec builders.
+
+**Tests:**
+
+- `crates/overdrive-control-plane/tests/integration/canonical_address_inbound_walking_skeleton.rs` — **S-WS keystone** (in-process `run_server` + production deploy/stop handlers on the REAL `EbpfDataplane`, `dataplane_override: None`; only seam = `mtls_identity_override`).
+- `crates/overdrive-worker/tests/integration/{inbound_rules_per_listener,inbound_rule_keys_declared_port,job_kind_installs_no_inbound_rule}.rs` — S-NRULES / S-DPORT / S-JOB0 Tier-3 real-nft scenarios.
+- `crates/overdrive-core/tests/{canonical_address_bridge_advertise,mesh_backend_lb_gate,capture_advertise_port_set_equality}.rs` — S-BRIDGE / S-GATE / S-PORTSET Tier-1 DST.
+- `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs` — S-V2 (FIXTURE_V1 untouched; FIXTURE_V2 + offset re-pin added same commit).
+- `crates/overdrive-worker/tests/integration/bidirectional_walking_skeleton.rs` — **synthetic-virt removal** (test-installed `install_inbound_tproxy` + `INBOUND_VIRT_IP/PORT` deleted; inbound moved to the control-plane keystone).
+- `crates/overdrive-control-plane/tests/integration/alloc_netns_lifecycle.rs` — paired regression tests for the `f034f38f` convergence fix (both gate directions).
+- Numerous fixture-only `+1`/`+2` line touches across acceptance/integration/schema-evolution suites (additive `workload_addr: None` / `service_ports: Vec::new()` field defaults).
+
+**Docs / verification:**
+
+- `docs/analysis/root-cause-analysis-canonical-address-inbound-{roundtrip-hang,reply-leg}.md` — two RCA docs (pasted tcpdump/bpftrace/server-log evidence) for the keystone's two production walls.
+- `verification/expectations/E04-workload-reachable-at-canonical-address-mtls/{README.md,runner.sh}` + `verification/expectations/INDEX.md` — E04 expectation stub authored **`pending` only** (capture DEFERRED to #227 on #75).
+- `docs/product/architecture/brief.md` — Component Inventory FINALIZE block.
+- `docs/feature/canonical-workload-address-inbound-tproxy/deliver/*` — roadmap, execution-log, per-step notes, reviews, refactoring-log.
+
+### [REF] Scenarios Green
+
+**8 of 8** DISTILL scenarios GREEN on **dev-Lima 7.0.0-22** (2026-06-23). Where
+each ran:
+
+| Scenario | Tier | Lane | Result (dev-Lima 7.0) |
+|---|---|---|---|
+| S-WS | Tier-3 (in-process `run_server` + real `EbpfDataplane`) | `-p overdrive-control-plane --features integration-tests` (root) | GREEN (byte-exact mTLS round-trip); VERDICT:WORKS |
+| S-NRULES / S-DPORT / S-JOB0 | Tier-3 (real nft) | `-p overdrive-worker --features integration-tests` (root) | GREEN |
+| S-BRIDGE / S-GATE / S-PORTSET | Tier-1 DST | default lane (`-p overdrive-core`, Lima-routed) | GREEN |
+| S-V2 | default lane (rkyv golden) | `-p overdrive-core` | GREEN |
+
+**Merge-gate caveat:** the S-WS keystone AC is **MERGE-BLOCKING on the pinned-6.18
+appliance-kernel Tier-3 matrix (ADR-0068)**. dev-Lima 7.0 is the inner loop —
+necessary-but-not-sufficient. **The 6.18 signal has not been observed.** Tier-1
+DST + S-V2 are environment-independent and final; the Tier-3 scenarios' merge
+signal is the appliance-kernel CI run.
+
+### [REF] DoD Check
+
+No DISCUSS Definition-of-Done artifact exists (feature started at SPIKE; no
+`discuss/` dir). The DoD is the DISTILL/DESIGN acceptance set + the design's
+DELIVER obligations:
+
+| DoD item | Status (dev-Lima 7.0) | Evidence |
+|---|---|---|
+| All 8 DISTILL scenarios GREEN | ✅ (8/8) | execution-log.json; per-step COMMIT/PASS |
+| Vertical slice through real production entry points (`run_server` + deploy/stop handlers on real `EbpfDataplane`) | ✅ | S-WS keystone; 03-02-review Finding A (no invented surface) |
+| No test installs a rule / supplies an address / stands in for a production call site | ✅ | synthetic virt + test-install REMOVED; litmus (delete 03-01 → RED) SOUND (Finding C) |
+| Inbound rule keys on declared service port (one-source/two-readers, D-BLOCKER1) | ✅ | S-DPORT; `ServiceV1::listen_ports()` single source |
+| Bridge advertises canonical `workload_addr:port`; `vip` unchanged (D-B2) | ✅ | S-BRIDGE both arms |
+| Hydrator gates mesh backends; local/remote arms unchanged (D-GATE) | ✅ | S-GATE three arms; 02-02 mutation 100% |
+| `AllocStatusRow` V2 additive, V1 golden decodes through | ✅ | S-V2; FIXTURE_V1 untouched |
+| Port-set equality AC (Obligation #1, N≥2) | ✅ | S-PORTSET `@property` byte-set equality |
+| Obligation #5 — `AllocStatusRowV2.workload_addr` rustdoc (materialized slot×base join + #239 single-cut) | ✅ | observation_store.rs docstring |
+| Zero CREATE-NEW components | ✅ | refactoring-log per-file ledger; design Reuse Analysis |
+| **Pinned-6.18 Tier-3 matrix passes (Obligation #3, MERGE-BLOCKING)** | ⏳ **NOT OBSERVED** | dev-Lima 7.0 only; the merge gate |
+| E04 black-box capture | ⏳ DEFERRED to #227 on #75 (both OPEN) | E04 stub `pending`; 03-02-review Merge condition 2 |
+
+### [REF] Demo Evidence
+
+This feature has **no operator-CLI demo transcript** — its acceptance proof IS
+the S-WS keystone round-trip (the keystone is the demo). No separate
+`overdrive deploy` CLI demo was captured, and none is fabricated here.
+
+**Executed acceptance proof (S-WS keystone, dev-Lima 7.0.0-22, 2026-06-23):**
+a node booted through the production `run_server` composition root; two mesh
+workloads deployed through the production `POST /v1/jobs` handler on the REAL
+`EbpfDataplane` (`dataplane_override: None`); the client dialed the server's
+canonical `workload_addr:service_port` directly (no name lookup); the
+**production-installed** inbound nft-TPROXY rule (from `start_alloc` off
+`spec.{workload_addr,service_ports}`) diverted the dial to the server's leg-C
+transparent listener; the connection authenticated with mutual TLS; the request
+bytes arrived at the server byte-for-byte and the reply bytes returned
+byte-for-byte (`REQUEST != RESPONSE` guards a request-loopback masquerade).
+Result: **VERDICT:WORKS**, byte-exact, no RST observed. Litmus integrity SOUND —
+deleting the 03-01 production install routes the dial to the plain Python server,
+which cannot speak TLS → handshake fails → RED (proven via the client-side rustls
+handshake, NOT map inspection). **This proof is on dev-Lima 7.0 only; the merge
+signal is the pinned-6.18 Tier-3 CI matrix, not yet observed.** Black-box
+`overdrive serve` + `overdrive deploy` capture (no test PKI) is DEFERRED to the
+E04 expectation (#227 on #75).
+
+### [REF] Quality Gates
+
+| Gate | Outcome |
+|---|---|
+| Per-step TDD | **6/6** steps COMMIT/PASS (01-01, 01-02, 02-01, 02-02, 03-01, 03-02) — legacy 5-phase contract; SKIP reasons logged (NOT_APPLICABLE) where a phase had no surface |
+| Per-step adversarial review | 01-02, 02-02, 03-01, 03-02 (keystone) all **APPROVED** (03-02 conditional on the 6.18 Tier-3 CI gate) |
+| Per-step mutation | 01-02 **100%** kill; 02-02 **100%** kill; 03-01 & 03-02 **N/A** (single-example real-kernel nft I/O / one-shot Tier-3 keystone — no mutable pure decision branch; PBT/mutation is the wrong tool for nft I/O) |
+| Phase 3 — L1-L6 refactor | feature code already clean (0 files transformed, all inspected targets clean); clippy `-D warnings` clean at HEAD; log-only commit `52599f08`. One pre-existing smell surfaced-but-not-fixed (F-1, out of scope) |
+| Phase 5 — feature-wide mutation final-check | **NOT RUN** — user elected to skip → finalize. Per-step mutation (01-02, 02-02 = 100%) already covered the mutable logic surface; 03-01/03-02 had no mutable surface |
+| Phase 6 — deliver integrity | **PASS** |
+
+### [REF] Pre-requisites
+
+The implementation depended on:
+
+- **DISTILL scenarios:** the 8-scenario set (S-WS, S-NRULES, S-DPORT, S-JOB0,
+  S-BRIDGE, S-GATE, S-PORTSET, S-V2) with RED scaffolds staged in DISTILL
+  (`#[should_panic(expected = "RED scaffold")]`).
+- **DESIGN components (all EXTEND/REUSE):** `AllocationSpec`, the C3
+  `provision_and_inject_netns` seam, `WorkloadLifecycle` projection,
+  `install_inbound_tproxy` (REUSE AS-IS), `BackendDiscoveryBridge` advertise,
+  `RunningAllocSet`, `AllocStatusRow` envelope, `hydrate_actual`,
+  `ServiceMapHydrator`, `ensure_shared_routing_infra` (REUSE), `veth_provisioner`
+  ip_forward/routes (REUSE).
+- **Three Tier-3 spikes** (increment-a/-b/-c) that settled the load-bearing
+  questions (no new routing primitive; cgroup hook FIRES → gate-not-retire;
+  VIP/LB inert → GATE sufficient).
+- **Pre-existing seams** the keystone composed (no new surface):
+  `mtls_identity_override` (transparent-mtls 06-03, `20f799b7`),
+  `run_server_with_obs_and_driver` (#143, `ed5975d8`).
+- **Pinned-6.18 Tier-3 matrix** (ADR-0068) — the merge-blocking signal for S-WS;
+  `integration-tests` feature on `overdrive-worker` + `overdrive-control-plane`;
+  root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN` for Tier-3.
