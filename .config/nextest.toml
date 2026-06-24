@@ -223,23 +223,59 @@ filter = '''
         | test(s_02_05_anti_scenario_no_is_running_with)
         | test(s_02_06_submit_echo_names_kind_upfront)
         | test(s_02_09_k1_honesty_100_trials)
-        | test(composed_bidirectional_proxy_walking_skeleton_no_rst)
-        | test(agent_handshake_presents_held_svid_client_and_server_roles)
-        | test(outbound_enforce_ktls_tx_forward_writeall_copy_return_zerocopy_splice_tls13_wire)
-        | test(inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server)
-        | test(guardrails_fail_closed_limits_supervision_exemption_authn_boundary)
-        | test(mtls_probe_activation_fault_refuses_boot)
-        | test(deployed_exec_workload_declared_peer_leg_carries_tls13_via_production_boot_path)
-        | test(production_boot_attaches_then_detaches_alloc_mtls_intercept)
-        | test(marked_workload_dial_is_still_intercepted_f5_self_exempt_negative)
-        | test(mtls_dataplane_load_attach_per_alloc_program_redirect)
-        | test(mtls_dataplane_load_reuses_prepinned_service_map)
-        | test(serve_restart_readopts_surviving_slot_and_gcs_orphan_netns)
-        | test(serve_restart_sweeps_surviving_per_workload_tproxy_rule)
         | test(alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal)
         | test(provision_failure_drives_alloc_to_failed_row_not_pending_retry)
         | test(provision_creates_and_idempotently_converges_per_workload_netns)
         | test(provision_injects_node_local_responder_into_netns_resolv_conf)
+    )
+'''
+test-group = 'host-kernel-shared'
+
+# mTLS Tier-3 surface → `host-kernel-shared`, matched by MODULE (rename-proof).
+#
+# Every test below installs/razes the SHARED, node-global `overdrive-mtls`
+# kernel state: the `ip overdrive-mtls` nft table, the fwmark `ip rule` +
+# `local` route (table 100), the `IP_TRANSPARENT` leg listeners, and the
+# host-`lo`-bound backends / `tproxy to 127.0.0.1` leg-F loopback path. That
+# state is process-global and crosses netns boundaries, so two such tests run
+# concurrently clobber each other — a connect that should reach a host-`lo`
+# backend is diverted by a sibling's rule (the egress-AC4 timeout), or a
+# sibling's `clean_shared_infra()` razes the leg-F mid-flight (the
+# MeshUnreachable fail-closed leak). Both were PR #245's CI flakes.
+#
+# The worker mtls tests ALSO hold a cross-process `flock`
+# (`/tmp/overdrive-mtls-kernel-state.lock`) that serialises them against each
+# OTHER — but NOT against the dataplane `mtls_*` / control-plane inbound-tproxy
+# + adopt tests, which serialise only via this group. The whole surface must
+# therefore live in ONE single-writer group, which is why it joins
+# `host-kernel-shared` rather than relying on the flock alone.
+#
+# Matched by `test(<module>::)` / `package(...) & test(mtls)` — NOT per-fn —
+# because the per-fn entries that used to live in the block above went stale on
+# the first refactor and dropped the worker surface out of serialisation
+# entirely. Module-level membership is rename-proof: a new test in any of these
+# files joins the single-writer domain automatically. Same lesson as the
+# trybuild "match by BINARY, not fn-name" note above.
+[[profile.default.overrides]]
+filter = '''
+    binary(integration)
+    & (
+        (package(overdrive-worker) & (
+            test(bidirectional_walking_skeleton)
+            | test(egress_tproxy_capture)
+            | test(inbound_rule_keys_declared_port)
+            | test(inbound_rules_per_listener)
+            | test(job_kind_installs_no_inbound_rule)
+            | test(mtls_intercept_install)
+            | test(name_resolve_enforce_consistency)
+            | test(outbound_enforce_substrate_asymmetry)
+            | test(start_alloc_installs_both_tproxy)
+        ))
+        | (package(overdrive-dataplane) & test(mtls))
+        | (package(overdrive-control-plane) & (
+            test(canonical_address_inbound_walking_skeleton)
+            | test(adopt_on_restart)
+        ))
     )
 '''
 test-group = 'host-kernel-shared'
