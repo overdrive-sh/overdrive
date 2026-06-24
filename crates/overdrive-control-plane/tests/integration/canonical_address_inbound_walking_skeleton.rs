@@ -216,10 +216,20 @@ impl ClientNetns {
         ip(&["netns", "exec", CLIENT_NS, "ip", "link", "set", CLIENT_WL_VETH, "up"]);
         ip(&["netns", "exec", CLIENT_NS, "ip", "route", "add", "default", "via", CLIENT_GW]);
         // rp_filter relaxation on the client host-veth (asymmetric path: the
-        // reply from leg-C returns on `lo`, not this veth).
-        let _ = Command::new("sysctl")
+        // reply from leg-C returns on `lo`, not this veth). MUST succeed — a
+        // silent failure leaves rp_filter=1, which drops the asymmetric reply
+        // and would misdiagnose downstream as "leg-C failed" (debugging.md §8:
+        // no bare `let _` on fallible fixture setup).
+        let rp = Command::new("sysctl")
             .args(["-w", &format!("net.ipv4.conf.{CLIENT_HOST_VETH}.rp_filter=0")])
-            .output();
+            .output()
+            .expect("spawn sysctl to relax rp_filter on the client host-veth");
+        assert!(
+            rp.status.success(),
+            "sysctl rp_filter=0 on {CLIENT_HOST_VETH} must succeed (the asymmetric \
+             leg-C reply path needs rp_filter relaxed); stderr: {}",
+            String::from_utf8_lossy(&rp.stderr)
+        );
         Self
     }
 
