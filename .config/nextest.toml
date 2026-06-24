@@ -280,6 +280,47 @@ filter = '''
 '''
 test-group = 'host-kernel-shared'
 
+# Dataplane cgroup-UDP surface → `host-kernel-shared`, matched by MODULE.
+#
+# Every test below builds a real `EbpfDataplane` and attaches the three
+# `cgroup_sock_addr` programs (`connect4` / `sendmsg4` / `recvmsg4`) to the
+# SHARED root cgroup `/sys/fs/cgroup` with `CgroupAttachMode::Single`
+# (overdrive-dataplane `lib.rs` ~710/744/764; aya `Single` → attach flag 0).
+# Their `LOCAL_BACKEND_MAP` / `REVERSE_LOCAL_MAP` are `pinning = NONE`, so each
+# process owns a PRIVATE copy. Run two such tests as separate nextest processes
+# and the loser's `sendto(VIP)` traverses the WINNER's `sendmsg4` program,
+# reads the winner's empty/foreign map, gets no VIP→backend rewrite, and the
+# round-trip never completes — the 2s poll exhausts and the test panics
+# ("did not round-trip within 2s — cgroup sendmsg4 forward rewrite regression").
+#
+# This is the cgroup analogue of the mtls block above: a process-global kernel
+# surface (the root-cgroup `Single` attach) that in-process `serial_test` cannot
+# guard across separate nextest processes — only this `max-threads = 1` group
+# can. Reproduced as PR #245's second CI flake; population diff was 4/4 pass
+# serialised vs 7/24 fail concurrent, the root-cgroup attach count oscillating
+# through multiples of 3 (3 progs × N concurrent processes). Production code is
+# byte-identical to main — serialisation RESOLVES the contention, it does not
+# mask a timing bug.
+#
+# ALL cgroup-attaching modules join, not just the same-VIP pair: the necessary
+# condition is the shared root-cgroup attach, not the map-key collision, so
+# under-serialising any one re-opens the race. By-module (rename-proof).
+[[profile.default.overrides]]
+filter = '''
+    binary(integration)
+    & package(overdrive-dataplane)
+    & (
+        test(unconnected_udp_roundtrip)
+        | test(unconnected_udp_reply_hardening)
+        | test(service_map_vip_port)
+        | test(reverse_nat_udp_e2e)
+        | test(multi_listener_tcp_udp_e2e)
+        | test(deregister_retry_safety)
+        | test(local_backend_proto_connect)
+    )
+'''
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,
