@@ -46,6 +46,13 @@ mod acceptance {
     // `TransitionReason` enum from `overdrive-core`. Compile-time
     // type-identity witness; the snapshot/streaming surfaces share the
     // SAME type so byte-equality is structural.
+    // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
+    // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record
+    // round-trip through hickory, NODATA-SOA / NXDOMAIN-SOA with MINIMUM=1,
+    // and the deterministic-per-`Clock` SOA SERIAL. Default unit lane
+    // (in-process, no real I/O) — the irreducibly-Tier-1 half of the DNS
+    // surface (the socket loop is Tier-3, DDN-4). RED scaffolds.
+    mod dns_wire;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     #[cfg(feature = "integration-tests")]

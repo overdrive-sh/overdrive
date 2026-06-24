@@ -100,6 +100,15 @@ tonic           = "0.12"
 prost           = "0.13"
 quinn           = { version = "0.11", default-features = false, features = ["rustls", "runtime-tokio"] }
 instant-acme    = "0.8"
+# `hickory-proto` — the DNS wire codec for the dial-by-name-responder
+# (ADR-0072 DDN-3: hickory-proto IS the codec; do NOT hand-roll). Used only
+# by `overdrive-control-plane`'s `dns_responder::wire` to decode the inbound
+# query and encode the A / NODATA-SOA / NXDOMAIN-SOA reply. Apache-2.0/MIT
+# (OSS-first). The pure domain core (`NameAnswer`, `answer_for`) stays
+# hickory-free — only `wire.rs` names a hickory type (DDN-4/D-DBN-5 ACL).
+# `default-features = false`: the bare wire `Message`/`RData`/`SOA` codec is
+# all this feature needs — no resolver, no runtime, no DNSSEC.
+hickory-proto   = { version = "0.26", default-features = false }
 # --- Control plane: axum + utoipa (phase-1-control-plane-core DISTILL) ---
 # SCAFFOLD: true — added for phase-1-control-plane-core per ADRs 0008 / 0009 /
 # 0013. Versions chosen per DESIGN wave-decisions §Tech stack. Crafter may

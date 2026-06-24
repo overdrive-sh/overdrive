@@ -21,6 +21,7 @@
 //! [`CertSerial`] (hex) are case-sensitive — they are not human-typed.
 
 use std::fmt::{self, Display, Formatter};
+use std::net::SocketAddrV4;
 use std::num::NonZeroU16;
 use std::str::FromStr;
 
@@ -913,6 +914,50 @@ impl From<MeshServiceName> for String {
     fn from(v: MeshServiceName) -> Self {
         v.to_string()
     }
+}
+
+// -----------------------------------------------------------------------------
+// NameAnswer — the pure v1 DNS query result for the dial-by-name responder.
+// -----------------------------------------------------------------------------
+
+/// The pure, wire-free result of a dial-by-name query (dial-by-name-responder,
+/// ADR-0072 DDN-4 / D-DBN-2). `answer_for(name, qtype, &index)` returns one of
+/// these three variants; `dns_responder::wire::encode` later renders it to DNS
+/// bytes. The variant names ARE the contract (ADR-0072 § Pinned signatures).
+///
+/// # Home-module choice (ADR-0072 § Components latitude)
+///
+/// ADR-0072 § Component decomposition grants DELIVER latitude on `NameAnswer`'s
+/// home — `crates/overdrive-core/src/` "(`id.rs` or a small `dns` module)".
+/// This step lands it in `id.rs` alongside [`MeshServiceName`] (the name
+/// layer's other core type): the two are the dial-by-name domain vocabulary,
+/// co-locating them keeps the name-layer types in one place, avoids a new
+/// `lib.rs` `pub mod dns;` re-export, and matches the first-named option in the
+/// Component table. Reachable as `overdrive_core::id::NameAnswer`.
+///
+/// # Hickory-free (DDN-4 / D-DBN-5 ACL boundary)
+///
+/// `NameAnswer` names ONLY std types (`SocketAddrV4`). It MUST NOT reference any
+/// `hickory_proto` type — `overdrive-core` stays hickory-free; only `wire.rs`
+/// (in `overdrive-control-plane`) crosses the codec boundary.
+///
+/// # The v1 answer contract
+///
+/// - `Records(addrs)` — the name has ≥1 running-AND-healthy IPv4 backend; an
+///   `A` query is answered with one A record per addr.
+/// - `NoData` — the name IS currently resolvable (≥1 running-and-healthy
+///   backend) but has no record of the queried type (`AAAA` in v1, since the
+///   substrate is IPv4): NOERROR with no answer + a negative-TTL SOA.
+/// - `NxDomain` — 0 running-and-healthy backends (declared-but-not-running,
+///   unhealthy, OR unknown all collapse in v1): NXDOMAIN + a negative-TTL SOA.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NameAnswer {
+    /// ≥1 running-AND-healthy IPv4 backend → one A record per addr.
+    Records(Vec<SocketAddrV4>),
+    /// Live name, no record of the queried type (AAAA in v1) → NODATA + SOA.
+    NoData,
+    /// 0 running-and-healthy backends → NXDOMAIN + SOA.
+    NxDomain,
 }
 
 // -----------------------------------------------------------------------------

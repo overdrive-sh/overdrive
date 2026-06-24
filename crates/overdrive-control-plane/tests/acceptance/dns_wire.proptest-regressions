@@ -1,0 +1,16 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc be50912a1b3b84f2f2bc8ff91e5736095ff9133334470dac2fbf4c2733266c17 # shrinks to name = MeshServiceName("0"), t = 0ns
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 130a2bc101a1f48ad6cf2886012f3a7f4292211547ddc7ab6e02fbe345c44bf5 # shrinks to name = MeshServiceName("0"), qtype = A, t = 0ns
+cc 30a45d29632e49210013ae09f93abdd4ecf64bc6f4a8339ff80cd4840a97a9e2 # shrinks to name = MeshServiceName("a"), secs1 = 0, delta_secs = 1, negative = NoData
+cc e53fa635b5b061ccc5446cf3919103c71553b11f5370b93bf9ce046664533f97 # shrinks to name = MeshServiceName("a"), addrs = [0.0.0.0:0], t = 0ns

@@ -60,6 +60,12 @@ pub mod cgroup_preflight;
 // surfaces as `ControlPlaneError::Validation { field:
 // Some("dataplane"), .. }`.
 pub mod dataplane_config;
+// dial-by-name-responder (ADR-0072, GH #243) — the in-agent name layer:
+// the third reader of the `ObservationStore` `service_backends` surface,
+// answering `<job>.svc.overdrive.local` queries. Step 01-02 lands only the
+// `wire` codec (DNS decode/encode behind the DDN-4/D-DBN-5 ACL boundary);
+// `answer.rs` / `name_index.rs` / `responder.rs` are later slices.
+pub mod dns_responder;
 pub mod error;
 pub mod handlers;
 // workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
