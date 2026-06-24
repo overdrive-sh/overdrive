@@ -259,6 +259,20 @@ mod integration {
         mod walking_skeleton;
     }
 
+    /// canonical-workload-address-inbound-tproxy (GH #241) — S-WS keystone.
+    /// RELOCATED here (R1) from the `overdrive-worker` test tree because the
+    /// keystone drives in-process `run_server` (the production boot composition
+    /// root + the composed mTLS worker), which lives in `overdrive-control-plane`
+    /// — a worker-crate test physically cannot reach it (the reverse dep edge is
+    /// a Cargo-rejected cycle). Drives the REAL `EbpfDataplane` (NO
+    /// `dataplane_override`, so `compose_mtls` composes the mTLS worker) +
+    /// `mtls_identity_override = Some(TestPki)`; deploys two mesh workloads and
+    /// proves a client dialing the server's canonical `workload_addr:service_port`
+    /// is captured by the PRODUCTION-installed (03-01) inbound nft-TPROXY rule,
+    /// mTLS terminates, and the round-trip completes. Root + CAP_NET_ADMIN;
+    /// SKIP otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
+    mod canonical_address_inbound_walking_skeleton;
+
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.
     pub mod workload_identity_manager {

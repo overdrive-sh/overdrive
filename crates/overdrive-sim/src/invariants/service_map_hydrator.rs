@@ -23,7 +23,17 @@
 //! `crates/overdrive-sim/src/invariants/mod.rs` as additive variants
 //! `HydratorEventuallyConverges` and `HydratorIdempotentSteadyState`.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    // The four-shape fixtures construct ids/addresses that are infallible
+    // by construction (ServiceId::new(42), a literal valid SpiffeId, a
+    // const NonZeroU16). `.expect` documents the construction contract,
+    // consistent with the `#[cfg(test)]` retry-budget module below and the
+    // sibling invariant fixtures.
+    clippy::expect_used
+)]
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -38,6 +48,21 @@ use overdrive_core::reconcilers::{
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::ServiceHydrationStatus;
 use overdrive_core::wall_clock::UnixInstant;
+
+// The Path-A/mesh workload subnet the hydrator gates against — the
+// canonical `10.99.0.0/16` `WORKLOAD_SUBNET_BASE`. The `canonical(..)`
+// constructor takes the same value the provisioner carves `/30`s from.
+// Aliased (not a `fn`) to avoid naming the `ipnet` crate directly —
+// `overdrive-sim` does not depend on it.
+use overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE as MESH_SUBNET;
+
+/// Host primary IPv4 for the LOCAL-arm classifier. Distinct from every
+/// mesh and remote address used in the four-shape fixtures; itself NOT in
+/// the mesh subnet so the `local-only` shape's backend (== `host_ipv4`)
+/// is partitioned LOCAL, not gated as mesh.
+const fn host_ipv4() -> Ipv4Addr {
+    Ipv4Addr::new(10, 0, 0, 9)
+}
 
 use crate::harness::{InvariantResult, InvariantStatus};
 
@@ -81,14 +106,30 @@ const STEADY_STATE_TICKS: u32 = 5;
 pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
     const NAME: &str = "hydrator-eventually-converges";
 
-    let scenario = match build_single_service_scenario() {
-        Ok(s) => s,
-        Err(reason) => return fail(NAME, reason),
-    };
-    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
-    let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
+    // Exercise ALL FOUR service shapes as sub-cases (convergence-model.md
+    // § 10.2). The MIXED shape is the load-bearing addition — it is the
+    // face the faithless full-set echo made structurally undetectable
+    // (RCA § 10.4); a regression of the fingerprint-domain mismatch
+    // re-fails it here within the budget.
+    for shape in shape_fixtures() {
+        if let Err(reason) = drive_one_shape_to_convergence(&shape) {
+            return fail(NAME, format!("shape '{}': {reason}", shape.label));
+        }
+    }
+    pass(NAME)
+}
 
-    let mut state = scenario.state;
+/// Drive a single service shape from cold start to convergence, modelling
+/// the REAL action-shim's write-back: each emitted `DataplaneUpdateService`
+/// records `Completed { fingerprint: fingerprint(vip, action.backends) }`
+/// — the PROGRAMMED-subset fingerprint, NOT the desired full-set echo
+/// (convergence-model.md § 10.1). The honest, shape-agnostic convergence
+/// predicate (§ 10.1) is: within the budget, a tick exists where
+/// `actions.is_empty()` AND every desired service has a `Completed` row.
+fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
+    let any_reconciler =
+        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4(), MESH_SUBNET));
+    let mut state = shape.state.clone();
     let mut view = ServiceMapHydratorView::default();
 
     for tick_idx in 0..CONVERGENCE_TICK_BUDGET {
@@ -100,30 +141,24 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
             &tick,
         );
 
-        // The dispatched action shim's behaviour: on every emitted
-        // DataplaneUpdateService for service S with fingerprint F,
-        // record actual.S = Completed { fingerprint = F, applied_at }.
-        // The harness simulates the success branch (the dataplane
-        // applied the update); the Failed branch + retry-budget gate
-        // is exercised by the unit tests in `overdrive-core`.
+        // Model the REAL shim (dataplane_update_service::dispatch):
+        // fingerprint over the ACTION's backends (the programmed subset,
+        // possibly EMPTY = the per-proto purge), NOT the desired full-set
+        // echo. RegisterLocalBackend emits NO row — the harness must NOT
+        // synthesise one (model the real cgroup path's silence).
         for action in &actions {
-            if let Action::DataplaneUpdateService { service_id, .. } = action {
-                let desired = match state.desired.get(service_id) {
-                    Some(d) => d.clone(),
-                    None => {
-                        return fail(
-                            NAME,
-                            format!(
-                                "tick {tick_idx}: hydrator emitted DataplaneUpdateService \
-                                 for {service_id} which is not in state.desired"
-                            ),
-                        );
-                    }
-                };
+            if let Action::DataplaneUpdateService { service_id, vip, backends, .. } = action {
+                if !state.desired.contains_key(service_id) {
+                    return Err(format!(
+                        "tick {tick_idx}: hydrator emitted DataplaneUpdateService for \
+                         {service_id} which is not in state.desired"
+                    ));
+                }
+                let applied_fp = fingerprint(vip, backends);
                 state.actual.insert(
                     *service_id,
                     ServiceHydrationStatus::Completed {
-                        fingerprint: desired.fingerprint,
+                        fingerprint: applied_fp,
                         applied_at: UnixInstant::from_unix_duration(Duration::from_secs(
                             u64::from(tick_idx) + 1,
                         )),
@@ -132,35 +167,32 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
             }
         }
 
-        // Install next_view per the runtime's persist-then-install
-        // contract. The DST harness has no fsync to elide, so this
-        // is the in-memory installation step the runtime would
-        // normally do after `write_through` returns Ok.
         let AnyReconcilerView::ServiceMapHydrator(next_view_inner) = next_view else {
-            return fail(
-                NAME,
-                "reconciler returned non-ServiceMapHydrator view variant".to_string(),
-            );
+            return Err("reconciler returned non-ServiceMapHydrator view variant".to_string());
         };
         view = next_view_inner;
 
-        // Convergence check — actual.fingerprint matches desired.fingerprint
-        // AND no actions were emitted this tick (idempotent steady state
-        // reached).
-        if actions.is_empty() && all_converged(&state) {
-            return pass(NAME);
+        // Shape-agnostic convergence (§ 10.1): the loop quiesced AND every
+        // desired service has a confirmed Completed row. This holds for
+        // remote-only (Completed{fp(vip,[remote])}), all-mesh / local-only
+        // (Completed{fp(vip,[])} via the empty purge), and mixed alike.
+        if actions.is_empty() && every_service_has_completed_row(&state) {
+            if tick_idx >= shape.max_converge_ticks {
+                return Err(format!(
+                    "converged at tick {tick_idx} but the shape budget is \
+                     {} ticks — convergence is slower than the model allows",
+                    shape.max_converge_ticks
+                ));
+            }
+            return Ok(());
         }
     }
 
-    fail(
-        NAME,
-        format!(
-            "hydrator did not converge within {CONVERGENCE_TICK_BUDGET} ticks; \
-             final state: desired={:?} actual={:?}",
-            state.desired.keys().collect::<Vec<_>>(),
-            state.actual,
-        ),
-    )
+    Err(format!(
+        "did not converge within {CONVERGENCE_TICK_BUDGET} ticks; \
+         final actual={:?}",
+        state.actual,
+    ))
 }
 
 /// Drive the idempotent-steady-state scenario.
@@ -180,82 +212,173 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
 pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
     const NAME: &str = "hydrator-idempotent-steady-state";
 
-    let mut scenario = match build_single_service_scenario() {
-        Ok(s) => s,
-        Err(reason) => return fail(NAME, reason),
-    };
-    // Pre-populate `actual` with the converged Completed status,
-    // matching the post-convergence harness state.
-    let (service_id, desired) = match scenario.state.desired.iter().next() {
-        Some((id, d)) => (*id, d.clone()),
-        None => return fail(NAME, "scenario constructed empty desired map".to_string()),
-    };
-    scenario.state.actual.insert(
-        service_id,
-        ServiceHydrationStatus::Completed {
-            fingerprint: desired.fingerprint,
-            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
-        },
-    );
+    // EACH of the four shapes must emit ZERO actions per tick once
+    // converged (convergence-model.md § 10.2) — the all-mesh and
+    // local-only shapes must NOT re-emit the empty purge once
+    // `Completed{fp(vip,[])}` is observed.
+    for shape in shape_fixtures() {
+        if let Err(reason) = drive_one_shape_steady_state(&shape) {
+            return fail(NAME, format!("shape '{}': {reason}", shape.label));
+        }
+    }
+    pass(NAME)
+}
 
-    let reconciler = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
-    let any_reconciler = AnyReconciler::ServiceMapHydrator(reconciler);
+/// Drive one shape to its converged `actual` (the same programmed-subset
+/// `Completed` row the shim writes), then tick `STEADY_STATE_TICKS` times
+/// and assert every tick emits zero actions.
+fn drive_one_shape_steady_state(shape: &ShapeFixture) -> Result<(), String> {
+    let any_reconciler =
+        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4(), MESH_SUBNET));
 
+    // Build the converged `actual`: for each service, the Completed row
+    // carries `fingerprint(vip, programmed_subset)` — the value the real
+    // shim writes for this shape (the empty purge for all-mesh / local-only,
+    // the remote survivor for remote-only / mixed).
+    let mut state = shape.state.clone();
+    for (service_id, desired) in &shape.state.desired {
+        let programmed = programmed_subset(desired);
+        let applied_fp = fingerprint(&desired.vip, &programmed);
+        state.actual.insert(
+            *service_id,
+            ServiceHydrationStatus::Completed {
+                fingerprint: applied_fp,
+                applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+            },
+        );
+    }
+
+    // Complete the converged precondition for the DECOUPLED local seam
+    // (mechanism L-a, convergence-model.md § 8.3): a converged View must
+    // already carry the last-applied LOCAL fingerprint per service, mirroring
+    // how `actual` above carries the applied PROGRAMMED-remote fingerprint. An
+    // empty `last_applied_local_fingerprint` would (correctly) make the
+    // hydrator's local seam see `local_fingerprint != None` and emit the
+    // tick-0 `RegisterLocalBackend` install — the DESIGNED first-tick behavior,
+    // not a steady-state action. For all-mesh / remote-only shapes
+    // `local_subset` is empty, so `last_applied[sid] = fingerprint(vip, [])`.
     let mut view = ServiceMapHydratorView::default();
+    for (service_id, desired) in &shape.state.desired {
+        let local = local_subset(desired);
+        view.last_applied_local_fingerprint.insert(*service_id, fingerprint(&desired.vip, &local));
+    }
+
     for tick_idx in 0..STEADY_STATE_TICKS {
         let tick = make_tick(tick_idx);
         let (actions, next_view) = any_reconciler.reconcile(
-            &AnyState::ServiceMapHydrator(scenario.state.clone()),
-            &AnyState::ServiceMapHydrator(scenario.state.clone()),
+            &AnyState::ServiceMapHydrator(state.clone()),
+            &AnyState::ServiceMapHydrator(state.clone()),
             &AnyReconcilerView::ServiceMapHydrator(view.clone()),
             &tick,
         );
 
         if !actions.is_empty() {
-            return fail(
-                NAME,
-                format!(
-                    "tick {tick_idx}: converged hydrator emitted {} action(s); \
-                     expected zero. actions={actions:?}",
-                    actions.len(),
-                ),
-            );
+            return Err(format!(
+                "tick {tick_idx}: converged hydrator emitted {} action(s); \
+                 expected zero. actions={actions:?}",
+                actions.len(),
+            ));
         }
 
-        view = match next_view {
-            AnyReconcilerView::ServiceMapHydrator(v) => v,
-            _ => {
-                return fail(
-                    NAME,
-                    "reconciler returned non-ServiceMapHydrator view variant".to_string(),
-                );
-            }
+        let AnyReconcilerView::ServiceMapHydrator(v) = next_view else {
+            return Err("reconciler returned non-ServiceMapHydrator view variant".to_string());
         };
+        view = v;
     }
 
-    pass(NAME)
+    Ok(())
 }
 
-/// Single-service scenario fixture used by both invariants. One
-/// service in `desired` with one healthy backend; `actual` is
-/// empty (cold start).
-struct Scenario {
+/// One service-shape fixture: a label, its `desired`-only state (cold
+/// `actual`), and the convergence-tick budget for the shape.
+struct ShapeFixture {
+    label: &'static str,
     state: ServiceMapHydratorState,
+    /// The shape converges at or before this 0-based tick index.
+    max_converge_ticks: u32,
 }
 
-fn build_single_service_scenario() -> Result<Scenario, String> {
-    let service_id = ServiceId::new(42).map_err(|e| format!("ServiceId construction: {e}"))?;
-    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 42)))
-        .map_err(|e| format!("ServiceVip construction: {e}"))?;
-    let alloc =
-        SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0").map_err(|e| e.to_string())?;
-    let backend = Backend {
-        alloc,
-        addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), 8080),
-        weight: 1,
-        healthy: true,
-    };
-    let backends = vec![backend];
+/// The PROGRAMMED-remote subset of a service's backends — the exact set
+/// the emitted `DataplaneUpdateService` carries and the shim hashes back.
+/// Mirrors the hydrator's gate: drop mesh (`∈ workload_subnet`) and LOCAL
+/// (`== host_ipv4`) backends.
+fn programmed_subset(desired: &ServiceDesired) -> Vec<Backend> {
+    let subnet = MESH_SUBNET;
+    let host = host_ipv4();
+    desired
+        .backends
+        .iter()
+        .filter(|b| match b.addr.ip() {
+            IpAddr::V4(v4) => !subnet.contains(&v4) && v4 != host,
+            IpAddr::V6(_) => true,
+        })
+        .cloned()
+        .collect()
+}
+
+/// The LOCAL survivors of a service's backends — the exact set the
+/// hydrator's `local` arm computes and `RegisterLocalBackend` carries
+/// (mechanism L-a, convergence-model.md § 8.3). Keeps ONLY the LOCAL,
+/// non-mesh V4 backends (`addr.ip() == host_ipv4`); drops mesh
+/// (`∈ workload_subnet`), remote, and V6. For all-mesh / remote-only
+/// shapes the result is empty, so a converged View records
+/// `last_applied_local_fingerprint[sid] = fingerprint(vip, [])` and the
+/// hydrator's decoupled local seam sees no diff on tick 0.
+fn local_subset(desired: &ServiceDesired) -> Vec<Backend> {
+    let host = host_ipv4();
+    desired
+        .backends
+        .iter()
+        .filter(|b| match b.addr.ip() {
+            IpAddr::V4(v4) => v4 == host,
+            IpAddr::V6(_) => false,
+        })
+        .cloned()
+        .collect()
+}
+
+/// The four canonical shapes (convergence-model.md § 10.2). Each is a
+/// single V4-VIP service with one backend in the named address class.
+fn shape_fixtures() -> Vec<ShapeFixture> {
+    vec![
+        // remote-only: [10.96.0.50] — survives; Completed{fp(vip,[remote])}.
+        build_shape("remote-only", &[Ipv4Addr::new(10, 96, 0, 50)]),
+        // all-mesh: [10.99.0.6] — gated out; empty purge → Completed{fp(vip,[])}.
+        build_shape("all-mesh", &[Ipv4Addr::new(10, 99, 0, 6)]),
+        // mixed: the load-bearing case — one mesh (gated out) + one remote
+        // (survives into the programmed subset). This is the face the
+        // faithless full-set echo made structurally undetectable (RCA § 10.4).
+        build_shape(
+            "mixed-mesh-remote",
+            &[Ipv4Addr::new(10, 99, 0, 6), Ipv4Addr::new(10, 96, 0, 50)],
+        ),
+        // local-only: [host_ipv4] — partitioned LOCAL; empty purge → Completed{fp(vip,[])}.
+        build_shape("local-only", &[host_ipv4()]),
+    ]
+}
+
+/// Build a shape fixture carrying the given V4 backend addresses.
+fn build_shape(label: &'static str, backend_ips: &[Ipv4Addr]) -> ShapeFixture {
+    ShapeFixture { label, state: single_service_state(backend_ips), max_converge_ticks: 2 }
+}
+
+/// Construct a one-service `ServiceMapHydratorState` carrying the given V4
+/// backend addresses (each port 8080) on a single non-mesh V4 VIP, with an
+/// empty `actual` (cold start). The VIP (10.0.0.1) is itself NOT in the
+/// mesh subnet, so only the backends' classes are under test.
+fn single_service_state(backend_ips: &[Ipv4Addr]) -> ServiceMapHydratorState {
+    let service_id = ServiceId::new(42).expect("ServiceId accepts any u64");
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let backends: Vec<Backend> = backend_ips
+        .iter()
+        .map(|ip| Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
+            weight: 1,
+            healthy: true,
+        })
+        .collect();
     let fp = fingerprint(&vip, &backends);
 
     let mut desired = BTreeMap::new();
@@ -269,19 +392,18 @@ fn build_single_service_scenario() -> Result<Scenario, String> {
             fingerprint: fp,
         },
     );
-
-    Ok(Scenario { state: ServiceMapHydratorState { desired, actual: BTreeMap::new() } })
+    ServiceMapHydratorState { desired, actual: BTreeMap::new() }
 }
 
-/// True iff every desired service has an `actual.Completed` row whose
-/// fingerprint matches the desired fingerprint.
-fn all_converged(state: &ServiceMapHydratorState) -> bool {
-    state.desired.iter().all(|(service_id, desired)| {
-        matches!(
-            state.actual.get(service_id),
-            Some(ServiceHydrationStatus::Completed { fingerprint, .. })
-                if *fingerprint == desired.fingerprint
-        )
+/// True iff every desired service has a `Completed` `actual` row. This is
+/// the shape-agnostic convergence predicate (convergence-model.md § 10.1):
+/// "the loop quiesced AND a confirmed row exists per service." It does NOT
+/// re-derive the programmable fingerprint — it observes that a `Completed`
+/// row was produced, which (paired with `actions.is_empty()` at the call
+/// site) is the honest convergence signal for every shape.
+fn every_service_has_completed_row(state: &ServiceMapHydratorState) -> bool {
+    state.desired.keys().all(|service_id| {
+        matches!(state.actual.get(service_id), Some(ServiceHydrationStatus::Completed { .. }))
     })
 }
 
@@ -443,7 +565,7 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
         .desired
         .listeners
         .insert(svc_id, ProjectedListener { vip, port, protocol: Proto::Tcp });
-    bridge_state.actual.running.insert(alloc);
+    bridge_state.actual.running.insert(alloc, None);
     let bridge_view = BackendDiscoveryBridgeView::default();
     let tick0 = make_tick(0);
     let (bridge_actions, _bridge_next_view) =
@@ -509,7 +631,10 @@ pub async fn evaluate_bridge_to_hydrator_handoff() -> InvariantResult {
 
     // ---- Step 4: tick the hydrator against the projected desired
     //      with empty actual (no prior service_hydration_results row).
-    let hydrator = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+    let hydrator = ServiceMapHydrator::canonical(
+        std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+    );
     let any_hydrator = AnyReconciler::ServiceMapHydrator(hydrator);
     let hydrator_state = ServiceMapHydratorState { desired: desired_map, actual: BTreeMap::new() };
     let hydrator_view = ServiceMapHydratorView::default();
@@ -742,7 +867,10 @@ mod retry_budget_proptest {
             // `now_secs` is strictly BEFORE the backoff deadline.
             now_delta in 0u64..backoff_for_attempt(0).as_secs(),
         ) {
-            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+            let r = ServiceMapHydrator::canonical(
+                std::net::Ipv4Addr::UNSPECIFIED,
+                overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+            );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;
@@ -818,7 +946,10 @@ mod retry_budget_proptest {
             // Additional seconds beyond the deadline (0 = exactly at boundary).
             extra_secs in 0u64..=60u64,
         ) {
-            let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED);
+            let r = ServiceMapHydrator::canonical(
+                std::net::Ipv4Addr::UNSPECIFIED,
+                overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
+            );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
             let desired_svc = make_desired();
             let fp = desired_svc.fingerprint;

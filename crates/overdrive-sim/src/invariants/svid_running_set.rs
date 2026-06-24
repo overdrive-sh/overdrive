@@ -358,6 +358,9 @@ async fn write_alloc_state(h: &Harness, alloc_raw: &str, state: AllocState) -> R
         kind: overdrive_core::aggregate::WorkloadKind::Job,
         listeners: Vec::new(),
         started_at: None,
+        // svid-churn driver rows are host-netns shapes — no canonical
+        // workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     h.state
         .obs

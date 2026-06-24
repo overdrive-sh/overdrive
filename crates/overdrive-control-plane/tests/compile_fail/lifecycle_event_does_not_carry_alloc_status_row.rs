@@ -41,6 +41,11 @@ fn main() {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // AllocStatusRowV2 additive field (GH #241): present so this
+        // compile-fail fixture fails for its SINGLE intended reason
+        // (the `from:` type mismatch below), not an incidental
+        // missing-field error.
+        workload_addr: None,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

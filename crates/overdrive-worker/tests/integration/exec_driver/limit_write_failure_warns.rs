@@ -56,6 +56,8 @@ async fn limit_write_failure_warns_and_continues() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     // With force-fail injection, the limit-write helper returns

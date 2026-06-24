@@ -1665,7 +1665,8 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let (job, intent_digest, probe_descriptors) = read_job(state, &workload_id).await?;
+            let (job, intent_digest, probe_descriptors, service_ports) =
+                read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
@@ -1698,6 +1699,10 @@ async fn hydrate_desired(
                 // hydrate-desired boundary via `project_probe_descriptors`.
                 // Job-kind / Schedule / absent intent → empty vec.
                 probe_descriptors,
+                // canonical-workload-address-inbound-tproxy (D-A1, GH #241):
+                // declared Service listener ports projected at the same
+                // boundary via `project_service_listen_ports`.
+                service_ports,
             };
             Ok(AnyState::WorkloadLifecycle(s))
         }
@@ -1802,7 +1807,7 @@ async fn hydrate_desired(
                         },
                     actual: overdrive_core::reconcilers::backend_discovery_bridge::RunningAllocSet {
                         workload_id,
-                        running: std::collections::BTreeSet::new(),
+                        running: BTreeMap::new(),
                     },
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
@@ -2291,14 +2296,17 @@ async fn hydrate_svid_actual_held(
 async fn read_job(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>), ConvergenceError> {
+) -> Result<
+    (Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<std::num::NonZeroU16>),
+    ConvergenceError,
+> {
     let key = IntentKey::for_workload(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let Some(b) = bytes else { return Ok((None, None, Vec::new())) };
+    let Some(b) = bytes else { return Ok((None, None, Vec::new(), Vec::new())) };
     let intent = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
         b.as_ref(),
         &state.intent_redb_path,
@@ -2315,9 +2323,16 @@ async fn read_job(
     // landed. The helper is canonical-order (startup → readiness →
     // liveness); Job / Schedule yield empty per ADR-0054 §3.
     let probe_descriptors = overdrive_core::reconcilers::project_probe_descriptors(&intent);
+    // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
+    // #241): project the live intent's declared Service listener ports at
+    // the IDENTICAL hydrate-desired seam as `probe_descriptors`, and thread
+    // them through `WorkloadLifecycleState::service_ports`. One source
+    // (`svc.listeners`), two readers — this producer and the inbound-rule
+    // `dport` install (step 03-01). Job / Schedule yield empty.
+    let service_ports = overdrive_core::reconcilers::project_service_listen_ports(&intent);
     match &intent {
         overdrive_core::aggregate::WorkloadIntent::Job(job) => {
-            Ok((Some(job.clone()), None, probe_descriptors))
+            Ok((Some(job.clone()), None, probe_descriptors, service_ports))
         }
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
             // Project Service onto a kind-agnostic Job shape. JobV1
@@ -2339,10 +2354,10 @@ async fn read_job(
             };
             let digest =
                 intent.spec_digest().map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            Ok((Some(job), Some(digest), probe_descriptors))
+            Ok((Some(job), Some(digest), probe_descriptors, service_ports))
         }
         overdrive_core::aggregate::WorkloadIntent::Schedule(_) => {
-            Ok((None, None, probe_descriptors))
+            Ok((None, None, probe_descriptors, service_ports))
         }
     }
 }
@@ -2553,36 +2568,12 @@ async fn hydrate_actual(
         AnyReconciler::SvidLifecycle(_) => {
             hydrate_svid_actual_held(state, &workload_id_from_target(target)?).await
         }
+        // The WorkloadLifecycle actual-side projection is built in
+        // `hydrate_workload_lifecycle_actual` so this match arm stays within
+        // `clippy::too_many_lines` (same extraction precedent as
+        // `hydrate_svid_actual_held` above).
         AnyReconciler::WorkloadLifecycle(_) => {
-            let workload_id = workload_id_from_target(target)?;
-            let rows = state
-                .obs
-                .alloc_status_rows()
-                .await
-                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            let mut allocations = BTreeMap::new();
-            for row in rows.into_iter().filter(|r| r.workload_id == workload_id) {
-                allocations.insert(row.alloc_id.clone(), row);
-            }
-            let nodes = baseline_nodes_phase1();
-            // `actual.job` / `actual.desired_to_stop` are unused (only
-            // the desired side carries them). Per ADR-0037 Amendment
-            // 2026-05-10 / ADR-0047 §1: read the persisted workload-kind
-            // discriminator so the State pair stays semantically uniform.
-            let workload_kind = read_workload_kind(state, &workload_id).await?;
-            let (_, intent_digest, _) = read_job(state, &workload_id).await?;
-            let service_spec_digest =
-                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-            Ok(AnyState::WorkloadLifecycle(WorkloadLifecycleState {
-                workload_id,
-                job: None,
-                desired_to_stop: false,
-                nodes,
-                allocations,
-                workload_kind,
-                service_spec_digest,
-                probe_descriptors: Vec::new(), // GAP-8: actual side unused; desired side drives action arms
-            }))
+            hydrate_workload_lifecycle_actual(state, &workload_id_from_target(target)?).await
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             // 08-02 hydrate-actual reads from
@@ -2648,13 +2639,20 @@ async fn hydrate_actual(
                 .alloc_status_rows()
                 .await
                 .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
-            let running: std::collections::BTreeSet<AllocationId> = rows
+            // Obligation #2a (GH #241): populate the per-alloc canonical
+            // `workload_addr` into the map VALUE. The V2 alloc-status row
+            // already carries `workload_addr` (a frozen `slot × base`
+            // join materialized at provision time, D-BLOCKER2) — read it
+            // verbatim; the bridge does NOT recompute from `NetSlot`. A
+            // `None` here is a host-netns / non-Path-A alloc; the bridge
+            // falls back to `host_ipv4` for those (D-B2).
+            let running: BTreeMap<AllocationId, Option<std::net::Ipv4Addr>> = rows
                 .into_iter()
                 .filter(|r| {
                     r.workload_id == workload_id
                         && r.state == overdrive_core::traits::observation_store::AllocState::Running
                 })
-                .map(|r| r.alloc_id)
+                .map(|r| (r.alloc_id, r.workload_addr))
                 .collect();
             let s =
                 overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
@@ -2697,6 +2695,48 @@ async fn hydrate_actual(
             hydrate_service_lifecycle_actual(state, &workload_id).await
         }
     }
+}
+
+/// Actual-side projection for the `WorkloadLifecycle` reconciler.
+///
+/// Extracted from [`hydrate_actual`] to keep that fn's match arm within
+/// the `clippy::too_many_lines` budget (same precedent as
+/// [`hydrate_svid_actual_held`]). `actual.job` / `actual.desired_to_stop`
+/// are unused (only the desired side carries them); `probe_descriptors`
+/// and `service_ports` are empty on the actual side — the desired side
+/// drives both action arms.
+async fn hydrate_workload_lifecycle_actual(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<AnyState, ConvergenceError> {
+    let rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    let mut allocations = BTreeMap::new();
+    for row in rows.into_iter().filter(|r| &r.workload_id == workload_id) {
+        allocations.insert(row.alloc_id.clone(), row);
+    }
+    let nodes = baseline_nodes_phase1();
+    // Per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the persisted
+    // workload-kind discriminator so the State pair stays semantically
+    // uniform.
+    let workload_kind = read_workload_kind(state, workload_id).await?;
+    let (_, intent_digest, _, _) = read_job(state, workload_id).await?;
+    let service_spec_digest =
+        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
+    Ok(AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job: None,
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind,
+        service_spec_digest,
+        probe_descriptors: Vec::new(), // GAP-8: actual side unused; desired side drives action arms
+        service_ports: Vec::new(), // D-A1 (GH #241): actual side unused; desired side drives action arms
+    }))
 }
 
 /// Actual-side projection for the `ServiceLifecycle` reconciler.
@@ -2934,11 +2974,17 @@ fn liveness_restart_spec(
             .chain(spec.liveness_probes.iter())
             .cloned()
             .collect(),
-        // Netns-agnostic reconciler side (JOIN-2) — the slot-derived netns
-        // name + host-veth name are injected ONLY at the action-shim C3 site,
-        // never here.
+        // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
+        // #241): the declared Service listener ports — read through the
+        // single `ServiceV1::listen_ports` source the hydrate-desired
+        // projection also reads, so the two sets stay structurally identical.
+        service_ports: spec.listen_ports(),
+        // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
+        // slot-derived netns name, host-veth name, and canonical workload_addr
+        // are injected ONLY at the action-shim C3 site, never here.
         netns: None,
         host_veth: None,
+        workload_addr: None,
     }
 }
 
@@ -3252,6 +3298,22 @@ mod tests {
             alloc_state: AllocState,
             counter: u64,
         ) {
+            write_alloc_status_with_addr(state, alloc, alloc_state, counter, None).await;
+        }
+
+        /// Variant carrying an explicit per-alloc canonical `workload_addr`
+        /// (AllocStatusRowV2 additive field, GH #241). The `None`-default
+        /// `write_alloc_status` delegates here; the bridge-population
+        /// mutation-gate test passes `Some(addr)` to assert the
+        /// `hydrate_actual` read threads the V2 row's `workload_addr` into
+        /// the `RunningAllocSet.running` map value (Obligation #2a).
+        async fn write_alloc_status_with_addr(
+            state: &AppState,
+            alloc: &str,
+            alloc_state: AllocState,
+            counter: u64,
+            workload_addr: Option<std::net::Ipv4Addr>,
+        ) {
             let row = AllocStatusRow {
                 alloc_id: AllocationId::new(alloc).expect("alloc id"),
                 workload_id: workload_id(),
@@ -3269,6 +3331,8 @@ mod tests {
                     AllocState::Pending => None,
                     _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
                 },
+                // Per-alloc canonical workload address (AllocStatusRowV2 additive field, GH #241).
+                workload_addr,
             };
             state
                 .obs
@@ -3469,9 +3533,62 @@ mod tests {
                 panic!("expected BackendDiscoveryBridge variant");
             };
             assert_eq!(s.actual.running.len(), 2, "only Running rows must pass the filter");
-            assert!(s.actual.running.contains(&AllocationId::new("payments-0").expect("alloc id")));
-            assert!(s.actual.running.contains(&AllocationId::new("payments-2").expect("alloc id")));
+            assert!(
+                s.actual.running.contains_key(&AllocationId::new("payments-0").expect("alloc id"))
+            );
+            assert!(
+                s.actual.running.contains_key(&AllocationId::new("payments-2").expect("alloc id"))
+            );
             assert_eq!(s.actual.workload_id, workload_id());
+        }
+
+        /// Obligation #2a (GH #241) — `hydrate_actual` threads each Running
+        /// V2 row's per-alloc `workload_addr` into the `RunningAllocSet.running`
+        /// map VALUE. Mutation-gate for the population read
+        /// (`.map(|r| (r.alloc_id, r.workload_addr))`): a mesh alloc carries
+        /// `Some(10.99.0.6)`; a host-netns alloc carries `None`. A mutant that
+        /// drops the read (`-> None`) or swaps the field is killed by the
+        /// `Some` assertion below.
+        #[tokio::test]
+        async fn hydrate_actual_populates_per_alloc_workload_addr() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let state = build_state(&tmp, None).await;
+
+            let mesh_addr = std::net::Ipv4Addr::new(10, 99, 0, 6);
+            // Mesh (Path-A) alloc — carries the canonical workload_addr.
+            write_alloc_status_with_addr(
+                &state,
+                "payments-mesh",
+                AllocState::Running,
+                1,
+                Some(mesh_addr),
+            )
+            .await;
+            // Host-netns alloc — no canonical workload address.
+            write_alloc_status_with_addr(&state, "payments-host", AllocState::Running, 2, None)
+                .await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &bridge_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::BackendDiscoveryBridge(s) = result else {
+                panic!("expected BackendDiscoveryBridge variant");
+            };
+            assert_eq!(
+                s.actual.running.get(&AllocationId::new("payments-mesh").expect("alloc id")),
+                Some(&Some(mesh_addr)),
+                "mesh alloc must carry Some(workload_addr) read verbatim from the V2 row",
+            );
+            assert_eq!(
+                s.actual.running.get(&AllocationId::new("payments-host").expect("alloc id")),
+                Some(&None),
+                "host-netns alloc must carry None (no canonical workload address)",
+            );
         }
 
         // -------------------------------------------------------------

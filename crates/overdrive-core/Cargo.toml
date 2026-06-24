@@ -85,6 +85,15 @@ toml.workspace = true
 # pure `std::sync::OnceLock` and needs no extra dep.
 parking_lot.workspace = true
 
+# `ipnet` — IPv4 CIDR type (`Ipv4Net`) naming the Path-A/mesh
+# workload subnet the `ServiceMapHydrator` gates mesh backends against
+# (`WORKLOAD_SUBNET_BASE`, D-GATE-PRED). The hydrator takes the generic
+# `Ipv4Net` value as a mandatory ctor param (core MUST NOT depend on
+# the `overdrive-control-plane` wiring crate where the const lives).
+# `ipnet` is a pure-Rust CIDR type with no runtime I/O — NOT on the
+# dst-lint banned-API list.
+ipnet.workspace = true
+
 [features]
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the

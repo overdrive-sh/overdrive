@@ -285,6 +285,8 @@ fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec
         // it directly to exercise the OUTBOUND egress-rule install.
         netns: None,
         host_veth,
+        service_ports: Vec::new(),
+        workload_addr: None,
     }
 }
 

@@ -13,12 +13,12 @@ describes the built-in CA and how it works.
 	resolves the operator key-encryption key, decrypts and adopts the persistent
 	root, and refuses to start if the envelope will not open. Every running
 	allocation then gets a SPIFFE SVID issued, held, and audited, and
-	`overdrive alloc status` reports each one. A held SVID now reaches the wire:
-	[transparent mTLS](/docs/concepts/transparent-mtls) presents it on outbound mesh
-	connections and encrypts the traffic with TLS 1.3. Two consumers are still
-	unbuilt — the ingress gateway and the telemetry sink — and the inbound data path
-	is staged, so identity is minted, persistent, presented on a workload's outbound
-	connections, and not yet carried everywhere. See [Where it stands](#where-it-stands).
+	`overdrive alloc status` reports each one. A held SVID reaches the wire:
+	[transparent mTLS](/docs/concepts/transparent-mtls) presents it on inbound and
+	outbound mesh connections and encrypts the traffic with TLS 1.3. The consumers
+	still unbuilt are the ingress gateway and the telemetry sink, so identity is
+	minted, persistent, and presented across the mesh, but not yet on those two
+	paths. See [Where it stands](#where-it-stands).
 </Callout>
 
 ## Two TLS stories, two CAs
@@ -146,13 +146,12 @@ The built-in CA runs in `overdrive serve`:
   The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
   intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
   host/sim parity all sit on the production path.
-- **On the wire, with consumers still to come:** a held SVID is now presented on
+- **On the wire, with consumers still to come:** a held SVID is presented on
   the wire. [Transparent mTLS](/docs/concepts/transparent-mtls) reads it to run the
-  outbound mesh handshake and encrypt the connection with TLS 1.3 over kTLS —
-  provable with a packet capture. The remaining consumers, the ingress gateway and
-  the telemetry sink, are unbuilt, and the inbound mTLS data path is staged, so a
-  workload's identity is carried on its outbound connections to other workloads but
-  not yet on every path.
+  mesh handshake in both directions and encrypt the connection with TLS 1.3 over
+  kTLS — provable with a packet capture. The remaining consumers, the ingress
+  gateway and the telemetry sink, are unbuilt, so a workload's identity is carried
+  across the mesh but not yet on those paths.
 
 ## Where to go next
 

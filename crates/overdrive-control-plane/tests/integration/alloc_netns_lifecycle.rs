@@ -73,8 +73,10 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
-use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
-use overdrive_core::transition_reason::TransitionReason;
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+};
+use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::SimIdentityRead;
@@ -155,6 +157,8 @@ fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> Allocat
         // seam's own assign/provision/inject is exercised, not pre-set.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     }
 }
 
@@ -482,6 +486,241 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
         !allocator.snapshot().contains_key(&alloc),
         "AC14.3: the slot must be released after terminal teardown",
     );
+
+    worker.stop_alloc(&alloc);
+}
+
+// ---------------------------------------------------------------------------
+// Regression — `FinalizeFailed` teardown is GATED on the terminal kind
+// (canonical-address inbound RCA §9, GH #241).
+//
+// A Service workload with empty startup probes emits
+// `FinalizeFailed { terminal: Some(Stable { .. }) }` one convergence tick after
+// it reaches Running — a SUCCESS announcement that (correctly) keeps the row
+// `Running` (the GAP-9 guard at `action_shim/mod.rs:1024`). Before the fix the
+// `FinalizeFailed` arm ran `teardown_and_release_netns` (and `worker.stop_alloc`)
+// UNCONDITIONALLY, so this success claim destroyed the live Service's
+// per-workload netns + host-veth + nft rules and released its slot — leaving a
+// healthy workload Running but unreachable ~230 ms after start.
+//
+// The fix gates both destructive teardowns on the `Stable` discriminator so a
+// success leaves the alloc untouched while a genuine failure still reaps it.
+// These two tests pin BOTH sides of the gate:
+//
+//   (a) FinalizeFailed { Stable } must NOT tear down — the slot stays HELD and
+//       (root-gated) the netns survives. RED on the pre-fix code.
+//   (b) FinalizeFailed { Failed } must STILL tear down — the slot IS released
+//       and (root-gated) the netns is reaped. Guards against the fix over-gating
+//       (i.e. never tearing down). GREEN before AND after the fix.
+//
+// The slot-snapshot half is the in-memory observable proxy and runs on EVERY
+// host: `teardown_and_release_netns` does teardown-THEN-`release`, and
+// `teardown_workload_netns` swallows an absent netns (`netns_del` → "absent"
+// swallowed), so an alloc whose slot was assigned in-RAM (no real `ip netns add`)
+// still exercises the gate without privilege — today (bug) the Stable teardown
+// releases the slot → snapshot empty → RED; with the gate the slot stays held →
+// GREEN. The `ip netns list` half needs CAP_NET_ADMIN and SKIPs otherwise, like
+// the sub-claims above.
+// ---------------------------------------------------------------------------
+
+/// The opt-out `Stable` witness the `ServiceLifecycleReconciler` emits for an
+/// empty-startup-probes Service (`service_lifecycle.rs:540-558`) — mirrored here
+/// so the dispatched terminal matches the real emission shape.
+fn opt_out_stable_terminal() -> TerminalCondition {
+    TerminalCondition::Stable {
+        settled_in_ms: 0,
+        witness: ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "none (opted out)".to_owned(),
+            inferred: false,
+        },
+    }
+}
+
+/// Seed a prior `Running` `AllocStatusRow` for `alloc` so the `FinalizeFailed`
+/// arm's `find_prior_alloc_row` resolves and the gate is exercised against a
+/// live-Running alloc (the exact precondition of the RCA §9 defect).
+async fn seed_running_row(
+    obs: &dyn ObservationStore,
+    alloc: &AllocationId,
+    workload: &WorkloadId,
+    node: &NodeId,
+) {
+    let row = AllocStatusRow {
+        alloc_id: alloc.clone(),
+        workload_id: workload.clone(),
+        node_id: node.clone(),
+        state: AllocState::Running,
+        // counter 0 so the FinalizeFailed write (`timestamp_for` → counter
+        // `tick.tick + 1` = 1, with the SAME writer = this row's node_id) strictly
+        // DOMINATES under LWW — a counter tie with an equal writer is retained
+        // (idempotency case), which would otherwise mask the finalize write.
+        updated_at: LogicalTimestamp { counter: 0, writer: node.clone() },
+        reason: Some(TransitionReason::Started),
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        workload_addr: None,
+    };
+    obs.write(ObservationRow::AllocStatus(Box::new(row)))
+        .await
+        .expect("seed prior Running alloc row");
+}
+
+#[tokio::test]
+async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
+    let tmp = TempDir::new().expect("tempdir");
+    let store_path = tmp.path().join("intent.redb");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker();
+    // No driver call on the FinalizeFailed arm — a SimDriver is sufficient.
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+
+    let alloc = AllocationId::new("anl-stable").expect("valid alloc id");
+    let workload = WorkloadId::new("svc-anl-stable").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+
+    // Hold slot 0 in the allocator (the observable the gate protects). Assigned
+    // in-RAM — no kernel I/O — so the slot-snapshot assertion runs on every host.
+    let allocator = NetSlotAllocator::new();
+    let slot = allocator.assign(alloc.clone()).expect("assign slot 0");
+    let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    // RAII sweep so a residual netns from a crashed prior run leaves no residue.
+    let _ = teardown_workload_netns(&plan);
+    let _guard = NetnsGuard { plan: plan.clone() };
+
+    // Precondition: the slot is held before the terminal dispatch.
+    assert!(
+        allocator.snapshot().contains_key(&alloc),
+        "precondition: the alloc must hold its slot before the Stable terminal",
+    );
+
+    // Seed the live-Running prior row the FinalizeFailed arm finalizes against.
+    seed_running_row(obs.as_ref(), &alloc, &workload, &node).await;
+
+    // Dispatch the SUCCESS terminal — a Stable FinalizeFailed.
+    dispatch_one(
+        Action::FinalizeFailed {
+            alloc_id: alloc.clone(),
+            terminal: Some(opt_out_stable_terminal()),
+        },
+        driver.as_ref(),
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("FinalizeFailed { Stable } dispatch must succeed");
+
+    // CORE (every host): a Stable success MUST NOT release the slot — the live
+    // Service is still serving on its netns. RED on the pre-fix code (the
+    // unconditional teardown released it).
+    assert!(
+        allocator.snapshot().contains_key(&alloc),
+        "RCA §9: FinalizeFailed {{ Stable }} must NOT tear down a live Running alloc — \
+         the slot must still be held (the netns/veth back a healthy workload)",
+    );
+
+    // The row stays Running (GAP-9 guard) — the Stable claim is a success.
+    let row = latest_row(obs.as_ref(), &alloc).await.expect("alloc row present after finalize");
+    assert_eq!(
+        row.state,
+        AllocState::Running,
+        "RCA §9: a Stable FinalizeFailed keeps the row Running (success claim), got {:?}",
+        row.state,
+    );
+
+    // BONUS (root only): the netns the slot derives must survive. On an
+    // unprivileged host no real netns was ever provisioned, so this is vacuous —
+    // skip it rather than assert against a netns that never existed.
+    if is_root() && netns_present(&plan.netns) {
+        // Only meaningful if a real netns was provisioned (it was not, here, since
+        // we assigned the slot directly). Present-and-still-present is the claim.
+        assert!(
+            netns_present(&plan.netns),
+            "RCA §9: a Stable terminal must not reap the per-workload netns {}",
+            plan.netns,
+        );
+    }
+
+    worker.stop_alloc(&alloc);
+}
+
+#[tokio::test]
+async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
+    let tmp = TempDir::new().expect("tempdir");
+    let store_path = tmp.path().join("intent.redb");
+    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
+        Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
+    let obs = build_obs();
+    let worker = build_worker();
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+
+    let alloc = AllocationId::new("anl-failed").expect("valid alloc id");
+    let workload = WorkloadId::new("svc-anl-failed").expect("valid workload id");
+    let node = NodeId::new("node-001").expect("valid node id");
+
+    let allocator = NetSlotAllocator::new();
+    let slot = allocator.assign(alloc.clone()).expect("assign slot 0");
+    let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let _ = teardown_workload_netns(&plan);
+    let _guard = NetnsGuard { plan: plan.clone() };
+
+    assert!(
+        allocator.snapshot().contains_key(&alloc),
+        "precondition: the alloc must hold its slot before the Failed terminal",
+    );
+
+    seed_running_row(obs.as_ref(), &alloc, &workload, &node).await;
+
+    // Dispatch a GENUINE terminal — a Failed FinalizeFailed (non-Stable).
+    dispatch_one(
+        Action::FinalizeFailed {
+            alloc_id: alloc.clone(),
+            terminal: Some(TerminalCondition::Failed { exit_code: Some(1) }),
+        },
+        driver.as_ref(),
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect("FinalizeFailed { Failed } dispatch must succeed");
+
+    // CORE (every host): a genuine failure MUST still tear down — the slot is
+    // released (teardown-then-release). This guards against the fix OVER-gating
+    // (i.e. never tearing down). GREEN both before and after the fix.
+    assert!(
+        !allocator.snapshot().contains_key(&alloc),
+        "RCA §9 (over-gating guard): FinalizeFailed {{ Failed }} must STILL tear down — \
+         the slot must be released exactly as today",
+    );
+
+    // The row lands Failed (every non-Stable terminal → finalized_state Failed).
+    let row = latest_row(obs.as_ref(), &alloc).await.expect("alloc row present after finalize");
+    assert_eq!(
+        row.state,
+        AllocState::Failed,
+        "a genuine FinalizeFailed terminal must land the row Failed, got {:?}",
+        row.state,
+    );
+
+    // BONUS (root only): the netns is reaped on a genuine failure.
+    if is_root() {
+        assert!(
+            !netns_present(&plan.netns),
+            "RCA §9 (over-gating guard): a Failed terminal must still reap the netns {}",
+            plan.netns,
+        );
+    }
 
     worker.stop_alloc(&alloc);
 }

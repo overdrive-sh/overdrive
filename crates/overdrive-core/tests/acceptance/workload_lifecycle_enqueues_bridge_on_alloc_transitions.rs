@@ -101,6 +101,8 @@ fn alloc_with_state(
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 fn fresh_tick() -> TickContext {
@@ -234,6 +236,7 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -244,6 +247,7 @@ fn start_allocation_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -292,6 +296,7 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -302,6 +307,7 @@ fn stop_allocation_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -352,6 +358,7 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -362,6 +369,7 @@ fn gc_stop_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -412,6 +420,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -422,6 +431,7 @@ fn finalize_failed_branch_dual_emits_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
 
     // View at the ceiling: restart_counts hits RESTART_BACKOFF_CEILING,
@@ -482,6 +492,7 @@ fn converged_tick_emits_no_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -492,6 +503,7 @@ fn converged_tick_emits_no_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -555,6 +567,8 @@ fn terminal_operator_stopped_alloc(
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -594,6 +608,7 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id,
@@ -604,6 +619,7 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();
@@ -672,6 +688,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
@@ -682,6 +699,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick();

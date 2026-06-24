@@ -100,6 +100,8 @@ async fn seed_running_row(
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed Running row");
 }
@@ -149,6 +151,8 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");

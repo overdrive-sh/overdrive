@@ -677,13 +677,21 @@ impl WorkloadLifecycle {
                             // canonical role order. See
                             // `WorkloadLifecycleState::probe_descriptors`.
                             probe_descriptors: desired.probe_descriptors.clone(),
-                            // The reconciler stays netns/veth-AGNOSTIC (JOIN-2):
-                            // the slot-derived netns name + host-veth name are
+                            // D-A1 / D-BLOCKER1 (GH #241): the declared
+                            // Service listener ports, projected at
+                            // hydrate-desired time. Same clone-from-desired
+                            // shape as `probe_descriptors` above. Empty for
+                            // Job-kind / Schedule-kind.
+                            service_ports: desired.service_ports.clone(),
+                            // The reconciler stays netns/veth/addr-AGNOSTIC
+                            // (JOIN-2 + D-A1): the slot-derived netns name,
+                            // host-veth name, and canonical workload_addr are
                             // runtime slot state injected ONLY at the action-shim
                             // C3 site, never carried in intent (criterion 6's
                             // rebuilt-on-restart model).
                             netns: None,
                             host_veth: None,
+                            workload_addr: None,
                         },
                         kind: desired.workload_kind,
                         // Crash-loop restart pathway — the restart cause is
@@ -767,10 +775,17 @@ impl WorkloadLifecycle {
                                 // → liveness in canonical order. See
                                 // `WorkloadLifecycleState::probe_descriptors`.
                                 probe_descriptors: desired.probe_descriptors.clone(),
-                                // Netns/veth-agnostic reconciler (JOIN-2) — see
-                                // the RestartAllocation spec above.
+                                // D-A1 / D-BLOCKER1 (GH #241): declared Service
+                                // listener ports, projected at hydrate-desired
+                                // time — same clone-from-desired shape as
+                                // `probe_descriptors`. See the RestartAllocation
+                                // spec above.
+                                service_ports: desired.service_ports.clone(),
+                                // Netns/veth/addr-agnostic reconciler (JOIN-2 +
+                                // D-A1) — see the RestartAllocation spec above.
                                 netns: None,
                                 host_veth: None,
+                                workload_addr: None,
                             },
                             kind: desired.workload_kind,
                         };
@@ -1036,6 +1051,15 @@ pub struct WorkloadLifecycleState {
     /// silently dropping Service-kind probes even after GAP-6 admission
     /// + GAP-7 spawn-loop wiring landed.
     pub probe_descriptors: Vec<ProbeDescriptor>,
+    /// Declared Service listener ports projected from the live intent at
+    /// hydrate-desired time via [`project_service_listen_ports`]
+    /// (canonical-workload-address inbound-TPROXY, D-A1 / D-BLOCKER1, GH
+    /// #241). Empty for Job-kind / Schedule-kind / absent intent; a Service
+    /// carries its `listeners[].port` set in declaration order. The
+    /// reconciler clones this into every emitted `AllocationSpec.service_ports`
+    /// at the IDENTICAL site/shape as [`Self::probe_descriptors`] so the
+    /// inbound-TPROXY install (step 03-01) receives the declared port set.
+    pub service_ports: Vec<std::num::NonZeroU16>,
 }
 
 /// Project the operator-declared probe descriptors of a
@@ -1093,6 +1117,40 @@ pub fn project_probe_descriptors(
     }
 }
 
+/// Project a workload intent's **declared Service listener ports** for the
+/// canonical-workload-address inbound-TPROXY path (D-A1 / D-BLOCKER1, GH
+/// #241). Mirrors [`project_probe_descriptors`] one-for-one in shape.
+///
+/// This is the producer half of the **one-source / two-readers** invariant
+/// (D-BLOCKER1): the declared `svc.listeners[].port` set is the SINGLE
+/// source the inbound-rule `dport` install (step 03-01) and the
+/// `BackendDiscoveryBridge` advertise path (step 02-01) both read. Keeping
+/// this projection bottomed-out in `svc.listeners` is load-bearing — if a
+/// second path derived the port set from anywhere else, the S-PORTSET
+/// equality property (finalized 02-01) would break.
+///
+/// Per-variant projection:
+///
+/// - [`crate::aggregate::WorkloadIntent::Service(svc)`] →
+///   `svc.listen_ports()` — the operator's declared listener ports in
+///   declaration order, read through the single
+///   [`crate::aggregate::ServiceV1::listen_ports`] source (D-BLOCKER1).
+/// - [`crate::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
+///   no listener surface; the canonical-address inbound path is a
+///   Service-kind concern, same boundary as probes per ADR-0054 §3).
+/// - [`crate::aggregate::WorkloadIntent::Schedule(_)`] → empty vec (the
+///   schedule's per-fire instance is a Job, not a Service — no listeners).
+#[must_use]
+pub fn project_service_listen_ports(
+    intent: &crate::aggregate::WorkloadIntent,
+) -> Vec<std::num::NonZeroU16> {
+    match intent {
+        crate::aggregate::WorkloadIntent::Job(_)
+        | crate::aggregate::WorkloadIntent::Schedule(_) => Vec::new(),
+        crate::aggregate::WorkloadIntent::Service(svc) => svc.listen_ports(),
+    }
+}
+
 /// `WorkloadLifecycle` reconciler's typed view — the runtime-persisted
 /// private memory per ADR-0035.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -1108,4 +1166,149 @@ pub struct WorkloadLifecycleView {
     /// has already been emitted.
     #[serde(default)]
     pub released_for_terminal: BTreeSet<crate::id::ContentHash>,
+}
+
+#[cfg(test)]
+mod project_service_listen_ports_tests {
+    //! Producer-side unit partition for `project_service_listen_ports`
+    //! (canonical-workload-address-inbound-tproxy step 01-02, D-A1 /
+    //! D-BLOCKER1). The projection is a pure function — its signature IS
+    //! the driving port (port-to-port at the domain layer). It mirrors
+    //! `project_probe_descriptors`: a Service projects its declared
+    //! listener ports; Job and Schedule each project the empty vec.
+    //!
+    //! Fixtures build the `Service` arm end-to-end via
+    //! `ServiceV1::from_submit` (the parser-side path), so the projection
+    //! is exercised against the same `svc.listeners` shape the runtime
+    //! hydrate path uses and the bridge reads in 02-01 — keeping the
+    //! S-PORTSET equality property structurally honest (D-BLOCKER1: one
+    //! source, two readers).
+
+    use std::num::{NonZeroU16, NonZeroU32};
+
+    use proptest::prelude::*;
+
+    use crate::aggregate::{
+        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV1, ServiceV1,
+        WorkloadDriver, WorkloadIntent,
+    };
+    use crate::api::submit::{ListenerInput, ServiceSpecInput};
+    use crate::id::WorkloadId;
+    use crate::traits::driver::Resources;
+
+    use super::project_service_listen_ports;
+
+    fn wid(s: &str) -> WorkloadId {
+        WorkloadId::new(s).expect("valid WorkloadId")
+    }
+
+    fn make_job(id: &str) -> Job {
+        Job {
+            id: wid(id),
+            replicas: NonZeroU32::new(1).expect("1 is non-zero"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+        }
+    }
+
+    /// Build a `WorkloadIntent::Service` carrying the given listener
+    /// ports (all TCP) via the validating parser-side path.
+    fn service_with_ports(ports: &[u16]) -> WorkloadIntent {
+        let listeners =
+            ports.iter().map(|p| ListenerInput { port: *p, protocol: "tcp".to_string() }).collect();
+        let input = ServiceSpecInput {
+            id: "svc".to_string(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: DriverInput::Exec(ExecInput {
+                command: "/bin/serve".to_string(),
+                args: vec![],
+            }),
+            listeners,
+            startup_probes: vec![],
+            readiness_probes: vec![],
+            liveness_probes: vec![],
+        };
+        let svc = ServiceV1::from_submit(input).expect("canonical ServiceSpecInput is valid");
+        WorkloadIntent::Service(svc)
+    }
+
+    #[test]
+    fn service_projects_its_declared_listener_ports() {
+        // Declared in DESCENDING order on purpose: an ascending input
+        // (e.g. [8080, 9090]) cannot distinguish an order-PRESERVING
+        // projection from one that sorts its output — both yield the
+        // same vec. A descending declaration makes the "declaration
+        // order" claim falsifiable: a sorting projection would yield
+        // [8080, 9090] and fail this assertion.
+        let intent = service_with_ports(&[9090, 8080]);
+
+        let projected = project_service_listen_ports(&intent);
+
+        let expected: Vec<NonZeroU16> = vec![
+            NonZeroU16::new(9090).expect("9090 is non-zero"),
+            NonZeroU16::new(8080).expect("8080 is non-zero"),
+        ];
+        assert_eq!(
+            projected, expected,
+            "Service must project its listener ports in declaration order \
+             (a sorting projection would yield [8080, 9090] and fail here)",
+        );
+    }
+
+    #[test]
+    fn job_kind_projects_the_empty_port_set() {
+        let intent = WorkloadIntent::Job(make_job("a-job"));
+
+        let projected = project_service_listen_ports(&intent);
+
+        assert!(
+            projected.is_empty(),
+            "Job-kind has no listener surface — must project the empty vec, got {projected:?}",
+        );
+    }
+
+    #[test]
+    fn schedule_kind_projects_the_empty_port_set() {
+        let intent = WorkloadIntent::Schedule(ScheduleV1 {
+            id: wid("a-schedule"),
+            job: make_job("a-schedule"),
+            cron_expr: CronExpr::new("0 * * * *").expect("valid cron"),
+        });
+
+        let projected = project_service_listen_ports(&intent);
+
+        assert!(
+            projected.is_empty(),
+            "Schedule-kind has no listener surface — must project the empty vec, got {projected:?}",
+        );
+    }
+
+    proptest! {
+        /// Producer side of S-PORTSET (finalized 02-01): over an
+        /// arbitrary non-empty set of distinct listener ports, the
+        /// projected set equals the declared set. D-BLOCKER1 — the
+        /// projection bottoms out in `svc.listeners`, the single source
+        /// the inbound-rule `dport` (03-01) and the bridge (02-01) also
+        /// read.
+        #[test]
+        fn service_projection_equals_declared_listener_set(
+            ports in prop::collection::btree_set(1u16..=u16::MAX, 1..=8)
+        ) {
+            let declared: Vec<u16> = ports.iter().copied().collect();
+            let intent = service_with_ports(&declared);
+
+            let projected = project_service_listen_ports(&intent);
+
+            let expected: Vec<NonZeroU16> = declared
+                .iter()
+                .map(|p| NonZeroU16::new(*p).expect("port is non-zero"))
+                .collect();
+            prop_assert_eq!(
+                projected,
+                expected,
+                "projected listener-port set must equal the declared listener set",
+            );
+        }
+    }
 }

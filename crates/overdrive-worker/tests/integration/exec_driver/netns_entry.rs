@@ -149,6 +149,8 @@ async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
         // placed it) and enters it via `setns(CLONE_NEWNET)`.
         netns: Some(target_ns.name.clone()),
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver
@@ -206,6 +208,8 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
         // open() pre-flight fails → `DriverError::NetnsEntry`.
         netns: Some(missing_name.clone()),
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let err = driver.start(&spec).await.expect_err("start must fail for missing netns");

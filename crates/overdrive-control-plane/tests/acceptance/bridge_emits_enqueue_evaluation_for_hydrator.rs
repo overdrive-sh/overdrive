@@ -67,7 +67,7 @@ fn bridge_reconcile_emits_paired_write_and_enqueue_for_hydrator() {
         .desired
         .listeners
         .insert(service_id, ProjectedListener { vip, port, protocol: Proto::Tcp });
-    state.actual.running.insert(alloc);
+    state.actual.running.insert(alloc, None);
     let view = BackendDiscoveryBridgeView::default();
 
     let (actions, _next_view) = bridge.reconcile(&state, &state, &view, &tick(1));
@@ -130,7 +130,7 @@ fn bridge_dedup_branch_emits_zero_actions_including_no_enqueue() {
         .desired
         .listeners
         .insert(service_id, ProjectedListener { vip, port, protocol: Proto::Tcp });
-    state.actual.running.insert(alloc);
+    state.actual.running.insert(alloc, None);
 
     // First tick — write happens; expect dual emission.
     let (actions_first, view_after_first) =

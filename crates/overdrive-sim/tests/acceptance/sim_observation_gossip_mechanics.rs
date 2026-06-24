@@ -50,6 +50,8 @@ fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -184,6 +186,8 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this

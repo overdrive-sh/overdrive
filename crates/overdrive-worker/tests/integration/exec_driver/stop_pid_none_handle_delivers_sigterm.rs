@@ -63,6 +63,8 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     // Start the allocation but intentionally discard the returned handle,

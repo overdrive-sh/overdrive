@@ -112,6 +112,8 @@ fn alloc_with_state(
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -154,6 +156,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -164,6 +167,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     (desired, actual)
 }

@@ -54,6 +54,8 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

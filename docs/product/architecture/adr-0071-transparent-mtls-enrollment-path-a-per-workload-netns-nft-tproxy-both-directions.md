@@ -975,3 +975,84 @@ full rationale.
   expected-SVID join), #243 (in-agent name responder — reframed from "DNS responder
   daemon"), and #244 (client-side SPIFFE-ID library). #61 stays the VIP/non-native
   path, NOT the name responder.)*
+
+## Amendment 2026-06-22 (#241 — canonical-workload-address inbound TPROXY production install)
+
+**Status: Accepted.** Pins the production wiring of the inbound nft-TPROXY install
+this ADR deferred (fact 1 / fact 3 INBOUND named #241 as the owner; `start_alloc`
+recorded `tproxy_guard = None`). Settled by THREE Tier-3 spikes
+(`docs/feature/canonical-workload-address-inbound-tproxy/spike/findings{,-cgroup-firing-scope,-vip-lb-inert}.md`,
+kernel 7.0). Full design: that feature's `feature-delta.md` +
+`design/wave-decisions.md`. Purely ADDITIVE on the locked Path-A model — no
+`MtlsEnforcement`/`MtlsResolve` contract change.
+
+### A1 — keystone install (closes the `tproxy_guard = None` deferral)
+
+`AllocationSpec` gains TWO pure in-memory fields (SAME channel as the
+already-shipped slot-derived `netns` / `host_veth` — `Debug, Clone, PartialEq, Eq`,
+NO serde, NO rkyv, never persisted): `pub workload_addr: Option<Ipv4Addr>` and
+`pub service_ports: Vec<NonZeroU16>`.
+
+- `workload_addr` is set at the C3 `provision_and_inject_netns` site from
+  `plan.workload_addr` (beside the existing `spec.netns`/`spec.host_veth`
+  injection) — `Some` ONLY on a Path-A (mTLS-composed) alloc, `None` otherwise.
+- `service_ports` is set by `WorkloadLifecycle` via a new
+  `project_service_listen_ports(intent)` mirroring `project_probe_descriptors`
+  (`Service(svc) => svc.listeners.iter().map(|l| l.port).collect()`,
+  `Job/Schedule => Vec::new()`).
+- In `start_alloc`, `tproxy_guard = None` is REPLACED: for each `port` in
+  `spec.service_ports`, when `spec.workload_addr` is `Some(addr)`, call
+  `install_inbound_tproxy(SocketAddrV4::new(addr, port.get()), leg_c_addr.port())`
+  and retain the returned `TproxyInterceptGuard`(s) for the alloc lifetime (the
+  single guard becomes a `Vec`). N listeners → N rules; Job-kind (0 listeners) →
+  0 inbound rules. Reuses the inline `leg_c_addr` local (the shape the deferral
+  comment anticipated: "if #241 mirrors leg-F and installs in `start_alloc` it
+  would read an inline `leg_c_addr` local").
+
+### BLOCKER1 — the inbound rule's dport contract (one source, two readers, D-TME-10)
+
+The inbound rule keys on `ip daddr <workload_addr> tcp dport <service_port>`, where
+`service_port` = **the declared Service listener port** — the SAME value
+`service_backends` advertises and the egress `MtlsResolve` keys on
+(`MtlsResolve::resolve` keys on the full `(addr,port)`). It is NOT the ephemeral
+`leg_c_addr.port()` (the self-referential shape this ADR's deferral explicitly
+rejected as inert), NOT all-TCP, NOT a hardcoded port. This realizes D-TME-10's
+one-source/two-readers invariant on the inbound leg: name, advertise, resolve, and
+intercept all key on one declared port.
+
+### B2 — canonical-address advertise
+
+`BackendDiscoveryBridge` advertises `Backend.addr = workload_addr:port` instead of
+`host_ipv4:port`. This is what makes the egress `ServiceBackendsResolve` index
+(C4) classify a dial to the canonical `workload_addr` as `Mesh` (else the inbound
+leg fails closed). **`ServiceBackendRow.vip` is UNCHANGED** — the dialable-VIP path
+is #61 territory, orthogonal (the VIP *allocator* #167 already shipped). The bridge
+reads the per-alloc `workload_addr` as an OBSERVED input (BLOCKER2).
+
+### BLOCKER2 — `workload_addr` is an observed input, persisted on `AllocStatusRow` V2
+
+The bridge (`overdrive-core`) must read the per-alloc `workload_addr` as an
+observed fact. **Persist `workload_addr: Option<Ipv4Addr>` directly on
+`AllocStatusRow` (an `AllocStatusRowEnvelope::V2` bump per `development.md` § "rkyv
+schema evolution" 6-step), NOT the `NetSlot` to recompute at the bridge.** Reason:
+the slot→addr derivation + `WORKLOAD_SUBNET_BASE` live in `overdrive-control-plane`
+(recompute-at-bridge needs a core relocation), AND the base is a future
+operator-tunable (#239) — recomputing `base + slot*4 + 2` at a later tick against a
+drifted base would advertise an addr different from the one the inbound rule was
+installed on. The addr is a slot×base-at-provision-time join the inbound contract
+already committed to; persisting that materialization keeps install / observe /
+advertise byte-identical. `RunningAllocSet.running` widens
+`BTreeSet<AllocationId>` → `BTreeMap<AllocationId, Option<Ipv4Addr>>` to carry it.
+The #239 tunable-base caveat is an accepted single-cut-greenfield risk for
+single-node v1 (a base change is a redeploy, not a live re-tune).
+
+### Cross-reference
+
+The ADR-0053↔ADR-0071 same-host-LB reconciliation (the D-GATE decision — gate
+`ServiceMapHydrator` off Path-A `workload_addr` backends so the
+`cgroup_connect4_service` hook misses and nft-TPROXY owns mesh delivery) is
+recorded as an **ADR-0053 amendment** (2026-06-22), since it governs ADR-0053's
+classifier. It is empirically proven safe by `findings-vip-lb-inert.md`
+(no live v1 VIP-LB consumer → B2 safe, GATE sufficient, TEACH unnecessary until a
+dialable-VIP path ships — #61; the VIP *allocator* #167 already shipped, and this
+ADR-0053 amendment is the durable GATE→TEACH record).

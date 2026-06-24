@@ -1,0 +1,90 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-mesh-only-reconcile-loop",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T08:46:01Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T08:53:02Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new internal helper",
+      "t": "2026-06-24T08:53:02Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:08:15Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:08:15Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:12:31Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:14:01Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new internal helper",
+      "t": "2026-06-24T09:14:02Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: in-scope production+test GREEN (new churn test passes; 699 overdrive-core tests, doctests, dst-lint, clippy all green) but cargo dst hydrator-idempotent-steady-state local-only shape fails \u2014 requires an out-of-boundary DST invariant harness edit; escalated to orchestrator for boundary approval",
+      "t": "2026-06-24T09:19:53Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: no commit \u2014 blocked on out-of-boundary DST invariant harness edit (cargo dst hydrator-idempotent-steady-state local-only shape, overdrive-sim/src/invariants/service_map_hydrator.rs). All in-scope GREEN (new churn test + 699 overdrive-core tests + doctests + dst-lint + clippy). Escalated to orchestrator for boundary approval before COMMIT.",
+      "t": "2026-06-24T09:20:42Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:33:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T09:38:51Z"
+    }
+  ]
+}

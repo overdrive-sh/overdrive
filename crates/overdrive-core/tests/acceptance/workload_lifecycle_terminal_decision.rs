@@ -109,6 +109,8 @@ fn alloc_with_state(
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -159,6 +161,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -169,6 +172,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
@@ -222,6 +226,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -232,6 +237,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -271,6 +277,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -281,6 +288,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -326,6 +334,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let actual = WorkloadLifecycleState {
         workload_id: jid("payments"),
@@ -336,6 +345,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     };
     let mut restart_counts = BTreeMap::new();
     // Budget remaining: attempts < ceiling.
@@ -423,6 +433,7 @@ proptest! {
                     workload_kind: WorkloadKind::default(),
                     service_spec_digest: None,
                     probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
         };
         let actual = WorkloadLifecycleState {
             workload_id: jid("payments"),
@@ -433,6 +444,7 @@ proptest! {
             workload_kind: WorkloadKind::default(),
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
         };
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(aid("alloc-payments-0"), attempts);

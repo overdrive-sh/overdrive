@@ -68,6 +68,8 @@ async fn live_map_returns_to_zero_after_eight_start_stop_cycles() {
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         };
 
         let handle = driver.start(&spec).await.expect("start succeeds");

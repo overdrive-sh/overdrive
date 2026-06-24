@@ -52,6 +52,8 @@ async fn child_pid_appears_in_cgroup_procs() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");

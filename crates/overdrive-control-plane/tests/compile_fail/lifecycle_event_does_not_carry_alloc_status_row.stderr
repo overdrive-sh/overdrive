@@ -1,5 +1,5 @@
 error[E0308]: mismatched types
-  --> tests/compile_fail/lifecycle_event_does_not_carry_alloc_status_row.rs:53:15
+  --> tests/compile_fail/lifecycle_event_does_not_carry_alloc_status_row.rs:58:15
    |
-53 |         from: row, // <-- expected type `AllocStateWire`, found `AllocStatusRow`
-   |               ^^^ expected `AllocStateWire`, found `AllocStatusRowV1`
+58 |         from: row, // <-- expected type `AllocStateWire`, found `AllocStatusRow`
+   |               ^^^ expected `AllocStateWire`, found `AllocStatusRowV2`

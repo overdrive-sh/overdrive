@@ -2448,7 +2448,15 @@ pub fn service_map_hydrator(
 ) -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::reconcilers::{AnyReconciler, ServiceMapHydrator};
 
-    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4))
+    use crate::veth_provisioner::WORKLOAD_SUBNET_BASE;
+
+    // Thread the SAME `WORKLOAD_SUBNET_BASE` the provisioner carves
+    // per-allocation `/30`s from (one source, D-GATE-PRED) so the
+    // hydrator gates Path-A/mesh backends out of BOTH LB paths.
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
+        host_ipv4,
+        WORKLOAD_SUBNET_BASE,
+    ))
 }
 
 #[cfg(test)]

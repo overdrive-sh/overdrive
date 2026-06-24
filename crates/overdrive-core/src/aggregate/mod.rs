@@ -939,6 +939,22 @@ impl JobV1 {
 }
 
 impl ServiceV1 {
+    /// The **single source** for this Service's operator-declared
+    /// listener-port set, in declaration order (D-BLOCKER1
+    /// one-source/two-readers, GH #241).
+    ///
+    /// `self.listeners[].port` is the canonical declaration the
+    /// inbound-TPROXY path keys on. Both the reconciler producer
+    /// ([`crate::reconcilers::workload_lifecycle::project_service_listen_ports`]
+    /// Service arm) and the Slice 05 liveness-restart spec path read
+    /// through this one method, so the projected set stays structurally
+    /// identical across the two readers — a future filter / dedup / sort
+    /// lives here and cannot diverge between them.
+    #[must_use]
+    pub fn listen_ports(&self) -> Vec<std::num::NonZeroU16> {
+        self.listeners.iter().map(|l| l.port).collect()
+    }
+
     /// Project a persisted `ServiceV1` plus its platform-issued VIP onto
     /// the describe-wire [`crate::api::describe::ServiceSpecOutput`] per
     /// ADR-0064 § 3.

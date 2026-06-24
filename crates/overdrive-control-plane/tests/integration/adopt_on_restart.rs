@@ -265,6 +265,8 @@ async fn obs_with_running(alloc: &AllocationId) -> Arc<dyn ObservationStore> {
         kind: overdrive_core::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write Running row");
     obs

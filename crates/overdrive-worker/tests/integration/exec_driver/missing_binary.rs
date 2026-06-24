@@ -50,6 +50,8 @@ async fn missing_binary_does_not_create_cgroup_scope() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let result = driver.start(&spec).await;

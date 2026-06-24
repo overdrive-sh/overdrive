@@ -74,6 +74,8 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
             AllocState::Pending => None,
             _ => Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         },
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -255,6 +257,8 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Draining state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     peer_c
         .write(ObservationRow::AllocStatus(Box::new(t1_row.clone())))

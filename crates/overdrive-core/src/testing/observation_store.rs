@@ -179,6 +179,12 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         kind: crate::aggregate::WorkloadKind::Service,
         listeners: Vec::new(),
         started_at,
+        // Generic LWW-conformance harness rows are host-netns shapes —
+        // no Path-A netns provision, so no canonical workload address.
+        // `None`, symmetric with `AllocationSpec.netns`/`host_veth`
+        // being absent (canonical-workload-address-inbound-tproxy,
+        // GH #241 / AllocStatusRowV2 additive field).
+        workload_addr: None,
     }
 }
 

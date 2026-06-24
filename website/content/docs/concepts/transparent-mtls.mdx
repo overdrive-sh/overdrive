@@ -1,6 +1,6 @@
 ---
 title: Transparent mTLS
-description: How Overdrive encrypts traffic between workloads with each workload's own SPIFFE identity. Each workload runs in its own network namespace and opens an ordinary socket; a node-agent-owned L4 proxy captures the connection, resolves which mesh backend it targets, runs the TLS 1.3 handshake with the workload's SVID, and hands steady-state crypto to the kernel. The outbound enforcement path ships and is provable with tcpdump.
+description: How Overdrive encrypts traffic between workloads with each workload's own SPIFFE identity. Each workload runs in its own network namespace and opens an ordinary socket; a node-agent-owned L4 proxy captures the connection in both directions, resolves which mesh backend it targets, runs the TLS 1.3 handshake with the workload's SVID, and hands steady-state crypto to the kernel. Both directions run in overdrive serve and are provable with a wire capture.
 ---
 
 This is the layer that finally puts identity on the wire. The
@@ -9,20 +9,19 @@ the [lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) holds it
 in-process and drops it on stop. Neither one encrypts a packet. This subsystem
 does: it terminates and originates TLS 1.3 on the workload's behalf, presenting
 the workload's SVID, so two workloads that opened plain sockets end up talking
-ciphertext authenticated to the platform's trust bundle. The outbound path runs
-in `overdrive serve` today, and a packet capture proves it — TLS 1.3 records on
-the wire, zero plaintext.
+ciphertext authenticated to the platform's trust bundle. Both directions run in
+`overdrive serve`, and a packet capture proves it — TLS 1.3 records on the wire,
+zero plaintext.
 
-<Callout title="Outbound ships; inbound is staged">
-	The outbound enforcement path is live end-to-end in `overdrive serve` and proven
-	by a wire capture: a workload's connection is captured on egress, resolved to its
-	mesh backend, handshaked with the workload's SVID, and encrypted with
-	TLS 1.3. The inbound path is designed and spike-proven on a real kernel — the
-	server-side listener and accept loop stand up per allocation — but the production
-	rule that aims real client traffic at that listener is not yet installed, so
-	inbound traffic is not intercepted in a running deploy. v1 covers process
-	workloads on a single node, with chain-to-bundle authentication. See
-	[Where it stands](#where-it-stands).
+<Callout title="v1 scope">
+	Transparent mTLS encrypts mesh traffic in both directions for process workloads
+	on a single node, and a wire capture proves it. Each workload is reachable at its
+	own canonical mesh address; a client that dials that address on a service port is
+	captured, handshaked, and delivered to the server over TLS 1.3. Authentication is
+	chain-to-bundle — a presented SVID is verified against the trust bundle, and
+	pinning a specific expected peer identity is not part of this cut. Workloads dial
+	concrete canonical addresses; resolving a service name to one is a separate
+	node-local responder. See [Where it stands](#where-it-stands).
 </Callout>
 
 ## The workload holds nothing
@@ -130,13 +129,14 @@ verifies** a client certificate against the trust bundle, arms kTLS-RX, and
 splices byte-exact plaintext to the identity-unaware server. A client that cannot
 present a valid chain never reaches the workload.
 
-The agent's transparent listener and accept loop stand up per allocation in
-`serve` today. What is staged is the production rule that aims real client traffic
-at that listener. Its match key is the address a client dials to reach the server
-workload, and a single-node process deploy has no source for that address yet —
-the same name-resolution gap that a workload dialing a peer by name depends on.
-Until that rule is installed, inbound interception is exercised by the integration
-tests, not by a running deploy.
+The match key is the workload's **canonical mesh address**. Each allocation gets
+its own address on the mesh — its routable identity — and the agent advertises that
+address as the workload's backend. When the allocation starts, the agent installs
+one capture rule per declared service port, each keyed on the canonical address and
+that port. A client that dials `canonical-address:service-port` lands on the rule,
+the agent's server leg terminates the handshake, and the byte stream splices through
+to the workload. The client dials the concrete address directly; resolving a service
+name to it is a separate node-local responder.
 
 ## Fail closed, never cleartext
 
@@ -170,7 +170,11 @@ the same capture finds zero plaintext bytes from the workload's payload. The
 egress capture rule is visible in `nft list ruleset`, the workload's network
 namespace in `ip netns identify`, and the kernel's TLS upper-layer protocol state
 in `ss -tie`. The agent's recovery of the dialed address is checked against the
-address the workload actually used. The handshake-rejection and boot-refusal cases
+address the workload actually used. The inbound path is proven the same way: a
+deploy of two mesh workloads runs a real client handshake to the server's canonical
+address, and it completes only because the server-side capture rule routes the
+connection to the agent's leg — remove the rule and the handshake fails. The
+handshake-rejection and boot-refusal cases
 are proven by their negatives: a client without a valid chain is refused, and a
 node with an injected probe fault refuses to boot.
 
@@ -180,27 +184,23 @@ capture.
 
 ## Where it stands
 
-Transparent mTLS enforcement is wired into `serve`, with a clear line between
-what runs in a deploy and what is staged:
+Transparent mTLS encrypts mesh traffic in both directions, wired into `serve`:
 
-- **Live in serve:** the outbound path. A process workload's connection is
+- **Both directions in a deploy.** A process workload's outbound connection is
   captured on egress, resolved per connection to its mesh backend, handshaked with
-  the workload's SVID, and encrypted with TLS 1.3 over kTLS — proven
-  end-to-end by the wire capture above. Each workload runs in its own network
-  namespace. Boot-time, per-allocation, and restart-recovery enforcement all fail
-  closed.
-- **Staged:** the inbound production data path. The agent's server-side listener
-  and handshake stand up per allocation, but the rule that routes real client
-  traffic to them waits on resolving the address a client dials to reach a
-  workload. Dialing a peer by service name waits on the node-local DNS responder;
-  today the agent resolves whatever concrete address a workload dials.
-- **v1 scope:** process workloads only, on a single node, with chain-to-bundle
-  authentication — a presented SVID is verified against the trust bundle, but the
-  caller does not yet pin which specific peer identity it expects. The resolve
-  returns a concrete running backend address, not a virtual service IP. Sealed-VM
-  and unikernel workloads, intended-peer identity pinning, and the service-VIP path
-  are designed and tracked, not shipped.
-- **No operator verb:** encryption is automatic. There is no command to enable or
+  the workload's SVID, and encrypted with TLS 1.3 over kTLS. A connection inbound to
+  a workload's canonical mesh address is captured by a per-port rule the agent
+  installs when the allocation starts, handshaked server-side, and spliced to the
+  workload. Each workload runs in its own network namespace. Boot-time,
+  per-allocation, and restart-recovery enforcement all fail closed.
+- **Authentication is chain-to-bundle.** A presented SVID is verified against the
+  trust bundle. The caller does not pin which specific peer identity it expects.
+- **Workloads dial concrete addresses.** The resolve returns a running backend's
+  canonical address, not a virtual service IP, and a client dials that address
+  directly. Resolving a service name to it is a separate node-local responder.
+- **Process workloads, single node.** Sealed-VM and unikernel workloads, and the
+  multi-node mesh, are outside this scope.
+- **No operator verb.** Encryption is automatic. There is no command to enable or
   disable it; `overdrive deploy <SPEC>` is the only workload verb, and a deployed
   mesh workload is encrypted without further configuration.
 

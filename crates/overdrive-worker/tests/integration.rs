@@ -99,6 +99,25 @@ mod integration {
     // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
     mod bidirectional_walking_skeleton;
 
+    // canonical-workload-address-inbound-tproxy (GH #241) — DISTILL RED scaffolds.
+    // The keystone slice: production-installed inbound nft-TPROXY (from
+    // `start_alloc` off `spec.{workload_addr, service_ports}`), NO test-installed
+    // rule, NO synthetic loopback virt. The S-WS keystone
+    // (`canonical_address_inbound_walking_skeleton`) RELOCATED to the
+    // `overdrive-control-plane` test tree (R1): it drives in-process `run_server`,
+    // which lives in `overdrive-control-plane` (`overdrive-control-plane`
+    // depends-on `overdrive-worker`, so a worker-crate test cannot reach
+    // `run_server` — a reverse edge is a Cargo-rejected cycle). The remaining
+    // worker-tree scenarios observe the production-installed nft rule shape via
+    // `start_alloc` directly: S-NRULES/S-DPORT/S-JOB0.
+    // Shared Tier-3 fixture for S-NRULES / S-DPORT / S-JOB0 (step 03-01): the
+    // kernel-state lock, shared-infra scrub, chain dump, and `AllocationSpec`
+    // builder all three inbound-rule scenarios drive `start_alloc` through.
+    mod inbound_rule_keys_declared_port;
+    mod inbound_rules_per_listener;
+    mod inbound_tproxy_harness;
+    mod job_kind_installs_no_inbound_rule;
+
     // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
     // invariant (Tier-3 obligation (e) / Q5a / D-TME-9 / D-TME-10): a DNS-returned
     // service_backends addr IS the addr MtlsResolve recognizes. The workload dials

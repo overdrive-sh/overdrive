@@ -190,6 +190,7 @@ pub use workflow_lifecycle::{
 pub use workload_lifecycle::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
     WorkloadLifecycleView, backoff_for_attempt, project_probe_descriptors,
+    project_service_listen_ports,
 };
 
 // `ServiceLifecycleReconciler` lives in `overdrive_core::service_lifecycle`

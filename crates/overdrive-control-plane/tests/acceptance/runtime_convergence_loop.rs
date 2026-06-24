@@ -136,6 +136,8 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     state
         .obs
@@ -314,6 +316,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     state
         .obs
@@ -918,6 +922,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
@@ -928,6 +933,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
+        service_ports: Vec::new(),
     });
 
     // Single TickContext shared across both reconcile calls — same
@@ -1125,6 +1131,8 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Failed-after-running carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     state
         .obs

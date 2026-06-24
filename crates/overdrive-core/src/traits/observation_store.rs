@@ -311,7 +311,16 @@ impl LogicalTimestamp {
 /// Writers go through [`AllocStatusRow::latest`]
 /// (= [`AllocStatusRowEnvelope::latest`]); readers project through
 /// [`AllocStatusRowEnvelope::into_latest`].
-pub type AllocStatusRow = AllocStatusRowV1;
+///
+/// Re-aliased V1 → V2 in the same commit as the
+/// `AllocStatusRowEnvelope::V2` bump
+/// (canonical-workload-address-inbound-tproxy, GH #241) — the public
+/// name tracks the LATEST payload (alias-to-payload, UI-02), so
+/// struct-literal call sites pick up the additive `workload_addr`
+/// field. The exit-observer write path populates it; every host-netns
+/// fixture leaves it `None` (defaulted by the `From<V1> for V2`
+/// up-conversion on legacy reads).
+pub type AllocStatusRow = AllocStatusRowV2;
 
 /// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
 ///
@@ -642,9 +651,21 @@ impl JobSpec {
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocStatusRowEnvelope {
     V1(AllocStatusRowV1),
+    // V2 appends the materialized per-alloc `workload_addr` (the
+    // `slot × base-at-provision` join the inbound nft rule is keyed on)
+    // — canonical-workload-address-inbound-tproxy, GH #241 / ADR-0071
+    // Path A. The V1 discriminant is UNMOVED (declaration order: V1 = 0,
+    // V2 = 1) so pre-existing V1 archives continue to read through the
+    // `From<V1> for V2` chain. Per `development.md` § "rkyv schema
+    // evolution" → "Version-bump procedure".
+    V2(AllocStatusRowV2),
 }
 
-pub type AllocStatusRowLatest = AllocStatusRowV1;
+// Alias-to-payload (UI-02): the public name points at the LATEST
+// payload struct so call sites keep using struct-literal
+// `AllocStatusRow { ... }`. Re-aliased V1 → V2 in the same commit as
+// the variant append.
+pub type AllocStatusRowLatest = AllocStatusRowV2;
 
 // SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
 // enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
@@ -712,16 +733,112 @@ pub struct AllocStatusRowV1 {
     pub started_at: Option<UnixInstant>,
 }
 
+// SCAFFOLD: false — V2 payload for `AllocStatusRowEnvelope`
+// (canonical-workload-address-inbound-tproxy, GH #241). `pub` due to
+// rustc E0446 in the trait impl (same constraint as V1); Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocStatusRowV2 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub node_id: NodeId,
+    pub state: AllocState,
+    pub updated_at: LogicalTimestamp,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub terminal: Option<TerminalCondition>,
+    pub stderr_tail: Option<String>,
+    pub kind: WorkloadKind,
+    pub listeners: Vec<ListenerRow>,
+    /// Wall-clock instant at which this allocation first transitioned
+    /// Pending → Running. Carried forward verbatim from
+    /// [`AllocStatusRowV1::started_at`] — see that field's docstring
+    /// for the full "persist inputs, not derived state" rationale.
+    pub started_at: Option<UnixInstant>,
+    /// Canonical per-allocation workload address — the **materialized
+    /// `slot × base-at-provision` join** the inbound nft-TPROXY rule is
+    /// keyed on (canonical-workload-address-inbound-tproxy, GH #241 /
+    /// ADR-0071 Path A, feature-delta BLOCKER-2).
+    ///
+    /// # What this is
+    ///
+    /// A frozen snapshot of `WORKLOAD_SUBNET_BASE + slot*4 + 2`,
+    /// computed ONCE at provision time (`plan.workload_addr` at the C3
+    /// seam) and persisted here as an **observed input** — the exact
+    /// same value three readers share: the inbound nft rule installed
+    /// against it, this persisted row, and the
+    /// `BackendDiscoveryBridge` advertise (`workload_addr:port`).
+    /// Persisting the materialized join (rather than the `NetSlot` to
+    /// recompute) keeps the address byte-identical across install,
+    /// observe, and advertise — a recompute-at-the-bridge would diverge
+    /// the instant the base is re-tuned.
+    ///
+    /// # Semantics
+    ///
+    /// - `None`: a host-netns workload (no provisioned netns / no
+    ///   Path-A interception). Every current fixture. Symmetric with
+    ///   `AllocationSpec.netns` / `host_veth` being absent. The bridge
+    ///   falls back to `host_ipv4:port` (unchanged behaviour).
+    /// - `Some(addr)`: a Path-A (mTLS-composed) alloc that provisioned
+    ///   a netns; `addr` is the canonical workload address the inbound
+    ///   rule captures to.
+    ///
+    /// # Discipline — #239 Phase-1 single-cut constraint
+    ///
+    /// The address is a *join* of `slot × base-at-provision-time`. Its
+    /// inputs are immutable for the life of the allocation: the slot is
+    /// fixed at provision, and the base is a Phase-1 single-node
+    /// constant. Per `.claude/rules/development.md` § "Persist inputs,
+    /// not derived state", the persisted derived-value risk (a future
+    /// `#239`-tunable base making the stored addr stale) does NOT bite
+    /// within a deployment's life: **a base change is a full redeploy /
+    /// re-provision / re-observe of every allocation — NOT a live
+    /// re-tune of running allocs.** The netns and inbound rule are
+    /// re-provisioned against the new base and the new `workload_addr`
+    /// is re-observed into a fresh row. This rustdoc is the structural
+    /// guard: it forbids a future "just recompute it at the bridge"
+    /// refactor that would silently reintroduce the install/advertise
+    /// divergence the design rejected.
+    pub workload_addr: Option<Ipv4Addr>,
+}
+
+/// Additive V1 → V2 up-conversion: every pre-existing field carried
+/// forward verbatim; the new `workload_addr` defaults to `None` (a V1
+/// row was written before the canonical-address field existed, so the
+/// honest projection is "no workload address observed"). Per
+/// `development.md` § "rkyv schema evolution" → "Version-bump
+/// procedure" step 4.
+impl From<AllocStatusRowV1> for AllocStatusRowV2 {
+    fn from(v1: AllocStatusRowV1) -> Self {
+        Self {
+            alloc_id: v1.alloc_id,
+            workload_id: v1.workload_id,
+            node_id: v1.node_id,
+            state: v1.state,
+            updated_at: v1.updated_at,
+            reason: v1.reason,
+            detail: v1.detail,
+            terminal: v1.terminal,
+            stderr_tail: v1.stderr_tail,
+            kind: v1.kind,
+            listeners: v1.listeners,
+            started_at: v1.started_at,
+            workload_addr: None,
+        }
+    }
+}
+
 impl VersionedEnvelope for AllocStatusRowEnvelope {
-    type Latest = AllocStatusRowV1;
+    type Latest = AllocStatusRowV2;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
+        Self::V2(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1),
+            Self::V1(v1) => Ok(v1.into()),
+            Self::V2(v2) => Ok(v2),
         }
     }
 
@@ -753,28 +870,39 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// subsidiary GAP-1 fix): added an `Option<UnixInstant>`
     /// `started_at` field inline to `AllocStatusRowV1`. `UnixInstant`
     /// wraps `Duration` (12 bytes — 8 for seconds + 4 for nanos),
-    /// inlined behind the `Option` discriminant; this extends the
-    /// trailing root structure beyond the prior 192-byte pin. The
-    /// new offset is determined empirically by the schema-evolution
-    /// fixture's triangulation test (`alloc_status_row_discriminant
-    /// _offset_triangulation`); update this constant and
-    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant
-    /// or layout change.
+    /// inlined behind the `Option` discriminant; this extended the
+    /// trailing root structure to the 212-byte pin.
+    ///
+    /// **Repinned 2026-06-22 — 212 → 224 — V2 append
+    /// (canonical-workload-address-inbound-tproxy, GH #241).**
+    /// Appending `V2(AllocStatusRowV2)` — whose only delta is the
+    /// additive `workload_addr: Option<Ipv4Addr>` — grows the outer
+    /// enum's INLINE footprint to `max(V1, V2)`, extending the
+    /// trailing root structure by 8 bytes (the `Option<Ipv4Addr>`
+    /// footprint, aligned) and shifting the discriminant offset to
+    /// 224. The value is EMPIRICAL — derived from the actual archived
+    /// bytes via the schema-evolution triangulation test
+    /// (`alloc_status_row_discriminant_offset_triangulation`), NOT
+    /// guessed. Update this constant and
+    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant or
+    /// layout change.
     ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(212)
+        Some(224)
     }
 
     fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0 (declaration order — first
-        // variant). Empirically verified by archiving a canonical
-        // `AllocStatusRowEnvelope::latest(...)` and inspecting the
-        // byte at `bytes.len() - 208`.
-        &[0]
+        // V1 = 0, V2 = 1 (rkyv declaration order). The V2 bump appended
+        // tag 1 (canonical-workload-address-inbound-tproxy, GH #241);
+        // V1 (tag 0) continues to round-trip through `into_latest` via
+        // the `From<V1> for V2` chain. Empirically verified by the
+        // `alloc_status_row_unknown_version_probe_surfaces` test
+        // (supported_max == 1).
+        &[0, 1]
     }
 
     fn type_name() -> &'static str {

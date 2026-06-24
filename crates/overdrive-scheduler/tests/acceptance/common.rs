@@ -92,6 +92,10 @@ pub fn make_alloc_running(alloc_id: &str, workload_id: &str, target_node: &str) 
         listeners: Vec::new(),
         // GAP-1 subsidiary: Running state carries fixed wall-clock.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Scheduler placement fixtures are host-netns shapes — no
+        // canonical workload address (AllocStatusRowV2 additive field,
+        // GH #241).
+        workload_addr: None,
     }
 }
 
@@ -115,6 +119,9 @@ pub fn make_alloc_terminated(
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated state was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address
+        // (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }
 }
 
@@ -232,6 +239,10 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
                             1_700_000_000,
                         ))),
+                        // Host-netns placement fixture — no canonical
+                        // workload address (AllocStatusRowV2 additive
+                        // field, GH #241).
+                        workload_addr: None,
                     }
                 })
                 .collect()

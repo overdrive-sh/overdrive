@@ -223,6 +223,8 @@ async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId,
         kind: overdrive_core::aggregate::WorkloadKind::Job,
         listeners: Vec::new(),
         started_at: None,
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("write alloc row");
 }

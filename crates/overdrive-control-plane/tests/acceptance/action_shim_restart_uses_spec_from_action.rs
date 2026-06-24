@@ -115,6 +115,8 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         listeners: Vec::new(),
         // GAP-1 subsidiary: Terminated was Running first.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(prior_row)))
         .await
@@ -138,6 +140,8 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
     let action = Action::RestartAllocation {
         alloc_id,

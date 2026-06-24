@@ -630,6 +630,11 @@ pub struct ServiceMapHydratorState {
 
 pub struct ServiceDesired {
     pub vip: ServiceVip,
+    // `port`/`proto` added in step 02-02 (canonical-workload-address /
+    // D-GATE; ADR-0060 site #8 / C3): both sourced from a
+    // listener-bearing `(port, proto)` fact, NEVER defaulted to `Tcp`.
+    pub port: NonZeroU16,                 // listener port
+    pub proto: Proto,                     // L4 protocol (listener-bearing)
     pub backends: Vec<Backend>,           // BTreeMap-sorted
     pub fingerprint: BackendSetFingerprint, // u64, content-hash
 }
@@ -648,7 +653,10 @@ silently-failed dataplane update — exactly the failure mode
 J-PLAT-004 is meant to close. `service_hydration_results` is the
 typed observation row the shim writes after the dataplane call
 returns; the next reconcile tick reads it. Retries are driven by
-fingerprint mismatch, not by re-emitting on every tick.
+fingerprint mismatch, not by re-emitting on every tick. (The
+fingerprint compared is `programmed_fingerprint` — the
+programmable-remote projection — not the full set; see *Convergence
+fingerprint domain*, amended 2026-06-24.)
 
 ### `type View = ServiceMapHydratorView` — persists inputs (not deadlines)
 
@@ -660,7 +668,20 @@ pub struct ServiceMapHydratorView {
     /// Per-service retry memory. `attempts` increments only on
     /// `DataplaneUpdateService` dispatch (NOT every tick); reset
     /// to 0 on Completed observation.
+    #[serde(default)]
     pub retries: BTreeMap<ServiceId, RetryMemory>,
+    /// Fingerprint of the LOCAL backend set most recently driven via
+    /// `RegisterLocalBackend`, per service. Persists the INPUT (the
+    /// applied local-set fingerprint), NOT a derived "needs re-drive"
+    /// boolean — the local re-drive decision is recomputed every tick
+    /// from this input + the freshly-computed `local_fingerprint`.
+    /// Added by `fix-mesh-only-reconcile-loop` (L-a, B5=build-now,
+    /// 2026-06-24) — see *Convergence fingerprint domain* → local path
+    /// below. Additive CBOR `#[serde(default)]`: a pre-L-a View (no
+    /// field) deserialises with an empty map (no envelope, no
+    /// migration).
+    #[serde(default)]
+    pub last_applied_local_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -673,7 +694,11 @@ pub struct RetryMemory {
 
 The next-attempt deadline is **recomputed every tick** as
 `last_failure_seen_at + backoff_for_attempt(attempts)`. Never
-persisted. `BTreeMap` per § Ordered-collection choice.
+persisted. `BTreeMap` per § Ordered-collection choice. The
+`last_applied_local_fingerprint` map (added 2026-06-24) is the **only**
+new persisted surface across the convergence-domain fix; both
+`programmed_fingerprint` and `local_fingerprint` are recomputed every
+tick from inputs and never persisted.
 
 ### `reconcile` skeleton
 
@@ -684,8 +709,123 @@ proposal-draft.md § 5; key invariants:)
   (structural — `desired.desired` is `BTreeMap`-keyed on
   `ServiceId`, the loop emits once per key).
 - View row reset on confirmed convergence
-  (`actual.fingerprint == desired.fingerprint`).
+  (`actual.fingerprint == programmed_fingerprint`; see
+  *Convergence fingerprint domain* below — amended 2026-06-24).
 - View row GC for services no longer in `desired`.
+
+### Convergence fingerprint domain (amended 2026-06-24 — fix-mesh-only-reconcile-loop)
+
+> **This amendment supersedes the original "convergence is
+> `actual.fingerprint == desired.fingerprint` over the service's full
+> backend set" definition.** The full-set definition was structurally
+> unreachable for any service that isn't remote-only, producing three
+> non-converging faces (all-mesh, mixed mesh+remote tight-spin,
+> local-only) — confirmed by executed evidence in
+> `docs/feature/fix-mesh-only-reconcile-loop/deliver/rca.md` § 10.2.
+> The governing design is
+> `docs/feature/fix-mesh-only-reconcile-loop/design/convergence-model.md`.
+
+The D-GATE three-way subnet partition (D-GATE / D-GATE-PRED,
+canonical-workload-address-inbound-tproxy) drops mesh backends from
+both LB paths and routes LOCAL backends to `RegisterLocalBackend`
+(cgroup), leaving only the **REMOTE survivors** as the set the
+`DataplaneUpdateService` action programs and the action-shim hashes
+back into its `Completed` row. Convergence MUST therefore be measured
+over that **programmable-remote projection**, not the full set:
+
+- **`programmed_fingerprint`** is a per-service value recomputed every
+  tick inside `reconcile` from inputs already in hand:
+
+  ```
+  programmed_fingerprint = fingerprint(desired_svc.vip, remote_survivors)
+  ```
+
+  where `remote_survivors = desired_svc.backends` minus mesh backends
+  (∈ `workload_subnet`) minus LOCAL backends (`addr.ip() == host_ipv4`)
+  — exactly the set the emitted `DataplaneUpdateService.backends`
+  carries. It is **derived, never persisted** (`.claude/rules/development.md`
+  § Persist inputs, not derived state). For a V6 VIP, which has no LOCAL
+  partition, `remote_survivors == non_mesh`.
+
+- **The dispatch decision and the convergence comparison both key on
+  `programmed_fingerprint`**, not `desired_svc.fingerprint`. This is the
+  fingerprint the action-shim writes back (`fingerprint(vip,
+  action.backends)`, `dataplane_update_service.rs`) — so
+  `Completed.fingerprint == programmed_fingerprint` is reachable for
+  every service shape. `should_dispatch`'s signature is unchanged; only
+  the value passed for its `desired_fingerprint` parameter changes.
+
+- **The empty programmable set settles via the documented per-proto
+  purge.** A service whose `remote_survivors` is empty (all-mesh, or
+  local-only) emits one `DataplaneUpdateService { backends: [] }` — the
+  `Dataplane::update_service` contract's `backends.is_empty()` ⇒
+  per-proto purge (`traits/dataplane.rs`, ADR-0060 D4). The shim writes
+  `Completed{fingerprint(vip,[])}`; the next tick settles. The all-mesh
+  service is NOT special-cased — `∅` is the degenerate value of the one
+  unconditional emit path. The `if !remote_is_empty` emit guard is
+  REMOVED; emitting the empty purge on a non-mesh→all-mesh transition
+  also tears down stranded `REVERSE_NAT`/`SERVICE_MAP` entries (closes
+  the Finding-2 teardown gap, RCA § 4).
+
+- **`last_attempted_fingerprint` records `programmed_fingerprint`**, not
+  the full set — consistent with the comparison and the `Completed` row.
+  The 02-02 "don't record a phantom for an all-mesh service" guard is
+  obsolete: an all-mesh service genuinely dispatches a purge, so
+  recording its empty-set programmed fingerprint is honest.
+
+- **The full-set `desired_svc.fingerprint` is RETAINED, demoted to the
+  churn/identity key** — it remains what `project_service_desired`
+  stamps onto `ServiceDesired`, what the evaluation broker keys
+  re-triggering on, and the `spec_hash`/`CorrelationKey` input. It is no
+  longer the convergence target. No code computing or persisting it
+  changes; the `RetryMemory` field shape (3 fields) is UNCHANGED. The
+  `ServiceMapHydratorView` gains exactly ONE additive field
+  (`last_applied_local_fingerprint`, the L-a local-churn re-drive surface
+  above — additive CBOR `#[serde(default)]`, no envelope, no migration);
+  `retries` is unchanged. No rkyv schema evolution (the View is CBOR in the
+  runtime-owned `ViewStore`).
+
+- **The local/cgroup path has no hydration observation row** (per
+  ADR-0053; `register_local_backend.rs` — "the cgroup hook produces no
+  observation row; convergence is observable via the production-handle
+  read-back in the walking-skeleton test"). A local-only service's
+  REMOTE-axis convergence is represented by the empty-remote purge it ALSO
+  emits (settling over `fingerprint(vip,[])`); its LOCAL-axis convergence
+  is driven by a `RegisterLocalBackend` install on first dispatch AND a
+  re-drive on every subsequent LOCAL-set change (see *local-churn re-drive*
+  below). The cgroup map-insert is idempotent converge-on-apply
+  (re-inserting an existing entry is a no-op). No EXTERNAL observation
+  surface for the cgroup path is added (that is deferred — GH #246).
+
+  **Local-churn re-drive (BUILT 2026-06-24 — `fix-mesh-only-reconcile-loop`
+  convergence-model § 8.3, L-a, B5=build-now):** re-keying `need_dispatch`
+  onto `programmed_fingerprint` gates only the REMOTE/XDP emit + the
+  empty-remote purge. The `RegisterLocalBackend` emission is **decoupled**
+  from `need_dispatch` and gated on its OWN per-service convergence signal:
+  `local_fingerprint = fingerprint(vip, local_survivors)` compared against
+  the persisted `ServiceMapHydratorView.last_applied_local_fingerprint
+  .get(sid)`. On a difference (first install OR post-install churn) the
+  hydrator re-emits `RegisterLocalBackend` for the CURRENT local set and
+  records the applied fingerprint; on equality it emits nothing for the
+  local path. A **local-backend add/remove/health-flip with an unchanged
+  remote projection IS therefore re-driven** — independent of whether
+  `programmed_fingerprint` moved. (An earlier draft claimed the re-key left
+  this gap; the L-a mechanism closes it.) The gap is latent/unreachable on
+  the production path today — every production Service backend is a MESH
+  backend (`workload_addr ∈ 10.99.0.0/16`) and the hydrator's LOCAL
+  partition is empty by construction (bridge advertises
+  `workload_addr.unwrap_or(host_ipv4)`; the C3 seam materialises
+  `workload_addr = Some(/30)` on every `mtls_worker.is_some()` boot;
+  `compose_mtls = dataplane_override.is_none()` is true on every real-
+  dataplane `serve`) — so the surface stays minimal: ONE additive CBOR
+  `ServiceMapHydratorView.last_applied_local_fingerprint` map
+  (`#[serde(default)]`, no envelope, no migration), GC'd in lockstep with
+  `retries`. The **EXTERNAL** cgroup observation surface (a queryable
+  observation-store row distinguishing "local backend installed" from
+  "remote programmed") is a separate, larger concern and is **DEFERRED,
+  tracked as [GH #246](https://github.com/overdrive-sh/overdrive/issues/246)**
+  — per CLAUDE.md § "Build vertical slices… never isolated mechanisms," an
+  observation surface no production deploy exercises is out of scope.
 
 ### Hydration shape (runtime-owned, NOT in `reconcile`)
 
@@ -792,11 +932,23 @@ The reconciler author writes `reconcile` only.
 
 | DST invariant | Property |
 |---|---|
-| `HydratorEventuallyConverges` | For every `service_id`, `actual.fingerprint == desired.fingerprint` is reached within a bounded number of ticks given a stable `desired`. |
-| `HydratorIdempotentSteadyState` | Once `actual.fingerprint == desired.fingerprint` for all services, the hydrator emits zero `DataplaneUpdateService` actions per tick. |
+| `HydratorEventuallyConverges` | For every `service_id`, `actual.fingerprint == programmed_fingerprint` is reached within a bounded number of ticks given a stable `desired` — for **every** service shape (remote-only, all-mesh, mixed mesh+remote, local-only). |
+| `HydratorIdempotentSteadyState` | Once converged for all services, the hydrator emits zero actions per tick — including the all-mesh and local-only shapes (no re-emit of the empty purge once `Completed{fingerprint(vip,[])}` is observed). |
 
 Both live in `crates/overdrive-sim/src/invariants/` and run on every
 PR per `.claude/rules/testing.md` § Tier 1.
+
+> **Fidelity requirement (amended 2026-06-24).** The harness MUST model
+> the action-shim's write-back fingerprint as `fingerprint(vip,
+> action.backends)` (the programmed subset) — NOT echo
+> `desired.fingerprint` — or drive the real
+> `dataplane_update_service::dispatch`. The original echo was a faithless
+> simulation that masked the subset-domain mismatch entirely (RCA
+> § 10.4). The invariant MUST exercise all four service shapes; the
+> **mixed mesh+remote** shape is the load-bearing addition — it is the
+> face the faithless echo made structurally undetectable. See
+> `docs/feature/fix-mesh-only-reconcile-loop/design/convergence-model.md`
+> § 10.
 
 ---
 

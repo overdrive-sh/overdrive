@@ -667,6 +667,8 @@ async fn write_alloc_state(h: &Harness, alloc_raw: &str, state: AllocState, coun
         kind: overdrive_core::aggregate::WorkloadKind::Job,
         listeners: Vec::new(),
         started_at: None,
+        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     };
     h.state
         .obs

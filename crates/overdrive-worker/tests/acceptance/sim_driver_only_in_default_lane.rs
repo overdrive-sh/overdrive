@@ -29,6 +29,8 @@ async fn default_lane_does_not_spawn_real_processes() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     // Action — enter through the driving port.

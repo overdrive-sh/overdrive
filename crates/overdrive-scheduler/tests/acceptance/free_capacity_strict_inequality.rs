@@ -92,6 +92,9 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         listeners: Vec::new(),
         // GAP-1 subsidiary: Pending state has no Running wall-clock yet.
         started_at: None,
+        // Host-netns fixture — no canonical workload address
+        // (AllocStatusRowV2 additive field, GH #241).
+        workload_addr: None,
     }];
 
     let result = schedule(&nodes, &job, &allocs);

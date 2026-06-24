@@ -314,6 +314,16 @@ fn build_alloc_status_row(
         kind,
         listeners: Vec::new(),
         started_at,
+        // canonical-workload-address-inbound-tproxy (GH #241 /
+        // AllocStatusRowV2): default `None` at this shared row-builder
+        // seam. The INITIAL population is the Running-row write site's
+        // responsibility (the StartAllocation / RestartAllocation arms
+        // copy `spec.workload_addr` onto the row after building it,
+        // step 01-02 D-A1 / D-BLOCKER2). Successor / terminal writers
+        // (FinalizeFailed, exit observer) forward-carry the prior row's
+        // value. Stays `None` for host-netns allocs (every current
+        // fixture, where the C3 seam never provisioned an address).
+        workload_addr: None,
     }
 }
 
@@ -821,6 +831,12 @@ fn provision_and_inject_netns(
     // both off `plan` before it is dropped.
     spec.netns = Some(plan.netns.clone());
     spec.host_veth = Some(plan.host_veth);
+    // D-A1 (canonical-workload-address-inbound-tproxy, GH #241): inject the
+    // canonical per-workload address — the third member of the slot-derived
+    // channel, off the SAME plan as netns/host_veth. The Running-row write
+    // (below) copies this onto `AllocStatusRowV2.workload_addr` (the observed
+    // input), and step 03-01 consumes it as the inbound-rule destination.
+    spec.workload_addr = Some(plan.workload_addr);
     Ok(())
 }
 
@@ -1005,11 +1021,18 @@ async fn dispatch_single(
             // written verbatim onto the row + lifecycle event, so the
             // streaming layer's `ServiceSubmitEvent::Stable` projection
             // (which reads `event.terminal`, not the state) is unchanged.
-            let finalized_state = if matches!(terminal, Some(TerminalCondition::Stable { .. })) {
-                prior_row.state
-            } else {
-                AllocState::Failed
-            };
+            //
+            // The SAME `Stable` discriminator gates the destructive
+            // infrastructure teardowns below (canonical-address inbound
+            // RCA §9, GH #241): a `Stable` FinalizeFailed is a SUCCESS
+            // claim that keeps the alloc Running and still serving on its
+            // netns/leg-C, so it MUST NOT tear down the per-workload
+            // netns/veth/nft or detach the mTLS intercept. Only a
+            // genuine terminal (the `finalized_state == Failed` set) reaps
+            // the alloc. Hoisted once here and reused at both teardown
+            // sites so the row-state and teardown decisions cannot drift.
+            let is_stable = matches!(terminal, Some(TerminalCondition::Stable { .. }));
+            let finalized_state = if is_stable { prior_row.state } else { AllocState::Failed };
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
@@ -1039,19 +1062,32 @@ async fn dispatch_single(
             // so any probe supervisor spawned earlier in the alloc's
             // lifetime is cleaned up. Default no-op when no
             // ProbeRunner is wired.
+            // Probe-supervisor cleanup is correct for BOTH a Stable and a
+            // genuine terminal (a Stable alloc has indeed passed startup, so
+            // its supervisor hook is benign-or-correct) — NOT gated on
+            // `is_stable`. Only the two DESTRUCTIVE infrastructure teardowns
+            // below are gated (canonical-address inbound RCA §9, GH #241).
             driver.on_alloc_terminal(&row.alloc_id);
-            // transparent-mtls-host-socket (step 06-03): tear down the
-            // alloc's mTLS intercept (detach the cgroup program, remove
-            // the TPROXY rule, drain the per-connection teardown set
-            // fail-closed). Idempotent for an alloc with no intercept.
-            if let Some(worker) = mtls_worker {
-                worker.stop_alloc(&row.alloc_id);
+            // The mTLS-intercept detach and the C3 netns teardown are both
+            // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
+            // claim (the alloc stays Running and keeps serving on leg-C / its
+            // netns), so detaching the intercept or reaping the netns would
+            // leave a healthy workload running but UNREACHABLE. Both fire only
+            // for a genuine terminal (the `finalized_state == Failed` set).
+            if !is_stable {
+                // transparent-mtls-host-socket (step 06-03): tear down the
+                // alloc's mTLS intercept (detach the cgroup program, remove
+                // the TPROXY rule, drain the per-connection teardown set
+                // fail-closed). Idempotent for an alloc with no intercept.
+                if let Some(worker) = mtls_worker {
+                    worker.stop_alloc(&row.alloc_id);
+                }
+                // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
+                // per-alloc netns + veth, THEN release the slot — AFTER the
+                // driver stop. Idempotent; no-op for an alloc that never
+                // provisioned or off the mTLS gate.
+                teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             }
-            // C3 TEARDOWN SEAM (D-TME-12 G2, step 04-01): tear down the
-            // per-alloc netns + veth, THEN release the slot — AFTER the driver
-            // stop. Idempotent; no-op for an alloc that never provisioned or
-            // off the mTLS gate.
-            teardown_and_release_netns(&row.alloc_id, net_slot_allocator, mtls_worker)?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
@@ -1156,7 +1192,7 @@ async fn dispatch_single(
             // EarlyExit / StartupProbeFailed / Stable gates branch
             // on `None` explicitly (no silent-zero collapse).
             let started_at = if state == AllocState::Running { Some(tick.now_unix) } else { None };
-            let row = build_alloc_status_row(
+            let mut row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
@@ -1169,6 +1205,20 @@ async fn dispatch_single(
                 kind,
                 started_at,
             );
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): the StartAllocation Running write is the INITIAL
+            // population of the canonical workload address. Copy
+            // `spec.workload_addr` (injected at the C3 provision seam off
+            // `plan.workload_addr`) straight onto the row — an OBSERVED INPUT,
+            // the materialised slot×base-at-provision snapshot the node
+            // provisioned this alloc into (no recompute, no derivation). On a
+            // failed start (`state == Failed`) the alloc never reached the
+            // provisioned netns, so the absent value carries forward; the
+            // builder already defaults `None`. Successor / terminal writers
+            // (exit observer, FinalizeFailed) forward-carry `prior.workload_addr`.
+            if state == AllocState::Running {
+                row.workload_addr = spec.workload_addr;
+            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites
@@ -1362,7 +1412,7 @@ async fn dispatch_single(
                 // ever reached Running.
                 prior_row.started_at
             };
-            let row = build_alloc_status_row(
+            let mut row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
@@ -1375,6 +1425,18 @@ async fn dispatch_single(
                 kind,
                 started_at,
             );
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): a restart re-provisions the netns/veth under the same
+            // slot (idempotent converge-on-boot) — `spec.workload_addr` is
+            // re-injected at the C3 seam. On reaching Running, populate the
+            // row's canonical address from the freshly-provisioned spec, same
+            // observed-input semantics as the StartAllocation arm above. A
+            // rejected restart (`state == Failed`) carries the builder's
+            // `None`; the prior generation's address (if any) is irrelevant to
+            // a never-Running attempt.
+            if state == AllocState::Running {
+                row.workload_addr = spec.workload_addr;
+            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites

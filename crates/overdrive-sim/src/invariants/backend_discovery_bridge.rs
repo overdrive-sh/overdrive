@@ -217,7 +217,7 @@ async fn scenario_single_alloc() -> Result<(), String> {
 
     let mut state = BackendDiscoveryBridgeState::empty_for_workload(wid.clone());
     state.desired.listeners.insert(sid, lst);
-    state.actual.running.insert(alloc_id("alloc-a")?);
+    state.actual.running.insert(alloc_id("alloc-a")?, None);
 
     let mut view = BackendDiscoveryBridgeView::default();
     for tick_idx in 0..CONVERGENCE_TICK_BUDGET {
@@ -260,9 +260,9 @@ async fn scenario_multi_alloc() -> Result<(), String> {
 
     let mut state = BackendDiscoveryBridgeState::empty_for_workload(wid.clone());
     state.desired.listeners.insert(sid, lst);
-    state.actual.running.insert(alloc_id("alloc-x")?);
-    state.actual.running.insert(alloc_id("alloc-y")?);
-    state.actual.running.insert(alloc_id("alloc-z")?);
+    state.actual.running.insert(alloc_id("alloc-x")?, None);
+    state.actual.running.insert(alloc_id("alloc-y")?, None);
+    state.actual.running.insert(alloc_id("alloc-z")?, None);
 
     let mut view = BackendDiscoveryBridgeView::default();
     for tick_idx in 0..CONVERGENCE_TICK_BUDGET {
@@ -299,7 +299,7 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
 
     let mut state = BackendDiscoveryBridgeState::empty_for_workload(wid.clone());
     state.desired.listeners.insert(sid, lst);
-    state.actual.running.insert(alloc_id("alloc-a")?);
+    state.actual.running.insert(alloc_id("alloc-a")?, None);
 
     let mut view = BackendDiscoveryBridgeView::default();
 
@@ -318,7 +318,7 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
 
     // Phase 2 — drop alloc-a, add alloc-b. Run remaining ticks.
     state.actual.running.clear();
-    state.actual.running.insert(alloc_id("alloc-b")?);
+    state.actual.running.insert(alloc_id("alloc-b")?, None);
     for tick_idx in 1..CONVERGENCE_TICK_BUDGET {
         let tick = make_tick(tick_idx);
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick);
@@ -382,7 +382,7 @@ pub async fn evaluate_bridge_idempotent_steady_state() -> InvariantResult {
         Ok(a) => a,
         Err(cause) => return fail(NAME, cause),
     };
-    state.actual.running.insert(single_alloc);
+    state.actual.running.insert(single_alloc, None);
 
     // STEP 1 — reach steady state. First tick MUST emit one action;
     // applying it populates obs; subsequent ticks MUST dedup.
@@ -534,7 +534,7 @@ pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResu
         Ok(a) => a,
         Err(cause) => return fail(NAME, cause),
     };
-    state.actual.running.insert(alloc_a);
+    state.actual.running.insert(alloc_a, None);
 
     // STEP 1 — reach steady state. The returned `next_view` is what
     // would be persisted by `ViewStore::write_through` before the
@@ -598,7 +598,7 @@ pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResu
         Ok(a) => a,
         Err(cause) => return fail(NAME, cause),
     };
-    state.actual.running.insert(alloc_b);
+    state.actual.running.insert(alloc_b, None);
 
     let drift_tick = make_tick(2);
     let (drift_actions, drift_view) =

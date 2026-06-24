@@ -97,6 +97,7 @@ fn sample_backends() -> Vec<Backend> {
 fn hydrator_reconciler() -> AnyReconciler {
     AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
         std::net::Ipv4Addr::UNSPECIFIED,
+        overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
     ))
 }
 

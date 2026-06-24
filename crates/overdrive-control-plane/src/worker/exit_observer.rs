@@ -586,6 +586,17 @@ async fn handle_exit_event(
         // `started_at` verbatim. Same forward-carry pattern as
         // `stderr_tail` / `kind` / `workload_id` / `node_id`.
         started_at: prior.started_at,
+        // canonical-workload-address-inbound-tproxy (GH #241 /
+        // AllocStatusRowV2): the exit observer is a successor-row
+        // writer for a Terminated / Failed transition — forward-carry
+        // the prior row's canonical workload address verbatim, same
+        // pattern as `started_at` / `kind`. The INITIAL population off
+        // `spec.workload_addr` lands at the action-shim's
+        // Pending → Running write (step 01-02, D-A1 / D-BLOCKER2); from
+        // there the value rides the prior row into every successor
+        // transition. `None` for host-netns allocs (every current
+        // fixture, where the C3 seam never ran).
+        workload_addr: prior.workload_addr,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
     Ok(Some((row, prior_state)))

@@ -51,6 +51,8 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
         // mTLS-composed boot gate — no provisioned netns/veth.
         netns: None,
         host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
     };
 
     let handle = driver.start(&initial_spec).await.expect("start succeeds");

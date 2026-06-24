@@ -1206,6 +1206,8 @@ mod lifecycle_hook_tests {
             probe_descriptors: Vec::<ProbeDescriptor>::new(),
             netns: None,
             host_veth: None,
+            service_ports: Vec::new(),
+            workload_addr: None,
         }
     }
 
