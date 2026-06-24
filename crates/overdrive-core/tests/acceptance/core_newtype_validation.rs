@@ -265,3 +265,81 @@ fn malformed_job_label() -> impl Strategy<Value = String> {
         "[a-z0-9]{0,5}[!/:@ ][a-z0-9]{0,5}",
     ]
 }
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-03 (design-fidelity refinement) — a multi-label `<job>` prefix is
+// rejected: the v1 contract is a SINGLE `<job>` label, NO namespace segment.
+//
+// ADR-0072:279 pins the newtype as "a single `<job>` label in v1 (single-node,
+// NO namespace segment)". `validate_label` PERMITS `.` (id.rs:102) because
+// other label newtypes (`WorkloadId`/`NodeId`) legitimately carry dotted
+// forms (`region.eu-west-1`), so delegating the post-suffix `<job>` straight
+// to `validate_label` would wrongly accept a two-label prefix. The single-
+// label guard lives in `MeshServiceName::new`, NOT in `validate_label`. A
+// dotted `<job>` maps to `IdParseError::InvalidChar { kind: "MeshServiceName",
+// ch: '.', index }` — the `.`'s position within the `<job>` part.
+// -----------------------------------------------------------------------------
+
+#[test]
+fn mesh_service_name_rejects_multi_label_job_prefix() {
+    // "foo.bar.svc.overdrive.local" strips to <job> = "foo.bar" — a two-label
+    // prefix the v1 contract forbids. It must be rejected, NOT accepted with
+    // <job> = "foo.bar".
+    let outcome = MeshServiceName::new("foo.bar.svc.overdrive.local");
+    assert!(
+        matches!(
+            outcome,
+            Err(IdParseError::InvalidChar { kind: "MeshServiceName", ch: '.', index: 3 })
+        ),
+        "multi-label <job> 'foo.bar' must be rejected as InvalidChar at the '.'; got {outcome:?}"
+    );
+
+    // A deeper prefix is rejected the same way (the first '.' is the offender).
+    let deeper = MeshServiceName::new("a.b.c.svc.overdrive.local");
+    assert!(
+        matches!(
+            deeper,
+            Err(IdParseError::InvalidChar { kind: "MeshServiceName", ch: '.', index: 1 })
+        ),
+        "multi-label <job> 'a.b.c' must be rejected as InvalidChar at the first '.'; got {deeper:?}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-04 (length-boundary refinement) — the positive length boundary
+// for `MeshServiceName` specifically is pinned on BOTH sides.
+//
+// S-DBN-NAME-04's proptest exercises the over-long REJECT side via the generic
+// generator, but never pins the max-VALID `<job>` ACCEPT side for
+// `MeshServiceName` — a regression that wrongly rejected a long-but-valid name
+// would pass the suite. The ceiling is `<job>` label ≤ `LABEL_MAX` (253), the
+// ADR-0072:281 contract and the development.md "one shared length ceiling"
+// rule (sized off `LABEL_MAX`, never a bespoke smaller magic number). This
+// pins both sides of the inequality the way the existing 253-accepted /
+// 254-rejected `WorkloadId` pair already does.
+// -----------------------------------------------------------------------------
+
+#[test]
+fn mesh_service_name_label_length_boundary_is_label_max() {
+    // Max-valid: a single-label all-alphanumeric <job> at exactly LABEL_MAX
+    // (253) chars is ACCEPTED. (LABEL_MAX is not re-exported as a path const;
+    // the value is pinned at 253 here and named in the comment, matching the
+    // existing WorkloadId boundary test's literal.)
+    let max_job = "a".repeat(253);
+    let full_max = format!("{max_job}.{}", MeshServiceName::SUFFIX);
+    let accepted = MeshServiceName::new(&full_max);
+    assert!(
+        matches!(&accepted, Ok(name) if name.as_str().len() == 253),
+        "a 253-char single-label <job> must be accepted at the LABEL_MAX boundary; got {accepted:?}"
+    );
+
+    // Max+1: a 254-char <job> is REJECTED with TooLong (the ceiling, not a
+    // silent truncation).
+    let over_job = "a".repeat(254);
+    let full_over = format!("{over_job}.{}", MeshServiceName::SUFFIX);
+    let rejected = MeshServiceName::new(&full_over);
+    assert!(
+        matches!(rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max: 253 })),
+        "a 254-char <job> must be rejected as TooLong at the LABEL_MAX boundary; got {rejected:?}"
+    );
+}

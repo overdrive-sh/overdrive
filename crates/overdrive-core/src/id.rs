@@ -839,6 +839,17 @@ impl MeshServiceName {
     /// [`LABEL_MAX`] ceiling (no bespoke smaller magic number; an empty,
     /// over-long, or out-of-class label maps to the existing `Empty` /
     /// `TooLong` / `InvalidChar` / `InvalidFormat` variants).
+    ///
+    /// **v1 single-label contract (ADR-0072:279):** the `<job>` is a *single*
+    /// label — single-node, NO namespace segment. The shared [`validate_label`]
+    /// PERMITS `.` (id.rs:102) because other label newtypes (`WorkloadId` /
+    /// `NodeId`) legitimately carry dotted forms (`region.eu-west-1`); so this
+    /// constructor adds a single-label guard ON TOP of `validate_label` — a
+    /// dotted `<job>` (e.g. `foo.bar.svc.overdrive.local` → `<job>` =
+    /// `"foo.bar"`) is rejected as [`IdParseError::InvalidChar`] at the
+    /// offending `.`. A dotted deploy-spec service id is therefore simply not
+    /// mesh-dialable by name in v1, which is exactly the design's intended
+    /// scope (NO namespace segment), not a regression.
     pub fn new(raw: &str) -> Result<Self, IdParseError> {
         const KIND: &str = "MeshServiceName";
         let lowered = raw.to_ascii_lowercase();
@@ -847,10 +858,19 @@ impl MeshServiceName {
         let job = lowered.strip_suffix(Self::SUFFIX).and_then(|s| s.strip_suffix('.')).ok_or(
             IdParseError::InvalidFormat { kind: KIND, expected: "<job>.svc.overdrive.local" },
         )?;
+        // Single-label guard: the v1 `<job>` is ONE label with no namespace
+        // segment. `validate_label` would accept an interior `.`, so reject a
+        // dotted `<job>` here (at the offending `.`'s position within the
+        // `<job>` part) BEFORE delegating the remaining (now dot-free) rules.
+        if let Some(index) = job.find('.') {
+            return Err(IdParseError::InvalidChar { kind: KIND, ch: '.', index });
+        }
         // `validate_label` re-lowercases (a no-op here) and enforces the
-        // DNS-1123 label rules + the shared LABEL_MAX ceiling on the `<job>`
-        // part. The reported `kind` is "MeshServiceName" so the error names
-        // the rejecting newtype, not the inner helper.
+        // DNS-1123 label rules + the shared LABEL_MAX ceiling (`<job>` ≤
+        // LABEL_MAX = 253; the ADR-0072:281 contract, no bespoke smaller
+        // ceiling) on the now-dot-free `<job>` part. The reported `kind` is
+        // "MeshServiceName" so the error names the rejecting newtype, not the
+        // inner helper.
         validate_label(KIND, job).map(Self)
     }
 
