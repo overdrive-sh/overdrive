@@ -547,6 +547,43 @@ jobs:
     served_by_phase: 2
     status: active
 
+  - id: J-MESH-001
+    title: "Let an unmodified workload reach a mesh peer by name and land at a live instance — no SDK, no mesh awareness"
+    relates_to: J-SEC-003
+    situation: >
+      When a workload I run must open a connection to another mesh workload by
+      its logical name (<job>.svc.overdrive.local) — and the workload is
+      identity-unaware and unmodified (it just calls getaddrinfo + connect like
+      it would anywhere) — and the platform has already SHIPPED resolv.conf
+      injection (each per-netns /etc/resolv.conf points at the per-netns gateway,
+      D-TME-9) but NOTHING answers there yet, so name resolution fails in a deploy,
+    motivation: >
+      I want an in-agent name-answering listener (in the same process that owns
+      the agent-light L4 proxy and the ServiceBackendsResolve index — NOT a
+      separate daemon, NOT in-kernel) to answer A for <job>.svc.overdrive.local
+      with the running backend's IPv4 address from the shared resolve index (the
+      v1 substrate is IPv4 — the MtlsResolve addr is SocketAddrV4, the per-netns
+      responder addr is Ipv4Addr), returning the SAME address MtlsResolve
+      recognizes (headless, no VIP, D-TME-10); answer AAAA as NODATA (the name is
+      currently resolvable, no IPv6 record — a real IPv6 backend story is out of
+      v1 scope); and NXDOMAIN when no backend is running (declared-but-empty and
+      unknown are indistinguishable — the responder reads the running resolve
+      index) — never a stale address,
+    outcome: >
+      so an unmodified workload can DIAL a mesh peer BY NAME and land at a live
+      instance the existing intercept path then mTLS's — closing the dial-by-name
+      leg the transparent-mtls arc deferred (#236), making the mesh reachable from
+      ordinary code rather than only enforceable on a connection that already
+      exists; and so the resolve index becomes "one source, THREE readers"
+      (outbound resolve + inbound install + name answers) with the name layer
+      byte-consistent with what the intercept path enforces.
+    source: >
+      GH #243; D-TME-9/10/11 (docs/evolution/2026-06-22-transparent-mtls-enrollment.md);
+      whitepaper §11. Distilled from the issue + the finalized arc, not from user
+      interviews (per the jobs.yaml header precedent).
+    served_by_phase: 2
+    status: active
+
   - id: J-DOCS-001
     title: "Find an authoritative Overdrive answer fast while evaluating or adopting"
     situation: >
@@ -824,3 +861,30 @@ changelog:
       crafter to implement the superseded system). Source re-pointed to ADR-0069
       + the spike findings. served_by_phase unchanged (2). Other entries
       unmodified.
+  - date: 2026-06-24
+    change: >
+      Added J-MESH-001 for the dial-by-name-responder feature (GH #243),
+      authored by the DISCUSS wave. First J-MESH-* job — the reachability/
+      mesh-naming family, peer to the J-SEC-* enforcement family. VERDICT: MINT
+      a new job (relates_to: J-SEC-003), NOT elevate under J-SEC-003 or
+      J-OPS-004. Justification: dial-by-name has a distinct progress (an
+      unmodified, identity-unaware workload REACHES a mesh peer BY NAME —
+      <job>.svc.overdrive.local — and lands at a RUNNING instance) and a distinct
+      failure mode (name resolution returns nothing / a stale address → the
+      workload cannot even INITIATE the connection), orthogonal to J-SEC-003's
+      on-the-wire enforcement progress (cleartext on the wire / a handshake that
+      does not fail closed). Follows the J-SEC-002 mint precedent (2026-06-08,
+      "different progress + failure mode"), NOT the udp-sendmsg4 elevation
+      precedent (2026-06-05, "same reachability job at finer granularity") —
+      J-OPS-004 is operator-trust in the Service-submit wire signal, a different
+      actor-circumstance than a workload dialing a peer. J-MESH-001 is the
+      deferred in-agent DNS-responder leg of the transparent-mtls arc (#236): the
+      responder answers <job>.svc.overdrive.local from service_backends ∩ running
+      via the shared ServiceBackendsResolve index (D-TME-11), returning the
+      headless addr MtlsResolve recognizes (D-TME-10) — making the resolve index
+      "one source, THREE readers." Distilled from the issue + the finalized arc
+      (docs/evolution/2026-06-22-transparent-mtls-enrollment.md), not from user
+      interviews (per the header precedent). served_by_phase: 2. Created the
+      journey docs/product/journeys/dial-a-mesh-peer-by-name.yaml; personas
+      untouched (Ana referenced inline only). Existing entries unmodified. See
+      docs/feature/dial-by-name-responder/.
