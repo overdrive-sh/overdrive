@@ -333,55 +333,66 @@ impl Reconciler for ServiceMapHydrator {
 
                 // ADR-0053 § 4 — per-backend Local-vs-Remote classification.
                 let host_ipv4 = self.host_ipv4;
-                let vip_v4 = match desired_svc.vip.get() {
-                    std::net::IpAddr::V4(v4) => v4,
-                    // Phase-1-unreachable arm: Phase-1 services are V4-only, so
-                    // a V6 VIP never occurs and this gate-bypass (emit
-                    // `DataplaneUpdateService` with ALL backends + `continue`,
-                    // skipping the `is_mesh_backend` filter below) has no live
-                    // exposure. Uniform `is_mesh_backend` application to the V6
-                    // path is deferred to if/when V6 VIPs ship.
-                    std::net::IpAddr::V6(_) => {
-                        actions.push(Action::DataplaneUpdateService {
-                            service_id: *service_id,
-                            vip: desired_svc.vip,
-                            port: desired_svc.port,
-                            proto: desired_svc.proto,
-                            backends: desired_svc.backends.clone(),
-                            correlation: CorrelationKey::derive(
-                                &target_str,
-                                &spec_hash,
-                                "update-service",
-                            ),
-                        });
-                        let entry = next_view.retries.entry(*service_id).or_default();
-                        entry.attempts = entry.attempts.saturating_add(1);
-                        entry.last_failure_seen_at = tick.now_unix;
-                        entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
-                        continue;
-                    }
-                };
 
-                // D-GATE / D-GATE-PRED — three-way subnet-membership split
-                // applied BEFORE the existing LOCAL/REMOTE partition. A
-                // Path-A/mesh backend (V4 addr ∈ `workload_subnet`,
-                // 10.99.0.0/16) is gated out of BOTH LB paths: nft-TPROXY
-                // owns its delivery (reconciles ADR-0053 ↔ ADR-0071). The
-                // mesh filter runs FIRST (`is_mesh_backend`) so a mesh
-                // backend never reaches the local/remote partition; the
-                // surviving non-mesh backends feed the unchanged partition.
+                // D-GATE / D-GATE-PRED — three-way subnet-membership gate
+                // applied BEFORE the existing LOCAL/REMOTE partition AND
+                // BEFORE the VIP-family switch. A Path-A/mesh backend (V4
+                // addr ∈ `workload_subnet`, 10.99.0.0/16) is gated out of
+                // BOTH LB paths: nft-TPROXY owns its delivery (reconciles
+                // ADR-0053 ↔ ADR-0071). The gate keys on the BACKEND's
+                // address, NOT the VIP's family, so it applies uniformly to
+                // every VIP family — a V6 VIP carrying a V4 mesh backend is
+                // gated identically to a V4 VIP. Hoisting it above the match
+                // (`non_mesh`) is the single, VIP-family-independent site.
                 let workload_subnet = self.workload_subnet;
                 let is_mesh_backend = |b: &&Backend| match b.addr.ip() {
                     std::net::IpAddr::V4(v4) => workload_subnet.contains(&v4),
                     std::net::IpAddr::V6(_) => false,
                 };
+                let non_mesh: Vec<&Backend> =
+                    desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).collect();
 
-                let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
-                    desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).partition(|b| {
-                        match b.addr.ip() {
-                            std::net::IpAddr::V4(v4) => v4 == host_ipv4,
-                            std::net::IpAddr::V6(_) => false,
+                let vip_v4 = match desired_svc.vip.get() {
+                    std::net::IpAddr::V4(v4) => v4,
+                    // V6 VIP arm. The mesh gate above already excluded
+                    // Path-A/mesh backends, so the V6 path drives only the
+                    // remote LB path over `non_mesh`. It records a dispatch
+                    // ONLY when it emitted one — an all-mesh V6 service
+                    // (`non_mesh.is_empty()`) emits nothing AND records
+                    // nothing, mirroring the V4 all-mesh retry-guard below.
+                    // Reachable through the driving port (`ServiceVip`
+                    // accepts V6); the IPv4-only `VipRange` allocator keeps
+                    // it unreached in the current production flow.
+                    std::net::IpAddr::V6(_) => {
+                        if !non_mesh.is_empty() {
+                            actions.push(Action::DataplaneUpdateService {
+                                service_id: *service_id,
+                                vip: desired_svc.vip,
+                                port: desired_svc.port,
+                                proto: desired_svc.proto,
+                                backends: non_mesh.into_iter().cloned().collect(),
+                                correlation: CorrelationKey::derive(
+                                    &target_str,
+                                    &spec_hash,
+                                    "update-service",
+                                ),
+                            });
+                            let entry = next_view.retries.entry(*service_id).or_default();
+                            entry.attempts = entry.attempts.saturating_add(1);
+                            entry.last_failure_seen_at = tick.now_unix;
+                            entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
                         }
+                        continue;
+                    }
+                };
+
+                // V4 path — partition the already-mesh-filtered `non_mesh`
+                // set into LOCAL (== `host_ipv4`) and REMOTE arms. Observable
+                // behavior is identical to before the gate was hoisted.
+                let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
+                    non_mesh.into_iter().partition(|b| match b.addr.ip() {
+                        std::net::IpAddr::V4(v4) => v4 == host_ipv4,
+                        std::net::IpAddr::V6(_) => false,
                     });
 
                 let remote_is_empty = remote.is_empty();

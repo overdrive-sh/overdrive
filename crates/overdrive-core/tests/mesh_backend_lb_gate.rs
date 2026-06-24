@@ -27,7 +27,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use ipnet::Ipv4Net;
@@ -371,6 +371,147 @@ fn all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks() {
     assert!(
         view2.retries.is_empty(),
         "tick 2: retries must STAY empty — no phantom dispatch re-engaged the backoff gate"
+    );
+}
+
+/// Build a `ServiceDesired` whose VIP is a **V6** `ServiceVip` carrying the
+/// given V4 backend addresses (each at port 8080). `ServiceVip` wraps
+/// `IpAddr` and accepts V6 at the type/parser level, so the V6 VIP arm of
+/// `ServiceMapHydrator::reconcile` is reachable through the driving port —
+/// only the IPv4-only `VipRange` allocator keeps it unreached in the current
+/// production flow, with no compile-time guard. The backends are V4 so the
+/// mesh gate (which keys on the BACKEND's address, not the VIP's family)
+/// must still apply.
+fn v6_vip_desired_with_backends(vip6: Ipv6Addr, backend_ips: &[Ipv4Addr]) -> ServiceDesired {
+    let vip = ServiceVip::new(IpAddr::V6(vip6)).expect("valid V6 ServiceVip");
+    let backends: Vec<Backend> = backend_ips
+        .iter()
+        .map(|ip| Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
+            weight: 1,
+            healthy: true,
+        })
+        .collect();
+    let fp = fingerprint(&vip, &backends);
+    ServiceDesired {
+        vip,
+        port: std::num::NonZeroU16::new(8080).expect("non-zero"),
+        proto: Proto::Tcp,
+        backends,
+        fingerprint: fp,
+    }
+}
+
+/// Regression (latent defect) — the V6 VIP arm of
+/// `ServiceMapHydrator::reconcile` previously branched on the VIP address
+/// family BEFORE applying the `is_mesh_backend` gate: it emitted
+/// `DataplaneUpdateService` with the FULL backend list and `continue`d,
+/// bypassing the mesh filter the V4 path applies. The mesh-gate invariant
+/// (ADR-0071: a mesh `workload_addr` backend's delivery is owned
+/// EXCLUSIVELY by nft-TPROXY, NEVER the dataplane LB path) keys on the
+/// BACKEND's address, not the VIP's family — so a V6 VIP carrying a V4
+/// mesh backend silently leaked the mesh backend into the LB path
+/// (split-brain delivery). `ServiceVip` accepts V6 at the type/parser
+/// level, so the arm is reachable through the driving port.
+///
+/// A V6 VIP carrying a mesh backend (`10.99.0.6`) + a non-mesh remote
+/// backend (`10.96.0.50`) must emit a `DataplaneUpdateService` whose
+/// `backends` contains ONLY the remote backend — the mesh backend must
+/// NOT appear. The V6 arm has no local path, so no `RegisterLocalBackend`
+/// is emitted.
+#[test]
+fn v6_vip_service_excludes_mesh_backend_from_dataplane_update() {
+    let host = Ipv4Addr::new(10, 0, 0, 1);
+    let vip6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+    let mesh = Ipv4Addr::new(10, 99, 0, 6);
+    let remote = Ipv4Addr::new(10, 96, 0, 50);
+    assert!(workload_subnet().contains(&mesh), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
+    assert!(!workload_subnet().contains(&remote), "fixture precondition: 10.96.0.50 ∉ mesh subnet");
+
+    let r = ServiceMapHydrator::canonical(host, workload_subnet());
+    let s_id = make_service_id(1);
+    let mut desired = BTreeMap::new();
+    desired.insert(s_id, v6_vip_desired_with_backends(vip6, &[mesh, remote]));
+    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    let view = ServiceMapHydratorView::default();
+
+    let (actions, _next_view) = r.reconcile(&state, &state, &view, &make_tick(0));
+
+    // Exactly one DataplaneUpdateService carrying EXACTLY the remote backend.
+    let dataplane: Vec<&Action> =
+        actions.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).collect();
+    assert_eq!(
+        dataplane.len(),
+        1,
+        "a V6 VIP service with a surviving remote backend emits exactly one DataplaneUpdateService"
+    );
+    match dataplane[0] {
+        Action::DataplaneUpdateService { backends, .. } => {
+            assert_eq!(
+                backends.len(),
+                1,
+                "the V6 path must carry EXACTLY one backend (the mesh backend gated out)"
+            );
+            assert_eq!(
+                backends[0].addr,
+                SocketAddr::new(IpAddr::V4(remote), 8080),
+                "the surviving backend must be the remote 10.96.0.50:8080"
+            );
+        }
+        other => panic!("expected DataplaneUpdateService, got {other:?}"),
+    }
+
+    // The mesh backend must NOT appear in any emitted DataplaneUpdateService.
+    for action in &actions {
+        if let Action::DataplaneUpdateService { backends, .. } = action {
+            for b in backends {
+                assert_ne!(
+                    b.addr,
+                    SocketAddr::new(IpAddr::V4(mesh), 8080),
+                    "mesh backend 10.99.0.6 must NOT leak into a V6 VIP DataplaneUpdateService"
+                );
+            }
+        }
+    }
+
+    // The V6 arm has no local path — no RegisterLocalBackend is emitted.
+    let register_count =
+        actions.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).count();
+    assert_eq!(register_count, 0, "the V6 VIP arm has no local path — no RegisterLocalBackend");
+}
+
+/// Regression (latent defect, all-mesh half) — an all-mesh V6 VIP service
+/// must emit NOTHING and leave `view.retries` empty, mirroring the V4
+/// `all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks`
+/// guard. The pre-fix V6 arm bumped the retry budget unconditionally (it
+/// emitted `DataplaneUpdateService` before gating), so an all-mesh V6
+/// service recorded a phantom dispatch and would re-dispatch + fsync a
+/// View row forever. Post-fix, with the gate hoisted above the VIP-family
+/// switch, an all-mesh V6 service emits no action AND records nothing.
+#[test]
+fn v6_vip_all_mesh_service_emits_nothing_and_keeps_retries_empty() {
+    let host = Ipv4Addr::new(10, 0, 0, 1);
+    let vip6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+    let m1 = Ipv4Addr::new(10, 99, 0, 6);
+    let m2 = Ipv4Addr::new(10, 99, 0, 10);
+    assert!(workload_subnet().contains(&m1), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
+    assert!(workload_subnet().contains(&m2), "fixture precondition: 10.99.0.10 ∈ mesh subnet");
+
+    let r = ServiceMapHydrator::canonical(host, workload_subnet());
+    let s_id = make_service_id(1);
+    let mut desired = BTreeMap::new();
+    desired.insert(s_id, v6_vip_desired_with_backends(vip6, &[m1, m2]));
+    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    let view = ServiceMapHydratorView::default();
+
+    let (actions, next_view) = r.reconcile(&state, &state, &view, &make_tick(0));
+
+    assert!(actions.is_empty(), "an all-mesh V6 VIP service must emit NO actions");
+    assert!(
+        next_view.retries.is_empty(),
+        "an all-mesh V6 VIP service must record NOTHING in the View (no phantom retry budget)"
     );
 }
 
