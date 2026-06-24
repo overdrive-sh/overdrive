@@ -319,130 +319,122 @@ impl Reconciler for ServiceMapHydrator {
         let mut next_view = view.clone();
 
         for (service_id, desired_svc) in &desired.desired {
+            // D-GATE / D-GATE-PRED — three-way subnet-membership gate applied
+            // BEFORE the LOCAL/REMOTE partition AND BEFORE the VIP-family
+            // switch. A Path-A/mesh backend (V4 addr ∈ `workload_subnet`,
+            // 10.99.0.0/16) is gated out of BOTH LB paths: nft-TPROXY owns its
+            // delivery (reconciles ADR-0053 ↔ ADR-0071). The gate keys on the
+            // BACKEND's address, NOT the VIP's family, so it applies uniformly
+            // to every VIP family. Computed here (a pure fn of
+            // `desired_svc.backends`, independent of the dispatch decision) so
+            // the post-gate REMOTE survivor set is available to derive
+            // `programmed_fingerprint` BEFORE `should_dispatch` runs.
+            let host_ipv4 = self.host_ipv4;
+            let workload_subnet = self.workload_subnet;
+            let is_mesh_backend = |b: &&Backend| match b.addr.ip() {
+                std::net::IpAddr::V4(v4) => workload_subnet.contains(&v4),
+                std::net::IpAddr::V6(_) => false,
+            };
+            let non_mesh: Vec<&Backend> =
+                desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).collect();
+
+            // Partition `non_mesh` into LOCAL (== host_ipv4) and REMOTE arms.
+            // For a V6 VIP there is no LOCAL partition — every non-mesh backend
+            // is "remote" — so `remote_survivors == non_mesh` and `local` is
+            // empty (the V4-equality predicate is never true for a V6 VIP, but
+            // the backends are V4 so this partitions correctly regardless).
+            let vip_is_v4 = matches!(desired_svc.vip.get(), std::net::IpAddr::V4(_));
+            let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
+                non_mesh.iter().copied().partition(|b| {
+                    vip_is_v4
+                        && match b.addr.ip() {
+                            std::net::IpAddr::V4(v4) => v4 == host_ipv4,
+                            std::net::IpAddr::V6(_) => false,
+                        }
+                });
+            let remote_survivors: Vec<Backend> = remote.iter().map(|b| (*b).clone()).collect();
+
+            // The post-gate REMOTE survivors are the ONLY backends the
+            // dataplane (XDP/REVERSE_NAT) is driven to program. The programmed
+            // fingerprint is `fingerprint(vip, remote_survivors)` — byte-
+            // identical to what `dataplane_update_service::dispatch` writes back
+            // (`fingerprint(vip, action.backends)`) because the emitted action
+            // carries exactly `remote_survivors`. This equality is the entire
+            // convergence-model realignment (convergence-model.md § 3.1):
+            // dispatch + convergence key on the PROGRAMMABLE projection, never
+            // the full backend set. Recomputed every tick from inputs
+            // (`backends`, `workload_subnet`, `host_ipv4`), NEVER persisted.
+            let programmed_fingerprint =
+                crate::dataplane::fingerprint::fingerprint(&desired_svc.vip, &remote_survivors);
+
             let actual_status = actual.actual.get(service_id);
             let need_dispatch = should_dispatch(
                 actual_status,
-                desired_svc.fingerprint,
+                programmed_fingerprint,
                 view.retries.get(service_id),
                 tick.now_unix,
             );
 
             if need_dispatch {
                 let target_str = format!("service-map-hydrator/{service_id}");
+                // `spec_hash` stays keyed on the FULL-set `desired_svc.fingerprint`
+                // (convergence-model.md § 3.3): the correlation key identifies
+                // "this service's desired-state revision"; the full-set
+                // fingerprint is the stable identity of that revision (the
+                // churn/identity signal). Do NOT re-key onto
+                // `programmed_fingerprint`.
                 let spec_hash = ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
 
-                // ADR-0053 § 4 — per-backend Local-vs-Remote classification.
-                let host_ipv4 = self.host_ipv4;
+                // Emit the DataplaneUpdateService UNCONDITIONALLY on dispatch
+                // (convergence-model.md § 3.3) — an empty `remote_survivors`
+                // is the documented per-proto PURGE (traits/dataplane.rs
+                // :197-204). This drives the dataplane to the empty state AND
+                // produces the Completed{fingerprint(vip,[])} row that lets an
+                // all-mesh / local-only service settle, AND tears down stranded
+                // REVERSE_NAT/SERVICE_MAP entries on a non-mesh→all-mesh
+                // transition (Finding 2, § 6). Uniform for V4 and V6 VIPs.
+                actions.push(Action::DataplaneUpdateService {
+                    service_id: *service_id,
+                    vip: desired_svc.vip,
+                    port: desired_svc.port,
+                    proto: desired_svc.proto,
+                    backends: remote_survivors.clone(),
+                    correlation: CorrelationKey::derive(&target_str, &spec_hash, "update-service"),
+                });
 
-                // D-GATE / D-GATE-PRED — three-way subnet-membership gate
-                // applied BEFORE the existing LOCAL/REMOTE partition AND
-                // BEFORE the VIP-family switch. A Path-A/mesh backend (V4
-                // addr ∈ `workload_subnet`, 10.99.0.0/16) is gated out of
-                // BOTH LB paths: nft-TPROXY owns its delivery (reconciles
-                // ADR-0053 ↔ ADR-0071). The gate keys on the BACKEND's
-                // address, NOT the VIP's family, so it applies uniformly to
-                // every VIP family — a V6 VIP carrying a V4 mesh backend is
-                // gated identically to a V4 VIP. Hoisting it above the match
-                // (`non_mesh`) is the single, VIP-family-independent site.
-                let workload_subnet = self.workload_subnet;
-                let is_mesh_backend = |b: &&Backend| match b.addr.ip() {
-                    std::net::IpAddr::V4(v4) => workload_subnet.contains(&v4),
-                    std::net::IpAddr::V6(_) => false,
-                };
-                let non_mesh: Vec<&Backend> =
-                    desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).collect();
-
-                let vip_v4 = match desired_svc.vip.get() {
-                    std::net::IpAddr::V4(v4) => v4,
-                    // V6 VIP arm. The mesh gate above already excluded
-                    // Path-A/mesh backends, so the V6 path drives only the
-                    // remote LB path over `non_mesh`. It records a dispatch
-                    // ONLY when it emitted one — an all-mesh V6 service
-                    // (`non_mesh.is_empty()`) emits nothing AND records
-                    // nothing, mirroring the V4 all-mesh retry-guard below.
-                    // Reachable through the driving port (`ServiceVip`
-                    // accepts V6); the IPv4-only `VipRange` allocator keeps
-                    // it unreached in the current production flow.
-                    std::net::IpAddr::V6(_) => {
-                        if !non_mesh.is_empty() {
-                            actions.push(Action::DataplaneUpdateService {
-                                service_id: *service_id,
-                                vip: desired_svc.vip,
-                                port: desired_svc.port,
-                                proto: desired_svc.proto,
-                                backends: non_mesh.into_iter().cloned().collect(),
-                                correlation: CorrelationKey::derive(
-                                    &target_str,
-                                    &spec_hash,
-                                    "update-service",
-                                ),
-                            });
-                            let entry = next_view.retries.entry(*service_id).or_default();
-                            entry.attempts = entry.attempts.saturating_add(1);
-                            entry.last_failure_seen_at = tick.now_unix;
-                            entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
-                        }
-                        continue;
-                    }
-                };
-
-                // V4 path — partition the already-mesh-filtered `non_mesh`
-                // set into LOCAL (== `host_ipv4`) and REMOTE arms. Observable
-                // behavior is identical to before the gate was hoisted.
-                let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
-                    non_mesh.into_iter().partition(|b| match b.addr.ip() {
-                        std::net::IpAddr::V4(v4) => v4 == host_ipv4,
-                        std::net::IpAddr::V6(_) => false,
-                    });
-
-                let remote_is_empty = remote.is_empty();
-                let local_is_empty = local.is_empty();
-
-                if !remote_is_empty {
-                    actions.push(Action::DataplaneUpdateService {
-                        service_id: *service_id,
-                        vip: desired_svc.vip,
-                        port: desired_svc.port,
-                        proto: desired_svc.proto,
-                        backends: remote.into_iter().cloned().collect(),
-                        correlation: CorrelationKey::derive(
-                            &target_str,
-                            &spec_hash,
-                            "update-service",
-                        ),
-                    });
+                // The LOCAL path (V4 VIP only — `local` is empty for a V6 VIP)
+                // emits one RegisterLocalBackend per surviving LOCAL backend.
+                // Unchanged from before the realignment.
+                if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
+                    push_register_local_backend_actions(
+                        &mut actions,
+                        &local,
+                        &LocalBackendEmit {
+                            service_id: *service_id,
+                            vip_v4,
+                            vip_port: desired_svc.port.get(),
+                            proto: desired_svc.proto,
+                            target_str: &target_str,
+                            spec_hash: &spec_hash,
+                        },
+                    );
                 }
 
-                push_register_local_backend_actions(
-                    &mut actions,
-                    &local,
-                    &LocalBackendEmit {
-                        service_id: *service_id,
-                        vip_v4,
-                        vip_port: desired_svc.port.get(),
-                        proto: desired_svc.proto,
-                        target_str: &target_str,
-                        spec_hash: &spec_hash,
-                    },
-                );
-
-                // Only count this tick as a dispatch when at least one LB
-                // path actually emitted an action. A service whose entire
-                // backend set was gated out as Path-A/mesh
-                // (`local_is_empty && remote_is_empty`) programmed NOTHING
-                // — nft-TPROXY owns its delivery — so it must NOT record an
-                // attempted fingerprint or bump the retry budget (else the
-                // backoff gate would throttle a phantom dispatch and the
-                // View would falsely claim the service was programmed).
-                if !(local_is_empty && remote_is_empty) {
-                    let entry = next_view.retries.entry(*service_id).or_default();
-                    entry.attempts = entry.attempts.saturating_add(1);
-                    entry.last_failure_seen_at = tick.now_unix;
-                    entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
-                }
+                // A dispatch ALWAYS emitted a DataplaneUpdateService now (incl.
+                // the empty purge), so it always has a programmable fingerprint
+                // to record. Record the PROGRAMMED fingerprint (matches what the
+                // Completed row will carry), NOT the full-set fingerprint
+                // (convergence-model.md § 3.4). The 02-02 "don't record a phantom
+                // for an all-mesh service" guard is OBSOLETE — an all-mesh service
+                // genuinely dispatches a purge, so recording its empty-set
+                // programmed fingerprint is honest.
+                let entry = next_view.retries.entry(*service_id).or_default();
+                entry.attempts = entry.attempts.saturating_add(1);
+                entry.last_failure_seen_at = tick.now_unix;
+                entry.last_attempted_fingerprint = Some(programmed_fingerprint);
             } else if let Some(ServiceHydrationStatus::Completed { fingerprint, .. }) =
                 actual_status
-                && *fingerprint == desired_svc.fingerprint
+                && *fingerprint == programmed_fingerprint
             {
                 next_view.retries.remove(service_id);
             }

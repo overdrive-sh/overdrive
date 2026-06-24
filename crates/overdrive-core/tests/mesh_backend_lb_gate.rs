@@ -34,7 +34,7 @@ use ipnet::Ipv4Net;
 use proptest::prelude::*;
 
 use overdrive_core::dataplane::backend_key::Proto;
-use overdrive_core::dataplane::fingerprint::fingerprint;
+use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
 use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::reconcilers::{
     Action, Reconciler, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
@@ -97,11 +97,18 @@ fn desired_with_backend(backend_ip: Ipv4Addr) -> ServiceDesired {
 /// Drive `ServiceMapHydrator::reconcile` for a single service whose only
 /// backend has `backend_ip`, returning the port-exposed observable
 /// universe: `(register_local_backend_count, dataplane_update_service_count,
-/// programmed_fingerprint)`. The programmed fingerprint is read from the
-/// returned `View` (`RetryMemory.last_attempted_fingerprint`) — `Some` iff
-/// the hydrator counted this service as dispatched, `None` iff the service
-/// was gated out of both paths.
-fn reconcile_universe(backend_ip: Ipv4Addr) -> (usize, usize, Option<u64>) {
+/// programmed_fingerprint, emitted_remote_backends_len)`.
+///
+/// Under the convergence-model realignment every dispatching service
+/// records the PROGRAMMABLE fingerprint (`fingerprint(vip,
+/// remote_survivors)`) in `RetryMemory.last_attempted_fingerprint` — for an
+/// all-mesh / local-only service that is `Some(fingerprint(vip, []))` (the
+/// empty-set purge), for a remote-only / mixed service it is `Some` over the
+/// surviving remote backends. `emitted_remote_backends_len` is the length of
+/// the `DataplaneUpdateService.backends` vector (0 for an empty purge).
+fn reconcile_universe(
+    backend_ip: Ipv4Addr,
+) -> (usize, usize, Option<BackendSetFingerprint>, usize) {
     let r = ServiceMapHydrator::canonical(host_ipv4(), workload_subnet());
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
@@ -117,66 +124,104 @@ fn reconcile_universe(backend_ip: Ipv4Addr) -> (usize, usize, Option<u64>) {
         actions.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).count();
     let programmed_fingerprint =
         next_view.retries.get(&s_id).and_then(|m| m.last_attempted_fingerprint);
+    let emitted_remote_backends_len = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::DataplaneUpdateService { backends, .. } => Some(backends.len()),
+            _ => None,
+        })
+        .unwrap_or(0);
 
-    (register_local_backend_count, dataplane_update_service_count, programmed_fingerprint)
+    (
+        register_local_backend_count,
+        dataplane_update_service_count,
+        programmed_fingerprint,
+        emitted_remote_backends_len,
+    )
 }
 
-/// S-GATE mesh arm (happy) — a backend whose `addr.ip()` is within
-/// `WORKLOAD_SUBNET_BASE` (10.99.0.0/16) emits NEITHER
-/// `RegisterLocalBackend` NOR `DataplaneUpdateService` (mesh -> skip;
-/// nft-TPROXY owns delivery). `@example`-pinned at 10.99.0.6 — the
-/// canonical in-netns workload address (slot-1 `/30`). The retry-memory
-/// fingerprint stays `None`: a fully-gated service is not counted as
-/// dispatched.
+/// S-GATE mesh arm — under the convergence-model realignment
+/// (`fix-mesh-only-reconcile-loop`, convergence-model.md § 11.1) the
+/// all-mesh contract INVERTS: a mesh backend programs NO LOCAL path and is
+/// EXCLUDED from the remote backend PAYLOAD, but the service DOES emit the
+/// empty-remote purge that settles it. The mesh backend never leaks into
+/// the emitted backends — the `DataplaneUpdateService` carries the EMPTY
+/// set (the documented per-proto purge, traits/dataplane.rs:197-204).
+/// `@example`-pinned at 10.99.0.6 (slot-1 `/30`). `register_count == 0`
+/// (UNCHANGED — no local emit for a mesh backend); `dataplane_count == 1`
+/// (CHANGED from 0 — the purge); emitted backends EMPTY; `programmed_fp ==
+/// Some(fingerprint(vip, []))` (CHANGED from `None` — the service now
+/// genuinely dispatches a purge over the empty programmable set).
 #[test]
-fn mesh_subnet_backend_programs_neither_local_nor_remote_lb_path() {
+fn mesh_subnet_backend_settles_via_empty_remote_purge() {
     let mesh_backend = Ipv4Addr::new(10, 99, 0, 6);
     assert!(
         workload_subnet().contains(&mesh_backend),
         "fixture precondition: 10.99.0.6 must be inside the mesh subnet"
     );
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let empty_fp = fingerprint(&vip, &[]);
 
-    let (register_count, dataplane_count, programmed_fp) = reconcile_universe(mesh_backend);
+    let (register_count, dataplane_count, programmed_fp, remote_backends_len) =
+        reconcile_universe(mesh_backend);
 
     assert_eq!(
         register_count, 0,
         "mesh backend must emit NO RegisterLocalBackend (nft-TPROXY owns delivery)"
     );
     assert_eq!(
-        dataplane_count, 0,
-        "mesh backend must emit NO DataplaneUpdateService (nft-TPROXY owns delivery)"
+        dataplane_count, 1,
+        "mesh backend must emit exactly ONE DataplaneUpdateService — the empty-remote purge that settles the service"
     );
     assert_eq!(
-        programmed_fp, None,
-        "a fully-gated mesh service is not counted as dispatched — no programmed fingerprint"
+        remote_backends_len, 0,
+        "the mesh backend must NOT leak into the emitted payload — the purge carries the EMPTY set"
+    );
+    assert_eq!(
+        programmed_fp,
+        Some(empty_fp),
+        "an all-mesh service records the programmable fingerprint over the EMPTY set"
     );
 }
 
-/// S-GATE local arm (error/edge — gate must NOT over-fire) — a backend
-/// whose `addr == host_ipv4` still emits `RegisterLocalBackend` (the
-/// LOCAL arm is UNCHANGED). Proves the gate does not swallow the local
-/// path. `@example`-pinned at `host_ipv4`.
+/// S-GATE local arm — a backend whose `addr == host_ipv4` still emits
+/// `RegisterLocalBackend` (the LOCAL arm is UNCHANGED — `register_count ==
+/// 1`). Under the convergence-model realignment (convergence-model.md
+/// § 11.1) the local-only service ALSO emits the empty-remote purge that
+/// settles its (empty) programmable projection: `dataplane_count` CHANGES
+/// 0 → 1, the emitted backends are EMPTY (the local backend does not leak
+/// into the remote payload), and `programmed_fp` is now `Some(fingerprint(
+/// vip, []))` — over the EMPTY remote set, not the full set. `@example`-
+/// pinned at `host_ipv4`.
 #[test]
-fn host_address_backend_still_registers_as_local_backend() {
+fn host_address_backend_registers_local_and_settles_via_empty_remote_purge() {
     let local_backend = host_ipv4();
     assert!(
         !workload_subnet().contains(&local_backend),
         "fixture precondition: host_ipv4 must NOT be inside the mesh subnet"
     );
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let empty_fp = fingerprint(&vip, &[]);
 
-    let (register_count, dataplane_count, programmed_fp) = reconcile_universe(local_backend);
+    let (register_count, dataplane_count, programmed_fp, remote_backends_len) =
+        reconcile_universe(local_backend);
 
     assert_eq!(
         register_count, 1,
         "a host-address backend must still emit exactly one RegisterLocalBackend (LOCAL arm)"
     );
     assert_eq!(
-        dataplane_count, 0,
-        "a host-address backend is local — no DataplaneUpdateService for the remote path"
+        dataplane_count, 1,
+        "a local-only service also emits the empty-remote purge that settles its empty remote projection"
     );
-    assert!(
-        programmed_fp.is_some(),
-        "a dispatched (local) service records its attempted fingerprint in the View"
+    assert_eq!(
+        remote_backends_len, 0,
+        "the local backend must NOT leak into the remote payload — the purge carries the EMPTY set"
+    );
+    assert_eq!(
+        programmed_fp,
+        Some(empty_fp),
+        "a local-only service records the programmable fingerprint over the EMPTY remote set"
     );
 }
 
@@ -195,12 +240,17 @@ fn non_mesh_non_host_backend_still_drives_dataplane_service_update() {
     );
     assert_ne!(remote_backend, host_ipv4(), "fixture precondition: must not equal host_ipv4");
 
-    let (register_count, dataplane_count, programmed_fp) = reconcile_universe(remote_backend);
+    let (register_count, dataplane_count, programmed_fp, remote_backends_len) =
+        reconcile_universe(remote_backend);
 
     assert_eq!(register_count, 0, "a remote backend is not local — no RegisterLocalBackend");
     assert_eq!(
         dataplane_count, 1,
         "a non-mesh non-host backend must still emit exactly one DataplaneUpdateService (REMOTE arm)"
+    );
+    assert_eq!(
+        remote_backends_len, 1,
+        "the remote-only happy path is UNCHANGED — the surviving remote backend is in the payload"
     );
     assert!(
         programmed_fp.is_some(),
@@ -332,23 +382,33 @@ fn mixed_service_excludes_mesh_keeps_remote_backend_and_registers_local() {
     }
 }
 
-/// D3 (≥2-tick all-mesh retry-guard) — an all-mesh service records NOTHING
-/// in the View and does not bump the retry budget, across two consecutive
-/// ticks. Without the all-mesh guard the service records a phantom
-/// fingerprint and re-dispatches + fsyncs a View row ~once/sec forever
-/// (the ratified-correct behavior the orchestrator's trace established).
-/// Both backends ∈ 10.99.0.0/16; `host_ipv4 = 10.0.0.1`.
+/// Convergence-model realignment (`fix-mesh-only-reconcile-loop`,
+/// convergence-model.md § 4 / § 11.1) — an all-mesh service SETTLES via the
+/// empty-remote purge. This is a genuinely NEW contract that DELETES the
+/// prior "emits nothing, retries stay empty" behavior (which encoded the
+/// perpetual-loop bug, RCA): the old model never produced a hydration row,
+/// so the View never settled and `should_dispatch` re-entered its dispatch
+/// arm in perpetuity. Per `.claude/rules/development.md` § "Deletion
+/// discipline" the salvage is honest — new name, new assertions describing
+/// the new requirement. Both backends ∈ 10.99.0.0/16; `host_ipv4 = 10.0.0.1`.
 ///
-/// Tick 2 feeds `view1` forward with a later `tick.now_unix` to prove the
-/// emptiness is stable across ticks — a phantom dispatch on tick 1 would
-/// have populated `view1.retries` and the guard would never re-engage.
+/// - **Tick 1** (default View, empty `actual`): emits exactly ONE
+///   `DataplaneUpdateService { backends: [] }` (the per-proto purge) and
+///   records `retries[s].last_attempted_fingerprint = Some(fp(vip, []))`.
+/// - **Tick 2** (given a `Completed{fp(vip,[])}` row in `actual`, View fed
+///   forward): emits ZERO actions and CLEARS `retries` — settled.
 #[test]
-fn all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks() {
+fn all_mesh_service_settles_via_empty_remote_purge() {
+    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+
     let host = Ipv4Addr::new(10, 0, 0, 1);
     let m1 = Ipv4Addr::new(10, 99, 0, 6);
     let m2 = Ipv4Addr::new(10, 99, 0, 10);
     assert!(workload_subnet().contains(&m1), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
     assert!(workload_subnet().contains(&m2), "fixture precondition: 10.99.0.10 ∈ mesh subnet");
+
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+    let empty_fp = fingerprint(&vip, &[]);
 
     let r = ServiceMapHydrator::canonical(host, workload_subnet());
     let s_id = make_service_id(1);
@@ -356,21 +416,44 @@ fn all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks() {
     desired.insert(s_id, desired_with_backends(&[m1, m2]));
     let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
 
-    // Tick 1 — default View, empty actual.
+    // Tick 1 — default View, empty actual. One empty-remote purge emitted.
     let view0 = ServiceMapHydratorView::default();
     let (actions1, view1) = r.reconcile(&state, &state, &view0, &make_tick(0));
-    assert!(actions1.is_empty(), "tick 1: an all-mesh service must emit NO actions");
-    assert!(
-        view1.retries.is_empty(),
-        "tick 1: an all-mesh service must record NOTHING in the View (no phantom retry budget)"
+    let dataplane1: Vec<&Action> =
+        actions1.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).collect();
+    assert_eq!(
+        dataplane1.len(),
+        1,
+        "tick 1: an all-mesh service emits exactly ONE DataplaneUpdateService (the empty purge)"
+    );
+    match dataplane1[0] {
+        Action::DataplaneUpdateService { backends, .. } => {
+            assert!(backends.is_empty(), "tick 1: the purge carries the EMPTY backend set");
+        }
+        other => panic!("expected DataplaneUpdateService, got {other:?}"),
+    }
+    assert_eq!(
+        view1.retries.get(&s_id).and_then(|m| m.last_attempted_fingerprint),
+        Some(empty_fp),
+        "tick 1: an all-mesh service records the programmable fingerprint over the EMPTY set"
     );
 
-    // Tick 2 — feed view1 forward, later now_unix.
-    let (actions2, view2) = r.reconcile(&state, &state, &view1, &make_tick(2));
-    assert!(actions2.is_empty(), "tick 2: an all-mesh service must STILL emit NO actions");
+    // Tick 2 — feed a Completed{fp(vip,[])} row (what the shim writes for
+    // the purge) into actual, View fed forward, later now_unix. `state` is
+    // not read after tick 1, so mutate it in place rather than clone.
+    let mut settled = state;
+    settled.actual.insert(
+        s_id,
+        ServiceHydrationStatus::Completed {
+            fingerprint: empty_fp,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+        },
+    );
+    let (actions2, view2) = r.reconcile(&settled, &settled, &view1, &make_tick(2));
+    assert!(actions2.is_empty(), "tick 2: a settled all-mesh service emits ZERO actions");
     assert!(
         view2.retries.is_empty(),
-        "tick 2: retries must STAY empty — no phantom dispatch re-engaged the backoff gate"
+        "tick 2: the convergence-reset arm CLEARS retries once the empty-purge Completed row is observed"
     );
 }
 
@@ -482,16 +565,19 @@ fn v6_vip_service_excludes_mesh_backend_from_dataplane_update() {
     assert_eq!(register_count, 0, "the V6 VIP arm has no local path — no RegisterLocalBackend");
 }
 
-/// Regression (latent defect, all-mesh half) — an all-mesh V6 VIP service
-/// must emit NOTHING and leave `view.retries` empty, mirroring the V4
-/// `all_mesh_service_emits_nothing_and_keeps_retries_empty_across_ticks`
-/// guard. The pre-fix V6 arm bumped the retry budget unconditionally (it
-/// emitted `DataplaneUpdateService` before gating), so an all-mesh V6
-/// service recorded a phantom dispatch and would re-dispatch + fsync a
-/// View row forever. Post-fix, with the gate hoisted above the VIP-family
-/// switch, an all-mesh V6 service emits no action AND records nothing.
+/// Convergence-model realignment (convergence-model.md § 3.1 V6 note /
+/// § 11.1) — an all-mesh V6 VIP service SETTLES via the empty-remote purge,
+/// mirroring the V4 `all_mesh_service_settles_via_empty_remote_purge`
+/// contract. This DELETES the prior "emits nothing, retries empty" V6
+/// behavior (the same perpetual-loop bug on the V6 arm). The V6 arm now
+/// emits the empty purge unconditionally on dispatch and records the
+/// programmable fingerprint over the empty `non_mesh` set; given the
+/// `Completed{fp(vip,[])}` row it settles. The V6 arm has no LOCAL path,
+/// so no `RegisterLocalBackend` is emitted.
 #[test]
-fn v6_vip_all_mesh_service_emits_nothing_and_keeps_retries_empty() {
+fn v6_vip_all_mesh_service_settles_via_empty_remote_purge() {
+    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+
     let host = Ipv4Addr::new(10, 0, 0, 1);
     let vip6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
     let m1 = Ipv4Addr::new(10, 99, 0, 6);
@@ -499,30 +585,68 @@ fn v6_vip_all_mesh_service_emits_nothing_and_keeps_retries_empty() {
     assert!(workload_subnet().contains(&m1), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
     assert!(workload_subnet().contains(&m2), "fixture precondition: 10.99.0.10 ∈ mesh subnet");
 
+    let vip = ServiceVip::new(IpAddr::V6(vip6)).expect("valid V6 ServiceVip");
+    let empty_fp = fingerprint(&vip, &[]);
+
     let r = ServiceMapHydrator::canonical(host, workload_subnet());
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, v6_vip_desired_with_backends(vip6, &[m1, m2]));
     let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
-    let view = ServiceMapHydratorView::default();
+    let view0 = ServiceMapHydratorView::default();
 
-    let (actions, next_view) = r.reconcile(&state, &state, &view, &make_tick(0));
+    // Tick 1 — one empty-remote purge; no RegisterLocalBackend (no V6 local path).
+    let (actions1, view1) = r.reconcile(&state, &state, &view0, &make_tick(0));
+    let dataplane1: Vec<&Action> =
+        actions1.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).collect();
+    assert_eq!(
+        dataplane1.len(),
+        1,
+        "tick 1: an all-mesh V6 service emits exactly ONE DataplaneUpdateService (the empty purge)"
+    );
+    match dataplane1[0] {
+        Action::DataplaneUpdateService { backends, .. } => {
+            assert!(backends.is_empty(), "tick 1: the V6 purge carries the EMPTY backend set");
+        }
+        other => panic!("expected DataplaneUpdateService, got {other:?}"),
+    }
+    let register_count =
+        actions1.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).count();
+    assert_eq!(register_count, 0, "the V6 VIP arm has no local path — no RegisterLocalBackend");
+    assert_eq!(
+        view1.retries.get(&s_id).and_then(|m| m.last_attempted_fingerprint),
+        Some(empty_fp),
+        "tick 1: the V6 all-mesh service records the programmable fingerprint over the EMPTY set"
+    );
 
-    assert!(actions.is_empty(), "an all-mesh V6 VIP service must emit NO actions");
+    // Tick 2 — Completed{fp(vip,[])} row → settled, retries cleared.
+    // `state` is not read after tick 1, so mutate it in place (no clone).
+    let mut settled = state;
+    settled.actual.insert(
+        s_id,
+        ServiceHydrationStatus::Completed {
+            fingerprint: empty_fp,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+        },
+    );
+    let (actions2, view2) = r.reconcile(&settled, &settled, &view1, &make_tick(2));
+    assert!(actions2.is_empty(), "tick 2: a settled all-mesh V6 service emits ZERO actions");
     assert!(
-        next_view.retries.is_empty(),
-        "an all-mesh V6 VIP service must record NOTHING in the View (no phantom retry budget)"
+        view2.retries.is_empty(),
+        "tick 2: the convergence-reset arm CLEARS retries once the empty-purge Completed row is observed"
     );
 }
 
 proptest! {
-    /// PBT over the three address classes: for any backend address, the
-    /// three-way subnet split routes it to exactly one disposition, and
-    /// the two non-mesh arms never over-fire. The invariant is that mesh
-    /// membership (and ONLY mesh membership) zeroes both LB paths;
-    /// host-equality routes to LOCAL; everything else routes to REMOTE.
-    /// Strategy spans one representative per arm so shrinking always
-    /// reports the minimal failing class.
+    /// PBT over the three address classes (convergence-model.md § 11.1):
+    /// every single-backend service emits EXACTLY ONE `DataplaneUpdateService`
+    /// (the remote/XDP path — populated for a remote backend, EMPTY purge for
+    /// mesh/local), plus a `RegisterLocalBackend` iff the backend is local.
+    /// The OLD "mesh zeroes both paths" invariant is DELETED — it encoded the
+    /// perpetual-loop bug. Mesh membership routes the backend out of the
+    /// PAYLOAD (it never leaks in); the service still emits the empty purge
+    /// that settles it. Strategy spans one representative per arm so shrinking
+    /// always reports the minimal failing class.
     #[test]
     fn three_way_split_routes_each_address_class_to_exactly_one_disposition(
         backend_ip in prop_oneof![
@@ -535,23 +659,43 @@ proptest! {
             (1u8..=95, 0u8..=255, 0u8..=255).prop_map(|(b, c, d)| Ipv4Addr::new(10, b, c, d)),
         ]
     ) {
-        let (register_count, dataplane_count, programmed_fp) = reconcile_universe(backend_ip);
+        let (register_count, dataplane_count, programmed_fp, remote_backends_len) =
+            reconcile_universe(backend_ip);
+
+        let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)))
+            .expect("valid ServiceVip");
+        let empty_fp = fingerprint(&vip, &[]);
 
         let is_mesh = workload_subnet().contains(&backend_ip);
         let is_local = backend_ip == host_ipv4();
 
         if is_mesh {
+            // all-mesh single-backend service: empty-remote purge settles it.
             prop_assert_eq!(register_count, 0, "mesh: no RegisterLocalBackend");
-            prop_assert_eq!(dataplane_count, 0, "mesh: no DataplaneUpdateService");
-            prop_assert_eq!(programmed_fp, None, "mesh: not counted as dispatched");
+            prop_assert_eq!(dataplane_count, 1, "mesh: one DataplaneUpdateService (empty purge)");
+            prop_assert_eq!(remote_backends_len, 0, "mesh: empty purge payload");
+            prop_assert_eq!(programmed_fp, Some(empty_fp), "mesh: programmed over the empty set");
         } else if is_local {
+            // local + empty-remote purge.
             prop_assert_eq!(register_count, 1, "local: exactly one RegisterLocalBackend");
-            prop_assert_eq!(dataplane_count, 0, "local: no DataplaneUpdateService");
-            prop_assert!(programmed_fp.is_some(), "local: dispatched");
+            prop_assert_eq!(dataplane_count, 1, "local: one DataplaneUpdateService (empty purge)");
+            prop_assert_eq!(remote_backends_len, 0, "local: empty remote purge payload");
+            prop_assert_eq!(programmed_fp, Some(empty_fp), "local: programmed over the empty set");
         } else {
+            // remote-only happy path — UNCHANGED: the surviving remote backend
+            // is in the payload and the programmed fingerprint is over it.
+            let remote_backend = Backend {
+                alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                    .expect("valid SpiffeId"),
+                addr: SocketAddr::new(IpAddr::V4(backend_ip), 8080),
+                weight: 1,
+                healthy: true,
+            };
+            let remote_fp = fingerprint(&vip, std::slice::from_ref(&remote_backend));
             prop_assert_eq!(register_count, 0, "remote: no RegisterLocalBackend");
             prop_assert_eq!(dataplane_count, 1, "remote: exactly one DataplaneUpdateService");
-            prop_assert!(programmed_fp.is_some(), "remote: dispatched");
+            prop_assert_eq!(remote_backends_len, 1, "remote: the surviving backend is in the payload");
+            prop_assert_eq!(programmed_fp, Some(remote_fp), "remote: programmed over the remote survivor");
         }
     }
 }
