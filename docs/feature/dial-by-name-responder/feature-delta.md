@@ -809,31 +809,51 @@ index is provably untouched.
 
 # Wave: DISTILL (GH #243) — Quinn, 2026-06-25
 
+> **REV-2 RE-DISTILL note (2026-06-25, commit `8e22f499`).** The DISTILL
+> `[REF]` sections in THIS block were re-distilled to the ratified ADR-0072
+> REV-2 stable-frontend contract. The scenario set is now **39** (was 26);
+> the executable spec + RED-classification PLAN in `distill/` are the
+> REV-2-current SSOT. The original (REV-1) wording below the REV-2-updated
+> sections (Inherited commitments, WS strategy, Adapter coverage, Scaffold
+> MANIFEST, etc.) has been updated in place where it named the superseded
+> backend-addr answer contract; the per-section REV-2 deltas are marked
+> inline. The DESIGN § "Wave: DESIGN — REVISION 2" block below this DISTILL
+> block is the contract this re-distill targets. Wave-Decision Reconciliation
+> HARD GATE re-run for REV-2: **PASS — 0 contradictions** (the dispatch's four
+> REV-2 contract points all match the committed ADR-0072 REV-2 + feature-delta
+> REV-2; D-TME-10 "headless / no-VIP" is an ADR *supersession*, recorded
+> verbatim as superseded, not a contradiction).
+>
 > The executable acceptance specification for this feature. Compact `[REF]`
 > form, matching the file's lean-density posture. The GIVEN/WHEN/THEN scenario
 > SSOT lives in `docs/feature/dial-by-name-responder/distill/test-scenarios.md`
-> (the 26-scenario executable spec — **no `.feature` files**, per
+> (the **39-scenario** executable spec — **no `.feature` files**, per
 > `.claude/rules/testing.md`); the RED-classification PLAN in
 > `distill/red-classification.md`. These `[REF]` sections are the pointers +
 > structured summaries. Wave-Decision Reconciliation HARD GATE: **PASS — 0
-> contradictions** across DISCUSS / DESIGN (no DEVOPS delta dir; the Tier-3
-> obligation is folded into the DESIGN § DEVOPS/Tier-3 section). Lang: Rust
-> (`[lang-mode] rust`). Policy: `inherit` (`docs/architecture/atdd-infrastructure-policy.md`
-> exists; dial-by-name rows appended below).
+> contradictions** across DISCUSS / DESIGN / DESIGN-REV-2 (no DEVOPS delta dir;
+> the Tier-3 obligation is folded into the DESIGN § DEVOPS/Tier-3 section).
+> Lang: Rust (`[lang-mode] rust`). Policy: `inherit`
+> (`docs/architecture/atdd-infrastructure-policy.md` exists; dial-by-name +
+> the REV-2 frontend rows recorded below).
 
 ## Wave: DISTILL / [REF] Inherited commitments
 
 | Origin | Commitment | DDD | Impact |
 |--------|------------|-----|--------|
-| DESIGN/DDN-1 | Sibling name-keyed reader over the SAME `service_backends` rows; the addr-keyed `ServiceBackendsResolve` intercept struct is provably untouched | DDN-1 | Scenarios assert through `answer_for` / the index's public read only; S-DBN-IDX-04 + S-DBN-SINGLE-SRC prove no second source of backend truth and `mtls_resolve_adapter.rs` is not modified |
-| DESIGN/DDN-2 | `by_name` index gates `Backend.healthy == true` (running-AND-healthy), matching the intercept's `Mesh` set | DDN-2 | S-DBN-ANSWER-04 + S-DBN-IDX-02 + S-DBN-SINGLE-SRC make the healthy gate a structural mutation target — an unhealthy-only name MUST yield NXDOMAIN, and the answered addr MUST classify `Mesh` |
+| DESIGN-REV-2/1a-A | NEW per-`<job>` `FrontendAddrAllocator` (sibling to `NetSlotAllocator`) carving a STABLE frontend addr `F` from `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`; idempotent per `<job>`, retained across alloc cycles + zero-healthy windows, released ONLY on logical-workload deletion | REV-1a | S-DBN-FRONTEND-01..04 make the allocator a structural mutation target (membership/disjointness, idempotency, release-only-on-deletion, collision-free); S-DBN-WS-STABLE proves byte-stability across a real alloc cycle (SQ1 elimination) |
+| DESIGN-REV-2/1b-A | EXTEND `BackendIndex` with `by_frontend: BTreeMap<FrontendKey, ServiceId>` (`FrontendKey = (SocketAddrV4, Proto)`); a THREE-way `classify` arm (hit → first-by-`Ord` healthy → `Mesh`/`MeshUnreachable`; frontend-subnet miss → `MeshUnreachable` fail-closed; else `by_addr` fall-through) | REV-1b | S-DBN-REKEY-01..04 + S-DBN-FAILCLOSED-01 + S-DBN-EQUIV-01 guard the translation, the proto-key, the fail-closed arm, and the host-vs-in-memory equivalence (the trait-docstring contract) |
+| DESIGN-REV-2/Finding-2 | WITHHOLD-not-release lifecycle — a transient zero-healthy `<job>` is WITHHELD by `name_index` (→ NXDOMAIN), the `FrontendAddrAllocator` RETAINS `F`; release only on deletion | REV-2 | S-DBN-FRONTEND-03 + S-DBN-IDX-02 + S-DBN-NXDOMAIN-02 assert BOTH the withheld answer AND the retained `F` — a mutant that releases on zero-healthy passes the NXDOMAIN check but fails the retained-`F` check |
+| DESIGN-REV-2/Finding-3 | Coherence: a single ordered drain updates `by_frontend` BEFORE `name_index` exposes `F`; PLUS the fail-closed-on-frontend-subnet-miss arm (`∈ 10.98.0.0/16` miss → `MeshUnreachable`, NO cleartext) | REV-2 | S-DBN-COHERENCE-01 (ordering invariant) + S-DBN-FAILCLOSED-01 (the structural defense) together make the DNS↔resolve race non-exploitable |
+| DESIGN/DDN-1 (SUPERSEDED by REV-2) | REV-1: sibling name-keyed reader; the addr-keyed `ServiceBackendsResolve` struct "provably untouched". **REV-2 supersedes**: the struct is EXTENDED additively (`by_frontend` map + `classify` arm, 1b-A) — the user ratified the in-place extension by choosing the thin path | DDN-1 → REV-1b | The name layer is still a sibling reader (own `name_index`); REV-2's edit is the additive `by_frontend`/`classify` on `BackendIndex` (S-DBN-REKEY-04 proves the `by_addr` path is preserved, backward-compatible) |
+| DESIGN/DDN-2 (RE-SCOPED by REV-2) | REV-1: the healthy gate decided *which addr we answer*. **REV-2 re-scopes**: the gate decides *whether the `<job>` is resolvable at all* (expose its stable `F` or withhold); the healthy backend is selected by `MtlsResolve` at *translation* time | DDN-2 → Finding-2 | S-DBN-ANSWER-04 + S-DBN-IDX-02 make the healthy-gate-as-withhold-seam a structural mutation target (an unhealthy-only `<job>` → NXDOMAIN); S-DBN-REKEY-01/02 make the translation-time healthy selection the mutation target (first-by-`Ord` → `Mesh`; zero-healthy → `MeshUnreachable`) |
 | DESIGN/DDN-3 | `hickory-proto` codec + own `IP_PKTINFO` socket loop (`hickory-server` rejected — no per-packet reply-source control) | DDN-3 | `wire.rs` is proptested in isolation (S-DBN-WIRE-*); the socket loop is irreducibly Tier-3 (S-DBN-BIND-*), acceptance via `getent` source-pin, never `dig` |
 | DESIGN/DDN-4 | Pure `answer_for` + separately-proptested encoder; NO port trait, NO Sim adapter | DDN-4 | `answer_for` is THE mutation-gate target (S-DBN-ANSWER-*); the project policy records "no new Sim adapter for the socket" — the socket has no Tier-2 backstop, a Sim would give false confidence |
 | DESIGN/DDN-5 | Wildcard `0.0.0.0:53` first; per-gateway-addr fallback on `EADDRINUSE`, source = `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick | DDN-5 | S-DBN-BIND-01 (wildcard coexists) + S-DBN-BIND-02 (forced-`EADDRINUSE` fallback re-derive lifecycle) |
 | DESIGN/DDN-6 | `run_server` owns the responder: probe-then-spawn-then-hold-handle, gated by `mtls_worker.is_some()`, `health.startup.refused` on failure | DDN-6 | S-DBN-WS litmus (delete the spawn → `getent` times out) + S-DBN-BIND-03 (Earned-Trust refuse-boot, cause-distinct `DnsResponderError` → distinct refusal reason) |
 | DESIGN/DDN-7 | NEW `MeshServiceName` newtype (`SUFFIX = svc.overdrive.local`, single `<job>` label v1, full completeness + proptest) | DDN-7 | S-DBN-NAME-01..04 (mandatory round-trip proptest + case-insensitive + suffix grammar + label-limit rejection) in the core newtype-test suite |
 | DESIGN/DDN-8 | NXDOMAIN(+1s-MINIMUM SOA) for 0-running-and-healthy; NODATA(+same SOA) for AAAA-on-live; SERIAL via `Clock` | DDN-8 | S-DBN-WIRE-02/03/04 pin the SOA shape + the deterministic-per-`Clock` SERIAL; S-DBN-NXDOMAIN-01 confirms the 1s TTL lets a retry land |
-| DISCUSS/D-TME-10 | Headless return shape — the answered `A` addr is byte-identical to the addr `MtlsResolve.resolve` recognizes; NO VIP, NO #167/#61 | n/a | S-DBN-SINGLE-SRC (K-DBN-4 oracle): feed the answered addr into `resolve`, assert byte-equality + `Mesh` classification |
+| DISCUSS/D-TME-10 (SUPERSEDED by REV-2) | REV-1: headless — the answered `A` addr is the backend addr, byte-identical to what `MtlsResolve` recognizes; NO VIP/translation. **REV-2 supersedes**: the answered addr is the STABLE per-`<job>` frontend `F` that `MtlsResolve` is re-keyed to recognize AND translate to a live backend (a stable IPv4 frontend is VIP-*shaped* but delivered via nft-TPROXY, NOT #61 XDP — a re-scoping, not a contradiction) | n/a → D-DBN-6 | S-DBN-SINGLE-SRC (K-DBN-4 oracle, REV-2 form): feed the answered `F` into the re-keyed `resolve(F, Tcp)`, assert it recognizes `F`, classifies `Mesh`, and translates to a running-and-healthy backend |
 | DISCUSS/D-TME-11 | One source, THREE readers — the responder is the third sibling reader over the `ObservationStore` `service_backends` surface (same rows, same List-then-Watch + relist-on-`Lagged`) | DDN-1 | S-DBN-IDX-01/03 mirror the `ServiceBackendsResolve` List-then-Watch + relist behaviour against `SimObservationStore` |
 | DISCUSS/D-TME-9 | `resolv.conf` injection SHIPPED — each per-netns gateway = `plan.host_addr`, the addr the responder answers on | n/a | The Tier-3 fixtures (S-DBN-WS / S-DBN-BIND-*) rely on the shipped injection; the responder answers on each per-netns gateway (one root-netns wildcard listener) |
 | SPIKE/Slice-00 | `getaddrinfo`/`getent`, never `dig @gw` alone (the source-pin litmus); `ip_forward=1` prerequisite; root-netns wildcard listener | n/a | K2 fixture knob — every name-path Tier-3 scenario asserts on `getent`; a `dig`-only assertion is a reviewer-flagged defect |
@@ -841,22 +861,35 @@ index is provably untouched.
 
 ## Wave: DISTILL / [REF] Scenario list with tags
 
-26 scenarios (16 Tier 1 pure / in-memory, 10 Tier 3 real-kernel Lima).
-Full GIVEN/WHEN/THEN in `distill/test-scenarios.md`. Error-path coverage
-**14/26 = 54%** (≥40% target met — the fail-honest NXDOMAIN posture is
-the load-bearing US-DBN-4 leg).
+> **REV-2 RE-DISTILL** (commit `8e22f499` stable-frontend contract): the set
+> grew **26 → 39 scenarios** (28 Tier 1 pure / in-memory, 11 Tier 3
+> real-kernel Lima). 13 PRESERVED (NAME-01..04, WIRE-01..04, ANSWER-05,
+> NXDOMAIN-03, BIND-01..03), 13 RE-DISTILLed (ANSWER-01..04, IDX-01..04, WS,
+> SINGLE-SRC, PINGPONG, NXDOMAIN-01/02), **13 NEW** (FRONTEND-01..04,
+> REKEY-01..04, FAILCLOSED-01, COHERENCE-01, EQUIV-01, WS-STABLE, CHURN). Full
+> GIVEN/WHEN/THEN + per-scenario REV-2 status in `distill/test-scenarios.md`.
+> Error-path coverage **18/39 = 46%** (≥40% target met — the fail-honest
+> withheld-NXDOMAIN posture plus the REV-2 fail-closed-on-frontend-subnet-miss
+> arm).
 
-| Scenario | Tags | Tier | US |
-|---|---|---|---|
-| S-DBN-NAME-01..04 | `@property`/`@error_path` `@in-memory` | 1 | US-DBN-2 |
-| S-DBN-ANSWER-01..05 | `@property`/`@error_path` `@in-memory` `@kpi` | 1 | US-DBN-2/4 |
-| S-DBN-WIRE-01..04 | `@property`/`@error_path` `@in-memory` | 1 | US-DBN-2/4 |
-| S-DBN-IDX-01..04 | `@property`/`@error_path` `@in-memory` `@kpi` | 1 | US-DBN-2/4 |
-| S-DBN-WS | `@walking_skeleton` `@driving_adapter` `@real-io` `@kpi` | 3 | US-DBN-2 |
-| S-DBN-SINGLE-SRC | `@real-io` `@kpi` | 3 | US-DBN-2 |
-| S-DBN-PINGPONG | `@walking_skeleton` `@real-io` `@edd` `@kpi` | 3 | US-DBN-3 |
-| S-DBN-NXDOMAIN-01..03 | `@real-io` `@error_path` `@kpi` | 3 | US-DBN-4 |
-| S-DBN-BIND-01..03 | `@boot` `@real-io` (`@error_path` on 02/03) | 3 | US-DBN-2 |
+| Scenario | Tags | Tier | US | REV-2 |
+|---|---|---|---|---|
+| S-DBN-NAME-01..04 | `@property`/`@error_path` `@in-memory` | 1 | US-DBN-2 | PRESERVED |
+| S-DBN-FRONTEND-01..04 | `@property`/`@error_path` `@in-memory` `@frontend` `@churn` | 1 | US-DBN-2/4 | NEW (01-04) |
+| S-DBN-ANSWER-01..05 | `@property`/`@error_path` `@in-memory` `@frontend` `@kpi` | 1 | US-DBN-2/4 | RE-DISTILL (01-04 ANSWER-05 PRESERVED) |
+| S-DBN-WIRE-01..04 | `@property`/`@error_path` `@in-memory` | 1 | US-DBN-2/4 | PRESERVED |
+| S-DBN-IDX-01..04 | `@property`/`@error_path` `@in-memory` `@frontend` `@churn` `@kpi` | 1 | US-DBN-2/4 | RE-DISTILL |
+| S-DBN-REKEY-01..04 | `@property`/`@error_path` `@in-memory` `@frontend` `@kpi` | 1 | US-DBN-2/4 | NEW (02-00) |
+| S-DBN-FAILCLOSED-01 | `@property` `@in-memory` `@fail_closed` `@error_path` `@kpi` | 1 | US-DBN-2 | NEW (02-00) |
+| S-DBN-COHERENCE-01 | `@property` `@in-memory` `@frontend` | 1 | US-DBN-2 | NEW (02-00) |
+| S-DBN-EQUIV-01 | `@property` `@in-memory` `@frontend` | 1 | US-DBN-2 | NEW (02-00) |
+| S-DBN-WS | `@walking_skeleton` `@driving_adapter` `@real-io` `@frontend` `@kpi` | 3 | US-DBN-2 | RE-DISTILL |
+| S-DBN-WS-STABLE | `@real-io` `@frontend` `@churn` `@kpi` | 3 | US-DBN-2 | NEW (02-02) |
+| S-DBN-CHURN | `@real-io` `@churn` `@error_path` `@kpi` | 3 | US-DBN-4 | NEW (02-02) |
+| S-DBN-SINGLE-SRC | `@real-io` `@frontend` `@kpi` | 3 | US-DBN-2 | RE-DISTILL |
+| S-DBN-PINGPONG | `@walking_skeleton` `@real-io` `@edd` `@kpi` | 3 | US-DBN-3 | RE-DISTILL |
+| S-DBN-NXDOMAIN-01..03 | `@real-io` `@error_path` `@frontend` `@churn` `@kpi` | 3 | US-DBN-4 | RE-DISTILL (03 PRESERVED) |
+| S-DBN-BIND-01..03 | `@boot` `@real-io` (`@error_path` on 02/03) | 3 | US-DBN-2 | PRESERVED |
 
 ## Wave: DISTILL / [REF] WS strategy (Architecture of Reference)
 
@@ -872,13 +905,22 @@ per-feature A/B/C/D choice:
 - **Driven internal** (`ObservationStore` `service_backends` surface) =
   real: Tier-3 uses the real `LocalObservationStore`; Tier-1 uses
   `SimObservationStore` (the `adapter-sim` "real" in-process adapter
-  honouring the same trait) for the watch/relist logic (S-DBN-IDX-*).
+  honouring the same trait) for the watch/relist/ordering logic
+  (S-DBN-IDX-*, S-DBN-COHERENCE-01).
+- **Driven internal — the NEW REV-2 pure seams** (`FrontendAddrAllocator`
+  + the re-keyed `BackendIndex`/`classify`) = pure, no port trait, Tier-1
+  proptest (S-DBN-FRONTEND-* / S-DBN-REKEY-* / S-DBN-FAILCLOSED-01 /
+  S-DBN-EQUIV-01). The `MtlsResolve` re-key equivalence (S-DBN-EQUIV-01) is
+  the host-vs-in-memory contract guard the trait docstring mandates. The
+  Tier-3 oracle (S-DBN-SINGLE-SRC) feeds the answered `F` into the real
+  re-keyed `resolve`.
 - **The UDP `:53` socket + `IP_PKTINFO`** = **irreducibly Tier-3 real, NO
   Sim** (DDN-4). The spike proved this substrate cannot be honestly
   simulated (no Tier-2 `BPF_PROG_TEST_RUN`-equivalent for multi-homed
   `IP_PKTINFO`); a Sim adapter would simulate exactly the part the spike
   proved lies. The DST seam is the pure `answer_for` + the proptested
-  `wire.rs` encoder, NOT a fake socket.
+  `wire.rs` encoder + the pure `FrontendAddrAllocator`/`classify`, NOT a
+  fake socket.
 - **Driven external / non-deterministic** = none new (`Clock` is the only
   injected non-determinism, reused; no email/SMS/payment/LLM/3rd-party).
 
@@ -888,57 +930,77 @@ Every driven adapter the responder adds or consumes → a `@real-io`
 scenario (Mandate 6). Full table in `distill/test-scenarios.md` §
 "Adapter coverage table". Summary: UDP `:53` socket loop (S-DBN-WS,
 S-DBN-BIND-01/02) · `getaddrinfo`/`getent` consuming adapter (S-DBN-WS,
-S-DBN-NXDOMAIN-*, S-DBN-BIND-01/02) · `ObservationStore` reader (S-DBN-WS
-real, S-DBN-IDX-* Sim) · `Clock` for SOA SERIAL (S-DBN-WIRE-04) ·
-`NetSlotAllocator` fallback source (S-DBN-BIND-02) · `MtlsResolve.resolve`
-oracle (S-DBN-SINGLE-SRC) · `EbpfDataplane`/intercept (reused, S-DBN-WS +
+S-DBN-WS-STABLE, S-DBN-NXDOMAIN-*, S-DBN-BIND-01/02) · `ObservationStore`
+reader + single ordered drain (S-DBN-WS real, S-DBN-IDX-*/COHERENCE-01 Sim) ·
+**`FrontendAddrAllocator`** (S-DBN-FRONTEND-* Tier-1, S-DBN-WS/WS-STABLE/
+NXDOMAIN-02 Tier-3) · **re-keyed `MtlsResolve`** (`by_frontend` translation,
+S-DBN-REKEY-*/FAILCLOSED-01/EQUIV-01 Tier-1, S-DBN-SINGLE-SRC/WS/CHURN
+Tier-3) · `Clock` for SOA SERIAL (S-DBN-WIRE-04) · `NetSlotAllocator`
+fallback source (S-DBN-BIND-02) · per-connection pump-task + `TCP_USER_TIMEOUT`
+(S-DBN-CHURN) · `EbpfDataplane`/egress-intercept (reused, S-DBN-WS +
 S-DBN-PINGPONG) · `overdrive deploy` handler (S-DBN-WS, S-DBN-PINGPONG,
 S-DBN-NXDOMAIN-*). **Empty rows: none.** The pure `answer_for` + `wire.rs`
-are NOT adapters (no port trait, DDN-4) — they are the Tier-1 proptest
-seams.
++ `FrontendAddrAllocator` + `BackendIndex`/`classify` are NOT adapters (no
+port trait, DDN-4) — they are the Tier-1 proptest seams.
 
 ## Wave: DISTILL / [REF] Scaffold MANIFEST
 
 **SCOPE DECISION**: DISTILL produces this MANIFEST, NOT landed `.rs`
-files. The `answer_for`/`wire.rs` scaffolds NAME `hickory_proto` types, so
-a compilable RED scaffold REQUIRES the `hickory-proto` workspace dep +
-the `nix` `socket`/`uio` features — which are DELIVER's wiring step
-(ADR-0072 § Components: "ADD"/"EXTEND"). Landing a half-built module + a
-new workspace dep mid-DISTILL would perturb the workspace build for
-everyone and is out of scope. **NO file is written under `crates/` this
-wave.** DELIVER's RED phase materialises each file below with the
-`todo!("RED scaffold: …")` / `#[should_panic(expected = "RED scaffold")]`
-markers, adds the dep, and runs the fail-for-right-reason gate
+files. The `dns_responder/*` + `mtls_resolve_adapter` re-key scaffolds NAME
+types not yet in `crates/` (`NameIndex`, `FrontendAddrAllocator`,
+`FrontendKey`, `by_frontend`) and the socket loop NAMES `nix`
+`recvmsg`/`sendmsg` types — so a compilable RED scaffold REQUIRES the `nix`
+`socket`/`uio` features (the `hickory-proto` workspace dep is now COMMITTED,
+`04fa3d18`). Landing the half-built modules + the `mtls_resolve_adapter`
+re-key mid-DISTILL would perturb the workspace build and is out of scope.
+**NO file is written under `crates/` this wave.** DELIVER's RED phase
+materialises each file below with the `todo!("RED scaffold: …")` /
+`#[should_panic(expected = "RED scaffold")]` markers, adds the `nix`
+features, and runs the fail-for-right-reason gate
 (`distill/red-classification.md`).
+
+> **REV-2 MANIFEST delta** (commit `8e22f499`): production scaffolds ADDED —
+> `dns_responder/frontend_addr_allocator.rs` (NEW, 01-04) and the EXTEND of
+> `mtls_resolve_adapter.rs` (the `by_frontend`/`FrontendKey`/three-way
+> `classify` re-key, 02-00). The `name_index.rs` row is RE-SPEC'd (maps
+> `<job>` → stable `F`, NOT → backend-addr set; withhold-not-release). The
+> `MeshServiceName` / `NameAnswer` / `wire.rs` rows are now COMMITTED
+> (`b39fe4d2`/`04fa3d18`) — marked accordingly. Test scaffolds ADDED:
+> `dns_frontend_allocator.rs` + `mtls_resolve_rekey.rs` (Tier 1); the churn +
+> stable-across-cycle Tier-3 tests fold into the walking-skeleton file.
 
 ### Production scaffolds (DELIVER materialises; all `todo!("RED scaffold: …")` + `#[expect(clippy::todo, …)]`)
 
-| Path | Stubs (the PINNED signature) | Scenarios it RED's |
-|---|---|---|
-| `crates/overdrive-core/src/id.rs` (+`MeshServiceName`) | `MeshServiceName(/*…*/)`; `const SUFFIX = "svc.overdrive.local"`; `new(&str) -> Result<Self, IdParseError>`; `as_str(&self) -> &str`; `+ Display` (lowercase) `+ FromStr` (case-insensitive) `+ Serialize/Deserialize` (matching) `+ TryFrom<String>/<&str>` (model on `define_label_newtype!` + `validate_label` + `LABEL_MAX`; bespoke suffix `FromStr`) | S-DBN-NAME-01..04 |
-| `crates/overdrive-core/src/` (`NameAnswer`, in `id.rs` or a small `dns` module) | `enum NameAnswer { Records(Vec<SocketAddrV4>), NoData, NxDomain }` (variant names ARE the contract) | (consumed by all `answer_for` scenarios) |
-| `crates/overdrive-control-plane/src/dns_responder/mod.rs` | module wiring + re-exports | (module root) |
-| `crates/overdrive-control-plane/src/dns_responder/answer.rs` | `pub fn answer_for(name: &MeshServiceName, qtype: hickory_proto::rr::RecordType, index: &NameIndex) -> NameAnswer` | S-DBN-ANSWER-01..05 |
-| `crates/overdrive-control-plane/src/dns_responder/name_index.rs` | `NameIndex` = `by_name: BTreeMap<MeshServiceName, BTreeSet<SocketAddrV4>>`; List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` (mirror `ServiceBackendsResolve`); `Backend.healthy == true` gate (DDN-2); the OQ-1 `<job>` grouping | S-DBN-IDX-01..04, S-DBN-ANSWER-04 |
-| `crates/overdrive-control-plane/src/dns_responder/wire.rs` | `hickory-proto` decode (query) + encode (`NameAnswer → Vec<u8>`: A / NODATA-SOA / NXDOMAIN-SOA, MINIMUM=1, SERIAL via `Clock`) | S-DBN-WIRE-01..04 |
-| `crates/overdrive-control-plane/src/dns_responder/responder.rs` | `impl DnsResponder { new(store: Arc<dyn ObservationStore>, clock: Arc<dyn Clock>, slots: veth_provisioner::NetSlotAllocator) -> Self; async fn probe(&self) -> Result<(), DnsResponderError>; async fn serve(self: Arc<Self>) }` (wildcard→per-addr fallback, `IP_PKTINFO` recv/send loop) | S-DBN-BIND-01..03, S-DBN-WS, S-DBN-SINGLE-SRC, S-DBN-NXDOMAIN-*, S-DBN-PINGPONG |
-| `crates/overdrive-control-plane/src/dns_responder/` (`DnsResponderError`) | `enum DnsResponderError { Bind { addr: SocketAddr, source: std::io::Error }, ListSeed { reason: String }, Probe { reason: String }, Socket { source: std::io::Error } }` — typed, NO `Internal(String)`, each → distinct `health.startup.refused` reason | S-DBN-BIND-03 |
-| `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver` ~1893-1957) | EXTEND: construct after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure | S-DBN-WS (litmus), S-DBN-BIND-03 |
+| Path | Stubs (the PINNED signature) | Scenarios it RED's | REV-2 |
+|---|---|---|---|
+| `crates/overdrive-core/src/id.rs` (+`MeshServiceName`) | `MeshServiceName(String)`; `const SUFFIX = "svc.overdrive.local"`; `new(&str) -> Result<Self, IdParseError>`; `as_str`; `+ Display`/`FromStr`/serde/`TryFrom` | S-DBN-NAME-01..04 | **COMMITTED** (`b39fe4d2`/`4f030771`/`15d86342`) — NOT re-scaffolded; addr-agnostic, reused unchanged |
+| `crates/overdrive-core/src/id.rs` (`NameAnswer`) | `enum NameAnswer { Records(Vec<SocketAddrV4>), NoData, NxDomain }` (variant names ARE the contract) | (consumed by all `answer_for` scenarios) | **COMMITTED** (`04fa3d18`, `id.rs:954`) — addr-agnostic, `Records` now holds `vec![F]` |
+| `crates/overdrive-control-plane/src/dns_responder/mod.rs` | module wiring + re-exports | (module root) | NEW (02-01) |
+| `crates/overdrive-control-plane/src/dns_responder/frontend_addr_allocator.rs` | `FrontendAddrAllocator { /* <job> -> Ipv4Addr */ }`; `new()`; `assign(&self, job) -> Result<Ipv4Addr, FrontendAddrExhausted>` (idempotent per `<job>`, atomic claim); `release(&self, job)` (deletion-only, no health input); `snapshot()`; const `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16` (pure smallest-free scan, mirror `NetSlotAllocator`) | S-DBN-FRONTEND-01..04, S-DBN-WS, S-DBN-WS-STABLE, S-DBN-NXDOMAIN-02 | **NEW (01-04)** |
+| `crates/overdrive-control-plane/src/dns_responder/answer.rs` | `pub fn answer_for(name: &MeshServiceName, qtype: hickory_proto::rr::RecordType, index: &NameIndex) -> NameAnswer` (signature UNCHANGED; `Records` now `vec![F]`) | S-DBN-ANSWER-01..05 | NEW (01-03, RE-SPEC: answer stable `F`) |
+| `crates/overdrive-control-plane/src/dns_responder/name_index.rs` | `NameIndex` maps `<job>` → **stable frontend addr `F`** (NOT → backend-addr set); List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` (mirror `ServiceBackendsResolve`); the `Backend.healthy == true` gate as the WITHHOLD seam (REV-2 DDN-2/Finding-2 — governs *resolvability*); the OQ-1 `<job>` grouping; consumes the `FrontendAddrAllocator` binding | S-DBN-IDX-01..04, S-DBN-ANSWER-04, S-DBN-COHERENCE-01 | NEW (01-03, RE-SPEC: `<job>`→`F`, withhold-not-release) |
+| `crates/overdrive-control-plane/src/dns_responder/wire.rs` | `hickory-proto` decode (query) + encode (`NameAnswer → Vec<u8>`: A / NODATA-SOA / NXDOMAIN-SOA, MINIMUM=1, SERIAL via `Clock`) | S-DBN-WIRE-01..04 | **COMMITTED** (`04fa3d18`) — addr-agnostic, renders whatever IPv4 addr handed |
+| `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs` (`BackendIndex` EXTEND) | ADD `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)`; the THREE-way `classify` arm (hit → first-by-`Ord` healthy → `Mesh` / else `MeshUnreachable`; frontend-subnet miss → `MeshUnreachable`; else `by_addr` fall-through); the single ordered drain updating `by_frontend` BEFORE `name_index`; the re-keyed contract pinned in the `MtlsResolve` trait docstring | S-DBN-REKEY-01..04, S-DBN-FAILCLOSED-01, S-DBN-COHERENCE-01, S-DBN-EQUIV-01, S-DBN-SINGLE-SRC, S-DBN-WS, S-DBN-CHURN | **NEW (02-00)** — EXTEND additively; REV-1's "untouched" SUPERSEDED |
+| `crates/overdrive-control-plane/src/dns_responder/responder.rs` | `impl DnsResponder { new(store, clock, slots: NetSlotAllocator) -> Self; async fn probe(&self) -> Result<(), DnsResponderError>; async fn serve(self: Arc<Self>) }` (wildcard→per-addr fallback, `IP_PKTINFO` recv/send loop) | S-DBN-BIND-01..03, S-DBN-WS, S-DBN-WS-STABLE, S-DBN-CHURN, S-DBN-SINGLE-SRC, S-DBN-NXDOMAIN-*, S-DBN-PINGPONG | NEW (02-01, socket loop UNCHANGED) |
+| `crates/overdrive-control-plane/src/dns_responder/` (`DnsResponderError`) | `enum DnsResponderError { Bind { addr, source }, ListSeed { reason }, Probe { reason }, Socket { source } }` — typed, NO `Internal(String)` | S-DBN-BIND-03 | NEW (02-01, UNCHANGED) |
+| `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver` ~1893-1957) | EXTEND: construct the `FrontendAddrAllocator` (share on `AppState`) + the re-keyed `MtlsResolve` + the `DnsResponder` after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure | S-DBN-WS (litmus), S-DBN-BIND-03 | EXTEND (02-01, +FrontendAddrAllocator + re-key wiring) |
 
 ### Test scaffolds (DELIVER materialises; `#[should_panic(expected = "RED scaffold")]`)
 
-| Path | Tier | Scenarios |
-|---|---|---|
-| `crates/overdrive-core/tests/acceptance/core_newtype_roundtrip.rs` (EXTEND) | 1 | S-DBN-NAME-01/02 (mandatory proptest round-trip) |
-| `crates/overdrive-core/tests/acceptance/core_newtype_validation.rs` (EXTEND) | 1 | S-DBN-NAME-03/04 |
-| `crates/overdrive-control-plane/tests/acceptance/dns_answer_for.rs` (NEW; wire into `acceptance.rs`) | 1 | S-DBN-ANSWER-01/02/03/05 |
-| `crates/overdrive-control-plane/tests/acceptance/dns_name_index.rs` (NEW) | 1 | S-DBN-ANSWER-04, S-DBN-IDX-01..04 |
-| `crates/overdrive-control-plane/tests/acceptance/dns_wire.rs` (NEW) | 1 | S-DBN-WIRE-01..04 |
-| `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs` (NEW; `mod integration { mod … }` in `integration.rs`) | 3 | S-DBN-WS, S-DBN-SINGLE-SRC |
-| `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs` (NEW) | 3 | S-DBN-PINGPONG (+ the `E05` EDD expectation, honest `pending`) |
-| `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs` (NEW) | 3 | S-DBN-NXDOMAIN-01..03 |
-| `crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs` (NEW) | 3 | S-DBN-BIND-01..03 |
-| `examples/dial-by-name-responder/{a,b}.toml` + the staged ping-pong bin | 3 | S-DBN-PINGPONG fixtures (real on-disk `command` path) |
+| Path | Tier | Scenarios | REV-2 |
+|---|---|---|---|
+| `crates/overdrive-core/tests/acceptance/core_newtype_roundtrip.rs` (EXTEND) | 1 | S-DBN-NAME-01/02 (mandatory proptest round-trip) | PRESERVED (committed) |
+| `crates/overdrive-core/tests/acceptance/core_newtype_validation.rs` (EXTEND) | 1 | S-DBN-NAME-03/04 | PRESERVED (committed) |
+| `crates/overdrive-control-plane/tests/acceptance/dns_frontend_allocator.rs` (NEW) | 1 | S-DBN-FRONTEND-01..04 | **NEW (01-04)** |
+| `crates/overdrive-control-plane/tests/acceptance/dns_answer_for.rs` (NEW; wire into `acceptance.rs`) | 1 | S-DBN-ANSWER-01/02/03/05 | RE-DISTILL |
+| `crates/overdrive-control-plane/tests/acceptance/dns_name_index.rs` (NEW) | 1 | S-DBN-ANSWER-04, S-DBN-IDX-01..04, S-DBN-COHERENCE-01 | RE-DISTILL |
+| `crates/overdrive-control-plane/tests/acceptance/dns_wire.rs` (NEW) | 1 | S-DBN-WIRE-01..04 | PRESERVED (codec committed) |
+| `crates/overdrive-control-plane/tests/acceptance/mtls_resolve_rekey.rs` (NEW) | 1 | S-DBN-REKEY-01..04, S-DBN-FAILCLOSED-01, S-DBN-EQUIV-01 | **NEW (02-00)** |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs` (NEW; `mod integration { mod … }` in `integration.rs`) | 3 | S-DBN-WS, S-DBN-WS-STABLE, S-DBN-CHURN, S-DBN-SINGLE-SRC | RE-DISTILL + NEW (WS-STABLE/CHURN) |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs` (NEW) | 3 | S-DBN-PINGPONG (+ the `E05` EDD expectation, honest `pending`) | RE-DISTILL |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs` (NEW) | 3 | S-DBN-NXDOMAIN-01..03 | RE-DISTILL |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs` (NEW) | 3 | S-DBN-BIND-01..03 | PRESERVED |
+| `examples/dial-by-name-responder/{a,b}.toml` + the staged ping-pong bin | 3 | S-DBN-PINGPONG fixtures (real on-disk `command` path) | RE-DISTILL (dial stable frontend name) |
 
 **No `__SCAFFOLD__` / `// SCAFFOLD: true` marker sweep this wave** — the
 Rust RED convention is `todo!("RED scaffold: …")` (production) +
@@ -981,26 +1043,46 @@ them to the policy file; recorded here for the audit trail):
   resolution from inside a deployed workload's netns under Lima
   (`cargo xtask lima run --`); the name-path acceptance signal, never
   `dig @gw` alone.
-- **Driven internal** — `ObservationStore` `service_backends` reader →
-  `SimObservationStore` (Tier 1, the watch/relist logic) + real
-  `LocalObservationStore` (Tier 3). The responder is a sibling reader; no
-  new struct.
+- **Driven internal** — `ObservationStore` `service_backends` reader + the
+  single ordered drain → `SimObservationStore` (Tier 1, the
+  watch/relist/ordering logic) + real `LocalObservationStore` (Tier 3). The
+  responder is a sibling reader (own `name_index`).
+- **Driven internal (NEW, REV-2, pure — no Sim, no port trait)** — the
+  `FrontendAddrAllocator` (`assign`/`release`/`snapshot`) + the re-keyed
+  `BackendIndex`/`classify` (`by_frontend` translation + the three-way arm).
+  Pure data-structure seams, Tier-1 proptest (S-DBN-FRONTEND-*,
+  S-DBN-REKEY-*, S-DBN-FAILCLOSED-01, S-DBN-EQUIV-01); the host-vs-in-memory
+  equivalence (S-DBN-EQUIV-01) is the trait-docstring contract guard.
 - **Driven internal (NO Sim)** — the UDP `:53` socket + `IP_PKTINFO` →
   real kernel only (DDN-4; no Tier-2 backstop). Explicitly NOT a port
   trait, NOT a Sim adapter — the DST seam is the pure `answer_for` + the
-  proptested `wire.rs` codec.
+  proptested `wire.rs` codec + the pure `FrontendAddrAllocator`/`classify`.
 - **Driven external / non-deterministic** — none new (`Clock` reused for
-  the SOA SERIAL; no email/SMS/payment/LLM/3rd-party).
+  the SOA SERIAL; the per-connection pump-task + `TCP_USER_TIMEOUT` churn
+  surface is real Tier-3, NOT `sock_destroy`; no email/SMS/payment/LLM/3rd-party).
 
 ## Wave: DISTILL / [REF] Outcomes registered
 
-Four OUT-DBN rows registered to `docs/product/outcomes/registry.yaml`
-(`feature: dial-by-name-responder`) — see § "Outcome registration" in the
-DISTILL summary. `OUT-DBN-ANSWER-FOR` (the v1 DNS answer contract,
-`specification`), `OUT-DBN-MESH-SERVICE-NAME` (the name grammar newtype,
-`specification`), `OUT-DBN-RESPONDER-SERVE` (the name-answering operation
-through serve+deploy, `operation`), `OUT-DBN-SINGLE-SOURCE` (the answered
-addr == the `MtlsResolve` `Mesh` addr, `invariant`).
+OUT-DBN rows in `docs/product/outcomes/registry.yaml`
+(`feature: dial-by-name-responder`). The original four:
+`OUT-DBN-ANSWER-FOR` (the v1 DNS answer contract, `specification`),
+`OUT-DBN-MESH-SERVICE-NAME` (the name grammar newtype, `specification`),
+`OUT-DBN-RESPONDER-SERVE` (the name-answering operation through serve+deploy,
+`operation`), `OUT-DBN-SINGLE-SOURCE` (the answered addr == the `MtlsResolve`
+`Mesh` addr, `invariant`).
+
+**REV-2 outcome deltas** (DELIVER registers when the surfaces land — the
+new typed contract surfaces 01-04 / 02-00 introduce): `OUT-DBN-FRONTEND-ALLOC`
+(the stable per-`<job>` frontend address allocation + withhold-not-release
+lifecycle, `specification`), `OUT-DBN-FRONTEND-TRANSLATE` (the re-keyed
+`resolve(F, proto)` → live-backend translation + the fail-closed-on-subnet-miss
+arm, `operation`). `OUT-DBN-ANSWER-FOR` is RE-SCOPED (answers the stable `F`,
+not a backend set) and `OUT-DBN-SINGLE-SOURCE` is RESTATED (the answered `F`
+is the addr `MtlsResolve` translates to a `Mesh` backend, REV-2 D-DBN-6) —
+DELIVER updates their input/output shapes when the re-keyed surfaces land.
+DISTILL does NOT mutate the registry this RE-DISTILL pass (the surfaces are
+not yet built — registration is at DELIVER, per the outcomes-registry
+trigger).
 
 ## Wave: DISTILL / [REF] Pre-requisites
 
@@ -1011,50 +1093,76 @@ addr == the `MtlsResolve` `Mesh` addr, `invariant`).
 - **DONE**: Slice 00 PROMOTE (`spike/wave-decisions.md`) — the
   one-listener-many-netns assumption is validated.
 - **DELIVER's RED-phase deps (NOT added this wave — see Scaffold MANIFEST
-  SCOPE DECISION)**: `hickory-proto.workspace = true` (root `Cargo.toml`
-  `[workspace.dependencies]` — the one new workspace dep the `answer_for`/
-  `wire.rs` scaffolds need to compile) + the `nix` `socket`/`uio`
-  features; the staged tiny Rust ping-pong bin at a real on-disk `command`
-  path (decided 2026-06-24, the `coinflip-helper` precedent).
+  SCOPE DECISION)**: the `nix` `socket`/`uio` features (the socket loop);
+  the NEW `dns_responder/frontend_addr_allocator.rs` + the
+  `mtls_resolve_adapter.rs` `by_frontend`/`classify` re-key (REV-2 01-04 /
+  02-00 — not yet in `crates/`); the staged tiny Rust ping-pong bin at a
+  real on-disk `command` path (decided 2026-06-24, the `coinflip-helper`
+  precedent). **NOTE**: `hickory-proto.workspace = true` is now COMMITTED
+  (`04fa3d18`, the 01-02 wire codec) — no longer a DELIVER-add.
 - **Tier-3 obligation**: re-confirm the spike verdict on the pinned-6.18
   appliance kernel in the DELIVER Tier-3 matrix (ADR-0068; the MERGE
   GATE). Dev-Lima `7.0.0-22-generic` is necessary-but-not-sufficient.
 
 ## Wave: DISTILL / [REF] Wave-decisions (DISTILL — folded, compact)
 
-1. **Reconciliation HARD GATE: PASS — 0 contradictions** across DISCUSS /
-   DESIGN. DISCUSS's D-TME-9/10/11 + the v1 DNS answer contract table are
-   carried into DESIGN's DDN-1..8 with no inversion; the scenarios
-   reference the running-AND-healthy contract throughout. No DEVOPS delta
-   dir exists (the Tier-3 obligation is folded into DESIGN § DEVOPS);
-   default infra used, warning logged, not a blocker.
-2. **26 scenarios, 54% error-path.** Tier 1 (16) = the pure seams
-   (`MeshServiceName`, `answer_for`, `wire.rs`, `NameIndex`) under
-   proptest + `SimObservationStore`; Tier 3 (10) = the socket + boot + the
-   reused intercept under Lima as root. No Tier 2 (DDN-4, no
-   `BPF_PROG_TEST_RUN` surface).
-3. **OQ-1 surfaced, NOT resolved.** `SpiffeId` confirmed-absent a
-   job-segment accessor (`id.rs:267-282` exposes only `as_str`/
-   `trust_domain`/`path`). DISTILL names it as the one open surface
-   decision; DELIVER pins the signature (CLAUDE.md "never invent API
-   surface"). No scenario depends on a specific accessor shape —
-   S-DBN-IDX-01 asserts the `<job>`-grouping behaviour, not the accessor.
+1. **Reconciliation HARD GATE (REV-2 re-run): PASS — 0 contradictions**
+   across DISCUSS / DESIGN / DESIGN-REVISION-2. The dispatch's four REV-2
+   contract points (stable `F` in `10.98.0.0/16`; `by_frontend`/`FrontendKey`
+   re-key; withhold-not-release; ordered-drain + fail-closed coherence) all
+   match the committed ADR-0072 REV-2 + the feature-delta REV-2 sections
+   verbatim. DISCUSS's D-TME-10 "headless / no-VIP" and DESIGN's DDN-1
+   "intercept struct untouched" are ADR *supersessions* (recorded verbatim as
+   superseded in ADR-0072 § "Changed Assumptions (REV-2)"), NOT contradictions.
+   No DEVOPS delta dir exists (the Tier-3 obligation is folded into DESIGN §
+   DEVOPS); default infra used, warning logged, not a blocker.
+2. **39 scenarios, 46% error-path** (was 26 / 54% in REV-1). Tier 1 (28) =
+   the pure seams (`MeshServiceName`, `answer_for`, `wire.rs`, `NameIndex`,
+   the NEW `FrontendAddrAllocator`, the re-keyed `BackendIndex`/`classify`)
+   under proptest + `SimObservationStore`; Tier 3 (11) = the socket + boot +
+   the NEW churn/stable-across-cycle ACs + the reused intercept under Lima as
+   root. No Tier 2 (DDN-4, no `BPF_PROG_TEST_RUN` surface).
+3. **OQ-1 surfaced, NOT resolved (still open under REV-2).** `SpiffeId`
+   confirmed-absent a job-segment accessor (`id.rs:269-304` exposes only
+   `as_str`/`trust_domain`/`path`/`for_allocation`). REV-2 STILL needs it (to
+   key the `FrontendAddrAllocator` by `<job>` + group rows). DISTILL names it
+   as an open surface decision; DELIVER pins the signature (CLAUDE.md "never
+   invent API surface"). TWO additional REV-2 DELIVER-open details NAMED (not
+   picked): the `FrontendKey` newtype-vs-tuple shape, and the
+   `orig_dst.ip() ∈ 10.98.0.0/16` CIDR-membership accessor. No scenario
+   depends on a specific shape — they assert behaviour.
 4. **No `crates/` files written this wave** (the Scaffold MANIFEST SCOPE
-   DECISION) — the `hickory-proto` dep is DELIVER's wiring step.
+   DECISION) — the NEW `frontend_addr_allocator.rs` + the `mtls_resolve_adapter`
+   re-key are DELIVER's wiring step (`hickory-proto` is already COMMITTED
+   `04fa3d18`).
 5. **EDD graduation**: S-DBN-PINGPONG → `verification/expectations/`
    `E05-dial-by-name-ping-pong-mtls`, honest `pending` until #227/#75
    (mirror E04). DELIVER authors the expectation stub + `runner.sh`; the
-   capture is different-fox-reviewed, never self-stamped.
-6. **Pillar compliance**: Pillar 1 (domain language — titles use
-   `resolve by name`, `running-and-healthy`, `stale addr`, `NXDOMAIN`, no
-   DNS/socket jargon in titles); Pillar 2 (chained narrative — S-DBN-IDX-01
-   → IDX-02 read as one name's lifecycle; S-DBN-WS → S-DBN-NXDOMAIN-02
-   chain a resolved name into its stop); Pillar 3 (production composition
-   root — S-DBN-WS uses real `run_server`; no Tier B state-machine PBT —
-   the journey is rich but the socket is irreducibly Tier-3, so Tier B's
-   in-memory composition would simulate the substrate the spike proved
-   cannot be simulated; the pure `answer_for`/`NameIndex` PBT at Tier 1
-   covers the domain-rich input space instead).
+   capture is different-fox-reviewed, never self-stamped. Behaviorally
+   unchanged by REV-2 (the resolved value is a stable `F`, an internal detail).
+6. **Pillar compliance**: Pillar 1 (domain language — titles use `resolve by
+   name`, `stable frontend addr`, `running-and-healthy`, `withheld`,
+   `NXDOMAIN`, `prompt reset`, no `by_frontend`/`classify`/socket jargon in
+   titles); Pillar 2 (chained narrative — S-DBN-FRONTEND-01 → FRONTEND-02
+   read as one `<job>`'s addr lifecycle; S-DBN-IDX-01 → IDX-02 as one
+   resolvability lifecycle; S-DBN-WS → S-DBN-NXDOMAIN-02 chain a resolved name
+   into its stop; S-DBN-REKEY-01 → REKEY-02 relax the healthy precondition);
+   Pillar 3 (production composition root — S-DBN-WS uses real `run_server`;
+   no Tier B state-machine PBT — the journey is rich but the socket is
+   irreducibly Tier-3, and the re-keyed `classify` state space is covered by
+   the S-DBN-EQUIV-01 host-vs-in-memory equivalence + the S-DBN-REKEY-* PBT at
+   Tier 1, which is the right shape for the `BackendIndex`-as-state-machine
+   model without simulating the substrate the spike proved cannot be simulated).
+7. **REV-2 RE-DISTILL (commit `8e22f499`)**: the answer contract shifted from
+   a volatile per-instance backend addr to a stable per-`<job>` frontend `F`;
+   the per-step re-scope (`feature-delta.md` § "Per-step roadmap re-scope")
+   adds steps 01-04 (`FrontendAddrAllocator`) + 02-00 (`MtlsResolve` re-key)
+   and re-distills 01-03 / 02-02 / 03-01. The roadmap.json rewrite is the NEXT
+   step (will reference these scenario IDs); this RE-DISTILL did NOT touch
+   `roadmap.json`, `crates/`, or #61. The prior `nw-acceptance-designer-reviewer`
+   APPROVED verdict applied to the superseded REV-1 26-scenario spec and does
+   NOT carry forward — the Final Wave Review Gate MUST re-run against this
+   REV-2 spec.
 
 ---
 
