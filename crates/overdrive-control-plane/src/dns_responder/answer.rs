@@ -12,8 +12,12 @@
 //! binding the [`NameIndex`] exposes for the name's `<job>`; the dataplane
 //! (02-00 re-keyed `MtlsResolve`) later translates `F → a live backend`.
 //!
-//! `answer_for` is a pure function of `(name, qtype, &index)` — it performs NO
-//! I/O and NO clock read, so it is trivially deterministic and DST-replayable.
+//! `answer_for` is a pure function of `(name, qtype, &index)` — a deterministic
+//! read of the allocator's CURRENT `<job> → F` binding through `&index` (it
+//! performs NO I/O and NO clock read, and writes nothing), so it is trivially
+//! deterministic and DST-replayable. "Pure" here is read-only-over-current-state,
+//! not state-independent: the answer reflects whatever binding the allocator
+//! holds at call time (the 01-05 assigner is the only writer).
 //! It is the single mutation-gate target (DDN-4): the
 //! [`Records`](NameAnswer::Records) / [`NxDomain`](NameAnswer::NxDomain) /
 //! [`NoData`](NameAnswer::NoData) arms each carry a falsifiable single-stable-F

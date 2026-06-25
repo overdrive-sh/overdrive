@@ -17,6 +17,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use hickory_proto::rr::RecordType;
 use overdrive_control_plane::dns_responder::answer::answer_for;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
@@ -289,35 +290,63 @@ async fn idx_02_zero_healthy_withholds_but_retains_the_same_frontend() {
 // ---------------------------------------------------------------------------
 // S-DBN-IDX-03 — relist-on-Lagged reflects store state S exactly.
 //
-// A store double whose subscription emits one `Lagged` (then nothing) forces
-// the drain down the relist-on-Lagged path; after the relist the index must
-// reflect the backing store's authoritative snapshot S.
+// The relist-on-`Lagged` arm must be the ONLY path that makes `present`
+// resolvable — otherwise the test is vacuous (REV-2: a List-at-probe that
+// already sees `present` lets `await_answer`'s first synchronous `answer_for`
+// return `want` immediately, before any `yield_now`, so the spawned drain never
+// runs and the `Lagged → relist` arm never executes).
+//
+// The `RelistRecoversStore` double makes the List-at-probe return EMPTY and the
+// post-`Lagged` relist return the `present` healthy row, sequenced by a
+// deterministic call counter on `all_service_backends_rows` (NOT timing):
+//   - call #1 (the probe's List leg) → `Ok(vec![])` → `present` NOT resolvable;
+//   - call #2+ (the relist-on-`Lagged`) → `Ok(vec![present healthy row])`.
+// So `present` becomes resolvable ONLY via the Lagged-triggered relist: a mutant
+// deleting the `Lagged` arm (or the `relist_into` inside it) leaves `present`
+// unresolved forever and the test goes RED.
 // ---------------------------------------------------------------------------
 
-/// A store double that delegates the List leg to a backing `SimObservationStore`
-/// but hands the watch a subscription that emits a single `Lagged` (then ends).
-/// This forces the drain's relist-on-`Lagged` recovery — the only path that can
-/// reconcile the index with a snapshot it never saw a `Row` for.
-struct LaggingStore {
+/// A store double whose List leg is sequenced by a deterministic call counter so
+/// the relist-on-`Lagged` recovery is the ONLY path that makes a name resolvable:
+/// `all_service_backends_rows` call #1 (the probe's List leg) returns EMPTY; call
+/// #2+ (the relist driven by the single emitted `Lagged`) returns `rows`. The
+/// watch hands one `SubscriptionEvent::Lagged` then ends.
+struct RelistRecoversStore {
     inner: Arc<SimObservationStore>,
+    /// Counts `all_service_backends_rows` invocations: #1 = the probe's List
+    /// leg (empty), #2+ = the relist-on-`Lagged` (returns `rows`).
+    list_calls: Arc<std::sync::atomic::AtomicUsize>,
+    /// The authoritative snapshot the relist recovers (returned from call #2+).
+    rows: Vec<ServiceBackendRow>,
 }
 
 #[async_trait]
-impl ObservationStore for LaggingStore {
+impl ObservationStore for RelistRecoversStore {
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }
 
     async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
-        // One Lagged, then end — the drain must relist to recover.
-        let stream = futures::stream::iter(vec![SubscriptionEvent::Lagged { missed: 7 }]);
+        // One Lagged, then STAY PENDING (never end) — the drain must relist to
+        // recover. The trailing `pending()` matters: if the stream ENDED after the
+        // single `Lagged`, the drain's next `next().await` would observe stream-end
+        // and fault the watch (`name_index.rs:414`) right after the recovery,
+        // withholding `present` again. A live-but-quiet watch is the post-recovery
+        // steady state we are asserting.
+        let stream = futures::stream::iter(vec![SubscriptionEvent::Lagged { missed: 7 }])
+            .chain(futures::stream::pending());
         Ok(Box::new(Box::pin(stream)) as LagAwareSubscription)
     }
 
     async fn all_service_backends_rows(
         &self,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
-        self.inner.all_service_backends_rows().await
+        // Deterministic sequencing (not timing): the FIRST call is the probe's
+        // List leg → EMPTY (so `present` is NOT resolvable before the watch); the
+        // SECOND+ call is the relist-on-`Lagged` → the authoritative `rows` (the
+        // ONLY path that makes `present` resolvable).
+        let call = self.list_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0 { Ok(vec![]) } else { Ok(self.rows.clone()) }
     }
 
     // The remaining surface is unused by NameIndex — delegate everything to
@@ -409,39 +438,235 @@ impl ObservationStore for LaggingStore {
 }
 
 /// `#[tokio::test]` (single shared runtime) — the relist-on-`Lagged` recovery is
-/// an async drain path. A mutant that drops the `Lagged → relist_into` arm leaves
-/// the `present` name unresolved forever (the test goes RED).
+/// an async drain path. The List-at-probe returns EMPTY, so the ONLY path that
+/// makes `present` resolvable is the `Lagged`-triggered relist (call #2 of
+/// `all_service_backends_rows`). A mutant that drops the `Lagged → relist_into`
+/// arm leaves `present` unresolved forever (the test goes RED).
 #[tokio::test]
 async fn idx_03_relist_on_lagged_reflects_store_state() {
     let sim = fresh_store();
-    // State S: `present` has a healthy backend; `absent` has none.
-    sim.write(ObservationRow::ServiceBackend(backends_row(
-        1,
-        vec![backend_for("present", 1, true)],
-        1,
-    )))
-    .await
-    .expect("seed present row");
     let allocator = FrontendAddrAllocator::new();
-    let store: Arc<dyn ObservationStore> = Arc::new(LaggingStore { inner: Arc::clone(&sim) });
-    let index = NameIndex::new(store, allocator.clone());
-    // Probe Lists S then opens the watch (which will emit Lagged → relist).
-    index.probe().await.expect("probe Lists S and opens the lagging watch");
-
     let present_name = mesh_name("present");
     let absent_name = mesh_name("absent");
-    // After the Lagged-triggered relist, the index reflects S exactly: `present`
-    // resolves to its stable F; `absent` does not.
+
+    // State S (recovered by the relist): `present` has a healthy backend;
+    // `absent` has none. The 01-05 deploy-time assigner has bound `present → F`.
+    let s_rows = vec![backends_row(1, vec![backend_for("present", 1, true)], 1)];
+    records_of(&allocator, &present_name); // assign present → F (deploy-time).
+
+    let store: Arc<dyn ObservationStore> = Arc::new(RelistRecoversStore {
+        inner: Arc::clone(&sim),
+        list_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        rows: s_rows,
+    });
+    let index = NameIndex::new(store, allocator.clone());
+    // Probe's List leg (call #1) returns EMPTY → `present` is NOT yet resolvable;
+    // the watch then emits one Lagged → relist (call #2) recovers S.
+    index.probe().await.expect("probe Lists EMPTY and opens the lagging watch");
+
+    // `present` becomes resolvable ONLY via the Lagged-triggered relist: the
+    // first synchronous `answer_for` is NxDomain (List was empty) so `await_answer`
+    // yields, the drain runs, the `Lagged` arm relists S, and `present` resolves.
     let want = records_of(&allocator, &present_name);
     assert_eq!(
         await_answer(&index, &present_name, &want).await,
         want,
-        "after relist-on-Lagged, a <job> healthy in S resolves to its stable F",
+        "after relist-on-Lagged (the ONLY resolvable path), `present` resolves to its stable F",
     );
     assert_eq!(
         answer_for(&absent_name, RecordType::A, &index),
         NameAnswer::NxDomain,
         "after relist-on-Lagged, a <job> absent from S does not resolve",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// S-DBN-IDX-03 (fail-closed) — a relist-on-`Lagged` whose store read FAILS
+// faults the watch, so a previously-resolvable name WITHHOLDS (fail-closed).
+// Covers the Lagged-relist-FAILURE branch (`name_index.rs:404-406`, the
+// `watch_healthy.store(false)` set on `relist_into(...).is_err()`).
+//
+// The `RelistFailsStore` double makes the List-at-probe SUCCEED (`present`
+// resolves) but the post-`Lagged` relist return `Err`, sequenced by the same
+// deterministic call counter:
+//   - call #1 (the probe's List leg) → `Ok(vec![present healthy row])`;
+//   - call #2  (the relist-on-`Lagged`) → `Err(ObservationStoreError)`.
+// So `present` is resolvable AFTER probe, then the failed relist faults the
+// watch and `present` WITHHOLDS. A mutant deleting the `watch_healthy.store(false)`
+// at line 405 keeps `present` resolving — the test goes RED.
+// ---------------------------------------------------------------------------
+
+/// A store double whose List leg is sequenced by a call counter so the
+/// relist-on-`Lagged` FAILS: `all_service_backends_rows` call #1 (the probe's
+/// List leg) returns `rows` (so `present` resolves); call #2 (the relist driven
+/// by the single emitted `Lagged`) returns `Err`. The watch hands one
+/// `SubscriptionEvent::Lagged` then ends.
+struct RelistFailsStore {
+    inner: Arc<SimObservationStore>,
+    /// Counts `all_service_backends_rows` invocations: #1 = the probe's List
+    /// leg (returns `rows`), #2 = the relist-on-`Lagged` (returns `Err`).
+    list_calls: Arc<std::sync::atomic::AtomicUsize>,
+    /// The authoritative snapshot the List leg returns (from call #1).
+    rows: Vec<ServiceBackendRow>,
+}
+
+#[async_trait]
+impl ObservationStore for RelistFailsStore {
+    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+        self.inner.write(row).await
+    }
+
+    async fn subscribe_all_events(&self) -> Result<LagAwareSubscription, ObservationStoreError> {
+        // One Lagged, then end — the drain relists, and call #2 fails.
+        let stream = futures::stream::iter(vec![SubscriptionEvent::Lagged { missed: 7 }]);
+        Ok(Box::new(Box::pin(stream)) as LagAwareSubscription)
+    }
+
+    async fn all_service_backends_rows(
+        &self,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        // Deterministic sequencing (not timing): the FIRST call is the probe's
+        // List leg → succeeds with `rows` (so `present` resolves after probe);
+        // the SECOND call is the relist-on-`Lagged` → `Err`, faulting the watch.
+        let call = self.list_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0 {
+            Ok(self.rows.clone())
+        } else {
+            Err(ObservationStoreError::Unreachable { peer: "relist-failed".to_owned() })
+        }
+    }
+
+    // The remaining surface is unused by NameIndex — delegate everything to
+    // the backing SimObservationStore.
+    async fn alloc_status_rows(
+        &self,
+    ) -> Result<Vec<overdrive_core::traits::observation_store::AllocStatusRow>, ObservationStoreError>
+    {
+        self.inner.alloc_status_rows().await
+    }
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &overdrive_core::id::AllocationId,
+    ) -> Result<
+        Option<overdrive_core::traits::observation_store::AllocStatusRow>,
+        ObservationStoreError,
+    > {
+        self.inner.alloc_status_row(alloc_id).await
+    }
+    async fn node_health_rows(
+        &self,
+    ) -> Result<Vec<overdrive_core::traits::observation_store::NodeHealthRow>, ObservationStoreError>
+    {
+        self.inner.node_health_rows().await
+    }
+    async fn issued_certificate_rows(
+        &self,
+    ) -> Result<
+        Vec<overdrive_core::ca::issued_certificate_row::IssuedCertificateRow>,
+        ObservationStoreError,
+    > {
+        self.inner.issued_certificate_rows().await
+    }
+    async fn next_issuance_ordinal(
+        &self,
+    ) -> Result<overdrive_core::id::IssuanceOrdinal, ObservationStoreError> {
+        self.inner.next_issuance_ordinal().await
+    }
+    async fn write_probe_result(
+        &self,
+        row: overdrive_core::observation::ProbeResultRow,
+    ) -> Result<(), ObservationStoreError> {
+        self.inner.write_probe_result(row).await
+    }
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &overdrive_core::id::AllocationId,
+    ) -> Result<Vec<overdrive_core::observation::ProbeResultRow>, ObservationStoreError> {
+        self.inner.list_probe_results_for_alloc(alloc_id).await
+    }
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> Result<
+        Vec<(overdrive_core::id::CorrelationKey, overdrive_core::workflow::WorkflowStatus)>,
+        ObservationStoreError,
+    > {
+        self.inner.workflow_terminal_rows().await
+    }
+    async fn workflow_signal(
+        &self,
+        key: &overdrive_core::workflow::SignalKey,
+    ) -> Result<Option<overdrive_core::workflow::SignalValue>, ObservationStoreError> {
+        self.inner.workflow_signal(key).await
+    }
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<
+        Vec<overdrive_core::traits::observation_store::ServiceHydrationResultRow>,
+        ObservationStoreError,
+    > {
+        self.inner.service_hydration_results_rows(service_id).await
+    }
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.service_backends_rows(service_id).await
+    }
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<
+        Vec<overdrive_core::traits::observation_store::ReconcileConflictRow>,
+        ObservationStoreError,
+    > {
+        self.inner.reconcile_conflict_rows(service_id).await
+    }
+}
+
+/// `#[tokio::test]` (single shared runtime) — the Lagged-relist-FAILURE fault.
+/// The List-at-probe SUCCEEDS so `present` is resolvable; the `Lagged`-triggered
+/// relist (call #2) returns `Err`, faulting the watch, so `present` WITHHOLDS
+/// fail-closed thereafter. A mutant deleting `watch_healthy.store(false)` at
+/// `name_index.rs:405` keeps `present` resolving forever (the test goes RED).
+#[tokio::test]
+async fn idx_03_relist_on_lagged_failure_faults_the_watch_fail_closed() {
+    let sim = fresh_store();
+    let allocator = FrontendAddrAllocator::new();
+    let present_name = mesh_name("present");
+
+    // State S the List leg returns: `present` has a healthy backend. The 01-05
+    // deploy-time assigner has bound `present → F`.
+    let s_rows = vec![backends_row(1, vec![backend_for("present", 1, true)], 1)];
+    let f = allocator.assign(&present_name).expect("allocator has free addresses");
+
+    let store: Arc<dyn ObservationStore> = Arc::new(RelistFailsStore {
+        inner: Arc::clone(&sim),
+        list_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        rows: s_rows,
+    });
+    let index = NameIndex::new(store, allocator.clone());
+    // Probe's List leg (call #1) returns S → `present` IS resolvable; the watch
+    // then emits one Lagged → relist (call #2) FAILS → the drain faults the watch.
+    index.probe().await.expect("probe Lists S and opens the lagging watch");
+
+    // After probe `present` was resolvable; once the failed relist faults the
+    // watch, `frontend_for` WITHHOLDS (fail-closed) and the answer becomes
+    // NxDomain — the first synchronous `answer_for` is Records([F]) (≠ NxDomain),
+    // so `await_answer` yields, the drain runs the failing relist, faults, and the
+    // next `answer_for` is NxDomain.
+    assert_eq!(
+        await_answer(&index, &present_name, &NameAnswer::NxDomain).await,
+        NameAnswer::NxDomain,
+        "a relist-on-Lagged failure faults the watch → previously-resolvable name WITHHOLDS",
+    );
+    // Guard the test's own premise: `present` WAS resolvable + assigned F before
+    // the relist failed (so the NxDomain above is the FAULT withholding, not a
+    // never-resolvable name).
+    assert_ne!(
+        NameAnswer::Records(vec![SocketAddrV4::new(f, 0)]),
+        NameAnswer::NxDomain,
+        "premise: present was resolvable and assigned F before the relist failed",
     );
 }
 
