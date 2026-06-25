@@ -22,9 +22,12 @@
 //!   recv/sendmsg loop).
 //!
 //! Step 01-02 lands `wire` GREEN — its `encode`/`decode` are fully
-//! implemented, so the module carries no `clippy::todo` scaffold expectation.
-//! Later slices that add `answer.rs` / `name_index.rs` / `responder.rs` as RED
-//! scaffolds will re-introduce a scoped `#![cfg_attr(not(test),
-//! expect(clippy::todo, …))]` for the duration of their active slice.
+//! implemented. Step 01-04 lands `frontend_addr_allocator` GREEN — its
+//! `assign`/`release`/`snapshot` bodies are fully implemented, so the module
+//! carries no `clippy::todo` scaffold expectation. Later slices that add
+//! `answer.rs` / `name_index.rs` / `responder.rs` as RED scaffolds will
+//! re-introduce a scoped `#![cfg_attr(not(test), expect(clippy::todo, …))]`
+//! for the duration of their active slice.
 
+pub mod frontend_addr_allocator;
 pub mod wire;

@@ -46,6 +46,14 @@ mod acceptance {
     // `TransitionReason` enum from `overdrive-core`. Compile-time
     // type-identity witness; the snapshot/streaming surfaces share the
     // SAME type so byte-equality is structural.
+    // dial-by-name-responder step 01-04 (ADR-0072 REV-2, GH #243) — the
+    // `dns_responder::frontend_addr_allocator` proptests. S-DBN-FRONTEND-01..04:
+    // membership in 10.98.0.0/16 + disjointness from the two other /16s,
+    // idempotency across an alloc cycle (SQ1-elimination), withhold-not-release
+    // (Finding-2), and collision-free distinct assignment + reclaim. Default
+    // unit lane (in-process, pure allocator — no kernel/netns/socket). RED
+    // scaffolds (production `todo!()` bodies land GREEN in the same slice).
+    mod dns_frontend_allocator;
     // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
     // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record
     // round-trip through hickory, NODATA-SOA / NXDOMAIN-SOA with MINIMUM=1,
