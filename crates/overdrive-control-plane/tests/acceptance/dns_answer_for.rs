@@ -89,13 +89,40 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
     }
 }
 
+/// The `<job>` mesh name a `Backend`'s `alloc` SVID
+/// (`spiffe://overdrive.local/job/<job>/alloc/...`) dials as — mirrors the
+/// production `name_index::job_of` extraction so the fixture can model the
+/// 01-05 deploy-time assigner binding `<job> → F` on declaration.
+fn job_of_backend(backend: &Backend) -> MeshServiceName {
+    let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
+    let label = loop {
+        match segments.next() {
+            Some("job") => break segments.next().expect("job segment present"),
+            Some(_) => {}
+            None => panic!("backend SVID carries no /job/<job>/ segment"),
+        }
+    };
+    mesh_name(label)
+}
+
 /// Build a `NameIndex` over a store seeded with `rows`, sharing `allocator`.
-/// Writes the rows FIRST then probes, so List-at-probe seeds them.
+/// Writes the rows FIRST then probes, so List-at-probe seeds them. Pre-`assign`s
+/// every `<job>` the rows declare into the SHARED allocator — modeling the 01-05
+/// deploy-time assigner having bound `<job> → F` BEFORE the backend appeared
+/// (REV-3: `frontend_for` is a PURE READER, so a resolvable-but-unassigned
+/// `<job>` would be WITHHELD; the assigner-runs-first is the production
+/// precondition these tests stand in for).
 async fn index_listing(
     store: &Arc<SimObservationStore>,
     allocator: FrontendAddrAllocator,
     rows: Vec<ServiceBackendRow>,
 ) -> NameIndex {
+    for row in &rows {
+        for backend in &row.backends {
+            // Idempotent per <job>; mirrors the deploy-time assign-on-declare.
+            allocator.assign(&job_of_backend(backend)).expect("allocator has free addresses");
+        }
+    }
     for row in rows {
         store.write(ObservationRow::ServiceBackend(row)).await.expect("write service_backends row");
     }

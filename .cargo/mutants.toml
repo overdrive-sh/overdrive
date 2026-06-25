@@ -405,6 +405,22 @@ exclude_re = [
     # with Ok(())` entry does for that function's custom-Result return.
     "RedbJournalStore::next_step -> JsResult<u32> with JsResult::",
 
+    # `<impl Drop for NameIndex>::drop` (dial-by-name-responder 01-03,
+    # `crates/overdrive-control-plane/src/dns_responder/name_index.rs`) — the
+    # only observable effect is aborting the single-owner watch-drain task on
+    # index drop (best-effort, fire-and-forget cleanup). cargo-mutants
+    # synthesises a `()` body replacement, but Drop cannot await the abort, so
+    # the sole symptom of an emptied body is the "still-running task at
+    # teardown" nextest labels leaky — there is no synchronous, in-process
+    # observable to assert through the public surface, so the mutant is
+    # behaviourally indistinguishable in a test. Same equivalent-mutant class
+    # as `ServiceBackendsResolve::drop` (`mtls_resolve_adapter.rs`) — both
+    # abort a background drain on `Drop`. The source-level `// mutants: skip`
+    # comment on the `impl Drop` carries the rationale; this regex is the
+    # actual suppression mechanism (a bare comment suppresses nothing per
+    # `.claude/rules/testing.md`).
+    "replace <impl Drop for NameIndex>::drop with \\(\\)",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,

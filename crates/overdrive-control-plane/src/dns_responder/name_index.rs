@@ -67,17 +67,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::StreamExt;
 use overdrive_core::id::{MeshServiceName, SpiffeId};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
-    ObservationRow, ObservationStore, ServiceBackendRow, SubscriptionEvent,
+    ObservationRow, ObservationStore, ObservationStoreError, ServiceBackendRow, SubscriptionEvent,
 };
 use parking_lot::RwLock;
+use thiserror::Error;
 use tokio::task::JoinHandle;
 
 use super::frontend_addr_allocator::FrontendAddrAllocator;
+
+/// Result alias used throughout the `name_index` module (crate convention:
+/// every error type ships a matching `Result` alias so call sites never
+/// re-name the error type — `CLAUDE.md` § "Rust library conventions").
+pub type Result<T, E = NameIndexError> = std::result::Result<T, E>;
+
+/// Typed errors for the [`NameIndex`] probe / List legs.
+///
+/// The single failure mode today is an unreadable `service_backends`
+/// observation surface — embedded via `#[from]` rather than stringified, so a
+/// `run_server` caller (wired in step 02-01) can branch on the underlying
+/// [`ObservationStoreError`] cause when the Earned-Trust probe refuses startup
+/// (`.claude/rules/development.md` § "Errors": never flatten a typed error to
+/// `String` at a startup-refusing boundary).
+#[derive(Debug, Error)]
+pub enum NameIndexError {
+    /// The `service_backends` observation surface was unreadable at the List
+    /// leg ([`probe`](NameIndex::probe) or a relist). The node refuses to start
+    /// (`health.startup.refused`) on this at probe time.
+    #[error("service_backends observation surface unreadable: {source}")]
+    Store {
+        /// The underlying [`ObservationStore`] read error.
+        #[from]
+        source: ObservationStoreError,
+    },
+}
 
 /// Extract the `<job>` label from a workload [`SpiffeId`]'s path and reconstruct
 /// the [`MeshServiceName`] it dials as.
@@ -146,6 +174,21 @@ impl ResolvableIndex {
         // Evict this service's prior contribution from every `<job>` it touched,
         // scoped to `service_id` so a different service's healthy backend at the
         // same `<job>` is never evicted.
+        //
+        // INVARIANT (one-service-per-job): each logical `<job>` is contributed
+        // by exactly ONE `service_id` (a `<job>` is the single-label mesh name a
+        // Service declares, and a Service maps 1:1 to a `ServiceId`). Under that
+        // posture the per-service eviction below can only ever remove the addrs
+        // THIS service contributed, so it never drops a `SocketAddr` another
+        // service still claims for the same `<job>`. The risk the eviction would
+        // pose absent the invariant — two distinct `service_id`s sharing one
+        // `SocketAddr` under one `<job>`, where evicting one service's stale set
+        // (`addrs.remove(addr)`) could wrongly empty `by_name[job]` while the
+        // other is still healthy — cannot arise: the `addrs_by_job_service` key
+        // is `(job, service_id)`, so two services contributing the same `<job>`
+        // would each hold their OWN keyed addr set, and the union in `by_name`
+        // would only empty when BOTH evict. The invariant is asserted at Tier 1
+        // by `apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_service`.
         let prior: Vec<MeshServiceName> = self
             .addrs_by_job_service
             .keys()
@@ -212,13 +255,27 @@ pub struct NameIndex {
     store: Arc<dyn ObservationStore>,
     /// The SINGLE source of frontend truth (DDN-2): the SAME `Arc`-shared
     /// allocator instance the 02-00 `by_frontend` re-key reads. `frontend_for`
-    /// answers `F` from `assign` (idempotent per `<job>`); the index never
-    /// fabricates or caches an `F`.
+    /// READS the allocator's EXISTING `<job> → F` binding (a read-only
+    /// `snapshot().get(<job>)` lookup); the index NEVER writes the allocator,
+    /// fabricates an `F`, or caches one. The binding is WRITTEN by the 01-05
+    /// deploy-time assigner — never by this reader (REV-3 single-source /
+    /// pure-reader invariant; CLAUDE.md § "Implement to the design").
     allocator: FrontendAddrAllocator,
     /// The in-RAM `<job>` resolvability set, behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
     /// task. The lock is never held across an `.await`.
     resolvable: Arc<RwLock<ResolvableIndex>>,
+    /// Watch-health flag, `Arc`-shared with the single-owner drain task.
+    /// `true` while the drain is observing a live subscription; set `false` by
+    /// the drain when the watch terminates unrecoverably — a relist-on-`Lagged`
+    /// whose store read fails OR the subscription closing (stream end). While
+    /// `false`, [`frontend_for`](NameIndex::frontend_for) returns `None`
+    /// (WITHHOLD — fail-closed): the resolvability set can no longer be
+    /// certified current, so a DNS answer would serve liveness from a signal
+    /// the index has stopped updating (the stale-answer hazard the stable-`F`
+    /// design fights). Mirrors `ServiceBackendsResolve`'s `watch_healthy`
+    /// faulted posture (`mtls_resolve_adapter.rs`).
+    watch_healthy: Arc<AtomicBool>,
     /// The single-owner drain task's abort handle, held so the task is aborted
     /// on `Drop`. `None` until the first [`probe`](NameIndex::probe) opens the
     /// watch.
@@ -237,36 +294,57 @@ impl NameIndex {
             store,
             allocator,
             resolvable: Arc::new(RwLock::new(ResolvableIndex::default())),
+            // Healthy until proven otherwise: before any probe the resolvability
+            // set is empty (every name WITHHELD anyway), and the drain marks this
+            // `false` only on a real watch termination / relist failure.
+            watch_healthy: Arc::new(AtomicBool::new(true)),
             drain_task: parking_lot::Mutex::new(None),
         }
     }
 
     /// The stable frontend address `F` for `name`, IFF the name is currently
-    /// resolvable (≥1 running-AND-healthy backend). `None` when WITHHELD/absent
-    /// — the healthy-gate WITHHOLD seam projected to the query the
-    /// [`answer_for`](super::answer::answer_for) consumes.
+    /// resolvable (≥1 running-AND-healthy backend) AND the allocator ALREADY
+    /// binds the `<job>` (the 01-05 deploy-time assigner has run for it).
+    /// `None` when WITHHELD/absent — the healthy-gate WITHHOLD seam projected to
+    /// the query the [`answer_for`](super::answer::answer_for) consumes.
     ///
-    /// When resolvable, `F` is the [`FrontendAddrAllocator`]'s binding for the
-    /// `<job>` (idempotent `assign`) — the SINGLE source of frontend truth, NOT
-    /// a cached index value.
+    /// This is a **PURE READER** (REV-3 root-cause fix): it READS the
+    /// [`FrontendAddrAllocator`]'s EXISTING `<job> → F` binding via the
+    /// read-only [`snapshot`](FrontendAddrAllocator::snapshot) — it does NOT
+    /// call `assign` and performs NO mutation. A DNS query for a resolvable
+    /// `<job>` the allocator does NOT yet bind is WITHHELD (`None` → `NxDomain`),
+    /// NEVER assigned-on-read; the binding is the allocator's, written only by
+    /// the 01-05 deploy-time assigner, NEVER by this index (CLAUDE.md
+    /// § "Implement to the design — never invent API surface").
+    ///
+    /// Returns `None` (WITHHOLD — fail-closed) when the watch is faulted (the
+    /// drain died or a relist failed): the resolvability set can no longer be
+    /// certified current, so the index withholds rather than serve a stale
+    /// liveness answer (mirrors `ServiceBackendsResolve`'s faulted posture).
     #[must_use]
     pub fn frontend_for(&self, name: &MeshServiceName) -> Option<Ipv4Addr> {
+        // Fail-closed: a faulted watch means the resolvability set is no longer
+        // current — WITHHOLD rather than answer from a signal we stopped
+        // updating (the stale-answer hazard the stable-F design fights).
+        if !self.watch_healthy.load(Ordering::SeqCst) {
+            return None;
+        }
         // The healthy-gate WITHHOLD seam: not resolvable ⇒ no answer (None).
         if !self.resolvable.read().is_resolvable(name) {
             return None;
         }
-        // Resolvable ⇒ answer the allocator's binding (idempotent `assign` — the
-        // SINGLE source of frontend truth). An allocator at full capacity for a
-        // NEW `<job>` refuses; a refusal collapses to "no answer" (NxDomain),
-        // never a fabricated addr.
-        self.allocator.assign(name).ok()
+        // Resolvable ⇒ READ the allocator's EXISTING binding (the SINGLE source
+        // of frontend truth, written by the 01-05 assigner). A `<job>` the
+        // allocator does not yet bind is WITHHELD (`None`) — NEVER assigned on
+        // this read path, NEVER a fabricated addr.
+        self.allocator.snapshot().get(name).copied()
     }
 
     /// List the authoritative `service_backends` snapshot into the index (the
     /// List leg of List-then-Watch + the relist recovery). The store read is
     /// awaited, then applied to the index in a sync critical section — the
     /// write-lock is NEVER held across the `.await`.
-    async fn relist(&self) -> std::result::Result<(), String> {
+    async fn relist(&self) -> Result<()> {
         Self::relist_into(&self.store, &self.resolvable).await
     }
 
@@ -275,11 +353,17 @@ impl NameIndex {
     /// index by `Arc`-ref so the drain task — which holds `Arc`-clones, not
     /// `&self` — can re-List on a watch-loss signal. The write-lock is NEVER held
     /// across the `.await`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NameIndexError::Store`] (embedding the underlying
+    /// [`ObservationStoreError`] via `#[from]`) when the
+    /// `all_service_backends_rows` read fails.
     async fn relist_into(
         store: &Arc<dyn ObservationStore>,
         resolvable: &Arc<RwLock<ResolvableIndex>>,
-    ) -> std::result::Result<(), String> {
-        let rows = store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
+    ) -> Result<()> {
+        let rows = store.all_service_backends_rows().await?;
         resolvable.write().replace_from_snapshot(&rows);
         Ok(())
     }
@@ -288,11 +372,18 @@ impl NameIndex {
     /// folds every `service_backends` row into the resolvability set, relisting
     /// on `Lagged` (MIRRORS `ServiceBackendsResolve::spawn_drain`). On
     /// [`SubscriptionEvent::Lagged`] the drain re-Lists the authoritative
-    /// snapshot — a dropped update is RECOVERED, never silently lost. The task
-    /// exits when the subscription closes (stream end).
+    /// snapshot — a dropped update is RECOVERED, never silently lost.
+    ///
+    /// On an unrecoverable watch failure — a relist-on-`Lagged` whose store read
+    /// fails, OR the subscription closing (stream end) — the drain sets
+    /// `watch_healthy = false` and exits, so
+    /// [`frontend_for`](NameIndex::frontend_for) WITHHOLDS (fail-closed)
+    /// thereafter rather than serving a stale liveness answer (mirrors
+    /// `ServiceBackendsResolve`'s faulted posture).
     fn spawn_drain(
         store: Arc<dyn ObservationStore>,
         resolvable: Arc<RwLock<ResolvableIndex>>,
+        watch_healthy: Arc<AtomicBool>,
         mut subscription: overdrive_core::traits::observation_store::LagAwareSubscription,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
@@ -307,14 +398,20 @@ impl NameIndex {
                     SubscriptionEvent::Lagged { .. } => {
                         // The watch dropped rows: re-acquire the authoritative
                         // snapshot and rebuild (relist-on-`Lagged`). A relist
-                        // whose store read fails stops the drain — the index can
-                        // no longer be kept current.
+                        // whose store read fails leaves the index uncertifiable —
+                        // fault the watch so `frontend_for` WITHHOLDS, and stop
+                        // draining (the index can no longer be kept current).
                         if Self::relist_into(&store, &resolvable).await.is_err() {
+                            watch_healthy.store(false, Ordering::SeqCst);
                             return;
                         }
                     }
                 }
             }
+            // The watch terminated (the subscription closed): the resolvability
+            // set can no longer be certified current. Fault the watch so
+            // `frontend_for` WITHHOLDS rather than serve a stale liveness answer.
+            watch_healthy.store(false, Ordering::SeqCst);
         })
     }
 
@@ -325,10 +422,11 @@ impl NameIndex {
     ///
     /// # Errors
     ///
-    /// Returns the [`ObservationStore`] error string when the List leg's
-    /// `all_service_backends_rows` or the Watch leg's `subscribe_all_events`
-    /// fails.
-    pub async fn probe(&self) -> std::result::Result<(), String> {
+    /// Returns [`NameIndexError::Store`] (embedding the underlying
+    /// [`ObservationStoreError`]) when the List leg's `all_service_backends_rows`
+    /// or the Watch leg's `subscribe_all_events` fails — the node refuses to
+    /// start (`health.startup.refused`).
+    pub async fn probe(&self) -> Result<()> {
         // (1) List leg — seed the index from the authoritative snapshot BEFORE
         // the watch opens, so the index is never empty-but-trusted.
         self.relist().await?;
@@ -341,16 +439,20 @@ impl NameIndex {
         if self.drain_task.lock().is_some() {
             return Ok(());
         }
-        let subscription =
-            self.store.subscribe_all_events().await.map_err(|err| err.to_string())?;
+        let subscription = self.store.subscribe_all_events().await?;
         {
             let mut slot = self.drain_task.lock();
             if slot.is_some() {
                 return Ok(());
             }
+            // A fresh watch is healthy until the drain proves otherwise (mirrors
+            // `ServiceBackendsResolve::probe` re-arming `watch_healthy` on the
+            // owning probe).
+            self.watch_healthy.store(true, Ordering::SeqCst);
             let handle = Self::spawn_drain(
                 Arc::clone(&self.store),
                 Arc::clone(&self.resolvable),
+                Arc::clone(&self.watch_healthy),
                 subscription,
             );
             *slot = Some(handle);
@@ -360,6 +462,16 @@ impl NameIndex {
 }
 
 impl Drop for NameIndex {
+    // mutants: skip — the only observable effect is aborting the background
+    // drain task on index drop (best-effort cleanup, fire-and-forget). Its sole
+    // symptom is the "still-running task at teardown" nextest reports as leaky;
+    // there is no synchronous, in-process observable to assert on through the
+    // public surface (Drop cannot await the abort), so a mutant that empties
+    // this body is behaviourally indistinguishable in a test. Mirrors the
+    // documented skip on `ServiceBackendsResolve::drop` (mtls_resolve_adapter.rs).
+    // The load-bearing suppression is the `exclude_re` entry in
+    // `.cargo/mutants.toml` (a bare comment suppresses nothing per
+    // `.claude/rules/testing.md`); this comment is the human-facing rationale.
     fn drop(&mut self) {
         // Abort the single-owner drain task so it does not outlive the index.
         // Bind the `take` into a local so the `parking_lot` guard temporary drops
