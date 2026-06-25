@@ -42,6 +42,19 @@ Code-grounded inputs:
 `docs/research/networking/dns-positive-ttl-vs-cache-invalidation-dial-by-name-research.md`
 (sub-q 4).
 
+**CORRECTION (2026-06-25) — review-surfaced correctness fix to DDN-7's `<job>`
+label ceiling.** The original DDN-7 pinned `<job>` label ≤ `LABEL_MAX (253)`,
+which conflated the DNS-*name* max (253, total FQDN, RFC 1035 §3.1) with the
+DNS-*label* max. A `<job>` is a single DNS label, hard-capped at **63 octets**
+(RFC 1035 §2.3.4). The corrected ceiling is 63. This prevents a latent
+`wire::encode` panic: a 64–253-char `<job>` that `MeshServiceName::new` accepted
+makes `Name::from_str("<job>.svc.overdrive.local")` return `Err` (the
+`hickory-proto` codec enforces the 63-octet label limit), hitting an
+`unreachable!` at the DNS boundary. `LABEL_MAX (253)` itself is correct and
+unchanged — it remains the DNS-name ceiling for *derived* label-shaped ids
+(`development.md` § "One shared length ceiling for label-shaped ids"); only the
+`MeshServiceName` `<job>` DNS-*label* ceiling is corrected here.
+
 ## Changed Assumptions (REV-2, 2026-06-25)
 
 ### What changed and why
@@ -737,8 +750,13 @@ after `AppState::new` (`:1944`) — no contradiction with the real composition r
 A `MeshServiceName` label-shaped newtype: `const SUFFIX = "svc.overdrive.local"`;
 a **single `<job>` label** in v1 (single-node, NO namespace segment);
 case-insensitive `FromStr`, canonical lowercase `Display`, serde matching
-`Display`/`FromStr`, `<job>` label ≤ `LABEL_MAX` (253). Full newtype
-completeness + a mandatory proptest round-trip (per the codebase newtype
+`Display`/`FromStr`, `<job>` label ≤ **63 octets** (the DNS single-label maximum,
+RFC 1035 §2.3.4). This is the DNS *label* limit — a single label of
+`<job>.svc.overdrive.local` — and is **distinct from `LABEL_MAX` (253)**, which is
+the DNS *name* (total FQDN) maximum (RFC 1035 §3.1). The `<job>` is one label, not a
+whole name, so its hard protocol ceiling is 63 (a real protocol constant, like the
+codebase's existing `RECONCILER_NAME_MAX` / `WORKFLOW_NAME_MAX` = 63), NOT 253. Full
+newtype completeness + a mandatory proptest round-trip (per the codebase newtype
 rules). It models the `<job>.svc.overdrive.local` grammar so the responder
 parses+matches the suffix through a validated type, never ad-hoc string ops.
 

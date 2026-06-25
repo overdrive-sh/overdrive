@@ -1869,8 +1869,9 @@ re-key to the REV-1 set):
 **Pinned signatures** (CLAUDE.md "implement to the design"):
 
 - `MeshServiceName` — label-shaped newtype, `const SUFFIX = "svc.overdrive.local"`,
-  single `<job>` label (≤ `LABEL_MAX`), case-insensitive `FromStr`, canonical
-  lowercase `Display`, serde matching, mandatory proptest round-trip.
+  single `<job>` label (≤ 63 octets, the DNS single-label max, RFC 1035 §2.3.4;
+  NOT `LABEL_MAX`/253 which is the DNS-name max), case-insensitive `FromStr`,
+  canonical lowercase `Display`, serde matching, mandatory proptest round-trip.
 - `enum NameAnswer { Records(Vec<SocketAddrV4>), NoData, NxDomain }` (the pure
   classification result — variant names PINNED in DESIGN; the three arms are
   fixed by the contract table: `Records` = ≥1 running-and-healthy backend,
