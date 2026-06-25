@@ -171,6 +171,32 @@ fn workload_id(id: &str) -> overdrive_core::id::WorkloadId {
     overdrive_core::id::WorkloadId::new(id).expect("valid workload id")
 }
 
+/// Seed a VALID archived `WorkloadIntent::Service` payload at a literal
+/// SUB-KEY path (`sub_key`, whose suffix past `workloads/` contains a '/') —
+/// the SAME archival codec [`seed_declared_service`] uses, so the value
+/// genuinely DECODES as a Service. `payload_id` is the Service id baked into
+/// the payload (DISTINCT from the canonical record's id), which is the id the
+/// rebuild would `assign` if it ever processed this sub-key.
+///
+/// The boot rebuild's line-138 filter (`suffix.is_empty() || suffix.contains('/')`)
+/// must SKIP this row BEFORE the decode — a canonical-only seed never forces the
+/// two disjuncts of that `||` to differ observably, so this sub-key-with-Service
+/// payload is what kills the `||`→`&&` mutant.
+async fn seed_service_payload_at_sub_key(
+    store: &Arc<LocalIntentStore>,
+    sub_key: &str,
+    payload_id: &str,
+) {
+    let service = ServiceV1::from_submit(service_spec(payload_id, vec![(8080, "tcp")]))
+        .expect("valid service spec");
+    let intent = WorkloadIntent::Service(service);
+    let archived = intent.archive_for_store().expect("archive Service intent");
+    store
+        .put(sub_key.as_bytes(), archived.as_ref())
+        .await
+        .expect("seed Service payload at sub-key path");
+}
+
 /// A running-AND-healthy `Backend` for `<job>=id`, whose `alloc` SVID carries
 /// `/job/<id>/alloc/...` — the shape `name_index::job_of` extracts the `<job>`
 /// from. Mirrors `dns_answer_for.rs::backend_for` (the 01-03 fixture). The
@@ -398,6 +424,50 @@ async fn boot_rebuild_repopulates_empty_allocator_from_declared_services() {
         allocator.snapshot(),
         after,
         "re-running the rebuild re-assigns each <job> to the SAME F (no churn)",
+    );
+}
+
+#[tokio::test]
+async fn boot_rebuild_ignores_service_payload_under_a_sub_key_path() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let (state, store, path) = build_app_state(&tmp);
+    let allocator = state.frontend_addr_allocator.clone();
+
+    // GIVEN a CANONICAL `workloads/realsvc` Service record (id=realsvc) AND a
+    // VALID archived Service payload sitting at the SUB-KEY `workloads/realsvc/bogus`
+    // (suffix contains '/') whose payload carries a DISTINCT id (id=ghost). The
+    // sub-key value genuinely decodes as a Service — so the ONLY thing stopping
+    // `ghost` from being assigned is the line-138 sub-key filter.
+    seed_declared_service(&store, "realsvc").await;
+    seed_service_payload_at_sub_key(&store, "workloads/realsvc/bogus", "ghost").await;
+    assert!(allocator.snapshot().is_empty(), "the allocator is empty before the rebuild");
+
+    // WHEN the boot rebuild pass runs (the driving port).
+    rebuild_frontend_addrs_from_intent(&store, &path, &allocator)
+        .await
+        .expect("boot rebuild must succeed");
+
+    // THEN ONLY the canonical record's `<job>=realsvc` is bound — the sub-key
+    // Service payload is a NON-record (not a `workloads/<id>` declaration) and
+    // contributes no binding. Under the `||`→`&&` mutant the line-138 `if` never
+    // fires (empty-AND-contains-'/' is impossible), so the sub-key is decoded,
+    // honored, and `ghost` is bound → snapshot().len() == 2 / `ghost` present →
+    // this test goes RED. That is the kill.
+    let after = allocator.snapshot();
+    assert_eq!(
+        after.len(),
+        1,
+        "only the canonical workloads/<id> record declares a <job>; the \
+         workloads/<id>/bogus sub-key Service payload must be SKIPPED before decode",
+    );
+    assert!(
+        after.contains_key(&job_name("realsvc")),
+        "the canonical declared Service realsvc must be bound",
+    );
+    assert!(
+        !after.contains_key(&job_name("ghost")),
+        "a Service payload at a SUB-KEY path must NOT be honored as a declaration \
+         (the line-138 sub-key filter skips it before decode)",
     );
 }
 
