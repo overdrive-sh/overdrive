@@ -608,12 +608,14 @@ journey:
 | `MeshServiceName` newtype | `crates/overdrive-core/src/id.rs` | **CREATE NEW** | The `<job>.svc.overdrive.local` grammar; validated, case-insensitive, label ≤ `LABEL_MAX` |
 | `NameAnswer` enum | `crates/overdrive-core/src/` (`id.rs` or small `dns` module) | **CREATE NEW** | Pure query result: `Records(Vec<SocketAddrV4>) \| NoData \| NxDomain` |
 | `dns_responder` module root | `crates/overdrive-control-plane/src/dns_responder/mod.rs` | **CREATE NEW** | Module wiring + re-exports |
-| `name_index.rs` | `…/dns_responder/name_index.rs` | **CREATE NEW** | `by_name: BTreeMap<MeshServiceName, BTreeSet<SocketAddrV4>>`; List-then-Watch + relist-on-`Lagged` + single-owner drain + `probe()` (mirror `ServiceBackendsResolve`) |
-| `answer.rs` | `…/dns_responder/answer.rs` | **CREATE NEW** | Pure `answer_for(name, qtype, &index) -> NameAnswer` (the mutation-gate target) |
+| `frontend_addr_allocator.rs` | `…/dns_responder/frontend_addr_allocator.rs` | **CREATE NEW** (REV-2, 1a-A) | `FrontendAddrAllocator` — the single `<job> ↔ F` owner (frontend SSOT) BOTH `name_index` and `by_frontend` derive `F` from; `assign`/`release`/`snapshot`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16` |
+| `name_index.rs` | `…/dns_responder/name_index.rs` | **CREATE NEW** | RE-SPEC (REV-2): maps `<job>` → stable frontend addr `F` (NOT → a backend-addr set); reads the `FrontendAddrAllocator` `<job> ↔ F` binding via the single ordered drain; List-then-Watch + relist-on-`Lagged` + single-owner drain + `probe()` (mirror `ServiceBackendsResolve`); the healthy gate is the WITHHOLD seam |
+| `answer.rs` | `…/dns_responder/answer.rs` | **CREATE NEW** | Pure `answer_for(name, qtype, &index) -> NameAnswer` (the mutation-gate target); `Records` now holds `vec![F]` (one stable frontend addr) |
 | `wire.rs` | `…/dns_responder/wire.rs` | **CREATE NEW** | `hickory-proto` decode (query) + encode (`NameAnswer` → bytes: A / NODATA-SOA / NXDOMAIN-SOA); separately proptested |
-| `responder.rs` | `…/dns_responder/responder.rs` | **CREATE NEW** | `DnsResponder` host adapter: bind (wildcard→per-addr fallback), `IP_PKTINFO` recv/sendmsg loop, `probe()`, `serve()` |
+| `responder.rs` | `…/dns_responder/responder.rs` | **CREATE NEW** | `DnsResponder` host adapter: bind (wildcard→per-addr fallback), `IP_PKTINFO` recv/sendmsg loop, `probe()`, `serve()`; constructed with the SAME `FrontendAddrAllocator` handle as the re-keyed resolve |
+| `BackendIndex` `by_frontend` re-key | `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs` | **EXTEND** (REV-2, 1b-A, additive) | `by_frontend: BTreeMap<(F, listener.port, Proto), ServiceId>` + a three-way `classify` arm; derives the `<job> ↔ F` binding from the SAME `FrontendAddrAllocator` instance the `name_index` reads |
 | `DnsResponderError` | `…/dns_responder/` | **CREATE NEW** | Typed `thiserror`; no `Internal(String)` |
-| composition root | `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver`, ~1893-1957) | **EXTEND** | Construct after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure |
+| composition root | `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver`, ~1893-1957) | **EXTEND** | Construct ONE `FrontendAddrAllocator`, share on `AppState`, inject the SAME handle into BOTH the re-keyed `MtlsResolve` and the `DnsResponder` (the single-owner invariant); construct the responder after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure |
 | `hickory-proto` dep | root `Cargo.toml` `[workspace.dependencies]` | **ADD** | Apache-2.0/MIT |
 | `nix` features | `overdrive-control-plane` + workspace `nix` (`socket`, `uio`) | **EXTEND** | `recvmsg`/`sendmsg`/`ControlMessage::Ipv4PacketInfo` (no new public API) |
 
@@ -643,10 +645,20 @@ journey:
   `reconcilers.md` Bar-1 converge), keeping sockets tracking the live slot set.
 
 **Required-deps discipline:** `DnsResponder::new(store, clock, slots:
-NetSlotAllocator)` — all mandatory constructor params, no builder, no default
-(`development.md` § "Port-trait dependencies"). The `NetSlotAllocator` handle is
-a cheap `Arc`-shared clone; it is NOT a port trait (it is concrete host state,
-the single source of slot truth — a second source would be the anti-pattern).
+NetSlotAllocator, frontend: FrontendAddrAllocator)` — all mandatory constructor
+params, no builder, no default (`development.md` § "Port-trait dependencies").
+The `NetSlotAllocator` handle is a cheap `Arc`-shared clone; it is NOT a port
+trait (it is concrete host state, the single source of slot truth — a second
+source would be the anti-pattern). **The `FrontendAddrAllocator` (REV-2, 1a-A) is
+a DISTINCT fourth parameter — a different allocator, a different concern:**
+`slots` is the per-netns reply-source-pin / per-addr fallback source (DDN-5);
+`frontend` is the single `<job> ↔ F` owner the `name_index` answers `F` from
+(§ Frontend lifecycle contract — the single-owner invariant). It is the SAME
+`FrontendAddrAllocator` instance the composition root injects into the re-keyed
+`MtlsResolve` (`by_frontend`), so the answered `F` is byte-identical to the `F`
+the resolve path recognizes. The responder MUST NOT construct its own
+`FrontendAddrAllocator` or derive `F` independently — a second source is the
+addressing-divergence anti-pattern REV-2 exists to prevent.
 
 ## Wave: DESIGN / [REF] Pinned signatures (implement to the design — do NOT invent surface)
 
@@ -981,9 +993,9 @@ features, and runs the fail-for-right-reason gate
 | `crates/overdrive-control-plane/src/dns_responder/name_index.rs` | `NameIndex` maps `<job>` → **stable frontend addr `F`** (NOT → backend-addr set); List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` (mirror `ServiceBackendsResolve`); the `Backend.healthy == true` gate as the WITHHOLD seam (REV-2 DDN-2/Finding-2 — governs *resolvability*); the OQ-1 `<job>` grouping; consumes the `FrontendAddrAllocator` binding | S-DBN-IDX-01..04, S-DBN-ANSWER-04, S-DBN-COHERENCE-01 | NEW (01-03, RE-SPEC: `<job>`→`F`, withhold-not-release) |
 | `crates/overdrive-control-plane/src/dns_responder/wire.rs` | `hickory-proto` decode (query) + encode (`NameAnswer → Vec<u8>`: A / NODATA-SOA / NXDOMAIN-SOA, MINIMUM=1, SERIAL via `Clock`) | S-DBN-WIRE-01..04 | **COMMITTED** (`04fa3d18`) — addr-agnostic, renders whatever IPv4 addr handed |
 | `crates/overdrive-control-plane/src/mtls_resolve_adapter.rs` (`BackendIndex` EXTEND) | ADD `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)`; the THREE-way `classify` arm (hit → first-by-`Ord` healthy → `Mesh` / else `MeshUnreachable`; frontend-subnet miss → `MeshUnreachable`; else `by_addr` fall-through); the single ordered drain updating `by_frontend` BEFORE `name_index`; the re-keyed contract pinned in the `MtlsResolve` trait docstring | S-DBN-REKEY-01..04, S-DBN-FAILCLOSED-01, S-DBN-COHERENCE-01, S-DBN-EQUIV-01, S-DBN-SINGLE-SRC, S-DBN-WS, S-DBN-CHURN | **NEW (02-00)** — EXTEND additively; REV-1's "untouched" SUPERSEDED |
-| `crates/overdrive-control-plane/src/dns_responder/responder.rs` | `impl DnsResponder { new(store, clock, slots: NetSlotAllocator) -> Self; async fn probe(&self) -> Result<(), DnsResponderError>; async fn serve(self: Arc<Self>) }` (wildcard→per-addr fallback, `IP_PKTINFO` recv/send loop) | S-DBN-BIND-01..03, S-DBN-WS, S-DBN-WS-STABLE, S-DBN-CHURN, S-DBN-SINGLE-SRC, S-DBN-NXDOMAIN-*, S-DBN-PINGPONG | NEW (02-01, socket loop UNCHANGED) |
+| `crates/overdrive-control-plane/src/dns_responder/responder.rs` | `impl DnsResponder { new(store, clock, slots: NetSlotAllocator, frontend: FrontendAddrAllocator) -> Self; async fn probe(&self) -> Result<(), DnsResponderError>; async fn serve(self: Arc<Self>) }` (wildcard→per-addr fallback, `IP_PKTINFO` recv/send loop). `slots` is the DDN-5 per-addr fallback source; `frontend` is the single `<job> ↔ F` owner the `name_index` answers `F` from — the SAME instance injected into the re-keyed `MtlsResolve` (DDN-2 single-owner). | S-DBN-BIND-01..03, S-DBN-WS, S-DBN-WS-STABLE, S-DBN-CHURN, S-DBN-SINGLE-SRC, S-DBN-NXDOMAIN-*, S-DBN-PINGPONG | NEW (02-01, socket loop UNCHANGED; `+frontend` param added REV-2) |
 | `crates/overdrive-control-plane/src/dns_responder/` (`DnsResponderError`) | `enum DnsResponderError { Bind { addr, source }, ListSeed { reason }, Probe { reason }, Socket { source } }` — typed, NO `Internal(String)` | S-DBN-BIND-03 | NEW (02-01, UNCHANGED) |
-| `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver` ~1893-1957) | EXTEND: construct the `FrontendAddrAllocator` (share on `AppState`) + the re-keyed `MtlsResolve` + the `DnsResponder` after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure | S-DBN-WS (litmus), S-DBN-BIND-03 | EXTEND (02-01, +FrontendAddrAllocator + re-key wiring) |
+| `crates/overdrive-control-plane/src/lib.rs` (`run_server_with_obs_and_driver` ~1893-1957) | EXTEND: construct ONE `FrontendAddrAllocator` (share on `AppState`) and inject the SAME `Arc`-shared handle into BOTH the re-keyed `MtlsResolve` (so `by_frontend` recognizes `F`) AND the `DnsResponder` (so `name_index` answers `F`) — the single-owner invariant (DDN-2); construct the `DnsResponder` after `resolve.probe()`; `responder.probe()`; `tokio::spawn(serve)`; hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on failure | S-DBN-WS (litmus), S-DBN-BIND-03, S-DBN-SINGLE-SRC | EXTEND (02-01, +single `FrontendAddrAllocator` injected into both paths + re-key wiring) |
 
 ### Test scaffolds (DELIVER materialises; `#[should_panic(expected = "RED scaffold")]`)
 
@@ -1511,6 +1523,19 @@ one ordered drain/barrier so `by_frontend` is never behind `name_index`."
   `<job> → F` binding visible to `name_index` is the natural shape — the readers
   are not independent watchers in this design, they are projections off one
   ordered apply.
+- **The `<job> → F` binding is the SAME for both projections because there is ONE
+  source for it — the single `FrontendAddrAllocator` instance** (1a-A; § Frontend
+  lifecycle contract — the single-owner invariant). The ordered drain looks up /
+  binds `<job> → F` from that one allocator, writes the `(F, listener.port, Proto)
+  → ServiceId` entry into `by_frontend` (STEP A), then exposes the SAME `F` to
+  `name_index` (STEP B). The rows supply *liveness* (running-AND-healthy?); the
+  allocator supplies *which `F`*. Neither projection has a second `<job> → F`
+  source — a second allocator would assign a different `F` to the same `<job>`,
+  the DNS-answered `F` would miss `by_frontend`, and the dial would fail-closed
+  (`MeshUnreachable` via (ii) below) — the exact addressing-divergence defect this
+  contract exists to prevent. The composition root (DDN-6) enforces "one instance"
+  by constructing the `FrontendAddrAllocator` once and injecting the SAME handle
+  into both the re-keyed `MtlsResolve` and the `DnsResponder`.
 - Option (a) is a *weaker* restatement of the same idea expressed as a read-time
   gate ("DNS checks resolve first"); (b) makes it a *write-time* barrier (resolve
   is updated first), which is the stronger and simpler invariant — there is no
@@ -1635,7 +1660,7 @@ C4Container
     Container(dns, "DnsResponder", "in-agent, hickory-proto codec + IP_PKTINFO loop", "Answers <job>.svc.overdrive.local with the STABLE per-<job> frontend addr F")
     Container(nameidx, "name_index (projection)", "<job> -> stable F; WITHHOLDS on zero-healthy", "Maps <job> -> stable frontend addr F (REV-2: NOT -> backend addrs); gates Backend.healthy == true")
     Container(drain, "single ordered drain", "one owner over the shared service_backends rows (Finding-3 barrier)", "Applies each row batch to by_frontend (+ a healthy backend) BEFORE exposing F to name_index — write-time ordering, option (b)")
-    Container(falloc, "FrontendAddrAllocator", "per-<job> IPv4, stable across alloc cycles (1a-A)", "Binds <job> -> F; the Overdrive ClusterIP analogue")
+    Container(falloc, "FrontendAddrAllocator", "per-<job> IPv4, stable across alloc cycles (1a-A); SINGLE OWNER of <job> -> F", "Binds <job> -> F; the Overdrive ClusterIP analogue. ONE instance (run_server constructs it once and injects the SAME handle into BOTH name_index and by_frontend, via the ordered drain) — the single source of frontend truth, so the answered F == the recognized F (DDN-2 single-owner invariant)")
     Container(tproxy, "nft-TPROXY interceptor", "ADR-0071 Path-A (reused verbatim)", "Captures the connection to (F, listener.port); recovers orig_dst verbatim")
     Container(resolve, "MtlsResolve (re-keyed, 1b-A)", "by_frontend: BTreeMap<FrontendKey,ServiceId>, FrontendKey=(SocketAddrV4,Proto)", "Translates (F, listener.port, proto) -> current running-AND-healthy backend B; three-way classify (hit -> Mesh; frontend-subnet miss -> MeshUnreachable fail-closed; else by_addr); enforces SPIFFE mTLS")
     Container(pump, "per-connection pump task", "TCP_USER_TIMEOUT / keepalive (mtls_intercept_worker.rs:34)", "Surfaces backend death; bounds in-flight churn (no sock_destroy)")

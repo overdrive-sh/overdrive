@@ -178,6 +178,20 @@ disjoint from both the VIP range and the workload range — collision-free.
   health gate now ALSO governs lifecycle (Finding 2):** a transient zero-healthy
   `<job>` → the `name_index` WITHHOLDS the answer (→ NXDOMAIN), while the
   `FrontendAddrAllocator` RETAINS `F` (release only on logical-workload deletion).
+  **The single-owner invariant (REV-2, the byte-consistency anchor):** the `<job>
+  ↔ F` binding has exactly ONE owner — the `FrontendAddrAllocator` (1a-A). The
+  DNS answer path (`name_index` / `answer_for`) and the resolve translate path
+  (`MtlsResolve.by_frontend`) BOTH derive `<job> ↔ F` from the **same
+  `FrontendAddrAllocator` instance**. This is the "one source" invariant extended
+  to `F` (the sibling of the shipped "one source = `service_backends` rows, three
+  readers" model — here the second single source is the allocator's `<job> ↔ F`
+  binding). It is what makes the `F` the DNS path *answers* byte-identical to the
+  `F` the resolve path *recognizes/translates*: a second allocator source would
+  assign a different `F` to the same `<job>`, the answered `F` would miss
+  `by_frontend`, and the connection would fail-closed (`MeshUnreachable`) — the
+  addressing-divergence defect REV-2 exists to prevent. The Finding-3 ordered
+  drain (below) is the coherence mechanism that exposes the SAME allocator-owned
+  `F` to both projections in the right order.
 - **D-TME-10 "headless / NO VIP / NO translation layer"** — SUPERSEDED: a stable
   IPv4 frontend IS VIP-shaped and DOES introduce a (single-map) translation in
   `MtlsResolve`, delivered via nft-TPROXY (NOT #61 XDP).
@@ -189,11 +203,16 @@ disjoint from both the VIP range and the workload range — collision-free.
   `classify` arm: `by_frontend` hit → translate;
   frontend-subnet miss → `MeshUnreachable` fail-closed per Finding 3; general miss
   → today's `by_addr` fall-through); the user ratified the in-place extension by
-  choosing the thin path. The DNS↔resolve coherence is option (b) — a single
-  ordered drain updates `by_frontend` before `name_index` (Finding 3). The
-  re-keyed contract (key type + first-by-`Ord` selection + fail-closed-on-subnet-
-  miss arm) MUST be pinned in the `MtlsResolve` trait docstring + an equivalence
-  test (`development.md` § "Trait definitions specify behavior").
+  choosing the thin path. The `<job> ↔ F` binding `by_frontend` is keyed on comes
+  from the **single `FrontendAddrAllocator` instance** (the single-owner invariant
+  pinned under DDN-2 above) — `by_frontend` does NOT spin up a second `<job> → F`
+  source; the same allocator handle the `name_index` reads supplies the `F` here.
+  The DNS↔resolve coherence is option (b) — a single ordered drain updates
+  `by_frontend` before `name_index` (Finding 3), both projections reading the SAME
+  allocator-owned `F`. The re-keyed contract (key type + first-by-`Ord` selection +
+  fail-closed-on-subnet-miss arm) MUST be pinned in the `MtlsResolve` trait
+  docstring + an equivalence test (`development.md` § "Trait definitions specify
+  behavior").
 - **DDN-3 / DDN-4 / DDN-5 / DDN-6 / DDN-7 / DDN-8** — UNCHANGED (codec, pure
   `answer_for` seam, bind/fallback, composition root, `MeshServiceName`,
   negative-TTL SOA are all addr-agnostic).
@@ -329,6 +348,13 @@ grounded on live code (`file:line`).
     readers, the single-owner drain `mtls_resolve_adapter.rs:56-87`), so a
     write-time barrier is the natural and stronger shape; (a) is the same idea as
     a per-query read gate and reintroduces a cross-reader coupling DDN-1 avoids.
+    **The `F` both projections expose is the SAME allocator-owned binding** — the
+    ordered drain looks up `<job> → F` from the single `FrontendAddrAllocator`
+    instance (the single-owner invariant under DDN-2), binds it into `by_frontend`
+    in STEP A, then exposes the SAME `F` to `name_index` in STEP B. Neither
+    projection derives `F` from anywhere else; the `service_backends` rows supply
+    *liveness* (is there a running-AND-healthy backend for `<job>`?), the allocator
+    supplies *which `F`*. Two single sources, one drain reading both.
   - **(ii) Fail-closed-on-frontend-subnet-miss (ADOPTED structural defense):**
     a captured connection whose `orig_dst.ip() ∈ WORKLOAD_FRONTEND_BASE
     (10.98.0.0/16)` that MISSES `by_frontend` classifies **`MeshUnreachable`
@@ -601,6 +627,35 @@ takes a concrete `NetSlotAllocator` handle (cheap `Arc`-shared clone; no new
 port trait, no second source of slot truth). The wildcard path never touches it;
 it is read ONLY when the fallback fires.
 
+**The `NetSlotAllocator` (`slots`) is DISTINCT from the `FrontendAddrAllocator`
+— two different allocators, two different concerns.** `slots` is the per-netns
+reply-source-pin / per-addr fallback allocator (DDN-5; the gateway-set source for
+the EADDRINUSE fallback). The `FrontendAddrAllocator` is the `<job> ↔ F` SSOT
+(1a-A; the single-owner invariant under DDN-2) the responder reads to *answer*
+`F`. So `DnsResponder::new` takes BOTH, as separate parameters:
+
+```rust
+impl DnsResponder {
+    fn new(
+        store: Arc<dyn ObservationStore>,
+        clock: Arc<dyn Clock>,
+        slots: veth_provisioner::NetSlotAllocator,   // DDN-5 per-addr fallback source (UNCHANGED)
+        frontend: FrontendAddrAllocator,             // NEW (1a-A): the single <job> ↔ F owner
+                                                     //   the name_index answers F from — the SAME
+                                                     //   instance MtlsResolve.by_frontend derives F from
+    ) -> Self;
+    async fn probe(&self) -> Result<(), DnsResponderError>;
+    async fn serve(self: Arc<Self>);
+}
+```
+
+`frontend` is a cheap `Arc`-shared clone of the ONE `FrontendAddrAllocator` the
+composition root constructs (DDN-6 below); it is the same instance injected into
+the re-keyed `MtlsResolve`, so the `F` the `name_index` answers is byte-identical
+to the `F` `by_frontend` recognizes. Adding a second `FrontendAddrAllocator` here
+(or letting the responder derive `F` independently) is the addressing-divergence
+defect the single-owner invariant forbids.
+
 **Dynamic re-bind lifecycle (gateways come/go as allocs start/stop):**
 `NetSlotAllocator` is a snapshot-on-demand map (`snapshot() ->
 BTreeMap<AllocationId, NetSlot>`, mutated by `assign`/`release`/`adopt`); it
@@ -638,6 +693,32 @@ failure (the Earned-Trust gate), `tokio::spawn`s the serve loop, and holds the
 `JoinHandle` for shutdown — gated by the SAME `if mtls_worker.is_some()` real-
 dataplane block that gates the netns/intercept path (a no-op on a non-mTLS /
 `SimDataplane` boot, where no per-alloc netns exist to inject into).
+
+**The composition root constructs ONE `FrontendAddrAllocator` and injects the
+SAME handle into BOTH paths (the single-owner invariant, DDN-2).** Inside the
+`if mtls_worker.is_some()` block, ordered so the one allocator reaches both
+readers:
+
+1. Construct the single `FrontendAddrAllocator` (1a-A, empty-on-boot rebuild) and
+   share it on `AppState` beside the existing `net_slot_allocator`.
+2. Construct the re-keyed `MtlsResolve` (1b-A) so its single ordered drain is fed
+   the `<job> → F` binding from THAT allocator (the `by_frontend` translate path
+   recognizes the same `F`). The probed-Ok resolve is then moved into the worker
+   (the worker-held resolve and the responder share the one allocator, so
+   `by_frontend` and `name_index` agree on `F`).
+3. Construct the `DnsResponder` AFTER `resolve.probe()` with `store` +
+   `config.clock` + the `state.net_slot_allocator` handle (DDN-5 fallback source)
+   **+ the SAME `FrontendAddrAllocator` handle** (so the `name_index` answers the
+   allocator-owned `F`). Then `responder.probe()` → spawn → hold `JoinHandle`.
+
+The socket loop / bind / `IP_PKTINFO` / Earned-Trust gate are UNCHANGED; the
+composition-root delta is the single `FrontendAddrAllocator` construction +
+its injection into BOTH the re-keyed resolve and the responder. The shipped
+construction site supports this: `resolve` is an `Arc<dyn MtlsResolve>`
+(`lib.rs:1910`) moved into the worker (`:1937`), and the allocator is `Arc`-shared,
+so one `let frontend = FrontendAddrAllocator::new()` binding can feed the resolve
+before the move AND survive (held on `AppState`) to the responder construction
+after `AppState::new` (`:1944`) — no contradiction with the real composition root.
 
 **Alternatives considered:**
 - **Spawn the responder lazily on first deploy / outside the composition root
@@ -699,19 +780,36 @@ parses+matches the suffix through a validated type, never ad-hoc string ops.
   on a sub-second-to-seconds cadence; a 1 s negative TTL keeps the
   deploy-then-dial loop tight without hammering the responder.
 
-## Byte-consistency — the same rows, not a shared struct
+## Byte-consistency — two single sources, not a shared struct (REV-2)
 
-The honest framing: the responder is the **third reader of the
-`ObservationStore` `service_backends` surface** — NOT a reader of the
-addr-keyed intercept index *struct*. Both readers (`ServiceBackendsResolve` and
-`DnsResponder`) fold the **same `ServiceBackendRow` rows** from the **same
-`ObservationStore`** via the **same List-then-Watch contract**
-(`all_service_backends_rows` at probe, `subscribe_all_events` drain,
-relist-on-`Lagged`). The answered `A` addr and the addr `MtlsResolve.resolve`
-recognizes are byte-identical because they derive from the same row's
-`Backend.addr` — consistency is a property of the shared rows, not of a shared
-in-RAM structure. This is the "one source, THREE readers" contract (outbound
-resolve + inbound install + name answers) made precise.
+The honest framing under REV-2 (stable-frontend): the answered value is the
+**stable per-`<job>` frontend addr `F`**, NOT a `service_backends` row's
+`Backend.addr` (the REV-1 headless model this section described is SUPERSEDED).
+Byte-consistency therefore rests on **TWO single sources**, both shared by the
+DNS answer path and the resolve translate path:
+
+1. **Frontend truth = the `FrontendAddrAllocator` (`<job> ↔ F`).** The single
+   allocator instance is the ONLY owner of which `F` a `<job>` holds. The DNS
+   path (`name_index` / `answer_for`) *answers* `F` and the resolve path
+   (`MtlsResolve.by_frontend`) *recognizes/translates* `F`, BOTH reading the SAME
+   allocator instance (DDN-2 single-owner invariant). The answered `F` is
+   byte-identical to the recognized `F` because there is exactly one `F` per
+   `<job>` — a second allocator source would diverge them and fail the connection
+   closed.
+2. **Liveness truth = the `service_backends` rows.** Both readers
+   (`ServiceBackendsResolve` and `DnsResponder`) fold the **same
+   `ServiceBackendRow` rows** from the **same `ObservationStore`** via the **same
+   List-then-Watch contract** (`all_service_backends_rows` at probe,
+   `subscribe_all_events` drain, relist-on-`Lagged`). The rows decide
+   *resolvability* (is there a running-AND-healthy backend for `<job>`?) — the
+   `name_index` WITHHOLDS the answer when zero, and `by_frontend` translates `F`
+   to the first-by-`Ord` running-AND-healthy backend.
+
+Consistency is a property of these two shared single sources read through the
+single ordered drain (Finding 3), not of a shared in-RAM structure. This is the
+"one source, THREE readers" contract for liveness (outbound resolve + inbound
+install + name answers) PLUS the "one owner" contract for the `<job> ↔ F`
+binding, made precise.
 
 ## Components
 
@@ -719,12 +817,14 @@ resolve + inbound install + name answers) made precise.
 |---|---|---|
 | `MeshServiceName` newtype | `overdrive-core/src/id.rs` | **CREATE NEW** |
 | `NameAnswer` enum (pure result of `answer_for`) | `overdrive-core` (id or a small `dns` module) | **CREATE NEW** |
-| `dns_responder/name_index.rs` (`by_name` List-then-Watch index) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
+| `FrontendAddrAllocator` (the single `<job> ↔ F` owner — frontend SSOT; feeds BOTH `name_index` and `by_frontend`) | `overdrive-control-plane/src/dns_responder/frontend_addr_allocator.rs` | **CREATE NEW** (1a-A) |
+| `dns_responder/name_index.rs` (`<job>` → stable `F` List-then-Watch index; reads the `FrontendAddrAllocator` binding via the ordered drain) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/answer.rs` (pure `answer_for`) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/wire.rs` (hickory-proto encode/decode) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/responder.rs` (`DnsResponder` host adapter + socket loop) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
+| `BackendIndex` `by_frontend` re-key (`(F, listener.port, Proto)` → `ServiceId`; reads the SAME `FrontendAddrAllocator` binding) | `overdrive-control-plane/src/mtls_resolve_adapter.rs` | **EXTEND** (1b-A, additive) |
 | `DnsResponderError` (typed `thiserror`) | `dns_responder/` | **CREATE NEW** |
-| `run_server_with_obs_and_driver` composition | `overdrive-control-plane/src/lib.rs` (~1893-1957) | **EXTEND** (construct after `resolve.probe()` with `store` + `config.clock` + the `state.net_slot_allocator` handle for the fallback source — DDN-5; probe; spawn; hold handle; same `mtls_worker.is_some()` gate) |
+| `run_server_with_obs_and_driver` composition | `overdrive-control-plane/src/lib.rs` (~1893-1957) | **EXTEND** (construct ONE `FrontendAddrAllocator`, share on `AppState`, inject the SAME handle into BOTH the re-keyed `MtlsResolve` and the `DnsResponder` — the single-owner invariant; construct the responder after `resolve.probe()` with `store` + `config.clock` + the `state.net_slot_allocator` handle for the fallback source (DDN-5) + the `FrontendAddrAllocator` handle for `F` answers (DDN-2); probe; spawn; hold handle; same `mtls_worker.is_some()` gate) |
 | `hickory-proto` workspace dep | root `Cargo.toml [workspace.dependencies]` | **ADD** (Apache-2.0/MIT) |
 | `nix` features (`socket`, `uio` for `recvmsg`/`sendmsg`/`ControlMessage::Ipv4PacketInfo`) | `overdrive-control-plane` + workspace `nix` features | **EXTEND** (no new public API) |
 
