@@ -104,12 +104,15 @@ pub enum FrontendRebuildError {
 /// every `<job>` to its EXISTING `F` (FRONTEND-02), so the pass is safe to run
 /// on every boot and a double-invocation produces no churn.
 ///
-/// **NOT gated on `mtls_worker`.** Unlike
-/// [`crate::veth_provisioner::adopt_on_restart_recovery`] (which adopts
-/// surviving netns that exist ONLY on the mTLS path), the frontend rebuild
-/// re-derives from declared-Service intent that exists independently of mTLS —
-/// gating it would leave the allocator empty on a non-mTLS boot and the
-/// `name_index` reader would withhold every declared name.
+/// **Driven from `run_server` GATED on `mtls_worker.is_some()`** — the SAME
+/// composition gate the netns
+/// [`adopt_on_restart_recovery`](crate::veth_provisioner::adopt_on_restart_recovery)
+/// uses, and the same gate the 02-01 responder + its `name_index` reader are
+/// themselves built behind (feature-delta DDN-6). On a non-mTLS boot there is no
+/// responder and no reader to serve, so the allocator the rebuild would populate
+/// has no consumer — gating to match keeps the rebuild and its only reader
+/// behind one gate (roadmap 01-05 pin). This function itself is gate-agnostic;
+/// the gating lives at the `run_server` call site.
 ///
 /// # Errors
 ///

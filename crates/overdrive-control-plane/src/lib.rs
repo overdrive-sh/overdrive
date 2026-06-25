@@ -2059,36 +2059,39 @@ pub async fn run_server_with_obs_and_driver(
                 return Err(error::ControlPlaneError::NftRuleSweep(source));
             }
         }
-    }
 
-    // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
-    // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
-    // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
-    // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
-    // pass re-derives every `<job> → F` binding from the declared-Service intent
-    // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
-    // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
-    // `AppState` construction (so `state.frontend_addr_allocator` /
-    // `state.store` are available) and BEFORE the convergence loop / responder
-    // serve spawn (so the `name_index` reader the responder reads — once 02-01
-    // injects the shared instance — never observes an empty-but-trusted
-    // allocator).
-    //
-    // NOT gated on `state.mtls_worker.is_some()` (unlike the netns
-    // `adopt_on_restart_recovery` above, which adopts surviving netns that exist
-    // ONLY on the mTLS path): the frontend binding re-derives from
-    // declared-Service intent that exists independently of mTLS. Gating it would
-    // leave the allocator empty on a non-mTLS boot and the `name_index` reader
-    // would withhold every declared name — the exact contradiction ASSIGN-03
-    // forbids. A rebuild failure (unreadable intent SSOT, or frontend-block
-    // exhaustion mid-rebuild) refuses the boot fail-closed via the typed
-    // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
-    crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
-        &state.store,
-        &state.intent_redb_path,
-        &state.frontend_addr_allocator,
-    )
-    .await?;
+        // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
+        // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
+        // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
+        // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
+        // pass re-derives every `<job> → F` binding from the declared-Service intent
+        // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
+        // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
+        // the netns adopt + nft sweep above (preserving the PINNED boot order
+        // adopt → GC → sweep → rebuild → serve) and BEFORE the convergence loop /
+        // responder serve spawn (so the `name_index` reader the responder reads —
+        // once 02-01 injects the shared instance — never observes an
+        // empty-but-trusted allocator).
+        //
+        // GATED on `state.mtls_worker.is_some()` — the SAME composition gate the
+        // netns adopt above uses, and (the load-bearing reason) the SAME gate the
+        // 02-01 responder + its `name_index` reader are themselves built behind
+        // (feature-delta DDN-6; the responder is constructed inside this very
+        // real-dataplane block). On a non-mTLS boot there is therefore NO
+        // responder and NO reader to serve — populating the allocator there is
+        // wasted work, not a fix. Re-gating restores the roadmap 01-05 pin
+        // ("gated by the SAME `mtls_worker.is_some()` block") AND keeps the
+        // rebuild and its only consumer behind one gate. A rebuild failure
+        // (unreadable intent SSOT, or frontend-block exhaustion mid-rebuild)
+        // refuses the boot fail-closed via the typed
+        // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
+        crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.frontend_addr_allocator,
+        )
+        .await?;
+    }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`

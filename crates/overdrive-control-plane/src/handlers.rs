@@ -301,37 +301,7 @@ pub async fn submit_workload(
         .map_err(|e| ControlPlaneError::internal("spec_digest of WorkloadIntent", e))?;
     let spec_digest = spec_digest_hash.to_string();
 
-    // 4a. Service-arm VIP allocation per ADR-0049 (amended 2026-05-15)
-    //     / service-vip-allocator step 02-03d.
-    //
-    //     Concurrency contract per `.claude/rules/development.md` §
-    //     "Concurrency & async" → "Never hold a lock across `.await`":
-    //     the allocator lock IS the serialisation point — the
-    //     content-addressed memo lookup + the inner store write happen
-    //     under one guard so that two concurrent submits for the SAME
-    //     spec_digest both see the same VIP (one wins the lock and
-    //     issues; the other hits the memo). The guard is dropped
-    //     EXPLICITLY before any further `.await` (the admission
-    //     `put_if_absent` below); the next `.await` therefore does NOT
-    //     hold the allocator mutex.
-    //
-    //     `PersistentServiceVipAllocator::allocate` itself fsyncs the
-    //     allocator entry through the byte-level `IntentStore` before
-    //     returning Ok, so the durable allocator memo is committed
-    //     before this handler returns the VIP to the client. On
-    //     byte-identical resubmit the memo hit short-circuits without
-    //     a store write — that is the property S-VIP-04 pins.
-    let service_vip = if matches!(intent, WorkloadIntent::Service(_)) {
-        let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
-        let mut guard = state.allocator.lock().await;
-        let vip = guard.allocate(digest_bytes).await?;
-        drop(guard);
-        Some(vip)
-    } else {
-        None
-    };
-
-    // 4b. Service-arm frontend-address assignment (dial-by-name-responder
+    // 4a. Service-arm frontend-address assignment (dial-by-name-responder
     //     step 01-05; ADR-0072 REV-3, GH #243). This is the WRITER seam: the
     //     deploy-time `assign(<job>)` at Service declaration that binds the
     //     stable per-`<job>` frontend address `F` the `name_index` (01-03)
@@ -339,6 +309,17 @@ pub async fn submit_workload(
     //     allocate's `matches!(intent, WorkloadIntent::Service(_))` guard — a
     //     Job / Schedule submit assigns NO frontend addr (frontends are a
     //     Service-name concern).
+    //
+    //     ORDERING (D5 review fix): the frontend assign runs BEFORE the VIP
+    //     allocate below, NOT after. The frontend allocator is purely in-memory
+    //     (empty-on-boot, idempotent, rebuilt from declared intent), so its only
+    //     fallible exit is frontend-block EXHAUSTION. By placing it first, an
+    //     exhaustion early-return precedes any DURABLE VIP commit — so it can
+    //     never leak a fsync'd VIP that has no `WorkloadIntent` (and thus no
+    //     `Action::ReleaseServiceVip`) to release it. A later VIP-allocate
+    //     failure leaves only a benign in-memory `<job> → F` frontend binding
+    //     with no persisted intent: empty-on-boot, idempotent on retry, unread
+    //     by any reader for a `<job>` that has no declared Service.
     //
     //     IDEMPOTENT per `<job>` at the allocator layer (FRONTEND-02): an
     //     already-held `<job>` (a byte-identical resubmit reaching the
@@ -375,6 +356,41 @@ pub async fn submit_workload(
             )
         })?;
     }
+
+    // 4b. Service-arm VIP allocation per ADR-0049 (amended 2026-05-15)
+    //     / service-vip-allocator step 02-03d.
+    //
+    //     Runs AFTER the in-memory frontend assign above (D5 review fix) so the
+    //     DURABLE VIP commit is the LAST fallible allocation before the
+    //     admission `put_if_absent` — no fsync'd VIP can be stranded by a
+    //     subsequent frontend-exhaustion early-return.
+    //
+    //     Concurrency contract per `.claude/rules/development.md` §
+    //     "Concurrency & async" → "Never hold a lock across `.await`":
+    //     the allocator lock IS the serialisation point — the
+    //     content-addressed memo lookup + the inner store write happen
+    //     under one guard so that two concurrent submits for the SAME
+    //     spec_digest both see the same VIP (one wins the lock and
+    //     issues; the other hits the memo). The guard is dropped
+    //     EXPLICITLY before any further `.await` (the admission
+    //     `put_if_absent` below); the next `.await` therefore does NOT
+    //     hold the allocator mutex.
+    //
+    //     `PersistentServiceVipAllocator::allocate` itself fsyncs the
+    //     allocator entry through the byte-level `IntentStore` before
+    //     returning Ok, so the durable allocator memo is committed
+    //     before this handler returns the VIP to the client. On
+    //     byte-identical resubmit the memo hit short-circuits without
+    //     a store write — that is the property S-VIP-04 pins.
+    let service_vip = if matches!(intent, WorkloadIntent::Service(_)) {
+        let digest_bytes: [u8; 32] = *spec_digest_hash.as_bytes();
+        let mut guard = state.allocator.lock().await;
+        let vip = guard.allocate(digest_bytes).await?;
+        drop(guard);
+        Some(vip)
+    } else {
+        None
+    };
 
     // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
     //     persist the workload-kind discriminator at
@@ -519,7 +535,7 @@ pub async fn submit_workload(
                 // allocates a SECOND, distinct VIP that leaks unless released.
                 // The frontend allocator is keyed by the logical `<job>` (the
                 // workload id), which is IDENTICAL on a conflicting resubmit, so
-                // the step-4b `assign(<job>)` above was an idempotent no-op that
+                // the step-4a `assign(<job>)` above was an idempotent no-op that
                 // returned the EXISTING `F` — it consumed no new address and
                 // left the binding unchanged. There is nothing to release.
                 // Calling `release(<job>)` here would EVICT the live workload's

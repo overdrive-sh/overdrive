@@ -34,6 +34,7 @@
 //! `LocalIntentStore` + `Sim*` adapters + the pure allocator — no
 //! kernel/netns/socket).
 
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -43,8 +44,11 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 
+use hickory_proto::rr::RecordType;
+
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
+use overdrive_control_plane::dns_responder::answer::answer_for;
 use overdrive_control_plane::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
 use overdrive_control_plane::dns_responder::name_index::NameIndex;
@@ -56,10 +60,13 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput, ServiceV1, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
-use overdrive_core::id::{MeshServiceName, NodeId};
+use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
+use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_core::traits::observation_store::{
+    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+};
 
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -162,6 +169,36 @@ async fn seed_declared_service(store: &Arc<LocalIntentStore>, id: &str) {
 
 fn workload_id(id: &str) -> overdrive_core::id::WorkloadId {
     overdrive_core::id::WorkloadId::new(id).expect("valid workload id")
+}
+
+/// A running-AND-healthy `Backend` for `<job>=id`, whose `alloc` SVID carries
+/// `/job/<id>/alloc/...` — the shape `name_index::job_of` extracts the `<job>`
+/// from. Mirrors `dns_answer_for.rs::backend_for` (the 01-03 fixture). The
+/// per-instance backend addr sits in `10.99.0.0/16`, DELIBERATELY a different
+/// block from the frontend `F` the answer must return.
+fn running_healthy_backend(id: &str) -> Backend {
+    let spiffe = SpiffeId::new(&format!("spiffe://overdrive.local/job/{id}/alloc/a1"))
+        .expect("valid spiffe id");
+    Backend {
+        alloc: spiffe,
+        addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 1), 8080)),
+        weight: 1,
+        healthy: true,
+    }
+}
+
+/// A `service_backends` observation row carrying one running-AND-healthy backend
+/// for `<job>=id`. Mirrors `dns_answer_for.rs::backends_row`.
+fn running_healthy_row(id: &str) -> ServiceBackendRow {
+    ServiceBackendRow {
+        service_id: ServiceId::new(1).expect("valid service id"),
+        vip: Ipv4Addr::new(10, 96, 0, 1),
+        backends: vec![running_healthy_backend(id)],
+        updated_at: LogicalTimestamp {
+            counter: 1,
+            writer: NodeId::new("local").expect("valid node id"),
+        },
+    }
 }
 
 // ===========================================================================
@@ -374,18 +411,15 @@ async fn writer_feeds_the_same_allocator_instance_the_name_index_reads() {
     let tmp = TempDir::new().expect("tmpdir");
     let (state, _store, _path) = build_app_state(&tmp);
 
-    // A single Arc-shared FrontendAddrAllocator (a clone shares the held map).
+    // The ONE shared FrontendAddrAllocator the writer assigns into and the
+    // reader (name_index) reads from. A clone shares the held map, so the
+    // single-owner invariant (DDN-2) is "the writer's binding IS the reader's".
     let writer_allocator = state.frontend_addr_allocator.clone();
     let reader_allocator = state.frontend_addr_allocator.clone();
 
-    // Build a name_index over the SAME instance (a different ObservationStore
-    // is irrelevant — ASSIGN-04 asserts on the allocator binding the index
-    // exposes, the single source of frontend truth).
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::from_str("reader").expect("NodeId"), 0));
-    let _name_index = NameIndex::new(obs, reader_allocator.clone());
-
-    // WHEN the writer (the Service submit) binds api -> F.
+    // (1) WRITER: a Service submit through the `submit_workload` driving port
+    //     binds api -> F in the shared allocator (the 01-05 assign-on-declare
+    //     seam). Capture the writer's assigned F.
     let response = submit_json(
         state,
         SubmitWorkloadRequest {
@@ -395,17 +429,43 @@ async fn writer_feeds_the_same_allocator_instance_the_name_index_reads() {
     .await
     .expect("Service submit must succeed");
     assert_eq!(response.workload_id, "api");
-
-    // THEN the reader_allocator (the SAME instance the name_index holds)
-    // observes the SAME binding, byte-identical — no second <job> -> F source.
-    let writer_f =
+    let assigned_f =
         *writer_allocator.snapshot().get(&job_name("api")).expect("writer binds api -> F");
-    let reader_f = *reader_allocator
-        .snapshot()
-        .get(&job_name("api"))
-        .expect("the reader's clone observes the writer's binding (single shared instance)");
+    assert!(
+        WORKLOAD_FRONTEND_BASE.contains(&assigned_f),
+        "the writer's assigned F {assigned_f} must be within {WORKLOAD_FRONTEND_BASE}",
+    );
+
+    // (2) READER: build a NameIndex over the SAME allocator instance and an
+    //     ObservationStore seeded with a running-AND-healthy backend for
+    //     <job>=api (so `api` is RESOLVABLE). `probe()` Lists the seeded row.
+    let obs: Arc<SimObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::from_str("reader").expect("NodeId"), 0));
+    obs.write(ObservationRow::ServiceBackend(running_healthy_row("api")))
+        .await
+        .expect("seed a running-AND-healthy backend row for api");
+    let name_index =
+        NameIndex::new(Arc::clone(&obs) as Arc<dyn ObservationStore>, reader_allocator.clone());
+    name_index.probe().await.expect("probe Lists the seeded service_backends row");
+
+    // (3) THEN: resolving `api.svc.overdrive.local` over the reader's index
+    //     answers EXACTLY the writer's assigned F, byte-identical — the
+    //     single source of frontend truth (DDN-2). There is NO second
+    //     <job> -> F source.
+    //
+    //     NON-VACUITY LITMUS: this assertion drives the READER path
+    //     (`answer_for` -> `frontend_for` -> the SHARED allocator). Stubbing
+    //     `frontend_for`/`answer_for` to fabricate an F or assign-on-read would
+    //     produce an F that does NOT equal `assigned_f` (a fabricated addr is
+    //     never the writer's binding; an assign-on-read on a DIFFERENT cloned
+    //     view would diverge), so this test goes RED. (Contrast the prior
+    //     vacuous `assert_eq!(snapshot, snapshot)` over two clones of the same
+    //     mutex, which passed regardless of the reader.)
+    let answer = answer_for(&job_name("api"), RecordType::A, &name_index);
     assert_eq!(
-        writer_f, reader_f,
-        "the answered F == the assigned F (single source of frontend truth, DDN-2)",
+        answer,
+        NameAnswer::Records(vec![SocketAddrV4::new(assigned_f, 0)]),
+        "the reader answers EXACTLY the writer's assigned F (single source of \
+         frontend truth, DDN-2); answered F must be byte-identical to assigned F",
     );
 }
