@@ -54,6 +54,14 @@ mod acceptance {
     // unit lane (in-process, pure allocator — no kernel/netns/socket). RED
     // scaffolds (production `todo!()` bodies land GREEN in the same slice).
     mod dns_frontend_allocator;
+    // dial-by-name-responder step 01-03 (ADR-0072 REV-2, GH #243) — the pure
+    // `answer_for` projection (S-DBN-ANSWER-01..05) and the List-then-Watch
+    // `NameIndex` that maps each resolvable `<job>` to its stable frontend addr
+    // F (S-DBN-ANSWER-04 + S-DBN-IDX-01..04). Default unit lane (in-process;
+    // SimObservationStore + FrontendAddrAllocator — no kernel/netns/socket).
+    // `answer_for` is THE primary mutation-gate target (DDN-4).
+    mod dns_answer_for;
+    mod dns_name_index;
     // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
     // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record
     // round-trip through hickory, NODATA-SOA / NXDOMAIN-SOA with MINIMUM=1,
