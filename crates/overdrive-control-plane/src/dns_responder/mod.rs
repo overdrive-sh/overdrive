@@ -27,10 +27,16 @@
 //! carries no `clippy::todo` scaffold expectation. Step 01-03 lands `answer`
 //! (the pure `answer_for`) and `name_index` (the List-then-Watch `NameIndex`
 //! that maps each resolvable `<job>` to its stable frontend addr `F`); both
-//! are fully implemented GREEN in the same slice. `responder.rs` (the socket
-//! loop) remains a later slice and is NOT declared here yet.
+//! are fully implemented GREEN in the same slice. Step 01-05 lands
+//! `boot_rebuild` — the empty-on-boot converge-on-boot rebuild that
+//! re-populates the [`frontend_addr_allocator::FrontendAddrAllocator`] from
+//! the declared-Service intent SSOT (the writer's boot half; the
+//! assign-on-declare half lives in the `submit_workload` Service arm).
+//! `responder.rs` (the socket loop) remains a later slice and is NOT declared
+//! here yet.
 
 pub mod answer;
+pub mod boot_rebuild;
 pub mod frontend_addr_allocator;
 pub mod name_index;
 pub mod wire;

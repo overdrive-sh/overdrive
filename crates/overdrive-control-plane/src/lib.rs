@@ -346,6 +346,26 @@ pub struct AppState {
     /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
     /// on a fresh process boot nothing is held (criterion 6).
     pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
+    /// Per-host stable per-`<job>` frontend-address allocator
+    /// (dial-by-name-responder step 01-05; ADR-0072 REV-2/REV-3, GH #243).
+    /// The SINGLE source of frontend truth (DDN-2): the ONE `Arc`-shared
+    /// instance the deploy-time WRITER (the `submit_workload` Service arm +
+    /// the boot rebuild) populates AND the `name_index` (01-03) / `by_frontend`
+    /// (02-00) READERS observe. The 01-05 assign-on-declare writes the
+    /// `<job> → F` binding; 02-01 LATER injects the SAME cloned instance into
+    /// the `DnsResponder` + re-keyed `MtlsResolve` readers.
+    ///
+    /// Plain `Clone` value field (mirrors `net_slot_allocator`), NOT an outer
+    /// `Arc<Mutex<…>>`: [`crate::dns_responder::frontend_addr_allocator::
+    /// FrontendAddrAllocator`] holds its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY,
+    /// so a `.clone()` shares the same held map — exactly how the single
+    /// instance is shared across writer + readers. Ephemeral runtime state,
+    /// NEVER persisted: empty on a fresh boot, re-populated by the
+    /// converge-on-boot rebuild
+    /// ([`crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent`])
+    /// from the declared-Service intent SSOT.
+    pub frontend_addr_allocator:
+        crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -572,6 +592,17 @@ impl AppState {
             // On a fresh process boot nothing is held; still-Running allocs
             // re-assign on their next lifecycle pass (criterion 6).
             net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
+            // Default-construct the per-host frontend-address allocator INSIDE
+            // the constructor (dial-by-name-responder step 01-05) — NOT a
+            // constructor parameter, same ripple-avoidance as
+            // `net_slot_allocator`: it self-shares on clone, so every fixture
+            // gets its own fresh empty allocator with no signature change. On a
+            // fresh process boot nothing is held; the production boot's
+            // converge-on-boot rebuild re-populates it from the declared-Service
+            // intent SSOT, and the `submit_workload` Service arm assigns on
+            // every new declare.
+            frontend_addr_allocator:
+                crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
         }
     }
 }
@@ -2029,6 +2060,35 @@ pub async fn run_server_with_obs_and_driver(
             }
         }
     }
+
+    // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
+    // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
+    // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
+    // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
+    // pass re-derives every `<job> → F` binding from the declared-Service intent
+    // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
+    // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
+    // `AppState` construction (so `state.frontend_addr_allocator` /
+    // `state.store` are available) and BEFORE the convergence loop / responder
+    // serve spawn (so the `name_index` reader the responder reads — once 02-01
+    // injects the shared instance — never observes an empty-but-trusted
+    // allocator).
+    //
+    // NOT gated on `state.mtls_worker.is_some()` (unlike the netns
+    // `adopt_on_restart_recovery` above, which adopts surviving netns that exist
+    // ONLY on the mTLS path): the frontend binding re-derives from
+    // declared-Service intent that exists independently of mTLS. Gating it would
+    // leave the allocator empty on a non-mTLS boot and the `name_index` reader
+    // would withhold every declared name — the exact contradiction ASSIGN-03
+    // forbids. A rebuild failure (unreadable intent SSOT, or frontend-block
+    // exhaustion mid-rebuild) refuses the boot fail-closed via the typed
+    // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
+    crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
+        &state.store,
+        &state.intent_redb_path,
+        &state.frontend_addr_allocator,
+    )
+    .await?;
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`

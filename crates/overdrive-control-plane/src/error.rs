@@ -560,6 +560,22 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     VipAllocator(#[from] overdrive_dataplane::allocators::PersistentAllocatorError),
 
+    /// Converge-on-boot frontend-address rebuild failure surfaced from the
+    /// dial-by-name-responder boot pass (step 01-05; ADR-0072 REV-3, GH #243).
+    /// Pass-through embedding via `#[from]` per `.claude/rules/development.md`
+    /// § "Never flatten a typed error to `Internal(String)`": the typed inner
+    /// [`crate::dns_responder::boot_rebuild::FrontendRebuildError`] carries a
+    /// distinct variant per failure mode (`IntentScan` — the declared-Service
+    /// SSOT was unreadable; `Exhausted` — the frontend block filled
+    /// mid-rebuild), so the composition root can `matches!(e,
+    /// ControlPlaneError::FrontendRebuild(_))` for structured
+    /// `health.startup.refused` diagnostics. Same boot-path shape as
+    /// `NetnsRecovery` / `ListenerFactRebuild`: the rebuild happens BEFORE the
+    /// listener binds, so the `to_response` arm is exhaustiveness-only (an
+    /// `Exhausted` cause maps to HTTP 503, every other cause to HTTP 500).
+    #[error(transparent)]
+    FrontendRebuild(#[from] crate::dns_responder::boot_rebuild::FrontendRebuildError),
+
     /// Service-health-check-probes ProbeRunner Earned-Trust gate
     /// failure per ADR-0054 § 7. Pass-through embedding so the
     /// composition root / CLI can branch on
@@ -893,6 +909,32 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
                 other => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     ErrorBody { error: "internal".into(), message: other.to_string(), field: None },
+                ),
+            }
+        }
+        ControlPlaneError::FrontendRebuild(e) => {
+            // Boot-path-only in practice (the rebuild runs BEFORE the listener
+            // binds; the composition root branches on `matches!(e,
+            // ControlPlaneError::FrontendRebuild(_))` for structured
+            // `health.startup.refused` diagnostics). The arm exists for enum
+            // exhaustiveness AND so a future on-request rebuild path surfaces a
+            // discrete status: frontend-block exhaustion is operator-actionable
+            // (provision a larger frontend range) → HTTP 503 with the discrete
+            // `error = "frontend_exhausted"` discriminator; an unreadable intent
+            // SSOT is an infra failure → HTTP 500.
+            use crate::dns_responder::boot_rebuild::FrontendRebuildError;
+            match e {
+                FrontendRebuildError::Exhausted { .. } => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    ErrorBody {
+                        error: "frontend_exhausted".into(),
+                        message: e.to_string(),
+                        field: None,
+                    },
+                ),
+                FrontendRebuildError::IntentScan(_) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
                 ),
             }
         }

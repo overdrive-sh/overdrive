@@ -61,6 +61,15 @@ mod acceptance {
     // SimObservationStore + FrontendAddrAllocator — no kernel/netns/socket).
     // `answer_for` is THE primary mutation-gate target (DDN-4).
     mod dns_answer_for;
+    // dial-by-name-responder step 01-05 (ADR-0072 REV-3, GH #243) — the
+    // FrontendAddrAllocator WRITER seam. S-DBN-ASSIGN-01..04: assign-on-declare
+    // through the `submit_workload` driving port (Service-only guard),
+    // idempotent across resubmit + no-eviction-on-conflict, the empty-on-boot
+    // converge-on-boot rebuild from declared-Service intent, and the
+    // single-owner WRITER feeding the SAME instance the `name_index` reads.
+    // Default unit lane (in-process: LocalIntentStore + Sim* + the pure
+    // allocator — no kernel/netns/socket).
+    mod dns_frontend_assigner;
     mod dns_name_index;
     // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
     // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record

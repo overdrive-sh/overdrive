@@ -331,6 +331,51 @@ pub async fn submit_workload(
         None
     };
 
+    // 4b. Service-arm frontend-address assignment (dial-by-name-responder
+    //     step 01-05; ADR-0072 REV-3, GH #243). This is the WRITER seam: the
+    //     deploy-time `assign(<job>)` at Service declaration that binds the
+    //     stable per-`<job>` frontend address `F` the `name_index` (01-03)
+    //     reader answers with. Service-only, mirroring the `service_vip`
+    //     allocate's `matches!(intent, WorkloadIntent::Service(_))` guard — a
+    //     Job / Schedule submit assigns NO frontend addr (frontends are a
+    //     Service-name concern).
+    //
+    //     IDEMPOTENT per `<job>` at the allocator layer (FRONTEND-02): an
+    //     already-held `<job>` (a byte-identical resubmit reaching the
+    //     KeyExists path, OR the boot rebuild having already assigned it)
+    //     returns its EXISTING `F` unchanged, consuming no new address. So the
+    //     handler adds NO idempotency logic here — calling `assign` on every
+    //     Service submit is correct, and a resubmit never consumes a second
+    //     address nor changes the binding.
+    //
+    //     OQ-1: the `<job>` key is derived
+    //     `MeshServiceName::new("<id>.<SUFFIX>")` — byte-identical to the
+    //     `name_index` reader's `job_of` derivation, so the WRITER's key is the
+    //     SAME key the READER looks up (DDN-2 single-owner). An exhausted
+    //     frontend block fails the submit CLOSED via the typed
+    //     `ControlPlaneError::FrontendRebuild` (HTTP 503; never a silent
+    //     reuse). A Service id that is not a valid v1 single-label mesh name is
+    //     not mesh-dialable by name (the reader skips it too) — assigning no
+    //     frontend addr is the design's intended scope, not a submit failure.
+    //
+    //     The assigned `F` is held by the `frontend_addr_allocator` value on
+    //     `AppState` (the ONE shared instance the readers observe). NOT
+    //     released on the happy KeyExists path; the conflict-rollback path below
+    //     follows the SAME release-on-conflict-ONLY discipline as the VIP.
+    if let WorkloadIntent::Service(service_v1) = &intent
+        && let Ok(job) = overdrive_core::id::MeshServiceName::new(&format!(
+            "{}.{}",
+            service_v1.id.as_str(),
+            overdrive_core::id::MeshServiceName::SUFFIX
+        ))
+    {
+        state.frontend_addr_allocator.assign(&job).map_err(|source| {
+            ControlPlaneError::FrontendRebuild(
+                crate::dns_responder::boot_rebuild::FrontendRebuildError::Exhausted { job, source },
+            )
+        })?;
+    }
+
     // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
     //     persist the workload-kind discriminator at
     //     `IntentKey::for_workload_kind` so the streaming endpoint can
@@ -466,6 +511,22 @@ pub async fn submit_workload(
                 // spec). Adding a `remove_workload` here would evict the
                 // EXISTING workload's facts on a conflicting resubmit —
                 // exactly the corruption U6 guards against.
+                //
+                // The FRONTEND allocator is ALSO a deliberate NO-OP here
+                // (dial-by-name-responder step 01-05) — but for a DIFFERENT
+                // reason than the VIP's allocate-then-release. The VIP is keyed
+                // by `spec_digest`, so a conflicting (different-spec) resubmit
+                // allocates a SECOND, distinct VIP that leaks unless released.
+                // The frontend allocator is keyed by the logical `<job>` (the
+                // workload id), which is IDENTICAL on a conflicting resubmit, so
+                // the step-4b `assign(<job>)` above was an idempotent no-op that
+                // returned the EXISTING `F` — it consumed no new address and
+                // left the binding unchanged. There is nothing to release.
+                // Calling `release(<job>)` here would EVICT the live workload's
+                // frontend `F` on a rejected resubmit — the exact
+                // stale-`F`/eviction corruption ASSIGN-02 + U6 forbid. The
+                // binding survives the conflict untouched precisely BECAUSE the
+                // allocator is `<job>`-keyed and idempotent.
                 return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 });
