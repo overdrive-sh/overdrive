@@ -21,7 +21,9 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{IdParseError, LABEL_MAX, MeshServiceName, NodeId, WorkloadId};
+use overdrive_core::id::{
+    DNS_LABEL_OCTET_MAX, IdParseError, LABEL_MAX, MeshServiceName, NodeId, WorkloadId,
+};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -218,12 +220,12 @@ fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
 // with a typed IdParseError.
 //
 // PROPERTY: for every <job> label L that violates the DNS-1123-label rules
-// (empty, > LABEL_MAX, leading/trailing non-alphanumeric, out-of-class char),
-// "<L>.svc.overdrive.local" returns Err(IdParseError::<variant>) — never
-// panics, never silently truncates. The ceiling is sized off LABEL_MAX (253),
-// never a bespoke smaller magic number (the "one shared length ceiling" rule,
-// development.md § "One shared length ceiling for label-shaped ids"; reuse
-// validate_label). Hebert ch.6 negative testing: relax the happy-path
+// (empty, > DNS_LABEL_OCTET_MAX, leading/trailing non-alphanumeric,
+// out-of-class char), "<L>.svc.overdrive.local" returns Err(IdParseError::
+// <variant>) — never panics, never silently truncates. The `<job>` is a single
+// DNS LABEL, capped at DNS_LABEL_OCTET_MAX (63 octets — RFC 1035 §2.3.4;
+// corrected ADR-0072 DDN-7), the DNS-*label* max, NOT the 253 DNS-*name* max
+// (`LABEL_MAX`). Hebert ch.6 negative testing: relax the happy-path
 // assumption to surface any under-specified accept path.
 // -----------------------------------------------------------------------------
 
@@ -244,18 +246,20 @@ proptest! {
 }
 
 /// A `<job>` label that violates at least one DNS-1123-label rule:
-/// empty, over-long (> `LABEL_MAX`), leading/trailing non-alphanumeric, or
-/// containing an out-of-class character. Each arm targets a distinct
-/// `validate_label` reject branch.
+/// empty, over-long (> `DNS_LABEL_OCTET_MAX`), leading/trailing non-alphanumeric,
+/// or containing an out-of-class character. Each arm targets a distinct
+/// `MeshServiceName::new` / `validate_label` reject branch.
 fn malformed_job_label() -> impl Strategy<Value = String> {
-    // LABEL_MAX is 253; an over-long label exceeds it. Use 254..=300 to stay
-    // bounded while crossing the ceiling.
+    // DNS_LABEL_OCTET_MAX is 63; an over-long single label exceeds it. Use
+    // 64..=300 so the band 64..=253 — which the OLD 253 ceiling wrongly
+    // accepted but `hickory-proto` rejects on the wire — is exercised as
+    // rejected, crossing the corrected 63-octet boundary.
     prop_oneof![
         // Empty label (-> Empty variant).
         Just(String::new()),
-        // Over-long label (-> TooLong variant): sized against LABEL_MAX (253),
-        // never a bespoke smaller ceiling.
-        (254usize..=300).prop_map(|n| "a".repeat(n)),
+        // Over-long label (-> TooLong variant): exceeds DNS_LABEL_OCTET_MAX
+        // (63), the DNS single-label octet max — NOT the 253 name max.
+        (64usize..=300).prop_map(|n| "a".repeat(n)),
         // Leading non-alphanumeric (-> InvalidFormat).
         "[-_.][a-z0-9]{1,10}",
         // Trailing non-alphanumeric (-> InvalidFormat).
@@ -312,36 +316,53 @@ fn mesh_service_name_rejects_multi_label_job_prefix() {
 // S-DBN-NAME-04's proptest exercises the over-long REJECT side via the generic
 // generator, but never pins the max-VALID `<job>` ACCEPT side for
 // `MeshServiceName` — a regression that wrongly rejected a long-but-valid name
-// would pass the suite. The ceiling is `<job>` label ≤ `LABEL_MAX` (253), the
-// ADR-0072:281 contract and the development.md "one shared length ceiling"
-// rule (sized off `LABEL_MAX`, never a bespoke smaller magic number). This
-// pins both sides of the inequality the way the existing 253-accepted /
-// 254-rejected `WorkloadId` pair already does.
+// would pass the suite. The `<job>` is a single DNS LABEL (the first label of
+// `<job>.svc.overdrive.local`), hard-capped at `DNS_LABEL_OCTET_MAX` (63
+// octets — RFC 1035 §2.3.4, enforced by `hickory-proto`), NOT the DNS-*name*
+// max `LABEL_MAX` (253). The corrected ADR-0072 DDN-7 (2026-06-25) pins 63: a
+// 64..=253-char `<job>` that the old 253 ceiling accepted would make
+// `Name::from_str` reject and panic the responder's `unreachable!` at the DNS
+// boundary. This pins both sides of the inequality the way the existing
+// accepted/rejected `WorkloadId` pair does, derived from the named const (no
+// bare `63` literal).
 // -----------------------------------------------------------------------------
 
 #[test]
-fn mesh_service_name_label_length_boundary_is_label_max() {
-    // Max-valid: a single-label all-alphanumeric <job> at exactly LABEL_MAX
-    // chars is ACCEPTED. The boundary is derived from the shared
-    // `overdrive_core::id::LABEL_MAX` const (no bespoke literal), per the
-    // development.md "one shared length ceiling" rule.
-    let max_job = "a".repeat(LABEL_MAX);
+fn mesh_service_name_label_length_boundary_is_dns_label_octet_max() {
+    // Max-valid: a single-label all-alphanumeric <job> at exactly
+    // DNS_LABEL_OCTET_MAX (63) chars is ACCEPTED. The boundary is derived from
+    // the shared `overdrive_core::id::DNS_LABEL_OCTET_MAX` const (no bespoke
+    // literal) — the RFC 1035 §2.3.4 single-label octet limit.
+    let max_job = "a".repeat(DNS_LABEL_OCTET_MAX);
     let full_max = format!("{max_job}.{}", MeshServiceName::SUFFIX);
     let accepted = MeshServiceName::new(&full_max);
     assert!(
-        matches!(&accepted, Ok(name) if name.as_str().len() == LABEL_MAX),
-        "a {LABEL_MAX}-char single-label <job> must be accepted at the LABEL_MAX boundary; got {accepted:?}"
+        matches!(&accepted, Ok(name) if name.as_str().len() == DNS_LABEL_OCTET_MAX),
+        "a {DNS_LABEL_OCTET_MAX}-char single-label <job> must be accepted at the DNS label-octet boundary; got {accepted:?}"
     );
 
-    // Max+1: a (LABEL_MAX + 1)-char <job> is REJECTED with TooLong (the
-    // ceiling, not a silent truncation). The `max` field is bound and compared
-    // against LABEL_MAX in the guard — a bare const in the pattern position
+    // Max+1: a (DNS_LABEL_OCTET_MAX + 1)-char <job> is REJECTED with TooLong
+    // (the 63-octet ceiling, not a silent truncation, and not the 253 name
+    // ceiling). The `max` field is bound and compared against
+    // DNS_LABEL_OCTET_MAX in the guard — a bare const in the pattern position
     // would bind a fresh variable rather than match by value.
-    let over_job = "a".repeat(LABEL_MAX + 1);
+    let over_job = "a".repeat(DNS_LABEL_OCTET_MAX + 1);
     let full_over = format!("{over_job}.{}", MeshServiceName::SUFFIX);
     let rejected = MeshServiceName::new(&full_over);
     assert!(
-        matches!(&rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == LABEL_MAX),
-        "a (LABEL_MAX + 1)-char <job> must be rejected as TooLong at the LABEL_MAX boundary; got {rejected:?}"
+        matches!(&rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == DNS_LABEL_OCTET_MAX),
+        "a (DNS_LABEL_OCTET_MAX + 1)-char <job> must be rejected as TooLong at the 63-octet boundary; got {rejected:?}"
+    );
+
+    // A well over-long <job> (past even the 253 DNS-name ceiling) ALSO surfaces
+    // TooLong { max: 63 } — the 63 label check fires UNIFORMLY, ahead of the
+    // shared `validate_label` 253 check, so every over-63 label reports the
+    // label ceiling, never `max: 253`.
+    let way_over_job = "a".repeat(LABEL_MAX + 1);
+    let full_way_over = format!("{way_over_job}.{}", MeshServiceName::SUFFIX);
+    let way_rejected = MeshServiceName::new(&full_way_over);
+    assert!(
+        matches!(&way_rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == DNS_LABEL_OCTET_MAX),
+        "an over-253 <job> must STILL report TooLong {{ max: 63 }} (the label ceiling fires first); got {way_rejected:?}"
     );
 }

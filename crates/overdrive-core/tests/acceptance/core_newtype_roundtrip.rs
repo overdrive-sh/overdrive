@@ -156,19 +156,19 @@ fn job_id_parses_from_realistic_config_value() {
 /// interior (NOT `.` — the v1 contract is a SINGLE label, NO namespace
 /// segment, ADR-0072:279; `validate_label` permits `.` for OTHER newtypes, but
 /// `MeshServiceName::new` adds a single-label guard on top). Must start AND end
-/// with an alphanumeric. Sized to reach the `<job>` ≤ `LABEL_MAX` (253) ceiling
-/// — interior `{0,251}` so the longest generated single label is
-/// `1 + 251 + 1 = 253` chars, pinning the positive length boundary for
-/// `MeshServiceName` (the "one shared length ceiling" rule: size off
-/// `LABEL_MAX`, never a bespoke smaller number).
+/// with an alphanumeric. Sized to reach the `<job>` ≤ `DNS_LABEL_OCTET_MAX`
+/// (63) ceiling — the `<job>` is a single DNS LABEL, hard-capped at 63 octets
+/// (RFC 1035 §2.3.4; corrected ADR-0072 DDN-7), NOT the 253 DNS-name max.
+/// Interior `{0,61}` so the longest generated single label is `1 + 61 + 1 = 63`
+/// chars, pinning the positive length boundary for `MeshServiceName`.
 fn valid_job_label() -> impl Strategy<Value = String> {
     prop_oneof![
         // Single-char labels (the boundary: start == end == alphanumeric).
         "[a-z0-9]",
         // Multi-char single labels: alnum boundary + interior class (no `.`) +
-        // alnum boundary, up to the LABEL_MAX (253) ceiling. Includes the
-        // pinned domain-readable "server" / "payments-api" shapes.
-        "[a-z0-9][a-z0-9_-]{0,251}[a-z0-9]",
+        // alnum boundary, up to the DNS_LABEL_OCTET_MAX (63) ceiling. Includes
+        // the pinned domain-readable "server" / "payments-api" shapes.
+        "[a-z0-9][a-z0-9_-]{0,61}[a-z0-9]",
     ]
 }
 
@@ -246,12 +246,12 @@ proptest! {
     fn mesh_service_name_parse_is_case_insensitive_with_lowercase_canonical(
         label in valid_job_label(),
         // One case-flip bit per character of the full name (label + "." +
-        // suffix). The label can reach LABEL_MAX (253) and the suffix is 19
-        // chars, so the full name is at most 253 + 1 + 19 = 273 chars; size the
-        // flips to 0..=273 so the case-fold property is exercised across the
+        // suffix). The label can reach DNS_LABEL_OCTET_MAX (63) and the suffix
+        // is 19 chars, so the full name is at most 63 + 1 + 19 = 83 chars; size
+        // the flips to 0..=83 so the case-fold property is exercised across the
         // ENTIRE name (a shorter bound would leave a long name's tail
         // unflipped, never testing case-folding there).
-        flips in proptest::collection::vec(any::<bool>(), 0..=273),
+        flips in proptest::collection::vec(any::<bool>(), 0..=83),
     ) {
         let full_lower = format!("{label}.{}", MeshServiceName::SUFFIX);
         let permuted = permute_case(&full_lower, &flips);

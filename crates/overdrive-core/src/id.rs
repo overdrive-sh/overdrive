@@ -90,6 +90,22 @@ pub enum IdParseError {
 /// sharing a truncated prefix collapsed to one id).
 pub const LABEL_MAX: usize = 253;
 
+/// The DNS single-*label* octet maximum (RFC 1035 §2.3.4): one label of a
+/// domain name is hard-capped at 63 octets, distinct from [`LABEL_MAX`] (253),
+/// which is the DNS-*name* (whole FQDN) maximum (RFC 1035 §3.1).
+///
+/// This is a real protocol constant — the `hickory-proto` codec enforces it on
+/// the wire — mirroring the codebase's existing `RECONCILER_NAME_MAX` /
+/// `WORKFLOW_NAME_MAX` (both 63). It bounds a [`MeshServiceName`]'s `<job>`,
+/// which is a single DNS label (the first label of
+/// `<job>.svc.overdrive.local`); a `<job>` longer than 63 octets would make
+/// `hickory_proto::rr::Name::from_str` reject the rendered name and panic the
+/// responder's wire encoder. NOT a "bespoke smaller ceiling" of [`LABEL_MAX`]
+/// (`development.md` § "One shared length ceiling for label-shaped ids") — that
+/// rule governs *derived* label-shaped ids sized off the DNS-name max; a DNS
+/// *label* legitimately uses its own RFC-1035 protocol limit.
+pub const DNS_LABEL_OCTET_MAX: usize = 63;
+
 fn validate_label(kind: &'static str, raw: &str) -> Result<String, IdParseError> {
     if raw.is_empty() {
         return Err(IdParseError::Empty { kind });
@@ -834,12 +850,22 @@ impl MeshServiceName {
     ///
     /// Case-folds, strips the terminal `.svc.overdrive.local` (the wrong /
     /// missing / non-terminal suffix all surface as an
-    /// [`IdParseError::InvalidFormat`]), then validates the remaining `<job>`
+    /// [`IdParseError::InvalidFormat`]), caps the `<job>` at the DNS
+    /// single-label octet limit [`DNS_LABEL_OCTET_MAX`] (63 octets — RFC 1035
+    /// §2.3.4; corrected ADR-0072 DDN-7), then validates the remaining `<job>`
     /// label through the shared [`validate_label`] — reusing the DNS-1123
-    /// character class, the start/end-alphanumeric rule, and the single
-    /// [`LABEL_MAX`] ceiling (no bespoke smaller magic number; an empty,
-    /// over-long, or out-of-class label maps to the existing `Empty` /
-    /// `TooLong` / `InvalidChar` / `InvalidFormat` variants).
+    /// character class and the start/end-alphanumeric rule. An empty,
+    /// over-63-octet, or out-of-class label maps to the existing `Empty` /
+    /// `TooLong { max: 63 }` / `InvalidChar` / `InvalidFormat` variants.
+    ///
+    /// The 63-octet cap is the DNS-*label* maximum, NOT [`LABEL_MAX`] (253, the
+    /// DNS-*name* max) — a single label is hard-capped at 63 on the wire, so a
+    /// longer `<job>` would make `hickory_proto::rr::Name::from_str` reject the
+    /// rendered name and panic the responder's encoder. This is a real protocol
+    /// constant (mirroring `RECONCILER_NAME_MAX` / `WORKFLOW_NAME_MAX` = 63),
+    /// not a bespoke-smaller ceiling of [`LABEL_MAX`] (`development.md` § "One
+    /// shared length ceiling for label-shaped ids" governs *derived* ids sized
+    /// off the DNS-name max; a DNS label uses its own RFC-1035 limit).
     ///
     /// **v1 single-label contract (ADR-0072:279):** the `<job>` is a *single*
     /// label — single-node, NO namespace segment. The shared [`validate_label`]
@@ -866,12 +892,26 @@ impl MeshServiceName {
         if let Some(index) = job.find('.') {
             return Err(IdParseError::InvalidChar { kind: KIND, ch: '.', index });
         }
+        // DNS single-label octet cap: the `<job>` is one DNS LABEL (the first
+        // label of `<job>.svc.overdrive.local`), hard-capped at
+        // `DNS_LABEL_OCTET_MAX` = 63 octets (RFC 1035 §2.3.4; corrected
+        // ADR-0072 DDN-7, 2026-06-25). This is a real protocol constant, NOT a
+        // bespoke-smaller ceiling of `LABEL_MAX` — a `<job>` longer than 63
+        // octets would make `hickory_proto::rr::Name::from_str` reject the
+        // rendered name and panic the responder's wire encoder. The check fires
+        // UNIFORMLY ahead of `validate_label`'s 253 ceiling, so EVERY over-63
+        // label (64, 100, 300, …) reports `TooLong { max: 63 }` — never
+        // `max: 253` for the 254+ range.
+        if job.len() > DNS_LABEL_OCTET_MAX {
+            return Err(IdParseError::TooLong { kind: KIND, max: DNS_LABEL_OCTET_MAX });
+        }
         // `validate_label` re-lowercases (a no-op here) and enforces the
-        // DNS-1123 label rules + the shared LABEL_MAX ceiling (`<job>` ≤
-        // LABEL_MAX = 253; the ADR-0072:281 contract, no bespoke smaller
-        // ceiling) on the now-dot-free `<job>` part. The reported `kind` is
+        // DNS-1123 label rules (empty / character-class / start-end-alphanumeric)
+        // on the now-dot-free, ≤ 63-octet `<job>` part. The reported `kind` is
         // "MeshServiceName" so the error names the rejecting newtype, not the
-        // inner helper.
+        // inner helper. (`validate_label`'s own `LABEL_MAX` = 253 check is
+        // structurally unreachable here — the 63-octet guard above already
+        // rejected anything longer.)
         validate_label(KIND, job).map(Self)
     }
 

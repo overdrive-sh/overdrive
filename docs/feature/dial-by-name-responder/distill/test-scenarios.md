@@ -257,7 +257,9 @@ it).
 
 ```
 PROPERTY: for every valid <job> label L (a DNS-1123-label-like string,
-          1..=LABEL_MAX chars after accounting for the fixed
+          1..=DNS_LABEL_OCTET_MAX (63) chars — the <job> is a single DNS
+          LABEL, hard-capped at 63 octets per RFC 1035 §2.3.4 / corrected
+          ADR-0072 DDN-7, NOT the 253 DNS-name max — with the fixed
           ".svc.overdrive.local" suffix),
 GIVEN a MeshServiceName N constructed from "<L>.svc.overdrive.local"
 WHEN N is rendered via Display and re-parsed via FromStr
@@ -347,20 +349,23 @@ when it writes `MeshServiceName::new`.
 **US trace**: US-DBN-2 (negative — label-limit / character-class)
 **Driving port**: `MeshServiceName::new` / `FromStr`
 **Test surface**: Tier 1 — `core_newtype_validation.rs`
-**Production code guarded**: `MeshServiceName::new` label validation (reusing `validate_label` / `LABEL_MAX` per the Reuse gate, `id.rs:92-120`)
+**Production code guarded**: `MeshServiceName::new` label validation (the 63-octet DNS-label cap + the reused `validate_label` character-class/start-end rules, `id.rs`)
 
 #### Spec
 
 ```
 PROPERTY: for every <job> label L that violates the DNS-1123-label rules
-          (empty, > LABEL_MAX after the suffix budget, starts/ends with
+          (empty, > DNS_LABEL_OCTET_MAX (63) octets, starts/ends with
           a non-alphanumeric, or contains an out-of-class character),
 GIVEN "<L>.svc.overdrive.local"
 WHEN MeshServiceName::new is called
 THEN it returns Err(IdParseError::<variant>) — never panics, never
-     silently truncates (the "one shared length ceiling" rule:
-     MeshServiceName sizes its own ceiling off LABEL_MAX, never a bespoke
-     smaller magic number; development.md § "One shared length ceiling")
+     silently truncates. The <job> is a single DNS LABEL, hard-capped at
+     DNS_LABEL_OCTET_MAX = 63 octets (RFC 1035 §2.3.4; corrected ADR-0072
+     DDN-7), a real protocol constant — NOT a bespoke-smaller ceiling of
+     LABEL_MAX (253, the DNS-NAME max). A longer <job> would make
+     hickory-proto reject the rendered name and panic the responder's wire
+     encoder, so the 63-octet cap fires at construction.
 ```
 
 **Negative-testing note** (Hebert ch.6): this property RELAXES the

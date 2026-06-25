@@ -115,6 +115,35 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
+// S-DBN-WIRE-06 — The max-valid `<job>` label (63 octets, the DNS single-label
+// limit per RFC 1035 §2.3.4) encodes without panicking. `MeshServiceName::new`
+// caps `<job>` at 63 octets, which guarantees `Name::from_str` in `wire.rs`
+// always succeeds (63 + ".svc.overdrive.local" = 83 chars, every label ≤ 63) —
+// so the `parse_name` `unreachable!` at the DNS boundary is genuinely
+// unreachable. A 64+ `<job>` could not reach the encoder (rejected at
+// construction), so this is the encoder's worst case.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn wire_06_max_valid_label_encodes_without_panic() {
+    let max_label = "a".repeat(63);
+    let full = format!("{max_label}.{}", MeshServiceName::SUFFIX);
+    let name = MeshServiceName::new(&full).expect("a 63-octet <job> is a valid mesh service name");
+
+    // Encoding the worst-case-length name must produce bytes (no panic via the
+    // `unreachable!`), and the bytes must re-parse as a DNS Message.
+    let bytes = wire::encode(
+        ECHO_ID,
+        &name,
+        RecordType::A,
+        &NameAnswer::Records(vec![SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080)]),
+        Duration::from_secs(0),
+    );
+    let msg = Message::from_vec(&bytes).expect("max-label encoder output decodes as a DNS Message");
+    assert_eq!(msg.answers.len(), 1, "the single answered addr survives the max-length owner name");
+}
+
+// ---------------------------------------------------------------------------
 // S-DBN-WIRE-01 — Answered records survive a deterministic encode→decode
 // round-trip (Hebert symmetric property).
 // ---------------------------------------------------------------------------
