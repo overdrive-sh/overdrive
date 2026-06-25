@@ -16,6 +16,7 @@
 #![allow(clippy::unwrap_used)]
 
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::str::FromStr;
 use std::time::Duration;
 
 use hickory_proto::op::{Message, ResponseCode};
@@ -63,6 +64,56 @@ fn arb_clock_reading() -> impl Strategy<Value = Duration> {
     (0u64..=4_000_000_000u64).prop_map(Duration::from_secs)
 }
 
+/// A fixed non-zero DNS message ID used by the section-shape tests
+/// (WIRE-01..04). Picking a non-zero constant means those tests also
+/// implicitly assert the response echoes the request ID (RFC 1035 §4.1.1) —
+/// a hard-coded ID-0 response would fail the `msg.id() == ECHO_ID` checks.
+const ECHO_ID: u16 = 0x1234;
+
+// ---------------------------------------------------------------------------
+// S-DBN-WIRE-05 — The DNS message ID round-trips: `decode` surfaces the
+// query's ID and `encode` echoes it back into the response (RFC 1035 §4.1.1).
+// Real stub resolvers (glibc, systemd-resolved) match responses to outstanding
+// queries by ID and DISCARD a mismatched (ID-0) response, so the codec MUST
+// preserve the ID — there is no post-`encode` seam to set it (wire is the
+// DDN-4 anti-corruption boundary that owns the `hickory_proto::Message`).
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn wire_05_message_id_is_echoed_through_decode_and_encode(
+        name in arb_mesh_name(),
+        addrs in arb_addr_set(),
+        id in any::<u16>(),
+        t in arb_clock_reading(),
+    ) {
+        // A query datagram carrying an arbitrary (possibly zero) message ID.
+        let mut query = Message::new(id, hickory_proto::op::MessageType::Query, hickory_proto::op::OpCode::Query);
+        let owner = hickory_proto::rr::Name::from_str(&name.to_string())
+            .expect("valid mesh name parses as a DNS Name");
+        query.add_query(hickory_proto::op::Query::query(owner, RecordType::A));
+        let query_bytes = query.to_vec().expect("self-constructed query encodes");
+
+        // `decode` surfaces the query's ID on the DecodedQuery.
+        let decoded = wire::decode(&query_bytes).expect("a well-formed mesh query decodes");
+        prop_assert_eq!(decoded.id, id, "decode must surface the query message ID");
+
+        // `encode` echoes the ID back into the response datagram. The ID lives
+        // on `metadata` (same field-access idiom the WIRE-01..04 tests use for
+        // `response_code`); avoids importing the `UpdateMessage` trait.
+        let response_bytes = wire::encode(
+            decoded.id,
+            &name,
+            RecordType::A,
+            &NameAnswer::Records(addrs),
+            t,
+        );
+        let response = Message::from_vec(&response_bytes)
+            .expect("encoder output decodes as a DNS Message");
+        prop_assert_eq!(response.metadata.id, id, "response must echo the request ID (RFC 1035 §4.1.1)");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // S-DBN-WIRE-01 — Answered records survive a deterministic encode→decode
 // round-trip (Hebert symmetric property).
@@ -75,7 +126,13 @@ proptest! {
         addrs in arb_addr_set(),
         t in arb_clock_reading(),
     ) {
-        let bytes = wire::encode(&name, RecordType::A, &NameAnswer::Records(addrs.clone()), t);
+        let bytes = wire::encode(ECHO_ID, &name, RecordType::A, &NameAnswer::Records(addrs.clone()), t);
+
+        prop_assert_eq!(
+            Message::from_vec(&bytes).expect("decodes").metadata.id,
+            ECHO_ID,
+            "encode must echo the request ID",
+        );
 
         let msg = Message::from_vec(&bytes).expect("encoder output decodes as a DNS Message");
 
@@ -113,10 +170,11 @@ proptest! {
         name in arb_mesh_name(),
         t in arb_clock_reading(),
     ) {
-        let bytes = wire::encode(&name, RecordType::AAAA, &NameAnswer::NoData, t);
+        let bytes = wire::encode(ECHO_ID, &name, RecordType::AAAA, &NameAnswer::NoData, t);
 
         let msg = Message::from_vec(&bytes).expect("encoder output decodes as a DNS Message");
 
+        prop_assert_eq!(msg.metadata.id, ECHO_ID, "encode must echo the request ID");
         prop_assert_eq!(msg.metadata.response_code, ResponseCode::NoError, "NODATA is NOERROR");
         prop_assert_eq!(msg.answers.len(), 0, "NODATA carries no answer records");
 
@@ -150,10 +208,11 @@ proptest! {
         qtype in prop_oneof![Just(RecordType::A), Just(RecordType::AAAA)],
         t in arb_clock_reading(),
     ) {
-        let bytes = wire::encode(&name, qtype, &NameAnswer::NxDomain, t);
+        let bytes = wire::encode(ECHO_ID, &name, qtype, &NameAnswer::NxDomain, t);
 
         let msg = Message::from_vec(&bytes).expect("encoder output decodes as a DNS Message");
 
+        prop_assert_eq!(msg.metadata.id, ECHO_ID, "encode must echo the request ID");
         prop_assert_eq!(msg.metadata.response_code, ResponseCode::NXDomain);
         prop_assert_eq!(msg.answers.len(), 0, "NXDOMAIN carries no answer records");
 
@@ -212,12 +271,12 @@ proptest! {
         let qtype = RecordType::AAAA;
 
         // Same T → byte-identical SERIAL (and byte-identical SOA encoding).
-        let a = wire::encode(&name, qtype, &negative, t1);
-        let b = wire::encode(&name, qtype, &negative, t1);
+        let a = wire::encode(ECHO_ID, &name, qtype, &negative, t1);
+        let b = wire::encode(ECHO_ID, &name, qtype, &negative, t1);
         prop_assert_eq!(soa_serial(&a), soa_serial(&b), "same T → identical SERIAL");
 
         // Distinct T (≥ 1s apart) → distinct SERIAL (1s granularity).
-        let c = wire::encode(&name, qtype, &negative, t2);
+        let c = wire::encode(ECHO_ID, &name, qtype, &negative, t2);
         prop_assert_ne!(
             soa_serial(&a),
             soa_serial(&c),

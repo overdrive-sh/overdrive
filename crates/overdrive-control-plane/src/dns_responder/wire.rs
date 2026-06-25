@@ -64,6 +64,11 @@ const SOA_EXPIRE_SECS: i32 = 1;
 /// name the responder matches against its index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedQuery {
+    /// The DNS message ID, echoed verbatim into the response per RFC 1035
+    /// § 4.1.1. Stub resolvers (glibc, systemd-resolved) match a response to
+    /// its outstanding query by this ID and discard a mismatched one, so the
+    /// responder MUST echo it back through [`encode`].
+    pub id: u16,
     /// The dialed mesh service name (parsed from the query's first question).
     pub name: MeshServiceName,
     /// The queried record type (`A` / `AAAA`).
@@ -109,7 +114,10 @@ pub fn decode(datagram: &[u8]) -> Result<DecodedQuery, WireError> {
     let canonical = wire_name.strip_suffix('.').unwrap_or(&wire_name);
     let name =
         MeshServiceName::new(canonical).map_err(|_| WireError::NotMeshName { name: wire_name })?;
-    Ok(DecodedQuery { name, qtype: question.query_type() })
+    // The ID lives on `message.metadata` (same field-access idiom this module
+    // uses for `metadata.response_code`); avoids pulling the `UpdateMessage`
+    // trait into scope just for the `.id()` accessor.
+    Ok(DecodedQuery { id: message.metadata.id, name, qtype: question.query_type() })
 }
 
 /// Encode a [`NameAnswer`] into a DNS response datagram for the query
@@ -122,11 +130,17 @@ pub fn decode(datagram: &[u8]) -> Result<DecodedQuery, WireError> {
 /// - [`NameAnswer::NxDomain`] → `ResponseCode::NXDomain`, `ANCOUNT == 0`,
 ///   exactly one SOA in AUTHORITY with `MINIMUM == 1`.
 ///
+/// `id` is the originating query's DNS message ID, echoed verbatim into the
+/// response header per RFC 1035 § 4.1.1 — a stub resolver matches the response
+/// to its outstanding query by this ID and discards a mismatched one, so it
+/// MUST be carried through ([`decode`] surfaces it on [`DecodedQuery::id`]).
+///
 /// `serial_reading` is the injected clock reading `T` (a `Duration` since the
 /// UNIX epoch); the SOA `SERIAL` is `T.as_secs() as u32` (1-second
 /// granularity). The encoder NEVER reads wall-clock — `T` is always a
 /// parameter (DDN-8; `development.md` § "Never call `SystemTime::now()`").
 pub fn encode(
+    id: u16,
     name: &MeshServiceName,
     qtype: RecordType,
     answer: &NameAnswer,
@@ -138,8 +152,10 @@ pub fn encode(
     let owner = parse_name(&name.to_string());
 
     // A response carries the question echoed back (RFC 1035 § 4.1.1): build a
-    // Response message, echo the query, and fill the matching section.
-    let mut message = Message::new(0, MessageType::Response, OpCode::Query);
+    // Response message echoing the query's ID, echo the question, and fill the
+    // matching section. The ID MUST match the request or a stub resolver
+    // discards the response.
+    let mut message = Message::new(id, MessageType::Response, OpCode::Query);
     message.add_query(hickory_proto::op::Query::query(owner.clone(), qtype));
 
     match answer {
