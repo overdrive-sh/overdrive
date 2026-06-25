@@ -13,9 +13,14 @@
 //! pairwise-distinctness assertion RED (the port-to-port / no-testing-theatre
 //! defence).
 //!
-//! Port-to-port discipline: the pure smallest-free scan and the atomic held-map
-//! wrapper are both exercised through the public `assign`/`release`/`snapshot`
-//! surface — there is no below-port helper that warrants a separate unit layer.
+//! Port-to-port discipline: the per-`<job>` stability, idempotency,
+//! withhold-not-release, and collision-free/reclaim properties are exercised
+//! through the public `assign`/`release`/`snapshot` surface here. The pure
+//! scan's EXHAUSTION and CAPACITY paths — which a port-level test cannot reach
+//! without assigning the whole 65534-address block — are unit-tested directly
+//! against the private `smallest_free_addr` / `frontend_block_capacity` in the
+//! module's own `#[cfg(test)] mod tests` (mirroring `NetSlotAllocator`'s
+//! pure-fn suite in `veth_provisioner.rs`).
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
@@ -298,6 +303,18 @@ proptest! {
             Some(drawn),
             "the newcomer holds the address it was assigned",
         );
-        let _ = released_addr; // freed address: reclaimable; smallest-free draws it
+
+        // The reclaim is EXACT, not merely "some free address in the block":
+        // jobs[0] was assigned FIRST, so it held the lowest address in the
+        // block; releasing it makes that address the smallest-free again, so the
+        // newcomer draws EXACTLY the freed address. A mutant that picks any other
+        // free address (a high-water-mark counter that never fills the gap)
+        // survives every weaker check above but flips this one — this is the
+        // assertion that actually closes the reclaim contract.
+        prop_assert_eq!(
+            drawn,
+            released_addr,
+            "the smallest-free reclaim hands the newcomer EXACTLY the freed lowest address",
+        );
     }
 }

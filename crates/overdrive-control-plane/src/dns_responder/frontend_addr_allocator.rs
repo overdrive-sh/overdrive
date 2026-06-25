@@ -252,3 +252,104 @@ impl FrontendAddrAllocator {
         self.held.lock().clone()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test code: expect is the canonical assertion pattern")]
+mod tests {
+    use super::{
+        FrontendAddrExhausted, WORKLOAD_FRONTEND_BASE, frontend_block_capacity, smallest_free_addr,
+    };
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
+
+    /// The usable host count of `10.98.0.0/16` (`65536` block addresses minus the
+    /// reserved network + broadcast endpoints). Pinned as a literal here so a
+    /// mutant in [`frontend_block_capacity`]'s `broadcast - network - 1`
+    /// arithmetic is killed by a concrete expectation, not a re-derivation of the
+    /// same expression.
+    const USABLE_HOST_COUNT: u64 = 65_534;
+
+    /// PURE decision — over an empty held set the smallest-free address is the
+    /// FIRST USABLE host (`10.98.0.1`), NEVER the reserved network address
+    /// `10.98.0.0`. Pins the network-endpoint reservation at the pure-scan level
+    /// (a `network()+1 → network()+0` mutant flips this to `10.98.0.0`); mirrors
+    /// `NetSlotAllocator::smallest_free_slot`'s empty-set test.
+    #[test]
+    fn smallest_free_addr_of_empty_held_set_is_the_first_usable_host() {
+        let held = BTreeSet::new();
+        assert_eq!(
+            smallest_free_addr(&held).expect("an empty block always has a free address"),
+            Ipv4Addr::new(10, 98, 0, 1),
+            "the first assignment is network()+1, never the reserved network address 10.98.0.0",
+        );
+    }
+
+    /// PURE decision — the scan returns the LOWEST GAP, not the next-monotonic
+    /// address, so a released (lower) address is reclaimed ahead of an unused
+    /// higher one. Mirrors `NetSlotAllocator`'s lowest-gap test and is the
+    /// pure-level companion to the FRONTEND-04 reclaim assertion.
+    #[test]
+    fn smallest_free_addr_returns_the_lowest_gap_not_the_next_monotonic() {
+        // Hold .1, .2, and .4 — the lowest gap is .3 (NOT .5, the next-monotonic
+        // after the highest held).
+        let held: BTreeSet<Ipv4Addr> =
+            [Ipv4Addr::new(10, 98, 0, 1), Ipv4Addr::new(10, 98, 0, 2), Ipv4Addr::new(10, 98, 0, 4)]
+                .into_iter()
+                .collect();
+        assert_eq!(
+            smallest_free_addr(&held).expect("a sparse held set has a free address"),
+            Ipv4Addr::new(10, 98, 0, 3),
+            "the scan fills the lowest gap (.3), not the next-monotonic address (.5)",
+        );
+    }
+
+    /// PURE decision — when every USABLE host address is held, the scan returns
+    /// the typed [`FrontendAddrExhausted`] error (NEVER an address, NEVER a
+    /// panic, NEVER a reused/reserved endpoint). The public allocator's
+    /// 65534-address span makes a port-level exhaustion test prohibitively
+    /// expensive, so this pure seam is where refusal is exercised affordably —
+    /// the exact reason `smallest_free_addr` is separated from the held-map
+    /// wrapper (mirrors `NetSlotAllocator`'s full-space exhaustion test).
+    #[test]
+    fn smallest_free_addr_of_full_block_is_exhausted_error() {
+        let first = u32::from(WORKLOAD_FRONTEND_BASE.network()) + 1;
+        let last = u32::from(WORKLOAD_FRONTEND_BASE.broadcast()) - 1;
+        let full: BTreeSet<Ipv4Addr> = (first..=last).map(Ipv4Addr::from).collect();
+        assert_eq!(
+            smallest_free_addr(&full),
+            Err(FrontendAddrExhausted { capacity: USABLE_HOST_COUNT }),
+            "a full usable block refuses with FrontendAddrExhausted, never a reused address",
+        );
+    }
+
+    /// PURE — one free address in an otherwise-full block is found and returned
+    /// (the scan does not give up early). Guards the exhaustion path's inverse:
+    /// a mutant that returns `Err` while a gap remains is killed here.
+    #[test]
+    fn smallest_free_addr_finds_the_single_free_address_in_a_nearly_full_block() {
+        let first = u32::from(WORKLOAD_FRONTEND_BASE.network()) + 1;
+        let last = u32::from(WORKLOAD_FRONTEND_BASE.broadcast()) - 1;
+        // The single free address is the block's last usable host.
+        let free = Ipv4Addr::from(last);
+        let held: BTreeSet<Ipv4Addr> = (first..last).map(Ipv4Addr::from).collect();
+        assert_eq!(
+            smallest_free_addr(&held).expect("one free address remains"),
+            free,
+            "the scan finds the only remaining free address, it does not exhaust early",
+        );
+    }
+
+    /// PURE — the usable host capacity of the `/16` is 65534 (the 65536-address
+    /// block minus the reserved network + broadcast endpoints). Pins the
+    /// `broadcast - network - 1` arithmetic against an off-by-one mutant: a
+    /// `- 1 → + 1` mutant would report 65536, which would hand out the two
+    /// reserved endpoints.
+    #[test]
+    fn frontend_block_capacity_is_the_usable_host_count() {
+        assert_eq!(
+            frontend_block_capacity(),
+            USABLE_HOST_COUNT,
+            "10.98.0.0/16 has 65536 addresses; minus the reserved network + broadcast = 65534 usable",
+        );
+    }
+}
