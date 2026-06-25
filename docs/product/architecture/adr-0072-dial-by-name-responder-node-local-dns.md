@@ -112,8 +112,11 @@ DNS index into a second writer to the shared allocator.
   `release(<job>)` *surface* is implemented and Tier-1-tested (FRONTEND-03
   Property 2), but it has no production CALL SITE because the deletion edge does
   not exist. Wiring `release` into the stop path would reintroduce the SQ1
-  stale-`F` failure on every stop (explicitly rejected). Whether to add a
-  deletion verb (`DELETE /v1/jobs/:id`) is a **user decision**, out of this
+  stale-`F` failure on every stop (explicitly rejected). The deletion-verb
+  trigger is **tracked in `overdrive-sh/overdrive#211`** ("Implement workload
+  deletion (intent withdrawal) + service/dataplane teardown") — that verb's
+  teardown producer will drive `release(<job>)` alongside its existing
+  `ReleaseServiceVip` / `DeregisterLocalBackend` teardown — and is out of *this*
   feature's scope. Until then `F` is retained for the process lifetime of every
   declared `<job>` (acceptable Phase-1 single-node — the empty-on-boot rebuild
   reading the current declared set naturally drops a binding for a `<job>` not
@@ -993,11 +996,17 @@ binding, made precise.
   rollback, never on stop). REV-3 ships the **`assign` half only**; `F` is
   retained for the process lifetime of every declared `<job>` (acceptable
   Phase-1 single-node — the empty-on-boot rebuild reading the current declared
-  set drops a binding for a `<job>` not re-declared after restart). Whether to
-  add a deletion verb (`DELETE /v1/jobs/:id`) that drives `release(<job>)` is a
-  user decision, out of this feature's scope. The crafter MUST surface this as a
-  BLOCKER and MUST NOT wire `release` into the stop path (doing so reintroduces
-  the SQ1 stale-`F` failure on every stop).
+  set drops a binding for a `<job>` not re-declared after restart). The
+  `release(<job>)` deletion-verb trigger is **tracked in
+  `overdrive-sh/overdrive#211`** ("Implement workload deletion (intent
+  withdrawal) + service/dataplane teardown"): the workload-deletion verb's
+  teardown producer is the production actor that will drive
+  `FrontendAddrAllocator::release(<job>)` alongside its existing
+  `ReleaseServiceVip` / `DeregisterLocalBackend` teardown — the dial-by-name
+  frontend addr is the same class of teardown those already name. Out of *this*
+  feature's scope; the crafter MUST surface this as a BLOCKER and MUST NOT wire
+  `release` into the stop path (doing so reintroduces the SQ1 stale-`F` failure
+  on every stop).
 
 *(Two former open questions are now PINNED in DESIGN and NO LONGER deferred: the
 `NameAnswer` variant names + the `answer_for` qtype param are concrete — see
@@ -1005,8 +1014,8 @@ binding, made precise.
 per-addr-fallback gateway-set source is `NetSlotAllocator` + `responder_addr_for_slot`
 with a re-derive-on-converge-tick re-bind lifecycle — DDN-5. The remaining
 deferrals are OQ-1 (the `SpiffeId`/`WorkloadId` ↔ `<job>` accessor, a crafter
-DECISION) and OQ-REV3 (the `release(<job>)` deletion-verb trigger, a USER
-decision).)*
+DECISION) and OQ-REV3 (the `release(<job>)` deletion-verb trigger, tracked in
+`overdrive-sh/overdrive#211`).)*
 
 ## Out of scope (existing issues / named refinements)
 
