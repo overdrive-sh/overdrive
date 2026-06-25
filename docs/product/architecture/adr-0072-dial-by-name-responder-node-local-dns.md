@@ -55,6 +55,78 @@ unchanged — it remains the DNS-name ceiling for *derived* label-shaped ids
 (`development.md` § "One shared length ceiling for label-shaped ids"); only the
 `MeshServiceName` `<job>` DNS-*label* ceiling is corrected here.
 
+**AMENDMENT (REV-3, 2026-06-25) — the missing `FrontendAddrAllocator` WRITER is
+now named.** REV-2 named the two *readers* of the `<job> ↔ F` binding (the
+`name_index` / `answer_for` DNS path, DDN-1/DDN-2; the re-keyed
+`MtlsResolve.by_frontend`, 1b-A) and the *single-owner injection* (DDN-6: the
+composition root constructs ONE `FrontendAddrAllocator` and injects the SAME
+handle into both readers). It did NOT name the production actor that *calls*
+`FrontendAddrAllocator::assign(<job>)` when a `<job>` is declared. The prose
+described the binding passively — "bound on first running-AND-healthy backend
+for the `<job>`" (REV-2 1a-A), "the allocator RETAINS `F` … idempotent
+`assign(<job>)` returns the same `F`" (feature-delta § Frontend lifecycle
+contract) — and the feature-delta C4 even drew the *write* (`drain — looks up /
+binds <job> → F via the allocator`) inside the **health-gated ordered drain**,
+which contradicts Finding 2 (the `<job> ↔ F` binding MUST be **orthogonal to
+backend health**, surviving zero-healthy windows). With no named writer, the
+just-landed `name_index` (commit `53236c6a`) made the **DNS read path** the
+de-facto writer — `frontend_for` calls `self.allocator.assign(name).ok()`
+(`name_index.rs:262`) on *every query*, so a DNS lookup *allocates* a stable
+frontend addr as an order-dependent, non-deterministic side effect, turning the
+DNS index into a second writer to the shared allocator.
+
+**REV-3 names the writer (and corrects the read path):**
+
+- **The writer is a deploy-time lifecycle assigner.** `assign(<job>)` is called
+  at **`<job>` declaration** — in the **Service arm of `submit_workload`**
+  (`POST /v1/jobs`, `handlers.rs` ~324, the SAME `if matches!(intent,
+  WorkloadIntent::Service(_))` admission guard the `ServiceVipAllocator::allocate`
+  uses). This is the exact in-codebase precedent: an addressing allocator keyed
+  by the *logical workload*, bound at admission, fsynced before the handler
+  returns. Frontends are a Service-name concern, so a Job-kind submit does NOT
+  assign a frontend addr (mirroring the VIP allocate's Service-only guard).
+- **Boot story = empty-on-boot Bar-1 converge-on-boot rebuild** (NOT the
+  *persistent* `ServiceVipAllocator` `bulk_load` model). The allocator is
+  ephemeral (ADR-0072 1a-A, the `NetSlotAllocator` precedent), so on every node
+  boot it starts empty and a dedicated converge-on-boot pass re-derives the
+  `<job> → F` set from the **currently-declared Service intents**
+  (`IntentKey::for_workload` rows) — idempotent `assign` per `<job>` — run AFTER
+  `AppState` and BEFORE the convergence loop / `DnsResponder` serve spawn, the
+  mirror of `veth_provisioner::adopt_on_restart_recovery` (`lib.rs:1980`).
+  Declared-Service intent is the SSOT the rebuild reads (`development.md` §
+  "Persist inputs, not derived state"); the allocator is never persisted and
+  never inferred from a prior allocator dump.
+- **`frontend_for` (the DNS read path) is a PURE READER.** It performs a
+  read-only lookup of the allocator's *existing* `<job> → F` binding (e.g.
+  `snapshot().get(<job>)`), **never** `assign` on the query path. A `<job>` the
+  assigner has not yet bound is WITHHELD (NXDOMAIN), not assigned-on-read. The
+  `name_index.rs:262` `assign`-on-read is the defect REV-3 corrects.
+- **`release(<job>)` has NO production trigger today — and that is correct, not a
+  gap.** There is no logical-workload-DELETION verb in production: the router
+  exposes only `POST /v1/jobs` (declare), `POST /v1/jobs/:id/stop` (TRANSIENT —
+  the `IntentKey::for_workload` row PERSISTS, the `<job>` stays declared;
+  `handlers.rs:718-764`), and GET reads (`lib.rs:2094-2100`). "stop" is the
+  withhold-not-release case (Finding 2), NOT a release — and the
+  `ServiceVipAllocator` confirms the pattern (the VIP releases ONLY on the
+  conflict-rollback path, `handlers.rs:451-459`, never on stop). The
+  `release(<job>)` *surface* is implemented and Tier-1-tested (FRONTEND-03
+  Property 2), but it has no production CALL SITE because the deletion edge does
+  not exist. Wiring `release` into the stop path would reintroduce the SQ1
+  stale-`F` failure on every stop (explicitly rejected). Whether to add a
+  deletion verb (`DELETE /v1/jobs/:id`) is a **user decision**, out of this
+  feature's scope. Until then `F` is retained for the process lifetime of every
+  declared `<job>` (acceptable Phase-1 single-node — the empty-on-boot rebuild
+  reading the current declared set naturally drops a binding for a `<job>` not
+  re-declared after restart).
+
+The single-owner invariant (DDN-2) is unchanged and now complete: the ONE
+`FrontendAddrAllocator` is **written by the deploy-time assigner** and **read by
+both** the `name_index` and `by_frontend` — the answered `F` is byte-identical to
+the recognized `F` because there is exactly one writer and one instance. This
+amendment is realized in the roadmap as REV-3 step 01-05 (the writer) + the
+01-03 re-scope (the pure reader); the code correctives are a separate crafter
+dispatch.
+
 ## Changed Assumptions (REV-2, 2026-06-25)
 
 ### What changed and why
@@ -204,7 +276,15 @@ disjoint from both the VIP range and the workload range — collision-free.
   `by_frontend`, and the connection would fail-closed (`MeshUnreachable`) — the
   addressing-divergence defect REV-2 exists to prevent. The Finding-3 ordered
   drain (below) is the coherence mechanism that exposes the SAME allocator-owned
-  `F` to both projections in the right order.
+  `F` to both projections in the right order. **(REV-3 amendment — see the REV-3
+  AMENDMENT block at the top of this ADR: the WRITER of the `<job> ↔ F` binding
+  is the deploy-time lifecycle assigner (`assign(<job>)` at declaration in the
+  `POST /v1/jobs` Service arm; empty-on-boot converge-on-boot rebuild from
+  declared-Service intent), NOT the ordered drain and NOT the DNS read path. The
+  ordered drain only EXPOSES the allocator-owned `F` to both projections in
+  order; it does not CREATE the binding. The earlier "the drain looks up / binds
+  `<job> → F`" framing conflated a read with a write — the binding is created by
+  the assigner at declaration, orthogonal to backend health.)**
 - **D-TME-10 "headless / NO VIP / NO translation layer"** — SUPERSEDED: a stable
   IPv4 frontend IS VIP-shaped and DOES introduce a (single-map) translation in
   `MtlsResolve`, delivered via nft-TPROXY (NOT #61 XDP).
@@ -836,13 +916,14 @@ binding, made precise.
 | `MeshServiceName` newtype | `overdrive-core/src/id.rs` | **CREATE NEW** |
 | `NameAnswer` enum (pure result of `answer_for`) | `overdrive-core` (id or a small `dns` module) | **CREATE NEW** |
 | `FrontendAddrAllocator` (the single `<job> ↔ F` owner — frontend SSOT; feeds BOTH `name_index` and `by_frontend`) | `overdrive-control-plane/src/dns_responder/frontend_addr_allocator.rs` | **CREATE NEW** (1a-A) |
-| `dns_responder/name_index.rs` (`<job>` → stable `F` List-then-Watch index; reads the `FrontendAddrAllocator` binding via the ordered drain) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
+| Frontend-addr **WRITER** — deploy-time lifecycle assigner (REV-3): `assign(<job>)` at `<job>` declaration in the `POST /v1/jobs` Service arm + empty-on-boot converge-on-boot rebuild from declared-Service intent | `overdrive-control-plane/src/handlers.rs` (Service-arm admission ~324) + a converge-on-boot rebuild fn beside `adopt_on_restart_recovery` (`lib.rs` boot path) | **EXTEND** (REV-3, the missing writer — a new CALL SITE for the existing `FrontendAddrAllocator::assign`; NO new allocator method) |
+| `dns_responder/name_index.rs` (`<job>` → stable `F` List-then-Watch index; **PURE READER** of the `FrontendAddrAllocator` binding — read-only `snapshot().get(<job>)`, NEVER `assign`-on-read, REV-3) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/answer.rs` (pure `answer_for`) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/wire.rs` (hickory-proto encode/decode) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `dns_responder/responder.rs` (`DnsResponder` host adapter + socket loop) | `overdrive-control-plane/src/dns_responder/` | **CREATE NEW** |
 | `BackendIndex` `by_frontend` re-key (`(F, listener.port, Proto)` → `ServiceId`; reads the SAME `FrontendAddrAllocator` binding) | `overdrive-control-plane/src/mtls_resolve_adapter.rs` | **EXTEND** (1b-A, additive) |
 | `DnsResponderError` (typed `thiserror`) | `dns_responder/` | **CREATE NEW** |
-| `run_server_with_obs_and_driver` composition | `overdrive-control-plane/src/lib.rs` (~1893-1957) | **EXTEND** (construct ONE `FrontendAddrAllocator`, share on `AppState`, inject the SAME handle into BOTH the re-keyed `MtlsResolve` and the `DnsResponder` — the single-owner invariant; construct the responder after `resolve.probe()` with `store` + `config.clock` + the `state.net_slot_allocator` handle for the fallback source (DDN-5) + the `FrontendAddrAllocator` handle for `F` answers (DDN-2); probe; spawn; hold handle; same `mtls_worker.is_some()` gate) |
+| `run_server_with_obs_and_driver` composition | `overdrive-control-plane/src/lib.rs` (~1893-1957) | **EXTEND** (construct ONE `FrontendAddrAllocator`, share on `AppState`, inject the SAME handle into ALL of {the deploy-time **writer** (REV-3), the re-keyed `MtlsResolve`, the `DnsResponder`} — the single-owner invariant; run the empty-on-boot converge-on-boot rebuild (REV-3) AFTER `AppState` and BEFORE the convergence-loop / responder spawn, beside `adopt_on_restart_recovery`; construct the responder after `resolve.probe()` with `store` + `config.clock` + the `state.net_slot_allocator` handle for the fallback source (DDN-5) + the `FrontendAddrAllocator` handle for `F` answers (DDN-2); probe; spawn; hold handle; same `mtls_worker.is_some()` gate) |
 | `hickory-proto` workspace dep | root `Cargo.toml [workspace.dependencies]` | **ADD** (Apache-2.0/MIT) |
 | `nix` features (`socket`, `uio` for `recvmsg`/`sendmsg`/`ControlMessage::Ipv4PacketInfo`) | `overdrive-control-plane` + workspace `nix` features | **EXTEND** (no new public API) |
 
@@ -895,14 +976,37 @@ binding, made precise.
   `job_segment()` on the newtype, or a parse helper local to the index — is a
   small surface decision left to DISTILL/DELIVER per CLAUDE.md "Implement to the
   design — never invent API surface" (the design names the model, not the
-  signature; the crafter must surface and pin it, not improvise).
+  signature; the crafter must surface and pin it, not improvise). **(REV-3: the
+  writer (the deploy-time assigner) needs the same OQ-1 surface in the *other*
+  direction — `WorkloadId → MeshServiceName` for the `assign` call-site key;
+  `WorkloadId → MeshServiceName::new(format!("{id}.{SUFFIX}"))` is the obvious
+  shape, pinned as a crafter DECISION at the call site.)**
+
+- **OQ-REV3 — `release(<job>)` has no production trigger (a USER decision, not a
+  crafter improvisation).** The `release(<job>)` *surface* is implemented and
+  Tier-1-tested (FRONTEND-03 Property 2), but there is **no logical-workload-
+  DELETION verb** in production to call it: the router exposes only `POST
+  /v1/jobs` (declare), `POST /v1/jobs/:id/stop` (TRANSIENT — the `<job>` stays
+  declared, `handlers.rs:718-764`), and GET reads (`lib.rs:2094-2100`). "stop" is
+  the withhold-not-release case (Finding 2), NOT a release; the
+  `ServiceVipAllocator` confirms the pattern (VIP releases only on conflict-
+  rollback, never on stop). REV-3 ships the **`assign` half only**; `F` is
+  retained for the process lifetime of every declared `<job>` (acceptable
+  Phase-1 single-node — the empty-on-boot rebuild reading the current declared
+  set drops a binding for a `<job>` not re-declared after restart). Whether to
+  add a deletion verb (`DELETE /v1/jobs/:id`) that drives `release(<job>)` is a
+  user decision, out of this feature's scope. The crafter MUST surface this as a
+  BLOCKER and MUST NOT wire `release` into the stop path (doing so reintroduces
+  the SQ1 stale-`F` failure on every stop).
 
 *(Two former open questions are now PINNED in DESIGN and NO LONGER deferred: the
 `NameAnswer` variant names + the `answer_for` qtype param are concrete — see
 § Components / the feature-delta pinned-signatures block; and the
 per-addr-fallback gateway-set source is `NetSlotAllocator` + `responder_addr_for_slot`
-with a re-derive-on-converge-tick re-bind lifecycle — DDN-5. OQ-1 above is the
-sole remaining deferral.)*
+with a re-derive-on-converge-tick re-bind lifecycle — DDN-5. The remaining
+deferrals are OQ-1 (the `SpiffeId`/`WorkloadId` ↔ `<job>` accessor, a crafter
+DECISION) and OQ-REV3 (the `release(<job>)` deletion-verb trigger, a USER
+decision).)*
 
 ## Out of scope (existing issues / named refinements)
 
