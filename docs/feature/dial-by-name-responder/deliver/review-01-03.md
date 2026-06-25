@@ -66,3 +66,30 @@ REV-2 wired all readers — 01-03 (index), 02-00 (`by_frontend`), 02-01 (constru
 ## Resolution (decided 2026-06-25)
 
 Ownership path **(a) — a deploy-time lifecycle assigner** (assign on `<job>` declaration, release on logical deletion), validated and pinned by `@nw-solution-architect`, landing as a named roadmap step before 02-02 (the walking skeleton requires `F` bound on deploy). 01-03 re-scoped to a **pure read seam**. The three code correctives above are then applied as a 01-03 follow-up (read-only `frontend_for`, the `snapshot()`-unchanged test, the fail-closed faulted flag) once ownership is pinned. Order is load-bearing: ownership first, then code — do not "fix it green" by keeping assign-on-read.
+
+---
+
+## REV-2 — Re-review of corrective `521568cd` (2026-06-25)
+
+**Verdict:** NEEDS_REVISION — but **all three original blocking *production* defects are genuinely fixed.** What remains are **test-efficacy gaps** (orchestrator independently verified both blocking points against source).
+
+### The three original blockers — production fixes verified
+| Blocker | Status | Evidence |
+|---|---|---|
+| #1 `answer_for` impure (assign-on-read) | ✅ RESOLVED | `frontend_for` is a pure read — `self.allocator.snapshot().get(name).copied()` (`name_index.rs:340`); no `assign`. |
+| #2 tests can't tell read from write | ✅ RESOLVED | `idx_04_query_for_unassigned_job…` (`dns_name_index.rs:505-549`) is a genuine falsifier: healthy-but-unassigned `<job>` built *without* `index_listing`, asserts NxDomain **and** byte-unchanged `snapshot()`. |
+| #3 fail-stale on drain death | ⚠️ PARTIAL | Stream-end fault (`name_index.rs:414`) is correct AND tested (`EndingStore`). But the **Lagged-relist-failure** fault branch (`404-406`, new in this commit) has **no test**. |
+
+### issue (blocking): `idx_03` is vacuous for the relist-on-Lagged path it is named for
+Confirmed by schedule trace. `LaggingStore.all_service_backends_rows` delegates to a `sim` already holding the `present` healthy row (`dns_name_index.rs:418-424`), so List-at-probe makes `present` resolvable before the watch opens. `await_answer`'s first synchronous `answer_for` returns `Records([F]) == want` immediately — before any `yield_now` — so the spawned drain never runs and the `Lagged → relist` arm (`398-408`) never executes. **S-DBN-IDX-03 has no executing test;** a mutant deleting the Lagged arm survives. *Fix:* a stateful store double whose List-at-probe returns EMPTY and whose post-`Lagged` `all_service_backends_rows` returns `present`, so the relist is the only path that makes the name resolvable (the empty initial answer makes `await_answer` yield and run the drain).
+
+### issue (blocking): the mutation-gate claim (93.3%, "only `Drop` missed") is inconsistent with the coverage gaps
+If `idx_03` never runs the Lagged arm and no test exercises the Lagged-relist-**failure** branch, mutants on `name_index.rs:398-408` — including the new `watch_healthy.store(false)` at `404-406` — should survive, contradicting "only `Drop` missed." On macOS Lima the mutation summary is written to the **guest** target dir; the host `target/xtask/mutants-summary.json` is stale (a known trap). *Fix:* after adding the two tests, re-run the diff-scoped mutation on `name_index.rs`, read the **guest** summary (or the run log), and confirm ≥80% with the Lagged-arm mutants now caught.
+
+### Non-blocking
+- Lagged-relist-failure branch (`404-406`) needs a test — a store double returning `Err` from `all_service_backends_rows` after a `Lagged`, asserting the name then withholds (fail-closed, `watch_healthy=false`). (This is one of the two blocking fixes above.)
+- `snapshot()` clones the whole `BTreeMap` per DNS query (`frontend_addr_allocator.rs:251-253`). Fine for v1, but the correct read primitive is a point accessor `FrontendAddrAllocator::frontend_of(&self, &MeshServiceName) -> Option<Ipv4Addr>` (lock + `get` + copy) — the architect pre-sanctioned a read accessor as a valid DECISION (REV-3 01-03 re-scope), so this is the missing primitive, not new surface.
+- `apply_row` one-service-per-job test exercises only the distinct-addr case; the shared-addr stranding the invariant comment names is neither enforced nor tested (pre-existing, low probability).
+- `answer.rs` "pure function" docstring reads the allocator's *current* state through `&index`; a half-sentence ("a deterministic read of the allocator's current binding") removes the ambiguity.
+
+**Resolution:** test-efficacy only (production code stands). Crafter dispatched to (1) make `idx_03` non-vacuous, (2) add the Lagged-relist-failure test, (3) re-verify mutation honestly from the guest summary, plus the trivial `answer.rs` docstring clarification.
