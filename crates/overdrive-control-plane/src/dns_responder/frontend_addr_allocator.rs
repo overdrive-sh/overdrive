@@ -80,33 +80,45 @@ pub const WORKLOAD_FRONTEND_BASE: Ipv4Net = Ipv4Net::new_assert(Ipv4Addr::new(10
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("no free frontend address: all {capacity} addresses in {base} are held", base = WORKLOAD_FRONTEND_BASE)]
 pub struct FrontendAddrExhausted {
-    /// The total address-space capacity of [`WORKLOAD_FRONTEND_BASE`] — every
+    /// The usable host-address capacity of [`WORKLOAD_FRONTEND_BASE`] (the
+    /// `/16` block minus its reserved network + broadcast endpoints) — every
     /// one of which is held when this error is returned.
     pub capacity: u64,
 }
 
-/// PURE decision: the smallest [`Ipv4Addr`] in [`WORKLOAD_FRONTEND_BASE`] that
-/// is NOT in `held`.
+/// PURE decision: the smallest USABLE host [`Ipv4Addr`] in
+/// [`WORKLOAD_FRONTEND_BASE`] that is NOT in `held`.
 ///
-/// Total over the bounded `10.98.0.0/16` address span, deterministic (same
-/// `held` ⇒ same address), performs no I/O. This is the assign-smallest-free
-/// contract: the lowest GAP, not a next-monotonic counter — so an address
-/// freed by a [`FrontendAddrAllocator::release`] is reclaimed by the next
-/// `assign`.
+/// Total over the bounded `10.98.0.0/16` USABLE host span (the network and
+/// broadcast addresses are reserved — see below), deterministic (same `held` ⇒
+/// same address), performs no I/O. This is the assign-smallest-free contract:
+/// the lowest GAP, not a next-monotonic counter — so an address freed by a
+/// [`FrontendAddrAllocator::release`] is reclaimed by the next `assign`.
+///
+/// # Reserved endpoints
+///
+/// The block's network address (`10.98.0.0`) and broadcast address
+/// (`10.98.255.255`) are NEVER handed out — the scan runs over
+/// `[network()+1, broadcast()-1]`. This mirrors the usable-host discipline of
+/// the adjacent networking code (`crate::veth_provisioner` derives the per-netns
+/// gateway/peer as `network()+1`/`network()+2`, never the subnet-zero address;
+/// `VipRange::default()` reserves both endpoints). A dialer's `connect()` is
+/// pointed at the assigned `F`, and a subnet-zero / broadcast destination is not
+/// guaranteed routable+capturable through the frontend datapath, so it is
+/// excluded by construction rather than relied upon.
 ///
 /// # Errors
 ///
-/// Returns [`FrontendAddrExhausted`] when every address in the block is in
-/// `held` — never a (reused) address.
+/// Returns [`FrontendAddrExhausted`] when every usable address in the block is
+/// in `held` — never a (reused) address, and never a reserved endpoint.
 fn smallest_free_addr(held: &BTreeSet<Ipv4Addr>) -> Result<Ipv4Addr, FrontendAddrExhausted> {
-    // Scan the block's address span ascending (`network()..=broadcast()`) for
-    // the first address not held. The block is `10.98.0.0/16` so the span is
-    // `[u32::from(network()), u32::from(broadcast())]` inclusive — 65536
-    // addresses. A linear scan over a bounded /16 is trivially fast and
-    // obviously correct (single-node Phase 1); the lowest GAP is returned, so a
-    // released address (the lower one) is reclaimed by the next assign.
-    let first = u32::from(WORKLOAD_FRONTEND_BASE.network());
-    let last = u32::from(WORKLOAD_FRONTEND_BASE.broadcast());
+    // Scan the block's USABLE host span ascending for the first address not
+    // held. The block is a fixed `10.98.0.0/16`, so `network()+1` and
+    // `broadcast()-1` cannot under/overflow a `u32` (the endpoints are interior
+    // to the `u32` range). The lowest GAP is returned, so a released address
+    // (the lower one) is reclaimed by the next assign.
+    let first = u32::from(WORKLOAD_FRONTEND_BASE.network()) + 1;
+    let last = u32::from(WORKLOAD_FRONTEND_BASE.broadcast()) - 1;
     for raw in first..=last {
         let candidate = Ipv4Addr::from(raw);
         if !held.contains(&candidate) {
@@ -116,14 +128,15 @@ fn smallest_free_addr(held: &BTreeSet<Ipv4Addr>) -> Result<Ipv4Addr, FrontendAdd
     Err(FrontendAddrExhausted { capacity: frontend_block_capacity() })
 }
 
-/// The total number of addresses in [`WORKLOAD_FRONTEND_BASE`]
-/// (`broadcast - network + 1` over the `/16` span = 65536). Pure, deterministic;
-/// the [`FrontendAddrExhausted`] capacity is sourced from here so the error and
-/// the scan share one definition of "the block is full".
+/// The number of USABLE host addresses in [`WORKLOAD_FRONTEND_BASE`]
+/// (`broadcast - network - 1` over the `/16` span = 65534 — the 65536-address
+/// block minus the reserved network and broadcast endpoints). Pure,
+/// deterministic; the [`FrontendAddrExhausted`] capacity is sourced from here so
+/// the error and the scan share one definition of "the block is full".
 fn frontend_block_capacity() -> u64 {
     let first = u64::from(u32::from(WORKLOAD_FRONTEND_BASE.network()));
     let last = u64::from(u32::from(WORKLOAD_FRONTEND_BASE.broadcast()));
-    last - first + 1
+    last - first - 1
 }
 
 /// Per-host stable per-`<job>` frontend-address allocator (ADR-0072 REV-2).

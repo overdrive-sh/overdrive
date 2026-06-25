@@ -89,6 +89,25 @@ proptest! {
             "assigned {f} must lie inside WORKLOAD_FRONTEND_BASE {WORKLOAD_FRONTEND_BASE}",
         );
 
+        // Never the reserved network or broadcast endpoint of the /16 — a
+        // subnet-zero / broadcast destination is not guaranteed routable through
+        // the frontend datapath, so the usable-host scan excludes both (mirrors
+        // the veth_provisioner gateway/peer and VipRange reservation discipline).
+        prop_assert_ne!(
+            f,
+            WORKLOAD_FRONTEND_BASE.network(),
+            "assigned {} must not be the reserved network address {}",
+            f,
+            WORKLOAD_FRONTEND_BASE.network(),
+        );
+        prop_assert_ne!(
+            f,
+            WORKLOAD_FRONTEND_BASE.broadcast(),
+            "assigned {} must not be the reserved broadcast address {}",
+            f,
+            WORKLOAD_FRONTEND_BASE.broadcast(),
+        );
+
         // Disjoint from the per-netns /30 block (10.99.0.0/16) — the real const.
         prop_assert!(
             !WORKLOAD_SUBNET_BASE.contains(&f),
