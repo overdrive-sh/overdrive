@@ -71,6 +71,18 @@ mod acceptance {
     // allocator — no kernel/netns/socket).
     mod dns_frontend_assigner;
     mod dns_name_index;
+    // dial-by-name-responder step 02-00 (ADR-0072 REV-2, GH #243) — the re-keyed
+    // `MtlsResolve`/`BackendIndex` proptests. S-DBN-REKEY-01..04: frontend ->
+    // first-by-Ord live-backend translation, frontend-hit-zero-healthy ->
+    // MeshUnreachable, the proto axis as a key field (Finding-1), and the
+    // backward-compatible additive by_addr EXTEND. S-DBN-FAILCLOSED-01: the
+    // three-way fail-closed-on-frontend-subnet-miss arm (the structural defense,
+    // Finding-3). S-DBN-EQUIV-01: DST equivalence over the same call sequence.
+    // Default unit lane (in-process; the BackendIndex/classify data structure —
+    // no kernel/netns/socket; the socket is irreducibly Tier-3, DDN-4). RED
+    // scaffolds (production `classify` `todo!()` on the new arms land GREEN in
+    // the same step).
+    mod mtls_resolve_rekey;
     // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
     // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record
     // round-trip through hickory, NODATA-SOA / NXDOMAIN-SOA with MINIMUM=1,

@@ -99,6 +99,181 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-25T09:44:11Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T09:46:40Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:11:32Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:16:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the ANSWER-*/IDX-* proptests ARE the mandatory PBT coverage of the answer_for + NameIndex driving ports (port-to-port at domain scope); no below-port unit needed to reach GREEN",
+      "t": "2026-06-25T11:16:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:30:33Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:32:44Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:24:37Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:32:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the four ATs through the submit_workload + rebuild driving ports are the mandatory coverage of both writer call sites; the allocator's pure assign idempotency/exhaustion is already Tier-1 + mutation-gated at 01-04, and no below-port helper needs separate unit coverage to reach GREEN (mirrors prior steps 01-03/01-04).",
+      "t": "2026-06-25T17:32:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:37:14Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:37:22Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:02:49Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:04:33Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the ATs through the driving ports (submit_workload handler + rebuild_frontend_addrs_from_intent boot pass + answer_for/NameIndex reader path) are the coverage; mirrors prior 01-0x steps. No new pure-domain unit decomposition required.",
+      "t": "2026-06-25T18:04:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:07:23Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:09:25Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:19:29Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:21:12Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the AT (boot_rebuild_ignores_service_payload_under_a_sub_key_path) is the kill coverage; no unit decomposition needed for a test-only mutation corrective",
+      "t": "2026-06-25T18:21:12Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:22:17Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:24:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:53:40Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:03:47Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the mtls_resolve_rekey.rs + dns_name_index.rs COHERENCE-01 proptests ARE the mandatory PBT coverage of the re-keyed BackendIndex/classify data structure (driven port-to-port at the data-structure scope); no below-port helper warrants a separate unit layer (mirrors the 01-01..01-05 pattern).",
+      "t": "2026-06-25T19:03:47Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:12:57Z"
     }
   ]
 }
