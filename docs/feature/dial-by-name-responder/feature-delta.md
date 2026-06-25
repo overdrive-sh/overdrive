@@ -1055,3 +1055,768 @@ addr == the `MtlsResolve` `Mesh` addr, `invariant`).
    in-memory composition would simulate the substrate the spike proved
    cannot be simulated; the pure `answer_for`/`NameIndex` PBT at Tier 1
    covers the domain-rich input space instead).
+
+---
+
+# Wave: DESIGN — REVISION 2 (stable-frontend / ClusterIP-split) — Morgan, 2026-06-25
+
+> **PROPOSE-mode revision of the partly-delivered DESIGN above.** The user
+> ratified shifting dial-by-name from answering a *volatile per-instance backend
+> addr* (the REV-1 "headless v1" contract, DDN-2 / D-TME-10) to answering a
+> **STABLE per-`<job>` frontend addr** while the already-live dataplane
+> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071 Path-A / ADR-0053) owns
+> backend churn — the "ClusterIP split". This is the **thin path** (reuse the
+> live datapath, introduce a stable frontend) NOT the deferred **#61 VIP path**
+> (XDP `SERVICE_MAP`). Two code-grounded research docs settle the inputs:
+> `docs/research/networking/dial-by-name-thin-path-canonical-address-vs-cilium-socketlb-research.md`
+> (SQ1/SQ2/SQ6 — the load-bearing findings) and
+> `docs/research/networking/dns-positive-ttl-vs-cache-invalidation-dial-by-name-research.md`
+> (the stable-address-makes-TTL-moot sub-q 4).
+>
+> **This section supersedes REV-1's DDN-2 (mapping) byte-consistency framing and
+> the D-TME-10 "headless / no-VIP" answer contract.** It does NOT touch
+> committed roadmap steps 01-01 (`MeshServiceName`) / 01-02 (`NameAnswer` +
+> `hickory` wire codec) — the `SocketAddrV4` substrate and the codec are
+> **agnostic to which IPv4 addr they carry** (research SQ3: `Records(vec![addr])`
+> already holds one stable addr; the codec renders whatever addr it is handed).
+>
+> **FINALIZED (2026-06-25).** Both forks are RATIFIED by the user — **REV-1a =
+> 1a-A** (a NEW per-`<job>` `FrontendAddrAllocator`, sibling to
+> `NetSlotAllocator`, from a distinct subnet) and **REV-1b = 1b-A** (an additive
+> `by_frontend` map on `BackendIndex` + a `classify` translation arm; the key
+> carries the proto axis — `FrontendKey = (SocketAddrV4, Proto)` per 2nd-round
+> Finding-1, § Frontend-key contract — a bare `SocketAddrV4` would collide
+> `tcp/53` with `udp/53`). The gating spike **BLOCKER-1 returned WORKS** on a
+> real kernel (`findings-blocker1-frontend-addr-capture.md`); BLOCKER-2 is pinned
+> (deterministic first-by-`Ord`). The frontend subnet is **pinned to
+> `10.98.0.0/16`** — the spike's `10.96.0.0/16` candidate was REJECTED for a total
+> collision with the live service-VIP allocator default (collision check below).
+> All directional calls (thin path, the corrected `sock_destroy` framing,
+> whitepaper-not-SSOT, #61-reconcile-don't-rewrite) are ratified inputs designed
+> to. The option tables in § "The genuinely-open design forks" are retained for
+> the rejected-alternatives audit trail; the RATIFIED choice is marked inline.
+
+## REV-2 / [REF] Why a revision is forced — the two code findings (settled inputs)
+
+The dispatch's original "thin path = answer the EXISTING per-workload canonical
+address; it never goes stale" rests on a premise the live code does **not**
+satisfy:
+
+- **SQ1 — `workload_addr` is NOT stable across alloc cycles.** It is pure slot
+  arithmetic — `WORKLOAD_SUBNET_BASE.network() + slot*4 + 2`
+  (`veth_provisioner.rs:528-532`) — and the slot is assigned **per
+  `AllocationId`** by a smallest-free scan
+  (`NetSlotAllocator::assign`, `veth_provisioner.rs:709-729`; held map keyed by
+  `AllocationId`, `:673-678`). A backend cycle mints a NEW `AllocationId` →
+  acquires the smallest-free slot → frequently a **different** slot → a
+  **different** address. Restart-adoption (`adopt`, `:780-806`) preserves a slot
+  only for a *surviving same-`AllocationId`* process, not a cycled instance. So
+  answering `workload_addr` goes stale on the exact event the user wants to
+  eliminate. **A NEW stable-per-`<job>` frontend-address concept is required —
+  `workload_addr` cannot be reused for it.**
+- **SQ2 — `MtlsResolve` keys on the BACKEND addr, not a frontend addr.** The
+  index is `by_addr: BTreeMap<SocketAddrV4, BTreeMap<ServiceId, Backend>>`
+  populated from each row's `Backend.addr`
+  (`mtls_resolve_adapter.rs:207-253`); `resolve(orig_dst)` is a direct
+  point-lookup → `classify` (`:292-300`). A query for a *stable frontend addr*
+  would **MISS** the index → `NonMesh` → silent cleartext (`:298`). The module
+  rustdoc says so verbatim: *"Headless v1: the addr DNS returns IS the backend
+  addr, so the index is keyed by the backend addr DIRECTLY"* (`:89-91`).
+  **`MtlsResolve` must be re-keyed (or gain a translation) so
+  `resolve(stable_frontend_addr) → current live backend`** — the Cilium
+  ClusterIP→backend translation headless-v1 deliberately deferred.
+
+Cilium is the canonical reference for the split (research SQ4):
+`__sock4_xlate_fwd` translates the stable ClusterIP → a currently-selected
+backend at `connect()` (`bpf_sock.c:452-453`) and a reverse-NAT map preserves
+the ClusterIP illusion (`bpf_sock.c:145-171,580-624`). Overdrive's analogue is
+**MtlsResolve-at-intercept** translating a stable frontend → the live
+`service_backends` backend. The DNS-TTL research (sub-q 4) independently lands
+the same recommendation: a stable answer makes positive-TTL staleness moot **by
+construction** — the convergent industry pattern (K8s ClusterIP, Cilium,
+CoreDNS's relaxed 5 s TTL, Istio/Linkerd).
+
+## REV-2 / [REF] DDD delta
+
+- **D-DBN-1' (bounded context — unchanged shape, restated value).** The name
+  layer stays a NEW *reader* bounded context over the EXISTING `service_backends`
+  surface, and a NEW *frontend-address* concept. The answered value is no longer
+  a backend addr (an enforcement-context value) but a **frontend addr** owned by
+  the name/addressing context — which the enforcement context (`MtlsResolve`)
+  *translates*. Two contexts, one translation seam (the re-keyed resolve).
+- **D-DBN-4' (verified mapping — REVISED).** REV-1's `<job>` ← SVID-job-segment
+  mapping still holds for *grouping rows by `<job>`*. REV-2 adds: the
+  `name_index` maps `<job>` → that workload's **stable frontend addr** (one per
+  `<job>`), NOT → the set of backend addrs. The OQ-1 `SpiffeId` → `<job>`
+  accessor is **still needed** (to key the frontend-addr table by `<job>` and to
+  group running-AND-healthy backend rows under it for the resolve translation).
+- **D-DBN-6 (NEW — frontend↔backend translation invariant).** The byte-consistency
+  invariant is RESTATED (see § Changed byte-consistency contract): the answered
+  *frontend* addr is byte-identical to the addr `MtlsResolve` is re-keyed to
+  *recognize and translate*, and that translation always lands a
+  **running-AND-healthy** backend (`Mesh`), never a miss (`NonMesh`/cleartext)
+  and never an unhealthy backend (`MeshUnreachable`). The healthy gate (REV-1
+  DDN-2) moves from "which addr we answer" to "which backend the translation
+  selects". **The answered/translated unit is a full `SocketAddrV4 = (F,
+  listener.port)`, NOT a bare `Ipv4Addr` — see § Frontend-key contract (Finding-1
+  tightening) for the exact key type and the proto stance.**
+- **D-DBN-7' (NEW — frontend-subnet coherence invariant, Finding-3 tightening).**
+  The `10.98.0.0/16` block is **dedicated to mesh frontends**. Two invariants
+  follow and are pinned (§ Frontend-subnet coherence contract): (i) **ordering** —
+  `by_frontend` (resolve) is updated BEFORE `name_index` (DNS) from a single
+  ordered drain over the same `service_backends` rows, so DNS never answers an `F`
+  the resolve index has not yet learned; (ii) **fail-closed-on-subnet-miss** — a
+  captured connection whose `orig_dst.ip() ∈ 10.98.0.0/16` that MISSES `by_frontend`
+  is NOT `NonMesh`/cleartext; it is a mesh dial that arrived before the index was
+  ready (or to a withdrawn `<job>`), so it classifies **fail-closed (refuse, NO
+  cleartext)**. Together (i)+(ii) make the DNS↔resolve race **non-exploitable**:
+  worst case is a refused connect + client retry, never silent cleartext to a
+  should-be-mesh peer.
+
+## REV-2 / [REF] The genuinely-open design forks (PROPOSE — 2–3 options each)
+
+### REV-1a — the stable per-`<job>` frontend-address scheme — RATIFIED: 1a-A
+
+**Requirement**: a per-logical-`<job>` IPv4 addr, **stable across alloc cycles**,
+collision-free per host, lifecycle-bound to the *logical workload* (not the
+instance), that the DNS responder answers and `MtlsResolve` translates. Single-node
+Phase-2; IPv4-only (the `SocketAddrV4` substrate is unchanged). Default posture:
+**EXTEND** existing primitives over CREATE-NEW (Reuse Analysis hard gate).
+
+| Option | Shape | Pros | Cons | Reuse verdict |
+|---|---|---|---|---|
+| **1a-A (RATIFIED) — a NEW per-`<job>` frontend-addr allocator (sibling to `NetSlotAllocator`), carving from a DISTINCT subnet block (`WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`)** | A small per-host `FrontendAddrAllocator` keyed by `<job>` (`WorkloadId` / `MeshServiceName`), assigning a stable IPv4 from a NEW per-host block (e.g. a `/18` carved from a frontend `WORKLOAD_FRONTEND_BASE`, parallel to `WORKLOAD_SUBNET_BASE`'s `10.99.0.0/16`); bound on first running-AND-healthy backend for the `<job>`, **retained across alloc cycles AND across transient zero-healthy-backend windows, released ONLY on logical-workload deletion** (Finding-2; see § Frontend lifecycle contract — a transient zero-healthy state is handled by the `name_index` WITHHOLDING the answer → NXDOMAIN, NEVER by releasing `F`). Lives beside `NetSlotAllocator` on `AppState`. | Clean separation of concerns: the netns slot is genuinely per-instance (`AllocationId`), the frontend addr is genuinely per-logical-workload (`<job>`) — conflating them (1a-B) is exactly the SQ1 bug. The Cilium ClusterIP analogue. A distinct subnet keeps the `service_map_hydrator` mesh-gate (`Backend.addr ∈ 10.99.0.0/16`, `service_map_hydrator.rs:265-274`) UNCHANGED for backend addrs while letting the frontend addr have its own routing/gate story (see BLOCKER-1). Stable answer → TTL-moot (DNS research sub-q 4); the `A_RECORD_TTL_SECS=1` may relax. | New per-host allocator + a new subnet const (net-new surface; justified — no existing per-`<job>`-keyed addr source). The frontend addr must be *routable/capturable* by the nft-TPROXY datapath — the dataplane-integration question (BLOCKER-1) that decides whether this is "thin". Restart rebuild story (rebuild the `<job>→frontend` map from running allocs, mirroring `NetSlotAllocator`'s empty-on-boot rebuild). | **CREATE NEW** (a per-`<job>` allocator has no existing analogue; `NetSlotAllocator` is per-`AllocationId` by design and must stay so) |
+| **1a-B — extend `NetSlotAllocator` to key the slot per-`<job>` instead of per-`AllocationId`** | Re-key the held map `<job> → NetSlot`, so a cycled instance of the same `<job>` re-acquires the same slot → same `workload_addr`, making `workload_addr` itself the stable frontend. | Zero new allocator; the frontend addr IS `workload_addr` (no new subnet). | **Conflates two genuinely-different lifetimes**: the netns/veth/subnet slot is per-instance (two live instances of one `<job>` — e.g. replicas, or an overlapping drain — need DISTINCT netns/veths, the B1 collision the slot model exists to prevent, `veth_provisioner.rs:600-618`). Keying per-`<job>` breaks multi-replica and rolling-restart overlap. Research SQ6 explicitly rejects this: *"conflates the netns slot (genuinely per-instance) with the frontend addr (must be per-workload), so (a) is cleaner."* | **REJECTED** — breaks the per-instance slot invariant |
+| **1a-C — deterministic per-`<job>` derivation (hash `<job>` → addr in a frontend block), no allocator** | `frontend_addr = WORKLOAD_FRONTEND_BASE + (hash(<job>) mod N)`; no held state, stable by construction (same `<job>` → same addr across cycles AND restarts). | No allocator, no state, no restart-rebuild; stable across restarts for free. | **Hash collisions** — two distinct `<job>`s mod to one addr → two services share a frontend → the dataplane translates the wrong one (an identity/routing collision, the same defect class as `development.md` § "One shared length ceiling"). Mitigations (open-address probe on collision) re-introduce held state — converging on 1a-A. Single-node N is small; collision probability is non-trivial at modest `<job>` counts (birthday bound). | **REJECTED for v1** — collision risk unacceptable for an addressing primitive; revisit only if a perfect-hash / registry guarantees uniqueness |
+
+**RATIFIED: 1a-A** — a new per-`<job>` `FrontendAddrAllocator` from a distinct
+subnet block. It is the only option that keeps the per-instance slot invariant
+intact AND gives a genuinely-stable per-logical-workload frontend, and it is the
+direct Cilium-ClusterIP analogue the research endorses. The CREATE-NEW verdict
+is justified (no existing per-`<job>`-keyed addr source; `NetSlotAllocator` must
+remain per-`AllocationId`).
+
+**Pinned at finalization (the two formerly-open 1a-A details):**
+
+- **Subnet block const: `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`.** The spike's
+  `10.96.0.0/16` candidate is **REJECTED** — it collides totally with the live
+  service-VIP allocator default `VipRange::default() = 10.96.0.0/16`
+  (`crates/overdrive-dataplane/src/allocators/vip_range.rs:204-234`, in effect on
+  every boot absent a `[dataplane.vip_allocator]` override per ADR-0049 Alt-E;
+  live VIP examples `10.96.0.2/.10/.11`). `10.98.0.0/16` is disjoint from both
+  the VIP range (`10.96.0.0/16`) and the workload range (`10.99.0.0/16`),
+  satisfies both spike constraints (off-`10.99`; not on-link to any host route →
+  falls through the per-netns default route), and is unused anywhere in the
+  codebase. Full grep evidence in ADR-0072 § "Collision check". (Naming: keep
+  `WORKLOAD_FRONTEND_BASE` lexically distinct from the existing `ServiceFrontend`
+  VIP type at `crates/overdrive-core/src/dataplane/service_frontend.rs` — two
+  different "frontend" concepts.)
+- **Boot-rebuilt, not persisted** — empty-on-boot rebuild from the running
+  allocs, mirroring `NetSlotAllocator`'s Phase-1 empty-on-boot rebuild (the DDN-5
+  sibling precedent). No new persistence surface.
+
+**BLOCKER-1 RESOLVED → WORKS** (`findings-blocker1-frontend-addr-capture.md`,
+real kernel `7.0.0-22-generic`): the nft-TPROXY datapath captures a connection to
+a non-`/30` frontend addr via the per-netns default route production already
+installs, recovering `orig_dst` verbatim. The capture is destination-blind, so
+the verdict holds for `10.98.0.0/16` directly — **no new routing/capture
+dataplane work; REV-2 stays thin.**
+
+### REV-1b — re-keying `MtlsResolve` (frontend addr → current live backend) — RATIFIED: 1b-A
+
+**Requirement**: `resolve(stable_frontend_addr) → Mesh(running-AND-healthy
+backend)`, never `NonMesh` (the SQ2 miss) and never an unhealthy backend. The
+existing per-connection re-resolution against the live healthy set (the churn
+half, `:521-540`) is REUSED verbatim — only the *key* changes. Default: EXTEND.
+
+| Option | Shape | Pros | Cons | Reuse verdict |
+|---|---|---|---|---|
+| **1b-A (RATIFIED) — add a `frontend → ServiceId` map; resolve translates frontend → ServiceId → current healthy backend** | Extend `BackendIndex` with a second map `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (the stable frontend `(F, listener.port, proto)` → the logical service it fronts — the proto axis is carried per 2nd-round Finding-1 so `tcp/53`/`udp/53` never collide; § Frontend-key contract), built from the SAME `service_backends` rows + the frontend-allocator binding. `resolve(orig_dst)`: if `orig_dst ∈ by_frontend`, select a current running-AND-healthy backend for that `ServiceId` from the existing `by_addr`/per-service view (the live churn set) → `Mesh`; else fall through to today's backend-addr lookup. | Exactly Cilium's split: stable frontend constant, backend selection per-connect against the live set (the existing `classify` healthy logic is REUSED for selection). Additive — today's backend-addr path is preserved (backward-compatible; a direct backend dial still resolves). The translation is a pure index op, DST-testable, mutation-gate-able. | The selection policy (which healthy backend when N) is a NEW micro-decision — for v1 single-node single-replica it is "the one healthy backend"; >1 needs a pick rule (pin: deterministic first-by-`Ord`, or round-robin — a named v1 sub-decision). Couples the resolve index to the frontend-allocator binding (the `by_frontend` map must be fed the `<job>→frontend` truth — a new input to the index). | **EXTEND** `BackendIndex` (`mtls_resolve_adapter.rs:207`) — additive map + an additive `classify` arm; the security-critical struct is *extended in place*, NOT replaced |
+| **1b-B — answer the frontend addr but make the responder ALSO write a `frontend→backend` translation row the resolve index already reads** | The responder (name layer) owns a translation surface the resolve index consumes; resolve stays keyed on what it reads. | Keeps the translation authorship in the name layer. | Inverts ownership — the *enforcement* path would depend on the *name* layer for its translation truth (a name-layer outage would break enforcement). Violates DDN-1's "the security-critical intercept index stays decoupled from the name layer." A second writer of resolve-consumed state. | **REJECTED** — couples enforcement to the name layer (the exact DDN-1 anti-pattern) |
+| **1b-C — a separate `FrontendResolve` adapter wrapping `ServiceBackendsResolve`** | A new driven adapter in front of `MtlsResolve` that does frontend→backend, delegating the backend classification to the untouched `ServiceBackendsResolve`. | The `ServiceBackendsResolve` struct is byte-for-byte untouched (strongest DDN-1 compliance). | A new port + a new adapter + a new composition-root wiring for a translation that is *one map lookup*; the intercept call site (`mtls_intercept_worker.rs`) would call the wrapper, a real edit to the security-critical call path. Ceremony out of proportion to a map lookup; the wrapper still needs the frontend-allocator binding as input. | **VIABLE but heavier** — prefer 1b-A unless review insists the struct be byte-untouched |
+
+**RATIFIED: 1b-A** — extend `BackendIndex` with an additive
+`by_frontend → ServiceId` map and an additive `classify` translation arm,
+reusing the existing healthy-set selection logic. It is the smallest faithful
+realization of Cilium's split, keeps a direct-backend dial working
+(backward-compatible), and the resolve struct is *extended in place* rather than
+wrapped or duplicated.
+
+**BLOCKER-2 RESOLVED → pinned: the multi-healthy-backend selection rule is
+deterministic first-by-`Ord` for v1.** v1 is single-replica today (the choice is
+degenerate — one healthy backend), but a deterministic tie-break keeps DST
+replay-equivalence (`testing.md` § "Tier 1" — seed → bit-identical trajectory)
+intact and makes `classify` mutation-gate-able. Round-robin / load-aware
+selection is a named future churn-load concern, NOT v1 — it would introduce
+per-connection non-determinism the DST harness must model. This is an edit to
+`mtls_resolve_adapter.rs` — REV-1's DDN-1 "the intercept struct is provably
+untouched" is **superseded**: the struct is now *extended* (additively), which
+the user ratified by choosing the thin path. The DST `MtlsResolve` equivalence
+discipline (`development.md` § "Trait definitions specify behavior") applies — the
+re-keyed contract, including the first-by-`Ord` selection rule, MUST be pinned in
+the trait docstring + an equivalence test.
+
+### Active-termination posture — SETTLED (not re-litigated): NO `sock_destroy` in the thin path
+
+Per the corrected dispatch framing and research SQ5: **there is NO `sock_destroy`
+in the thin path — it is the wrong tool for a *terminating proxy*.** Backend death
+already propagates through the per-connection **pump task** + `TCP_USER_TIMEOUT` /
+keepalive on the worker proxy legs (`mtls_intercept_worker.rs:34`). The v1
+obligation is (a) a **Tier-3 churn test**: cycle a backend mid-connection → the
+client gets a prompt reset/error bounded by `TCP_USER_TIMEOUT`, not an indefinite
+hang; (b) confirm `TCP_USER_TIMEOUT` is tuned sanely. `sock_destroy` belongs ONLY
+to **#61's** future connect-time XDP-VIP-LB (no userspace proxy in path, so no
+pump task to surface the death) — recorded as #61 scope, NOT here. Even Cilium
+defaults TCP socket-termination OFF (research SQ5.3, `termination.go:212-219`), so
+"in-flight breaks, next dial is live" is consistent with the reference impl's own
+default, not a corner cut.
+
+## REV-2 / [REF] Changed byte-consistency contract (supersedes D-TME-10 / REV-1 DDN-2)
+
+| | REV-1 (headless v1 — superseded) | REV-2 (stable-frontend / ClusterIP split) |
+|---|---|---|
+| Answered `A` addr | the per-instance running-AND-healthy **backend** addr (`Backend.addr`) | the **stable per-`<job>` frontend** addr (1a-A) |
+| Byte-consistency claim | answered addr == the addr `MtlsResolve` recognizes (both = `Backend.addr`) | answered frontend addr == the addr `MtlsResolve` is re-keyed to **recognize AND translate** to a current live backend |
+| `MtlsResolve` key | backend addr (`by_addr`) | frontend addr → `ServiceId` → live backend (`by_frontend`, 1b-A) |
+| Staleness on cycle | answer goes STALE (SQ1) | answer is STABLE; the dataplane re-resolves the backend per-connect |
+| Positive TTL | `A_RECORD_TTL_SECS = 1` (load-bearing — backend addr is volatile) | TTL-moot by construction; MAY relax (DNS research sub-q 4) — a named v1 sub-decision, not auto-changed |
+| VIP framing | "NO VIP, NO #167" | a stable IPv4 frontend is **VIP-SHAPED** but delivered via nft-TPROXY, NOT XDP/#61/#167 (research Conflict 2: a re-scoping, not a contradiction) |
+
+## REV-2 / [REF] Frontend-key contract (Finding-1 — the `by_frontend` key is `(F, listener.port, Proto)`, NOT a bare `SocketAddrV4` and NOT a bare `Ipv4Addr`)
+
+> **2nd-round Finding 1 (High) correction:** the prior tightening pinned
+> `by_frontend: BTreeMap<SocketAddrV4, ServiceId>` and claimed `tcp/53`/`udp/53`
+> were "distinguishable with no schema change." That is FALSE — a `SocketAddrV4`
+> is ip+port only and collides the two protos on the key. The key now carries the
+> proto axis (`FrontendKey = (SocketAddrV4, Proto)`, option (b)); the "no schema
+> change" wording is removed. Grounded below on PRODUCTION code — the prior
+> round's "production TCP-only proof" (`backend_discovery_bridge.rs:485`) was a
+> `#[cfg(test)]` test helper and is NOT relied upon.
+
+The review surfaced that REV-2 mostly described the binding as `<job> → frontend
+addr` (an `Ipv4Addr`), while the resolve path is keyed by a full `SocketAddrV4`
+and `ServiceId` carries a port AND proto axis. The contract is now pinned
+unambiguously, grounded on live code:
+
+- **`resolve` receives a `SocketAddrV4`, not an `Ipv4Addr`.**
+  `async fn resolve(&self, orig_dst: SocketAddrV4)` (`mtls_resolve_adapter.rs:521`)
+  → `classify(orig_dst)` is a point-lookup on ip+port. The `SocketAddrV4` carries
+  no proto, so the `by_frontend` key MUST add a `Proto` field for collision-safety
+  (below); the captured proto is plumbed into the lookup (the v1 capture is TCP,
+  so the plumbed proto is `Proto::Tcp`).
+- **The frontend key is `(F, listener.port, listener.protocol)`.** `F` is the
+  per-`<job>` frontend IP that the `FrontendAddrAllocator` (1a-A) assigns;
+  `listener.port` is the **same port the backend row already carries** —
+  `Backend.addr = SocketAddr::new(IpAddr::V4(workload_addr ⟂ host_ipv4),
+  listener.port.get())` (`backend_discovery_bridge.rs:364-367`); `listener.protocol`
+  is the L4 proto the same row's `ServiceId` already encodes. The frontend addr
+  re-uses the backend's listener port verbatim; only the IP changes
+  (`workload_addr → F`). Thus **one frontend IP `F` fronting N distinct
+  `(port, proto)` listeners yields N distinct `by_frontend` entries**:
+  `(F, p1, Tcp) → ServiceId_1`, `(F, p2, Udp) → ServiceId_2`, …
+- **The `ServiceId` VALUE is the row's existing content-addressed `ServiceId`,
+  not a re-derivation.** `ServiceId::derive(vip, port, proto, "service-map")`
+  (`id.rs:1189`) is keyed by `(vip, port, proto)` — the **proto axis is real**
+  (`Proto { Tcp, Udp }`, `as_u8()` → `6`/`17`, `backend_key.rs:70-79`), inserted
+  between the port and purpose so two listeners on the same `(vip, port)` but
+  different L4 proto derive DISTINCT ids (the CoreDNS `tcp/53`+`udp/53` case; the
+  same derivation `listener_facts.rs:130` uses — note `listener_facts.rs:130` is
+  PRODUCTION, `backend_discovery_bridge.rs:130` is also production, both threading
+  `listener.protocol`). `by_frontend` carries the `ServiceId` already on the
+  `service_backends` rows it folds (`ServiceBackendRow.service_id`,
+  `backend_discovery_bridge.rs:389`) — it does NOT recompute it.
+- **The key MUST carry the proto axis (2nd-round Finding 1 — the prior "no schema
+  change / bare `SocketAddrV4`" claim was FALSE and is removed).** A bare
+  `SocketAddrV4` is ip+port ONLY — it **cannot distinguish `tcp/53` from
+  `udp/53`**. The `ServiceId` value only disambiguates AFTER the lookup, so two
+  same-`(F, port)` rows on different protos would **collide on the key** before
+  the value is ever read. The earlier "TCP/UDP same-port distinguishable with no
+  `by_frontend` schema change" framing is therefore false and is struck.
+- **The v1 path is NOT TCP-only at the row-producing layer — option (b) chosen,
+  grounded on PRODUCTION code:**
+  - The prior round cited `backend_discovery_bridge.rs:485` (`protocol:
+    Proto::Tcp`) as a "production TCP-only proof." It is **NOT production** — it
+    is a `#[cfg(test)] mod tests` helper `fn listener(...)`
+    (`backend_discovery_bridge.rs:451` opens the test module, `:481` is the
+    helper, `:485` is the line). It is a test fixture and is NOT relied upon.
+  - The PRODUCTION row-producing path is **proto-aware and UDP-admissible**:
+    admission parses `"udp" => Proto::Udp` (`aggregate/mod.rs:568`;
+    `workload_spec.rs:1009`; the listener carries `protocol: Proto`,
+    `workload_spec.rs:547`); the bridge's PRODUCTION `reconcile`
+    (`backend_discovery_bridge.rs:344-371`) emits a `Backend` row for **every**
+    listener regardless of `listener.protocol` — there is NO production proto
+    filter; the hydrator threads `proto: listener.protocol`
+    (`service_map_hydrator.rs:130`) behind a C3 guard that **refuses to default to
+    `Proto::Tcp`** (`:59-80`, `:120` → `ServiceProjectionError::NoListenerProto`).
+    UDP listeners with running backends are representable today (the
+    `udp-service-support` machinery exercises them).
+  - The existing `BackendIndex.by_addr: BTreeMap<SocketAddrV4, …>`
+    (`mtls_resolve_adapter.rs:214`) is itself proto-blind; a bare-`SocketAddrV4`
+    `by_frontend` would inherit the same hole.
+  - **Therefore: widen the key.** Option (a) ("v1 TCP-only via an explicit
+    PRODUCTION filter") is REJECTED — no such filter exists to cite, and adding
+    one would fight the C3 guard (a designed regression onto the proto-aware
+    path). Option (b) is chosen.
+- **Why the lookup still keys `Proto::Tcp` in v1 (and why that is NOT "dropping
+  the axis"):** the dataplane intercept (Path-A) is **TCP-only at the WORKER
+  layer** today — the outbound capture accepts a TCP listener and dials
+  `std::net::TcpStream::connect` (`accept_outbound_and_recover_orig_dst` +
+  `spawn_cleartext_passthrough`, `mtls_intercept_worker.rs:792-794`, `:1187`), so
+  every captured `orig_dst` is a TCP dial. The resolve key therefore carries
+  `Proto::Tcp` *because the capture is TCP*, not because the index lacks the axis.
+  When the intercept path later captures UDP, the `Proto` is already a key field,
+  so `tcp/53`/`udp/53` are distinguished **with no `by_frontend` schema change** —
+  the widening lands in the *capture/plumbing* (surface the captured proto into
+  `resolve`), never in the index key.
+
+**Pinned key type:** `by_frontend: BTreeMap<FrontendKey, ServiceId>` where
+`FrontendKey = (SocketAddrV4, Proto)` — the `SocketAddrV4` is `(F,
+listener.port)` and `Proto` is `listener.protocol`. One frontend IP `F` × N
+distinct `(port, proto)` listeners = N entries. (This SUPERSEDES the prior
+`BTreeMap<SocketAddrV4, ServiceId>` declaration — the bare-`SocketAddrV4` key was
+the collision hole 2nd-round Finding 1 names.) `FrontendKey` MAY be a named
+newtype `(SocketAddrV4, Proto)` for call-site clarity (DELIVER detail); the
+CONTRACT is that the key discriminates proto.
+
+## REV-2 / [REF] Frontend-subnet coherence contract (Finding-3 tightening — DNS↔resolve race made non-exploitable)
+
+REV-2 requires an answered `F` to NEVER miss `MtlsResolve` (a miss →
+`NonMesh` → cleartext `PassThrough`, `mtls_intercept_worker.rs:1112` /
+`spawn_cleartext_passthrough` `:1180` — a fail-OPEN security regression). Because
+`name_index` (DNS) and `by_frontend` (resolve) are **separate readers** of the
+same `service_backends` rows, a naïve build could let DNS answer `F` before
+`by_frontend` learns it. Two complementary mechanisms are pinned; **both** are
+required.
+
+### (i) Ordering — `by_frontend` is updated BEFORE `name_index` (coherence option (b), CHOSEN)
+
+The reviewer offered (a) "DNS answers `F` only after the resolve index holds the
+`by_frontend` entry + a healthy backend" and (b) "update both projections from
+one ordered drain/barrier so `by_frontend` is never behind `name_index`."
+**Option (b) is CHOSEN.** Rationale, grounded on the live model:
+
+- The "one source, three readers" contract already folds the **same
+  `service_backends` rows** through the **same List-then-Watch + single-owner
+  drain** (`mtls_resolve_adapter.rs:56-87`, `:480-518`). `name_index` and
+  `by_frontend` both derive from those rows, so a **single ordered drain** that
+  applies a batch of rows to `by_frontend` **before** it makes the corresponding
+  `<job> → F` binding visible to `name_index` is the natural shape — the readers
+  are not independent watchers in this design, they are projections off one
+  ordered apply.
+- Option (a) is a *weaker* restatement of the same idea expressed as a read-time
+  gate ("DNS checks resolve first"); (b) makes it a *write-time* barrier (resolve
+  is updated first), which is the stronger and simpler invariant — there is no
+  per-query cross-reader lookup, and the ordering is established once at apply
+  time. (a) would also reintroduce a cross-reader coupling the DDN-1 sibling-reader
+  decision deliberately avoids.
+- **Pinned ordering invariant:** within the single ordered drain, for any batch
+  that binds `<job> → F`, `by_frontend` (and a healthy backend for `F`'s
+  `ServiceId`) is applied BEFORE `name_index` exposes `F` as the answer for
+  `<job>`. DNS therefore never answers an `F` the resolve index has not already
+  learned. (DST-assertable as an ordering invariant on the drain.)
+
+### (ii) Fail-closed-on-frontend-subnet-miss (the structural defense — ADOPTED)
+
+The stronger structural defense the reviewer asked to evaluate **is sound and is
+ADOPTED**, because the live code makes it both necessary and safe:
+
+- **Necessary as defense-in-depth:** ordering (i) closes the steady-state race,
+  but a withdrawn-`<job>` window, a `Lagged`-relist gap, or any future reader
+  reordering could still present a frontend-subnet `orig_dst` that misses
+  `by_frontend`. Treating that as `NonMesh`/cleartext is the fail-open footgun.
+- **Safe (does NOT break legitimate non-mesh egress):** the live rustdoc pins
+  *why* a general miss must stay `NonMesh` — "making a miss fail-closed would
+  break legitimate external / non-mesh egress" (`mtls_resolve_adapter.rs:128-130`).
+  The subnet-membership discriminator resolves that tension exactly: a miss whose
+  `orig_dst.ip() ∈ WORKLOAD_FRONTEND_BASE (10.98.0.0/16)` is **not** a non-mesh
+  dst — `10.98.0.0/16` is the subnet **dedicated to mesh frontends** (ADR-0072 §
+  Pinned frontend subnet; disjoint from VIP `10.96.0.0/16` and workload
+  `10.99.0.0/16`), so a workload only ever lands there by dialing a frontend `F`.
+  A miss there is a mesh dial that is *early* (race) or to a *withdrawn* `<job>` —
+  never legitimate cleartext. A miss **outside** the subnet keeps today's
+  behaviour verbatim (fall through to `by_addr`; a true non-mesh dst → `NonMesh` →
+  cleartext, by design).
+
+- **Pinned classify arm** (see the pinned-signatures block above for the exact
+  shape): after the `by_frontend` hit/`MeshUnreachable` arms and before the
+  general `by_addr` fall-through, insert: `else if orig_dst.ip() ∈ 10.98.0.0/16
+  { MeshUnreachable }`. `MeshUnreachable` (the existing fail-closed arm,
+  `mtls_intercept_worker.rs:1113` → `OutboundAction::FailClosed` → drop leg-F, NO
+  cleartext, NO dial) is the right verdict: the worker refuses and the client
+  retries — exactly the negative-but-honest posture, consistent with the DDN-8
+  NXDOMAIN/fail-honest contract on the DNS side.
+
+**Net guarantee:** ordering (i) makes the steady-state race not occur;
+fail-closed-on-subnet-miss (ii) makes any residual race **non-exploitable** — the
+worst case is a refused connect + client retry (bounded, honest), NEVER silent
+cleartext to a should-be-mesh peer. The dataplane fails **closed** for mesh,
+which is the required posture. (ii) is independent of projection ordering, so it
+holds even if a future reader reorders.
+
+> **Membership-check primitive (DELIVER, not improvised here):** the
+> `orig_dst.ip() ∈ 10.98.0.0/16` test is a CIDR-containment check against the
+> pinned `WORKLOAD_FRONTEND_BASE`. The exact accessor (an `Ipv4Net::contains`
+> on the const, or an equivalent mask compare) is a DELIVER surface detail; the
+> CONTRACT is the membership test + the `MeshUnreachable` verdict. The crafter
+> MUST NOT invent a broader "is this any reserved subnet" helper — the test is
+> specifically membership in the dial-by-name frontend block.
+
+## REV-2 / [REF] Frontend lifecycle contract (Finding-2 tightening — `F` is per-logical-workload; WITHHOLD on zero-healthy, RELEASE only on deletion)
+
+The review found a self-contradiction: 1a-A pins the allocator to "retain `F`
+across alloc cycles and release only when the logical workload is removed," but
+the 03-01 wording said zero healthy backends → "the allocator releases OR the
+index withholds it." Releasing `F` on a *transient* zero-healthy state destroys
+the stability property (the whole point of 1a-A) and reintroduces the SQ1
+stale-cached-`F` failure. The lifecycle is now pinned with a single answer.
+
+**`F` is a property of the LOGICAL WORKLOAD (`<job>`), not of any allocation and
+not of current backend health.** The two distinct events:
+
+| Event | `FrontendAddrAllocator` | `name_index` (DNS answer) | Net observable |
+|---|---|---|---|
+| **Alloc cycle** (stop → new `AllocationId` → new `workload_addr`), `<job>` still declared | **RETAINS `F`** (idempotent `assign(<job>)` returns the same `F`) | answers the SAME `F` once a running-AND-healthy backend exists | `getent` returns the SAME `F` across the cycle; next connect lands the NEW backend (the SQ1-elimination AC, 02-02) |
+| **Transient zero healthy backends** (`<job>` declared, all backends momentarily down/unready) | **RETAINS `F`** — does NOT release | **WITHHOLDS the answer → NXDOMAIN** (+ 1 s SOA, DDN-8) | `getent` → NXDOMAIN *now*; the moment a backend goes running-AND-healthy the SAME `F` resolves again (no churn of the addr) |
+| **Logical-workload deletion** (`<job>` undeployed/removed) | **RELEASES `F`** (back to the free block) | WITHHOLDS → NXDOMAIN | `getent` → NXDOMAIN; a later re-deploy of `<job>` MAY draw a different `F` (the binding genuinely ended) |
+
+**The withhold seam is the `name_index`, not the allocator.** The `name_index`
+already gates its answer on "does this `<job>` have ≥1 running-AND-healthy
+backend right now" (DDN-2 — the running-AND-healthy fold). Zero-healthy → the
+`name_index` simply has no answer to give → NXDOMAIN. The allocator's `<job> → F`
+binding is **orthogonal** to that health gate: it survives the zero-healthy
+window so the addr is stable when health returns. Only the explicit
+logical-workload-removal signal drives `release(<job>)`.
+
+This also pins the boundary the DDN-8 negative contract already draws:
+zero-healthy (transient) and unknown/withdrawn (deleted) **both NXDOMAIN** on the
+DNS side (v1 does not distinguish them at the wire, ADR-0072 contract table) —
+but they differ at the **allocator**: transient retains `F`, deletion releases
+it. The DNS observable is identical; the addressing state is not.
+
+**Reconciled wording:** the 03-01 row above and the 1a-A allocator description
+now both say the SAME thing — **WITHHOLD-not-release on zero-healthy; release only
+on logical-workload deletion.** No reading of either text can land on "release on
+zero backends."
+
+## REV-2 / [REF] Reuse Analysis (mandatory hard gate — REV-2 delta)
+
+| Capability needed | Existing? | Verdict | Evidence |
+|---|---|---|---|
+| Stable per-`<job>` frontend IPv4 addr | NO — `workload_addr` is per-`AllocationId` (SQ1) | **CREATE NEW** (1a-A; the per-`<job>` `FrontendAddrAllocator` + `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`) | `veth_provisioner.rs:528-532,673-729`; research SQ1; ADR-0072 § Collision check |
+| Frontend→live-backend translation in resolve | PARTIAL — `BackendIndex` resolves backend-addr→`Mesh`; NO frontend key | **EXTEND** (1b-A; additive `by_frontend` map + `classify` arm, reuse the healthy-set selection) | `mtls_resolve_adapter.rs:207-300` |
+| Per-connection re-resolution against the live healthy set (churn) | YES — `resolve` + List-then-Watch drain | **REUSE verbatim** (the churn half already works; only the key changes) | `mtls_resolve_adapter.rs:521-540`; research SQ2.1 |
+| nft-TPROXY capture/handshake/kTLS/splice datapath | YES — ADR-0071 Path-A | **REUSE verbatim** (only the captured `orig_dst` changes — now a frontend addr) | ADR-0071; research SQ6 delta table |
+| `name_index` `<job>` → answer | UNBUILT (01-03) — REV-1 mapped name → backend addrs | **RE-SPEC (unbuilt)** — map `<job>` → stable frontend addr (1a-A) | `dns_responder/mod.rs:17-22`; research SQ3 |
+| `MeshServiceName`, `NameAnswer`, `wire` codec, SOA-TTL | YES — committed 01-01/01-02 | **REUSE UNCHANGED** (`SocketAddrV4` substrate + codec are addr-agnostic) | `id.rs:953-961`; `wire.rs`; research SQ3 |
+| OQ-1 `SpiffeId` → `<job>` accessor | PARTIAL — no job-segment accessor | **EXTEND (still needed)** — now to key the frontend table + group rows by `<job>` | `id.rs` `SpiffeId::path`; ADR-0072 OQ-1 |
+| In-flight churn handling (`sock_destroy`) | N/A | **NOT BUILT (v1)** — pump-task + `TCP_USER_TIMEOUT` covers it; `sock_destroy` is #61 scope | `mtls_intercept_worker.rs:34`; research SQ5 |
+| `service_map_hydrator` mesh-gate vs the frontend subnet | YES — gates `Backend.addr ∈ 10.99.0.0/16` | **NO CHANGE (confirmed)** — the frontend subnet `10.98.0.0/16` is disjoint from `10.99.0.0/16`, so a frontend addr never enters the mesh-gate membership test; the spike's standalone probe (no XDP) confirmed the frontend addr hits egress TPROXY and is not blackholed (findings § mesh-gate note) | `service_map_hydrator.rs:265-274`; findings § mesh-gate note |
+
+**Gate verdict: PASS (1 CREATE-NEW justified, rest REUSE/EXTEND).** The one
+CREATE-NEW (the per-`<job>` frontend allocator) has no existing alternative;
+every other surface is REUSE or additive EXTEND. The thin path holds: NO XDP, NO
+`SERVICE_MAP`, NO AAAA/IPv6 widening, NO #167 IPAM, NO #61 reactivation.
+
+## REV-2 / [REF] C4 Level 2 — Container (revised flow)
+
+```mermaid
+C4Container
+  title Container Diagram — dial-by-name (REV-2 stable-frontend / ClusterIP split)
+  Person(app, "Unmodified workload", "getaddrinfo(<job>.svc.overdrive.local) + connect; no SDK")
+  Container_Boundary(agent, "Overdrive node-agent (one process)") {
+    Container(dns, "DnsResponder", "in-agent, hickory-proto codec + IP_PKTINFO loop", "Answers <job>.svc.overdrive.local with the STABLE per-<job> frontend addr F")
+    Container(nameidx, "name_index (projection)", "<job> -> stable F; WITHHOLDS on zero-healthy", "Maps <job> -> stable frontend addr F (REV-2: NOT -> backend addrs); gates Backend.healthy == true")
+    Container(drain, "single ordered drain", "one owner over the shared service_backends rows (Finding-3 barrier)", "Applies each row batch to by_frontend (+ a healthy backend) BEFORE exposing F to name_index — write-time ordering, option (b)")
+    Container(falloc, "FrontendAddrAllocator", "per-<job> IPv4, stable across alloc cycles (1a-A)", "Binds <job> -> F; the Overdrive ClusterIP analogue")
+    Container(tproxy, "nft-TPROXY interceptor", "ADR-0071 Path-A (reused verbatim)", "Captures the connection to (F, listener.port); recovers orig_dst verbatim")
+    Container(resolve, "MtlsResolve (re-keyed, 1b-A)", "by_frontend: BTreeMap<FrontendKey,ServiceId>, FrontendKey=(SocketAddrV4,Proto)", "Translates (F, listener.port, proto) -> current running-AND-healthy backend B; three-way classify (hit -> Mesh; frontend-subnet miss -> MeshUnreachable fail-closed; else by_addr); enforces SPIFFE mTLS")
+    Container(pump, "per-connection pump task", "TCP_USER_TIMEOUT / keepalive (mtls_intercept_worker.rs:34)", "Surfaces backend death; bounds in-flight churn (no sock_destroy)")
+  }
+  ContainerDb(obs, "ObservationStore (service_backends)", "running-AND-healthy backend rows", "ONE source; the single ordered drain is the sole reader feeding both projections")
+  Container(backend, "Server workload", "a running mesh backend at B in its own netns", "")
+
+  Rel(app, dns, "1. resolves <job>.svc.overdrive.local via")
+  Rel(dns, nameidx, "reads stable frontend addr F from")
+  Rel(drain, obs, "List-then-Watch + relist-on-Lagged over the SAME rows")
+  Rel(drain, falloc, "looks up / binds <job> -> F via")
+  Rel(drain, resolve, "STEP A: applies row batch to by_frontend (+ healthy backend) FIRST")
+  Rel(drain, nameidx, "STEP B (after A): exposes F as <job>'s answer — ordering barrier")
+  Rel(app, tproxy, "2. connects to (F, listener.port); captured by")
+  Rel(tproxy, resolve, "hands orig_dst = (F, listener.port) to")
+  Rel(resolve, backend, "3. mTLS-originates to current backend B; pumped by")
+  Rel(pump, backend, "detects backend death within TCP_USER_TIMEOUT bound")
+```
+
+## REV-2 / [REF] Pinned signatures (FINAL — 1a-A / 1b-A ratified)
+
+```rust
+// 1a-A (RATIFIED) — NEW per-<job> frontend allocator. Sibling to NetSlotAllocator
+//        on AppState. Boot-rebuilt (empty-on-boot, NetSlotAllocator precedent).
+pub struct FrontendAddrAllocator { /* <job> -> Ipv4Addr, Arc<Mutex<BTreeMap>> */ }
+impl FrontendAddrAllocator {
+    pub fn new() -> Self;
+    pub fn assign(&self, job: &WorkloadId /* or MeshServiceName */) -> Result<Ipv4Addr, FrontendAddrExhausted>; // idempotent per <job>, atomic check-and-act (development.md § Check-and-act)
+    pub fn release(&self, job: &WorkloadId);                  // ONLY on logical-workload DELETION (undeploy/removal).
+                                                             //   NOT on alloc cycle, NOT on transient zero-healthy backends —
+                                                             //   F is per-logical-workload (Finding-2; § Frontend lifecycle contract).
+                                                             //   Zero-healthy is handled by the name_index WITHHOLDING the answer
+                                                             //   (→ NXDOMAIN), NOT by releasing F.
+    pub fn snapshot(&self) -> BTreeMap</*job*/, Ipv4Addr>;
+}
+// PINNED const: WORKLOAD_FRONTEND_BASE = 10.98.0.0/16 (Ipv4Net) — distinct from
+//   WORKLOAD_SUBNET_BASE (10.99.0.0/16) AND the service-VIP default (10.96.0.0/16,
+//   VipRange::default()); collision-checked (ADR-0072 § Collision check). The
+//   exact slot-within-block arithmetic + ceiling is a DELIVER detail (mirror
+//   NetSlotAllocator's pure smallest-free scan); the block + the public surface
+//   above are the contract.
+
+// 1b-A (RATIFIED) — EXTEND BackendIndex (additive; mtls_resolve_adapter.rs:207).
+//        The existing by_addr path is preserved; by_frontend is the new translation.
+type FrontendKey = (SocketAddrV4, Proto); // (F, listener.port, listener.protocol)
+                                          // MAY be a named newtype (DELIVER); the
+                                          // contract is that it discriminates proto.
+struct BackendIndex {
+    by_addr: BTreeMap<SocketAddrV4, BTreeMap<ServiceId, Backend>>,     // UNCHANGED
+    addrs_by_service: BTreeMap<ServiceId, Vec<SocketAddrV4>>,          // UNCHANGED
+    by_frontend: BTreeMap<FrontendKey, ServiceId>,                     // NEW (REV-2)
+}
+// FINDING-1 (2nd round, High) — by_frontend MUST carry the proto axis. A bare
+//   SocketAddrV4 is ip+port ONLY and cannot distinguish tcp/53 from udp/53 — two
+//   same-(F, port) rows on different protos collide on the key BEFORE the ServiceId
+//   value (which only disambiguates AFTER the lookup) is read. So the key is
+//   FrontendKey = (SocketAddrV4, Proto) = (F, listener.port, listener.protocol).
+//   F is the per-<job> frontend IP (1a-A); listener.port is the SAME port the
+//   backend row carries (Backend.addr = (workload_addr, listener.port),
+//   backend_discovery_bridge.rs:364-367, PRODUCTION reconcile); listener.protocol
+//   is the L4 proto the row's ServiceId already encodes (ServiceId::derive,
+//   id.rs:1189 — proto axis is REAL: Proto { Tcp, Udp }, as_u8 -> 6/17,
+//   backend_key.rs:70-79). One frontend IP F fronting N distinct (port, proto)
+//   listeners yields N distinct by_frontend entries: (F, p1, Tcp)->ServiceId_1,
+//   (F, p2, Udp)->ServiceId_2, ... The ServiceId VALUE is the SAME content-addressed
+//   ServiceId on the folded service_backends rows (listener_facts.rs:130 / the
+//   bridge derive it) — by_frontend does NOT re-derive it.
+//
+// PRODUCTION evidence option (b) is the only groundable choice (option (a),
+//   "TCP-only via a production filter," REJECTED — no such filter exists, and one
+//   would fight the C3 guard that refuses proto coercion):
+//   - backend_discovery_bridge.rs:485 (protocol: Proto::Tcp) is a #[cfg(test)]
+//     TEST HELPER (mod tests opens :451; fn listener at :481), NOT production —
+//     the prior round's "production TCP-only proof" was invalid and is dropped.
+//   - PRODUCTION admission is proto-aware/UDP-admissible: "udp" => Proto::Udp
+//     (aggregate/mod.rs:568, workload_spec.rs:1009); the bridge reconcile
+//     (:344-371) emits a Backend row for EVERY listener with NO proto filter; the
+//     hydrator threads proto: listener.protocol (service_map_hydrator.rs:130)
+//     behind the C3 guard (:120) that refuses to default to Tcp.
+//   So a bare-SocketAddrV4 key would silently collide a UDP <job> with a TCP one
+//   on (F, port). The widened key is collision-free by construction.
+//
+// WHY the v1 lookup keys Proto::Tcp (and why that is NOT dropping the axis): the
+//   dataplane intercept (Path-A) is TCP-only at the WORKER layer today — the
+//   outbound capture accepts a TCP listener and dials TcpStream::connect
+//   (mtls_intercept_worker.rs:792-794, :1187), so every captured orig_dst is TCP.
+//   The plumbed proto is Tcp BECAUSE the capture is TCP. When the intercept later
+//   captures UDP, Proto is already a key field — tcp/53 vs udp/53 distinguished
+//   with no by_frontend schema change; the widening lands in the capture/plumbing
+//   (surface the captured proto into resolve), never in the index key.
+//
+// DELIVER plumbing note: resolve currently receives orig_dst: SocketAddrV4 only
+//   (mtls_resolve_adapter.rs:521). Keying on Proto requires the captured L4 proto
+//   to reach classify. v1 captures TCP only (above), so a Proto::Tcp default at
+//   the call site is correct for v1; the resolve signature widening to carry proto
+//   is the named future-UDP plumbing step, NOT an index-key change.
+//
+// classify(orig_dst, proto): // orig_dst: SocketAddrV4 = (ip, port); proto from capture (v1: Tcp)
+//   let key: FrontendKey = (orig_dst, proto);
+//   if let Some(svc) = by_frontend.get(&key) {
+//       // matched a (F, listener.port, proto) frontend → translate
+//       select the FIRST-by-Ord running-AND-healthy backend for `svc` → Mesh;
+//       else MeshUnreachable  // svc known but no healthy backend right now (fail-closed)
+//   } else if orig_dst.ip() ∈ WORKLOAD_FRONTEND_BASE (10.98.0.0/16) {
+//       // FINDING-3 fail-closed-on-frontend-subnet-miss arm: a miss WITHIN the
+//       // dedicated mesh-frontend subnet is a mesh dial that arrived before the
+//       // index was ready (race) OR to a withdrawn <job>. NOT NonMesh/cleartext.
+//       MeshUnreachable  // refuse, NO cleartext — see § Frontend-subnet coherence contract
+//   } else {
+//       // a miss OUTSIDE the frontend subnet stays today's behaviour: fall through
+//       // to the existing by_addr lookup; a true non-mesh dst → NonMesh (cleartext,
+//       // by design — legitimate non-mesh egress, mtls_resolve_adapter.rs:126-130).
+//       existing by_addr lookup (Mesh / MeshUnreachable / NonMesh)
+//   }
+//
+// Multi-healthy selection rule PINNED (BLOCKER-2): deterministic first-by-Ord
+//   (v1 single-replica = degenerate; the deterministic tie-break preserves DST
+//   replay-equivalence). Re-keyed contract — including this selection rule, the
+//   (F, listener.port, Proto) key type, and the fail-closed-on-frontend-subnet-miss arm —
+//   pinned in the MtlsResolve trait docstring + an equivalence test (development.md).
+```
+
+01-01 / 01-02 signatures are UNCHANGED. 01-03's `answer_for` signature is
+UNCHANGED (`answer_for(name, qtype, &NameIndex) -> NameAnswer`); only what the
+`NameIndex` *maps to* changes (frontend addr, not backend addrs). `DnsResponder`
++ `DnsResponderError` (02-01) are UNCHANGED.
+
+## REV-2 / [REF] Per-step roadmap re-scope (FINAL spec — the roadmap.json rewrite + re-DISTILL is a follow-on, NOT executed here)
+
+> Steps **01-01 and 01-02 are COMMITTED and reused UNCHANGED** (addr-agnostic).
+> Steps 01-03 onward must be re-DISTILLed against the stable-frontend contract.
+> **This DESIGN pass does NOT rewrite `roadmap.json` or re-run DISTILL** — that
+> is the follow-on DISTILL/DELIVER wave. The per-step delta below is the FINAL
+> specification of what that follow-on must do: exact per-step status, position,
+> dependencies, and AC deltas. The two forks are ratified, so every delta below
+> is locked (no fork-dependent ambiguity remains).
+
+| Step | Status | REV-2 delta |
+|---|---|---|
+| **01-01** `MeshServiceName` | **COMMITTED — UNCHANGED** | The name grammar is addr-agnostic. No change. |
+| **01-02** `NameAnswer` + wire codec | **COMMITTED — UNCHANGED** | `Records(Vec<SocketAddrV4>)` holds one stable frontend addr; the codec renders whatever addr it is handed (research SQ3). No change. The `A_RECORD_TTL_SECS=1` MAY relax to a longer TTL now the answer is stable — a *named, optional* re-spec (DNS research sub-q 4), NOT auto-applied; if changed, it is a one-line `wire.rs` edit re-ratified, NOT a contract change to `NameAnswer`. |
+| **01-03** `NameIndex` + `answer_for` | **RE-DISTILL** | `name_index` maps `<job>` → **stable frontend addr** (1a-A), NOT `<job>` → backend-addr set. `answer_for` signature UNCHANGED; `Records(vec![frontend_addr])` (one stable addr per `<job>`). The `Backend.healthy == true` gate moves from "which addr we answer" (REV-1) to "is this `<job>` currently resolvable at all" (does it have ≥1 running-AND-healthy backend → bind/keep its frontend addr; else NXDOMAIN). OQ-1 `SpiffeId`→`<job>` accessor STILL needed (to key the frontend table + group rows). New dependency: `name_index` / its probe consumes the `FrontendAddrAllocator` binding. Scenarios S-DBN-ANSWER-01/04, S-DBN-IDX-01..04 re-spec: assert the answered addr is the *stable frontend* (byte-equal across an alloc cycle), not a per-instance backend addr. |
+| **NEW step `01-04` — `FrontendAddrAllocator` (1a-A)** | **NEW** | The per-`<job>` stable-frontend allocator + the `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16` const + the empty-on-boot rebuild story. Pure assign/release/snapshot (default-lane unit + mutation testable, mirroring `NetSlotAllocator`'s pure `smallest_free_slot` split). **Position/deps:** lands AFTER 01-02 (no dep on the name layer; it is pure addressing) and BEFORE the 01-03 re-DISTILL (which consumes the `<job>→frontend` binding). Independent of 01-01/01-02 surface. **BLOCKER-1 RESOLVED** (spike WORKS — the `10.98.0.0/16` block is routable+capturable through the shipped datapath); **no dataplane gate remains** on this step. The atomic per-`<job>` claim follows `development.md` § "Check-and-act must be atomic" (the `assign` return is the claim). |
+| **NEW step `02-00` — `MtlsResolve` re-key (1b-A)** | **NEW** | Extend `BackendIndex` with `by_frontend: BTreeMap<FrontendKey, ServiceId>` where **`FrontendKey = (SocketAddrV4, Proto)` = `(F, listener.port, listener.protocol)`** (2nd-round Finding-1; § Frontend-key contract — a bare `SocketAddrV4` cannot distinguish `tcp/53` from `udp/53`; the production row-producing path is proto-aware/UDP-admissible per `service_map_hydrator.rs:130` + the C3 guard, so the key carries proto; v1 captures TCP at the worker layer, so the plumbed proto is `Proto::Tcp`). The additive `classify` arm is a **THREE-way branch** (§ Frontend-key/coherence contracts): (1) `by_frontend` HIT → `ServiceId` → first-by-`Ord` running-AND-healthy backend → `Mesh` (else `MeshUnreachable`); (2) **MISS but `orig_dst.ip() ∈ 10.98.0.0/16` → `MeshUnreachable` (fail-closed-on-frontend-subnet-miss, Finding-3 — NO cleartext)**; (3) MISS outside the subnet → fall through to today's `by_addr` lookup (a true non-mesh dst → `NonMesh`/cleartext, by design). The re-keyed `MtlsResolve` trait-docstring contract MUST pin all three: the `(F, listener.port, Proto)` key type, the first-by-`Ord` selection rule, AND the fail-closed-on-frontend-subnet-miss arm + the equivalence test (`development.md` § "Trait definitions specify behavior"). **Coherence (Finding-3):** the `<job>→frontend` binding (from 01-04) is fed into the resolve index via a SINGLE ordered drain that updates `by_frontend` BEFORE `name_index` exposes `F` (option (b); § Frontend-subnet coherence contract). **Position/deps:** depends on 01-04 (the `<job>→frontend` truth it indexes); lands BEFORE 02-01 (the composition root wires the re-keyed resolve) and BEFORE 02-02 (the walking-skeleton oracle exercises the translation). Edits `mtls_resolve_adapter.rs` — REV-1's "untouched" is superseded (user-ratified). **BLOCKER-2 RESOLVED** — selection rule pinned: deterministic first-by-`Ord`. |
+| **02-01** `DnsResponder` adapter + `run_server` wiring | **MOSTLY UNCHANGED** | The socket loop / bind / `IP_PKTINFO` / Earned-Trust gate are unchanged. The composition root additionally wires the `FrontendAddrAllocator` (construct + share on `AppState`) and the re-keyed resolve. The responder answers the frontend addr from `name_index`. |
+| **02-02** Walking skeleton (`getent` → resolve → mTLS) | **RE-DISTILL** | `getent <job>.svc.overdrive.local` now resolves to the **stable frontend addr F** (in `10.98.0.0/16`); the connection to F is captured by the production nft-TPROXY rule (BLOCKER-1 spike WORKS — no test hand-installs the capture); `MtlsResolve` (re-keyed) translates F → live backend → mTLS. The S-DBN-SINGLE-SRC oracle is RESTATED: feed F into the re-keyed `resolve`; assert it classifies `Mesh` and translates to a running-AND-healthy backend (NOT "F == `Backend.addr`"). **NEW AC — F stable across alloc cycle:** cycle the backend (stop → new alloc, new `AllocationId` → new `workload_addr`) mid-test → `getent` returns the **SAME** F; the next connect to F lands the NEW backend. This is the AC that proves the SQ1 staleness is eliminated. |
+| **NEW Tier-3 churn AC (lands in 02-02, may also be asserted in 03-01)** in-flight churn | **NEW** | **Cycle a backend mid-connection → the client gets a prompt reset/error bounded by `TCP_USER_TIMEOUT`, NOT an indefinite hang**; confirm `TCP_USER_TIMEOUT` is tuned sanely on the worker proxy legs (`mtls_intercept_worker.rs:34`). Backend death surfaces through the per-connection pump task + `TCP_USER_TIMEOUT`/keepalive — **NO `sock_destroy`** (the corrected framing: `sock_destroy` is the wrong tool for a terminating proxy and belongs to #61's future connect-time XDP-VIP-LB, NOT REV-2). Research SQ5 v1 posture; even Cilium defaults TCP socket-termination OFF (SQ5.3). Distinct from the "stable F across cycle" AC above — that proves the *next* dial is live; this proves the *in-flight* dial fails fast, not hangs. |
+| **03-01** NXDOMAIN honesty | **MINOR RE-DISTILL** | NXDOMAIN when a `<job>` has 0 running-AND-healthy backends. **The mechanism is WITHHOLD, NOT RELEASE (Finding-2 tightening, see § Frontend lifecycle contract):** on a *temporary* zero-healthy-backend state the `name_index` **WITHHOLDS the DNS answer** (→ NXDOMAIN + 1 s SOA, consistent with the DDN-2/DDN-8 fail-honest negative contract) — the `FrontendAddrAllocator` does **NOT** release `F`. `F` is a property of the **logical workload**, retained across alloc cycles and zero-healthy windows, and released ONLY on logical-workload deletion. So "after all backends stop, the frontend addr stops *resolving*" — the binding is *withheld at the index*, not torn down at the allocator; a re-deployed/recovered `<job>` keeps its SAME `F`. A withdrawn (deleted) `<job>` NXDOMAINs AND its `F` is released. (Releasing `F` on a transient zero-healthy state would destroy the stability property and reintroduce the SQ1 stale-cached-`F` behaviour — explicitly rejected.) |
+| **03-02** ping-pong demo + EDD | **UNCHANGED behaviorally** | Two services dial each other by stable frontend name; counters advance; each hop mTLS'd. The E05 EDD expectation is unchanged in shape. |
+
+**Net roadmap shape**: 2 committed steps unchanged + ~2 NEW steps (frontend
+allocator; resolve re-key) + 01-03 and 02-02 re-DISTILLed + minor 03-01 edit.
+Still far thinner than #61 (no XDP, no `SERVICE_MAP`, no IPv6-VIP, no #167).
+
+## REV-2 / [REF] BLOCKERS — resolutions (FINAL)
+
+- **BLOCKER-1 (dataplane capture of the frontend subnet) — RESOLVED → WORKS.**
+  Settled by a Tier-3 spike on a real kernel (`7.0.0-22-generic`):
+  `spike/findings-blocker1-frontend-addr-capture.md`. A non-`/30` frontend addr
+  (probe vector `10.96.0.1`) **routes out the workload netns via the per-netns
+  `default via <gateway>` route production ALREADY installs** (`veth_provisioner.rs`
+  `WorkloadVethStep::AddDefaultRoute`), is **captured by the destination-blind
+  egress nft-TPROXY** (`install_outbound_tproxy`, `mtls_intercept.rs`), and
+  `orig_dst` is recovered verbatim. Negative control (default route removed) →
+  `ENETUNREACH`. The capture is destination-blind, so the verdict holds for ANY
+  non-on-link addr → the pinned `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16` inherits
+  it directly. **No new routing/capture dataplane work; REV-2 stays thin** — the
+  existing nft rules already capture F; the nft rule set is NOT extended. (The
+  probe used `10.96.0.1` as a *routing test vector only*; the production subnet is
+  the collision-checked `10.98.0.0/16`, NOT `10.96.0.0/16`.)
+- **BLOCKER-2 (multi-replica selection rule, 1b-A) — RESOLVED → pinned.**
+  `resolve(F)` selects the **deterministic first-by-`Ord`** running-AND-healthy
+  backend for v1. Single-replica makes the choice degenerate today; a
+  deterministic tie-break preserves DST replay-equivalence and is
+  mutation-gate-able. Round-robin / load-aware is a named future churn-load
+  concern, NOT v1. Pinned in the `MtlsResolve` trait docstring + equivalence test
+  (CLAUDE.md "implement to the design — never invent API surface").
+- **Subnet collision check (NEW finding, surfaced as a near-blocker, resolved) —
+  the spike's `10.96.0.0/16` candidate is REJECTED.** Grepping the codebase for
+  reserved CIDRs (the dispatch's mandated pre-pin check) found a **total
+  collision**: `VipRange::default()` (`crates/overdrive-dataplane/src/allocators/vip_range.rs:204-234`,
+  ADR-0049 Alt-E) reserves the **entire `10.96.0.0/16`** for the service-VIP
+  allocator on every boot (absent an operator override), with live examples
+  `10.96.0.2/.10/.11`. Pinning the dial-by-name frontend on the same `/16` would
+  put two uncoordinated allocators on one block — the addressing-collision defect
+  class. **Resolved by pinning `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`** (disjoint
+  from both VIP `10.96.0.0/16` and workload `10.99.0.0/16`; unused; satisfies both
+  spike constraints). Full evidence in ADR-0072 § "Collision check". This is the
+  one new contradiction-with-shipped-code surfaced this pass — flagged, not picked
+  past.
+- **#61 corrected-scope statement (item 3) — still needs user approval before any
+  GitHub edit.** See § REV-2 / [REF] #61 reconciliation below. Agents MUST NOT
+  edit the issue unilaterally; the orchestrator relays the proposed text.
+
+## REV-2 / [REF] #61 reconciliation — PROPOSED corrected scope (do NOT edit GH; user-approval gate)
+
+#61's current "Out of scope: east-west via SPIFFE-ID/ObservationStore, NOT DNS"
+is outdated whitepaper §11 framing (the whitepaper is NOT SSOT — project memory
+*"East-west addressing model"* + *"Whitepaper is OUTDATED"*). The ratified model:
+**unmodified workloads dial by NAME (DNS dial-by-name is PRIMARY); the dataplane
+(nft-TPROXY + `MtlsResolve`) enforces SPIFFE identity; SPIFFE-ID addressing is
+client-SDK-ONLY.** Proposed corrected #61 scope text (for user approval — the
+orchestrator relays; this agent does NOT run `gh issue edit`):
+
+> **Corrected scope (supersedes the whitepaper §11 framing in the issue body):**
+> Dial-by-name is the PRIMARY east-west reachability path for unmodified
+> workloads — `getaddrinfo("<job>.svc.overdrive.local")` answered by the
+> in-agent DNS responder (ADR-0072 / #243), delivered through nft-TPROXY +
+> per-connection `MtlsResolve` (ADR-0071 Path-A), which enforces SPIFFE mTLS
+> identity. SPIFFE-ID-as-address is a **client-SDK-only** convenience, NOT the
+> unmodified-workload path. #61's remaining scope is the **XDP `SERVICE_MAP`
+> VIP-LB datapath** (the `fdc2::/16` VIP + connect-time eBPF socket-LB +
+> `sock_destroy` active socket-termination), which the dial-by-name
+> stable-frontend (ADR-0072 REV-2, thin path via nft-TPROXY) does NOT
+> reactivate. `sock_destroy` belongs HERE (#61's userspace-proxy-free
+> connect-time LB), NOT to the dial-by-name responder (which is a terminating
+> proxy whose pump task + `TCP_USER_TIMEOUT` already surface backend death).
+
+## REV-2 / [REF] Wave-decisions (REV-2 — FINAL)
+
+1. **Both forks RATIFIED (no longer PROPOSE):** REV-1a = **1a-A** (a new
+   per-`<job>` `FrontendAddrAllocator`, sibling to `NetSlotAllocator`, from
+   `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`) and REV-1b = **1b-A** (additive
+   `by_frontend` map on `BackendIndex` + a `classify` translation arm). The
+   ADR-0072 REV-2 block is **FINAL** — DRAFT markers dropped.
+2. **Settled directional inputs designed-to:** thin path (not #61); NO
+   `sock_destroy` (pump-task + `TCP_USER_TIMEOUT`; `sock_destroy` is #61 scope);
+   whitepaper-not-SSOT; #61 reconcile-don't-rewrite.
+3. **Superseded REV-1 framing:** D-TME-10 "headless / no-VIP / answer the backend
+   addr" and DDN-2's backend-addr byte-consistency → REPLACED by the
+   stable-frontend contract (§ Changed byte-consistency contract). REV-1 DDN-1's
+   "intercept struct provably untouched" → SUPERSEDED (1b-A extends it
+   additively, user-ratified by choosing the thin path).
+4. **Committed steps untouched:** 01-01 / 01-02 reused unchanged (addr-agnostic
+   substrate + codec).
+5. **Frontend subnet PINNED: `10.98.0.0/16`.** The spike's `10.96.0.0/16`
+   candidate was REJECTED — a mandated pre-pin collision grep found a total
+   overlap with the service-VIP allocator default (`VipRange::default() =
+   10.96.0.0/16`). `10.98.0.0/16` is disjoint from both VIP and workload ranges
+   and satisfies both spike constraints (collision check in ADR-0072).
+6. **All blockers resolved:** BLOCKER-1 (dataplane capture) → WORKS (spike, real
+   kernel — REV-2 stays thin, no nft extension); BLOCKER-2 (multi-replica
+   selection) → pinned deterministic first-by-`Ord`; the subnet collision →
+   resolved by `10.98.0.0/16`. The only remaining user-gated item is the **#61
+   corrected-scope GitHub edit** (orchestrator relays; this agent does NOT run
+   `gh`).
+7. **ADR-0072 FINAL** — the `## Changed Assumptions (REV-2)` block quotes the
+   superseded headless-v1 contract verbatim, locks 1a-A + 1b-A, records the
+   pinned subnet + the two spike constraints + the collision check, cites
+   BLOCKER-1 resolved, and pins BLOCKER-2.
+8. **REV-2 contract tightenings (2026-06-25 — from a design-self-review, 3 High
+   findings; the REV-2 DIRECTION is unchanged, only the executable contract is
+   sharpened so the artifact rewrite cannot implement an ambiguous/racy version):**
+   - **Finding 1 — `by_frontend` key type pinned (CORRECTED in a 2nd review
+     round, High).** The key carries the proto axis —
+     `FrontendKey = (SocketAddrV4, Proto)` = `(F, listener.port, listener.protocol)`
+     (option (b)); one frontend IP `F` × N distinct `(port, proto)` listeners = N
+     entries. The 1st-round framing (a bare `SocketAddrV4` key, "TCP-only with no
+     schema change") was FALSE — a `SocketAddrV4` cannot distinguish `tcp/53` from
+     `udp/53`, and the cited "production TCP-only proof"
+     (`backend_discovery_bridge.rs:485`, `protocol: Proto::Tcp`) is a `#[cfg(test)]`
+     test helper, NOT production. The PRODUCTION row-producing path is
+     proto-aware/UDP-admissible (`aggregate/mod.rs:568`;
+     `service_map_hydrator.rs:130` + the C3 guard `:120`; the bridge `reconcile`
+     `:344-371` applies NO proto filter), so option (a) (a TCP-only production
+     filter) has no code to cite and would fight the C3 guard. The `ServiceId`
+     value still encodes proto (`ServiceId::derive`, `id.rs:1189`; `Proto::as_u8`
+     → `6`/`17`, `backend_key.rs:70-79`); the v1 lookup keys `Proto::Tcp` because
+     the worker-layer capture is TCP (`mtls_intercept_worker.rs:792-794`, `:1187`),
+     not because the index dropped the axis. See § Frontend-key contract.
+   - **Finding 2 — frontend lifecycle pinned: WITHHOLD-not-release.** `F` is a
+     property of the LOGICAL workload. Transient zero-healthy → `name_index`
+     WITHHOLDS the answer (→ NXDOMAIN, DDN-2/DDN-8 fail-honest); the allocator does
+     NOT release `F`. RELEASE happens ONLY on logical-workload deletion. The 03-01
+     row and the 1a-A allocator text are reconciled — neither can be read as
+     "release on zero backends." See § Frontend lifecycle contract.
+   - **Finding 3 — DNS↔resolve race made non-exploitable.** Chosen coherence =
+     **option (b)**: a single ordered drain updates `by_frontend` BEFORE
+     `name_index` (the readers are projections off one ordered apply, per the
+     "one source, three readers" model). PLUS the **fail-closed-on-frontend-subnet-
+     miss** arm is ADOPTED: a miss whose `orig_dst.ip() ∈ 10.98.0.0/16` (the subnet
+     DEDICATED to mesh frontends) classifies `MeshUnreachable` (refuse, NO
+     cleartext), NOT `NonMesh`. Safe because the subnet-membership discriminator
+     distinguishes a frontend miss from legitimate non-mesh egress — which the live
+     rustdoc requires stay `NonMesh` (`mtls_resolve_adapter.rs:128-130`). Worst case
+     of any residual race = refused connect + retry, never silent cleartext. See
+     § Frontend-subnet coherence contract.
+   - **No live-code contradiction surfaced.** `ServiceId::derive` DOES carry proto
+     (Finding-1 stance holds); the live `NonMesh → PassThrough` cleartext path
+     (`mtls_intercept_worker.rs:1112`) and the "a general miss must stay `NonMesh`"
+     rustdoc (`:128-130`) both CONFIRM and make safe the Finding-3 subnet-scoped
+     fail-closed arm. All three fixes are grounded, not designed around code.
