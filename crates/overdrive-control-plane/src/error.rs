@@ -673,6 +673,26 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     CaBoot(#[from] crate::ca_boot::CaBootError),
 
+    /// Dial-by-name `DnsResponder` boot-time failure (dial-by-name-responder
+    /// step 02-01, ADR-0072 DDN-6, GH #243). The responder is constructed +
+    /// `probe()`d under the Earned-Trust "wire → probe → use" gate AFTER the
+    /// converge-on-boot frontend rebuild and BEFORE the listener binds; a bind
+    /// failure (no bindable `:53`) or an unreadable `service_backends` surface
+    /// at the internal `NameIndex` List-seed refuses the boot fail-closed (a
+    /// responder that bound lazily could start and THEN fail to answer — the
+    /// silent-degradation footgun). Pass-through `#[from]` per
+    /// `.claude/rules/development.md` § "Never flatten a typed error to
+    /// `Internal(String)`": the typed [`crate::dns_responder::responder::DnsResponderError`]
+    /// carries a DISTINCT variant per failure mode (`Bind` / `ListSeed` /
+    /// `Probe` / `Socket`), so the CLI / §12 investigation agent can branch on
+    /// the cause — and each variant maps to a distinct `health.startup.refused`
+    /// reason at the call site (a mutant collapsing two reasons flips
+    /// S-DBN-BIND-03). Same boot-path shape as `MtlsBoot` / `FrontendRebuild`:
+    /// happens BEFORE the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    DnsResponderBoot(#[from] crate::dns_responder::responder::DnsResponderError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -991,6 +1011,18 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // structured startup diagnostics; the typed `CaBootError`'s own
             // `Display` carries the distinct boot cause (absent-KEK vs
             // wrong-KEK vs tampered-envelope).
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::DnsResponderBoot(e) => (
+            // Same boot-path shape as `MtlsBoot` / `FrontendRebuild` above: the
+            // `DnsResponder` is constructed + probed AFTER the frontend rebuild
+            // and BEFORE the listener binds (step 02-01, DDN-6), so this arm is
+            // exhaustiveness-only. The composition root branches on the typed
+            // variant (`matches!(e, DnsResponderBoot(_))`) to emit
+            // `health.startup.refused` with a per-variant reason and refuse to
+            // boot fail-closed; the typed `DnsResponderError`'s own `Display`
+            // carries the distinct cause (bind vs List-seed vs probe vs socket).
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

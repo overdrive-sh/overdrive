@@ -202,7 +202,10 @@ use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceId;
 use overdrive_core::traits::dataplane::Backend;
 
-use crate::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
+use crate::dns_responder::frontend_addr_allocator::{
+    FrontendAddrAllocator, WORKLOAD_FRONTEND_BASE,
+};
+use crate::dns_responder::name_index::job_of;
 use overdrive_core::traits::mtls_resolve::{
     MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend, Result,
 };
@@ -395,6 +398,73 @@ impl BackendIndex {
         self.by_frontend.insert(key, service_id);
     }
 
+    /// PURE-READER `by_frontend` projection (02-01; ADR-0072 REV-3) — rebuild
+    /// the `by_frontend` map from the authoritative `service_backends` rows AND
+    /// the SHARED [`FrontendAddrAllocator`] snapshot, WITHOUT mutating the
+    /// allocator.
+    ///
+    /// This mirrors the `name_index` drain's row→`<job>`→snapshot pattern
+    /// ([`crate::dns_responder::name_index`] `replace_from_snapshot`): for each
+    /// row, each running backend's `alloc` SpiffeId yields a `<job>`
+    /// ([`job_of`]); the SHARED allocator's snapshot supplies its stable
+    /// frontend `F` (a read-only `snapshot.get(<job>)` — NEVER `assign`, the
+    /// REV-3 pure-reader invariant), and the backend's own listener port +
+    /// `Proto::Tcp` (the v1 capture proto the [`Self::classify`] lookup keys —
+    /// `mtls_intercept_worker.rs:792-794`) complete the [`FrontendKey`]. A
+    /// `<job>` the allocator does NOT yet bind is WITHHELD (no entry) — NEVER
+    /// fabricated; a dial to its `F` then fails closed via [`Self::classify`]
+    /// arm 2 (the FAILCLOSED-01 security half; convergence is the availability
+    /// nicety). The `<job> → F` binding has exactly ONE source — the shared
+    /// allocator the DNS `name_index` answers from — so the `F` keyed here is
+    /// byte-identical to the `F` DNS answers (DDN-2 single-owner invariant).
+    ///
+    /// The full `by_frontend` is REPLACED from the rows + snapshot (not merged):
+    /// a `<job>` whose Service was removed (absent from `rows`) or whose `F` was
+    /// released (absent from the snapshot) drops its `by_frontend` entry,
+    /// matching the full-row-replace contract of [`Self::replace_from_snapshot`].
+    fn project_by_frontend(
+        &mut self,
+        rows: &[ServiceBackendRow],
+        frontend_snapshot: &BTreeMap<overdrive_core::id::MeshServiceName, std::net::Ipv4Addr>,
+    ) {
+        self.by_frontend.clear();
+        for row in rows {
+            self.project_row_by_frontend(row, frontend_snapshot);
+        }
+    }
+
+    /// Project ONE `service_backends` row's frontend keys (the incremental
+    /// per-row companion to [`Self::project_by_frontend`], used by the watch
+    /// drain). First evicts the row's service's prior `by_frontend` entries
+    /// (full-row replace — a shrunk backend set or a released `F` drops stale
+    /// keys), then inserts the current `<job> → F` keys read from the shared
+    /// allocator snapshot (the REV-3 pure read — NEVER `assign`).
+    fn project_row_by_frontend(
+        &mut self,
+        row: &ServiceBackendRow,
+        frontend_snapshot: &BTreeMap<overdrive_core::id::MeshServiceName, std::net::Ipv4Addr>,
+    ) {
+        // Evict this service's prior frontend keys (full-row replace, scoped to
+        // `service_id`): a different service's frontend key is never touched.
+        self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
+        for backend in &row.backends {
+            // A backend whose SpiffeId is not the `/job/<job>/alloc/<alloc>`
+            // shape (or whose `<job>` is not a v1 mesh name) contributes no
+            // frontend key — it is not mesh-dialable by name.
+            let Some(job) = job_of(&backend.alloc) else { continue };
+            // READ the shared allocator's EXISTING binding (REV-3 pure reader).
+            // WITHHOLD a `<job>` the allocator does not yet bind.
+            let Some(&frontend_ip) = frontend_snapshot.get(&job) else { continue };
+            // The frontend endpoint re-uses the backend's listener port
+            // verbatim; only the IP changes (workload_addr → F). The v1 capture
+            // is TCP, so the key carries `Proto::Tcp` — the same proto
+            // `classify` looks up.
+            let key =
+                FrontendKey::new(SocketAddrV4::new(frontend_ip, backend.addr.port()), Proto::Tcp);
+            self.by_frontend.insert(key, row.service_id);
+        }
+    }
+
     /// The FIRST-by-`Ord` running-AND-healthy backend `addr` for `service_id`,
     /// or `None` when the service has no healthy backend right now (BLOCKER-2:
     /// the deterministic tie-break that keeps DST replay-equivalence — v1
@@ -508,6 +578,15 @@ pub struct ServiceBackendsResolve {
     /// the Watch leg reads
     /// [`subscribe_all_events`](ObservationStore::subscribe_all_events).
     store: Arc<dyn ObservationStore>,
+    /// The SHARED [`FrontendAddrAllocator`] — the single `<job> → F` owner
+    /// (DDN-2; 02-01). The `by_frontend` projection READS this allocator's
+    /// snapshot (a pure read — NEVER `assign`, the REV-3 pure-reader invariant)
+    /// to key `(F, listener.port, proto) → ServiceId`. It is the SAME
+    /// `Arc`-shared instance the DNS `name_index` answers `F` from, so the `F`
+    /// keyed in `by_frontend` is byte-identical to the `F` DNS answers. The
+    /// `<job> → F` binding is WRITTEN only by the 01-05 deploy-time assigner —
+    /// NEVER by this drain.
+    frontend: FrontendAddrAllocator,
     /// The C4 in-RAM ownership-aware `addr → {service → Backend}` reverse index
     /// (F-A), behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
@@ -531,17 +610,22 @@ pub struct ServiceBackendsResolve {
 }
 
 impl ServiceBackendsResolve {
-    /// Construct the adapter from its REQUIRED [`ObservationStore`]. Mandatory,
-    /// not defaulted, no builder — a caller that forgets the store fails to
-    /// construct (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// The index starts empty and no watch is open yet;
-    /// [`probe`](MtlsResolve::probe) Lists the snapshot into the index and
-    /// opens the single-owner watch (the Earned-Trust "wire → probe → use"
-    /// gate).
+    /// Construct the adapter from its REQUIRED [`ObservationStore`] and the
+    /// SHARED [`FrontendAddrAllocator`] (02-01). Both mandatory, not defaulted,
+    /// no builder — a caller that forgets either fails to construct
+    /// (`.claude/rules/development.md` § "Port-trait dependencies"). The
+    /// `frontend` allocator is the SAME `Arc`-shared instance the DNS
+    /// `name_index` answers `F` from (DDN-2 single-owner); the `by_frontend`
+    /// projection READS its snapshot (pure read — never `assign`). The index
+    /// starts empty and no watch is open yet; [`probe`](MtlsResolve::probe)
+    /// Lists the snapshot into the index, projects `by_frontend` from the
+    /// allocator, and opens the single-owner watch (the Earned-Trust
+    /// "wire → probe → use" gate).
     #[must_use]
-    pub fn new(store: Arc<dyn ObservationStore>) -> Self {
+    pub fn new(store: Arc<dyn ObservationStore>, frontend: FrontendAddrAllocator) -> Self {
         Self {
             store,
+            frontend,
             index: Arc::new(RwLock::new(BackendIndex::default())),
             // Healthy until proven otherwise: a resolve before any probe (which
             // the composition root forbids — wire → probe → use) reads an empty
@@ -560,7 +644,7 @@ impl ServiceBackendsResolve {
     /// A store-read fault surfaces as the `String` the probe/resolve callers
     /// map to `Probe` / `StoreUnreadable`.
     async fn relist(&self) -> std::result::Result<(), String> {
-        Self::relist_into(&self.store, &self.index).await
+        Self::relist_into(&self.store, &self.index, &self.frontend).await
     }
 
     /// The relist primitive used by both [`Self::relist`] (the probe-time List
@@ -573,10 +657,22 @@ impl ServiceBackendsResolve {
     async fn relist_into(
         store: &Arc<dyn ObservationStore>,
         index: &Arc<RwLock<BackendIndex>>,
+        frontend: &FrontendAddrAllocator,
     ) -> std::result::Result<(), String> {
         let rows = store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
-        // Apply in a sync critical section — the await already returned.
-        index.write().replace_from_snapshot(&rows);
+        // Read the shared allocator snapshot OUTSIDE the index lock (a `Mutex`
+        // lock that does not cross the index `RwLock` — both are sync, neither
+        // crosses the `.await`). The `by_frontend` projection is a PURE READ of
+        // this snapshot (REV-3: never `assign`).
+        let frontend_snapshot = frontend.snapshot();
+        // Apply in a sync critical section — the await already returned. Scope
+        // the write guard so it drops before the function returns
+        // (clippy::significant_drop_tightening).
+        {
+            let mut index = index.write();
+            index.replace_from_snapshot(&rows);
+            index.project_by_frontend(&rows, &frontend_snapshot);
+        }
         Ok(())
     }
 
@@ -605,6 +701,7 @@ impl ServiceBackendsResolve {
     fn spawn_drain(
         store: Arc<dyn ObservationStore>,
         index: Arc<RwLock<BackendIndex>>,
+        frontend: FrontendAddrAllocator,
         watch_healthy: Arc<AtomicBool>,
         mut subscription: overdrive_core::traits::observation_store::LagAwareSubscription,
     ) -> JoinHandle<()> {
@@ -617,8 +714,14 @@ impl ServiceBackendsResolve {
             while let Some(event) = subscription.next().await {
                 match event {
                     SubscriptionEvent::Row(ObservationRow::ServiceBackend(row)) => {
-                        // Sync critical section — no lock across the `.await`.
-                        index.write().apply_row(row.service_id, &row.backends);
+                        // Read the shared allocator snapshot, then fold the row +
+                        // project its frontend keys in one sync critical section
+                        // (no lock across the `.await`). The `by_frontend`
+                        // projection is a PURE READ of the snapshot (REV-3).
+                        let frontend_snapshot = frontend.snapshot();
+                        let mut index = index.write();
+                        index.apply_row(row.service_id, &row.backends);
+                        index.project_row_by_frontend(&row, &frontend_snapshot);
                     }
                     // Non-`service_backends` rows are not part of the resolve
                     // index — ignore them (the watch is the whole observation
@@ -631,7 +734,7 @@ impl ServiceBackendsResolve {
                         // the index uncertifiable — fault the watch so
                         // `resolve` returns `StoreUnreadable`, and stop draining
                         // (the index can no longer be kept current).
-                        if Self::relist_into(&store, &index).await.is_err() {
+                        if Self::relist_into(&store, &index, &frontend).await.is_err() {
                             watch_healthy.store(false, Ordering::SeqCst);
                             return;
                         }
@@ -707,6 +810,7 @@ impl MtlsResolve for ServiceBackendsResolve {
             let handle = Self::spawn_drain(
                 Arc::clone(&self.store),
                 Arc::clone(&self.index),
+                self.frontend.clone(),
                 Arc::clone(&self.watch_healthy),
                 subscription,
             );
@@ -810,7 +914,10 @@ mod tests {
                 .await
                 .expect("write service_backends row");
         }
-        let adapter = ServiceBackendsResolve::new(Arc::clone(store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         // List-at-probe seeds the pre-existing rows into the index.
         adapter.probe().await.expect("probe Lists the pre-existing rows");
         adapter
@@ -884,7 +991,10 @@ mod tests {
 
         // Construct + probe AFTER the write. A forward-only observe-only adapter
         // would never see this row; List-at-probe seeds it.
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe Lists the pre-existing snapshot");
 
         assert_eq!(
@@ -974,7 +1084,10 @@ mod tests {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Deaf));
         let lagged_addr = v4(10, 0, 0, 42, 6000);
 
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe on an empty store is Ok");
         // The address is a miss right now (the row does not exist yet).
         assert_eq!(
@@ -1042,7 +1155,10 @@ mod tests {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::LaggedChannel));
         let dropped_addr = v4(10, 0, 0, 77, 7443);
 
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe on an empty store opens the channel watch");
 
         // (2) miss before anything is written.
@@ -1099,7 +1215,10 @@ mod tests {
     #[tokio::test]
     async fn watch_failure_makes_resolve_return_store_unreadable() {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Closed));
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
 
         // Probe succeeds (List Ok, subscribe_all_events Ok) — but the
         // subscription the double hands back is already closed, so the drain
@@ -1134,7 +1253,10 @@ mod tests {
     async fn store_read_fault_at_probe_returns_probe() {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Live));
         store.arm_list_fault();
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
 
         let err = adapter.probe().await.expect_err("an errored List surfaces as Err at probe time");
         assert!(
@@ -1150,6 +1272,93 @@ mod tests {
         let store = fresh_store();
         let adapter = adapter_listing_rows(&store, vec![]).await;
         adapter.probe().await.expect("probe on a readable (empty) store is Ok");
+    }
+
+    // ---- 02-01: by_frontend pure-reader drain projection -------------------
+
+    /// 02-01 — the `by_frontend` projection is a PURE READER of the SHARED
+    /// `FrontendAddrAllocator`: a dial to a `<job>`'s stable frontend `F`
+    /// translates to that `<job>`'s service's healthy backend, where `F` comes
+    /// from the allocator (NOT a re-derivation), and the projection NEVER
+    /// `assign`s (a `<job>` the allocator does not yet bind is WITHHELD).
+    ///
+    /// Port-to-port through `MtlsResolve` (`probe` projects `by_frontend` from
+    /// the allocator's snapshot at the List leg; `resolve` translates `F:port`).
+    /// Falsifiable: delete the `project_by_frontend` call in `relist_into` and
+    /// the dial to `F` MISSES `by_frontend`, falls into the `∈ 10.98.0.0/16`
+    /// fail-closed arm → `MeshUnreachable` (the test's `Mesh` assertion goes
+    /// RED). Two cases in one walkthrough: (A) allocator binds the `<job>` → `F`
+    /// translates to the backend (`Mesh`); (B) the allocator does NOT bind a
+    /// second `<job>` → its `F` is WITHHELD (no `by_frontend` entry → the
+    /// frontend-subnet-miss fail-closed arm → `MeshUnreachable`, NEVER `Mesh`).
+    #[tokio::test]
+    async fn by_frontend_projection_reads_the_shared_allocator_and_never_assigns() {
+        use overdrive_core::id::{AllocationId, MeshServiceName, WorkloadId};
+
+        let store = fresh_store();
+        let frontend = FrontendAddrAllocator::new();
+
+        // The allocator is the SINGLE source of `F`: pre-bind `<job> = bound`
+        // (the 01-05 deploy-time assigner's job) and LEAVE `<job> = withheld`
+        // unbound (the race / not-yet-assigned case — its row exists but the
+        // allocator does not bind its `F`, so the projection WITHHOLDS it).
+        let bound_job = MeshServiceName::new("bound.svc.overdrive.local").expect("valid mesh name");
+        let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
+
+        // A backend whose alloc SpiffeId is the `/job/<job>/alloc/<alloc>` shape
+        // the projection parses (`job_of`). The backend's listener port is the
+        // port the frontend key re-uses verbatim.
+        let backend_port = 8080;
+        let backend_addr = v4(10, 99, 0, 6, backend_port);
+        let mk_backend = |job_label: &str, addr: SocketAddrV4, healthy: bool| Backend {
+            alloc: SpiffeId::for_allocation(
+                &WorkloadId::new(job_label).expect("valid workload id"),
+                &AllocationId::new("alloc-1").expect("valid alloc id"),
+            ),
+            addr: SocketAddr::V4(addr),
+            weight: 1,
+            healthy,
+        };
+
+        // Both services have a healthy backend row; only `bound` has an
+        // allocator F. Write the rows, THEN probe the SHARED allocator-bearing
+        // adapter so the List-at-probe leg projects `by_frontend` from it.
+        for row in [
+            backends_row(101, vec![mk_backend("bound", backend_addr, true)], 1),
+            backends_row(202, vec![mk_backend("withheld", v4(10, 99, 0, 10, 9000), true)], 1),
+        ] {
+            store.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+        }
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            frontend.clone(),
+        );
+        adapter.probe().await.expect("probe projects by_frontend from the shared allocator");
+
+        // (A) a dial to the bound job's frontend `F:port` translates to its
+        // backend (Mesh) — `F` is the allocator's binding, not a re-derivation.
+        let f_endpoint = SocketAddrV4::new(f_bound, backend_port);
+        assert_eq!(
+            adapter.resolve(f_endpoint).await.expect("resolve F is Ok"),
+            MtlsResolution::Mesh(ResolvedBackend { addr: backend_addr, expected_svid: None }),
+            "by_frontend must translate the allocator's F to the job's healthy backend",
+        );
+
+        // (B) the withheld job has NO allocator binding → its frontend key is
+        // never projected. The allocator still binds ONLY `bound` (the
+        // projection never `assign`ed `withheld`): a dial to ANY unbound
+        // frontend-subnet addr MISSES by_frontend and fails closed.
+        assert_eq!(
+            frontend.snapshot().len(),
+            1,
+            "the pure-reader projection must NOT assign — only the pre-bound job is held",
+        );
+        let unbound_frontend = SocketAddrV4::new(std::net::Ipv4Addr::new(10, 98, 0, 250), 9000);
+        assert_eq!(
+            adapter.resolve(unbound_frontend).await.expect("resolve is Ok"),
+            MtlsResolution::MeshUnreachable,
+            "a frontend-subnet dial the allocator does not bind fails closed (never Mesh)",
+        );
     }
 
     // ---- F-A: ownership-aware index (the security proof) -------------------

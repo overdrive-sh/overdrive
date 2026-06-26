@@ -119,7 +119,15 @@ pub enum NameIndexError {
 ///
 /// This is the OQ-1 primitive — see the module rustdoc for the DECISION
 /// rationale (local helper, NOT a new `SpiffeId` accessor).
-fn job_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
+///
+/// `pub(crate)` (02-01): the re-keyed `MtlsResolve`'s `by_frontend` drain
+/// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<job>` from
+/// the SAME `service_backends` rows to key `by_frontend` from the shared
+/// allocator — reusing this one parse helper rather than re-deriving the
+/// `/job/<job>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
+/// never invent API surface"; the design pins "mirror the `name_index` drain's
+/// row→`<job>`→snapshot pattern").
+pub(crate) fn job_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
     // The path is `/job/<job>/alloc/<alloc>` — split on `/`, find the segment
     // immediately after the `job` marker. A path that does not carry a `job`
     // segment (or has nothing after it) yields no `<job>`.

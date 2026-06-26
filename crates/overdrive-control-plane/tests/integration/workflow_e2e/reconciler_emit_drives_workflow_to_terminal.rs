@@ -184,6 +184,11 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         // No transparent-mTLS layer in the workflow e2e (no real
         // dataplane to intercept on) — step 06-03 `Option` field.
         None,
+        // dial-by-name-responder step 02-01: a fresh empty per-host
+        // frontend-address allocator (the workflow e2e composes no DNS
+        // responder; this fixture never exercises dial-by-name).
+        overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(
+        ),
     );
 
     // --- The fixture trigger reconciler emits StartWorkflow. The

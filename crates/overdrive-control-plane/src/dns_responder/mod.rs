@@ -32,11 +32,14 @@
 //! re-populates the [`frontend_addr_allocator::FrontendAddrAllocator`] from
 //! the declared-Service intent SSOT (the writer's boot half; the
 //! assign-on-declare half lives in the `submit_workload` Service arm).
-//! `responder.rs` (the socket loop) remains a later slice and is NOT declared
-//! here yet.
+//! Step 02-01 lands `responder` — the `DnsResponder` host adapter (the
+//! wildcard-first / per-gateway-addr-fallback bind + the `recvmsg`/`sendmsg`
+//! `IP_PKTINFO` source-pinned serve loop) wired into `run_server` behind the
+//! Earned-Trust probe gate (DDN-6).
 
 pub mod answer;
 pub mod boot_rebuild;
 pub mod frontend_addr_allocator;
 pub mod name_index;
+pub mod responder;
 pub mod wire;

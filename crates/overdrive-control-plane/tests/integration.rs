@@ -78,6 +78,15 @@ mod integration {
     /// on `SimDataplane::local_backend_for`.
     mod deregister_local_backend_dispatch;
     mod describe_round_trip;
+    /// dial-by-name-responder step 02-01 (ADR-0072 REV-2, GH #243) — Tier-3
+    /// acceptance for the `DnsResponder` socket loop + the `run_server`
+    /// Earned-Trust boot gate (S-DBN-BIND-01/02/03). Drives the PRODUCTION
+    /// `DnsResponder::{probe,serve}` (wildcard `0.0.0.0:53` IP_PKTINFO bind,
+    /// per-gateway-addr fallback, `ipi_spec_dst` source-pin) and the boot
+    /// refuse-on-unbindable-port / unreadable-store path. `getent` is the
+    /// source-pin litmus (NEVER `dig` alone, DDN-5). Root + Lima; SKIP
+    /// otherwise. No Tier-2 backstop (DDN-4) — irreducibly real-kernel.
+    mod dns_responder_bind;
     /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
     /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
     /// 2026-05-10. Real `/bin/sh` workload writes 7 stderr lines;
