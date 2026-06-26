@@ -142,7 +142,9 @@ frontend + `MtlsResolve` translation + single-owner `FrontendAddrAllocator`) is
 UNCHANGED, and the two genuinely-strong invariants (DDN-2 byte-identity,
 Finding-3(ii) fail-closed) stay intact and become the load-bearing content.
 REKEY-01..04 and FAILCLOSED-01 are untouched (the review confirmed all five
-genuinely non-vacuous).
+genuinely non-vacuous). **User-ratified 2026-06-26** (the ordering barrier was
+an availability nicety, not a security invariant; security preserved by
+fail-closed, independently re-verified in the 02-00 re-review).
 
 **(1) Finding-3(i) "single ordered drain / write-time ordering barrier (STEP A
 before STEP B)" — SUPERSEDED.** The Changed-Assumptions / DDN-1 / DDN-2 text
