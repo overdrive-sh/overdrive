@@ -609,7 +609,7 @@ journey:
 | `NameAnswer` enum | `crates/overdrive-core/src/` (`id.rs` or small `dns` module) | **CREATE NEW** | Pure query result: `Records(Vec<SocketAddrV4>) \| NoData \| NxDomain` |
 | `dns_responder` module root | `crates/overdrive-control-plane/src/dns_responder/mod.rs` | **CREATE NEW** | Module wiring + re-exports |
 | `frontend_addr_allocator.rs` | `…/dns_responder/frontend_addr_allocator.rs` | **CREATE NEW** (REV-2, 1a-A) | `FrontendAddrAllocator` — the single `<job> ↔ F` owner (frontend SSOT) BOTH `name_index` and `by_frontend` derive `F` from; `assign`/`release`/`snapshot`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16` |
-| `name_index.rs` | `…/dns_responder/name_index.rs` | **CREATE NEW** | RE-SPEC (REV-2): maps `<job>` → stable frontend addr `F` (NOT → a backend-addr set); reads the `FrontendAddrAllocator` `<job> ↔ F` binding via the single ordered drain; List-then-Watch + relist-on-`Lagged` + single-owner drain + `probe()` (mirror `ServiceBackendsResolve`); the healthy gate is the WITHHOLD seam |
+| `name_index.rs` | `…/dns_responder/name_index.rs` | **CREATE NEW** | RE-SPEC (REV-2): maps `<job>` → stable frontend addr `F` (NOT → a backend-addr set); reads the `<job> ↔ F` binding from the ONE `Arc`-shared `FrontendAddrAllocator` via its OWN single-owner drain (`name_index.rs:41-43`, INDEPENDENT of the `by_frontend` drain — there is NO single shared drain); List-then-Watch + relist-on-`Lagged` + `probe()` (mirror `ServiceBackendsResolve`); the healthy gate is the WITHHOLD seam |
 | `answer.rs` | `…/dns_responder/answer.rs` | **CREATE NEW** | Pure `answer_for(name, qtype, &index) -> NameAnswer` (the mutation-gate target); `Records` now holds `vec![F]` (one stable frontend addr) |
 | `wire.rs` | `…/dns_responder/wire.rs` | **CREATE NEW** | `hickory-proto` decode (query) + encode (`NameAnswer` → bytes: A / NODATA-SOA / NXDOMAIN-SOA); separately proptested |
 | `responder.rs` | `…/dns_responder/responder.rs` | **CREATE NEW** | `DnsResponder` host adapter: bind (wildcard→per-addr fallback), `IP_PKTINFO` recv/sendmsg loop, `probe()`, `serve()`; constructed with the SAME `FrontendAddrAllocator` handle as the re-keyed resolve |
@@ -854,9 +854,9 @@ index is provably untouched.
 | Origin | Commitment | DDD | Impact |
 |--------|------------|-----|--------|
 | DESIGN-REV-2/1a-A | NEW per-`<job>` `FrontendAddrAllocator` (sibling to `NetSlotAllocator`) carving a STABLE frontend addr `F` from `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`; idempotent per `<job>`, retained across alloc cycles + zero-healthy windows, released ONLY on logical-workload deletion | REV-1a | S-DBN-FRONTEND-01..04 make the allocator a structural mutation target (membership/disjointness, idempotency, release-only-on-deletion, collision-free); S-DBN-WS-STABLE proves byte-stability across a real alloc cycle (SQ1 elimination) |
-| DESIGN-REV-2/1b-A | EXTEND `BackendIndex` with `by_frontend: BTreeMap<FrontendKey, ServiceId>` (`FrontendKey = (SocketAddrV4, Proto)`); a THREE-way `classify` arm (hit → first-by-`Ord` healthy → `Mesh`/`MeshUnreachable`; frontend-subnet miss → `MeshUnreachable` fail-closed; else `by_addr` fall-through) | REV-1b | S-DBN-REKEY-01..04 + S-DBN-FAILCLOSED-01 + S-DBN-EQUIV-01 guard the translation, the proto-key, the fail-closed arm, and the host-vs-in-memory equivalence (the trait-docstring contract) |
+| DESIGN-REV-2/1b-A | EXTEND `BackendIndex` with `by_frontend: BTreeMap<FrontendKey, ServiceId>` (`FrontendKey = (SocketAddrV4, Proto)`); a THREE-way `classify` arm (hit → first-by-`Ord` healthy → `Mesh`/`MeshUnreachable`; frontend-subnet miss → `MeshUnreachable` fail-closed; else `by_addr` fall-through) | REV-1b | S-DBN-REKEY-01..04 + S-DBN-FAILCLOSED-01 + S-DBN-EQUIV-01 guard the translation, the proto-key, the fail-closed arm, and the reference-oracle equivalence (the trait-docstring contract — classify trajectory vs an INDEPENDENT oracle; `BackendIndex` is a single struct, so a two-implementation comparison would be vacuous) |
 | DESIGN-REV-2/Finding-2 | WITHHOLD-not-release lifecycle — a transient zero-healthy `<job>` is WITHHELD by `name_index` (→ NXDOMAIN), the `FrontendAddrAllocator` RETAINS `F`; release only on deletion | REV-2 | S-DBN-FRONTEND-03 + S-DBN-IDX-02 + S-DBN-NXDOMAIN-02 assert BOTH the withheld answer AND the retained `F` — a mutant that releases on zero-healthy passes the NXDOMAIN check but fails the retained-`F` check |
-| DESIGN-REV-2/Finding-3 | Coherence: a single ordered drain updates `by_frontend` BEFORE `name_index` exposes `F`; PLUS the fail-closed-on-frontend-subnet-miss arm (`∈ 10.98.0.0/16` miss → `MeshUnreachable`, NO cleartext) | REV-2 | S-DBN-COHERENCE-01 (ordering invariant) + S-DBN-FAILCLOSED-01 (the structural defense) together make the DNS↔resolve race non-exploitable |
+| DESIGN-REV-2/Finding-3 (i) coherence — RECONCILED to the AS-IMPLEMENTED two-drains-one-allocator architecture | Byte-identity of `F` via the SINGLE `FrontendAddrAllocator` (DDN-2 single-owner): both projections (`by_frontend`, `name_index`) derive `F` from the ONE allocator, so the `F` they key/answer is byte-identical. The temporal write-time ordering barrier (`by_frontend` BEFORE `name_index`) is SUPERSEDED — there is NO single shared ordered drain; the implementation has TWO independent single-owner drains (`mtls_resolve_adapter.rs:55-57`, `name_index.rs:41-43`) reading one allocator, with no inter-drain ordering. PLUS the fail-closed-on-frontend-subnet-miss arm (`∈ 10.98.0.0/16` miss → `MeshUnreachable`, NO cleartext) | REV-2 | S-DBN-COHERENCE-01 (byte-identity-via-single-source Property 1 + fail-closed-regardless-of-inter-drain-timing Property 2) + S-DBN-FAILCLOSED-01 (the structural defense) together make the DNS↔resolve race non-exploitable: a residual race window worst-cases to a refused connect + retry (fail-closed), NEVER cleartext — so the barrier was an availability nicety, not a security invariant |
 | DESIGN/DDN-1 (SUPERSEDED by REV-2) | REV-1: sibling name-keyed reader; the addr-keyed `ServiceBackendsResolve` struct "provably untouched". **REV-2 supersedes**: the struct is EXTENDED additively (`by_frontend` map + `classify` arm, 1b-A) — the user ratified the in-place extension by choosing the thin path | DDN-1 → REV-1b | The name layer is still a sibling reader (own `name_index`); REV-2's edit is the additive `by_frontend`/`classify` on `BackendIndex` (S-DBN-REKEY-04 proves the `by_addr` path is preserved, backward-compatible) |
 | DESIGN/DDN-2 (RE-SCOPED by REV-2) | REV-1: the healthy gate decided *which addr we answer*. **REV-2 re-scopes**: the gate decides *whether the `<job>` is resolvable at all* (expose its stable `F` or withhold); the healthy backend is selected by `MtlsResolve` at *translation* time | DDN-2 → Finding-2 | S-DBN-ANSWER-04 + S-DBN-IDX-02 make the healthy-gate-as-withhold-seam a structural mutation target (an unhealthy-only `<job>` → NXDOMAIN); S-DBN-REKEY-01/02 make the translation-time healthy selection the mutation target (first-by-`Ord` → `Mesh`; zero-healthy → `MeshUnreachable`) |
 | DESIGN/DDN-3 | `hickory-proto` codec + own `IP_PKTINFO` socket loop (`hickory-server` rejected — no per-packet reply-source control) | DDN-3 | `wire.rs` is proptested in isolation (S-DBN-WIRE-*); the socket loop is irreducibly Tier-3 (S-DBN-BIND-*), acceptance via `getent` source-pin, never `dig` |
@@ -923,8 +923,11 @@ per-feature A/B/C/D choice:
   + the re-keyed `BackendIndex`/`classify`) = pure, no port trait, Tier-1
   proptest (S-DBN-FRONTEND-* / S-DBN-REKEY-* / S-DBN-FAILCLOSED-01 /
   S-DBN-EQUIV-01). The `MtlsResolve` re-key equivalence (S-DBN-EQUIV-01) is
-  the host-vs-in-memory contract guard the trait docstring mandates. The
-  Tier-3 oracle (S-DBN-SINGLE-SRC) feeds the answered `F` into the real
+  the reference-oracle contract guard the trait docstring mandates —
+  `BackendIndex`'s three-way classify trajectory checked against an
+  INDEPENDENT hand-written oracle (NOT a host-vs-in-memory two-implementation
+  comparison: there is one `BackendIndex` struct, so that would be vacuous).
+  The Tier-3 oracle (S-DBN-SINGLE-SRC) feeds the answered `F` into the real
   re-keyed `resolve`.
 - **The UDP `:53` socket + `IP_PKTINFO`** = **irreducibly Tier-3 real, NO
   Sim** (DDN-4). The spike proved this substrate cannot be honestly
@@ -943,7 +946,7 @@ scenario (Mandate 6). Full table in `distill/test-scenarios.md` §
 "Adapter coverage table". Summary: UDP `:53` socket loop (S-DBN-WS,
 S-DBN-BIND-01/02) · `getaddrinfo`/`getent` consuming adapter (S-DBN-WS,
 S-DBN-WS-STABLE, S-DBN-NXDOMAIN-*, S-DBN-BIND-01/02) · `ObservationStore`
-reader + single ordered drain (S-DBN-WS real, S-DBN-IDX-*/COHERENCE-01 Sim) ·
+reader + TWO independent single-owner drains, one allocator (S-DBN-WS real, S-DBN-IDX-*/COHERENCE-01 Sim) ·
 **`FrontendAddrAllocator`** (S-DBN-FRONTEND-* Tier-1, S-DBN-WS/WS-STABLE/
 NXDOMAIN-02 Tier-3) · **re-keyed `MtlsResolve`** (`by_frontend` translation,
 S-DBN-REKEY-*/FAILCLOSED-01/EQUIV-01 Tier-1, S-DBN-SINGLE-SRC/WS/CHURN
@@ -1055,16 +1058,19 @@ them to the policy file; recorded here for the audit trail):
   resolution from inside a deployed workload's netns under Lima
   (`cargo xtask lima run --`); the name-path acceptance signal, never
   `dig @gw` alone.
-- **Driven internal** — `ObservationStore` `service_backends` reader + the
-  single ordered drain → `SimObservationStore` (Tier 1, the
-  watch/relist/ordering logic) + real `LocalObservationStore` (Tier 3). The
-  responder is a sibling reader (own `name_index`).
+- **Driven internal** — `ObservationStore` `service_backends` reader + TWO
+  independent single-owner drains (the `name_index` drain and the `by_frontend`
+  drain, each with its OWN subscription, both reading the ONE shared
+  `FrontendAddrAllocator`) → `SimObservationStore` (Tier 1, the watch/relist
+  logic) + real `LocalObservationStore` (Tier 3). The responder is a sibling
+  reader (own `name_index`).
 - **Driven internal (NEW, REV-2, pure — no Sim, no port trait)** — the
   `FrontendAddrAllocator` (`assign`/`release`/`snapshot`) + the re-keyed
   `BackendIndex`/`classify` (`by_frontend` translation + the three-way arm).
   Pure data-structure seams, Tier-1 proptest (S-DBN-FRONTEND-*,
-  S-DBN-REKEY-*, S-DBN-FAILCLOSED-01, S-DBN-EQUIV-01); the host-vs-in-memory
-  equivalence (S-DBN-EQUIV-01) is the trait-docstring contract guard.
+  S-DBN-REKEY-*, S-DBN-FAILCLOSED-01, S-DBN-EQUIV-01); the reference-oracle
+  equivalence (S-DBN-EQUIV-01 — classify trajectory vs an INDEPENDENT oracle,
+  not a two-implementation comparison) is the trait-docstring contract guard.
 - **Driven internal (NO Sim)** — the UDP `:53` socket + `IP_PKTINFO` →
   real kernel only (DDN-4; no Tier-2 backstop). Explicitly NOT a port
   trait, NOT a Sim adapter — the DST seam is the pure `answer_for` + the
@@ -1162,9 +1168,10 @@ trigger).
    Pillar 3 (production composition root — S-DBN-WS uses real `run_server`;
    no Tier B state-machine PBT — the journey is rich but the socket is
    irreducibly Tier-3, and the re-keyed `classify` state space is covered by
-   the S-DBN-EQUIV-01 host-vs-in-memory equivalence + the S-DBN-REKEY-* PBT at
-   Tier 1, which is the right shape for the `BackendIndex`-as-state-machine
-   model without simulating the substrate the spike proved cannot be simulated).
+   the S-DBN-EQUIV-01 reference-oracle equivalence (classify trajectory vs an
+   INDEPENDENT oracle) + the S-DBN-REKEY-* PBT at Tier 1, which is the right
+   shape for the `BackendIndex`-as-state-machine model without simulating the
+   substrate the spike proved cannot be simulated).
 7. **REV-2 RE-DISTILL (commit `8e22f499`)**: the answer contract shifted from
    a volatile per-instance backend addr to a stable per-`<job>` frontend `F`;
    the per-step re-scope (`feature-delta.md` § "Per-step roadmap re-scope")
@@ -1282,16 +1289,22 @@ CoreDNS's relaxed 5 s TTL, Istio/Linkerd).
   tightening) for the exact key type and the proto stance.**
 - **D-DBN-7' (NEW — frontend-subnet coherence invariant, Finding-3 tightening).**
   The `10.98.0.0/16` block is **dedicated to mesh frontends**. Two invariants
-  follow and are pinned (§ Frontend-subnet coherence contract): (i) **ordering** —
-  `by_frontend` (resolve) is updated BEFORE `name_index` (DNS) from a single
-  ordered drain over the same `service_backends` rows, so DNS never answers an `F`
-  the resolve index has not yet learned; (ii) **fail-closed-on-subnet-miss** — a
-  captured connection whose `orig_dst.ip() ∈ 10.98.0.0/16` that MISSES `by_frontend`
-  is NOT `NonMesh`/cleartext; it is a mesh dial that arrived before the index was
-  ready (or to a withdrawn `<job>`), so it classifies **fail-closed (refuse, NO
-  cleartext)**. Together (i)+(ii) make the DNS↔resolve race **non-exploitable**:
-  worst case is a refused connect + client retry, never silent cleartext to a
-  should-be-mesh peer.
+  follow and are pinned (§ Frontend-subnet coherence contract): (i)
+  **byte-identity via the single allocator** (RECONCILED — the temporal
+  ordering barrier is SUPERSEDED) — `by_frontend` (resolve) and `name_index`
+  (DNS) are fed by TWO **independent** single-owner drains
+  (`mtls_resolve_adapter.rs:55-57`, `name_index.rs:41-43`) reading the ONE
+  `Arc`-shared `FrontendAddrAllocator`, so the `F` they key/answer is
+  byte-identical (DDN-2 single-owner) — there is no single ordered drain and no
+  inter-drain write-ordering; (ii) **fail-closed-on-subnet-miss** — a captured
+  connection whose `orig_dst.ip() ∈ 10.98.0.0/16` that MISSES `by_frontend` is
+  NOT `NonMesh`/cleartext; it is a mesh dial that arrived before the resolve
+  drain bound the key (or to a withdrawn `<job>`), so it classifies
+  **fail-closed (refuse, NO cleartext)**. (i) makes the answered `F` and the
+  recognized `F` the same value; (ii) makes any residual inter-drain timing gap
+  **non-exploitable**: worst case is a refused connect + client retry, never
+  silent cleartext to a should-be-mesh peer. The barrier (i) once described was
+  an availability nicety, not a security invariant — (ii) carries the security.
 
 ## REV-2 / [REF] The genuinely-open design forks (PROPOSE — 2–3 options each)
 
@@ -1498,55 +1511,74 @@ the collision hole 2nd-round Finding 1 names.) `FrontendKey` MAY be a named
 newtype `(SocketAddrV4, Proto)` for call-site clarity (DELIVER detail); the
 CONTRACT is that the key discriminates proto.
 
-## REV-2 / [REF] Frontend-subnet coherence contract (Finding-3 tightening — DNS↔resolve race made non-exploitable)
+## REV-2 / [REF] Frontend-subnet coherence contract (Finding-3 tightening — DNS↔resolve race made non-exploitable) — RECONCILED to the AS-IMPLEMENTED two-drains-one-allocator architecture
 
-REV-2 requires an answered `F` to NEVER miss `MtlsResolve` (a miss →
-`NonMesh` → cleartext `PassThrough`, `mtls_intercept_worker.rs:1112` /
+> **RECONCILIATION (2026-06-26, review-02-00 D1/D2 + independent verification).**
+> The original (i) below pinned a *single ordered drain* applying `by_frontend`
+> BEFORE `name_index` exposes `F` (a temporal write-time barrier). The
+> as-implemented architecture has **NO single shared drain**: there are **two
+> independent single-owner drain tasks**, each owning its own
+> `subscribe_all_events` subscription — the re-keyed `MtlsResolve`/`BackendIndex`
+> drain (`mtls_resolve_adapter.rs:55-57`, feeding `by_frontend`) and the
+> `NameIndex` drain (`name_index.rs:41-43`, feeding the resolvable set) — both
+> reading the **same `Arc`-shared `FrontendAddrAllocator`**, with **no ordering
+> coordination between them**. The temporal barrier therefore describes a
+> mechanism that exists nowhere, and it is **superseded**. The **real** enforced
+> invariant is **byte-identity of `F` via the single allocator** (DDN-2) — both
+> drains call `allocator.assign(<job>)`, so they key/answer the **same** `F`. The
+> barrier was, at most, an *availability* nicety (avoid a transient
+> NXDOMAIN-then-refuse retry), **not a security invariant**: if `name_index`
+> exposes `F` before `by_frontend` holds the key, a dial fails **closed**
+> (`MeshUnreachable`, refuse, never cleartext) by (ii) below, regardless of
+> inter-drain timing. The security half is held by the fail-closed arm
+> (FAILCLOSED-01), not by ordering. The two mechanisms below are restated
+> accordingly; **both** still required.
+
+REV-2 requires an answered `F` to NEVER miss `MtlsResolve` *and lead to cleartext*
+(a *general* miss → `NonMesh` → cleartext `PassThrough`, `mtls_intercept_worker.rs:1112` /
 `spawn_cleartext_passthrough` `:1180` — a fail-OPEN security regression). Because
 `name_index` (DNS) and `by_frontend` (resolve) are **separate readers** of the
-same `service_backends` rows, a naïve build could let DNS answer `F` before
-`by_frontend` learns it. Two complementary mechanisms are pinned; **both** are
-required.
+same `service_backends` rows, fed by **two independent drains**, a build could let
+DNS answer `F` before `by_frontend` learns it. Two complementary mechanisms are
+pinned; **both** are required.
 
-### (i) Ordering — `by_frontend` is updated BEFORE `name_index` (coherence option (b), CHOSEN)
+### (i) Byte-identity of `F` via the single `FrontendAddrAllocator` (DDN-2 single-owner — the enforced invariant; the temporal ordering barrier is SUPERSEDED)
 
-The reviewer offered (a) "DNS answers `F` only after the resolve index holds the
-`by_frontend` entry + a healthy backend" and (b) "update both projections from
-one ordered drain/barrier so `by_frontend` is never behind `name_index`."
-**Option (b) is CHOSEN.** Rationale, grounded on the live model:
+The load-bearing coherence property is **NOT** "write `by_frontend` before
+exposing `F` to `name_index`" — there is no shared drain to order. It is **"both
+projections derive `F` from the ONE `FrontendAddrAllocator` instance, so the `F`
+they key/answer is byte-identical."** Grounded on the live model:
 
-- The "one source, three readers" contract already folds the **same
-  `service_backends` rows** through the **same List-then-Watch + single-owner
-  drain** (`mtls_resolve_adapter.rs:56-87`, `:480-518`). `name_index` and
-  `by_frontend` both derive from those rows, so a **single ordered drain** that
-  applies a batch of rows to `by_frontend` **before** it makes the corresponding
-  `<job> → F` binding visible to `name_index` is the natural shape — the readers
-  are not independent watchers in this design, they are projections off one
-  ordered apply.
-- **The `<job> → F` binding is the SAME for both projections because there is ONE
-  source for it — the single `FrontendAddrAllocator` instance** (1a-A; § Frontend
-  lifecycle contract — the single-owner invariant). The ordered drain looks up /
-  binds `<job> → F` from that one allocator, writes the `(F, listener.port, Proto)
-  → ServiceId` entry into `by_frontend` (STEP A), then exposes the SAME `F` to
-  `name_index` (STEP B). The rows supply *liveness* (running-AND-healthy?); the
+- **The `<job> → F` binding has exactly ONE source — the single
+  `FrontendAddrAllocator` instance** (1a-A; § Frontend lifecycle contract — the
+  single-owner invariant). The re-keyed `MtlsResolve` drain calls
+  `allocator.assign(<job>)` to key `by_frontend`, and the `NameIndex` drain calls
+  the **same** `allocator.assign(<job>)` to answer `F` — both reading one
+  `Arc`-shared allocator. Because `assign(<job>)` is idempotent and there is one
+  instance, both projections key/answer the **same** `F` for the same `<job>`.
+  The `service_backends` rows supply *liveness* (running-AND-healthy?); the
   allocator supplies *which `F`*. Neither projection has a second `<job> → F`
-  source — a second allocator would assign a different `F` to the same `<job>`,
-  the DNS-answered `F` would miss `by_frontend`, and the dial would fail-closed
-  (`MeshUnreachable` via (ii) below) — the exact addressing-divergence defect this
-  contract exists to prevent. The composition root (DDN-6) enforces "one instance"
-  by constructing the `FrontendAddrAllocator` once and injecting the SAME handle
-  into both the re-keyed `MtlsResolve` and the `DnsResponder`.
-- Option (a) is a *weaker* restatement of the same idea expressed as a read-time
-  gate ("DNS checks resolve first"); (b) makes it a *write-time* barrier (resolve
-  is updated first), which is the stronger and simpler invariant — there is no
-  per-query cross-reader lookup, and the ordering is established once at apply
-  time. (a) would also reintroduce a cross-reader coupling the DDN-1 sibling-reader
-  decision deliberately avoids.
-- **Pinned ordering invariant:** within the single ordered drain, for any batch
-  that binds `<job> → F`, `by_frontend` (and a healthy backend for `F`'s
-  `ServiceId`) is applied BEFORE `name_index` exposes `F` as the answer for
-  `<job>`. DNS therefore never answers an `F` the resolve index has not already
-  learned. (DST-assertable as an ordering invariant on the drain.)
+  source — a second allocator (or a re-derivation, or a stale cache) would assign
+  a *different* `F` to the same `<job>`, the DNS-answered `F` would miss
+  `by_frontend`, and the dial would fail-closed (`MeshUnreachable` via (ii)
+  below) — the exact addressing-divergence defect this contract exists to prevent.
+  The composition root (DDN-6) enforces "one instance" by constructing the
+  `FrontendAddrAllocator` once and injecting the SAME handle into both the
+  re-keyed `MtlsResolve` and the `DnsResponder`.
+- **The temporal write-time ordering barrier is SUPERSEDED.** The two drains are
+  independent single-owner tasks with no ordering coordination; there is no point
+  in the implementation that orders one projection's write before the other's. A
+  race window (DNS answers `F` for a `<job>` whose `by_frontend` key the resolve
+  drain has not yet applied) is therefore *possible* — and *harmless*, because
+  (ii) makes it fail-closed, never cleartext. The barrier would only have removed
+  a transient NXDOMAIN-then-refuse-then-retry hiccup (an availability nicety), at
+  the cost of a cross-drain coupling the two-independent-drains design avoids.
+- **Pinned invariant (byte-identity, not ordering):** for every `<job>` both
+  drains observe, the `F` `by_frontend` is keyed on equals the `F` `name_index`
+  answers, byte-for-byte, because both come from `allocator.assign(<job>)` on the
+  ONE allocator. (Tier-1-assertable as a single-source property — S-DBN-COHERENCE-01
+  Property 1; the in-process sibling of the Tier-3 S-DBN-SINGLE-SRC oracle.) The
+  timing-independent fail-closed half is S-DBN-COHERENCE-01 Property 2 / FAILCLOSED-01.
 
 ### (ii) Fail-closed-on-frontend-subnet-miss (the structural defense — ADOPTED)
 
@@ -1658,22 +1690,23 @@ C4Container
   Person(app, "Unmodified workload", "getaddrinfo(<job>.svc.overdrive.local) + connect; no SDK")
   Container_Boundary(agent, "Overdrive node-agent (one process)") {
     Container(dns, "DnsResponder", "in-agent, hickory-proto codec + IP_PKTINFO loop", "Answers <job>.svc.overdrive.local with the STABLE per-<job> frontend addr F")
-    Container(nameidx, "name_index (projection)", "<job> -> stable F; WITHHOLDS on zero-healthy", "Maps <job> -> stable frontend addr F (REV-2: NOT -> backend addrs); gates Backend.healthy == true")
-    Container(drain, "single ordered drain", "one owner over the shared service_backends rows (Finding-3 barrier)", "Applies each row batch to by_frontend (+ a healthy backend) BEFORE exposing F to name_index — write-time ordering, option (b)")
-    Container(falloc, "FrontendAddrAllocator", "per-<job> IPv4, stable across alloc cycles (1a-A); SINGLE OWNER of <job> -> F", "Binds <job> -> F; the Overdrive ClusterIP analogue. ONE instance (run_server constructs it once and injects the SAME handle into BOTH name_index and by_frontend, via the ordered drain) — the single source of frontend truth, so the answered F == the recognized F (DDN-2 single-owner invariant)")
+    Container(nameidx, "name_index (projection + its OWN drain)", "<job> -> stable F; WITHHOLDS on zero-healthy", "Maps <job> -> stable frontend addr F (REV-2: NOT -> backend addrs); gates Backend.healthy == true. Its OWN single-owner drain (name_index.rs:41-43) folds service_backends rows; answers F via allocator.assign(<job>)")
+    Container(bfdrain, "by_frontend projection + its OWN drain", "re-keyed MtlsResolve/BackendIndex (mtls_resolve_adapter.rs:55-57)", "Its OWN single-owner drain folds service_backends rows into by_frontend; keys (F, listener.port, Proto) via allocator.assign(<job>). INDEPENDENT of the name_index drain — no inter-drain ordering")
+    Container(falloc, "FrontendAddrAllocator", "per-<job> IPv4, stable across alloc cycles (1a-A); SINGLE OWNER of <job> -> F", "Binds <job> -> F; the Overdrive ClusterIP analogue. ONE Arc-shared instance (run_server constructs it once and injects the SAME handle into BOTH drains) — the single source of frontend truth, so the F name_index answers == the F by_frontend keys, byte-for-byte (DDN-2 single-owner invariant). The temporal write-ordering barrier is SUPERSEDED; fail-closed (FAILCLOSED-01) holds the security half regardless of inter-drain timing")
     Container(tproxy, "nft-TPROXY interceptor", "ADR-0071 Path-A (reused verbatim)", "Captures the connection to (F, listener.port); recovers orig_dst verbatim")
     Container(resolve, "MtlsResolve (re-keyed, 1b-A)", "by_frontend: BTreeMap<FrontendKey,ServiceId>, FrontendKey=(SocketAddrV4,Proto)", "Translates (F, listener.port, proto) -> current running-AND-healthy backend B; three-way classify (hit -> Mesh; frontend-subnet miss -> MeshUnreachable fail-closed; else by_addr); enforces SPIFFE mTLS")
     Container(pump, "per-connection pump task", "TCP_USER_TIMEOUT / keepalive (mtls_intercept_worker.rs:34)", "Surfaces backend death; bounds in-flight churn (no sock_destroy)")
   }
-  ContainerDb(obs, "ObservationStore (service_backends)", "running-AND-healthy backend rows", "ONE source; the single ordered drain is the sole reader feeding both projections")
+  ContainerDb(obs, "ObservationStore (service_backends)", "running-AND-healthy backend rows", "ONE source for liveness; TWO independent single-owner drains (name_index + by_frontend) each fold the SAME rows from their OWN subscription")
   Container(backend, "Server workload", "a running mesh backend at B in its own netns", "")
 
   Rel(app, dns, "1. resolves <job>.svc.overdrive.local via")
   Rel(dns, nameidx, "reads stable frontend addr F from")
-  Rel(drain, obs, "List-then-Watch + relist-on-Lagged over the SAME rows")
-  Rel(drain, falloc, "looks up / binds <job> -> F via")
-  Rel(drain, resolve, "STEP A: applies row batch to by_frontend (+ healthy backend) FIRST")
-  Rel(drain, nameidx, "STEP B (after A): exposes F as <job>'s answer — ordering barrier")
+  Rel(nameidx, obs, "OWN drain: List-then-Watch + relist-on-Lagged over the SAME rows")
+  Rel(bfdrain, obs, "OWN drain: List-then-Watch + relist-on-Lagged over the SAME rows (INDEPENDENT subscription)")
+  Rel(nameidx, falloc, "reads F via allocator.assign(<job>) — answers the SAME F")
+  Rel(bfdrain, falloc, "reads F via allocator.assign(<job>) — keys the SAME F byte-for-byte")
+  Rel(bfdrain, resolve, "feeds by_frontend; resolve translates F -> live backend")
   Rel(app, tproxy, "2. connects to (F, listener.port); captured by")
   Rel(tproxy, resolve, "hands orig_dst = (F, listener.port) to")
   Rel(resolve, backend, "3. mTLS-originates to current backend B; pumped by")
@@ -1948,6 +1981,18 @@ orchestrator relays; this agent does NOT run `gh issue edit`):
      rustdoc requires stay `NonMesh` (`mtls_resolve_adapter.rs:128-130`). Worst case
      of any residual race = refused connect + retry, never silent cleartext. See
      § Frontend-subnet coherence contract.
+     > **RECONCILED (2026-06-26, review-02-00 D2 + independent verification):** the
+     > "single ordered drain updates `by_frontend` BEFORE `name_index`" coherence
+     > (i) was **superseded** — the as-implemented architecture has TWO
+     > **independent** single-owner drains (`mtls_resolve_adapter.rs:55-57`,
+     > `name_index.rs:41-43`) reading ONE `Arc`-shared `FrontendAddrAllocator`,
+     > with no shared drain and no inter-drain write-ordering. The enforced
+     > coherence is **byte-identity of `F` via the single allocator** (DDN-2); the
+     > temporal barrier was an availability nicety, not a security invariant. The
+     > **fail-closed-on-subnet-miss arm (ii) is unchanged and now carries the
+     > security half** — it holds regardless of inter-drain timing. ADR-0072 REV-4
+     > amendment + S-DBN-COHERENCE-01 rewrite (byte-identity Property 1 +
+     > timing-independent fail-closed Property 2) record the reconciliation.
    - **No live-code contradiction surfaced.** `ServiceId::derive` DOES carry proto
      (Finding-1 stance holds); the live `NonMesh → PassThrough` cleartext path
      (`mtls_intercept_worker.rs:1112`) and the "a general miss must stay `NonMesh`"

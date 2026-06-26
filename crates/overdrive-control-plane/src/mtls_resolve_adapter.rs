@@ -228,7 +228,7 @@ use tokio::task::JoinHandle;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FrontendKey {
     /// The mesh frontend endpoint `(F, listener.port)` — `F` drawn from
-    /// [`WORKLOAD_FRONTEND_BASE`] (`10.98.0.0/16`), the port the listener's.
+    /// [`WORKLOAD_FRONTEND_BASE`] (`10.98.0.0/16`); the port is the listener's.
     pub addr: SocketAddrV4,
     /// The listener's L4 protocol — the axis that discriminates two
     /// same-`(F, port)` listeners on different protos.
@@ -331,14 +331,28 @@ impl BackendIndex {
         self.addrs_by_service.insert(service_id, contributed);
     }
 
-    /// Rebuild the WHOLE index from an authoritative snapshot (the List leg of
-    /// List-then-Watch + the relist recovery). Every prior entry is dropped and
-    /// the snapshot's rows are re-applied — a snapshot IS the complete current
-    /// state (the keyless enumerate returns every LWW winner), so a full
+    /// Rebuild the `by_addr` projection from an authoritative `service_backends`
+    /// liveness snapshot (the List leg of List-then-Watch + the relist recovery).
+    /// Every prior `by_addr` / `addrs_by_service` entry is dropped and the
+    /// snapshot's rows are re-applied — a snapshot IS the complete current
+    /// liveness state (the keyless enumerate returns every LWW winner), so a full
     /// replace cannot strand a service the snapshot omitted (a service whose
     /// backends were removed is simply absent from the snapshot and from the
     /// rebuilt index).
-    pub fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
+    ///
+    /// `by_frontend` is INTENTIONALLY left untouched: the `service_backends`
+    /// liveness snapshot carries NO frontend-binding information — the
+    /// `<job> → F` bindings are owned by the
+    /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
+    /// (DDN-2) and projected into `by_frontend` by [`Self::bind_frontend`], not by
+    /// a liveness relist. Wiping `by_frontend` on a liveness `Lagged` relist would
+    /// drop every frontend mapping and break withhold-not-release.
+    ///
+    /// Visibility: private (the `name_index.rs` precedent), consumed only by
+    /// [`ServiceBackendsResolve::relist_into`] within this module — never a
+    /// cross-crate caller (the pinned 02-00 surface is `by_frontend` /
+    /// `FrontendKey` / `classify` only).
+    fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
         self.by_addr.clear();
         self.addrs_by_service.clear();
         for row in rows {
@@ -348,13 +362,35 @@ impl BackendIndex {
 
     /// Bind a mesh frontend endpoint `key = (F, listener.port, proto)` to the
     /// `ServiceId` it fronts — the 02-00 `by_frontend` re-key write half
-    /// (ADR-0072 REV-2). The COHERENCE-01 ordering barrier requires this STEP A
-    /// (`by_frontend` updated) to complete BEFORE STEP B (the DNS `name_index`
-    /// exposes `F`), so a frontend HIT never precedes the resolve learning it.
+    /// (ADR-0072 REV-2).
     ///
-    /// `F` is the SAME stable frontend the [`FrontendAddrAllocator`] binds — the
-    /// caller derives it from the ONE allocator instance (DDN-2 single-owner
-    /// invariant); `by_frontend` introduces NO second `<job> → F` source.
+    /// # The enforced invariant (DDN-2 — byte-identity via the ONE allocator)
+    ///
+    /// `F` is the SAME stable frontend the
+    /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
+    /// binds — the caller derives `F` for `<job>` from the ONE allocator
+    /// instance, the SAME instance the DNS `name_index` answers `<job>` from.
+    /// There is NO second `<job> → F` source: the `F` keyed here is
+    /// byte-identical to the `F` DNS answers (the DDN-2 single-owner invariant,
+    /// enforced by the COHERENCE-01 byte-identity property in
+    /// `dns_name_index.rs`). A second `<job> → F` source (a divergent allocator,
+    /// a re-derivation, a stale cache) would make the two projections key/answer
+    /// DIFFERENT `F`s — exactly what byte-identity forbids.
+    ///
+    /// # No write-time ordering barrier between the two projections
+    ///
+    /// `by_frontend` (this re-key projection) and the DNS `name_index` are fed
+    /// by TWO INDEPENDENT single-owner drains (`mtls_resolve_adapter` and
+    /// `name_index`), each reading the ONE shared allocator — there is NO single
+    /// ordered drain and NO temporal guarantee that `by_frontend` is bound before
+    /// `name_index` exposes `F` (or vice versa). The two drains have no inter-drain
+    /// ordering. Security does NOT rest on that ordering: even if `name_index`
+    /// exposes `F` for a `<job>` whose `(F, listener.port, proto)` key is not yet
+    /// bound here, a dial to that `F` MISSES `by_frontend`, falls into
+    /// [`classify`](Self::classify) arm 2 (`F ∈ 10.98.0.0/16` →
+    /// [`MeshUnreachable`](MtlsResolution::MeshUnreachable)) and fails closed — NEVER
+    /// cleartext (the FAILCLOSED-01 security half). Convergence (the bind landing)
+    /// is an availability nicety, not the security guarantee.
     pub fn bind_frontend(&mut self, key: FrontendKey, service_id: ServiceId) {
         self.by_frontend.insert(key, service_id);
     }

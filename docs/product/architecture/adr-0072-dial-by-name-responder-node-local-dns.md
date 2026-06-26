@@ -130,6 +130,90 @@ amendment is realized in the roadmap as REV-3 step 01-05 (the writer) + the
 01-03 re-scope (the pure reader); the code correctives are a separate crafter
 dispatch.
 
+**AMENDMENT (REV-4, 2026-06-26) — Finding-3(i) coherence and the EQUIV-01
+contract reconciled to the AS-IMPLEMENTED two-drains-one-allocator
+architecture.** An adversarial review of step 02-00
+(`docs/feature/dial-by-name-responder/deliver/review-02-00.md`, findings D1 +
+D2), corroborated by independent verification against the landed code, surfaced
+that two roadmap criteria (S-DBN-COHERENCE-01, S-DBN-EQUIV-01) were specified
+against architecture the implementation does not have. This amendment reconciles
+the DESIGN to implemented reality; the REV-2 DIRECTION (stable `10.98.0.0/16`
+frontend + `MtlsResolve` translation + single-owner `FrontendAddrAllocator`) is
+UNCHANGED, and the two genuinely-strong invariants (DDN-2 byte-identity,
+Finding-3(ii) fail-closed) stay intact and become the load-bearing content.
+REKEY-01..04 and FAILCLOSED-01 are untouched (the review confirmed all five
+genuinely non-vacuous).
+
+**(1) Finding-3(i) "single ordered drain / write-time ordering barrier (STEP A
+before STEP B)" — SUPERSEDED.** The Changed-Assumptions / DDN-1 / DDN-2 text
+below (and the feature-delta § "Frontend-subnet coherence contract" (i)) pinned
+a *single ordered drain* that updates `by_frontend` (STEP A) BEFORE exposing `F`
+to `name_index` (STEP B) — a temporal write-time barrier. **No such single
+shared drain exists.** The implementation has **two independent single-owner
+drain tasks**, each owning its own `subscribe_all_events` subscription:
+
+- the re-keyed `MtlsResolve`/`BackendIndex` drain that feeds `by_frontend`
+  (`crates/overdrive-control-plane/src/mtls_resolve_adapter.rs:55-57`), and
+- the `NameIndex` drain that feeds the resolvable set
+  (`crates/overdrive-control-plane/src/dns_responder/name_index.rs:41-43`),
+
+both reading the **same `Arc`-shared `FrontendAddrAllocator`** (the roadmap 02-01
+wiring constructs the re-keyed `MtlsResolve` with *its own* drain and a
+*separate* `DnsResponder`/`name_index` — two components, one allocator). There is
+no shared drain to order, so the temporal barrier describes a coordination
+mechanism present nowhere. It is **superseded**.
+
+The barrier was, at most, an **availability** nicety (avoid a transient
+NXDOMAIN-then-refuse-then-retry hiccup when `name_index` exposes `F` for a `<job>`
+whose `by_frontend` key the resolve drain has not yet applied), **NOT a security
+invariant**. The security posture holds **regardless of inter-drain timing**:
+because `10.98.0.0/16` is dedicated to mesh frontends, a dial to an `F` that
+misses `by_frontend` classifies arm-2 (`∈ 10.98.0.0/16` miss) → `MeshUnreachable`
+→ **fail-closed (refuse, never cleartext)** by Finding-3(ii) / FAILCLOSED-01. A
+race window worst-cases to a refused connect + client retry, never silent
+cleartext to a should-be-mesh peer.
+
+**The enforced coherence invariant is byte-identity of `F` via the single
+allocator (DDN-2 single-owner), not ordering.** Both drains call
+`allocator.assign(<job>)` on the ONE `Arc`-shared `FrontendAddrAllocator`, so the
+`F` `by_frontend` is keyed on equals the `F` `name_index` answers, byte-for-byte
+— there is exactly one `<job> → F` source. A second `<job> → F` source (a
+divergent allocator, a re-derivation, a stale cache) is the addressing-divergence
+defect DDN-2 exists to prevent. S-DBN-COHERENCE-01 is rewritten to assert this:
+**Property 1** (byte-identity via the ONE allocator — a mutant introducing a
+second `F` source flips it) + **Property 2** (fail-closed regardless of
+inter-drain timing — a mutant flattening the subnet-miss arm to `NonMesh` flips
+it). It stays at roadmap step 02-00, Tier-1, test home
+`dns_name_index.rs` — the in-process sibling of the Tier-3 S-DBN-SINGLE-SRC
+(02-02) oracle. (The `mtls_resolve_adapter.rs` docstring that currently claims the
+"STEP A before STEP B" barrier is an aspirational doc for an unenforced invariant,
+CLAUDE.md "Never document behaviour that is not implemented" — the crafter fixes
+that docstring; this amendment governs the design artifacts.)
+
+**(2) S-DBN-EQUIV-01 "host build path AND in-memory test-double path" — RE-FRAMED
+to reference-oracle equivalence.** `BackendIndex` is a **single internal struct of
+ONE adapter**; there is no sim/host split for it (`SimMtlsResolve` is a different
+level — the `MtlsResolve` trait — and was deliberately NOT re-keyed). A two-impl
+"host-vs-in-memory" equivalence therefore collapses to driving two
+`BackendIndex::default()` through identical calls → `assert_eq!(x, x)`, zero
+independent kill power (review D1). Per `.claude/rules/development.md` § "Trait
+definitions specify behavior": *if there is only one implementation, an
+"equivalence" test of it against itself enforces nothing.* The reconciled
+criterion replaces it with the genuine enforcement when only one implementation
+exists: the re-keyed three-way `classify` trajectory over an arbitrary ordered
+sequence of (row-apply | frontend-binding | classify-probe) steps matches an
+**independent hand-written reference oracle** that re-derives the expected verdict
+WITHOUT calling `BackendIndex` (the shape REKEY-01 already uses for its
+first-by-`Ord` `min` recompute, generalised over the whole trajectory), AND the
+trajectory is deterministic (seed → bit-identical). It stays at step 02-00,
+Tier-1, test home `mtls_resolve_rekey.rs`.
+
+The Finding-3(i) and DDN-2 framing in the REV-2 sections below, and the
+feature-delta coherence contract, are read through this amendment: the enforced
+property is byte-identity via the single allocator + timing-independent
+fail-closed, NOT a temporal write-ordering barrier. The supersession is clean
+(greenfield, single-cut — no deprecation, no transitional path).
+
 ## Changed Assumptions (REV-2, 2026-06-25)
 
 ### What changed and why
@@ -437,9 +521,19 @@ grounded on live code (`file:line`).
   passthrough` `:1180`), a fail-OPEN regression. Because `name_index` (DNS) and
   `by_frontend` (resolve) are separate readers, two complementary mechanisms are
   pinned, **both required**:
-  - **(i) Ordering (coherence option (b), CHOSEN over (a)):** a SINGLE ordered
-    drain updates `by_frontend` (+ a healthy backend) BEFORE `name_index` exposes
-    `F`. The readers are projections off ONE ordered apply over the shared
+  > **REV-4 supersession (2026-06-26):** sub-bullet **(i) below is SUPERSEDED** —
+  > there is no single ordered drain (the implementation has two independent
+  > single-owner drains reading one allocator,
+  > `mtls_resolve_adapter.rs:55-57` / `name_index.rs:41-43`). The enforced
+  > coherence is **byte-identity of `F` via the single `FrontendAddrAllocator`**
+  > (DDN-2); the temporal ordering barrier was an availability nicety, not a
+  > security invariant. Sub-bullet **(ii) is unchanged and carries the security
+  > half** — it holds regardless of inter-drain timing. See the REV-4 AMENDMENT
+  > block at the top of this ADR; S-DBN-COHERENCE-01 is rewritten accordingly.
+  - **(i) Ordering (coherence option (b), CHOSEN over (a)) — SUPERSEDED by REV-4
+    (see the supersession note above; retained for the audit trail):** a SINGLE
+    ordered drain updates `by_frontend` (+ a healthy backend) BEFORE `name_index`
+    exposes `F`. The readers are projections off ONE ordered apply over the shared
     `service_backends` rows (the "one source, three readers" model — DDN-1 sibling
     readers, the single-owner drain `mtls_resolve_adapter.rs:56-87`), so a
     write-time barrier is the natural and stronger shape; (a) is the same idea as

@@ -274,6 +274,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-25T19:12:57Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:15:40Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:33:05Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: hardening existing-GREEN tests against reframed criteria \u2014 no new production behavior; the litmus (inject a classify bug \u2192 oracle/byte-identity diverges) is a guard, not a logged RED",
+      "t": "2026-06-25T20:43:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: hardening existing-GREEN tests against reframed criteria \u2014 no new production behavior; the litmus (inject a classify bug \u2192 oracle/byte-identity diverges) is a guard, not a logged RED",
+      "t": "2026-06-25T20:43:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:43:54Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:44:49Z"
     }
   ]
 }

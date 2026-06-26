@@ -14,7 +14,11 @@
 //!
 //! REKEY-01/02/03 + FAILCLOSED-01 + EQUIV-01 drive the genuinely-new arm-1/arm-2
 //! `classify` behaviour; REKEY-04 is GREEN-by-preservation (the additive-EXTEND
-//! `by_addr` arm-3 fall-through, unchanged).
+//! `by_addr` arm-3 fall-through, unchanged). EQUIV-01 proves the production
+//! `classify` trajectory matches an INDEPENDENT reference oracle (the spec
+//! re-stated as a model fold — NOT a struct compared against itself) over an
+//! arbitrary ordered step sequence, plus a determinism clause (same seed →
+//! bit-identical trajectory).
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
@@ -329,13 +333,15 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// S-DBN-EQUIV-01 — DST equivalence: two BackendIndex constructions agree on the
-// re-keyed classify over the SAME ordered call sequence.
+// S-DBN-EQUIV-01 — reference-oracle equivalence + determinism: the production
+// `BackendIndex` re-keyed-classify trajectory over an arbitrary ordered step
+// sequence matches an INDEPENDENT hand-written reference oracle that re-derives
+// the expected verdict at every classify-probe WITHOUT calling `BackendIndex`.
 // ---------------------------------------------------------------------------
 
 /// One step in the replayed sequence: either a row apply, a frontend binding,
-/// or a classify probe. The two index constructions are driven through the
-/// SAME sequence and must agree on every probe verdict.
+/// or a classify probe. BOTH the production `BackendIndex` and the independent
+/// reference oracle fold the SAME sequence; they must agree on every probe.
 #[derive(Clone, Debug)]
 enum Step {
     ApplyRow { service: u64, addrs: Vec<(u8, bool)> },
@@ -343,11 +349,25 @@ enum Step {
     Classify { hi: u8, lo: u8, port: u16, proto_udp: bool, frontend: bool },
 }
 
+// Small, CORRELATED domains so frontend `bind` keys and frontend `classify`
+// probes COLLIDE often — otherwise the arm-1 (`by_frontend` HIT) path that runs
+// the first-by-`Ord` tie-break is essentially never reached by an uncorrelated
+// random sequence, and the `min`/`max` mutant would survive EQUIV-01. `f_lo` /
+// `port` are drawn from the SAME tiny pools the classify probe uses, and a
+// service's backend set draws ≥2 candidate host octets so a frontend-bound
+// service routinely has multiple healthy backends (exercising the tie-break).
+const POOL_FRONTEND_LO: std::ops::RangeInclusive<u8> = 1..=3;
+const POOL_PORT: std::ops::RangeInclusive<u16> = 1..=3;
+const POOL_SERVICE: std::ops::RangeInclusive<u64> = 1..=2;
+
 fn arb_step() -> impl Strategy<Value = Step> {
     prop_oneof![
-        (1u64..=4, prop::collection::vec((1u8..=254, any::<bool>()), 0..=3))
+        // ApplyRow: 0..=4 backends from a small host-octet pool (1..=6) so a
+        // service routinely holds ≥2 healthy backends → the first-by-Ord
+        // tie-break is genuinely exercised when that service is frontend-bound.
+        (POOL_SERVICE, prop::collection::vec((1u8..=6, any::<bool>()), 0..=4))
             .prop_map(|(service, addrs)| Step::ApplyRow { service, addrs }),
-        (1u8..=254, 1u16..=u16::MAX, any::<bool>(), 1u64..=4).prop_map(
+        (POOL_FRONTEND_LO, POOL_PORT, any::<bool>(), POOL_SERVICE).prop_map(
             |(f_lo, port, proto_udp, service)| Step::BindFrontend {
                 f_lo,
                 port,
@@ -355,7 +375,10 @@ fn arb_step() -> impl Strategy<Value = Step> {
                 service,
             }
         ),
-        (0u8..=255, 0u8..=255, 1u16..=u16::MAX, any::<bool>(), any::<bool>()).prop_map(
+        // Classify: `hi`/`port` from the SAME frontend pools (so a frontend probe
+        // can HIT a bound key); `lo` from the backend host pool (so a
+        // workload-subnet probe can HIT a by_addr entry).
+        (POOL_FRONTEND_LO, 1u8..=6, POOL_PORT, any::<bool>(), any::<bool>()).prop_map(
             |(hi, lo, port, proto_udp, frontend)| Step::Classify {
                 hi,
                 lo,
@@ -367,8 +390,21 @@ fn arb_step() -> impl Strategy<Value = Step> {
     ]
 }
 
-/// Apply one step to an index, returning the classify verdict when the step is
-/// a probe (so two constructions can be compared verdict-for-verdict).
+/// The proto for a step's `proto_udp` flag.
+const fn proto_of(proto_udp: bool) -> Proto {
+    if proto_udp { Proto::Udp } else { Proto::Tcp }
+}
+
+/// The destination a `Classify` step probes — frontend-subnet addr OR
+/// workload-subnet addr per the flag, so the sequence exercises all three arms.
+/// SHARED by `drive` (which applies it to `BackendIndex`) and the oracle (which
+/// re-derives the verdict for it), so both observe the byte-identical input.
+fn classify_dst(hi: u8, lo: u8, port: u16, is_frontend: bool) -> SocketAddrV4 {
+    if is_frontend { frontend(3, hi, port) } else { backend_addr(0, lo.max(1), port) }
+}
+
+/// Apply one step to the production `BackendIndex`, returning the classify
+/// verdict when the step is a probe (so the oracle can be compared against it).
 fn drive(index: &mut BackendIndex, step: &Step) -> Option<MtlsResolution> {
     match step {
         Step::ApplyRow { service, addrs } => {
@@ -380,49 +416,208 @@ fn drive(index: &mut BackendIndex, step: &Step) -> Option<MtlsResolution> {
             None
         }
         Step::BindFrontend { f_lo, port, proto_udp, service } => {
-            let proto = if *proto_udp { Proto::Udp } else { Proto::Tcp };
-            index.bind_frontend(FrontendKey::new(frontend(3, *f_lo, *port), proto), svc(*service));
+            index.bind_frontend(
+                FrontendKey::new(frontend(3, *f_lo, *port), proto_of(*proto_udp)),
+                svc(*service),
+            );
             None
         }
         Step::Classify { hi, lo, port, proto_udp, frontend: is_frontend } => {
-            let proto = if *proto_udp { Proto::Udp } else { Proto::Tcp };
-            // Probe a frontend-subnet addr OR a workload-subnet addr depending
-            // on the flag, so the sequence exercises all three classify arms.
-            let dst = if *is_frontend {
-                frontend(3, *hi, *port)
-            } else {
-                backend_addr(0, (*lo).max(1), *port)
-            };
-            Some(index.classify(dst, proto))
+            Some(index.classify(classify_dst(*hi, *lo, *port, *is_frontend), proto_of(*proto_udp)))
+        }
+    }
+}
+
+/// The INDEPENDENT reference oracle for the three-way re-keyed classify — the
+/// SPEC re-stated as a model, NOT a second copy of production. It folds the
+/// SAME `Step` sequence into its own model state and re-derives every
+/// classify-probe verdict WITHOUT calling `BackendIndex`/`FrontendKey`/`classify`.
+///
+/// The model carries exactly the inputs the spec consumes:
+/// - `by_addr: addr → { service → healthy }` — per-contributing-service
+///   readiness at each addr (the F-A ownership-aware shape; an addr is
+///   resolvable while ANY service has a healthy backend there);
+/// - `addrs_by_service: service → contributed addrs` — so a full-row apply
+///   REPLACES exactly that service's prior addrs (full-row-write contract);
+/// - `by_frontend: (F, port, proto) → service`.
+///
+/// `classify` is the three-way spec verbatim: (1) `by_frontend` HIT →
+/// first-by-`Ord` healthy backend of that service → `Mesh` else
+/// `MeshUnreachable`; (2) miss but `ip ∈ 10.98.0.0/16` → `MeshUnreachable`;
+/// (3) miss outside → `by_addr` fall-through (any-healthy-at-addr → `Mesh`,
+/// claimed-but-none-healthy → `MeshUnreachable`, unclaimed → `NonMesh`).
+///
+/// A production logic bug DIVERGES the trajectories and flips the assertion:
+/// `min → max` in the first-by-`Ord` pick, flattening any arm, or dropping the
+/// proto axis (so `tcp/P` and `udp/P` collide) all make `BackendIndex` disagree
+/// with this oracle — REAL independent kill power, unlike a struct compared
+/// against itself.
+#[derive(Default)]
+struct ClassifyOracle {
+    by_addr: std::collections::BTreeMap<SocketAddrV4, std::collections::BTreeMap<u64, bool>>,
+    addrs_by_service: std::collections::BTreeMap<u64, Vec<SocketAddrV4>>,
+    by_frontend: std::collections::BTreeMap<(SocketAddrV4, Proto), u64>,
+}
+
+impl ClassifyOracle {
+    /// Full-row apply: drop ONLY this service's prior addrs, then insert its
+    /// current ones (the full-row-write + per-service-eviction spec).
+    fn apply_row(&mut self, service: u64, addrs: &[(u8, bool)]) {
+        if let Some(stale) = self.addrs_by_service.remove(&service) {
+            for addr in stale {
+                if let Some(by_service) = self.by_addr.get_mut(&addr) {
+                    by_service.remove(&service);
+                    if by_service.is_empty() {
+                        self.by_addr.remove(&addr);
+                    }
+                }
+            }
+        }
+        let mut contributed = Vec::new();
+        for &(h, healthy) in addrs {
+            let addr = backend_addr(0, h, 9000);
+            self.by_addr.entry(addr).or_default().insert(service, healthy);
+            contributed.push(addr);
+        }
+        self.addrs_by_service.insert(service, contributed);
+    }
+
+    fn bind_frontend(&mut self, f: SocketAddrV4, proto: Proto, service: u64) {
+        self.by_frontend.insert((f, proto), service);
+    }
+
+    /// The smallest-by-`Ord` addr at which `service` has a healthy backend
+    /// (the first-by-`Ord` tie-break), re-derived from the model — NOT via
+    /// production.
+    fn first_healthy_for(&self, service: u64) -> Option<SocketAddrV4> {
+        self.addrs_by_service
+            .get(&service)?
+            .iter()
+            .filter(|addr| {
+                self.by_addr
+                    .get(addr)
+                    .and_then(|by_service| by_service.get(&service))
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .copied()
+            .min()
+    }
+
+    /// The three-way classify spec, re-derived independently.
+    fn classify(&self, dst: SocketAddrV4, proto: Proto) -> MtlsResolution {
+        // Arm 1 — by_frontend HIT.
+        if let Some(&service) = self.by_frontend.get(&(dst, proto)) {
+            return self
+                .first_healthy_for(service)
+                .map_or(MtlsResolution::MeshUnreachable, |addr| {
+                    MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None })
+                });
+        }
+        // Arm 2 — by_frontend MISS inside the frontend subnet → fail-closed.
+        // `10.98.0.0/16` membership, re-derived from the octets (NOT the prod
+        // const) so a const-drift mutant in production is still caught.
+        if dst.ip().octets()[0] == 10 && dst.ip().octets()[1] == 98 {
+            return MtlsResolution::MeshUnreachable;
+        }
+        // Arm 3 — outside the subnet: by_addr fall-through.
+        match self.by_addr.get(&dst) {
+            Some(by_service) if by_service.values().any(|&healthy| healthy) => {
+                MtlsResolution::Mesh(ResolvedBackend { addr: dst, expected_svid: None })
+            }
+            Some(_) => MtlsResolution::MeshUnreachable,
+            None => MtlsResolution::NonMesh,
+        }
+    }
+
+    /// Fold one step into the oracle, returning the expected verdict on a probe.
+    fn drive(&mut self, step: &Step) -> Option<MtlsResolution> {
+        match step {
+            Step::ApplyRow { service, addrs } => {
+                self.apply_row(*service, addrs);
+                None
+            }
+            Step::BindFrontend { f_lo, port, proto_udp, service } => {
+                self.bind_frontend(frontend(3, *f_lo, *port), proto_of(*proto_udp), *service);
+                None
+            }
+            Step::Classify { hi, lo, port, proto_udp, frontend: is_frontend } => Some(
+                self.classify(classify_dst(*hi, *lo, *port, *is_frontend), proto_of(*proto_udp)),
+            ),
         }
     }
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(48))]
+    #![proptest_config(ProptestConfig::with_cases(64))]
 
-    /// S-DBN-EQUIV-01 (the trait-docstring contract guard, development.md
-    /// § "Trait definitions specify behavior"): two `BackendIndex` instances
-    /// driven through the SAME ordered sequence of row applies + frontend
-    /// bindings return the byte-identical verdict at EVERY classify step, and
-    /// the verdict trajectory is deterministic (the first-by-`Ord` selection is
-    /// what makes this hold across builds). The three-way arm + the first-by-Ord
-    /// selection is the contract; this equivalence test is the enforcement.
+    /// S-DBN-EQUIV-01 (reference-oracle equivalence; the trait-docstring contract
+    /// guard, development.md § "Trait definitions specify behavior"): the
+    /// production `BackendIndex` re-keyed-classify trajectory over an arbitrary
+    /// ordered sequence of (row-apply | frontend-binding | classify-probe) steps
+    /// matches an INDEPENDENT reference oracle that re-derives the expected
+    /// verdict at EVERY probe WITHOUT calling `BackendIndex`. The oracle is the
+    /// SPEC (a model fold), not a second copy of production — so a logic bug in
+    /// `classify`/`first_healthy_backend_for` (swap `min` for `max`, flatten an
+    /// arm, drop the proto axis) DIVERGES the two trajectories and flips this
+    /// assertion. This is real independent kill power.
     #[test]
-    fn equiv_01_two_constructions_agree_on_every_classify(
+    fn equiv_01_classify_matches_independent_reference_oracle(
+        steps in prop::collection::vec(arb_step(), 1..=24),
+    ) {
+        let mut index = BackendIndex::default();
+        let mut oracle = ClassifyOracle::default();
+
+        // Deterministic prelude — STRUCTURALLY guarantee the arm-1 (`by_frontend`
+        // HIT) first-by-`Ord` tie-break is exercised EVERY run (an uncorrelated
+        // random sequence reaches it too rarely for the `min`/`max` mutant to be
+        // reliably killed). Bind a frontend key to a service that holds THREE
+        // healthy backends at distinct addrs, then probe that exact key: the
+        // expected verdict is `Mesh(smallest-by-Ord healthy addr)`. A `min → max`
+        // mutant picks the LARGEST instead → the oracle and production diverge on
+        // this probe. Both fold the prelude identically, so the comparison stays
+        // valid; the random suffix exercises the rest of the trajectory.
+        let prelude = [
+            Step::ApplyRow { service: 1, addrs: vec![(2, true), (5, true), (3, true)] },
+            Step::BindFrontend { f_lo: 1, port: 1, proto_udp: false, service: 1 },
+            Step::Classify { hi: 1, lo: 0, port: 1, proto_udp: false, frontend: true },
+        ];
+
+        for step in prelude.iter().chain(steps.iter()) {
+            let got = drive(&mut index, step);
+            let want = oracle.drive(step);
+            prop_assert_eq!(
+                got,
+                want,
+                "production BackendIndex must match the independent reference oracle at every \
+                 classify-probe (the three-way spec); a classify logic bug diverges them",
+            );
+        }
+    }
+
+    /// S-DBN-EQUIV-01 DETERMINISM clause: the same step sequence yields a
+    /// bit-identical verdict trajectory across two fresh `BackendIndex`
+    /// constructions. This isolates the determinism half of the criterion — a
+    /// mutant introducing iteration nondeterminism (e.g. a `HashMap` swap that
+    /// reorders the first-by-`Ord` scan) would flip the byte-identity of the two
+    /// trajectories. (The CORRECTNESS half — that the trajectory matches the spec
+    /// — is the oracle property above; determinism alone is not correctness.)
+    #[test]
+    fn equiv_01_verdict_trajectory_is_deterministic(
         steps in prop::collection::vec(arb_step(), 1..=24),
     ) {
         let mut index_a = BackendIndex::default();
         let mut index_b = BackendIndex::default();
 
-        for step in &steps {
-            let verdict_a = drive(&mut index_a, step);
-            let verdict_b = drive(&mut index_b, step);
-            prop_assert_eq!(
-                verdict_a,
-                verdict_b,
-                "two constructions driven through the SAME sequence agree on every classify verdict",
-            );
-        }
+        let trajectory_a: Vec<Option<MtlsResolution>> =
+            steps.iter().map(|step| drive(&mut index_a, step)).collect();
+        let trajectory_b: Vec<Option<MtlsResolution>> =
+            steps.iter().map(|step| drive(&mut index_b, step)).collect();
+
+        prop_assert_eq!(
+            trajectory_a,
+            trajectory_b,
+            "the same seed yields a bit-identical verdict trajectory (deterministic replay)",
+        );
     }
 }

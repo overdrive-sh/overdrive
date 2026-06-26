@@ -26,7 +26,7 @@ use overdrive_control_plane::mtls_resolve_adapter::{BackendIndex, FrontendKey};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::mtls_resolve::{MtlsResolution, ResolvedBackend};
+use overdrive_core::traits::mtls_resolve::MtlsResolution;
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError, ServiceBackendRow, SubscriptionEvent,
@@ -1000,27 +1000,34 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
 }
 
 // ---------------------------------------------------------------------------
-// S-DBN-COHERENCE-01 — the write-time ordering barrier (REV-2 Finding-3 (i)).
+// S-DBN-COHERENCE-01 — byte-identity / single-source-of-F invariant (DDN-2),
+// plus timing-independent fail-closed (FAILCLOSED-01's availability companion).
 //
-// A single ordered drain feeds BOTH projections off the shared `service_backends`
-// rows reading the ONE `FrontendAddrAllocator`. Within any batch that binds
-// `<job> -> F`, `by_frontend` (the re-keyed resolve projection) is updated FIRST
-// (STEP A) and `name_index` exposes `F` for `<job>` SECOND (STEP B) — option (b),
-// the write-time barrier. Therefore there is NO observable moment where
-// `name_index` answers `F` for `<job>` while `by_frontend` does NOT yet hold the
-// `(F, listener.port, proto)` entry: DNS never answers an `F` the re-keyed resolve
-// has not already learned.
+// DDN-2 enforces that there is exactly ONE `<job> -> F` source: the shared
+// `FrontendAddrAllocator`. The re-keyed `MtlsResolve` (`by_frontend`) and the
+// DNS `name_index` are fed by TWO INDEPENDENT single-owner drains
+// (`mtls_resolve_adapter.rs:55-57` and `name_index.rs:41-43`), each reading the
+// SAME allocator — there is NO single ordered drain and NO temporal write-order
+// guarantee between the two projections.
 //
-// 02-00 scope: the single shared drain is COMPOSED in 02-01 (`run_server` injects
-// ONE allocator into both the re-keyed `MtlsResolve` and the `DnsResponder`). This
-// Tier-1 property exercises the ORDERING INVARIANT at the projection level the
-// 02-00 data structures expose — driving the production `BackendIndex` (the
-// `by_frontend` projection) and the production `NameIndex`/`answer_for` (the DNS
-// projection) off the SAME `FrontendAddrAllocator`, applying the batch in the
-// option-(b) order, and asserting the invariant at every inter-step observation
-// point. The `F` bound into `by_frontend` and the `F` exposed to `name_index` are
-// byte-identical because BOTH derive from the SAME allocator (DDN-2). A mutant
-// that exposes `F` to `name_index` before binding `by_frontend` flips this.
+// PROPERTY 1 (byte-identity via the ONE allocator): for every batch of `<job>`s
+// `assign()`ed into ONE allocator and driven into BOTH a re-keyed `BackendIndex`'s
+// `by_frontend` (keyed on the allocator-assigned `F`) AND the DNS `name_index`
+// (answering the allocator-assigned `F`), the `F` `name_index` answers for a
+// `<job>` is BYTE-IDENTICAL to the `F` `by_frontend` is keyed on — because there
+// is exactly ONE `<job> -> F` source. A SECOND source (a divergent allocator, a
+// re-derivation, a stale cache) makes the two projections key/answer DIFFERENT
+// `F`s and flips Property 1.
+//
+// PROPERTY 2 (fail-closed REGARDLESS of inter-drain timing): a frontend-subnet
+// dial that MISSES `by_frontend` classifies `MeshUnreachable` — so EVEN IF
+// `name_index` exposes `F` for a `<job>` whose `by_frontend` key is not yet bound
+// (the two drains are INDEPENDENT, with NO temporal ordering), the dial hits
+// classify arm-2 (`F ∈ 10.98.0.0/16`) -> fail-closed, NEVER cleartext. The
+// drain-ordering barrier is SUPERSEDED (an availability nicety, not security —
+// FAILCLOSED-01 pins the security half). This criterion does NOT assert temporal
+// write-ordering (which exists nowhere); it asserts byte-identity-via-single-source
+// (P1) + timing-independent fail-closed (P2).
 // ---------------------------------------------------------------------------
 
 /// The frontend port the listener exposes (the `F`'s port in the
@@ -1030,20 +1037,20 @@ const COHERENCE_LISTENER_PORT: u16 = 8080;
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(48))]
 
-    /// S-DBN-COHERENCE-01 (US-DBN-2): for every batch of running-and-healthy
-    /// rows that binds `<job> -> F` applied through the single ordered drain,
-    /// there is NO observable moment where `name_index` answers `F` for `<job>`
-    /// while `by_frontend` does NOT yet hold the `(F, listener.port, proto)`
-    /// entry. The ordering invariant: `by_frontend` is updated FIRST (STEP A),
-    /// `name_index` exposes `F` SECOND (STEP B).
+    /// S-DBN-COHERENCE-01 (US-DBN-2 / DDN-2) — byte-identity + timing-independent
+    /// fail-closed. Both projections derive `F` for each `<job>` from the ONE
+    /// shared `FrontendAddrAllocator`; the test asserts:
     ///
-    /// The test models the single ordered drain by applying each `<job>`'s
-    /// projection-pair in option-(b) order and asserting, at EVERY inter-step
-    /// observation, that any `<job>` whose `name_index` answer is `F` has its
-    /// `(F, port, Tcp)` already a `by_frontend` HIT (resolving Mesh) — never the
-    /// reverse. Both `F`s come from the ONE shared allocator (byte-identical).
+    /// PROPERTY 1 — for EVERY `<job>` in the batch, the `F` `name_index` answers
+    /// is byte-identical to the `F` `by_frontend` is keyed on (single source). A
+    /// second `<job> -> F` source would diverge them.
+    ///
+    /// PROPERTY 2 — a frontend-subnet dial that MISSES `by_frontend` (a `<job>`
+    /// whose key has NOT been bound — modelling the no-temporal-ordering case)
+    /// classifies `MeshUnreachable`, never cleartext (fail-closed regardless of
+    /// inter-drain timing).
     #[test]
-    fn coherence_01_by_frontend_updated_before_name_index_exposes_f(
+    fn coherence_01_single_source_f_byte_identity_and_timing_independent_fail_closed(
         labels in prop::collection::vec(arb_job_label(), 1..=4),
     ) {
         // De-duplicate the generated <job> labels (a batch binds each <job> once).
@@ -1053,19 +1060,16 @@ proptest! {
 
         tokio::runtime::Runtime::new().expect("rt").block_on(async {
             let store = fresh_store();
-            // ONE shared allocator — the single source of frontend truth that
-            // makes the F by_frontend keys byte-identical to the F name_index
-            // answers (DDN-2). Both projections read THIS instance.
+            // ONE shared allocator — the single source of frontend truth (DDN-2).
+            // BOTH projections (by_frontend keys, name_index answers) read THIS
+            // instance; there is no second <job> -> F source.
             let allocator = FrontendAddrAllocator::new();
 
-            // The two projections fed by the (modeled) single ordered drain:
-            // by_frontend lives on the BackendIndex; the DNS answer on NameIndex.
+            // The re-keyed resolve projection (by_frontend lives on BackendIndex).
             let mut by_frontend = BackendIndex::default();
 
-            // Seed the store + the NameIndex with the batch's running-and-healthy
-            // rows (STEP B's substrate: the rows make each <job> resolvable). The
-            // NameIndex's List-at-probe folds them; the allocator binds each
-            // <job> -> F (the deploy-time assign the single ordered drain reads).
+            // Seed the store + NameIndex with the batch's running-and-healthy rows
+            // so each <job> is resolvable; the allocator binds each <job> -> F.
             let rows: Vec<ServiceBackendRow> = jobs
                 .iter()
                 .enumerate()
@@ -1077,69 +1081,61 @@ proptest! {
                     backends_row(service_id, vec![backend_for(job, instance, true)], 1)
                 })
                 .collect();
-            let name_index =
-                index_listing(&store, allocator.clone(), rows.clone()).await;
+            let name_index = index_listing(&store, allocator.clone(), rows).await;
 
-            // The single ordered drain, option (b): for each <job> in the batch,
-            // STEP A binds by_frontend, then (only after) STEP B's projection
-            // (name_index) is allowed to expose F. We model "STEP B already done"
-            // via the NameIndex above; the invariant we assert is that BEFORE
-            // STEP A runs for a <job>, by_frontend MUST NOT yet resolve its F —
-            // and once STEP A runs, by_frontend resolves it. At NO observation
-            // does name_index answer an F that by_frontend cannot resolve.
+            // Drive each <job> into by_frontend, keyed on the SAME allocator F.
+            // The two drains are INDEPENDENT — there is no ordering between this
+            // bind and name_index's exposure. We bind every <job> EXCEPT the last
+            // one, so the last <job> models the no-temporal-ordering case:
+            // name_index exposes its F (List-at-probe folded its row) while
+            // by_frontend has NOT yet bound its key (Property 2's input).
+            let bind_upto = jobs.len().saturating_sub(1);
             for (i, job) in jobs.iter().enumerate() {
                 let instance = u8::try_from(i).expect("≤4 jobs") + 1;
                 let mesh = mesh_name(job);
-                // F is the allocator's binding (idempotent) — the SAME F both
-                // projections key on.
+                // F from the ONE allocator (idempotent) — the SAME F name_index
+                // answers (via `records_of`) and by_frontend is keyed on.
                 let f = allocator.assign(&mesh).expect("allocator has free addresses");
                 let f_endpoint = SocketAddrV4::new(f, COHERENCE_LISTENER_PORT);
                 let service_id =
                     ServiceId::new(u64::try_from(i).expect("≤4 jobs") + 1).expect("valid service id");
 
-                // STEP A — bind by_frontend FIRST. Pair the frontend key with the
-                // healthy backend the row carries (so the HIT resolves Mesh).
-                by_frontend.apply_row(service_id, &[backend_for(job, instance, true)]);
-                by_frontend.bind_frontend(FrontendKey::new(f_endpoint, Proto::Tcp), service_id);
+                // PROPERTY 1 — byte-identity: the F name_index answers for <job>
+                // is byte-identical to the F by_frontend is keyed on. Both come
+                // from the ONE allocator; a second <job> -> F source diverges them.
+                // `records_of(&allocator, &mesh)` is name_index's answer expressed
+                // as "the allocator's F for <job>" — `answer_for` MUST equal it.
+                prop_assert_eq!(
+                    answer_for(&mesh, RecordType::A, &name_index),
+                    records_of(&allocator, &mesh),
+                    "name_index answers <job> with the SAME allocator F by_frontend keys on \
+                     (single <job> -> F source; a second source would diverge them)",
+                );
 
-                // INVARIANT (post STEP A): name_index's answer for <job> is F,
-                // AND by_frontend now resolves (F, port, Tcp) to a Mesh backend.
-                // There is no observable moment where name_index answers F while
-                // by_frontend misses it — STEP A preceded STEP B's exposure.
-                let dns = answer_for(&mesh, RecordType::A, &name_index);
-                let by_frontend_verdict = by_frontend.classify(f_endpoint, Proto::Tcp);
-
-                if let NameAnswer::Records(addrs) = &dns {
-                    // name_index answered an F — by_frontend MUST already resolve
-                    // it (the ordering barrier). The answered F is byte-identical
-                    // to the keyed F (single allocator source).
-                    prop_assert_eq!(
-                        *addrs[0].ip(),
-                        f,
-                        "the answered F is the SAME allocator binding by_frontend keyed on",
-                    );
+                if i < bind_upto {
+                    by_frontend.apply_row(service_id, &[backend_for(job, instance, true)]);
+                    by_frontend.bind_frontend(FrontendKey::new(f_endpoint, Proto::Tcp), service_id);
+                    // The bound <job> resolves Mesh on the byte-identical F.
                     prop_assert!(
-                        matches!(by_frontend_verdict, MtlsResolution::Mesh(_)),
-                        "DNS never answers an F that the re-keyed resolve has not already \
-                         learned: by_frontend MUST resolve the answered F (Mesh), got {:?}",
-                        by_frontend_verdict,
+                        matches!(
+                            by_frontend.classify(f_endpoint, Proto::Tcp),
+                            MtlsResolution::Mesh(_)
+                        ),
+                        "a bound <job> resolves its allocator-assigned F (Mesh)",
                     );
                 } else {
-                    // name_index withheld (NxDomain) — vacuously coherent (no F
-                    // exposed). by_frontend STILL resolves its bound key to the
-                    // service's healthy backend: the safe direction
-                    // (resolve-learns-ahead-of-DNS), never the fail-open reverse.
-                    // `backend_for(job, instance, true)` is at
-                    // `10.99.0.<instance>:8080`.
-                    let backend_endpoint =
-                        SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, instance), 8080);
+                    // PROPERTY 2 — timing-independent fail-closed: name_index has
+                    // already exposed this <job>'s F (asserted byte-identical
+                    // above), but by_frontend has NOT bound its key. A dial to that
+                    // F MISSES by_frontend and MUST classify MeshUnreachable
+                    // (arm-2 fail-closed), NEVER NonMesh/cleartext — the two
+                    // independent drains have NO temporal ordering, and security
+                    // does not rest on it.
                     prop_assert_eq!(
-                        by_frontend_verdict,
-                        MtlsResolution::Mesh(ResolvedBackend {
-                            addr: backend_endpoint,
-                            expected_svid: None,
-                        }),
-                        "resolve learns F at or before DNS exposes it (never the reverse)",
+                        by_frontend.classify(f_endpoint, Proto::Tcp),
+                        MtlsResolution::MeshUnreachable,
+                        "an F exposed by name_index but not yet bound in by_frontend fails closed \
+                         (MeshUnreachable) regardless of inter-drain timing — never cleartext",
                     );
                 }
             }
