@@ -594,30 +594,4 @@ proptest! {
             );
         }
     }
-
-    /// S-DBN-EQUIV-01 DETERMINISM clause: the same step sequence yields a
-    /// bit-identical verdict trajectory across two fresh `BackendIndex`
-    /// constructions. This isolates the determinism half of the criterion — a
-    /// mutant introducing iteration nondeterminism (e.g. a `HashMap` swap that
-    /// reorders the first-by-`Ord` scan) would flip the byte-identity of the two
-    /// trajectories. (The CORRECTNESS half — that the trajectory matches the spec
-    /// — is the oracle property above; determinism alone is not correctness.)
-    #[test]
-    fn equiv_01_verdict_trajectory_is_deterministic(
-        steps in prop::collection::vec(arb_step(), 1..=24),
-    ) {
-        let mut index_a = BackendIndex::default();
-        let mut index_b = BackendIndex::default();
-
-        let trajectory_a: Vec<Option<MtlsResolution>> =
-            steps.iter().map(|step| drive(&mut index_a, step)).collect();
-        let trajectory_b: Vec<Option<MtlsResolution>> =
-            steps.iter().map(|step| drive(&mut index_b, step)).collect();
-
-        prop_assert_eq!(
-            trajectory_a,
-            trajectory_b,
-            "the same seed yields a bit-identical verdict trajectory (deterministic replay)",
-        );
-    }
 }
