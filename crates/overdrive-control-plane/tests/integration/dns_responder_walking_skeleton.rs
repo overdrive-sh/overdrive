@@ -117,9 +117,23 @@ const REQUEST: &[u8] =
 const RESPONSE: &[u8] =
     b"OVERDRIVE_DIAL_BY_NAME_RESPONSE_server_reply_rides_back_over_agent_leg_ktls_0202";
 
-/// The DNS SAN the dialer presents toward the server (matches the SNI; the
-/// agent's server handshake presents the held server SVID carrying this SAN).
+/// The DNS SAN the test dialer presents toward the server in its OWN
+/// `rustls::ClientConnection` SNI (`dial_frontend_in_netns` → `TestPkiHandle::
+/// dial`). The agent's leg-C SERVER handshake presents the held server SVID
+/// carrying this SAN, so the test client's direct verification succeeds.
 const SERVER_SNI: &str = "server.overdrive.local";
+
+/// The fixed sentinel SNI the PRODUCTION dataplane uses for the agent's
+/// intra-mesh **leg-B** peer dial (`overdrive-dataplane::mtls::outbound`,
+/// hardcoded `"peer.overdrive.local"` — "v1 is single-node + authn-only, so use
+/// a fixed sentinel name that the test peer presents a SAN for"). The
+/// dial-by-name CROSS-WORKLOAD path is the FIRST to exercise leg-B (the agent's
+/// host-originated re-dial to the resolved backend), so the server SVID MUST
+/// ALSO carry this SAN — else the leg-B client handshake verifies the server's
+/// presented SVID against `peer.overdrive.local`, finds only `server.overdrive.
+/// local`, and fails peer verification (the keystone INBOUND-only path never
+/// dialed leg-B, so it never needed this SAN).
+const MESH_PEER_SNI: &str = "peer.overdrive.local";
 
 /// The mesh name a client resolves to reach the "server" Service — `<job>` =
 /// `server`. Equal to `format!("server.{}", MeshServiceName::SUFFIX)`; pinned
@@ -346,8 +360,14 @@ impl TestPki {
 
         let client_spiffe = "spiffe://overdrive.local/ns/default/sa/client";
         let server_spiffe = "spiffe://overdrive.local/ns/default/sa/server";
-        let client_leaf = intermediate.mint_leaf(client_spiffe, None, true);
-        let server_leaf = intermediate.mint_leaf(server_spiffe, Some(SERVER_SNI), false);
+        let client_leaf = intermediate.mint_leaf(client_spiffe, &[], true);
+        // The server SVID carries BOTH the test client's direct SNI (SERVER_SNI)
+        // AND the production dataplane's hardcoded intra-mesh leg-B sentinel SNI
+        // (MESH_PEER_SNI) — the dial-by-name cross-workload path verifies the
+        // server's presented SVID against MESH_PEER_SNI on the agent's leg-B
+        // re-dial (the first path to exercise leg-B; see MESH_PEER_SNI docs).
+        let server_leaf =
+            intermediate.mint_leaf(server_spiffe, &[SERVER_SNI, MESH_PEER_SNI], false);
 
         Self {
             ca_cert_pem: root.cert_pem,
@@ -371,6 +391,10 @@ impl TestPki {
 
     fn server_svid_material(&self) -> SvidMaterial {
         svid_from_leaf(&self.server_leaf)
+    }
+
+    fn client_svid_material(&self) -> SvidMaterial {
+        svid_from_leaf(&self.client_leaf)
     }
 }
 
@@ -406,12 +430,12 @@ impl MintedCa {
         Self { params, key, cert_pem, cert_der }
     }
 
-    fn mint_leaf(&self, spiffe: &str, dns_san: Option<&str>, client_auth: bool) -> Leaf {
+    fn mint_leaf(&self, spiffe: &str, dns_sans: &[&str], client_auth: bool) -> Leaf {
         let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
         let uri = Ia5String::try_from(spiffe).expect("spiffe URI is a valid IA5 string");
         let mut sans = vec![SanType::URI(uri)];
-        if let Some(dns) = dns_san {
-            let dns_ia5 = Ia5String::try_from(dns).expect("dns SAN is a valid IA5 string");
+        for dns in dns_sans {
+            let dns_ia5 = Ia5String::try_from(*dns).expect("dns SAN is a valid IA5 string");
             sans.push(SanType::DnsName(dns_ia5));
         }
         params.subject_alt_names = sans;
@@ -453,18 +477,33 @@ fn svid_from_leaf(leaf: &Leaf) -> SvidMaterial {
 }
 
 /// The agent's held-identity `IdentityRead` double — the ONLY holder of SVID
-/// material (workloads hold nothing). Returns the SAME held server SVID for ANY
-/// alloc id (the production `IdentityMgr` keys by alloc id, but the transitive
-/// round-trip litmus does not depend on which alloc id selects which SVID, only
-/// that the server handshake completes).
+/// material (workloads hold nothing). ALLOC-AWARE, because the dial-by-name
+/// cross-workload mesh path exercises BOTH leg roles: the CLIENT-workload's
+/// agent dials leg-B as a TLS CLIENT (its presented cert must carry ClientAuth
+/// EKU), while the SERVER-workload's agent accepts leg-C as a TLS SERVER (its
+/// presented cert must carry ServerAuth EKU + the `peer.overdrive.local` SAN
+/// leg-B verifies against). A single server SVID for ALL allocs (the keystone's
+/// INBOUND-only shape) fails the cross-workload leg-B with "certificate does not
+/// allow extended key usage for client authentication" — the client-alloc agent
+/// would present a ServerAuth-only cert. So we key by alloc id: the `server`
+/// alloc gets the server leaf, every other alloc (the `client`) gets the client
+/// leaf.
 struct HeldServerIdentity {
     server_svid: SvidMaterial,
+    client_svid: SvidMaterial,
     bundle: TrustBundle,
 }
 
 impl IdentityRead for HeldServerIdentity {
-    fn svid_for(&self, _alloc: &AllocationId) -> Option<SvidMaterial> {
-        Some(self.server_svid.clone())
+    fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial> {
+        // The server-workload alloc id contains "server"; it presents the
+        // ServerAuth server leaf on leg-C. Every other alloc (the client) is a
+        // leg-B TLS client and must present the ClientAuth client leaf.
+        if alloc.as_str().contains("server") {
+            Some(self.server_svid.clone())
+        } else {
+            Some(self.client_svid.clone())
+        }
     }
 
     fn current_bundle(&self) -> Option<TrustBundle> {
@@ -505,6 +544,7 @@ impl Skeleton {
 
         let identity: Arc<dyn IdentityRead> = Arc::new(HeldServerIdentity {
             server_svid: pki.server_svid_material(),
+            client_svid: pki.client_svid_material(),
             bundle: pki.trust_bundle(),
         });
 
@@ -940,25 +980,37 @@ async fn deploy_and_wait_running(
 ///
 /// MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
 ///
-/// BLOCKED (02-02): the dial-by-name EGRESS loop is dead on the production path
-/// because the `BackendDiscoveryBridge` advertises the `host_ipv4` fallback
-/// (`10.96.0.1:port`) in the `service_backends` row instead of the materialized
-/// per-instance `workload_addr` (`10.99.x:port`). Tier-3 evidence: the bridge
-/// briefly advertises the correct `10.99.0.2` then permanently reverts to
-/// `10.96.0.1` once a later `alloc_status` Running row carries
-/// `workload_addr=None` (the V2 addr is dropped on re-reconcile and wins LWW).
-/// The re-keyed `MtlsResolve` then translates the resolved `F` → the
-/// unreachable `host_ipv4`, so the agent's leg-S dial cannot reach the
-/// workload's in-netns listener and the handshake fails. The keystone
-/// (INBOUND path) avoids this by reading the transient `Some(workload_addr)`
-/// directly and dialing it — it never depends on the bridge's `service_backends`
-/// translation reflecting the stable `workload_addr`. The fix is a production
-/// change OUTSIDE this test-only step's scope (preserve `workload_addr` across
-/// `alloc_status` re-writes, or have the bridge read the materialized addr
-/// robustly). Un-ignore once that production gap is closed.
-#[ignore = "blocked: BackendDiscoveryBridge advertises host_ipv4 fallback, not the materialized \
-            per-instance workload_addr, in the service_backends row — the dial-by-name F→backend \
-            translation targets an unreachable addr (production gap, out of 02-02 test-only scope)"]
+/// The mesh→mesh hop closes via the REV-5 output-hook leg-B interception
+/// companion (`mtls_intercept.rs`, spike `findings-output-hook-legb.md`): the
+/// agent's host-originated leg-B re-dial to the resolved backend (the dial-by-name
+/// case where the resolved frontend `F` ≠ the backend `workload_addr`) traverses
+/// the kernel OUTPUT hook, where the per-virt `type route hook output` divert
+/// rule steers it into the destination's leg-C. Without that companion the leg-B
+/// re-dial lands on the plaintext workload listener and the agent reads cleartext
+/// → `InvalidContentType` → RST (the symptom the RCA
+/// `root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md` diagnosed).
+///
+/// PARTIALLY BLOCKED (02-02 — leg-F→leg-C handshake-completion follow-up). The
+/// REV-5 output-hook DATAPATH fix is LANDED and pwru-proven: the agent's
+/// host-originated leg-B re-dial to the resolved backend IS diverted into the
+/// destination's leg-C on the OUTPUT path (`ip_route_me_harder` stamps the
+/// fwmark, `type route` re-lookup routes via `local table 100`, the prerouting
+/// `tproxy` rule on lo-reentry redirects to leg-C) and the TCP handshake
+/// completes. Two cross-workload test-fixture identity bugs surfaced and were
+/// fixed in this commit: (a) the server SVID now carries the
+/// `peer.overdrive.local` leg-B sentinel-SNI SAN the production dataplane
+/// hardcodes (`overdrive-dataplane::mtls::outbound`), and (b)
+/// `HeldServerIdentity` is alloc-aware so the CLIENT alloc's agent presents the
+/// ClientAuth client leaf on leg-B while the SERVER alloc's agent presents the
+/// ServerAuth server leaf on leg-C (a single ServerAuth SVID for all allocs —
+/// the keystone's INBOUND-only shape — failed the cross-workload leg-B EKU
+/// check). With both fixed there is NO agent-side mTLS rejection, but the test
+/// client's end-to-end rustls handshake (terminating against the server agent's
+/// leg-C) still does not complete. This is a remaining leg-F/leg-C
+/// handshake-completion issue in the cross-workload composition, NOT a datapath
+/// defect (the keystone INBOUND-only path never exercised an agent-originated
+/// leg-B into a peer's leg-C). Un-ignore once that gap closes.
+#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven, SAN/EKU fixture bugs fixed"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     if !is_root() {
@@ -979,23 +1031,37 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     // Deploy a single "server" mesh workload. It reaches Running with a stable
     // per-instance workload_addr; the bridge writes a healthy service_backends
     // row; the responder's name_index exposes <job> "server" bound a stable F.
-    // The dial is driven FROM THE SERVER'S OWN PRODUCTION netns (it has a
-    // production egress nft-TPROXY rule + resolv.conf, like any mesh workload),
-    // so the resolve + connect exercise the production path; the connect to F is
-    // translated back to the server's own live backend (the loop closes through
-    // the server itself).
     let server_id = "server";
     let server_backend = deploy_and_wait_stable_backend(&skeleton, server_id).await;
     let server_netns = netns_name_for_workload_addr(server_backend);
+
+    // Deploy a SEPARATE long-lived client workload — the dial SOURCE. Like the
+    // keystone (a distinct client → server, NEVER a self-dial) and the 03-02
+    // ping-pong, the client gives the test a PRODUCTION-provisioned netns (the
+    // responder-injected resolv.conf + the start_alloc egress nft-TPROXY rule)
+    // to resolve + dial FROM. Dialing the server's own frontend from the
+    // server's own netns is a mesh hairpin the cross-workload keystone never
+    // proved.
+    let client_backend =
+        deploy_and_wait_running(&skeleton, client_service_spec("client"), "client").await;
+    let client_netns = netns_name_for_workload_addr(client_backend);
     eprintln!(
-        "[02-02] server backend workload_addr = {server_backend}, netns = {server_netns} (dial source)"
+        "[02-02] server backend = {server_backend} (netns {server_netns}); \
+         client dial-source = {client_backend} (netns {client_netns})"
     );
 
-    // (1) RESOLVE — getaddrinfo from inside the server's PRODUCTION netns must
+    // Settle: a Running row precedes the per-alloc mTLS intercept install
+    // (the client's egress nft-TPROXY capture + leg-F listener, and the server's
+    // leg-C accept loop) by a short window. Dialing before both legs are live
+    // races a fast handshake failure. The sibling S-DBN tests already settle
+    // 500ms here; match them.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // (1) RESOLVE — getaddrinfo from inside the CLIENT's PRODUCTION netns must
     //     answer the STABLE frontend F ∈ 10.98.0.0/16 within the K2 5s budget.
     //     Asserted FIRST and SEPARATELY from the mTLS assertion (the K2
     //     two-culprits honesty: source-pin OR healthy-gate).
-    let netns = server_netns.clone();
+    let netns = client_netns.clone();
     let frontend =
         tokio::task::spawn_blocking(move || poll_resolve_frontend(&netns, Duration::from_secs(5)))
             .await
@@ -1022,13 +1088,14 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     );
     eprintln!("[02-02] resolved STABLE frontend F = {frontend}");
 
-    // (2) DIAL — connect to (F, SERVICE_PORT) from inside the server's
+    // (2) DIAL — connect to (F, SERVICE_PORT) from inside the CLIENT's
     //     PRODUCTION netns; the production egress rule captures it, the re-keyed
-    //     MtlsResolve translates F → the live backend, mTLS terminates, the
-    //     round-trip completes byte-exact. A wrong F (or a missing by_frontend
-    //     translation) would miss → fail-close → no backend → this fails.
+    //     MtlsResolve translates F → the server's live backend, mTLS terminates,
+    //     the round-trip completes byte-exact. A wrong F (or a missing
+    //     by_frontend translation) would miss → fail-close → no backend → this
+    //     fails.
     let dial_pki = TestPkiHandle::from(&pki);
-    let netns = server_netns.clone();
+    let netns = client_netns.clone();
     let result =
         tokio::task::spawn_blocking(move || dial_frontend_in_netns(&netns, dial_pki, frontend))
             .await
@@ -1151,12 +1218,19 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// S-DBN-WS, and pins that the answered `F ∈ 10.98.0.0/16` (the recognizable
 /// subnet) and NOT a `10.99.0.0/16` backend addr.
 ///
-/// BLOCKED (02-02): same production gap as `deployed_workload_resolves_peer_…`
-/// — the bridge advertises the `host_ipv4` fallback, so the `resolve(F)` →
-/// `Mesh` translation lands an unreachable backend and the round-trip cannot
-/// complete. Un-ignore once the `workload_addr`-drop gap is closed.
-#[ignore = "blocked: BackendDiscoveryBridge advertises host_ipv4 fallback, not the materialized \
-            per-instance workload_addr (production gap, out of 02-02 test-only scope)"]
+/// The round-trip THROUGH `F` closes via the REV-5 output-hook leg-B
+/// interception companion (`mtls_intercept.rs`): the agent's host-originated
+/// leg-B re-dial to the translated backend is diverted into the destination's
+/// leg-C on the OUTPUT path, so the mTLS hop terminates rather than RSTing on the
+/// plaintext listener.
+///
+/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
+/// handshake-completion follow-up as
+/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
+/// docstring): the REV-5 datapath fix is landed + pwru-proven and the SAN/EKU
+/// fixture bugs are fixed, but the end-to-end mTLS round-trip does not yet
+/// complete. Un-ignore once that gap closes.
+#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend() {
     if !is_root() {
@@ -1259,12 +1333,19 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// the next connect lands the NEW backend B2, mTLS terminates, and at NO point
 /// did `getent` return a per-instance backend addr ∈ 10.99.0.0/16.
 ///
-/// BLOCKED (02-02): same production gap — the bridge advertises the `host_ipv4`
-/// fallback, so the pre/post-cycle connects cannot land a reachable backend.
-/// The `getent`-byte-stability half (the SQ1 elimination, the core of this AC)
-/// is independently observable once the gap is closed. Un-ignore then.
-#[ignore = "blocked: BackendDiscoveryBridge advertises host_ipv4 fallback, not the materialized \
-            per-instance workload_addr (production gap, out of 02-02 test-only scope)"]
+/// The pre/post-cycle connects close via the REV-5 output-hook leg-B
+/// interception companion (`mtls_intercept.rs`): each connect to `F1` is
+/// translated to the current live backend and the agent's host-originated leg-B
+/// re-dial is diverted into the destination's leg-C on the OUTPUT path, so the
+/// mTLS hop terminates against B1 then B2.
+///
+/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
+/// handshake-completion follow-up as
+/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
+/// docstring). Un-ignore once that gap closes. (The `getent`-byte-stability
+/// half — the SQ1 elimination — is independently observable once the connect
+/// half completes.)
+#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend() {
     if !is_root() {
@@ -1403,12 +1484,19 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// S-DBN-WS-STABLE: that proves the NEXT dial is live; this proves the IN-FLIGHT
 /// dial fails fast rather than hangs.
 ///
-/// BLOCKED (02-02): same production gap — establishing the in-flight connection
-/// requires the connect to F to translate to a reachable backend, which the
-/// `host_ipv4`-fallback bridge defeats. Un-ignore once the `workload_addr`-drop
-/// gap is closed.
-#[ignore = "blocked: BackendDiscoveryBridge advertises host_ipv4 fallback, not the materialized \
-            per-instance workload_addr (production gap, out of 02-02 test-only scope)"]
+/// The in-flight connection is established through the REV-5 output-hook leg-B
+/// interception companion (`mtls_intercept.rs`): the connect to `F` is translated
+/// to the live backend and the agent's host-originated leg-B re-dial is diverted
+/// into the destination's leg-C on the OUTPUT path, so the mTLS hop terminates
+/// and data flows before the churn.
+///
+/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
+/// handshake-completion follow-up as
+/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
+/// docstring): establishing the in-flight connection needs the connect to F to
+/// complete the end-to-end mTLS hop, which does not yet close. Un-ignore once
+/// that gap closes.
+#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend() {
     if !is_root() {

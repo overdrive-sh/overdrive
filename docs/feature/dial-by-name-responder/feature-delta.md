@@ -1998,3 +1998,254 @@ orchestrator relays; this agent does NOT run `gh issue edit`):
      (`mtls_intercept_worker.rs:1112`) and the "a general miss must stay `NonMesh`"
      rustdoc (`:128-130`) both CONFIRM and make safe the Finding-3 subnet-scoped
      fail-closed arm. All three fixes are grounded, not designed around code.
+
+---
+
+## REV-5 / [REF] Datapath amendment — the output-hook leg-B interception companion (the surface BLOCKER-1's reuse claim missed)
+
+> **Status: DESIGN pin off a COMPLETED, falsification-tested spike (2026-06-27).
+> User-ratified ("proceed with recommendation 1", spike `wave-decisions.md`).**
+> Author: Morgan (nw-solution-architect). This amendment ratifies a NEW datapath
+> surface the REV-2 reuse analysis declared out of scope; it does NOT re-litigate
+> the stable-frontend direction (1a-A / 1b-A) or the DNS/resolve contracts
+> (DDN-1..DDN-8, REV-2..REV-4), all of which are unchanged.
+
+### Why this amendment exists — the falsified reuse claim
+
+The REV-2 Reuse Analysis row *"nft-TPROXY capture/handshake/kTLS/splice datapath
+— REUSE verbatim (only the captured `orig_dst` changes — now a frontend addr)"*
+(§ REV-2 Reuse Analysis, this file) and BLOCKER-1's *"the nft-TPROXY datapath
+captures a connection to the frontend → REV-2 stays thin, no nft extension"*
+(§ REV-2 BLOCKERS) are **falsified for the mesh→mesh hop** by the walking-skeleton
+RCA (`docs/analysis/root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md`).
+
+BLOCKER-1's spike validated the **client-egress** leg only: a workload's connect
+to a non-`/30` frontend addr `F` routes out the netns via the per-netns default
+route and is captured by the destination-blind egress nft-TPROXY
+(`install_outbound_tproxy`), `orig_dst` recovered verbatim. That leg is genuinely
+reuse-verbatim. **It never exercised the agent's leg-B re-dial.** dial-by-name is
+the FIRST path where the dialed `orig_dst` (the frontend `F` ∈ `10.98.0.0/16`) ≠
+the resolved backend `workload_addr` (∈ `10.99.0.0/16`), so after `resolve(F) →
+Mesh(backend)` the agent must **re-dial the backend** (leg-B,
+`overdrive-worker/src/mtls/mod.rs:612 dial_leg`, no `SO_MARK`). That re-dial is
+**host-locally-originated** (`ip route get <backend>` → `src 10.99.0.1 dev
+ovd-hv-0000`), so it traverses the kernel **OUTPUT** hook — but the destination
+workload's inbound mTLS interception (`install_inbound_tproxy`) is a
+**`type filter hook prerouting`**-only `tproxy` rule. Locally-originated packets
+never hit `prerouting`, so leg-B is un-intercepted, lands on the plaintext
+workload listener, and the agent's leg-B CLIENT handshake reads cleartext →
+`InvalidContentType` → `health.mtls.enforce_failed` → RST. (The canonical/keystone
+dial worked because its `orig_dst` IS the backend addr — one `daddr`-matched
+prerouting hop, no re-dial.)
+
+**The corrected reuse verdict:** the inbound interception datapath is **NOT
+reuse-verbatim for the mesh→mesh hop**; it needs an **output-hook companion** so
+the agent's host-originated leg-B re-dial is diverted to the destination's leg-C,
+exactly as the prerouting rule diverts a peer's SYN. This is the surface the
+feature-delta originally missed. The mechanism is **proven, falsification-tested,
+and production-promotable** (spike `findings-output-hook-legb.md`, real Lima
+kernel `7.0.0-22-generic`, root); this amendment ratifies it, it does not design
+it.
+
+### Decision A1-LEGB (PINNED) — leg-C output-path binding shape: `IP_FREEBIND` bind (spike-proven), NOT DNAT/redirect
+
+**Chosen: (A) bind `workload_addr:port` with `IP_FREEBIND` on the leg-C
+listener.** The output divert chain `meta mark set`s the existing shared fwmark
+and the `type route hook output` re-lookup steers the packet via the existing
+`ip rule fwmark 0x1 lookup 100` → `local 0.0.0.0/0 dev lo table 100` route to the
+`IP_TRANSPARENT` leg-C listener, where `getsockname` recovers `orig_dst =
+(workload_addr, port)` verbatim. The leg-C listener must additionally set
+`IP_FREEBIND` because on the output path it binds a **non-local** address
+(`workload_addr` ∈ `10.99.0.0/16` is not assigned to the host).
+
+**Rationale.** Option (A) is the shape the spike *empirically proved* under
+falsification (un-marked leg-B → intercepted, `getsockname=10.99.0.2:18951`;
+marked leg-S → exempt; unrelated daddr → no over-capture; `type filter`
+counter-test → decoy, proving `type route` necessary), it matches Cilium's
+from-host `mangle OUTPUT` route-re-lookup precedent, and it is **symmetric with
+the existing prerouting leg-C path** — the same `IP_TRANSPARENT` + `getsockname`
+orig-dst recovery the inbound path already uses (`accept_inbound_leg`), so it
+reuses the proven leg-C accept seam with one added sockopt. Option (B)
+(`meta mark set` + DNAT/`redirect` to `127.0.0.1:<legC>`) was **NOT probed**,
+would rewrite the destination (losing the `getsockname` orig-dst recovery the
+whole intercept design depends on, forcing a `SO_ORIGINAL_DST` path the codebase
+deliberately does not use — `accept_inbound_leg` rustdoc: "NOT `SO_ORIGINAL_DST`"),
+and adopting an unproven datapath shape over a proven one on a no-Tier-2-backstop
+routing surface would require its own spike for no benefit. (A) is decisive.
+
+### The production design contract (`crates/overdrive-worker/src/mtls_intercept.rs`) — implement TO this; invent no surface
+
+> Per CLAUDE.md "Implement to the design — never invent API surface." The exact
+> nft/ip incantation is pinned in `findings-output-hook-legb.md` § "The exact
+> working incantation"; the names, consts, and teardown surface below are the
+> contract the crafter builds to. Where this names an exact rule shape or const,
+> it is binding; where it says "DELIVER detail" the crafter picks the shape and
+> surfaces it if the design is ambiguous, never improvises past a gap.
+
+**New const (add beside the existing `IP_TRANSPARENT` const, `mtls_intercept.rs:45`):**
+
+```rust
+/// `IP_FREEBIND` sockopt level value — lets the leg-C listener bind the
+/// NON-LOCAL `workload_addr` (∈ 10.99.0.0/16, not assigned to the host) on the
+/// OUTPUT path, so the agent's host-originated leg-B re-dial is intercepted
+/// symmetric with the prerouting path. libc 0.2 does not name it. (REV-5)
+const IP_FREEBIND: libc::c_int = 15;
+```
+
+**New const (add beside `NFT_CHAIN`, `mtls_intercept.rs:61`):**
+
+```rust
+/// The shared `output` chain inside [`NFT_TABLE`] that holds the leg-S-dial
+/// exemption (once, at the head) followed by every per-virt OUTPUT divert rule.
+/// Distinct from [`NFT_CHAIN`] (`prerouting`): the output chain MUST be
+/// `type route hook output priority mangle` (NOT `type filter`) so the kernel
+/// RE-EVALUATES the route after `meta mark set`, firing the existing
+/// `ip rule fwmark` → `local` route on the OUTPUT path (spike-proven; the
+/// `type filter` counter-test lands on the plaintext decoy). (REV-5)
+const NFT_OUTPUT_CHAIN: &str = "output";
+```
+
+No new `MTLS_LEG_S_DIAL_MARK` (= `0x2`, `overdrive-core::dataplane`) and no new
+`TPROXY_FWMARK` (= `0x1`) const are needed — the output rule reuses both.
+
+**`ensure_shared_routing_infra` (~L506) — add the output chain + its head
+exemption; the `ip rule`/`ip route` lines are UNCHANGED.** After the existing
+`prerouting` chain ensure, add an idempotent create-if-missing for the output
+chain and insert the leg-S exemption at ITS head exactly once (mirroring the
+prerouting exemption guard, `chain_has_leg_s_exemption`):
+
+- `nft add chain ip overdrive-mtls output { type route hook output priority
+  mangle; policy accept; }` — idempotent create-if-missing (`run_nft`, same as
+  the prerouting `add chain`).
+- Insert the head exemption ONCE: `nft insert rule ip overdrive-mtls output meta
+  mark <MTLS_LEG_S_DIAL_MARK> accept`, guarded by a presence check on the OUTPUT
+  chain (a `chain_has_leg_s_exemption`-shape predicate scoped to
+  `NFT_OUTPUT_CHAIN` — DELIVER may parameterise the existing helper by chain
+  name, or add a sibling; it must not re-insert on every install).
+- **UNCHANGED (state explicitly in the rustdoc): the `ip rule fwmark 0x1 lookup
+  100` and `ip route add local 0.0.0.0/0 dev lo table 100` lines stay exactly as
+  they are.** `type route` makes them fire on the output path; no `iif lo` clause
+  and no second route table are needed (spike-proven).
+
+**`install_inbound_tproxy` (~L248) — append the companion output divert rule;
+the leg-C listener gains `IP_FREEBIND`.** After the existing prerouting `tproxy`
+append (step 2), append exactly ONE per-virt OUTPUT divert rule to the shared
+output chain (after its head exemption):
+
+```text
+nft add rule ip overdrive-mtls output \
+  ip daddr <virt.ip> tcp dport <virt.port> \
+  meta mark != <MTLS_LEG_S_DIAL_MARK> meta mark set <TPROXY_FWMARK> accept
+```
+
+i.e. `ip daddr <workload_addr> tcp dport <port> meta mark != 0x2 meta mark set
+0x1 accept`. The `meta mark != 0x2` clause skips the agent's marked leg-S inbound
+dial (which must reach the workload directly) and matches only the un-marked
+leg-B re-dial — the recursion guard the prerouting path already relies on. The
+leg-C listener (`make_transparent_listener`, the inbound leg-C the worker passes
+to `install_inbound_tproxy` for this virt) gains an `IP_FREEBIND` setsockopt
+(`IPPROTO_IP`, `IP_FREEBIND`, `1`) **immediately after the existing
+`IP_TRANSPARENT` setsockopt** in `make_transparent_listener` — so the one
+transparent listener serves BOTH the prerouting (peer SYN, local-addr bind) and
+output (agent leg-B re-dial, non-local-addr bind) paths. (DELIVER detail: whether
+`IP_FREEBIND` is set unconditionally on every `make_transparent_listener` — the
+simplest, and harmless for the prerouting path which binds `127.0.0.1` — or only
+on the leg-C inbound listener, is a crafter shape choice; unconditional is
+recommended and the spike set it unconditionally.)
+
+**Teardown — `TproxyInterceptGuard` now reaps TWO rules per inbound install; the
+classifier MUST be widened. This is a real teardown change, not a no-op.** The
+inbound install now appends two per-virt rules (prerouting `tproxy` + output
+`meta mark set`), so:
+
+- **`TproxyInterceptGuard` (`mtls_intercept.rs:817`) holds a single `handle: u64`
+  today.** It must carry BOTH the prerouting rule handle AND the output rule
+  handle for an inbound install, and its `Drop` must delete BOTH by handle (the
+  same by-handle `nft delete rule … handle <N>` the current Drop uses, once per
+  chain). **DELIVER detail (surface if ambiguous):** the egress install
+  (`install_outbound_tproxy`) appends only ONE rule and installs NO output
+  companion, so the guard must represent "one or two rules across one or two
+  chains." The recommended shape is a guard field that is a small set of
+  `(chain, handle)` pairs (e.g. `Vec<(&'static str, u64)>` or a two-`Option`
+  struct) — Drop iterates and deletes each by `(chain, handle)`. This is the ONE
+  guard-shape decision the crafter pins; do NOT invent a richer guard surface
+  than "the rules this install created, by chain+handle."
+- **`install_inbound_tproxy` recovers the output rule's handle** via a
+  `find_virt_rule_handle`-shape parse scoped to the OUTPUT chain. The existing
+  `find_virt_rule_handle` matches on the `tproxy to 127.0.0.1:<port>` redirect,
+  which the output rule does NOT carry — so a sibling parser (or a
+  chain+predicate-parameterised `find_virt_rule_handle`) must match the output
+  rule on its actual text: `ip daddr <vip>` + `tcp dport <vport>` + `meta mark
+  set <fwmark>` (NO `tproxy to`) + the trailing `# handle <N>`. Pin this predicate
+  explicitly — under-specify it and the install cannot recover the handle to tear
+  it down.
+- **`per_workload_rule_handles_in_dump` (the §5 boot-recovery sweep classifier,
+  `mtls_intercept.rs:797`) MUST be widened.** Its current predicate
+  `line.contains("tproxy to ")` recognises ONLY `tproxy`-verb rules — it will
+  **NOT** reap the new output `meta mark set` divert rule, leaking it across every
+  control-plane restart (the exact D2 dead-weight failure class the sweep exists
+  to close, now reopened for the output rule). Widen the per-workload predicate to
+  ALSO collect the output divert rule, WITHOUT collecting the shared infra. The
+  classifier discriminator is: **a per-workload rule is one that carries EITHER
+  `tproxy to ` (prerouting) OR (`ip daddr ` AND `meta mark set ` AND `tcp dport `)
+  (output divert); the shared infra — chain headers, the type/policy line, and
+  the F5 `meta mark <MTLS_LEG_S_DIAL_MARK> accept` exemption — carries neither.**
+  Note the exemption is `meta mark 0x2 accept` (a `meta mark` MATCH, no `set`),
+  whereas the divert rule is `meta mark set 0x1` (a `set`) — so keying the output
+  arm on `meta mark set ` (the `set` token) plus `ip daddr ` excludes the
+  exemption cleanly. **The sweep must run against BOTH chains** (`NFT_CHAIN` and
+  `NFT_OUTPUT_CHAIN`): `list_chain` is hardwired to `NFT_CHAIN` today, so DELIVER
+  must dump and sweep the output chain too (a chain-parameterised `list_chain` +
+  a second sweep pass, or a combined dump). This widening + the dual-chain sweep
+  are the load-bearing teardown change — pin them; the pure
+  `per_workload_rule_handles_in_dump` predicate is the unit/mutation-test target
+  (a fixture carrying the output divert rule + the exemption proves the partition).
+
+**No new typed-error variant is needed.** Every failure mode the output path can
+hit (chain create, rule append, handle recovery, by-handle delete, the
+`IP_FREEBIND` setsockopt) maps onto the EXISTING `InterceptError` variants —
+`TproxyInstall { reason }` for the nft/ip shell-outs and handle recovery (same as
+the prerouting path), and `TransparentListener { addr, source }` for the
+`IP_FREEBIND` setsockopt failure (the same variant the existing `IP_TRANSPARENT`
+setsockopt already maps to in `make_transparent_listener`). The crafter MUST NOT
+mint a new error variant or a new const beyond `IP_FREEBIND` + `NFT_OUTPUT_CHAIN`
+above — the proven recipe needs nothing more.
+
+### Reuse-analysis correction (supersedes the REV-2 row)
+
+The REV-2 Reuse Analysis row *"nft-TPROXY capture/handshake/kTLS/splice datapath
+— REUSE verbatim (only the captured `orig_dst` changes)"* is **corrected** by
+this amendment to:
+
+| Capability needed | Existing? | Verdict | Evidence |
+|---|---|---|---|
+| nft-TPROXY capture/handshake/kTLS/splice datapath (client egress + canonical/keystone hops) | YES — ADR-0071 Path-A | **REUSE verbatim** (client-egress capture + leg-C accept + handshake/kTLS/splice unchanged) | ADR-0071; BLOCKER-1 spike |
+| **Agent leg-B re-dial interception (mesh→mesh hop where dialed `orig_dst` = `F` ≠ backend `workload_addr`)** | **NO — inbound interception is `prerouting`-only; leg-B is host-(output-)originated** | **EXTEND (additive output-hook companion)** — `type route hook output` chain + per-virt output divert rule + leg-C `IP_FREEBIND`; teardown classifier widened | RCA `root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md`; spike `findings-output-hook-legb.md` (WORKS, falsification-tested) |
+
+The C4 (§ REV-2 C4 Level 2) relation *"`tproxy` … Captures the connection to
+(F, listener.port); recovers orig_dst verbatim"* describes the client-egress
+capture and remains correct for that leg; the **agent leg-B → destination leg-C**
+hop is the additional edge this amendment adds (an output-hook divert of the
+host-originated re-dial into the destination's leg-C). The thin-path posture
+holds: NO XDP, NO `SERVICE_MAP`, NO new IPAM — one additive nft chain + one
+sockopt, reusing the existing fwmark, route table, leg-S exemption mark, and
+leg-C accept seam.
+
+### DEVOPS / Tier-3 obligation (carried to platform-architect — extends § DESIGN DEVOPS obligation)
+
+- **Re-confirm the output-hook mechanism on the 6.18 appliance kernel (ADR-0068)
+  at Tier-3/DEVOPS.** The spike verdict is pinned to dev-Lima
+  `7.0.0-22-generic`. The exercised surfaces — `type route hook output`, the
+  fwmark policy-routing `ip rule` → `local table 100` route firing on the OUTPUT
+  path after a route re-lookup, and `IP_FREEBIND` binding a non-local addr — are
+  long-stable kernel features (well pre-6.18), so the verdict is expected to hold,
+  but the output-hook + policy-routing surface is a no-Tier-2-backstop datapath
+  mechanism and MUST be re-confirmed on the pinned appliance kernel in the DELIVER
+  Tier-3 matrix (mirrors the BLOCKER-1 / Slice-00 re-confirm obligation).
+- **Acceptance signal is the real mesh→mesh hop completing.** The existing 02-02
+  walking-skeleton Tier-3 test
+  (`dns_responder_walking_skeleton.rs::deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls`)
+  is the oracle: with the output-hook companion landed, the F-dial must NOT
+  `enforce_failed`/RST — the agent's leg-B re-dial is intercepted by the
+  destination leg-C, the mTLS hop completes, TLS 1.3 records on the peer wire. The
+  `[DIAG]` probes the RCA added are removed once this lands.

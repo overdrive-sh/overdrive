@@ -216,6 +216,64 @@ property is byte-identity via the single allocator + timing-independent
 fail-closed, NOT a temporal write-ordering barrier. The supersession is clean
 (greenfield, single-cut — no deprecation, no transitional path).
 
+**AMENDMENT (REV-5, 2026-06-27) — the mesh→mesh datapath includes an
+output-hook leg-B interception companion; the "nft-TPROXY interception UNCHANGED
+/ no enforcement surface" framing is CORRECTED.** This ADR's scope statement
+(Context / "What this ADR does NOT touch") asserts *"the nft-TPROXY
+both-directions interception … UNCHANGED"* and *"the responder … adds no
+enforcement surface and modifies no security-critical path."* The dial-by-name
+walking-skeleton RCA
+(`docs/analysis/root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md`)
+**falsifies that for the mesh→mesh hop.** dial-by-name is the first path where the
+dialed `orig_dst` (the stable frontend `F` ∈ `10.98.0.0/16`) ≠ the resolved
+backend `workload_addr` (∈ `10.99.0.0/16`), so after `resolve(F) → Mesh(backend)`
+the agent re-dials the backend (leg-B) from the **host netns** — a
+locally-originated connect that traverses the kernel **OUTPUT** hook, while the
+destination's inbound mTLS interception (`install_inbound_tproxy`) is a
+**`type filter hook prerouting`**-only `tproxy` rule. leg-B is therefore
+un-intercepted, hits the plaintext workload listener, and the agent's leg-B
+client handshake reads cleartext → `InvalidContentType` → RST. The
+canonical/keystone dial worked only because its `orig_dst` IS the backend addr (a
+single `daddr`-matched prerouting hop, no re-dial).
+
+**The correction:** the mesh→mesh datapath requires an additive **output-hook
+companion** to the inbound interception — a `type route hook output priority
+mangle` nft chain (the `type route` re-lookup is load-bearing; a `type filter`
+counter-test lands on the plaintext decoy — spike-proven) carrying a leg-S-dial
+exemption head rule + a per-virt `ip daddr <workload_addr> tcp dport <port> meta
+mark != 0x2 meta mark set 0x1 accept` divert, reusing the existing fwmark
+(`0x1`), `ip rule`/`local`-route policy routing (UNCHANGED), and `MTLS_LEG_S_DIAL_MARK`
+(`0x2`) exemption, plus an `IP_FREEBIND` sockopt on the leg-C listener so it can
+bind the non-local `workload_addr` on the output path. The mechanism is
+**proven, falsification-tested, and production-promotable** on a real Lima kernel
+(`7.0.0-22-generic`, root) — spike
+`docs/feature/dial-by-name-responder/spike/findings-output-hook-legb.md`,
+PROMOTE-ratified by the user 2026-06-27
+(`docs/feature/dial-by-name-responder/spike/wave-decisions.md` 2nd probe section).
+The leg-C output-path binding shape is pinned to **`IP_FREEBIND` bind** (option A,
+spike-proven; DNAT/redirect rejected as unproven and as losing the `getsockname`
+orig-dst recovery the intercept design depends on).
+
+This is a **READER→datapath correction, not a change to the DNS/resolve
+contracts** (DDN-1..DDN-8, REV-2/3/4 — the stable-frontend direction, the
+`by_frontend` key, fail-closed, single-owner allocator — are ALL unchanged). It
+amends only the ADR's scope claim that the interception is untouched: the
+dial-by-name mesh→mesh hop does touch the inbound interception surface, additively
+and behind the same leg-S exemption that already governs recursion. **The full
+production contract** — the `IP_FREEBIND` / `NFT_OUTPUT_CHAIN` consts, the
+`ensure_shared_routing_infra` / `install_inbound_tproxy` deltas, the leg-C
+`IP_FREEBIND`, and the load-bearing teardown-classifier widening
+(`TproxyInterceptGuard` now reaps TWO rules per inbound install;
+`per_workload_rule_handles_in_dump` must collect the `meta mark set` output rule
+across BOTH chains or it leaks across restarts) — is pinned in the feature-delta
+**§ "REV-5 / Datapath amendment — the output-hook leg-B interception companion"**
+(`docs/feature/dial-by-name-responder/feature-delta.md`). A crafter implements TO
+that section (CLAUDE.md "Implement to the design — never invent API surface"); no
+surface beyond the `IP_FREEBIND` + `NFT_OUTPUT_CHAIN` consts and the widened guard
+is sanctioned. **Merge-gate caveat:** the spike is on dev-Lima 7.x; the
+output-hook + `type route` + policy-routing surface MUST be re-confirmed on the
+pinned-6.18 appliance kernel at Tier-3/DEVOPS (ADR-0068).
+
 ## Changed Assumptions (REV-2, 2026-06-25)
 
 ### What changed and why

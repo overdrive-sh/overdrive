@@ -79,3 +79,57 @@ Deferred to **Slice 01 (DELIVER)**, designed by DESIGN. Not built in the spike
   appliance kernel in the DELIVER Tier-3 matrix.**
 - The acceptance SIGNAL for the name path is `getaddrinfo`/`getent`, never
   `dig @gw` alone (see Design Implication 1).
+
+---
+
+# SPIKE Decisions (2nd probe) — output-hook leg-B re-dial interception
+
+Surfaced during DELIVER 02-02 (the walking-skeleton vertical slice): the
+cross-workload dial-by-name loop RSTs at the agent's outbound leg-B mTLS
+handshake. Root cause: `docs/analysis/root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md`.
+PROBE executed for real under Lima as root; evidence in
+`findings-output-hook-legb.md` (real pasted program stdout + the falsification
+counter-test).
+
+## Assumption Tested
+
+When the resolved name's frontend `F` (10.98.0.0/16) ≠ the backend
+`workload_addr` (10.99.0.0/16), the agent re-dials the backend from the host
+netns (leg-B), which traverses the kernel OUTPUT hook — but the destination's
+inbound mTLS interception is a PREROUTING-only `tproxy` rule, so leg-B is never
+intercepted and hits the plaintext workload listener → `InvalidContentType` →
+RST. Can an OUTPUT-hook nft companion + the existing fwmark `ip rule`→`local`
+route + an `IP_TRANSPARENT` leg-C listener divert that host-locally-originated
+leg-B connect into leg-C? (No Tier-2 backstop — routing/nft mechanism.)
+
+## Probe Verdict
+
+**WORKS.** One load-bearing delta: the output chain must be **`type route hook
+output`** (NOT `type filter`) — `type route` forces a kernel route re-evaluation
+after `meta mark set`, so the *existing* fwmark `ip rule`→`local` route fires on
+the OUTPUT path. **No `iif lo` needed.** Falsification-tested (leg-B un-marked →
+intercepted, `getsockname`=10.99.0.2:18951; leg-S marked → exempt/decoy;
+unrelated daddr → no over-capture; `type filter` counter-test → decoy, proving
+`type route` necessary). Leg-C also needs `IP_FREEBIND`. Cross-checked against
+Cilium's from-host `mangle OUTPUT` route-re-lookup path. Kernel
+`7.0.0-22-generic` (dev Lima; re-confirm on 6.18 at DEVOPS, ADR-0068).
+
+## Promotion Decision
+
+**PROMOTE → build the datapath fix** (user, 2026-06-27, "proceed with
+recommendation 1"). The exact production-promotable incantation is pinned in
+`findings-output-hook-legb.md`. One design choice (leg-C output-path binding:
+`IP_FREEBIND` bind vs DNAT/redirect) goes to the **architect** to pin before a
+crafter writes the production change (only the `IP_FREEBIND` shape is
+spike-proven). Probe preserved (gitignored `spike-scratch/increment-c/`).
+
+## Design Implications
+
+The production change lands in `crates/overdrive-worker/src/mtls_intercept.rs`:
+`ensure_shared_routing_infra` adds an idempotent `type route hook output`
+chain + leg-S exemption (the `ip rule`/`ip route` are UNCHANGED);
+`install_inbound_tproxy` appends the companion output divert rule + leg-C gets
+`IP_FREEBIND`; and the `TproxyInterceptGuard` teardown classifier
+(`per_workload_rule_handles_in_dump`'s `"tproxy to "` predicate) must be widened
+to reap the new `meta mark set` output rule (a real teardown change, not a
+no-op). The architect ratifies this surface into ADR-0072 / the feature-delta.
