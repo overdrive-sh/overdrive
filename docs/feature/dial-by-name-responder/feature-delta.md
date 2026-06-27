@@ -2249,3 +2249,128 @@ leg-C accept seam.
   `enforce_failed`/RST — the agent's leg-B re-dial is intercepted by the
   destination leg-C, the mTLS hop completes, TLS 1.3 records on the peer wire. The
   `[DIAG]` probes the RCA added are removed once this lands.
+
+---
+
+## REV-6 / [REF] As-landed reconciliation — the 02-02 test-model correction + the user-approved re-size
+
+> **Status: reconcile-to-reality of step 02-02 (2026-06-28).** Author: Morgan
+> (nw-solution-architect). This amendment records two things the original 02-02
+> spec did not anticipate, both surfaced while *landing* the walking skeleton: a
+> **test-harness model correction** (a corrected reuse assumption, not a datapath
+> change) and a **user-approved re-size** (two ATs deferred to a real issue). It
+> changes NO production design — REV-5's datapath contract and the
+> DDN-1..DDN-8 / REV-2..REV-4 DNS/resolve contracts are unchanged.
+
+### A — the egress test-harness model error (corrects a REV-2 reuse assumption)
+
+The REV-2 walking-skeleton plan assumed the keystone dial shape was
+**reuse-verbatim**: a full `rustls::ClientConnection` whose TLS terminates at the
+captured peer (the same assumption REV-5 corrected for the *datapath*; this is the
+sibling correction for the *test client*). Landing 02-02 falsified that assumption
+for the **test client** as REV-5 had for the datapath:
+
+- The dial-by-name **egress** capture lands the workload's connect on the agent's
+  **plaintext** workload-facing leg (leg-F), not a TLS leg. By the ADR-0072
+  workload-identity model ("workloads hold NOTHING; the kernel/agent does mTLS"),
+  an identity-unaware workload speaks an **ordinary plaintext socket**; the agent
+  drains leg-F as plaintext and originates the mTLS on its **own** inter-agent
+  leg-B → leg-C hop. A full-rustls test client therefore gets **no TLS peer** —
+  its `ClientHello` tunnels through as plaintext to the plaintext backend, no
+  `ServerHello` returns, the handshake **stalls → RST**. This is the *opposite*
+  encryption role from the keystone's INBOUND path (where a peer-originated connect
+  is captured at prerouting → leg-C, a genuine TLS leg, so a rustls peer correctly
+  terminates its TLS there).
+- **Root cause** (RCA
+  `docs/analysis/root-cause-analysis-dial-by-name-agent-originated-mtls-stall.md`,
+  hypothesis (e)): the S-DBN-WS dial helper was copied verbatim from the keystone
+  onto a path whose captured leg has the opposite encryption role. A population-diff
+  probe (a *plaintext* dial to the same `F` round-tripped byte-exact while the
+  rustls dial stalled) pinned it as a **test-harness model error, not a datapath
+  defect** — the production datapath (egress capture · resolve · leg-B mTLS · REV-5
+  output-hook divert · leg-C mTLS · leg-S splice · reply) is **correct and complete
+  end-to-end**.
+
+**Corrected test model (the model the production path actually serves):**
+
+- **The dialer speaks PLAINTEXT** — `TcpStream::connect((F, SERVICE_PORT))` →
+  `write_all(REQUEST)` → read `RESPONSE`, with a byte-distinct `REQUEST`/`RESPONSE`
+  litmus proving the real server→client reply pipe (not an echo). No client-side
+  rustls, no client SVID, no SNI.
+- **The mTLS proof moves OFF the client and ONTO the inter-agent leg-B ↔ leg-C
+  wire** — the only segment the agent encrypts. On single-node that hop is
+  host-local (`lo`); the `WireScan { plaintext: 0 }` / `0x17`-records oracle on
+  `lo:SERVICE_PORT` proves it carries TLS 1.3 application_data records (both
+  directions, zero cleartext), so a cleartext-passthrough regression is still
+  caught. The server-side held SVIDs (`HeldServerIdentity`) **stay** — the agent's
+  leg-B/leg-C still need them; only the *test client's* TLS is removed.
+
+This is now a standing CLAUDE.md learning (§ "East-west mTLS tests — the egress
+DIALER speaks PLAINTEXT; the captured leg's encryption flips by direction") so the
+next crafter on the egress path (03-01 recovery legs, 03-02 ping-pong) does not
+repeat it.
+
+**Reuse-analysis correction (the test-client row REV-5's datapath correction
+missed).** REV-5 corrected the *datapath* reuse claim; this corrects the
+*test-client* reuse claim that rode alongside it:
+
+| Capability | REV-2 assumption | Corrected verdict | Evidence |
+|---|---|---|---|
+| The egress walking-skeleton **test client** dial shape | REUSE the keystone's full-rustls `ClientConnection` verbatim (client presents TLS, terminates at the captured peer) | **WRONG for the egress path** — the egress capture lands on the agent's plaintext leg-F, not a TLS leg-C; the dialer must speak PLAINTEXT and the mTLS proof moves to the inter-agent leg-B↔leg-C wire (`WireScan`/`0x17`) | RCA `…-agent-originated-mtls-stall.md` (population-diff probe); CLAUDE.md § "East-west mTLS tests" |
+
+The `[DIAG]` probes the RCA added were reverted (the test file `git diff` is empty
+of them); the corrected plaintext-egress model is what landed.
+
+### B — the user-approved re-size (S-DBN-WS-STABLE + S-DBN-CHURN → #249)
+
+02-02's delivered core is **S-DBN-WS + S-DBN-SINGLE-SRC** (both GREEN — the
+production-drivable name→F→live-backend loop with the inter-agent mTLS proof,
+through real `serve` + `deploy`). **S-DBN-WS-STABLE + S-DBN-CHURN are DEFERRED to
+overdrive-sh/overdrive#249** (user-approved 2026-06-28) and landed `#[ignore]`'d
+citing #249.
+
+**Why (a genuine driving-port gap, not a budget cut):** both ATs' WHEN clause —
+*cycle a declared workload's backend to a NEW `AllocationId`/`workload_addr` while
+the `<job>` stays declared* — is **not achievable through the production driving
+ports as they stand**:
+
+- `POST /v1/jobs/{id}/stop` writes a **sticky, overriding** operator-stop intent,
+  and `WorkloadLifecycle` **deliberately refuses** to schedule a replacement for an
+  operator-stopped workload (ADR-0037 Amendment / `WorkloadLifecycle` §Bug 3).
+- A same-spec `POST /v1/jobs` resubmit takes the `put_if_absent → KeyExists →
+  Unchanged` path, which does **not** clear the operator-stop key.
+- Crash-restart reuses the **same** `alloc_id`/slot — it does not mint a new
+  instance.
+- There is **no production backend-instance-replacement verb**. #211 is logical-
+  workload **deletion** (the *opposite* — it releases `F`), not replacement.
+
+So `deploy_and_wait_running` for the cycled instance B2 times out: the replace/
+restart edge does not exist. This is tracked in **#249** (backend instance
+replacement / restart-after-stop). It is **distinct** from the §A test-model error
+(that was a test fix; this is a missing production verb) and **distinct** from #211
+(deletion). The Tier-1 PBT half of stability (**S-DBN-FRONTEND-02** at 01-04)
+**remains GREEN and in this feature** — only the Tier-3 alloc-cycle/churn
+manifestations move to #249. **DES GREEN for 02-02 is honestly recorded EXECUTED
+FAIL (2/4)** in `execution-log.json` — the correct record of a 2-of-4 landing with
+two ATs deferred, not a regression. Un-ignore both ATs when #249 lands the verb.
+
+### C — the layer-2 `workload_addr` forward-carry fix (landed at 02-02)
+
+The bridge advertisement of `F` depended on a `#241`-territory bug that the walking
+skeleton surfaced: `build_alloc_status_row`
+(`crates/overdrive-control-plane/src/action_shim/mod.rs`) gained a **required**
+`workload_addr: Option<Ipv4Addr>` parameter, and `FinalizeFailed { Stable }` (a
+still-Running terminal claim) now **forward-carries** `prior_row.workload_addr`
+rather than dropping it — so the canonical workload address survives the
+finalize-failed write the bridge reads. The **residual layer-3 `host_ipv4` fallback
+that still masks a missing mesh `workload_addr`** is tracked in **#248** (cited at
+the masking sites in `action_shim/mod.rs`). This is a real production fix that
+landed under 02-02, not a test-only change.
+
+### Net
+
+02-02 landed: the production-drivable core dial-by-name loop (S-DBN-WS +
+S-DBN-SINGLE-SRC, GREEN); the REV-5 output-hook leg-B interception datapath (REV-5
+above); the layer-2 `workload_addr` forward-carry fix (§C, #248 residual); a
+corrected plaintext-egress test model (§A); and two Tier-3 alloc-cycle/churn ATs
+deferred to #249 (§B). No DNS/resolve contract changed; the thin-path posture holds.
