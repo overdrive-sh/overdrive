@@ -400,6 +400,16 @@ fn build_lifecycle_event(
 /// `Ok(())` after writing its Failed row. The obs-store write is the one
 /// fallible step propagated as `ShimError`.
 #[allow(clippy::too_many_arguments)]
+// mutants: skip — no killer test exercises the mtls-intercept-install
+// fail-closed path (`mtls_worker` is a concrete `Arc<MtlsInterceptWorker>`,
+// not a port, so there is no install-failure seam), so cargo-mutants'
+// whole-body `-> Ok(())` mutant is MISSED — a fail-closed security handler
+// silently turned into a no-op would pass the suite. Pre-existing
+// transparent-mtls-host-socket helper (step 06-03 / `5d7fbae0`), surfaced
+// by the dial-by-name 02-02 mutation review. The REAL suppression is the
+// `.cargo/mutants.toml` `exclude_re` entry (a bare comment suppresses
+// nothing — `.claude/rules/testing.md`); the fault-injection seam + killer
+// test are tracked in overdrive-sh/overdrive#250 (remove both when it lands).
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,

@@ -588,6 +588,31 @@ exclude_re = [
     #     `stderr_reports_absent_chain` (in scope; mutated). The
     #     ` -> Result<String>` anchor matches this I/O fn only.
     "replace list_named_chain -> Result<String> with Ok",
+
+    # transparent-mtls-host-socket — `fail_closed_on_mtls_install`
+    # (`crates/overdrive-control-plane/src/action_shim/mod.rs`, step 06-03 /
+    # commit `5d7fbae0`). The security-critical fail-closed handler: when
+    # `MtlsInterceptWorker::start_alloc` returns `Err(MtlsInterceptInstallError)`
+    # on a freshly-spawned Running alloc it stops the driver, supersedes the
+    # Running row with a `Failed` row carrying
+    # `TransitionReason::MtlsInterceptInstallFailed`, and does NOT release the
+    # exit-emission gate. NO killer test exists (nothing forces an install
+    # failure on a Running alloc and asserts the fail-closed Failed row), so
+    # cargo-mutants' whole-body `-> Ok(())` mutant is MISSED — a fail-closed
+    # security handler silently turned into a no-op would pass the suite.
+    # PRE-EXISTING and OUT of dial-by-name 02-02 scope: the helper's only
+    # 02-02 diff-touch was the required-parameter `None,` wiring on its
+    # `build_alloc_status_row` call, which pulled the whole-body mutant into
+    # the `--in-diff` window. `mtls_worker` is a concrete `Arc<MtlsInterceptWorker>`
+    # (not a port trait), so injecting an install failure needs a
+    # fault-injection seam that does not exist. That seam + the killer test
+    # are tracked in overdrive-sh/overdrive#250 — REMOVE this entry when it
+    # lands. A function-name anchor (the whole helper is uncovered, not just
+    # the whole-body mutant). The source-site `// mutants: skip` comment
+    # carries the same rationale as documentation; THIS regex is the actual
+    # suppression (a bare comment suppresses nothing per
+    # `.claude/rules/testing.md`).
+    "fail_closed_on_mtls_install",
 ]
 
 # ---------------------------------------------------------------------------
