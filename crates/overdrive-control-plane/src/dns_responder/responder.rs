@@ -32,8 +32,11 @@
 //! gateway addr, re-derived from
 //! [`NetSlotAllocator::snapshot`](crate::veth_provisioner::NetSlotAllocator::snapshot)
 //! via [`responder_addr_for_slot`](crate::veth_provisioner::responder_addr_for_slot).
-//! On the converge tick the bound set tracks the live slot set (add-if-missing /
-//! drop-if-absent — reconcilers.md Bar-1 converge).
+//! The per-gateway-addr socket set is bound ONCE at probe time, from the slot
+//! snapshot as it exists then; there is NO converge tick in v1. Live slot-churn
+//! tracking (add-if-missing as a slot is assigned / drop-if-absent as it is
+//! released — the reconcilers.md Bar-1 shape) is deferred to
+//! <https://github.com/overdrive-sh/overdrive/issues/247>.
 //!
 //! # Source-pin (DDN-5, the spike litmus)
 //!
@@ -146,6 +149,27 @@ pub enum DnsResponderError {
     },
 }
 
+impl DnsResponderError {
+    /// The DISTINCT `health.startup.refused` reason string for this variant —
+    /// the enum owns its own refusal vocabulary (`.claude/rules/development.md`
+    /// § "Label enums own their string representation"). The composition root
+    /// (`run_server`) calls this when a `probe()` failure refuses the boot, so
+    /// the per-variant reason is the SSOT here rather than an inline `match`
+    /// scattered at the call site. A mutant collapsing two variants onto one
+    /// reason flips the Tier-1 mapping test (`boot_refusal_reason_*` in this
+    /// module's `#[cfg(test)]`) AND the Tier-3 `run_server`-refusal test
+    /// (`dns_responder_bind.rs`).
+    #[must_use]
+    pub(crate) const fn boot_refusal_reason(&self) -> &'static str {
+        match self {
+            Self::Bind { .. } => "dns.responder.bind",
+            Self::ListSeed { .. } => "dns.responder.listseed",
+            Self::Probe { .. } => "dns.responder.probe",
+            Self::Socket { .. } => "dns.responder.socket",
+        }
+    }
+}
+
 /// Result alias used throughout the `responder` module (crate convention:
 /// every error type ships a matching `Result` alias — `CLAUDE.md` § "Rust
 /// library conventions").
@@ -255,6 +279,23 @@ impl DnsResponder {
                 });
             }
         };
+        // Silent-deaf-responder guard (N2): the fallback path with an empty slot
+        // snapshot binds ZERO sockets, so `probe()` returns Ok, `serve` spawns
+        // nothing, and the responder answers nothing — indistinguishable from a
+        // healthy boot in the logs. With no converge tick (deferred to #247) it
+        // stays deaf for the process lifetime. Emit a structured warning so the
+        // degraded boot is observable. (The wildcard path always binds exactly
+        // one socket, so an empty `bound` is unambiguously the fallback branch.)
+        if bound.is_empty() {
+            tracing::warn!(
+                name: "dns.responder.fallback.zero_sockets",
+                "dial-by-name DNS responder fell back to per-gateway-addr binding but the slot \
+                 snapshot was empty — bound ZERO sockets and is currently DEAF (answers no \
+                 queries). With no converge tick (https://github.com/overdrive-sh/overdrive/issues/247) \
+                 this persists for the process lifetime; restart the node once a gateway slot is \
+                 assigned, or land #247."
+            );
+        }
         *self.sockets.lock() = bound;
 
         // (2) List-seed the internal NameIndex (the Earned-Trust List-then-Watch
@@ -269,9 +310,15 @@ impl DnsResponder {
     /// Bind one `:53` socket per currently-assigned gateway addr, re-derived
     /// from `self.slots.snapshot()` via `responder_addr_for_slot` (the DDN-5
     /// per-gateway-addr fallback). Each socket gets `SO_REUSEADDR` + `IP_PKTINFO`.
-    /// An empty snapshot binds nothing (a degenerate but valid fallback — there
-    /// are no gateways to answer yet); the converge tick adds sockets as slots
-    /// appear.
+    /// The sockets are bound ONCE, from the slot snapshot AS IT EXISTS AT PROBE
+    /// TIME — there is no converge tick in v1, so a slot assigned AFTER probe
+    /// gets no socket until the process is restarted. Live slot-churn tracking
+    /// (add-if-missing / drop-if-absent) is deferred to
+    /// <https://github.com/overdrive-sh/overdrive/issues/247>. An empty snapshot
+    /// binds nothing — a degenerate fallback the caller [`probe`](Self::probe)
+    /// warns on (`dns.responder.fallback.zero_sockets`), because with no
+    /// converge a zero-socket responder is permanently deaf for the process
+    /// lifetime (also tracked by #247).
     fn bind_per_gateway_addr(&self) -> Result<Vec<OwnedFd>> {
         let mut bound = Vec::new();
         for slot in self.slots.snapshot().values().copied() {
@@ -289,8 +336,11 @@ impl DnsResponder {
     /// query, answer via the internal [`NameIndex`](super::name_index::NameIndex)
     /// (`frontend_for` → [`answer_for`](super::answer::answer_for) →
     /// [`wire::encode`](super::wire)), and `sendmsg` the reply source-pinned to
-    /// the queried gateway via `ipi_spec_dst`. On the converge tick the bound
-    /// per-gateway-addr socket set tracks the live slot set (Bar-1 converge).
+    /// the queried gateway via `ipi_spec_dst`. `serve` runs the bound socket set
+    /// as captured at probe time (`std::mem::take`) — it does NOT re-derive the
+    /// slot snapshot, so there is no converge of the per-gateway-addr socket set
+    /// to the live slot set in v1 (deferred to
+    /// <https://github.com/overdrive-sh/overdrive/issues/247>).
     ///
     /// Consumes `self: Arc<Self>` so the composition root can `tokio::spawn` the
     /// loop and hold the `JoinHandle`.
@@ -433,4 +483,48 @@ fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
 /// case that triggers the per-gateway-addr fallback).
 fn is_addr_in_use(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(libc::EADDRINUSE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DnsResponderError;
+
+    /// Each [`DnsResponderError`] variant maps to its OWN
+    /// `health.startup.refused` reason — the four reasons are distinct, so a
+    /// mutant collapsing any two arms to one literal (the inline-match flatten
+    /// the `run_server` call site used to carry) flips this in-process. This is
+    /// the Tier-1 half of the D2 fix: the reason mapping is no longer an
+    /// untested inline match the Tier-3 `probe()` path bypasses.
+    #[test]
+    fn boot_refusal_reason_maps_each_variant_to_a_distinct_reason() {
+        let bind = DnsResponderError::Bind {
+            addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
+                std::net::Ipv4Addr::UNSPECIFIED,
+                super::DNS_PORT,
+            )),
+            source: std::io::Error::from(std::io::ErrorKind::AddrInUse),
+        };
+        let list_seed = DnsResponderError::ListSeed { reason: "store unreadable".to_owned() };
+        let probe = DnsResponderError::Probe { reason: "watch open failed".to_owned() };
+        let socket = DnsResponderError::Socket {
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+
+        // (1) each variant carries its own distinct reason string.
+        assert_eq!(bind.boot_refusal_reason(), "dns.responder.bind");
+        assert_eq!(list_seed.boot_refusal_reason(), "dns.responder.listseed");
+        assert_eq!(probe.boot_refusal_reason(), "dns.responder.probe");
+        assert_eq!(socket.boot_refusal_reason(), "dns.responder.socket");
+
+        // (2) no two variants collapse onto the same reason — the property a
+        // flatten-mutant violates (all four reasons distinct).
+        let reasons = [
+            bind.boot_refusal_reason(),
+            list_seed.boot_refusal_reason(),
+            probe.boot_refusal_reason(),
+            socket.boot_refusal_reason(),
+        ];
+        let unique: std::collections::BTreeSet<&str> = reasons.iter().copied().collect();
+        assert_eq!(unique.len(), reasons.len(), "all four refusal reasons must be distinct");
+    }
 }

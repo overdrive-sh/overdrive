@@ -23,22 +23,35 @@
 //!   (`all_service_backends_rows()` fails at List-seed) → `probe` returns
 //!   `Err(DnsResponderError::ListSeed { .. })`. Each maps to a distinct
 //!   `health.startup.refused` reason at the `run_server` composition root.
+//! - **S-DBN-BIND-03 composition-root half (D2)** — the prior two assert the
+//!   `probe()`-level variant; this one boots the PRODUCTION `run_server`
+//!   composition root (real `EbpfDataplane` + composed mTLS worker via
+//!   `mtls_identity_override`, mirroring the keystone) with the test-only
+//!   `dns_probe_fault` seam armed, and asserts the boot REFUSES with
+//!   `Err(ControlPlaneError::DnsResponderBoot(_))` AND emits a structured
+//!   `health.startup.refused` event whose `reason` is `dns.responder.probe` —
+//!   killing the "delete the `return Err(DnsResponderBoot)`" + "flatten the
+//!   reason mapping" mutants the `probe()`-level tests cannot reach.
 //!
-//! Root + Lima (the `:53` bind needs CAP_NET_BIND_SERVICE / root); a non-root
-//! run SKIPs cleanly (the K1 root gate). `uname -r` is recorded.
+//! Root + Lima (the `:53` bind needs CAP_NET_BIND_SERVICE / root; the
+//! composition-root test additionally needs the real `EbpfDataplane` XDP attach
+//! + the mTLS kTLS-arm probe); a non-root run SKIPs cleanly (the K1 root gate).
+//! `uname -r` is recorded.
 
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::print_stderr,
     clippy::doc_markdown,
+    clippy::items_after_statements,
+    clippy::too_many_lines,
     reason = "Tier-3 acceptance body; failures panic with informative messages; \
               DDN-5/ipi_spec_dst/SO_REUSEADDR are the ADR-0072 contract vocabulary"
 )]
 
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hickory_proto::op::{Message, MessageType, OpCode, Query};
@@ -46,15 +59,30 @@ use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::serialize::binary::BinEncodable;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::responder::{DnsResponder, DnsResponderError};
+use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
+use overdrive_core::traits::IdentityRead;
+use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
 };
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_store_local::LocalObservationStore;
+use rcgen::string::Ia5String;
+use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
+use rustls::pki_types::CertificateDer;
+use tempfile::TempDir;
+use tracing::field::{Field, Visit};
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
+use tracing_subscriber::registry::LookupSpan;
 
 /// True iff this process is uid 0 (root). The bind to `:53` needs root /
 /// CAP_NET_BIND_SERVICE, so a non-root run SKIPs cleanly (the K1 root gate).
@@ -346,6 +374,51 @@ async fn probe_refuses_when_store_unreadable_at_listseed() {
     );
 }
 
+/// N2 — the silent-deaf-responder guard. When the wildcard `0.0.0.0:53` is held
+/// (forcing the fallback) AND the slot snapshot is EMPTY, `probe` binds ZERO
+/// sockets and returns `Ok(())` (a degenerate-but-valid bind). With no converge
+/// tick (#247) the responder is then permanently deaf — so `probe` MUST emit a
+/// structured `dns.responder.fallback.zero_sockets` warning, making the degraded
+/// boot observable rather than indistinguishable from a healthy one.
+#[tokio::test]
+async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
+    if !is_root() {
+        eprintln!("SKIP empty_fallback_binds_zero_sockets_and_warns_it_is_deaf: not root");
+        return;
+    }
+    record_kernel();
+
+    // Hold the wildcard 0.0.0.0:53 so the fallback fires; assign NO slots so the
+    // fallback binds nothing.
+    let Ok(_wildcard_holder) = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53)) else {
+        eprintln!("SKIP: could not bind stand-in wildcard :53");
+        return;
+    };
+
+    let collector = EventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let store = fresh_store();
+    let dns = responder(
+        Arc::clone(&store) as Arc<dyn ObservationStore>,
+        NetSlotAllocator::new(),
+        FrontendAddrAllocator::new(),
+    );
+
+    // The empty fallback is a valid bind of zero sockets — probe returns Ok.
+    dns.probe().await.expect("empty fallback binds zero sockets (degenerate but valid)");
+
+    // ... but it MUST warn that the responder is deaf.
+    let events = collector.snapshot();
+    let warned = events.iter().any(|row| row.name == "dns.responder.fallback.zero_sockets");
+    assert!(
+        warned,
+        "an empty-fallback zero-socket bind MUST emit dns.responder.fallback.zero_sockets \
+         (the responder is deaf and must not look healthy); got: {events:?}",
+    );
+}
+
 /// An `ObservationStore` whose `all_service_backends_rows` always errors (the
 /// List-seed fault), delegating every other method to an inner
 /// `SimObservationStore`. Used by S-DBN-BIND-03 Scenario B. Mirrors the
@@ -454,4 +527,292 @@ impl ObservationStore for FailingListStore {
     ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
         self.inner.reconcile_conflict_rows(service_id).await
     }
+}
+
+// ===========================================================================
+// S-DBN-BIND-03 composition-root half (D2) — `run_server` REFUSES boot on a
+// DNS-probe failure, mapping it to the `dns.responder.probe` refusal reason.
+// ===========================================================================
+//
+// The `probe_refuses_*` tests above drive `DnsResponder::probe()` directly and
+// assert the `DnsResponderError` variant — they never boot `run_server`, so the
+// composition-root logic (the reason mapping + the
+// `return Err(ControlPlaneError::DnsResponderBoot(_))` refusal) is untested by
+// them. This test closes that gap: it boots the PRODUCTION composition root
+// in-process (real `EbpfDataplane` + composed mTLS worker via
+// `mtls_identity_override`, mirroring `canonical_address_inbound_walking_skeleton`),
+// arms the test-only `dns_probe_fault` seam so the DNS responder's `probe()`
+// short-circuits to `Err(DnsResponderError::Probe { .. })`, and asserts BOTH:
+//   1. the boot returns `Err(ControlPlaneError::DnsResponderBoot(_))` — kills
+//      the "delete the `return Err(DnsResponderBoot)`" mutant (boot would else
+//      continue);
+//   2. a structured `health.startup.refused` event with `reason =
+//      dns.responder.probe` is emitted — kills the "flatten the reason mapping"
+//      mutant (the wired reason comes from the tested `boot_refusal_reason`).
+
+// ---------------------------------------------------------------------------
+// Tracing capture — minimal layer recording each event's `name:` + visited
+// fields (mirrors `tests/acceptance/probe_runner_boot_gate.rs`).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+struct EventRow {
+    name: String,
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+struct FieldVisitor {
+    fields: std::collections::BTreeMap<String, String>,
+}
+
+impl Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.fields
+            .insert(field.name().to_owned(), format!("{value:?}").trim_matches('"').to_owned());
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.fields.insert(field.name().to_owned(), value.to_owned());
+    }
+}
+
+#[derive(Clone, Default)]
+struct EventCollector {
+    inner: Arc<Mutex<Vec<EventRow>>>,
+}
+
+impl EventCollector {
+    fn snapshot(&self) -> Vec<EventRow> {
+        self.inner.lock().expect("collector lock").clone()
+    }
+}
+
+impl<S> Layer<S> for EventCollector
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut visitor = FieldVisitor::default();
+        event.record(&mut visitor);
+        self.inner
+            .lock()
+            .expect("collector lock")
+            .push(EventRow { name: event.metadata().name().to_owned(), fields: visitor.fields });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Minimal test PKI (root → intermediate → server leaf) so the composed mTLS
+// worker's Earned-Trust `probe()` PASSES — the boot must REACH the DNS
+// responder block (it is gated on `mtls_worker.is_some()`) before the armed
+// `dns_probe_fault` refuses it. Trimmed from the keystone's `TestPki` to just
+// the server SVID + trust bundle the inbound leg-C handshake needs.
+// ---------------------------------------------------------------------------
+
+struct ServerPki {
+    ca_cert_pem: String,
+    intermediate_cert_pem: String,
+    server_cert_pem: String,
+    server_cert_der: CertificateDer<'static>,
+    server_key_pem: String,
+    server_spiffe: SpiffeId,
+}
+
+impl ServerPki {
+    fn mint() -> Self {
+        let root = mint_root("overdrive-dns-d2-ROOT-CA");
+        let intermediate = mint_intermediate(&root, "overdrive-dns-d2-INTERMEDIATE-CA");
+        let server_spiffe = "spiffe://overdrive.local/ns/default/sa/server";
+        let (cert_pem, cert_der, key_pem) =
+            mint_server_leaf(&intermediate, server_spiffe, "server.overdrive.local");
+        Self {
+            ca_cert_pem: root.cert_pem,
+            intermediate_cert_pem: intermediate.cert_pem,
+            server_cert_pem: cert_pem,
+            server_cert_der: cert_der,
+            server_key_pem: key_pem,
+            server_spiffe: server_spiffe.parse().expect("valid spiffe id"),
+        }
+    }
+
+    fn identity(&self) -> Arc<dyn IdentityRead> {
+        let not_after = UnixInstant::from_unix_duration(Duration::from_secs(4_102_444_800)); // 2100
+        let svid = SvidMaterial::new(
+            CaCertPem::new(self.server_cert_pem.clone()),
+            CaCertDer::new(self.server_cert_der.as_ref().to_vec()),
+            CertSerial::new("0a0b0c0d").expect("valid serial"),
+            self.server_spiffe.clone(),
+            CaKeyPem::new(self.server_key_pem.clone()),
+            not_after,
+        );
+        let bundle = TrustBundle::new(
+            CaCertPem::new(self.ca_cert_pem.clone()),
+            Some(CaCertPem::new(self.intermediate_cert_pem.clone())),
+        );
+        Arc::new(HeldServerIdentity { svid, bundle })
+    }
+}
+
+use overdrive_core::CertSerial;
+
+struct HeldServerIdentity {
+    svid: SvidMaterial,
+    bundle: TrustBundle,
+}
+
+impl IdentityRead for HeldServerIdentity {
+    fn svid_for(&self, _alloc: &AllocationId) -> Option<SvidMaterial> {
+        Some(self.svid.clone())
+    }
+    fn current_bundle(&self) -> Option<TrustBundle> {
+        Some(self.bundle.clone())
+    }
+}
+
+struct MintedCa {
+    params: CertificateParams,
+    key: KeyPair,
+    cert_pem: String,
+}
+
+fn mint_root(cn: &str) -> MintedCa {
+    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+    let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let cert = params.self_signed(&key).unwrap();
+    let cert_pem = cert.pem();
+    MintedCa { params, key, cert_pem }
+}
+
+fn mint_intermediate(root: &MintedCa, cn: &str) -> MintedCa {
+    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+    params.distinguished_name.push(rcgen::DnType::CommonName, cn);
+    params.use_authority_key_identifier_extension = true;
+    let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let root_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&root.params, &root.key);
+    let cert = params.signed_by(&key, &root_issuer).unwrap();
+    let cert_pem = cert.pem();
+    MintedCa { params, key, cert_pem }
+}
+
+fn mint_server_leaf(
+    intermediate: &MintedCa,
+    spiffe: &str,
+    dns_san: &str,
+) -> (String, CertificateDer<'static>, String) {
+    let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    let uri = Ia5String::try_from(spiffe).expect("spiffe URI is a valid IA5 string");
+    let dns = Ia5String::try_from(dns_san).expect("dns SAN is a valid IA5 string");
+    params.subject_alt_names = vec![SanType::URI(uri), SanType::DnsName(dns)];
+    params.distinguished_name.push(rcgen::DnType::CommonName, spiffe);
+    params.use_authority_key_identifier_extension = true;
+    params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+    let leaf_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&intermediate.params, &intermediate.key);
+    let cert = params.signed_by(&leaf_key, &issuer).unwrap();
+    let cert_pem = cert.pem();
+    let cert_der = CertificateDer::from(cert.der().to_vec());
+    let key_pem = leaf_key.serialize_pem();
+    (cert_pem, cert_der, key_pem)
+}
+
+/// S-DBN-BIND-03 (D2) — boot the production composition root with the DNS-probe
+/// fault armed; the boot must REFUSE with
+/// `Err(ControlPlaneError::DnsResponderBoot(_))` AND emit
+/// `health.startup.refused` with `reason = dns.responder.probe`.
+///
+/// Mirrors the keystone's real-`EbpfDataplane` + `mtls_identity_override` boot
+/// harness (the DNS responder block is gated on `mtls_worker.is_some()`, so the
+/// composed mTLS worker is required to REACH it; the armed `dns_probe_fault`
+/// then refuses the boot at the DNS responder's `probe()`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn run_server_refuses_boot_on_dns_probe_fault_with_probe_reason() {
+    if !is_root() {
+        eprintln!(
+            "SKIP run_server_refuses_boot_on_dns_probe_fault_with_probe_reason: not root \
+             (real EbpfDataplane XDP attach + mTLS kTLS-arm probe + netns provision need \
+             CAP_NET_ADMIN/CAP_SYS_ADMIN)"
+        );
+        return;
+    }
+    record_kernel();
+
+    // The composition-root rustls CryptoProvider (installed once per process).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // Capture the structured boot events so we can assert the refusal reason.
+    let collector = EventCollector::default();
+    let subscriber = tracing_subscriber::registry().with(collector.clone());
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let pki = ServerPki::mint();
+
+    let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let cfg_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("mkdir data");
+    std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
+
+    let obs_path = data_dir.join("observation.redb");
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(LocalObservationStore::open(&obs_path).expect("open LocalObservationStore"));
+
+    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+        Arc::new(overdrive_host::SystemClock),
+        Arc::new(overdrive_host::RealCgroupFs::new()),
+    ));
+
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir: data_dir.clone(),
+        operator_config_dir: cfg_dir.clone(),
+        dataplane: Some(overdrive_control_plane::dataplane_config::DataplaneConfig {
+            client_iface: overdrive_control_plane::veth_provisioner::DEFAULT_CLIENT_IFACE
+                .to_owned(),
+            backend_iface: overdrive_control_plane::veth_provisioner::DEFAULT_BACKEND_IFACE
+                .to_owned(),
+        }),
+        dataplane_pin_dir: None,
+        // NO dataplane_override → compose_mtls = true → the production mTLS
+        // worker is composed and its Earned-Trust probe runs (so the boot
+        // REACHES the `mtls_worker.is_some()`-gated DNS responder block).
+        dataplane_override: None,
+        // The leg-C/leg-B test PKI so the composed mTLS worker's probe passes.
+        mtls_identity_override: Some(pki.identity()),
+        // THE seam under test: force the DNS responder's `probe()` to fail.
+        dns_probe_fault: Some("injected dns probe fault (D2)".to_owned()),
+        ..ServerConfig::new(Arc::new(overdrive_sim::adapters::SimKek::for_boot()))
+    };
+
+    let result = run_server_with_obs_and_driver(config, obs.clone(), driver).await;
+
+    // (1) the boot REFUSED with the typed DnsResponderBoot variant — kills the
+    // "delete the return Err(DnsResponderBoot)" mutant (boot would otherwise
+    // continue and return Ok(ServerHandle)).
+    let Err(err) = result else {
+        panic!(
+            "run_server MUST refuse boot when the DNS responder probe fails; \
+             got Ok(ServerHandle) — the DnsResponderBoot refusal was bypassed"
+        );
+    };
+    assert!(
+        matches!(err, ControlPlaneError::DnsResponderBoot(DnsResponderError::Probe { .. })),
+        "DNS-probe fault → ControlPlaneError::DnsResponderBoot(Probe); got {err:?}",
+    );
+
+    // (2) the structured refusal event names reason = dns.responder.probe —
+    // kills the "flatten the reason mapping" mutant (the wired reason comes
+    // from the tested `boot_refusal_reason`, distinct from the other variants).
+    let events = collector.snapshot();
+    let dns_refusal = events.iter().any(|row| {
+        row.name == "health.startup.refused"
+            && row.fields.get("reason").map(String::as_str) == Some("dns.responder.probe")
+    });
+    assert!(
+        dns_refusal,
+        "expected health.startup.refused with reason=dns.responder.probe; got: {events:?}",
+    );
 }

@@ -394,6 +394,20 @@ impl BackendIndex {
     /// [`MeshUnreachable`](MtlsResolution::MeshUnreachable)) and fails closed — NEVER
     /// cleartext (the FAILCLOSED-01 security half). Convergence (the bind landing)
     /// is an availability nicety, not the security guarantee.
+    ///
+    /// # Test-only construction seam (N1)
+    ///
+    /// As of 02-01 this method has NO production caller — the production drain
+    /// feeds `by_frontend` exclusively through the pure-reader
+    /// [`project_by_frontend`](Self::project_by_frontend) /
+    /// [`project_row_by_frontend`](Self::project_row_by_frontend) projection
+    /// over the SHARED [`FrontendAddrAllocator`] snapshot (REV-3). `bind_frontend`
+    /// survives ONLY as a direct-construction seam for the 02-00 acceptance
+    /// tests (`mtls_resolve_rekey.rs`, `dns_name_index.rs`), which build a
+    /// `by_frontend` map by hand to exercise `classify`. It is deliberately
+    /// retained (not deleted per `development.md` § "Deletion discipline")
+    /// because those tests depend on it; do not reach for it from a production
+    /// path — the production feeder is the `project_*` projection.
     pub fn bind_frontend(&mut self, key: FrontendKey, service_id: ServiceId) {
         self.by_frontend.insert(key, service_id);
     }

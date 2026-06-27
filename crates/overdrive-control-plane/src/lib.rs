@@ -821,6 +821,19 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub mtls_probe_fault: Option<String>,
 
+    /// Test-only fault-injection seam for the dial-by-name `DnsResponder`
+    /// Earned-Trust probe (dial-by-name-responder, step 02-01, S-DBN-BIND-03).
+    /// When `Some(msg)`, the boot path short-circuits `DnsResponder::probe()`
+    /// to `Err(DnsResponderError::Probe { reason: msg })` BEFORE the responder
+    /// is declared usable, so the `run_server` boot-refusal + per-variant
+    /// `health.startup.refused` reason-mapping + `ControlPlaneError::DnsResponderBoot`
+    /// fail-closed branch is exercised without needing a real `:53` bind
+    /// collision or an unreadable store. Mirrors `mtls_probe_fault` above;
+    /// gated behind `#[cfg(feature = "integration-tests")]` on both the field
+    /// and its use site so production builds compile it out entirely.
+    #[cfg(feature = "integration-tests")]
+    pub dns_probe_fault: Option<String>,
+
     /// Test-only PKI-injection seam for the transparent-mTLS layer
     /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
     /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
@@ -870,6 +883,8 @@ impl std::fmt::Debug for ServerConfig {
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field("dns_probe_fault", &self.dns_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field(
             "mtls_identity_override",
@@ -955,6 +970,12 @@ impl ServerConfig {
             // fail-closed branch.
             #[cfg(feature = "integration-tests")]
             mtls_probe_fault: None,
+            // dial-by-name-responder step 02-01 (S-DBN-BIND-03): default no
+            // DNS-probe fault; the `run_server` refusal test sets `Some(..)`
+            // to exercise the `DnsResponderBoot` + reason-mapping fail-closed
+            // branch without a real `:53` bind / store fault.
+            #[cfg(feature = "integration-tests")]
+            dns_probe_fault: None,
             // transparent-mtls-host-socket step 06-03: default no
             // identity override; the criteria[1] e2e sets `Some(..)`
             // to a `TestPki`-rooted `IdentityRead` so the agent's
@@ -2206,21 +2227,28 @@ pub async fn run_server_with_obs_and_driver(
             state.net_slot_allocator.clone(),
             state.frontend_addr_allocator.clone(),
         ));
-        if let Err(source) = responder.probe().await {
-            let reason = match &source {
-                crate::dns_responder::responder::DnsResponderError::Bind { .. } => {
-                    "dns.responder.bind"
-                }
-                crate::dns_responder::responder::DnsResponderError::ListSeed { .. } => {
-                    "dns.responder.listseed"
-                }
-                crate::dns_responder::responder::DnsResponderError::Probe { .. } => {
-                    "dns.responder.probe"
-                }
-                crate::dns_responder::responder::DnsResponderError::Socket { .. } => {
-                    "dns.responder.socket"
-                }
-            };
+        // The test-only `dns_probe_fault` seam forces the DNS responder probe
+        // to fail with a `DnsResponderError::Probe` so the `run_server`
+        // refusal + reason-mapping path (BIND-03's composition-root half) is
+        // exercised without needing a real bind / store fault. Mirrors the
+        // `mtls_probe_fault` seam above. `None` in production / unset tests →
+        // the real `probe()` runs.
+        #[cfg(feature = "integration-tests")]
+        let dns_probe_result = match config.dns_probe_fault.clone() {
+            Some(message) => {
+                Err(crate::dns_responder::responder::DnsResponderError::Probe { reason: message })
+            }
+            None => responder.probe().await,
+        };
+        #[cfg(not(feature = "integration-tests"))]
+        let dns_probe_result = responder.probe().await;
+        if let Err(source) = dns_probe_result {
+            // Per-variant refusal reason — the enum owns its own vocabulary
+            // (`development.md` § "Label enums own their string representation"),
+            // so the mapping is tested in-process (`boot_refusal_reason`) rather
+            // than as an inline match a mutation gate cannot reach through the
+            // Tier-3 probe path.
+            let reason = source.boot_refusal_reason();
             tracing::warn!(
                 name: "health.startup.refused",
                 reason,
