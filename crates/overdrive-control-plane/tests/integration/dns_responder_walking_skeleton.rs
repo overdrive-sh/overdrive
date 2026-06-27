@@ -1682,7 +1682,7 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// the inter-agent mTLS proof; this AT's restart-after-stop dependency is a
 /// design/scope gap to resolve before un-ignoring. Sibling: S-DBN-CHURN (same
 /// dependency).
-#[ignore = "02-02 BLOCKED on alloc-cycle restart: operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3); a same-spec re-deploy does not clear it and no production restart-after-stop verb exists. Distinct from the (fixed) plaintext-client model error. See docstring."]
+#[ignore = "02-02 DEFERRED to overdrive-sh/overdrive#249 (backend instance replacement / restart-after-stop): cycling the backend to a NEW AllocationId/workload_addr while the job stays declared needs a replace/restart verb that does not exist — operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3), a same-spec re-deploy does not clear it, and crash-restart reuses the alloc_id/slot. Distinct from the (fixed) plaintext-client model error and from #211 (deletion). Un-ignore when #249 lands. See docstring."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend() {
     if !is_root() {
@@ -1852,7 +1852,7 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// "next connect lands B2" half needs a production restart-after-stop path that
 /// does not exist. A design/scope gap to resolve before un-ignoring, distinct
 /// from the (fixed) plaintext-client model error.
-#[ignore = "02-02 BLOCKED on alloc-cycle restart: operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3); a same-spec re-deploy does not clear it and no production restart-after-stop verb exists. Distinct from the (fixed) plaintext-client model error. See docstring."]
+#[ignore = "02-02 DEFERRED to overdrive-sh/overdrive#249 (backend instance replacement / restart-after-stop): cycling the backend to a NEW AllocationId/workload_addr while the job stays declared needs a replace/restart verb that does not exist — operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3), a same-spec re-deploy does not clear it, and crash-restart reuses the alloc_id/slot. Distinct from the (fixed) plaintext-client model error and from #211 (deletion). Un-ignore when #249 lands. See docstring."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend() {
     if !is_root() {
