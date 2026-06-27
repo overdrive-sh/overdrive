@@ -527,4 +527,27 @@ mod tests {
         let unique: std::collections::BTreeSet<&str> = reasons.iter().copied().collect();
         assert_eq!(unique.len(), reasons.len(), "all four refusal reasons must be distinct");
     }
+
+    /// [`is_addr_in_use`](super::is_addr_in_use) is the PURE `EADDRINUSE`
+    /// predicate that gates the wildcard→per-gateway-addr fallback. In
+    /// production it only ever sees a *real* `bind` error, so the diff-scoped
+    /// mutation gate flagged its body as a blind spot (`-> {true,false}`,
+    /// `||→&&`, and both `==→!=`) — but the predicate itself is pure and
+    /// directly unit-testable, so those are in-process gaps, NOT the
+    /// irreducibly-Tier-3 socket arms. Two cases kill all five: a non-AddrInUse
+    /// kind must be REJECTED (kills `-> true` and both `==→!=`), and an
+    /// AddrInUse kind must be ACCEPTED (kills `-> false` and `||→&&`).
+    #[test]
+    fn is_addr_in_use_accepts_eaddrinuse_and_rejects_other_kinds() {
+        use std::io::{Error, ErrorKind};
+        // ACCEPT: kind-only AddrInUse (raw_os_error is None) exercises the
+        // first `||` operand and kills `||→&&` (true && false == false).
+        assert!(super::is_addr_in_use(&Error::from(ErrorKind::AddrInUse)));
+        // ACCEPT: a real EADDRINUSE errno exercises the second operand.
+        assert!(super::is_addr_in_use(&Error::from_raw_os_error(libc::EADDRINUSE)));
+        // REJECT: an unrelated kind must be false — kills `-> true` and flips
+        // both `==→!=` (false||false == false vs the mutated true||true).
+        assert!(!super::is_addr_in_use(&Error::from(ErrorKind::NotFound)));
+        assert!(!super::is_addr_in_use(&Error::from(ErrorKind::PermissionDenied)));
+    }
 }
