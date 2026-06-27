@@ -176,6 +176,14 @@ mod acceptance {
     // 03-03).
     mod release_service_vip_dispatch;
 
+    // dial-by-name-responder step 02-02 review-resolution D1 — default-lane
+    // PBT pinning the `FinalizeFailed` `workload_addr` forward-carry branch
+    // (`Stable` keeps the prior row's per-instance addr; a genuine terminal
+    // drops it to `None`). Kills the four branch mutants the Tier-3-only
+    // S-DBN-WS could not reach in-lane (GH #248). Default-lane: real
+    // `action_shim::dispatch` + sim adapters, no root/Lima/integration-tests.
+    mod finalize_failed_forward_carries_workload_addr;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the

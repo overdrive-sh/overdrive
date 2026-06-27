@@ -331,10 +331,25 @@ filter = '''
         | (package(overdrive-control-plane) & (
             test(serve_boot_provisions_veth)
             | test(backend_discovery_bridge)
+            | test(dns_responder_walking_skeleton)
         ))
     )
 '''
 test-group = 'host-kernel-shared'
+
+# dial-by-name-responder 02-02 (review-resolution) — `dns_responder_walking_skeleton`
+# joins `host-kernel-shared` above. Both WS tests in that module boot a real
+# `EbpfDataplane` via `run_server_with_obs_and_driver` (`dataplane_override:
+# None`) — the SAME root `cgroup_sock_addr` attach as `serve_boot_provisions_veth`
+# / `backend_discovery_bridge`, PLUS an XDP attach to the FIXED
+# `ovd-veth-cli` / `ovd-veth-bk` ifaces. Two run concurrently → the loser's boot
+# hits `IfaceXdpSlotBusy { iface: "ovd-veth-cli" }` (the XDP-slot analogue of the
+# root-attach race this block guards). They were MISSING from the single-writer
+# group when 02-02 landed, which env-blocked the step's mutation-gate baseline
+# (cargo-mutants runs the full integration suite under default concurrency per
+# mutant). Matched BY-MODULE (`test(dns_responder_walking_skeleton)`), rename-
+# proof — a future WS test in this file joins the single-writer domain
+# automatically (same discipline as the mtls / root-attacher blocks above).
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the

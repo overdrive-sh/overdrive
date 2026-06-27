@@ -516,6 +516,34 @@ exclude_re = [
     # regex is the suppression.)
     "replace sweep_per_workload_tproxy_rules -> Result<usize> with Ok",
 
+    # dial-by-name-responder 02-02 review-resolution D2 (REV-5 dual-chain) —
+    # `sweep_per_workload_tproxy_rules`'s body became `Ok(sweep_one_chain(
+    # prerouting)? + sweep_one_chain(output)?)` when REV-5 split the §5 sweep
+    # across BOTH chains. cargo-mutants now synthesises `+ -> -` / `+ -> *`
+    # arithmetic mutants on that count-sum. Both operands come from
+    # `sweep_one_chain`, which shells out to real `nft` — a default-lane test
+    # cannot make either operand non-zero, so the arithmetic mutant is
+    # unobservable in-lane (`0 + 0 == 0 - 0 == 0 * 0`). Killable only by the
+    # real-kernel Tier-3 AT that produces a non-zero survivor count from each
+    # chain (`serve_restart_sweeps_surviving_per_workload_tproxy_rule`). Same
+    # I/O-shim class as the whole-fn entry above.
+    "replace \\+ with - in sweep_per_workload_tproxy_rules",
+    "replace \\+ with \\* in sweep_per_workload_tproxy_rules",
+
+    # dial-by-name-responder 02-02 review-resolution D2 (REV-5 dual-chain) —
+    # `ensure_shared_routing_infra` gained the REV-5 OUTPUT-chain head leg-S
+    # exemption insert, guarded by `if !chain_has_leg_s_exemption(
+    # NFT_OUTPUT_CHAIN)? { run_nft(insert …)? }`. cargo-mutants synthesises a
+    # `delete !` mutant on that idempotence guard. The whole fn is a thin
+    # real-`nft` I/O shim (every line is an `nft add chain` / `nft insert
+    # rule` / `ip rule|route add` shell-out) — the only PURE decision in it,
+    # `chain_has_leg_s_exemption`'s parse, is `dump_has_leg_s_exemption`
+    # (in mutation scope, killed). The `delete !` flips a real-`nft` insert's
+    # firing condition, observable only by inspecting the live kernel chain →
+    # default-lane MISSED; killable only by the real-kernel Tier-3 install/
+    # restart ATs. Same I/O-shim class as the `sweep_*` entries.
+    "delete ! in ensure_shared_routing_infra",
+
     # `find_egress_rule_handle` (transparent-mtls 03-x) — I/O wrapper
     # that runs `list_chain` then delegates to the PURE
     # `find_egress_rule_handle_in_dump` (which IS in mutation scope and
@@ -525,6 +553,41 @@ exclude_re = [
     # anchor matches the I/O wrapper ONLY, not the pure `..._in_dump` fn
     # (whose name carries `_in_dump` before ` -> `), which stays mutated.
     "replace find_egress_rule_handle -> Result<Option<u64>> with Ok",
+
+    # dial-by-name-responder 02-02 review-resolution D2 — the four NEW
+    # REV-5 dual-chain nft-I/O shims in
+    # `crates/overdrive-worker/src/mtls_intercept.rs`. Same feature-gated-
+    # I/O class as the `sweep_per_workload_tproxy_rules` / `find_egress_
+    # rule_handle` siblings above: each shells out to real `nft` (a
+    # `list chain` / by-handle `delete`) after delegating its decision to a
+    # PURE `*_in_dump` parser that IS in mutation scope and killed by
+    # co-located default-lane unit tests. The shims' whole-fn body-
+    # replacement mutants are reachable only by the real-kernel Tier-3
+    # AT (`serve_restart_sweeps_surviving_per_workload_tproxy_rule` + the
+    # dial-by-name walking skeleton), which the worker-package default-lane
+    # mutants suite cannot run. The source-level `// mutants: skip` comments
+    # on each fn carry the same rationale as documentation; THESE regexes
+    # are the actual suppression (a bare comment suppresses nothing per
+    # `.claude/rules/testing.md`).
+    #
+    #   - `sweep_one_chain` — per-chain body of the §5 boot-recovery sweep
+    #     (REV-5 splits the sweep across the prerouting + output chains).
+    #     Pure decision: `per_workload_rule_handles_in_dump` (killed).
+    "replace sweep_one_chain -> Result<usize> with Ok",
+    #   - `chain_has_leg_s_exemption` — head-exemption idempotence guard,
+    #     parameterised by chain (REV-5 covers prerouting + output). Pure
+    #     decision: `dump_has_leg_s_exemption` (in scope; mutated).
+    "replace chain_has_leg_s_exemption -> Result<bool> with Ok",
+    #   - `find_output_divert_rule_handle` — REV-5 OUTPUT divert handle
+    #     recovery. Pure decision: `output_divert_handle_in_dump` (killed
+    #     by co-located tests, Praise P5).
+    "replace find_output_divert_rule_handle -> Result<u64> with Ok",
+    #   - `list_named_chain` — the parameterised `nft -a list chain ip
+    #     <table> <chain>` shell-out (REV-5 widened `list_chain` to take a
+    #     chain arg so both chains can be dumped). Pure decision:
+    #     `stderr_reports_absent_chain` (in scope; mutated). The
+    #     ` -> Result<String>` anchor matches this I/O fn only.
+    "replace list_named_chain -> Result<String> with Ok",
 ]
 
 # ---------------------------------------------------------------------------

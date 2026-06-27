@@ -359,6 +359,18 @@ pub fn install_inbound_tproxy(virt: SocketAddrV4, agent_port: u16) -> Result<Tpr
         "accept",
     ])?;
 
+    // PARTIAL-INSTALL POSTURE (REV-5 dual-append, N1): the two appends above
+    // (and the two handle recoveries below) are committed to the kernel BEFORE
+    // the `TproxyInterceptGuard` is constructed, so any `?` from here back to the
+    // first append (3)/(2) returns early with the rule(s) already in the chain
+    // and no guard to remove them. This is the codebase's accepted
+    // converge-on-boot posture, NOT an oversight: the §5 boot-recovery sweep
+    // (`sweep_per_workload_tproxy_rules` → `sweep_one_chain` over BOTH the
+    // prerouting and output chains) reaps any such orphan on the next
+    // control-plane restart (fail-closed; #234). `nft` failing mid-sequence is
+    // rare (EPERM / lock / missing binary), so within a single boot the bounded
+    // leak is tolerated rather than RAII-unwound here.
+    //
     // (4) Recover the kernel-assigned handle of EACH rule we just appended so
     // Drop can delete EXACTLY those two rules (siblings, the exemptions, and the
     // shared infra all untouched) — research F7c, the nft-canonical per-rule
@@ -581,7 +593,9 @@ pub fn sweep_per_workload_tproxy_rules() -> Result<usize> {
 // only by the real-kernel Tier-3 AT
 // `serve_restart_sweeps_surviving_per_workload_tproxy_rule`
 // (overdrive-control-plane), which the worker-package default-lane mutants
-// suite cannot run.
+// suite cannot run. DOCUMENTATION ONLY — the actual suppression is the
+// `replace sweep_one_chain -> Result<usize> with Ok` exclude_re entry in
+// `.cargo/mutants.toml` (a bare comment suppresses nothing per testing.md).
 fn sweep_one_chain(chain: &str) -> Result<usize> {
     let dump = match list_named_chain(chain) {
         Ok(dump) => dump,
@@ -793,7 +807,12 @@ fn ip_rule_dump_has_fwmark(dump: &str, mark: u32, table: u32) -> bool {
 /// [`dump_has_leg_s_exemption`] (`nft` via [`list_named_chain`]); the predicate
 /// logic is unit-tested there. Parameterised by `chain` so the SAME guard
 /// covers both the `prerouting` chain and the REV-5 `output` chain.
-// mutants: skip
+// mutants: skip — thin nft-I/O shim; the pure decision is
+// `dump_has_leg_s_exemption` (unit-tested, in mutation scope). The whole-fn
+// body-replacement mutant (`Ok(true)`/`Ok(false)`) is killable only by a
+// real-kernel Tier-3 run. DOCUMENTATION ONLY — the actual suppression is the
+// `replace chain_has_leg_s_exemption -> Result<bool> with Ok` exclude_re entry
+// in `.cargo/mutants.toml` (a bare comment suppresses nothing per testing.md).
 fn chain_has_leg_s_exemption(chain: &str) -> Result<bool> {
     Ok(dump_has_leg_s_exemption(&list_named_chain(chain)?))
 }
@@ -836,6 +855,14 @@ fn list_chain() -> Result<String> {
 /// Parameterised by `chain` so both the `prerouting` chain and the REV-5
 /// `output` chain can be dumped (handle recovery + the §5 boot sweep run over
 /// BOTH chains).
+// mutants: skip — thin nft-I/O shim (`nft -a list chain` + the
+// `stderr_reports_absent_chain` classification, which IS unit + mutation
+// covered). The whole-fn body-replacement mutant (`Ok(...)`) is killable only by
+// the real-kernel Tier-3 ATs that drive `nft` for real (the §5 sweep + the
+// dial-by-name walking skeleton), which the worker-package default-lane mutants
+// suite cannot run. DOCUMENTATION ONLY — the actual suppression is the
+// `replace list_named_chain -> Result<String> with Ok` exclude_re entry in
+// `.cargo/mutants.toml` (a bare comment suppresses nothing per testing.md).
 fn list_named_chain(chain: &str) -> Result<String> {
     let out = Command::new("nft")
         .args(["-a", "list", "chain", "ip", NFT_TABLE, chain])
@@ -911,6 +938,13 @@ fn find_virt_rule_handle(virt: SocketAddrV4, agent_port: u16) -> Result<u64> {
 ///
 /// Returns [`InterceptError::TproxyInstall`] if the output chain dump cannot be
 /// obtained, or if the just-appended rule's handle is not found in it.
+// mutants: skip — thin nft-I/O shim (`list_named_chain` + the pure
+// `output_divert_handle_in_dump`, which IS unit + mutation covered, Praise P5).
+// The whole-fn body-replacement mutant is killable only by a real-kernel Tier-3
+// run. DOCUMENTATION ONLY — the actual suppression is the
+// `replace find_output_divert_rule_handle -> Result<u64> with Ok` exclude_re
+// entry in `.cargo/mutants.toml` (a bare comment suppresses nothing per
+// testing.md).
 fn find_output_divert_rule_handle(virt: SocketAddrV4) -> Result<u64> {
     let dump = list_named_chain(NFT_OUTPUT_CHAIN)?;
     output_divert_handle_in_dump(&dump, virt).ok_or_else(|| InterceptError::TproxyInstall {
@@ -1784,6 +1818,45 @@ table ip overdrive-mtls {
             !handles.contains(&2),
             "the output-chain leg-S exemption (`meta mark 0x00000002 accept`, a MATCH not a SET) \
              must NEVER be swept — the `meta mark set ` token excludes it"
+        );
+    }
+
+    #[test]
+    fn classifier_output_divert_branch_requires_all_three_conjuncts() {
+        // KILLS the two `&& -> ||` mutants on the REV-5 OUTPUT-divert recognition
+        // branch (`ip daddr ` && `meta mark set ` && `tcp dport `): a line
+        // satisfying SOME but not ALL three conjuncts must be EXCLUDED. Under the
+        // correct `&&` every line below is rejected (none has `tproxy to ` AND
+        // none satisfies the full conjunction); flipping either `&&` to `||`
+        // would wrongly collect a partial-match line and tear down shared infra
+        // / a non-divert rule.
+        //
+        //   - handle 2: leg-S exemption — `meta mark … accept` MATCH (no `set`,
+        //     no `ip daddr`/`tcp dport`). Already covered, kept as the baseline.
+        //   - handle 3: `ip daddr ` + `tcp dport ` but NO `meta mark set ` (a
+        //     hypothetical non-divert filter rule). Correct `&&`: excluded
+        //     (missing the `set` conjunct). `&& -> ||` at the `meta mark set `
+        //     position: WRONGLY collected.
+        //   - handle 4: `meta mark set ` + `tcp dport ` but NO `ip daddr `.
+        //     Correct `&&`: excluded. `&& -> ||` at the `ip daddr ` position:
+        //     WRONGLY collected.
+        //   - handle 5: `ip daddr ` + `meta mark set ` but NO `tcp dport `.
+        //     Correct `&&`: excluded. `&& -> ||` at the `tcp dport ` position:
+        //     WRONGLY collected.
+        let partial_conjuncts = "\
+table ip overdrive-mtls {
+\tchain output { # handle 1
+\t\tmeta mark 0x00000002 accept # handle 2
+\t\tip daddr 10.99.0.2 tcp dport 8080 meta mark != 0x00000002 accept # handle 3
+\t\tmeta mark set 0x00000001 tcp dport 8080 accept # handle 4
+\t\tip daddr 10.99.0.3 meta mark set 0x00000001 accept # handle 5
+\t}
+}";
+        assert!(
+            per_workload_rule_handles_in_dump(partial_conjuncts).is_empty(),
+            "no line satisfies all THREE conjuncts (ip daddr AND meta mark set AND tcp dport) and \
+             none carries `tproxy to ` — every line must be EXCLUDED; collecting any partial-match \
+             line is the `&& -> ||` mutant (would sweep shared infra / a non-divert rule)"
         );
     }
 
