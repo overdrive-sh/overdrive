@@ -31,12 +31,39 @@
 //!   `orig_dst = (F, SERVICE_PORT)`, and the re-keyed `MtlsResolve` translates
 //!   it (`by_frontend` HIT → the live backend).
 //!
-//! The dial-by-name addition over the canonical-address keystone is ONLY the
+//! The dial-by-name addition over the canonical-address keystone is the
 //! `getaddrinfo` resolution STEP (name → stable `F`) PLUS the re-keyed
-//! `MtlsResolve` translating `F` → a live backend; the capture + handshake +
-//! mTLS round-trip datapath is REUSED verbatim from the proven keystone
-//! (BLOCKER-1 — the egress capture is destination-blind and recovers a
-//! non-`/30` frontend `orig_dst` verbatim).
+//! `MtlsResolve` translating `F` → a live backend; the capture + mTLS-origination
+//! + round-trip datapath is the proven EGRESS path (REV-5 output-hook leg-B
+//! interception — `mtls_intercept.rs`).
+//!
+//! ## CORRECTED EGRESS MODEL — the workload speaks PLAINTEXT (RCA, 2026-06-27)
+//!
+//! These ATs originally reused the KEYSTONE's dial model — a full
+//! `rustls::ClientConnection` whose TLS terminates at the captured peer. That is
+//! correct ONLY for the keystone's INBOUND path (prerouting → leg-C, a TLS leg),
+//! and STRUCTURALLY WRONG for the dial-by-name EGRESS path. Per the ADR-0072
+//! workload-identity model — "workloads hold NOTHING; the kernel/agent does mTLS"
+//! — the egress capture lands the workload's connect on the agent's PLAINTEXT
+//! leg-F (the workload-facing leg). The agent drains leg-F as plaintext and
+//! re-encrypts into its OWN leg-B mTLS session toward the resolved backend; it
+//! runs NO server handshake on leg-F. A full-rustls test client therefore gets no
+//! TLS peer and its ClientHello tunnels as plaintext to the plaintext backend →
+//! stall/RST. (RCA `root-cause-analysis-dial-by-name-agent-originated-mtls-
+//! stall.md`, hypothesis (e): TEST-MODEL MISMATCH. The production datapath was
+//! proven CORRECT end-to-end by a population-diff plaintext control dial.)
+//!
+//! The corrected model: **the test client speaks PLAINTEXT** (sends `REQUEST`,
+//! reads the byte-distinct `RESPONSE` over a bare `TcpStream`), modelling a real
+//! identity-unaware workload. The mTLS proof MOVES OFF the client (it terminates
+//! no TLS) and ONTO the inter-agent **leg-B ↔ leg-C** hop — the only segment the
+//! agent encrypts. On single-node that hop is host-local (`lo`); the `WireCapture`
+//! 0x17 oracle (`dial_frontend_with_mtls_proof` /
+//! `assert_inter_agent_hop_is_mtls`, mirrored from `bidirectional_walking_
+//! skeleton.rs`) proves it carries TLS-1.3 application_data records (both
+//! directions) with zero cleartext — so a cleartext-passthrough regression is
+//! still caught. The server-side held SVIDs (`HeldServerIdentity`) STAY: the
+//! agent's leg-B/leg-C still need them.
 //!
 //! ## How the resolve + dial run from a deployed netns
 //!
@@ -47,8 +74,8 @@
 //! enters the CLIENT's production netns via `setns(CLONE_NEWNET)` (the
 //! keystone's `enter_netns` shape) and runs `getaddrinfo("server.svc.\
 //! overdrive.local")` there — exercising the production resolv.conf → the
-//! production responder → the source-pinned reply — then connects to `(F,
-//! SERVICE_PORT)` from the SAME netns so its egress is captured by the
+//! production responder → the source-pinned reply — then connects PLAINTEXT to
+//! `(F, SERVICE_PORT)` from the SAME netns so its egress is captured by the
 //! client's production egress rule.
 //!
 //! Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`. A non-root run SKIPs
@@ -67,15 +94,26 @@
     clippy::items_after_statements,
     clippy::too_many_lines,
     clippy::similar_names,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::unnecessary_cast,
+    clippy::missing_const_for_fn,
+    clippy::unused_self,
     reason = "Tier-3 walking-skeleton bodies; failures must panic with informative messages; \
               F/F1/B1/B2 are the ADR-0072 REV-2 stable-frontend vocabulary; the composed flow \
-              is one long scenario"
+              is one long scenario; the AF_PACKET WireCapture 0x17 oracle is mirrored verbatim \
+              from overdrive-dataplane traffic.rs / bidirectional_walking_skeleton.rs (the same \
+              cast lints those files allow at file scope); TestPkiHandle is an intentional \
+              owned-handle whose dial moves across the netns thread"
 )]
 
+use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
@@ -94,7 +132,7 @@ use tempfile::TempDir;
 
 use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::CertificateDer;
 
 // ============================================================================
 // constants
@@ -116,12 +154,6 @@ const REQUEST: &[u8] =
 /// echo).
 const RESPONSE: &[u8] =
     b"OVERDRIVE_DIAL_BY_NAME_RESPONSE_server_reply_rides_back_over_agent_leg_ktls_0202";
-
-/// The DNS SAN the test dialer presents toward the server in its OWN
-/// `rustls::ClientConnection` SNI (`dial_frontend_in_netns` → `TestPkiHandle::
-/// dial`). The agent's leg-C SERVER handshake presents the held server SVID
-/// carrying this SAN, so the test client's direct verification succeeds.
-const SERVER_SNI: &str = "server.overdrive.local";
 
 /// The fixed sentinel SNI the PRODUCTION dataplane uses for the agent's
 /// intra-mesh **leg-B** peer dial (`overdrive-dataplane::mtls::outbound`,
@@ -149,6 +181,18 @@ const FRONTEND_SECOND_OCTET: u8 = 98;
 /// The per-instance workload (backend) block second octet (`10.99.0.0/16`,
 /// `WORKLOAD_SUBNET_BASE`) — `getent` MUST NEVER answer an addr here.
 const WORKLOAD_SECOND_OCTET: u8 = 99;
+
+/// `lo` — where the agent's INTER-AGENT leg-B ↔ leg-C TLS records physically
+/// carry their bytes on single-node. The agent's host-originated leg-B re-dial to
+/// the resolved backend (`workload_addr` ∈ 10.99.0.0/16, dport `SERVICE_PORT`) is
+/// diverted on the kernel OUTPUT hook (REV-5) and routed via `local table 100`
+/// (loopback re-entry) into the leg-C `127.0.0.1:<agent_port>` IP_TRANSPARENT
+/// listener — so the leg-B application_data records traverse `lo`. TPROXY
+/// preserves the original daddr/dport, so the records carry `dport = SERVICE_PORT`
+/// on the wire (`getsockname` recovers orig-dst). The 0x17 confidentiality oracle
+/// captures here; the plaintext leg-F (client → F) and leg-S (agent → backend)
+/// ride the per-workload VETHs (DIFFERENT ifaces) and never pollute this capture.
+const LOOPBACK_IFACE: &str = "lo";
 
 // ============================================================================
 // root gate + kernel record
@@ -340,7 +384,6 @@ struct Leaf {
     cert_pem: String,
     key_pem: String,
     cert_der: CertificateDer<'static>,
-    key_der: PrivateKeyDer<'static>,
     spiffe: overdrive_core::SpiffeId,
     serial: CertSerial,
 }
@@ -348,7 +391,6 @@ struct Leaf {
 struct TestPki {
     ca_cert_pem: String,
     intermediate_cert_pem: String,
-    intermediate_cert_der: CertificateDer<'static>,
     client_leaf: Leaf,
     server_leaf: Leaf,
 }
@@ -361,25 +403,21 @@ impl TestPki {
         let client_spiffe = "spiffe://overdrive.local/ns/default/sa/client";
         let server_spiffe = "spiffe://overdrive.local/ns/default/sa/server";
         let client_leaf = intermediate.mint_leaf(client_spiffe, &[], true);
-        // The server SVID carries BOTH the test client's direct SNI (SERVER_SNI)
-        // AND the production dataplane's hardcoded intra-mesh leg-B sentinel SNI
-        // (MESH_PEER_SNI) — the dial-by-name cross-workload path verifies the
-        // server's presented SVID against MESH_PEER_SNI on the agent's leg-B
-        // re-dial (the first path to exercise leg-B; see MESH_PEER_SNI docs).
-        let server_leaf =
-            intermediate.mint_leaf(server_spiffe, &[SERVER_SNI, MESH_PEER_SNI], false);
+        // The server SVID carries the production dataplane's hardcoded intra-mesh
+        // leg-B sentinel SNI (MESH_PEER_SNI) — the dial-by-name cross-workload
+        // EGRESS path verifies the server's presented SVID against MESH_PEER_SNI
+        // on the agent's leg-B re-dial (the first path to exercise leg-B; see
+        // MESH_PEER_SNI docs). The workload client speaks PLAINTEXT and presents
+        // no SNI of its own (workload-identity model), so no test-client-facing
+        // SAN is needed.
+        let server_leaf = intermediate.mint_leaf(server_spiffe, &[MESH_PEER_SNI], false);
 
         Self {
             ca_cert_pem: root.cert_pem,
-            intermediate_cert_pem: intermediate.cert_pem.clone(),
-            intermediate_cert_der: CertificateDer::from(intermediate.cert_der),
+            intermediate_cert_pem: intermediate.cert_pem,
             client_leaf,
             server_leaf,
         }
-    }
-
-    fn intermediate_cert_der(&self) -> CertificateDer<'static> {
-        self.intermediate_cert_der.clone()
     }
 
     fn trust_bundle(&self) -> TrustBundle {
@@ -402,7 +440,6 @@ struct MintedCa {
     params: CertificateParams,
     key: KeyPair,
     cert_pem: String,
-    cert_der: Vec<u8>,
 }
 
 impl MintedCa {
@@ -413,8 +450,7 @@ impl MintedCa {
         let key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
         let cert = params.self_signed(&key).unwrap();
         let cert_pem = cert.pem();
-        let cert_der = cert.der().to_vec();
-        Self { params, key, cert_pem, cert_der }
+        Self { params, key, cert_pem }
     }
 
     fn mint_intermediate(&self, cn: &str) -> Self {
@@ -426,8 +462,7 @@ impl MintedCa {
         let root_issuer: Issuer<'_, &KeyPair> = Issuer::from_params(&self.params, &self.key);
         let cert = params.signed_by(&key, &root_issuer).unwrap();
         let cert_pem = cert.pem();
-        let cert_der = cert.der().to_vec();
-        Self { params, key, cert_pem, cert_der }
+        Self { params, key, cert_pem }
     }
 
     fn mint_leaf(&self, spiffe: &str, dns_sans: &[&str], client_auth: bool) -> Leaf {
@@ -452,12 +487,10 @@ impl MintedCa {
         let cert_pem = cert.pem();
         let key_pem = leaf_key.serialize_pem();
         let cert_der = CertificateDer::from(cert.der().to_vec());
-        let key_der = PrivateKeyDer::from(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
         Leaf {
             cert_pem,
             key_pem,
             cert_der,
-            key_der,
             spiffe: spiffe.parse().expect("valid spiffe id"),
             serial: CertSerial::new("0a0b0c0d").expect("valid serial"),
         }
@@ -751,81 +784,63 @@ fn client_service_spec(workload_id: &str) -> ServiceSpecInput {
 }
 
 // ============================================================================
-// the in-netns mTLS client handshake/round-trip (the keystone's dial, reused)
+// the in-netns PLAINTEXT workload dial (a real identity-unaware workload speaks
+// plaintext; the agent originates the mTLS on leg-B → leg-C)
 // ============================================================================
+//
+// CORRECTED EGRESS MODEL (RCA `root-cause-analysis-dial-by-name-agent-
+// originated-mtls-stall.md`). The dial-by-name EGRESS capture lands the
+// workload's connect on the agent's PLAINTEXT leg-F (the workload-facing leg),
+// NOT on a TLS leg-C. By the ADR-0072 workload-identity model — "workloads hold
+// NOTHING; the kernel/agent does mTLS" — a real workload opens an ORDINARY
+// plaintext socket; the agent drains leg-F as plaintext and re-encrypts into its
+// OWN leg-B mTLS session toward the resolved backend. So the test client MUST
+// speak plaintext: it sends REQUEST and reads the byte-distinct RESPONSE over a
+// bare TcpStream. (The keystone `canonical_address_inbound_walking_skeleton.rs`
+// dials full-rustls because its INBOUND capture is at prerouting → leg-C, a TLS
+// leg with the OPPOSITE encryption role — reusing that client model here was the
+// model error the RCA diagnosed.)
+//
+// The mTLS proof therefore moves OFF the client (it no longer terminates any
+// TLS) and ONTO the inter-agent leg-B ↔ leg-C hop — the ONLY segment the agent
+// encrypts. On single-node, that hop is host-local: the agent's leg-B re-dial to
+// the resolved backend (`workload_addr` ∈ 10.99.0.0/16, dport SERVICE_PORT) is
+// diverted on the kernel OUTPUT hook (REV-5) and routed via `local table 100`
+// (loopback re-entry) into the leg-C `127.0.0.1:<agent_port>` IP_TRANSPARENT
+// listener — so the leg-B records physically traverse `lo` carrying
+// `dport = SERVICE_PORT`. The `WireCapture` 0x17 oracle (mirrored from the proven
+// `overdrive-dataplane` `traffic.rs` / `bidirectional_walking_skeleton.rs`
+// technique) captures `lo:SERVICE_PORT`: TLS-1.3 application_data records in BOTH
+// directions PROVE the inter-agent hop is encrypted, and zero cleartext markers
+// PROVE the workload's REQUEST/RESPONSE never leaked onto it as plaintext. The
+// plaintext leg-F (client → F) rides the client's host-side VETH, and leg-S
+// (agent → server backend) rides the server's VETH — both DIFFERENT ifaces — so
+// neither pollutes the `lo` capture.
 
-fn ca_root_store(ca_cert_pem: &str) -> rustls::RootCertStore {
-    let mut roots = rustls::RootCertStore::empty();
-    let mut rd = std::io::BufReader::new(ca_cert_pem.as_bytes());
-    for c in rustls_pemfile::certs(&mut rd) {
-        roots.add(c.expect("ca cert")).expect("add ca cert");
-    }
-    roots
-}
-
-fn drive_client_handshake(conn: &mut rustls::ClientConnection, tcp: &mut TcpStream) -> bool {
-    use std::io::ErrorKind;
-    loop {
-        while conn.wants_write() {
-            if conn.write_tls(tcp).is_err() {
-                return false;
-            }
-        }
-        if !conn.is_handshaking() {
-            return true;
-        }
-        match conn.read_tls(tcp) {
-            Ok(0) => return false,
-            Ok(_) => {
-                if conn.process_new_packets().is_err() {
-                    return false;
-                }
-            }
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {}
-            Err(_) => return false,
-        }
-    }
-}
-
-// A small owned-handle wrapper so the dial can run on a dedicated thread
-// without borrowing `pki` across the thread boundary.
+// A small owned-handle wrapper so the dial can run on a dedicated thread without
+// borrowing `pki` across the thread boundary. The agent's leg-B/leg-C still need
+// the server-side SVIDs (held by `HeldServerIdentity`); the CLIENT holds NOTHING
+// (workload-identity model) — so this handle carries only the agent_port the
+// leg-C listener binds (recovered post-boot) for the inter-agent wire capture.
 struct TestPkiHandle {
-    ca_cert_pem: String,
-    intermediate_cert_der: CertificateDer<'static>,
-    client_cert_der: CertificateDer<'static>,
-    client_key_der: PrivateKeyDer<'static>,
+    _marker: (),
 }
 
 impl TestPkiHandle {
-    fn from(pki: &TestPki) -> Self {
-        Self {
-            ca_cert_pem: pki.ca_cert_pem.clone(),
-            intermediate_cert_der: pki.intermediate_cert_der(),
-            client_cert_der: pki.client_leaf.cert_der.clone(),
-            client_key_der: pki.client_leaf.key_der.clone_key(),
-        }
+    fn from(_pki: &TestPki) -> Self {
+        Self { _marker: () }
     }
 
+    /// A real workload's PLAINTEXT dial: connect to `(F, SERVICE_PORT)`, send
+    /// REQUEST, read the byte-distinct RESPONSE. The agent captures this on its
+    /// plaintext leg-F and originates mTLS on leg-B → leg-C (proven separately by
+    /// the inter-agent wire capture). `observed_rst` is set on a write/RST error.
     fn dial(self, server_addr: SocketAddrV4) -> DialResult {
-        use rustls::pki_types::ServerName;
-        use rustls::{ClientConfig, ClientConnection};
-
         let fail = || DialResult { received_response_byte_exact: false, observed_rst: true };
-        let roots = ca_root_store(&self.ca_cert_pem);
-        let cfg = match ClientConfig::builder().with_root_certificates(roots).with_client_auth_cert(
-            vec![self.client_cert_der, self.intermediate_cert_der],
-            self.client_key_der,
-        ) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[02-02] dial client config: {e}");
-                return fail();
-            }
-        };
         // FAIL-FAST: bound the connect so a SYN with no SYN-ACK (a routing /
         // capture failure) returns a clear timeout in 10s instead of blocking
         // past nextest's reap. A real captured dial completes in <1ms.
-        let tcp = match TcpStream::connect_timeout(
+        let mut tcp = match TcpStream::connect_timeout(
             &std::net::SocketAddr::V4(server_addr),
             Duration::from_secs(10),
         ) {
@@ -836,30 +851,18 @@ impl TestPkiHandle {
             }
         };
         tcp.set_nodelay(true).ok();
-        let sni = ServerName::try_from(SERVER_SNI.to_string()).expect("server SNI");
-        let mut conn = ClientConnection::new(Arc::new(cfg), sni).expect("dial ClientConnection");
-        let mut tcp = tcp;
         tcp.set_read_timeout(Some(Duration::from_secs(8))).ok();
-        if !drive_client_handshake(&mut conn, &mut tcp) {
-            eprintln!("[02-02] dial handshake failed (agent leg)");
-            return fail();
-        }
-        std::thread::sleep(Duration::from_millis(400));
 
-        let mut observed_rst = false;
-        {
-            let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
-            if tls.write_all(REQUEST).and_then(|()| tls.flush()).is_err() {
-                observed_rst = true;
-            }
-        }
+        // `observed_rst` starts true iff the initial write/flush failed (a RST on
+        // the plaintext leg-F before any reply); the read loop below may also set
+        // it on a mid-read ConnectionReset.
+        let mut observed_rst = tcp.write_all(REQUEST).and_then(|()| tcp.flush()).is_err();
         let mut got = Vec::new();
         if !observed_rst {
             let deadline = Instant::now() + Duration::from_secs(8);
             let mut buf = vec![0u8; 4096];
             while got.len() < RESPONSE.len() && Instant::now() < deadline {
-                let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
-                match tls.read(&mut buf) {
+                match tcp.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => got.extend_from_slice(&buf[..n]),
                     Err(ref e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
@@ -878,6 +881,305 @@ impl TestPkiHandle {
         }
         DialResult { received_response_byte_exact: got == RESPONSE, observed_rst }
     }
+}
+
+// ============================================================================
+// inter-agent leg-B ↔ leg-C 0x17 confidentiality oracle (re-authored —
+// replicates the proven `overdrive-dataplane` `traffic.rs` /
+// `bidirectional_walking_skeleton.rs` technique: AF_PACKET capture on `lo`, walk
+// TLS record framing, count 0x17 app-data records per direction, scan for
+// cleartext markers). This is the EGRESS-path mTLS proof: the workload client
+// speaks plaintext (it terminates no TLS), so the encryption proof can only come
+// from the segment the agent encrypts — the inter-agent leg-B ↔ leg-C hop.
+// ============================================================================
+
+const TLS_CONTENT_TYPE_APPLICATION_DATA: u8 = 0x17;
+const TLS_LEGACY_RECORD_VERSION_TLS12: [u8; 2] = [0x03, 0x03];
+const TLS_LEGACY_RECORD_VERSION_TLS10: [u8; 2] = [0x03, 0x01];
+const TLS_RECORD_HEADER_LEN: usize = 5;
+const ETH_HDR_LEN: usize = 14;
+const IPV4_HDR_LEN: usize = 20;
+const ETH_P_ALL: std::os::raw::c_int = 0x0003;
+
+fn is_tls_record_version(version: [u8; 2]) -> bool {
+    version == TLS_LEGACY_RECORD_VERSION_TLS12 || version == TLS_LEGACY_RECORD_VERSION_TLS10
+}
+
+/// The result of scanning the captured inter-agent wire on `wire_port`: how many
+/// genuine `0x17` application_data records crossed in each direction, and how many
+/// times EITHER cleartext marker appeared (MUST be 0 on the encrypted leg).
+#[derive(Debug, Clone, Copy, Default)]
+struct WireScan {
+    records_to_wire_port: u64,
+    records_from_wire_port: u64,
+    plaintext_marker_hits: u64,
+}
+
+impl WireScan {
+    /// 0x17 records present in EITHER direction.
+    fn has_app_data(&self) -> bool {
+        self.records_to_wire_port > 0 || self.records_from_wire_port > 0
+    }
+}
+
+/// A live AF_PACKET/SOCK_RAW capture on `iface` that records every frame into a
+/// buffer on a background thread until `stop_and_scan`. Filtered (at scan time)
+/// to TCP frames touching `wire_port` (as src OR dst). Needs root + CAP_NET_RAW
+/// (the Tier-3 root gate provides both).
+struct WireCapture {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<Vec<Vec<u8>>>>,
+    wire_port: u16,
+}
+
+impl WireCapture {
+    fn start(iface: &str, wire_port: u16) -> Self {
+        let ifindex = if_nametoindex(iface).expect("wire-capture: if_nametoindex");
+        // SAFETY: AF_PACKET / SOCK_RAW socket on the bound iface.
+        let fd = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW, ETH_P_ALL.to_be() as i32) };
+        assert!(fd >= 0, "wire-capture: socket: {}", std::io::Error::last_os_error());
+
+        let mut sll: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
+        sll.sll_family = libc::AF_PACKET as u16;
+        sll.sll_protocol = (ETH_P_ALL as u16).to_be();
+        sll.sll_ifindex = ifindex as i32;
+        // SAFETY: bind an AF_PACKET socket to the resolved ifindex.
+        let rc = unsafe {
+            libc::bind(
+                fd,
+                std::ptr::from_ref(&sll).cast(),
+                std::mem::size_of::<libc::sockaddr_ll>() as libc::socklen_t,
+            )
+        };
+        assert!(rc == 0, "wire-capture: bind {iface}: {}", std::io::Error::last_os_error());
+        // SAFETY: fcntl on our own fd; non-blocking so the loop can poll `stop`.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        let handle = std::thread::spawn(move || -> Vec<Vec<u8>> {
+            let mut frames: Vec<Vec<u8>> = Vec::new();
+            let mut buf = vec![0u8; 65536];
+            while !stop_thread.load(Ordering::SeqCst) {
+                // SAFETY: recv into our owned buffer on the bound AF_PACKET fd.
+                let n = unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), 0) };
+                if n > 0 {
+                    frames.push(buf[..n as usize].to_vec());
+                } else {
+                    std::thread::sleep(Duration::from_micros(200));
+                }
+            }
+            // Final drain so records written right before `stop` are not lost.
+            loop {
+                // SAFETY: same bounded recv on our fd.
+                let n = unsafe { libc::recv(fd, buf.as_mut_ptr().cast(), buf.len(), 0) };
+                if n > 0 {
+                    frames.push(buf[..n as usize].to_vec());
+                } else {
+                    break;
+                }
+            }
+            // SAFETY: fd created above; close on capture-thread exit.
+            unsafe { libc::close(fd) };
+            frames
+        });
+        Self { stop, handle: Some(handle), wire_port }
+    }
+
+    fn stop_and_scan(mut self, request_marker: &[u8], response_marker: &[u8]) -> WireScan {
+        self.stop.store(true, Ordering::SeqCst);
+        let frames = self.handle.take().expect("wire-capture handle").join().expect("capture join");
+        scan_frames(&frames, self.wire_port, request_marker, response_marker)
+    }
+}
+
+fn scan_frames(
+    frames: &[Vec<u8>],
+    wire_port: u16,
+    request_marker: &[u8],
+    response_marker: &[u8],
+) -> WireScan {
+    let mut streams: BTreeMap<(u16, u16), Vec<u8>> = BTreeMap::new();
+    for frame in frames {
+        let Some((src_port, dst_port, payload)) = parse_tcp_payload(frame) else {
+            continue;
+        };
+        if src_port != wire_port && dst_port != wire_port {
+            continue;
+        }
+        if payload.is_empty() {
+            continue;
+        }
+        streams.entry((src_port, dst_port)).or_default().extend_from_slice(payload);
+    }
+    let mut records_to_wire_port: u64 = 0;
+    let mut records_from_wire_port: u64 = 0;
+    let mut plaintext_marker_hits: u64 = 0;
+    for (&(src_port, dst_port), stream) in &streams {
+        let records = count_tls_app_data_records(stream);
+        if dst_port == wire_port {
+            records_to_wire_port += records;
+        } else if src_port == wire_port {
+            records_from_wire_port += records;
+        }
+        // `plaintext_marker_hits` is a SECONDARY corroborating signal, NOT the
+        // primary confidentiality oracle. The LOAD-BEARING encryption proof is the
+        // directional `0x17` counts — `records_to_wire_port > 0` AND
+        // `records_from_wire_port > 0` (asserted by the caller): a cleartext
+        // inter-agent hop fails that combination (zero TLS records in at least one
+        // direction). The marker counter only adds a belt-and-braces "and no
+        // request/response plaintext leaked onto the encrypted stream" check,
+        // scoped to a TLS-bearing stream (`records > 0`) so a non-TLS stream that
+        // happens to touch `wire_port` is not load-bearing for the secondary check.
+        if records > 0 {
+            plaintext_marker_hits += count_subslices(stream, request_marker);
+            plaintext_marker_hits += count_subslices(stream, response_marker);
+        }
+    }
+    WireScan { records_to_wire_port, records_from_wire_port, plaintext_marker_hits }
+}
+
+fn parse_tcp_payload(frame: &[u8]) -> Option<(u16, u16, &[u8])> {
+    if frame.len() < ETH_HDR_LEN + IPV4_HDR_LEN {
+        return None;
+    }
+    if frame.get(12).copied()? != 0x08 || frame.get(13).copied()? != 0x00 {
+        return None;
+    }
+    let ip = ETH_HDR_LEN;
+    let vihl = frame.get(ip).copied()?;
+    if vihl >> 4 != 4 {
+        return None;
+    }
+    let ihl = ((vihl & 0x0f) as usize) * 4;
+    if ihl < IPV4_HDR_LEN {
+        return None;
+    }
+    if frame.get(ip + 9).copied()? != 0x06 {
+        return None; // not TCP
+    }
+    let tcp = ip + ihl;
+    if frame.len() < tcp + 20 {
+        return None;
+    }
+    let src_port = u16::from_be_bytes([frame.get(tcp).copied()?, frame.get(tcp + 1).copied()?]);
+    let dst_port = u16::from_be_bytes([frame.get(tcp + 2).copied()?, frame.get(tcp + 3).copied()?]);
+    let data_off = ((frame.get(tcp + 12).copied()? >> 4) as usize) * 4;
+    if data_off < 20 {
+        return None;
+    }
+    let payload_start = tcp + data_off;
+    if payload_start > frame.len() {
+        return None;
+    }
+    Some((src_port, dst_port, &frame[payload_start..]))
+}
+
+fn count_tls_app_data_records(stream: &[u8]) -> u64 {
+    let mut count: u64 = 0;
+    let mut i = 0usize;
+    while i + TLS_RECORD_HEADER_LEN <= stream.len() {
+        let content_type = stream[i];
+        let version = [stream[i + 1], stream[i + 2]];
+        let length = u16::from_be_bytes([stream[i + 3], stream[i + 4]]) as usize;
+        if !is_tls_record_version(version) {
+            break;
+        }
+        if content_type == TLS_CONTENT_TYPE_APPLICATION_DATA {
+            count += 1;
+        }
+        let next = i + TLS_RECORD_HEADER_LEN + length;
+        if next <= i {
+            break;
+        }
+        i = next;
+    }
+    count
+}
+
+fn count_subslices(haystack: &[u8], needle: &[u8]) -> u64 {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return 0;
+    }
+    let mut count: u64 = 0;
+    let mut i = 0usize;
+    while i + needle.len() <= haystack.len() {
+        if &haystack[i..i + needle.len()] == needle {
+            count += 1;
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
+fn if_nametoindex(iface: &str) -> std::io::Result<u32> {
+    let cstr = std::ffi::CString::new(iface).expect("iface name has no NUL");
+    // SAFETY: thin syscall wrapper; pointer not retained past call.
+    let idx = unsafe { libc::if_nametoindex(cstr.as_ptr()) };
+    if idx == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(idx)
+}
+
+/// Dial `(F, SERVICE_PORT)` from inside the client's PRODUCTION netns (plaintext
+/// workload client), AND capture the inter-agent leg-B ↔ leg-C hop on `lo` so the
+/// caller can assert BOTH the byte-exact round-trip (DialResult) AND that the
+/// inter-agent hop carried TLS-1.3 records with no cleartext (WireScan).
+///
+/// The capture starts on the HOST (before the dial thread enters the netns) so
+/// the leg-B records — which ride the HOST's `lo`, not the netns — are on the
+/// captured wire. The byte-distinct REQUEST/RESPONSE litmus doubles as the
+/// plaintext-marker source for the confidentiality oracle.
+fn dial_frontend_with_mtls_proof(
+    netns: &str,
+    pki_handle: TestPkiHandle,
+    frontend: Ipv4Addr,
+) -> (DialResult, WireScan) {
+    // Capture the inter-agent leg-B ↔ leg-C hop on the host's `lo` BEFORE the
+    // dial, so the very first leg-B record is on the captured wire.
+    let wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let dial = dial_frontend_in_netns(netns, pki_handle, frontend);
+    // Brief settle so the last leg-B/leg-C app-data record is drained before the
+    // capture stops (the round-trip already completed in `dial`).
+    std::thread::sleep(Duration::from_millis(200));
+    let scan = wire.stop_and_scan(REQUEST, RESPONSE);
+    (dial, scan)
+}
+
+/// Assert the inter-agent leg-B ↔ leg-C hop carried TLS-1.3 application_data
+/// records in BOTH directions and NO cleartext request/response marker — the
+/// EGRESS-path mTLS proof (the workload client speaks plaintext, so the encryption
+/// proof lives on the segment the agent encrypts). Separate from (and asserted
+/// AFTER) the resolve assertion, per the K2 two-culprits honesty.
+fn assert_inter_agent_hop_is_mtls(scan: &WireScan, scenario: &str) {
+    assert!(
+        scan.has_app_data(),
+        "{scenario}: the inter-agent leg-B ↔ leg-C hop (captured on lo:{SERVICE_PORT}) must carry \
+         TLS-1.3 0x17 application_data records — proving the agent originated mTLS on leg-B and \
+         terminated it on leg-C. A cleartext passthrough would show ZERO records. got {scan:?}"
+    );
+    assert!(
+        scan.records_to_wire_port > 0,
+        "{scenario}: the request direction (toward the backend) of the inter-agent hop must carry \
+         0x17 records (the agent's leg-B encrypted the workload's request). got {scan:?}"
+    );
+    assert!(
+        scan.records_from_wire_port > 0,
+        "{scenario}: the response direction (from the backend) of the inter-agent hop must carry \
+         0x17 records (the backend's reply rode back over leg-C kTLS). got {scan:?}"
+    );
+    assert_eq!(
+        scan.plaintext_marker_hits, 0,
+        "{scenario}: NO cleartext request/response marker may appear on the encrypted inter-agent \
+         leg-B ↔ leg-C wire — a non-zero count means the agent passed the workload's bytes through \
+         in cleartext instead of encrypting them. got {scan:?}"
+    );
 }
 
 // ============================================================================
@@ -990,27 +1292,25 @@ async fn deploy_and_wait_running(
 /// → `InvalidContentType` → RST (the symptom the RCA
 /// `root-cause-analysis-dial-by-name-by-frontend-resolve-rst.md` diagnosed).
 ///
-/// PARTIALLY BLOCKED (02-02 — leg-F→leg-C handshake-completion follow-up). The
-/// REV-5 output-hook DATAPATH fix is LANDED and pwru-proven: the agent's
+/// The REV-5 output-hook DATAPATH is LANDED and pwru-proven: the agent's
 /// host-originated leg-B re-dial to the resolved backend IS diverted into the
 /// destination's leg-C on the OUTPUT path (`ip_route_me_harder` stamps the
 /// fwmark, `type route` re-lookup routes via `local table 100`, the prerouting
-/// `tproxy` rule on lo-reentry redirects to leg-C) and the TCP handshake
-/// completes. Two cross-workload test-fixture identity bugs surfaced and were
-/// fixed in this commit: (a) the server SVID now carries the
-/// `peer.overdrive.local` leg-B sentinel-SNI SAN the production dataplane
-/// hardcodes (`overdrive-dataplane::mtls::outbound`), and (b)
-/// `HeldServerIdentity` is alloc-aware so the CLIENT alloc's agent presents the
-/// ClientAuth client leaf on leg-B while the SERVER alloc's agent presents the
-/// ServerAuth server leaf on leg-C (a single ServerAuth SVID for all allocs —
-/// the keystone's INBOUND-only shape — failed the cross-workload leg-B EKU
-/// check). With both fixed there is NO agent-side mTLS rejection, but the test
-/// client's end-to-end rustls handshake (terminating against the server agent's
-/// leg-C) still does not complete. This is a remaining leg-F/leg-C
-/// handshake-completion issue in the cross-workload composition, NOT a datapath
-/// defect (the keystone INBOUND-only path never exercised an agent-originated
-/// leg-B into a peer's leg-C). Un-ignore once that gap closes.
-#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven, SAN/EKU fixture bugs fixed"]
+/// `tproxy` rule on lo-reentry redirects to leg-C). Two cross-workload identity
+/// fixtures are in place: the server SVID carries the `peer.overdrive.local`
+/// leg-B sentinel-SNI SAN the production dataplane hardcodes
+/// (`overdrive-dataplane::mtls::outbound`), and `HeldServerIdentity` is
+/// alloc-aware (the CLIENT alloc's agent presents the ClientAuth client leaf on
+/// leg-B, the SERVER alloc's agent the ServerAuth server leaf on leg-C).
+///
+/// CORRECTED TEST MODEL (02-02 — RCA `root-cause-analysis-dial-by-name-agent-
+/// originated-mtls-stall.md`). The earlier "the test client's end-to-end rustls
+/// handshake does not complete" was a TEST-MODEL MISMATCH, not a datapath defect:
+/// the EGRESS capture lands the workload's connect on the agent's PLAINTEXT leg-F,
+/// so a full-rustls client got no TLS peer and stalled. The workload now speaks
+/// PLAINTEXT (workload-identity model); the mTLS is proven on the inter-agent
+/// leg-B ↔ leg-C hop via the `lo:SERVICE_PORT` 0x17 oracle (see the file-level
+/// docstring + `assert_inter_agent_hop_is_mtls`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     if !is_root() {
@@ -1088,18 +1388,22 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     );
     eprintln!("[02-02] resolved STABLE frontend F = {frontend}");
 
-    // (2) DIAL — connect to (F, SERVICE_PORT) from inside the CLIENT's
-    //     PRODUCTION netns; the production egress rule captures it, the re-keyed
-    //     MtlsResolve translates F → the server's live backend, mTLS terminates,
-    //     the round-trip completes byte-exact. A wrong F (or a missing
-    //     by_frontend translation) would miss → fail-close → no backend → this
-    //     fails.
+    // (2) DIAL — connect (PLAINTEXT, the workload-identity model) to (F,
+    //     SERVICE_PORT) from inside the CLIENT's PRODUCTION netns; the production
+    //     egress rule captures it on the agent's plaintext leg-F, the re-keyed
+    //     MtlsResolve translates F → the server's live backend, the agent
+    //     originates mTLS on leg-B → leg-C, the round-trip completes byte-exact.
+    //     A wrong F (or a missing by_frontend translation) would miss →
+    //     fail-close → no backend → this fails. The inter-agent leg-B ↔ leg-C hop
+    //     is captured on lo:SERVICE_PORT for the mTLS proof (asserted SEPARATELY
+    //     below, after the byte-exact round-trip).
     let dial_pki = TestPkiHandle::from(&pki);
     let netns = client_netns.clone();
-    let result =
-        tokio::task::spawn_blocking(move || dial_frontend_in_netns(&netns, dial_pki, frontend))
-            .await
-            .expect("dial task join");
+    let (result, scan) = tokio::task::spawn_blocking(move || {
+        dial_frontend_with_mtls_proof(&netns, dial_pki, frontend)
+    })
+    .await
+    .expect("dial task join");
 
     assert!(
         !result.observed_rst,
@@ -1108,12 +1412,20 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
     );
     assert!(
         result.received_response_byte_exact,
-        "S-DBN-WS: the dialer must read the server's reply byte-exact back over the agent leg's \
-         kTLS — proving the connect to the resolved F was captured by the PRODUCTION egress \
-         nft-TPROXY rule, the re-keyed MtlsResolve translated (F, SERVICE_PORT, Tcp) → the live \
-         backend, and mTLS terminated. Removing the production responder spawn (getent times out) \
-         or the by_frontend translation arm (connect to F fail-closes) takes this RED."
+        "S-DBN-WS: the workload's PLAINTEXT dial must read the server's reply byte-exact — proving \
+         the connect to the resolved F was captured by the PRODUCTION egress nft-TPROXY rule on the \
+         agent's plaintext leg-F, the re-keyed MtlsResolve translated (F, SERVICE_PORT, Tcp) → the \
+         live backend, the agent originated mTLS on leg-B and terminated leg-C, leg-S reached the \
+         server, and the byte-distinct RESPONSE rode back. Removing the production responder spawn \
+         (getent times out) or the by_frontend translation arm (connect to F fail-closes) takes \
+         this RED."
     );
+    // K-DBN-1 mTLS proof — the hop IS mTLS'd: the inter-agent leg-B ↔ leg-C wire
+    // carries TLS-1.3 0x17 application_data records (both directions) with NO
+    // cleartext. Asserted SEPARATELY from the resolve + round-trip (K2 honesty:
+    // the round-trip proves the datapath; this proves it is ENCRYPTED).
+    eprintln!("[02-02] S-DBN-WS inter-agent leg-B↔leg-C wire scan = {scan:?}");
+    assert_inter_agent_hop_is_mtls(&scan, "S-DBN-WS");
     eprintln!(
         "[02-02] VERDICT: WORKS — a deployed workload resolved its peer by name to the stable \
          frontend F ({frontend}:{SERVICE_PORT}) and the hop is mTLS'd, driven through in-process \
@@ -1121,9 +1433,13 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
          (MERGE GATE: pinned-6.18 Tier-3 matrix, ADR-0068.)"
     );
 
-    // Stop the workload through the production stop path BEFORE shutdown so the
-    // accept-loop threads are actually stopped (not timed-out-around).
+    // Stop BOTH workloads through the production stop path BEFORE shutdown so the
+    // accept-loop threads (server leg-C + client leg-F) are actually stopped, not
+    // timed-out-around: a live alloc's accept loop survives the in-process
+    // `Runtime::drop` and hangs teardown to nextest's ~120s reap (matching the
+    // sibling S-DBN tests, which stop both).
     stop_and_converge(&skeleton, server_id).await;
+    stop_and_converge(&skeleton, "client").await;
     skeleton.shutdown().await;
 }
 
@@ -1224,13 +1540,11 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// leg-C on the OUTPUT path, so the mTLS hop terminates rather than RSTing on the
 /// plaintext listener.
 ///
-/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
-/// handshake-completion follow-up as
+/// CORRECTED TEST MODEL (02-02) — same correction as
 /// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
-/// docstring): the REV-5 datapath fix is landed + pwru-proven and the SAN/EKU
-/// fixture bugs are fixed, but the end-to-end mTLS round-trip does not yet
-/// complete. Un-ignore once that gap closes.
-#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
+/// docstring + the file-level docstring): the workload client speaks PLAINTEXT
+/// (the EGRESS capture lands on the agent's plaintext leg-F); the mTLS is proven
+/// on the inter-agent leg-B ↔ leg-C hop via the `lo:SERVICE_PORT` 0x17 oracle.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend() {
     if !is_root() {
@@ -1294,17 +1608,22 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
     // mTLS-required server handshake rejects.)
     let dial_pki = TestPkiHandle::from(&pki);
     let netns = client_netns.clone();
-    let result =
-        tokio::task::spawn_blocking(move || dial_frontend_in_netns(&netns, dial_pki, frontend))
-            .await
-            .expect("dial task join");
+    let (result, scan) = tokio::task::spawn_blocking(move || {
+        dial_frontend_with_mtls_proof(&netns, dial_pki, frontend)
+    })
+    .await
+    .expect("dial task join");
     assert!(
         !result.observed_rst && result.received_response_byte_exact,
         "S-DBN-SINGLE-SRC: the production MtlsResolve.resolve(F, Tcp) for the answered F must be a \
          by_frontend HIT classified Mesh translating to the live backend — observed as a byte-exact \
-         mTLS round-trip THROUGH the answered F. The name answer and the resolve translation read \
-         the SAME <job> → F binding from the SAME FrontendAddrAllocator (DDN-2 single source)."
+         round-trip THROUGH the answered F (the workload speaks plaintext to leg-F; the agent \
+         originates mTLS on leg-B → leg-C). The name answer and the resolve translation read the \
+         SAME <job> → F binding from the SAME FrontendAddrAllocator (DDN-2 single source)."
     );
+    // The hop through the answered F is genuinely mTLS'd on the inter-agent leg.
+    eprintln!("[02-02] S-DBN-SINGLE-SRC inter-agent leg-B↔leg-C wire scan = {scan:?}");
+    assert_inter_agent_hop_is_mtls(&scan, "S-DBN-SINGLE-SRC");
     eprintln!(
         "[02-02] S-DBN-SINGLE-SRC: the answered F ({frontend}) is the addr the production \
          re-keyed MtlsResolve recognized (by_frontend HIT) and translated to a Mesh live backend \
@@ -1339,13 +1658,31 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// re-dial is diverted into the destination's leg-C on the OUTPUT path, so the
 /// mTLS hop terminates against B1 then B2.
 ///
-/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
-/// handshake-completion follow-up as
-/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
-/// docstring). Un-ignore once that gap closes. (The `getent`-byte-stability
-/// half — the SQ1 elimination — is independently observable once the connect
-/// half completes.)
-#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
+/// CORRECTED TEST MODEL (02-02) — the workload client speaks PLAINTEXT (same
+/// correction as `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls`,
+/// see its docstring + the file-level docstring); the post-cycle hop to B2 is
+/// proven mTLS on the inter-agent leg-B ↔ leg-C wire via the `lo:SERVICE_PORT`
+/// 0x17 oracle.
+///
+/// BLOCKED (02-02 — alloc-cycle restart semantics, a SEPARATE blocker from the
+/// plaintext-client model error). This AT's "WHEN: cycle the backend (stop the
+/// server → re-deploy the SAME `<job>` → a NEW alloc reaches Running)" is NOT
+/// achievable through the production driving ports as they stand. `POST
+/// /v1/jobs/{id}/stop` writes a STICKY, OVERRIDING operator-stop intent
+/// (`IntentKey::for_workload_stop`); the `WorkloadLifecycle` reconciler then
+/// DELIBERATELY refuses to schedule a replacement alloc for an operator-stopped
+/// workload (`workload_lifecycle.rs` — "an Operator-stopped Terminated alloc is a
+/// terminal intentional stop... MUST NOT schedule a fresh replacement... until
+/// the operator explicitly re-submits the job intent"; ADR-0037 Amendment /
+/// fix-exec-driver-exit-watcher §Bug 3). A same-spec `POST /v1/jobs` resubmit
+/// takes the `put_if_absent → KeyExists → Unchanged` path, which does NOT clear
+/// the operator-stop key — and there is NO production verb that does. So the
+/// re-deployed server (B2) never reaches Running and `deploy_and_wait_running`
+/// times out. The two NON-cycle ATs (S-DBN-WS, S-DBN-SINGLE-SRC) pass GREEN with
+/// the inter-agent mTLS proof; this AT's restart-after-stop dependency is a
+/// design/scope gap to resolve before un-ignoring. Sibling: S-DBN-CHURN (same
+/// dependency).
+#[ignore = "02-02 BLOCKED on alloc-cycle restart: operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3); a same-spec re-deploy does not clear it and no production restart-after-stop verb exists. Distinct from the (fixed) plaintext-client model error. See docstring."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend() {
     if !is_root() {
@@ -1432,18 +1769,24 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 
     // AND: the subsequent connect to F1 lands the NEW backend B2 (the re-keyed
     // MtlsResolve re-resolved the live backend per-connect). The byte-exact
-    // round-trip succeeds against the fresh server instance B2.
+    // round-trip succeeds against the fresh server instance B2, and the
+    // inter-agent leg-B ↔ leg-C hop to B2 is genuinely mTLS'd.
     let dial_pki = TestPkiHandle::from(&pki);
     let netns = client_netns.clone();
-    let post = tokio::task::spawn_blocking(move || dial_frontend_in_netns(&netns, dial_pki, f1))
-        .await
-        .expect("dial task join");
+    let (post, post_scan) =
+        tokio::task::spawn_blocking(move || dial_frontend_with_mtls_proof(&netns, dial_pki, f1))
+            .await
+            .expect("dial task join");
     assert!(
         !post.observed_rst && post.received_response_byte_exact,
         "S-DBN-WS-STABLE: the post-cycle connect to the SAME F1 must land the NEW backend B2 (the \
          re-keyed MtlsResolve re-resolved the live backend per-connect; the round-trip succeeds \
          against the fresh instance)"
     );
+    eprintln!(
+        "[02-02] S-DBN-WS-STABLE post-cycle inter-agent leg-B↔leg-C wire scan = {post_scan:?}"
+    );
+    assert_inter_agent_hop_is_mtls(&post_scan, "S-DBN-WS-STABLE (post-cycle to B2)");
 
     // AND: F1 was a stable frontend ∈ 10.98.0.0/16, NEVER a backend addr ∈
     // 10.99.0.0/16 — neither B1 nor B2 was ever the resolved value.
@@ -1490,13 +1833,26 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// into the destination's leg-C on the OUTPUT path, so the mTLS hop terminates
 /// and data flows before the churn.
 ///
-/// PARTIALLY BLOCKED (02-02) — same cross-workload leg-F→leg-C
-/// handshake-completion follow-up as
-/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls` (see its
-/// docstring): establishing the in-flight connection needs the connect to F to
-/// complete the end-to-end mTLS hop, which does not yet close. Un-ignore once
-/// that gap closes.
-#[ignore = "02-02 follow-up: cross-workload leg-F→leg-C mTLS handshake does not complete; REV-5 datapath fix landed + pwru-proven"]
+/// CORRECTED TEST MODEL (02-02) — the in-flight connection is a PLAINTEXT
+/// workload dial (same correction as
+/// `deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls`, see its
+/// docstring + the file-level docstring; the agent originates mTLS on leg-B →
+/// leg-C). This AT proves the fail-fast + next-dial-live behaviour; the
+/// inter-agent encryption proof lives in the sibling round-trip ATs.
+///
+/// BLOCKED (02-02 — alloc-cycle restart semantics; SAME blocker as
+/// `answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend`,
+/// see its docstring). The "AND a subsequent fresh connect to F lands the NEW
+/// live backend B2" step re-deploys the SAME `<job>` "server" after a
+/// `stop_and_converge`, but the production operator-stop intent
+/// (`IntentKey::for_workload_stop`) is sticky/overriding by design (ADR-0037
+/// Amendment / `WorkloadLifecycle` §Bug 3) and a same-spec resubmit does not
+/// clear it — so B2 never reaches Running and `deploy_and_wait_running` times
+/// out. The fail-fast-on-churn HALF is independently meaningful, but the AC's
+/// "next connect lands B2" half needs a production restart-after-stop path that
+/// does not exist. A design/scope gap to resolve before un-ignoring, distinct
+/// from the (fixed) plaintext-client model error.
+#[ignore = "02-02 BLOCKED on alloc-cycle restart: operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3); a same-spec re-deploy does not clear it and no production restart-after-stop verb exists. Distinct from the (fixed) plaintext-client model error. See docstring."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend() {
     if !is_root() {
@@ -1602,29 +1958,24 @@ struct InFlightOutcome {
     elapsed: Duration,
 }
 
-/// Inside the client's PRODUCTION netns: open an mTLS connection to `(F,
-/// SERVICE_PORT)`, complete the handshake + a first round-trip (data flowing),
-/// then HOLD the connection open and block on a second read with a generous
-/// per-read timeout. When B1 is cycled mid-connection the read returns
-/// PROMPTLY (reset / error / EOF) bounded by `TCP_USER_TIMEOUT` on the proxy
-/// legs — measured as the elapsed time until the read returns. Returns whether
-/// it returned within `CHURN_BOUND` (a hang would exceed it).
-fn churn_in_flight_read(netns: &str, pki: TestPkiHandle, frontend: Ipv4Addr) -> InFlightOutcome {
-    use rustls::pki_types::ServerName;
-    use rustls::{ClientConfig, ClientConnection};
-
+/// Inside the client's PRODUCTION netns: open a PLAINTEXT connection to `(F,
+/// SERVICE_PORT)` (a real identity-unaware workload — the agent originates the
+/// mTLS on leg-B → leg-C, the workload speaks plaintext to leg-F), complete a
+/// first round-trip (data flowing), then HOLD the connection open and block on a
+/// second read with a generous per-read timeout. When B1 is cycled mid-connection
+/// the read returns PROMPTLY (reset / error / EOF) bounded by `TCP_USER_TIMEOUT`
+/// on the proxy legs — measured as the elapsed time until the read returns.
+/// Returns whether it returned within `CHURN_BOUND` (a hang would exceed it).
+///
+/// `_pki` is retained for call-site symmetry with `dial_frontend_in_netns`; the
+/// CLIENT holds no SVID material (workload-identity model), so the handle is a
+/// marker and the plaintext dial needs nothing from it.
+fn churn_in_flight_read(netns: &str, _pki: TestPkiHandle, frontend: Ipv4Addr) -> InFlightOutcome {
     let timeout = InFlightOutcome { returned_promptly: false, elapsed: CHURN_BOUND };
     if !enter_netns(netns) {
         eprintln!("[02-02] setns into {netns} failed (churn)");
         return timeout;
     }
-    let roots = ca_root_store(&pki.ca_cert_pem);
-    let Ok(cfg) = ClientConfig::builder().with_root_certificates(roots).with_client_auth_cert(
-        vec![pki.client_cert_der, pki.intermediate_cert_der],
-        pki.client_key_der,
-    ) else {
-        return timeout;
-    };
     let server_addr = SocketAddrV4::new(frontend, SERVICE_PORT);
     let Ok(mut tcp) =
         TcpStream::connect_timeout(&std::net::SocketAddr::V4(server_addr), Duration::from_secs(10))
@@ -1633,31 +1984,22 @@ fn churn_in_flight_read(netns: &str, pki: TestPkiHandle, frontend: Ipv4Addr) -> 
         return timeout;
     };
     tcp.set_nodelay(true).ok();
-    let sni = ServerName::try_from(SERVER_SNI.to_string()).expect("server SNI");
-    let mut conn = ClientConnection::new(Arc::new(cfg), sni).expect("churn ClientConnection");
     // Per-read timeout: BELOW the CHURN_BOUND, so a single blocked read cannot
     // by itself satisfy "returned promptly" — the read must return because the
     // backend died (reset/error/EOF), not because the socket read timeout
     // fired. We loop reads and measure total elapsed from the churn trigger.
     tcp.set_read_timeout(Some(Duration::from_secs(2))).ok();
-    if !drive_client_handshake(&mut conn, &mut tcp) {
-        eprintln!("[02-02] churn handshake failed");
+    // First round-trip — data is flowing (the in-flight connection is real). The
+    // agent captures this plaintext request on leg-F and re-encrypts to leg-B.
+    if tcp.write_all(REQUEST).and_then(|()| tcp.flush()).is_err() {
         return timeout;
-    }
-    // First round-trip — data is flowing (the in-flight connection is real).
-    {
-        let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
-        if tls.write_all(REQUEST).and_then(|()| tls.flush()).is_err() {
-            return timeout;
-        }
     }
     let mut buf = vec![0u8; 4096];
     {
-        let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
         // Read the first response so the connection is genuinely established +
         // flowing before the churn. A WouldBlock here is fine (the bytes may
         // still be in flight); we proceed to hold the connection open.
-        let _ = tls.read(&mut buf);
+        let _ = tcp.read(&mut buf);
     }
 
     // Now HOLD the connection open and block on reads until the backend death
@@ -1670,8 +2012,7 @@ fn churn_in_flight_read(netns: &str, pki: TestPkiHandle, frontend: Ipv4Addr) -> 
             // A hang — the read never surfaced the backend death within bound.
             return InFlightOutcome { returned_promptly: false, elapsed: start.elapsed() };
         }
-        let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
-        match tls.read(&mut buf) {
+        match tcp.read(&mut buf) {
             // Clean EOF (the proxy closed the leg) — the backend death surfaced.
             Ok(0) => return InFlightOutcome { returned_promptly: true, elapsed: start.elapsed() },
             // More bytes flowed before the churn, OR a WouldBlock/TimedOut from
