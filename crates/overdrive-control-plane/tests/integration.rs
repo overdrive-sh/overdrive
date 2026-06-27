@@ -282,6 +282,24 @@ mod integration {
     /// SKIP otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
     mod canonical_address_inbound_walking_skeleton;
 
+    /// dial-by-name-responder step 02-02 (ADR-0072 REV-2, GH #243) — the
+    /// WALKING-SKELETON vertical slice. Four Tier-3 scenarios sharing one
+    /// real-`EbpfDataplane` + `mtls_identity_override` boot fixture (the
+    /// keystone shape): a deployed workload resolves its peer's STABLE
+    /// frontend `F ∈ 10.98.0.0/16` via `getaddrinfo`/`getent` (NOT `dig` —
+    /// K2) from inside its production-provisioned netns, the connect to `F`
+    /// is captured by the production egress nft-TPROXY rule, the re-keyed
+    /// `MtlsResolve` translates `F` → the live backend, and the hop is
+    /// mTLS'd (S-DBN-WS); `F` is byte-stable across a backend alloc cycle
+    /// (S-DBN-WS-STABLE — the SQ1 elimination); the answered `F` is the addr
+    /// `MtlsResolve` recognizes + translates (S-DBN-SINGLE-SRC); in-flight
+    /// churn fails fast bounded by `TCP_USER_TIMEOUT`, no `sock_destroy`
+    /// (S-DBN-CHURN). Drives ONLY production: NO test binds `:53`, installs a
+    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the
+    /// egress capture. Root + Lima; SKIP otherwise. MERGE-BLOCKING on the
+    /// pinned-6.18 Tier-3 matrix (ADR-0068).
+    mod dns_responder_walking_skeleton;
+
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.
     pub mod workload_identity_manager {
