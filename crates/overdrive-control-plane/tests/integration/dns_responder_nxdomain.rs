@@ -935,24 +935,24 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 /// observable). When run as root under Lima this fails: after `POST
 /// /v1/jobs/server/stop` converges the alloc to Terminated, `getent` keeps
 /// resolving the stale `F` (`[10.98.0.1] code 0`) indefinitely and NEVER
-/// reports NXDOMAIN. The WITHHOLD-on-zero-healthy seam is NOT driven by the
-/// production stop path: `BackendDiscoveryBridge::reconcile` builds backends
-/// from the Running alloc set, but the empty-backends `service_backends` row
-/// that would empty `name_index.by_name["server"]` (→ WITHHOLD → NXDOMAIN) does
-/// not land on the alloc→Terminated transition, so `frontend_for("server")`
-/// still returns `Some(F)`. Making this GREEN requires a production change to
-/// `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs` (re-tick
-/// / write a zero-backend row on alloc-Terminated) and/or the action-shim
-/// re-enqueue path — OUT OF this test-only step's two-file boundary
-/// (`dns_responder/*` and the bridge are READ-ONLY for 03-01 per the dispatch).
-/// The withhold-not-release F-retention contract this observes is ALREADY
-/// Tier-1 mutation-gated at 01-03 (`NameIndex` healthy-gate WITHHOLD seam +
-/// `answer_for` NxDomain arm) / 01-04. The test body is INTACT and will fail
-/// loud (surfacing the gap) the moment the production withhold-on-stop lands and
-/// this `#[ignore]` is removed — it is NOT weakened. Un-ignore when the
-/// withhold-on-stop production fix lands (a separate, production-drivable
-/// slice). Distinct from the recovery leg's #249 blocker below.
-#[ignore = "03-01 BLOCKED on a production WITHHOLD-on-stop gap (out of this test-only step's boundary): after POST /v1/jobs/{id}/stop converges to Terminated, the service_backends healthy row is not dropped (BackendDiscoveryBridge does not write a zero-backend row on alloc-Terminated), so the responder keeps answering the stale F and never NXDOMAINs. Fixing needs a production change to backend_discovery_bridge / the action-shim re-enqueue path — READ-ONLY for 03-01. The withhold-not-release contract is Tier-1 mutation-gated at 01-03/01-04. Body is intact (not weakened); un-ignore when the withhold-on-stop production slice lands. See docstring."]
+/// reports NXDOMAIN. The WITHHOLD-on-zero-healthy seam is NOT driven END-TO-END
+/// by the production stop path. RCA (overdrive-sh/overdrive#251) RULES OUT the
+/// two layers below the bridge — `name_index::apply_row` correctly evicts a
+/// `<job>` on a zero-backend row, and `hydrate_bridge_desired_listeners` keeps
+/// the stopped-but-declared Service's listeners — and NARROWS the suspect to the
+/// operator-stop → bridge re-tick propagation (the alloc leaving the bridge's
+/// Running set, and/or the `exit_observer:253` bridge re-enqueue firing on the
+/// operator-stop path), so no zero-backend `service_backends` retraction lands
+/// and `frontend_for("server")` still returns `Some(F)`. The fix is a production
+/// change OUT OF this test-only step's two-file boundary (`dns_responder/*` and
+/// the bridge are READ-ONLY for 03-01 per the dispatch). The withhold-not-release
+/// F-retention contract this observes is ALREADY Tier-1 mutation-gated at 01-03
+/// (`NameIndex` healthy-gate WITHHOLD seam + `answer_for` NxDomain arm) / 01-04.
+/// The test body is INTACT and will fail loud (surfacing the gap) the moment the
+/// production withhold-on-stop fix lands and this `#[ignore]` is removed — it is
+/// NOT weakened. Un-ignore when overdrive-sh/overdrive#251 lands. Distinct from
+/// the recovery leg's #249 blocker below.
+#[ignore = "03-01 BLOCKED on a production WITHHOLD-on-stop gap (out of this test-only step's boundary): after POST /v1/jobs/{id}/stop converges to Terminated, the WITHHOLD-on-zero-healthy seam is not driven end-to-end — no zero-backend service_backends retraction lands on the operator-stop -> Terminated transition, so the responder keeps answering the stale F and never NXDOMAINs. Tracked in overdrive-sh/overdrive#251 (RCA rules out name_index empty-row eviction + bridge hydrate; narrows to the operator-stop -> bridge re-tick propagation). Fixing is a production change READ-ONLY for 03-01. The withhold-not-release contract is Tier-1 mutation-gated at 01-03/01-04. Body is intact (not weakened); un-ignore when #251 lands. See docstring."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
     if !is_root() {
