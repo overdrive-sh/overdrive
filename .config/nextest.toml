@@ -332,6 +332,7 @@ filter = '''
             test(serve_boot_provisions_veth)
             | test(backend_discovery_bridge)
             | test(dns_responder_walking_skeleton)
+            | test(dns_responder_nxdomain)
         ))
     )
 '''
@@ -350,6 +351,21 @@ test-group = 'host-kernel-shared'
 # mutant). Matched BY-MODULE (`test(dns_responder_walking_skeleton)`), rename-
 # proof — a future WS test in this file joins the single-writer domain
 # automatically (same discipline as the mtls / root-attacher blocks above).
+#
+# dial-by-name-responder NXDOMAIN follow-up — `dns_responder_nxdomain` (the
+# empty-candidate-honesty Tier-3 module: withhold-then-resolve / unknown-name)
+# joins for the SAME reason. Its three tests boot a real `EbpfDataplane` via
+# `run_server_with_obs_and_driver` (`dataplane_override: None`) — the same
+# process-global `:53` bind + root `cgroup_sock_addr` attach + XDP attach to
+# the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
+# `dns_responder_walking_skeleton`. Run concurrently in the full integration
+# suite two collide on `:53` EADDRINUSE / `IfaceXdpSlotBusy`, so the module
+# MUST share the single-writer group. Matched BY-MODULE
+# (`test(dns_responder_nxdomain)`), rename-proof — mirrors the
+# `dns_responder_walking_skeleton` assignment. (Corrects the new module's
+# earlier omission from the serialization group when the NXDOMAIN tests
+# landed — joining the existing single-writer domain is required discipline,
+# not scope creep.)
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the

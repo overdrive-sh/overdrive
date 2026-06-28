@@ -1463,6 +1463,20 @@ mod service_vip_release_emission_tests {
     /// reconciler keys on) and the digest is not already released, a
     /// Service MUST emit exactly one `ReleaseServiceVip` carrying that
     /// digest (ADR-0049 D1 positive direction).
+    ///
+    /// SCOPE: this pins the gate's release-on-deletion **logic**, not a
+    /// v1-reachable production path. The `(job = None, digest = Some(_))`
+    /// input is NOT producible by the v1 hydrator — `reconciler_runtime::
+    /// read_job` returns `intent_digest = None` once the intent is
+    /// withdrawn, so `service_spec_digest = None` and the gate's
+    /// `let digest = desired.service_spec_digest?;` short-circuits.
+    /// Release-on-deletion is therefore **inert** on the v1 convergence
+    /// path (ADR-0049 D3); the stop-direction retention
+    /// (`declared_service_retains_vip`) is the path that is live today.
+    /// The logic pinned here goes live when the deletion verb wires a
+    /// hydrate-time digest — tracked in `overdrive-sh/overdrive#211`; see
+    /// the inline gap note in
+    /// `tests/integration/vip_allocator_lifecycle.rs`.
     #[test]
     fn withdrawn_service_intent_releases_vip() {
         let digest = fixture_digest();
@@ -1487,6 +1501,44 @@ mod service_vip_release_emission_tests {
                  ReleaseServiceVip; got {other:?}"
             ),
         }
+    }
+
+    /// INERT-IN-V1: the production convergence path. When the intent is
+    /// withdrawn, the v1 hydrator (`reconciler_runtime::read_job`) zeroes
+    /// BOTH `desired.job` (the trigger) AND `desired.service_spec_digest`
+    /// (`read_job` returns `intent_digest = None` once the intent is
+    /// absent). With `(job = None, digest = None)` the gate's
+    /// `service_spec_digest?` extraction short-circuits and NO release
+    /// fires — release-on-deletion is inert in v1 production per ADR-0049
+    /// D3, until `#211` wires a deletion verb that supplies the digest at
+    /// hydrate time. This pins that inert behavior so a future
+    /// digest-persistence change is a deliberate, test-visible decision
+    /// (the test flips red the moment a withdrawn intent starts carrying
+    /// a digest on the v1 path).
+    #[test]
+    fn withdrawn_service_without_digest_emits_no_release() {
+        let desired = WorkloadLifecycleState {
+            workload_id: wid("payments"),
+            job: None,
+            desired_to_stop: false,
+            nodes: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            workload_kind: WorkloadKind::Service,
+            // The v1 hydrator zeroes the digest alongside the intent.
+            service_spec_digest: None,
+            probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
+        };
+        let view = WorkloadLifecycleView::default();
+
+        let release = service_vip_release_emission(&desired, &view);
+
+        assert!(
+            release.is_none(),
+            "a withdrawn Service with no hydrated digest (the v1 production \
+             shape) MUST NOT emit ReleaseServiceVip — release-on-deletion is \
+             inert until #211 supplies the digest at hydrate time; got {release:?}",
+        );
     }
 
     /// Idempotency short-circuit is unchanged by the gate swap: once the
