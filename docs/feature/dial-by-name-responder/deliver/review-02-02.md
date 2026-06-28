@@ -173,3 +173,27 @@ The first two `action_shim` full-feature runs failed the **unmutated baseline** 
 ### Regression check.
 
 594 default-lane tests (`overdrive-worker` lib + `overdrive-control-plane` acceptance) pass after all edits; `clippy -D warnings` clean on both crates (default + `integration-tests`).
+
+---
+
+## Independent second-opinion pass (different-fox re-verification, `nw-software-crafter-reviewer` Opus + lead re-trace)
+
+**Posture:** the Resolution section above correctly declines to self-stamp its verdict and defers to a different-fox re-verification. This is that pass. An independent `nw-software-crafter-reviewer` re-traced every Resolution claim to current source (HEAD `b9365879`); the lead reviewer then re-confirmed the verdict-critical evidence firsthand. Nothing was trusted from the Resolution text.
+
+### Verdict: **APPROVED** — D1, D2, N1 are genuinely closed in the working tree (verified, not trusted); the residual `fail_closed_on_mtls_install` MISSED mutant is correctly scoped pre-existing and tracked compliantly. This supersedes the NEEDS_REVISION verdict above; the close-out has landed.
+
+### Resolution claims — independently verified
+
+- **D1 — RESOLVED (firsthand-confirmed, not theater).** `crates/overdrive-control-plane/tests/acceptance/finalize_failed_forward_carries_workload_addr.rs` (wired at `tests/acceptance.rs:185`) drives the production `dispatch` driving port with `Action::FinalizeFailed` (`:199-220`) and asserts on the `ObservationStore` driven-port boundary (`:222-228`) — never internal state. Two default-lane PBTs pin **both** arms: `finalize_failed_stable_keeps_the_running_alloc_workload_addr` (`:247`) asserts `Some(addr)` survives a `Stable` terminal; `finalize_failed_genuine_terminal_drops_workload_addr` (`:276`) asserts `None` over a `prop_oneof!` of Failed/Completed/BackoffExhausted. This kills all four mutants D1 named (always-`None`, always-`prior`, swap-arms, `matches!` `==`→`!=`). Confirmed CAUGHT by the diff-scoped mutation run (`dispatch_single -> Ok(())` killed by this test).
+- **D2 — RESOLVED (firsthand-confirmed).** `.cargo/mutants.toml` now carries real `exclude_re` entries for all four new shims — `sweep_one_chain` (`:576`), `chain_has_leg_s_exemption` (`:580`), `find_output_divert_rule_handle` (`:584`), `list_named_chain` (`:590`) — plus the REV-5 dual-chain arithmetic + head-exemption `delete !` mutants. The source `// mutants: skip` comments now read "DOCUMENTATION ONLY — the actual suppression is the `exclude_re` entry", the testing.md-compliant form. The bare-comment-suppresses-nothing gap is closed.
+- **N1 — RESOLVED (advisory).** The partial-install window is real, but the install fn now documents the §5 boot-recovery sweep (`sweep_per_workload_tproxy_rules` → `sweep_one_chain` over both chains; #234) as the accepted reaper — the sanctioned move for a non-blocking finding, consistent with the codebase's converge-on-boot posture.
+- **Mutation gate / #250 governance — VERIFIED COMPLIANT.** The one MISSED mutant (`fail_closed_on_mtls_install`) is correctly diagnosed pre-existing (defined at `action_shim/mod.rs:413`, step 06-03; 02-02's only diff-touch is the required-param `None,` wiring) and was surfaced to the user rather than faked. Issue **#250** is OPEN, user-authored (marcus-sa), scope-matching ("fault-injection test infra to kill the fail_closed_on_mtls_install mutant"), and created `2026-06-27T19:27:55Z` — **before** the citing commit `b9365879` (`2026-06-28T02:31`). CLAUDE.md deferral discipline (issue + user approval before citation) is satisfied.
+
+### MET criteria re-verified
+Vertical-slice integrity (`TestPkiHandle` holds nothing; `dial` is plaintext `TcpStream`, zero client rustls), the corrected plaintext-egress test model (mTLS proven only on the inter-agent `lo:SERVICE_PORT` 0x17 oracle, asserted separately from resolve + round-trip), the honest `#[ignore]→#249` deferrals with full real bodies, and the design-first pinned surface (zero invented surface) all hold under independent line-by-line reading.
+
+### Residual (non-blocking, out of 02-02 scope)
+- **nitpick:** `mtls_intercept.rs:178-182` carries a statement-level `// mutants: skip` (the `if fd < 0` guard) with no backing `exclude_re` — by the same testing.md rule applied to D2 it suppresses nothing. Pre-existing (not REV-5, not in 02-02's named scope), so not a 02-02 defect; worth a sweep when the file is next touched.
+
+### Bottom line
+**APPROVED.** The NEEDS_REVISION findings were accurate; the resolution dispatch closed them with substantive, non-theater fixes (a real two-arm PBT, real `exclude_re` backing, a documented reaper, and a bonus nextest single-writer-group fix that lifted the env-block); the one residual is honestly pre-existing and compliantly tracked in #250. Step 02-02 is clear to merge once the criterion-6 pinned-6.18 Tier-3 re-confirmation is carried by DEVOPS.

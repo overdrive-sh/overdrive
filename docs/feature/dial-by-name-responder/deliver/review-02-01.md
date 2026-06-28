@@ -189,3 +189,35 @@ loop for the fallback now would build a mechanism no production entry point reac
   `completed_step_ids`, count 7).
 
 [#247]: https://github.com/overdrive-sh/overdrive/issues/247
+
+---
+
+## Re-review (independent verification of the resolution) — **APPROVED**
+
+- **Re-reviewed at:** HEAD `b413736e` (resolution commits `751a1d69` D2/D3 + N1/N2/N4,
+  `48bb5562` D1 `is_addr_in_use` mutants).
+- **Posture:** the self-stamped "review resolution — APPROVED" was **not trusted** —
+  each blocking fix was independently re-traced against source / tests / the issue
+  tracker (the "different-fox" discipline; CLAUDE.md § "Verify unproven claims against
+  the actual evidence").
+- **Verdict:** **APPROVED** — all 3 blocking issues genuinely resolved; non-blocking
+  dispositions accepted.
+
+| Issue | Resolution verified | Evidence |
+|---|---|---|
+| **D1** mutation gate | **CLEARED** | `mutants-02-01.md` records a real diff-scoped Lima-root run extended to `responder.rs` + `mtls_resolve_adapter.rs` + `lib.rs` (per D1's required action), **89.3% ≥ 80%**. The in-process surfaces the gate defends — `boot_refusal_reason`, the `DnsResponderBoot` refusal, and the `project_by_frontend` fail-closed feeder — are **caught**. The 3 residual misses are the `responder.rs:274/323` real-`bind()` socket arms (genuinely Tier-3, behaviourally covered by BIND-01/02). |
+| **D2** refusal/reason-mapping untested | **CLEARED** | The inline 4-arm match is gone; `DnsResponderError::boot_refusal_reason()` (`responder.rs:163`) is wired at `lib.rs:2251` and killed in-process by the Tier-1 `boot_refusal_reason_maps_each_variant_to_a_distinct_reason` (`responder.rs:499`, asserts 4 distinct reasons + all-distinct). The delete-`return Err` mutant is killed by the new Tier-3 `run_server_refuses_boot_on_dns_probe_fault_with_probe_reason` (`dns_responder_bind.rs:331`) which boots the real composition via the `dns_probe_fault` seam and asserts `Err(DnsResponderBoot(Probe))` **+** the captured `health.startup.refused` `reason=dns.responder.probe`. The `dns_probe_fault` seam is a faithful mirror of the established `mtls_probe_fault` (`lib.rs:822` vs `:835`) — not an invented test-shaped surface. |
+| **D3** aspirational converge-tick docs | **CLEARED** | All three `responder.rs` rustdoc sites now state "**no converge tick in v1**" and cite **#247** (verified OPEN, created 2026-06-27, correctly scoped). The deferral satisfies CLAUDE.md § "Deferrals require GitHub issues — AND user approval BEFORE creation": the resolution records user approval (2026-06-27), the issue exists, and is cited at every site. N2 folded in: `dns.responder.fallback.zero_sockets` warning + `empty_fallback_binds_zero_sockets_and_warns_it_is_deaf` make a deaf boot observable. |
+| N1 / N2 / N4 | **RESOLVED** | `bind_frontend` documented as a test-only seam; zero-socket warning landed; `.develop-progress.json` reconciled (02-01 → completed). |
+| N3 | **Carried to 02-02** (correct disposition) | The `by_frontend` key uses `backend.addr.port()`; the `F:<port>` HIT-equality is only end-to-end-verified at 02-02's walking skeleton — keep it visible so 02-02 exercises a service whose listener port differs from any incidental backend port. |
+
+**Advisory (non-blocking, no action required to proceed):**
+- `mutants-02-01.md`'s rationale for the `responder.rs:274` guard→`false` miss is mildly
+  generous (BIND-02 *would* catch it if it ran without SKIPping), but the gate clears
+  ≥80% and the in-process surfaces are caught — acceptable.
+- The roadmap `S-DBN-BIND-02` text still demands the converge tick (left intact as the
+  "historical plan"); this § Resolution + #247 are the authoritative shipped-vs-deferred
+  record. A future roadmap reader relies on finding #247 — acceptable, slightly soft.
+
+> **Re-review reviewer:** `nw-software-crafter-reviewer` (Opus, adversarial). Step 02-01
+> is cleared to proceed to **02-02** (the walking skeleton), carrying N3 forward.
