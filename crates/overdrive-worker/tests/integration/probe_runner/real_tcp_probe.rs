@@ -10,6 +10,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use std::process::Command;
 use std::time::Duration;
 
 use overdrive_core::traits::prober::{ProbeOutcome, TcpProber};
@@ -68,23 +69,94 @@ async fn given_unbound_port_when_tokio_tcp_prober_probes_then_returns_fail_conne
     }
 }
 
-/// S-SHCP-INT-01-03 (US-01 WS / K1 sad path) — bound-but-not-
-/// accepting listener with a short timeout surfaces as
+/// Uniquely-named nft table for this test's silent-SYN-drop rule.
+/// Distinct from the `overdrive-mtls` table the dial-by-name Tier-3
+/// tests use, so the two suites cannot collide on a shared table name
+/// when run in the same VM.
+const PROBE_DROP_TABLE: &str = "overdrive_probetest";
+
+/// RAII teardown for the nft silent-SYN-drop rule installed by
+/// [`install_syn_drop`]. `Drop` runs on the normal return path AND on
+/// unwind (a failed assertion), so a panicking probe assertion cannot
+/// leak the nft table into the VM and poison a later run. Bind it with
+/// `let _guard = ...;` BEFORE the probe call.
+struct NftDropGuard {
+    table: &'static str,
+}
+
+impl Drop for NftDropGuard {
+    fn drop(&mut self) {
+        // Best-effort teardown — the table must be gone after the test
+        // regardless of outcome. Ignore the status: if the table is
+        // already absent (e.g. a prior failure removed it) the delete
+        // is a harmless no-op.
+        let _ = Command::new("nft").args(["delete", "table", "inet", self.table]).status();
+    }
+}
+
+/// Install an nft OUTPUT `drop` rule that silently discards TCP SYNs to
+/// `192.0.2.1:80` *before* they leave the host. No SYN-ACK ever returns,
+/// so `connect()` blocks until the app-level timeout fires — a
+/// deterministic timeout that does NOT depend on the host's networking
+/// backend (Lima user-v2/gvisor SYN-ACKs every destination, so the bare
+/// TEST-NET-1 address connects rather than blackholing). A kernel
+/// `blackhole`/`unreachable` route is wrong here: it returns
+/// `EINVAL`/`EHOSTUNREACH` *immediately* and would route through the
+/// prober's connect-error branch rather than the `tokio::time::timeout`
+/// elapsed branch this test exercises.
+fn install_syn_drop() -> NftDropGuard {
+    // Clear any stale table from a SIGKILL'd prior run (the exact
+    // leftover-state hazard this fixture defends against). Tolerate
+    // "not found" — a clean VM has nothing to delete.
+    let _ = Command::new("nft").args(["delete", "table", "inet", PROBE_DROP_TABLE]).status();
+
+    let table = format!("inet {PROBE_DROP_TABLE}");
+    let chain = format!(
+        "inet {PROBE_DROP_TABLE} out {{ type filter hook output priority 0; policy accept; }}"
+    );
+    let rule = format!("inet {PROBE_DROP_TABLE} out ip daddr 192.0.2.1 tcp dport 80 drop");
+
+    for args in [vec!["add", "table"], vec!["add", "chain"], vec!["add", "rule"]] {
+        let target = match args[1] {
+            "table" => &table,
+            "chain" => &chain,
+            _ => &rule,
+        };
+        let status = Command::new("nft")
+            .args(&args)
+            .arg(target)
+            .status()
+            .expect("nft must be invocable (root inside Lima / CI LVH harness)");
+        assert!(status.success(), "nft {args:?} {target:?} failed with status {status:?}");
+    }
+
+    NftDropGuard { table: PROBE_DROP_TABLE }
+}
+
+/// S-SHCP-INT-01-03 (US-01 WS / K1 sad path) — a non-responding target
+/// with a short timeout surfaces as
 /// `Fail { reason: "timeout after <duration>" }`.
 ///
-/// Lima loopback is reliable enough that `127.0.0.1:0` with the
-/// listener still bound does not reliably timeout (the kernel
-/// accepts the SYN into the backlog even without a userspace
-/// `accept()`). The deterministic timeout shape is a non-listening
-/// non-loopback address that drops SYN packets — TEST-NET-1
-/// (192.0.2.0/24, RFC 5737) is reserved for documentation and
-/// never routable; a connect attempt blocks until the timeout
-/// elapses.
+/// Exercises the prober's `tokio::time::timeout` elapsed branch
+/// (`tcp_prober.rs` lines 69-73). The deterministic, backend-independent
+/// non-response is produced by an nft OUTPUT `drop` rule that silently
+/// discards the TCP SYN before it leaves the host: no SYN-ACK ever
+/// returns, so `connect()` blocks until the 250ms app-level timeout
+/// elapses. This does NOT rely on `192.0.2.1` being unroutable — Lima's
+/// default user-v2/gvisor network stack SYN-ACKs every destination
+/// locally, so a bare connect to TEST-NET-1 succeeds; the silent SYN
+/// drop is what makes the timeout deterministic across networking
+/// backends. The probe target keeps `192.0.2.1:80` (RFC 5737 TEST-NET-1,
+/// reserved for documentation/test use) so the address still reads
+/// correctly as a test destination.
 #[tokio::test]
 async fn given_blackhole_address_when_tokio_tcp_prober_probes_then_returns_fail_timeout() {
+    // Install the silent-SYN-drop rule and bind its RAII teardown BEFORE
+    // the probe, so a panicking assertion below still tears the table
+    // down on unwind.
+    let _guard = install_syn_drop();
+
     let prober = TokioTcpProber::new();
-    // RFC 5737 TEST-NET-1 — reserved for documentation, never
-    // routable; connect attempts block until timeout.
     let outcome = prober
         .probe("192.0.2.1", 80, Duration::from_millis(250))
         .await
