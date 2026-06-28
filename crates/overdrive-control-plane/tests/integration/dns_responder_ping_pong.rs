@@ -8,9 +8,10 @@
 //! resolved through the in-agent responder, then intercepted + mTLS'd. It drives
 //! ONLY the production entry points — `run_server_with_obs_and_driver` (boot) +
 //! `POST /v1/jobs` (deploy, the in-process `overdrive deploy` driving port) +
-//! the example specs `examples/dial-by-name-responder/{a,b}.toml` + a staged
-//! tiny Rust ping-pong bin + `getaddrinfo`/`getent` (resolve, NOT `dig` — K2)
-//! from inside each deployed workload's PRODUCTION-provisioned netns.
+//! the example specs `examples/dial-by-name-responder/{a,b}.toml` + the
+//! checked-in `examples/dial-by-name-responder/ping_pong.py` client program +
+//! `getaddrinfo`/`getent` (resolve, NOT `dig` — K2) from inside each deployed
+//! workload's PRODUCTION-provisioned netns.
 //!
 //! ## This is the SECOND mesh→mesh egress hop, TWICE (criterion 7)
 //!
@@ -54,9 +55,9 @@
 //! "both counters advance over a 60s window" proof is the EDD harness's job, not
 //! an in-process `#[test]`'s — graduating it as the E05 EDD expectation (honest
 //! `pending`, mirroring E04) is the design (criterion 3). So the body here panics
-//! with the RED-scaffold marker; the staged-bin + example-toml fixtures are
-//! materialised (K3-honest) so the EDD runner has real artifacts when #227/#75
-//! land.
+//! with the RED-scaffold marker; the example specs and the checked-in
+//! `ping_pong.py` client program are real on-disk artifacts (K3-honest), so the
+//! EDD runner can drive them directly when #227/#75 land.
 //!
 //! Do NOT contort this green by hand-installing a production effect, substituting
 //! a transparent leg-F / TLS-presenting dialer, or injecting a test-only
@@ -86,8 +87,8 @@
 //! dev-Lima is necessary-but-not-sufficient and MUST be re-confirmed on 6.18
 //! (DEVOPS/Tier-3 obligation, criterion 5).
 //!
-//! Helpers (`is_root`, `record_kernel`, the staged-bin materialiser, the example
-//! spec paths) are kept LOCAL to this module — sibling `tests/integration/
+//! Helpers (`is_root`, `record_kernel`, the example spec + client-program
+//! paths) are kept LOCAL to this module — sibling `tests/integration/
 //! <scenario>.rs` files are distinct module roots and cannot import each other's
 //! items (sharing would require promoting them into a shared module AND touching
 //! the 02-02 / 03-01 files, out of this step's boundary; same note as
@@ -133,12 +134,15 @@ const SERVICE_B_PORT: u16 = 18972;
 const PING_PONG_CADENCE_SECS: u64 = 10;
 const PING_PONG_OBSERVE_WINDOW_SECS: u64 = 60;
 
-/// The REAL on-disk path the staged tiny Rust ping-pong bin is materialised to —
-/// the `command` both `examples/dial-by-name-responder/{a,b}.toml` point at (K3:
-/// no phantom path; the `coinflip-helper` → `/tmp/coinflip-helper` staging
-/// precedent). The bin is COMPILED + staged into this path inside Lima before
-/// deploy (see `stage_ping_pong_bin`), never checked in.
-const STAGED_BIN_PATH: &str = "/tmp/overdrive-ping-pong";
+/// The CHECKED-IN client program both `examples/dial-by-name-responder/{a,b}.toml`
+/// run (K3: a real on-disk file next to the specs, no phantom path; the
+/// `dns-resolver.toml` /usr/bin/socat precedent). Run by the real on-disk
+/// `/usr/bin/python3` interpreter (present in the dev Lima VM). The script binds
+/// a listener, replies a counted+dated PONG, and on a ~10s loop resolves its peer
+/// by name (getaddrinfo, NOT dig) and dials it PLAINTEXT — the operator can run
+/// it by hand with no build step.
+const PING_PONG_SCRIPT: &str = "examples/dial-by-name-responder/ping_pong.py";
+const PING_PONG_INTERP: &str = "/usr/bin/python3";
 
 /// The example spec paths (criterion 2 — the per-feature `examples/<feature>/`
 /// subdir convention this step introduces). `overdrive deploy <path>` consumes
@@ -173,132 +177,6 @@ fn record_kernel() -> String {
 }
 
 // ============================================================================
-// the staged tiny Rust ping-pong bin (K3 — a REAL on-disk path, no phantom)
-// ============================================================================
-
-/// The tiny Rust ping-pong program source — staged + compiled into
-/// `STAGED_BIN_PATH` so `examples/dial-by-name-responder/{a,b}.toml`'s
-/// `command = "/tmp/overdrive-ping-pong"` resolves to a real binary (K3 — no
-/// phantom path; the `coinflip-helper` staging precedent). The program:
-///
-/// - parses `--self-port` / `--peer-name` / `--peer-port`;
-/// - binds a TCP listener on `--self-port` (`0.0.0.0`); on each inbound
-///   connection it increments a counter, writes a fresh RFC-3339-ish date, and
-///   replies — the inbound "pong" the peer's dial reads (counter + date the
-///   operator observes advancing);
-/// - on a ~10s loop resolves `--peer-name` via `getaddrinfo`
-///   (`ToSocketAddrs` — a real stub-resolver call through the production
-///   resolv.conf, NOT `dig`) and dials it PLAINTEXT (an ordinary `TcpStream` —
-///   the identity-unaware workload; the agent originates mTLS on the inter-agent
-///   leg, CLAUDE.md § "East-west mTLS tests"), bumping a visible round-trip
-///   counter on each successful exchange.
-///
-/// Kept as a string + compiled with `rustc` (NOT a checked-in binary, NOT a
-/// registered `[[bin]]` — registering one would touch
-/// `crates/overdrive-control-plane/Cargo.toml`, out of this step's boundary).
-/// `no_std`-free std Rust, single file, no deps.
-const PING_PONG_SRC: &str = r#"
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-static INBOUND_PONGS: AtomicU64 = AtomicU64::new(0);
-static OUTBOUND_ROUNDTRIPS: AtomicU64 = AtomicU64::new(0);
-
-fn arg(flag: &str) -> Option<String> {
-    let args: Vec<String> = std::env::args().collect();
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
-}
-
-fn now_stamp() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-fn main() {
-    let self_port: u16 = arg("--self-port").and_then(|s| s.parse().ok()).expect("--self-port");
-    let peer_name = arg("--peer-name").expect("--peer-name");
-    let peer_port: u16 = arg("--peer-port").and_then(|s| s.parse().ok()).expect("--peer-port");
-
-    // Inbound: bind the listener; on each call increment the counter, refresh
-    // the date, and reply the pong the peer reads.
-    let listener = TcpListener::bind(("0.0.0.0", self_port)).expect("bind self port");
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let mut stream = stream;
-            let mut buf = [0u8; 256];
-            let _ = stream.read(&mut buf);
-            let n = INBOUND_PONGS.fetch_add(1, Ordering::SeqCst) + 1;
-            let pong = format!("PONG count={} date={}\n", n, now_stamp());
-            let _ = stream.write_all(pong.as_bytes());
-            let _ = stream.flush();
-        }
-    });
-
-    // Outbound: on a ~10s loop, resolve the PEER by name (getaddrinfo via
-    // ToSocketAddrs — a real stub-resolver call, NOT dig) and dial it PLAINTEXT
-    // (the workload-identity model — the agent originates mTLS on leg-B → leg-C).
-    let peer_target = format!("{}:{}", peer_name, peer_port);
-    loop {
-        match peer_target.to_socket_addrs() {
-            Ok(mut addrs) => {
-                if let Some(addr) = addrs.next() {
-                    if let Ok(mut tcp) = TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
-                        let _ = tcp.set_read_timeout(Some(Duration::from_secs(5)));
-                        let ping = format!("PING from {}\n", self_port);
-                        if tcp.write_all(ping.as_bytes()).and_then(|_| tcp.flush()).is_ok() {
-                            let mut buf = [0u8; 256];
-                            if let Ok(read) = tcp.read(&mut buf) {
-                                if read > 0 {
-                                    let n = OUTBOUND_ROUNDTRIPS.fetch_add(1, Ordering::SeqCst) + 1;
-                                    let reply = String::from_utf8_lossy(&buf[..read]);
-                                    println!(
-                                        "[ping-pong {}] outbound#{} -> {} got: {}",
-                                        self_port, n, peer_name, reply.trim()
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        eprintln!("[ping-pong {}] dial {} failed", self_port, addr);
-                    }
-                }
-            }
-            Err(e) => eprintln!("[ping-pong {}] resolve {} failed: {}", self_port, peer_name, e),
-        }
-        std::thread::sleep(Duration::from_secs(10));
-    }
-}
-"#;
-
-/// Materialise the tiny Rust ping-pong bin into `STAGED_BIN_PATH` by writing the
-/// source to a temp `.rs` and compiling it with `rustc -O`. This is the K3
-/// honesty: the `command` both example tomls point at is a REAL on-disk binary,
-/// not a phantom path the deploy would fail on. Returns `true` iff the bin was
-/// staged (a missing `rustc` in the run env makes it `false` — the scaffold body
-/// surfaces the RED marker regardless, but a real GREEN run needs the bin).
-///
-/// (When the EDD harness #227/#75 lands, the runner stages the bin the same way
-/// before driving `overdrive deploy`.)
-fn stage_ping_pong_bin() -> bool {
-    let src_path = "/tmp/overdrive-ping-pong.rs";
-    if std::fs::write(src_path, PING_PONG_SRC).is_err() {
-        eprintln!("[03-02] could not write ping-pong source to {src_path}");
-        return false;
-    }
-    let compiled = Command::new("rustc")
-        .args(["-O", src_path, "-o", STAGED_BIN_PATH])
-        .status()
-        .is_ok_and(|s| s.success());
-    if compiled {
-        eprintln!("[03-02] staged ping-pong bin -> {STAGED_BIN_PATH} (K3: real on-disk path)");
-    } else {
-        eprintln!("[03-02] rustc compile of ping-pong bin failed (no rustc in run env?)");
-    }
-    compiled
-}
-
-// ============================================================================
 // S-DBN-PINGPONG — bidirectional ping-pong demo (RED scaffold; the
 // operator-runnable proof graduates to the E05 EDD expectation, honest pending)
 // ============================================================================
@@ -318,13 +196,13 @@ fn stage_ping_pong_bin() -> bool {
 /// until #227/#75 land, mirroring E04 — criterion 3), NOT an in-process `#[test]`
 /// (the demo runs against the production binary, slice-02 § "Carpaccio").
 ///
-/// The fixtures this scaffold materialises so the EDD runner has real artifacts:
-/// the two example specs (`SPEC_A_PATH` / `SPEC_B_PATH`) and the staged tiny Rust
-/// ping-pong bin at `STAGED_BIN_PATH` (K3 — a real on-disk `command`, no phantom
-/// path). The PLAINTEXT-egress model (criterion 7) is baked into the staged bin:
-/// it dials its peer over an ordinary `TcpStream`, never presenting TLS (the
-/// 02-02 RCA model error); the per-hop mTLS proof lives on the inter-agent
-/// leg-B ↔ leg-C wire.
+/// The fixtures this step ships so the EDD runner has real artifacts: the two
+/// example specs (`SPEC_A_PATH` / `SPEC_B_PATH`) and the checked-in
+/// `PING_PONG_SCRIPT` client program (K3 — a real on-disk `command`, no phantom
+/// path; the operator runs it by hand with no build step). The PLAINTEXT-egress
+/// model (criterion 7) is baked into the script: it dials its peer over an
+/// ordinary plaintext socket, never presenting TLS (the 02-02 RCA model error);
+/// the per-hop mTLS proof lives on the inter-agent leg-B ↔ leg-C wire.
 ///
 /// GREEN transition: when #227/#75 land, replace the `panic!` with the
 /// two-`deploy` drive + the `getent`-per-peer resolution asserts + the
@@ -350,16 +228,15 @@ async fn two_services_dial_each_other_by_name_counters_advance_each_hop_mtls() {
     }
     let _kr = record_kernel();
 
-    // Materialise the K3 fixtures (the staged bin + the example specs exist on
-    // disk) so the EDD E05 runner has real artifacts when #227/#75 land. The
-    // staging itself is honest production-shaped work (no phantom path); the
-    // bidirectional DRIVE is what the EDD harness completes.
-    let _staged = stage_ping_pong_bin();
+    // The K3 fixtures are checked in (the two example specs + the `ping_pong.py`
+    // client program exist on disk next to each other), so the EDD E05 runner has
+    // real artifacts when #227/#75 land; the bidirectional DRIVE is what the EDD
+    // harness completes.
     eprintln!(
         "[03-02] S-DBN-PINGPONG fixtures: A=({SERVICE_A_ID}.svc:{SERVICE_A_PORT} dials \
          {PEER_NAME_FROM_A}); B=({SERVICE_B_ID}.svc:{SERVICE_B_PORT} dials {PEER_NAME_FROM_B}); \
-         specs {SPEC_A_PATH} / {SPEC_B_PATH}; bin {STAGED_BIN_PATH}; cadence ~{PING_PONG_CADENCE_SECS}s \
-         over a {PING_PONG_OBSERVE_WINDOW_SECS}s window."
+         specs {SPEC_A_PATH} / {SPEC_B_PATH}; client {PING_PONG_INTERP} {PING_PONG_SCRIPT}; \
+         cadence ~{PING_PONG_CADENCE_SECS}s over a {PING_PONG_OBSERVE_WINDOW_SECS}s window."
     );
 
     // RED scaffold (distill/red-classification.md S-DBN-PINGPONG): the

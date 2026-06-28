@@ -12,9 +12,10 @@
 #
 # Black-box only: surfaces are the `od` CLI + what the kernel exposes
 # (`ss`, `getent`, `tcpdump`). This runner does NOT link any `overdrive-*`
-# crate — when the precondition lands it stages the ping-pong bin, drives the
-# `od serve` + `od deploy ×2` shape sketched below, and observes the
-# wire/CLI/counters, nothing more.
+# crate — when the precondition lands it drives the `od serve` + `od deploy ×2`
+# shape sketched below (the client program is the checked-in `ping_pong.py` the
+# specs already point at — no staging step) and observes the wire/CLI/counters,
+# nothing more.
 #
 # The in-process Tier-3 witnesses are
 # `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs`
@@ -27,7 +28,7 @@ source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
 SPEC_A="examples/dial-by-name-responder/a.toml"
 SPEC_B="examples/dial-by-name-responder/b.toml"
-STAGED_BIN="/tmp/overdrive-ping-pong"
+PING_PONG_SCRIPT="examples/dial-by-name-responder/ping_pong.py"  # checked-in client program both specs run
 
 # --- Precondition gate: the full-system #227 harness + #75 OS image -----------
 # Until #227 (full-system Lima VM on the immutable OS) and #75 (Image Factory
@@ -47,10 +48,8 @@ exit 0
 # === SHAPE WHEN #227 + #75 LAND (not executed today) =========================
 # In a #227 full-system Lima VM, as root, with the built binary:
 #
-#   # 0. stage the tiny Rust ping-pong bin both specs' command points at (K3 —
-#   #    a real on-disk path, no phantom; the runner builds it the same way the
-#   #    03-02 Tier-3 scaffold does):
-#   #      rustc -O /path/to/ping_pong.rs -o "$STAGED_BIN"
+#   # 0. no staging step — the client program is the checked-in
+#   #    "$PING_PONG_SCRIPT" both specs already run via /usr/bin/python3.
 #   #
 #   # 1. boot the node (separate Lima-routed terminal):
 #   #      overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-e05

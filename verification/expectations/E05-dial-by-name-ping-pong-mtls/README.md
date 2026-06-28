@@ -62,12 +62,12 @@ immutable OS) on **#75** (the OS image). Neither has landed, so this expectation
 is `pending` and its `runner.sh` self-reports `pending` rather than narrating a
 capture it cannot execute.
 
-The example specs and the staged ping-pong bin are READY for the capture: the
-two `[service]`/`[exec]`/`[resources]`/`[[listener]]` specs
+The example specs and the client program are READY for the capture: the two
+`[service]`/`[exec]`/`[resources]`/`[[listener]]` specs
 `examples/dial-by-name-responder/{a,b}.toml` are landed, and their `command`
-points at a real on-disk staged Rust ping-pong bin (`/tmp/overdrive-ping-pong`,
-K3 — no phantom path; the runner stages it before `deploy`, the same way the
-Tier-3 scaffold does).
+runs the checked-in `examples/dial-by-name-responder/ping_pong.py` via
+`/usr/bin/python3` (K3 — a real on-disk file next to the specs, no phantom path,
+no build/staging step; an operator can run it by hand with plain `python3`).
 
 Sub-claims (to be captured once #227 + #75 land):
 
