@@ -744,6 +744,7 @@ async fn convergence_tick_retains_vip_on_stopped_but_declared_service() {
 // given a digest) is pinned at the unit level
 // (`workload_lifecycle.rs::service_vip_release_emission_tests::
 // withdrawn_service_intent_releases_vip`). Wiring a production deletion
-// path that ALSO supplies the digest at hydrate time is separate scope
-// (the future deletion/undeploy verb, D3/D5) — surfaced as a blocker,
-// not improvised here.
+// path that ALSO supplies the digest at hydrate time is separate scope —
+// tracked in overdrive-sh/overdrive#211 (workload deletion / intent
+// withdrawal + service+dataplane teardown), per ADR-0049 D3/D5. Surfaced
+// here, not improvised past.

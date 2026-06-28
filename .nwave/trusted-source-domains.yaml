@@ -30,6 +30,11 @@ official:
     - "docs.kernel.org"
     - "kubernetes.io"
     - "docs.docker.com"
+    - "developer.hashicorp.com"
+    - "nomadproject.io"
+    - "www.nomadproject.io"
+    - "consul.io"
+    - "www.consul.io"
   reputation: high
   verification_requirements:
     - official_publication

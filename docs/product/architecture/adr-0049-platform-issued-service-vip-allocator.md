@@ -2,9 +2,12 @@
 
 ## Status
 
-**Accepted (2026-05-14, amended 2026-05-14 / 2026-05-15 / 2026-05-19)**.
+**Accepted (2026-05-14, amended 2026-05-14 / 2026-05-15 / 2026-05-19 /
+2026-06-28)**.
 Decision-makers: Morgan (proposing); DESIGN-wave output of
-`docs/feature/service-vip-allocator/`.
+`docs/feature/service-vip-allocator/`. The 2026-06-28 amendment
+supersedes the § 6 *release trigger* (release-on-terminal → release-
+on-deletion) per #251 / RCA-251 / the K8s+Nomad lifecycle research.
 
 Tags: phase-1, dataplane, application-arch, allocator-primitive,
 admission, persistence-boundary.
@@ -17,7 +20,9 @@ consumer of VIPs); ADR-0041 (`update_service` shape); ADR-0040
 deferral #167 closes); ADR-0048 (rkyv versioned envelope); ADR-0019
 (operator config TOML); ADR-0035 / ADR-0036 (reconciler runtime
 contract); ADR-0011 (intent vs observation aggregate split);
-ADR-0013 (reconciler primitive).
+ADR-0013 (reconciler primitive); ADR-0072 (dial-by-name responder —
+the `FrontendAddrAllocator` whose release-on-deletion-only lifecycle
+the 2026-06-28 amendment makes the Service VIP symmetric with).
 
 **SSOT**: [overdrive-sh/overdrive#167](https://github.com/overdrive-sh/overdrive/issues/167).
 DISCUSS artifacts at `docs/feature/service-vip-allocator/discuss/`.
@@ -661,6 +666,21 @@ VIP is derived from those inputs + the allocator's pool policy and
 is owned by the allocator.
 
 ### 6. Reclamation — `WorkloadLifecycle` reconciler emits `Action::ReleaseVip`
+
+> **SUPERSEDED 2026-06-28 — the *release trigger* below (release on
+> observed terminal state) is reversed.** The VIP is now released on
+> **logical-workload deletion (intent withdrawal)**, NOT on a terminal
+> alloc. A stopped-or-crashed-but-still-declared Service **retains** its
+> VIP, symmetric with the dial-by-name frontend `F`. The reconciler
+> primitive, the `Action::ReleaseServiceVip` variant, the action-shim
+> wiring, and the View-records-past-emission discipline are all
+> **unchanged** — only the *gating condition* moves from
+> `actual.allocations.values().any(|row| row.terminal.is_some())` to
+> `desired.job.is_none()` (intent absent). See § Amendments → 2026-06-28
+> ("withhold-not-release VIP reclamation; symmetric with `F`") for the
+> full reversal, the evidence base (#251 / RCA / K8s+Nomad research),
+> and the pinned new gating condition the crafter implements. The
+> original §6 text below is retained verbatim as historical context.
 
 On terminal-state transition of a Service workload, the VIP is
 released back to the pool. The reclamation primitive is a
@@ -1311,3 +1331,385 @@ trade for it.
 Cross-reference: § Amendments → 2026-05-19; DELIVER step 03-03
 DISTILL S-VIP-07; `docs/feature/service-vip-allocator/distill/test-scenarios.md`
 S-VIP-P03 (revised).
+
+### 2026-06-28 — Withhold-not-release VIP reclamation; symmetric with the dial-by-name frontend `F`
+
+**Supersedes the § 6 *release trigger*.** The original § 6 ratified
+option **(a)** — `WorkloadLifecycle` emits `Action::ReleaseServiceVip`
+on **observed terminal alloc state** ("every terminated Service has no
+VIP allocation") — and explicitly **rejected (b)** an action-shim hook
+on `StopAllocation` *because it "misses crash-terminal transitions."*
+That framing optimised for the wrong invariant. This amendment reverses
+the trigger: the VIP is released **only on logical-workload deletion
+(intent withdrawal)**; a stopped-or-crashed-but-still-declared Service
+**retains** its VIP. The everything-else of § 6 stays
+(reconciler-emitted action, the `Action::ReleaseServiceVip` variant, the
+action-shim dispatch to `PersistentServiceVipAllocator::release`, the
+View records-past-emission discipline) — **only the gating condition
+moves.**
+
+#### Why the reversal is correct (addressing § 6's original rationale head-on)
+
+§ 6 chose release-on-terminal *to avoid missing crash-terminal
+transitions*. But "release the identity on crash/stop" is exactly the
+behaviour that is wrong — it conflates two independent planes:
+
+- **Identity** — the stable virtual IP a workload is *known by*
+  (the service VIP, and the dial-by-name frontend `F`). Identity is a
+  property of the *declared workload*, and survives a transient
+  stop/crash for as long as the workload stays declared.
+- **Reachability** — whether the name currently resolves to a *healthy
+  backend*. Reachability is a property of the *running instances*, and
+  collapses the moment they stop.
+
+The prior-art research
+(`docs/research/orchestration/service-vip-dns-lifecycle-stop-vs-delete-k8s-nomad.md`,
+2026-06-28; Confidence: High) is the evidence base: **both** Kubernetes
+(ClusterIP) **and** Nomad+Consul (mesh VIP) bind the stable VIP to the
+*declared-object* lifetime — released only on **delete/purge** — and
+gate *name resolution* on healthy backends as a **separate plane**.
+K8s de-allocates a ClusterIP only on **Service deletion** (not Pod
+churn, scale-to-zero, or zero ready endpoints — K1/K2); the Consul mesh
+VIP is keyed to the logical service in the catalog, stable across
+instance churn (N3); in both, what disappears on a transient stop is
+**backend reachability** (empty EndpointSlices / NXDOMAIN-or-empty
+service-DNS — K3/N2/N4), never the stable IP. Neither system exhibits
+Overdrive's asymmetry. Against this convention, Overdrive's
+**retain-`F`-on-stop matches** and its **release-VIP-on-stop is the
+outlier** — so making the VIP symmetric with `F` removes an
+identity-lifecycle asymmetry, it does not introduce one.
+
+"Retain across crash/stop, release on delete" is therefore *more*
+correct than § 6's "release on terminal," not a regression: it is the
+two-plane model the ecosystem documents, and it is what `F` already
+does (ADR-0072: `FrontendAddrAllocator::release` is **logical-workload-
+DELETION ONLY**, never on an alloc cycle, never on a transient
+zero-healthy window). § 6(b)'s "misses crash-terminal transitions"
+concern is *answered, not overridden*: under withhold-not-release a
+crash-terminal alloc is precisely a case where the VIP **should** be
+retained (the workload is still declared), so "missing" the
+crash-terminal release is the *correct* behaviour, not a defect.
+
+#### The #251 coupling defect this also unblocks
+
+`overdrive-sh/overdrive#251` (RCA: `docs/analysis/rca-251-withhold-on-stop.md`)
+is the proximate trigger. After `job stop` converges a Service to
+Terminated (intent **retained**, #249), dial-by-name keeps resolving the
+stopped workload's stable `F` forever — never NXDOMAIN. RCA-251 pins the
+mechanism (mechanism 3, confirmed by a live Lima population-diff probe):
+on the same terminal stop, `WorkloadLifecycle` emits
+`Action::ReleaseServiceVip`, whose executor evicts the VIP from the
+allocator memo — and the `BackendDiscoveryBridge`'s desired-listener
+hydrate (`hydrate_bridge_desired_listeners`) has an undocumented
+data-dependency on that memo. The release **nulls the input the
+zero-backend retraction needs**, so the retraction is never emitted and
+the name resolves `F` indefinitely. It is a *race between two terminal
+effects of one stop*, where one destroys the input the other needs. The
+root cause is that #251 **couples** the identity plane (VIP) and the
+reachability plane (name retraction). Retaining the VIP across stop
+removes the coupling at its source: the memo the bridge reads is still
+present, so the bridge can project the listener set and emit the
+zero-backend retraction on the same stop — and reachability collapses
+(NXDOMAIN) while identity (the VIP) is preserved.
+
+---
+
+#### Pinned decisions for the crafter (implement to the design; do not improvise)
+
+**D1 — New VIP release trigger (the gating condition the crafter
+implements).**
+
+The release fires on **intent withdrawal (logical-workload deletion)**,
+detected as `desired.job.is_none()` — NOT on a terminal alloc. The
+`service_vip_release_emission` helper
+(`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`, currently
+≈ L891–909) changes its **terminal-observation gate** from:
+
+```rust
+// BEFORE (release-on-terminal — superseded):
+let terminal_observed =
+    actual.allocations.values().any(|row| row.terminal.is_some());
+if !terminal_observed {
+    return None;
+}
+```
+
+to an **intent-absence gate**:
+
+```rust
+// AFTER (release-on-deletion — withhold-not-release):
+// The VIP is an identity bound to the DECLARED workload. Release it
+// only when the workload's intent is withdrawn — i.e. when the
+// reconciler observes `desired.job.is_none()` (the same signal the
+// Absent/GC branch in `reconcile_inner` keys on). A stopped-or-
+// crashed-but-still-declared Service (`desired.job.is_some()`) RETAINS
+// its VIP, symmetric with the dial-by-name frontend `F`
+// (ADR-0072 `FrontendAddrAllocator::release` = deletion-only).
+if desired.job.is_some() {
+    return None;
+}
+```
+
+Everything else in the helper is **unchanged**: the
+`desired.workload_kind == WorkloadKind::Service` gate (line ≈896), the
+`desired.service_spec_digest?` extraction (≈899), the
+`view.released_for_terminal.contains(&digest)` idempotency
+short-circuit (≈900), the `CorrelationKey::derive(...,
+"release-service-vip")` construction (≈908), and the returned
+`Action::ReleaseServiceVip { spec_digest, correlation }`. The
+`released_for_terminal` View field keeps its name and its role (the set
+IS the record "release already emitted for this digest"; it is an input
+per `.claude/rules/development.md` § "Persist inputs, not derived
+state"). The crafter MAY rename the field to a deletion-centric name
+(e.g. `released_for_deletion`) for clarity, but is NOT required to — the
+field's *semantics* ("digests we have already emitted release for, do
+not re-emit") are identical; a rename is a cosmetic call, not a contract
+change, and if chosen MUST land its View-schema implications (additive
+serde / the `WorkloadLifecycleView` evolution) in the same commit.
+
+**Caveat the crafter must respect — `desired.job` is the SSOT for
+"declared", and `desired_to_stop` is NOT deletion.** A stop intent
+(`POST /v1/jobs/{id}/stop`) writes a *separate* stop-intent key and
+**retains** the original spec key, so under a stop `desired.job` stays
+`Some(_)` and `desired_to_stop` is `true`. The new gate keys on
+`desired.job.is_none()` *only* — it MUST NOT key on `desired_to_stop`,
+on `is_operator_stopped`, on `row.terminal`, or on the GC terminal
+stamp. Those all fire on stop-while-declared, which is exactly the case
+that must now **retain** the VIP. The single correct deletion signal is
+the absence of the spec intent (`desired.job.is_none()`) — the identical
+signal the reconciler's own Absent/GC branch (`reconcile_inner`,
+`match desired.job.as_ref() { None => … }`, ≈L433) already uses to
+emit the `StoppedBy::SystemGc` terminal claim.
+
+**D2 — Mirror `F`'s mechanism (one deletion-release lifecycle, two
+allocators).**
+
+`FrontendAddrAllocator::release(&MeshServiceName)`
+(`crates/overdrive-control-plane/src/dns_responder/frontend_addr_allocator.rs:236`)
+is documented **"logical-workload-DELETION ONLY"** and is keyed on the
+logical `<job>` (`MeshServiceName`). The Service VIP now shares that
+*lifecycle* (release-on-deletion-only) but **reaches it through a
+different mechanism**, and the divergence is deliberate and load-bearing:
+
+- `F` is released by a **direct allocator method call** from a deletion
+  call site (when one exists — see D3). It is keyed on `MeshServiceName`
+  and carries no reconciler/action surface.
+- The Service VIP is released by the **reconciler → `Action::Release-
+  ServiceVip` → action-shim → `PersistentServiceVipAllocator::release`**
+  path (the § 6 primitive, **unchanged**). It is keyed on
+  `ServiceSpecDigest` (the allocator memo key per § 1) and persists via
+  the redb write-through shim (the VIP allocator is the *persistent* one;
+  `F` is ephemeral/rebuilt-on-boot).
+
+Why not collapse the VIP onto `F`'s direct-call mechanism: the VIP
+allocator is persistent and reconciler-driven by § 6's ratified design;
+the VIP key is the spec digest, not the `MeshServiceName`; and the
+reconciler is the single source of every terminal/lifecycle claim per
+ADR-0037 §4. Forcing the VIP release into a direct-call shape would
+bypass the reconciler convergence primitive that § 6 correctly chose.
+The **shared invariant** both allocators now honour — and the load-
+bearing symmetry this amendment establishes — is the *trigger*: **both
+release only on logical-workload deletion (intent withdrawal), neither
+on a transient stop/crash while the workload stays declared.** They
+share a lifecycle contract, not a code path.
+
+**D3 — Deletion-path reality check (Phase 1 posture). Deletion is NOT
+wired today.**
+
+Investigation of the live tree (2026-06-28) establishes:
+
+- **No operator-facing deletion verb exists.** The HTTP surface
+  (`crates/overdrive-control-plane/src/handlers.rs`) is `POST /v1/jobs`
+  (submit), `GET /v1/jobs/{id}` (describe), `POST /v1/jobs/{id}/stop`
+  (stop — writes a stop-intent key, **retains** the spec key),
+  `GET /v1/jobs` (list/status). There is **no `DELETE /v1/jobs/{id}`,
+  no undeploy, no `stop --purge`**. The operator CLI (`overdrive deploy`
+  / `overdrive job {list,stop}`) has no delete verb either.
+- **The `IntentStore::delete` primitive exists**
+  (`crates/overdrive-core/src/traits/intent_store.rs:193`) and the
+  `WorkloadLifecycle` **Absent/GC branch already converges on it**: when
+  intent is withdrawn (`desired.job.is_none()`), the reconciler GCs every
+  Running alloc with `terminal: Some(Stopped { by: SystemGc })`
+  (`reconcile_inner` ≈L433). But the only callers of `IntentStore::delete`
+  on a `jobs/` key today are **test fault-injection** (e.g.
+  `workload_gc_absent_intent` DST scenario 1, step 3) — no production
+  call site withdraws a workload's spec intent.
+- **`FrontendAddrAllocator::release` is itself never called from any
+  production site.** Confirmed by grep: every `.release(...)` caller is
+  either a test or the *different* `NetSlotAllocator` (keyed on
+  `AllocationId`, released on alloc-terminal — a separate concern). So
+  `F` is, in practice, **retained for the entire process lifetime
+  today.**
+
+**Accepted Phase-1 posture (honest consequence):** with no deletion path
+wired, **a stopped/crashed Service retains its VIP for the process
+lifetime — exactly as `F` is retained today.** This is acceptable for
+Phase-1 single-node: the default pool is `10.96.0.0/16` (§ 3, 65 533
+allocatable VIPs after the three reserved) — vast headroom relative to
+any plausible single-node declared-Service count, and the allocator
+re-hydrates its memo from persisted `allocator_entries` on restart
+(§ 1a / § 8). The VIP release is pinned to **the same future deletion
+trigger `F` will use**: when a deletion/undeploy verb lands (D5 below),
+it will (i) withdraw the spec intent via `IntentStore::delete`, which
+drives `desired.job.is_none()` and thus the reconciler's new release
+emission *for free* (no new wiring on the VIP side), and (ii) call
+`FrontendAddrAllocator::release(&job)` for the frontend. The crafter
+does **not** invent a deletion verb; the VIP release is wired to the
+*existing* `desired.job.is_none()` signal the Absent/GC branch already
+produces, and that signal fires the moment any future deletion path
+calls `IntentStore::delete`.
+
+**D4 — The decoupling principle, and what the crafter must do about the
+bridge.**
+
+The research's real lesson (S3 / caveat 3) is that **identity**
+(VIP/`F`: retain-until-delete) and **reachability** (name resolution:
+collapse-on-stop) are **two independent planes**, and #251 was a
+*coupling* defect. The **target end-state is full decoupling**: name
+resolution MUST collapse on stop (NXDOMAIN) **independent of** the VIP
+lifecycle.
+
+**Decision (pinned):** this amendment achieves full decoupling **by
+retaining the VIP** — and that is *sufficient*; the crafter does **NOT**
+also need to sever the bridge's name-retraction from the VIP memo as a
+separate change. Rationale: RCA-251 establishes that the bridge's
+zero-backend retraction *already works* whenever the VIP memo is present
+(Run A of the population diff: with the memo present the retraction
+lands and the name goes NXDOMAIN). The #251 failure is *only* that the
+release **evicted** the memo mid-stop. Once the VIP is retained across
+stop (D1), the memo the bridge reads (`hydrate_bridge_desired_listeners`
+→ `allocator.get(&digest)`) is **present for the whole
+stopped-but-declared window**, so the bridge projects the listener set,
+the reconcile loop body runs, the zero-backend `ServiceBackendRow` is
+written, the `name_index` folds it, and resolution collapses to NXDOMAIN
+— while the VIP (identity) is retained. **Retaining the VIP keeps the
+bridge's retraction working; that delivers the decoupled behaviour
+without a second fix.** This is "Option C alone" from the research
+framing, and it is sufficient *because the coupling was the release, not
+a structural dependency the bridge cannot shed*.
+
+The fuller structural decoupling — making
+`hydrate_bridge_desired_listeners` project listeners *without* depending
+on the live VIP memo at all (RCA-251 "Option A": fall back to the VIP on
+the last-written `service_backends` row when the memo is absent-but-
+declared) — is **defence-in-depth, not required by this amendment**, and
+the crafter MUST NOT undertake it here unless surfacing it as separate
+scope. Under D1, the memo is never absent for a still-declared workload,
+so the fallback never fires; it would only matter if a *future* change
+re-introduced mid-declared memo eviction. The principle is recorded so a
+future reviewer knows the planes are *meant* to be independent; the
+Phase-1 implementation realises that independence through VIP retention.
+
+**D5 — Deliberate NXDOMAIN-on-empty (conscious divergence from the K8s
+ClusterIP default).**
+
+Record as a **conscious choice**, not an accident, that Overdrive's
+dial-by-name responder returns **NXDOMAIN** on zero-healthy backends.
+The research (K3) shows this is the **opt-in** posture: the Kubernetes
+ClusterIP *default* keeps the name resolving to the stable VIP at zero
+endpoints (NODATA-shaped per RFC 8020 — the name still "exists"); CoreDNS
+`ignore empty_service` is the *opt-in* flag that flips it to NXDOMAIN.
+Overdrive deliberately chooses the opt-in (NXDOMAIN) posture, and the
+rationale is the workload-identity model: Overdrive workloads are
+**identity-unaware** and dial by name over a plaintext socket (the agent
+originates mTLS transparently). Unlike a K8s client dialing a ClusterIP
+(which gets a stable VIP and a connection that simply has no backend to
+land on — a clean connection-refused), an Overdrive dialer handed a
+still-resolving `F` for a dead workload would have the agent originate an
+mTLS leg to a backend that is gone — a silent, harder-to-diagnose
+failure. **Failing the resolve (NXDOMAIN) is fail-honest**: the dialer
+gets an unambiguous "this name has nothing behind it" at resolution time,
+not a stalled connection at dial time. This is why Overdrive's
+reachability plane collapses to NXDOMAIN where the K8s ClusterIP plane
+would stay NODATA — a justified divergence, captured here so the contract
+does not read as accidentally drifting from the K8s default. (Note the
+*identity* plane — the VIP — is unaffected by this choice; D5 governs
+only what the *name* resolves to, which is the reachability plane.)
+
+**D6 — Tradeoff + reaffirmed invariants.**
+
+*Tradeoff (recorded):* a stopped/crashed-but-still-declared Service now
+holds its VIP until deletion (D3: process lifetime today, since deletion
+is unwired). The cost is VIP-pool occupancy by stopped-not-deleted
+Services. This is bounded by the `10.96.0.0/16` default pool's 65 533-VIP
+headroom (§ 3) and matches the ecosystem's mitigation (K8s wide
+ServiceCIDR, Consul `240.0.0.0/4`; research caveat 1). `AllocatorError::
+Exhausted` is unchanged — exhaustion still surfaces as a synchronous
+typed admission 503 per § 4; retain-until-delete does not change the
+exhaustion contract, only shifts *when* a VIP returns to the pool.
+
+*Invariants reaffirmed (untouched by this amendment):*
+
+1. **`F` retention is unchanged.** The dial-by-name frontend `F` was
+   already release-on-deletion-only (ADR-0072; Tier-1 gated at roadmap
+   01-04). This amendment does NOT touch `FrontendAddrAllocator` — it
+   brings the *VIP* into line with `F`, not the reverse.
+2. **`FrontendAddrAllocator::release` is NOT called by this change.** No
+   new caller of `F`'s release is added here; `F`'s release stays
+   deletion-only and (today) unwired.
+3. **VIP-reuse on a fresh `allocate(&digest)` still works** (§ 1 /
+   2026-05-19 amendment). Released VIPs (released on *deletion*) return
+   to the pool and are re-allocatable; the scan-over-range selection is
+   unchanged. The no-duplicate-among-simultaneously-held invariant
+   holds by construction.
+4. **§ 6's reconciler primitive, `Action::ReleaseServiceVip`, action-shim
+   dispatch, and write-through release are all unchanged.** Only the
+   emission *gate* moves (terminal-observed → intent-absent).
+
+---
+
+#### Crafter-facing design spec (the exact contract)
+
+| Concern | Pinned contract |
+|---|---|
+| **Release trigger** | `desired.job.is_none()` (intent withdrawn / logical deletion). NOT `row.terminal.is_some()`, NOT `desired_to_stop`, NOT any terminal/GC stamp. |
+| **Site** | `service_vip_release_emission` in `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` (≈L891–909). Swap the terminal-observation gate for the intent-absence gate (D1). |
+| **Unchanged in the helper** | `WorkloadKind::Service` gate; `service_spec_digest?`; `released_for_terminal` idempotency short-circuit; `CorrelationKey::derive(…, "release-service-vip")`; the returned `Action::ReleaseServiceVip { spec_digest, correlation }`. |
+| **View field** | `released_for_terminal: BTreeSet<ContentHash>` keeps its role (records past emission, an input). Optional cosmetic rename to a deletion-centric name; if renamed, land the `WorkloadLifecycleView` schema implication in the same commit. NO behavioural change. |
+| **Action / shim / allocator** | `Action::ReleaseServiceVip`, the action-shim arm, and `PersistentServiceVipAllocator::release` are all **unchanged**. Do NOT add public API. |
+| **Bridge** | NO change required (D4). Retaining the VIP keeps the memo present for the stopped-but-declared window, so `hydrate_bridge_desired_listeners` projects the listener set and the zero-backend retraction lands — name → NXDOMAIN — with no bridge edit. |
+| **`F` / `FrontendAddrAllocator`** | Untouched (D6.1/D6.2). |
+| **Deletion path** | None wired today (D3); do NOT invent one. The new gate consumes the *existing* `desired.job.is_none()` signal; any future deletion verb drives it for free via `IntentStore::delete`. |
+
+**No new public API.** Every surface the crafter touches already exists:
+the `service_vip_release_emission` helper, the `desired.job` field on
+`WorkloadLifecycleState`, the `Action::ReleaseServiceVip` variant, the
+`released_for_terminal` View field. If the crafter believes a new
+type/method/variant/parameter is required to implement D1, that is a
+**design gap to STOP and surface** (CLAUDE.md "implement to the design —
+never invent API surface"), not licence to improvise — the design as
+specified needs none.
+
+**Test impact the crafter must address (specification, not roadmap):**
+the existing release-on-terminal acceptance tests
+(`crates/overdrive-core/tests/acceptance/workload_lifecycle_release_service_vip.rs`
+and the release-dispatch tests under `overdrive-control-plane`) assert
+the *old* trigger (release fires on terminal observation while
+`desired.job.is_some()`). Per `.claude/rules/development.md` § "Deletion
+discipline" / "Behavior change must mark stale adjacent docs", those
+assertions invert in the same commit: release MUST NOT fire on a
+terminal-but-declared alloc (the new RED → GREEN), and MUST fire on
+`desired.job.is_none()`. The #251 Tier-3 oracle
+(`dns_responder_nxdomain.rs::after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr`,
+currently `#[ignore]`) is un-ignored and becomes GREEN under this change
+(stop retains the VIP → bridge retraction lands → NXDOMAIN). The DST
+`workload_gc_absent_intent` scenario (intent-delete → GC) is the
+positive-direction oracle that the release *does* fire on intent
+withdrawal.
+
+**Sections rewritten:** § 6 (supersession marker on the release
+trigger; original text retained as history); Status line; **Relates to**
+(ADR-0072 added); this amendment block. § 1 / § 1a / § 2 / § 3 / § 4 /
+§ 5 / § 5a / § 7 / § 8 and the allocator's `allocate`/`release` *memo*
+semantics are **untouched** — release-on-deletion changes *when*
+`release` is called, not *what* it does.
+
+**No production code touched under this amendment** — landing belongs to
+the next DELIVER crafter dispatch against #251.
+
+Cross-reference: `overdrive-sh/overdrive#251`;
+`docs/analysis/rca-251-withhold-on-stop.md`;
+`docs/research/orchestration/service-vip-dns-lifecycle-stop-vs-delete-k8s-nomad.md`;
+ADR-0072 (`FrontendAddrAllocator` release-on-deletion-only); § 6
+(superseded release trigger); #249 (operator-stop retains Service
+intent — the precondition this amendment relies on).
