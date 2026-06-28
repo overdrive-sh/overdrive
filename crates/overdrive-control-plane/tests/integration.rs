@@ -300,6 +300,20 @@ mod integration {
     /// pinned-6.18 Tier-3 matrix (ADR-0068).
     mod dns_responder_walking_skeleton;
 
+    /// dial-by-name-responder EMPTY-CANDIDATE HONESTY (roadmap 03-01;
+    /// US-DBN-4 · K-DBN-2). Tier-3 `getent` observables that the production
+    /// responder WITHHOLDS the answer (NXDOMAIN) for a name with no
+    /// running-and-healthy backend (S-DBN-NXDOMAIN-01 query-before-healthy;
+    /// S-DBN-NXDOMAIN-02 withheld-after-stop, F-not-released; S-DBN-NXDOMAIN-03
+    /// unknown name), resolving to the stable frontend `F` once a backend is
+    /// running-and-healthy. Drives ONLY production: NO test binds `:53`,
+    /// installs a `resolv.conf`, allocates `F`, or programs a map. Root + Lima;
+    /// SKIP otherwise. The NXDOMAIN-02 recovery-after-stop observable is
+    /// `#[ignore]`'d to overdrive#249 (sticky operator-stop; same dependency as
+    /// 02-02 S-DBN-WS-STABLE). MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix
+    /// (ADR-0068).
+    mod dns_responder_nxdomain;
+
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.
     pub mod workload_identity_manager {
