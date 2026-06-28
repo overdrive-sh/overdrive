@@ -1559,6 +1559,27 @@ does **not** invent a deletion verb; the VIP release is wired to the
 produces, and that signal fires the moment any future deletion path
 calls `IntentStore::delete`.
 
+**Operational consequence (review-03-01 non-blocking suggestion, made
+explicit).** Because release-on-deletion is **inert on the v1
+convergence path** — the hydrator (`read_job`) zeroes
+`service_spec_digest` alongside `desired.job` on intent withdrawal
+(`reconciler_runtime.rs:2309`; `:1688-1689`), so the gate's
+`desired.service_spec_digest?` short-circuits *before* the
+`desired.job.is_none()` branch can fire — **a stopped/crashed-but-declared
+Service permanently holds its `10.96.x` VIP for the entire process
+lifetime; VIP retention is unbounded across stop/restart churn until
+#211 wires a deletion verb that supplies the digest at hydrate time.**
+This is acceptable for single-node Phase 1 (the pool is empty on boot —
+§ 1a / § 8 re-hydrate from `allocator_entries` — and carries 65 533-VIP
+headroom, § 3), but it is **not a surprise to budget for**: under the
+restart-after-stop churn tracked in #249, every stop-without-redeploy
+leaks one VIP for the rest of the process lifetime, and the leak is
+only reclaimed by a process restart (which re-derives the pool from the
+*current* declared set) — never by stop/restart alone — until #211
+lands the deletion edge. The inert path is pinned by
+`workload_lifecycle.rs::withdrawn_service_without_digest_emits_no_release`
+and the inline #211 note at `vip_allocator_lifecycle.rs:733-748`.
+
 **D4 — The decoupling principle, and what the crafter must do about the
 bridge.**
 

@@ -2374,3 +2374,79 @@ S-DBN-SINGLE-SRC, GREEN); the REV-5 output-hook leg-B interception datapath (REV
 above); the layer-2 `workload_addr` forward-carry fix (§C, #248 residual); a
 corrected plaintext-egress test model (§A); and two Tier-3 alloc-cycle/churn ATs
 deferred to #249 (§B). No DNS/resolve contract changed; the thin-path posture holds.
+
+---
+
+## REV-7 / [REF] As-landed reconciliation — the 03-01 NXDOMAIN slice + the #251 Service-VIP withhold-not-release fix
+
+> **Status: reconcile-to-reality of step 03-01 (2026-06-28).** Author: Morgan
+> (nw-solution-architect). This amendment records what landed while *delivering*
+> the NXDOMAIN end-to-end slice (03-01). It changes **NO design decision** — the
+> Option-C / withhold-not-release decision is ratified (ADR-0049 §6 amendment
+> 2026-06-28; ADR-0072 Finding-2). It is a **cross-reference** that the Service
+> VIP's lifecycle was corrected to match the frontend `F`'s, and that the
+> withhold-on-stop observable is now backed by a real fix.
+
+### A — the Service VIP now joins `F` under ONE withhold-not-release lifecycle (#251)
+
+The dial-by-name design (this feature) committed the frontend `F`
+(`FrontendAddrAllocator`) to **withhold-not-release** from REV-2 onward: `F` is a
+per-`<job>` identity, retained across a transient zero-healthy/stop window and
+released **only** on logical-workload deletion (S-DBN-FRONTEND-03; release has no
+production trigger until #211 — § REV3-BLOCKER). The **service VIP** (`10.96.x`,
+the `ServiceVipAllocator` / `ReleaseServiceVip` path, **ADR-0049 scope, not this
+feature's allocator**) was the *outlier*: per ADR-0049 §6 *original*, it released
+on **observed terminal alloc state** — i.e. it **released on stop**, via
+`WorkloadLifecycle::service_vip_release_emission`'s `terminal_observed`
+(`actual.allocations.values().any(|row| row.terminal.is_some())`) gate.
+
+That asymmetry **was the #251 bug**: releasing the VIP on a transient stop evicted
+the bridge's VIP memo, so the dial-by-name name kept resolving the **stale frontend
+`F`** for a stopped-but-declared Service forever (RCA
+`docs/analysis/rca-251-withhold-on-stop.md`, mechanism 3 — pinned by a live Lima
+population-diff probe). The fix (`88679ed8`, `Closes #251`) swapped that gate to
+**release-on-deletion** (`desired.job.is_none()`), ratified as the **ADR-0049 §6
+amendment (2026-06-28, D1)**. So **as-landed, the service VIP and `F` share one
+deletion-only lifecycle** — retained across stop, released only on logical-workload
+deletion, symmetric. The `10.96.0.0/16` ↔ `10.98.0.0/16` rows in this delta
+(collision-check, § REV-2; the `1670` capability row) are unchanged; only the
+VIP's *release trigger* moved, in ADR-0049, not here.
+
+### B — the withhold-after-stop NXDOMAIN observable is GREEN/live; the recovery leg stays deferred to #249
+
+S-DBN-NXDOMAIN-02 (the Tier-3 observable of the IDX-02 / FRONTEND-03 Tier-1
+withhold-not-release contract) is **satisfied in two halves** as-landed:
+
+- **Withhold-after-stop leg (GREEN/live):** stop → `Terminated` → `getent`
+  NXDOMAIN, never the stale `F` — un-ignored at landing once `88679ed8` made the
+  bridge's zero-backend retraction fire on stop
+  (`after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr`,
+  `dns_responder_nxdomain.rs`). At the *first* 03-01 landing this leg was
+  `#[ignore]`'d because the withhold-on-stop **production gap was still unknown**;
+  the #251 fix closed it.
+- **Recovery leg (deferred):** re-deploy/recover the SAME `<job>` → `getent`
+  resolves the SAME retained `F` — stays `#[ignore]`'d to **#249** (the
+  restart-after-stop / backend-instance-replacement verb is absent, the SAME #249
+  dependency 02-02's S-DBN-WS-STABLE/CHURN carry). The retained-`F` invariant is
+  Tier-1 mutation-gated at 01-04 (FRONTEND-03) / 01-03 (IDX-02), so only the
+  Tier-3 *observable* of the recovery half is deferred — not the contract.
+
+### C — scope honesty: the #251 fix is a SEPARATE `/nw-bugfix`, not 03-01 production code
+
+Step 03-01 ran as a **test-only** Tier-3 slice ("adds NO new production type"). The
+#251 production gate-swap (`88679ed8`, `Closes #251`, **no `Step-ID`**) is a
+**separate `/nw-bugfix`** surfaced *during* 03-01 and landed after the test-only
+batch. This reconciliation is therefore a **cross-reference** — the withhold-on-stop
+observable 03-01 asserts is now *backed by* the #251 fix — **NOT** a claim the
+test-only slice itself shipped the reconciler change. The production change lives in
+`overdrive-core` (`workload_lifecycle.rs`) and is recorded in ADR-0049 §6 / the
+RCA addendum, not in this feature's production-scaffold table.
+
+### Net
+
+03-01 as-landed: the NXDOMAIN-before-running + unknown-name legs GREEN; the
+withhold-after-stop leg GREEN/live **via the separate #251 fix** (service VIP
+swapped to release-on-deletion, ADR-0049 §6 amendment — now symmetric with `F`);
+the recovery leg `#[ignore]`'d to #249; VIP retention is unbounded until #211 wires
+deletion (ADR-0049 D3, operational consequence). No dial-by-name DNS/resolve
+contract changed; the withhold-not-release decision is ratified, not re-opened.
