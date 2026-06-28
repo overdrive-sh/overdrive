@@ -21,8 +21,9 @@
 # `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs`
 # (single-direction dial-by-name loop, GREEN) and
 # `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs`
-# (the bidirectional RED scaffold); E05 is the black-box operator-observable
-# `why` those tiers under-serve.
+# (the bidirectional proof — a REAL GREEN #[tokio::test], review-03-02.md
+# resolution (a)); E05 is the black-box operator-observable `why` those tiers
+# under-serve.
 
 source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
@@ -51,8 +52,14 @@ exit 0
 #   # 0. no staging step — the client program is the checked-in
 #   #    "$PING_PONG_SCRIPT" both specs already run via /usr/bin/python3.
 #   #
-#   # 1. boot the node (separate Lima-routed terminal):
-#   #      overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-e05
+#   # 1. boot the node (separate Lima-routed terminal). Launch `overdrive
+#   #    serve` from the REPO ROOT ($REPO_ROOT) — the a/b specs' `command`
+#   #    runs the script by the repo-root-relative path
+#   #    "examples/dial-by-name-responder/ping_pong.py", and `ExecDriver` sets
+#   #    no `current_dir` (it enters only CLONE_NEWNET, no mount ns), so the
+#   #    workload inherits serve's cwd. Pin it so the capture can't drift on the
+#   #    relative path:
+#   #      cd "$REPO_ROOT" && overdrive serve --bind 127.0.0.1:7443 --data-dir /tmp/od-e05
 #   #
 #   # 2. deploy BOTH halves; both must Accept.
 #   capture deploy_a od deploy "$SPEC_A"

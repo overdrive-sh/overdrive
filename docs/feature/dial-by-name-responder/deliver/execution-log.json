@@ -351,6 +351,188 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-26T05:45:41Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T06:14:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T06:17:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS: by_frontend pure-reader projection unit test (mtls_resolve_adapter.rs) \u2014 the new below-port mutable logic the Tier-3 ATs do not isolate",
+      "t": "2026-06-26T07:04:37Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T07:04:37Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T07:06:38Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test-only step adds no new below-port mutable production logic; the four Tier-3 ATs drive already-mutation-gated production (answer_for 01-03, wire.rs 01-02, FrontendAddrAllocator 01-04, re-keyed classify 02-00, responder.rs/lib.rs 02-01) \u2014 mirrors 01-0x/02-00 precedent",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-06-27T13:47:35Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T13:47:46Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:09:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:14:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 step adds NO new below-port mutable production source; WITHHOLD/retain logic already mutation-gated at 01-03 (answer_for NxDomain arm + NameIndex healthy-gate seam) and 01-04 (FrontendAddrAllocator release only-on-deletion). Mirrors 02-02 RED_UNIT SKIP precedent.",
+      "t": "2026-06-28T03:14:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: NXDOMAIN-01 PASS (isolated) + NXDOMAIN-03 PASS (isolated); NXDOMAIN-02 FAIL (isolated) \u2014 surfaces a production WITHHOLD-on-stop gap: after POST /v1/jobs/{id}/stop converges the alloc to Terminated, the service_backends healthy row is NOT dropped, so the responder keeps answering the stale F indefinitely (getent -> [10.98.0.1] code 0 forever; never NXDOMAIN). The WITHHOLD-on-zero-healthy seam is not driven by the production stop path. Fixing requires changing READ-ONLY production (backend_discovery_bridge re-eval on alloc-Terminated / action-shim re-enqueue) = OUT OF BOUNDS, design-gap BLOCKER. NXDOMAIN-02 recovery leg separately #249-blocked (ignored). Secondary: the 3 active tests interfere when run in parallel (shared :53 responder + FrontendAddrAllocator + identical server name) \u2014 pass individually, collide together. Sibling 02-02 hit-path test still GREEN. COMMIT withheld pending user decision.",
+      "t": "2026-06-28T03:20:35Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-06-28T03:21:17Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:26:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:29:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:33:21Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:40:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-DBN-PINGPONG is a single-example golden Tier-3 bidirectional walkthrough (criterion 1: no PBT at Tier 3) over already-gated 01/02 production logic; criterion 6 forbids any new below-port mutable production source. No unit test to author \u2014 mirrors the 02-02 / 03-01 RED_UNIT SKIP rationale.",
+      "t": "2026-06-28T12:40:22Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:41:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:43:14Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:46:16Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:57:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new below-port mutable production source \u2014 the bidirectional dial-by-name datapath (responder serve, re-keyed MtlsResolve, FrontendAddrAllocator, egress leg-B interception) is already mutation-gated production from steps 01/02; this step authors a Tier-3 acceptance test only. Mirrors the 02-02 / 03-01 RED_UNIT skip rationale.",
+      "t": "2026-06-28T13:57:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:57:18Z"
     }
   ]
 }

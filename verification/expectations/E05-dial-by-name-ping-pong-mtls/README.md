@@ -14,9 +14,11 @@ deploy` cannot be driven black-box with a real workload-identity CA, so this
 expectation cannot be captured against the built binary. The in-process Tier-3
 witnesses (the 02-02 walking skeleton `dns_responder_walking_skeleton.rs` for the
 single-direction dial-by-name loop, and the 03-02 `dns_responder_ping_pong.rs`
-RED scaffold for the bidirectional proof) cover the in-process slice with a test
-PKI seam; E05 is the black-box operator-observable complement those tiers
-under-serve. Do NOT self-stamp `satisfied` — bounce to a different-fox audit
+REAL `#[tokio::test]` for the bidirectional proof — `two_services_dial_each_other_
+by_name_counters_advance_each_hop_mtls`, GREEN) cover the in-process slice with a
+test PKI seam; E05 is the black-box operator-observable complement those tiers
+under-serve (the PRODUCTION workload-identity CA, no seam, driven through the
+built binary). Do NOT self-stamp `satisfied` — bounce to a different-fox audit
 once #227/#75 land. -->
 
 ## Expectation
@@ -45,7 +47,7 @@ This is the genuine operator-runnable proof for the dial-by-name feature: two
 `overdrive deploy` commands against a booted `overdrive serve` produce a visible,
 advancing, mutually-mTLS'd ping-pong — the whole feature, end to end.
 
-- Anchor: S-DBN-PINGPONG (`two_services_dial_each_other_by_name_counters_advance_each_hop_mtls`, the Tier-3 scaffold in `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs`)
+- Anchor: S-DBN-PINGPONG (`two_services_dial_each_other_by_name_counters_advance_each_hop_mtls`, the REAL GREEN Tier-3 `#[tokio::test]` in `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs`)
 - Anchor: K-DBN-3 (the bidirectional ping-pong KPI — both counters advance on a ~10s cadence over a 60s window, each hop mTLS'd)
 - Anchor: roadmap step 03-02 (US-DBN-3 — bidirectional ping-pong demo + EDD expectation) and `docs/feature/dial-by-name-responder/slices/slice-02-bidirectional-ping-pong-demo.md`
 - Anchor: ADR-0072 REV-2 (the stable-frontend dial-by-name contract) and GH #243 (dial-by-name-responder)
@@ -100,7 +102,11 @@ exists.
 
 The `what, forever` regression witnesses are the in-process Tier-3 modules: the
 02-02 walking skeleton (`dns_responder_walking_skeleton.rs`, the single-direction
-dial-by-name loop, GREEN) and the 03-02 ping-pong scaffold
-(`dns_responder_ping_pong.rs`, the bidirectional proof, RED-scaffolded until the
-EDD harness lands). E05 is the black-box operator-observable `why`; those modules
-are the in-process `what`.
+dial-by-name loop, GREEN) and the 03-02 ping-pong test
+(`dns_responder_ping_pong.rs::two_services_dial_each_other_by_name_counters_advance_each_hop_mtls`,
+the bidirectional proof — a REAL GREEN `#[tokio::test]` driving one
+`run_server` + two `deploy`s, each workload BOTH a mesh service and an egress
+dialer, both inbound counters advancing and both inter-agent hops mTLS'd; the
+review-03-02.md resolution-(a) replacement for the earlier panic scaffold). E05
+is the black-box operator-observable `why` (real CA, no seam, still `pending` on
+#227/#75); those modules are the in-process `what, forever`.
