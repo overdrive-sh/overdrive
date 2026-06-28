@@ -958,7 +958,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let view_post = WorkloadLifecycleView {
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
@@ -1151,7 +1151,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at,
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
@@ -1260,7 +1260,7 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
     let seeded = WorkloadLifecycleView {
         restart_counts: counts,
         last_failure_seen_at: BTreeMap::new(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 

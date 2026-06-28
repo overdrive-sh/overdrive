@@ -574,14 +574,17 @@ fn terminal_operator_stopped_alloc(
 
 #[test]
 fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
-    // Build a Service workload that has reached a terminal-state
-    // observation row AND carries a populated `service_spec_digest`
+    // Build a Service workload whose spec intent is WITHDRAWN
+    // (`desired.job = None` — logical-workload deletion, the trigger the
+    // withhold-not-release gate keys on per ADR-0049 amendment
+    // 2026-06-28) AND carries a populated `service_spec_digest`
     // (the hydrator-supplied input the release-emission path
-    // requires). `desired.desired_to_stop = true` short-circuits
-    // `reconcile_inner` into the Stop branch, which — because no
-    // alloc is Running — emits an empty action list. The wrapper
-    // then appends the `Action::ReleaseServiceVip` via
-    // `service_vip_release_emission`.
+    // requires). With `desired.job = None`, `reconcile_inner` enters the
+    // Absent/GC branch, which emits a `StopAllocation` only for Running
+    // allocs — and the sole alloc here is Terminated, so the GC branch
+    // emits NOTHING. The wrapper then appends the
+    // `Action::ReleaseServiceVip` via `service_vip_release_emission`
+    // (intent withdrawn ⇒ release fires).
     //
     // Net `actions` after the wrapper: `[ReleaseServiceVip]` — one
     // entry, NOT in the alloc-mutating set. With the real
@@ -601,8 +604,10 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
     );
     let desired = WorkloadLifecycleState {
         workload_id: workload_id.clone(),
-        job: Some(make_job("payments")),
-        desired_to_stop: true,
+        // Intent withdrawn — the deletion trigger the new release gate
+        // keys on. A still-declared Service would RETAIN its VIP.
+        job: None,
+        desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
@@ -612,7 +617,7 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
     };
     let actual = WorkloadLifecycleState {
         workload_id,
-        job: Some(make_job("payments")),
+        job: None,
         desired_to_stop: false,
         nodes,
         allocations,
@@ -634,9 +639,10 @@ fn release_service_vip_only_tick_emits_no_bridge_enqueue() {
     assert_eq!(
         actions.len(),
         1,
-        "Service terminal-state tick must emit exactly one action (ReleaseServiceVip); \
+        "Service intent-withdrawal tick must emit exactly one action (ReleaseServiceVip); \
          a bridge EnqueueEvaluation here would be spurious since no alloc-set mutation \
-         occurred; got {actions:?}"
+         occurred (the sole alloc is Terminated, so the GC branch emits no StopAllocation); \
+         got {actions:?}"
     );
     assert!(
         matches!(actions[0], Action::ReleaseServiceVip { .. }),

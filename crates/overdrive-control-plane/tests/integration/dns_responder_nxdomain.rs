@@ -931,28 +931,31 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 ///
 /// MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
 ///
-/// IGNORED (03-01 — production WITHHOLD-on-stop gap surfaced by this Tier-3
-/// observable). When run as root under Lima this fails: after `POST
-/// /v1/jobs/server/stop` converges the alloc to Terminated, `getent` keeps
-/// resolving the stale `F` (`[10.98.0.1] code 0`) indefinitely and NEVER
-/// reports NXDOMAIN. The WITHHOLD-on-zero-healthy seam is NOT driven END-TO-END
-/// by the production stop path. RCA (overdrive-sh/overdrive#251) RULES OUT the
-/// two layers below the bridge — `name_index::apply_row` correctly evicts a
-/// `<job>` on a zero-backend row, and `hydrate_bridge_desired_listeners` keeps
-/// the stopped-but-declared Service's listeners — and NARROWS the suspect to the
-/// operator-stop → bridge re-tick propagation (the alloc leaving the bridge's
-/// Running set, and/or the `exit_observer:253` bridge re-enqueue firing on the
-/// operator-stop path), so no zero-backend `service_backends` retraction lands
-/// and `frontend_for("server")` still returns `Some(F)`. The fix is a production
-/// change OUT OF this test-only step's two-file boundary (`dns_responder/*` and
-/// the bridge are READ-ONLY for 03-01 per the dispatch). The withhold-not-release
-/// F-retention contract this observes is ALREADY Tier-1 mutation-gated at 01-03
-/// (`NameIndex` healthy-gate WITHHOLD seam + `answer_for` NxDomain arm) / 01-04.
-/// The test body is INTACT and will fail loud (surfacing the gap) the moment the
-/// production withhold-on-stop fix lands and this `#[ignore]` is removed — it is
-/// NOT weakened. Un-ignore when overdrive-sh/overdrive#251 lands. Distinct from
-/// the recovery leg's #249 blocker below.
-#[ignore = "03-01 BLOCKED on a production WITHHOLD-on-stop gap (out of this test-only step's boundary): after POST /v1/jobs/{id}/stop converges to Terminated, the WITHHOLD-on-zero-healthy seam is not driven end-to-end — no zero-backend service_backends retraction lands on the operator-stop -> Terminated transition, so the responder keeps answering the stale F and never NXDOMAINs. Tracked in overdrive-sh/overdrive#251 (RCA rules out name_index empty-row eviction + bridge hydrate; narrows to the operator-stop -> bridge re-tick propagation). Fixing is a production change READ-ONLY for 03-01. The withhold-not-release contract is Tier-1 mutation-gated at 01-03/01-04. Body is intact (not weakened); un-ignore when #251 lands. See docstring."]
+/// LANDED (#251 fix — withhold-not-release). This is the Tier-3 oracle for
+/// overdrive-sh/overdrive#251 (RCA: `docs/analysis/rca-251-withhold-on-stop.md`).
+/// The root cause was **mechanism 3** (pinned by a live Lima population-diff
+/// probe): on the same operator-stop transition, `WorkloadLifecycle` emitted
+/// `Action::ReleaseServiceVip`, whose executor evicted the Service's VIP from
+/// the allocator memo — and the `BackendDiscoveryBridge`'s
+/// `hydrate_bridge_desired_listeners` has a data-dependency on that memo. The
+/// release **nulled the input the zero-backend retraction needs**, so the
+/// retraction was never emitted and the name resolved the stale `F` forever. It
+/// was a race between two terminal effects of one stop, where one destroyed the
+/// input the other needed.
+///
+/// The fix (ADR-0049 amendment 2026-06-28, D1) reverses the VIP release trigger
+/// from release-on-terminal to **release-on-deletion** (`desired.job.is_none()`):
+/// a stopped-but-still-declared Service now RETAINS its VIP, so the memo the
+/// bridge reads is present for the whole stopped-but-declared window. The bridge
+/// projects the listener set, the zero-backend `service_backends` retraction
+/// lands, the `name_index` folds it, and resolution collapses to NXDOMAIN —
+/// while the VIP (identity) is retained, symmetric with the frontend `F`. The
+/// fix needed NO bridge edit (D4: retaining the VIP suffices).
+///
+/// PORT-TO-PORT litmus: reverting the release gate to release-on-terminal would
+/// re-introduce the race and take this RED (the stopped name would resolve `F`
+/// again). The withhold-not-release F-retention contract is additionally Tier-1
+/// mutation-gated at 01-03 / 01-04.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
     if !is_root() {

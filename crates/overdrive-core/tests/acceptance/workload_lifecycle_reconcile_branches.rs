@@ -573,7 +573,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -700,7 +700,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
     let view = WorkloadLifecycleView {
         restart_counts: BTreeMap::new(),
         last_failure_seen_at,
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = fresh_tick(Instant::now(), now_unix);
 
@@ -1050,7 +1050,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at,
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = tick_at_unix(now, now_unix, 0);
 
@@ -1308,7 +1308,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
         let view = WorkloadLifecycleView {
             restart_counts,
             last_failure_seen_at,
-            released_for_terminal: BTreeSet::new(),
+            released_for_deletion: BTreeSet::new(),
         };
         let tick = tick_at_unix(now, now_unix, 0);
 
@@ -1379,7 +1379,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
         let view = WorkloadLifecycleView {
             restart_counts: BTreeMap::new(),
             last_failure_seen_at,
-            released_for_terminal: BTreeSet::new(),
+            released_for_deletion: BTreeSet::new(),
         };
         let tick = tick_at_unix(now, now_unix, 0);
 

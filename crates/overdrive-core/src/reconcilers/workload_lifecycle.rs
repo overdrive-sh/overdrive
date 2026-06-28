@@ -125,34 +125,34 @@ impl Reconciler for WorkloadLifecycle {
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         // service-vip-allocator step 03-01 — Service-arm VIP release
-        // per ADR-0049 (amended 2026-05-15).
+        // per ADR-0049 (amendment 2026-06-28 — withhold-not-release).
         //
         // When the workload is a Service AND we have a spec_digest in
-        // scope AND any allocation has reached a terminal-state
-        // observation row (i.e. `row.terminal.is_some()`) AND the
+        // scope AND the workload's intent is WITHDRAWN
+        // (`desired.job.is_none()` — logical-workload deletion) AND the
         // digest has NOT already been recorded in
-        // `view.released_for_terminal`, emit
-        // `Action::ReleaseServiceVip` exactly once and stamp the digest
-        // onto `next_view.released_for_terminal` so the next tick's
-        // gate short-circuits. Per `.claude/rules/development.md`
-        // § "Persist inputs, not derived state": the recorded set is
-        // the input "we already emitted release for this digest" —
-        // never a derived "needs release now" boolean.
+        // `view.released_for_deletion`, emit `Action::ReleaseServiceVip`
+        // exactly once and stamp the digest onto
+        // `next_view.released_for_deletion` so the next tick's gate
+        // short-circuits. Per `.claude/rules/development.md` § "Persist
+        // inputs, not derived state": the recorded set is the input "we
+        // already emitted release for this digest" — never a derived
+        // "needs release now" boolean.
         //
-        // The release decision is independent of (and additive to)
-        // the existing Stop / Absent / Run branches below: a terminal
-        // operator-stopped Service alloc flows through the Run-branch
-        // operator-stopped short-circuit (returns no other actions)
-        // AND ALSO emits the release here. The two-action shape is
-        // intentional — the reconciler is the single source of every
-        // terminal claim, and Service-VIP release is a terminal claim
-        // per ADR-0049.
-        let release_pair = service_vip_release_emission(desired, actual, view);
+        // A stopped-or-crashed-but-STILL-DECLARED Service
+        // (`desired.job.is_some()`) RETAINS its VIP — the VIP is an
+        // identity bound to the declared workload, symmetric with the
+        // dial-by-name frontend `F` (ADR-0072). The release decision is
+        // independent of (and additive to) the Stop / Absent / Run
+        // branches below, and now COINCIDES with the Absent/GC branch's
+        // own `desired.job.is_none()` trigger: on intent withdrawal the
+        // reconciler GCs the running allocs AND releases the VIP.
+        let release_pair = service_vip_release_emission(desired, view);
 
         let (mut actions, mut next_view) = Self::reconcile_inner(desired, actual, view, tick);
         if let Some((release_action, released_digest)) = release_pair {
             actions.push(release_action);
-            next_view.released_for_terminal.insert(released_digest);
+            next_view.released_for_deletion.insert(released_digest);
         }
 
         // UI-06 (F1 fix per audit-reconciler-handoff-topology.md):
@@ -873,35 +873,58 @@ fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
 ///
 /// 1. `desired.workload_kind == WorkloadKind::Service`, AND
 /// 2. `desired.service_spec_digest` is `Some(digest)`, AND
-/// 3. at least one observed allocation in `actual.allocations` carries
-///    a terminal claim (`row.terminal.is_some()`), AND
-/// 4. `digest` is NOT already present in `view.released_for_terminal`.
+/// 3. `digest` is NOT already present in `view.released_for_deletion`,
+///    AND
+/// 4. the workload's intent is **withdrawn** — `desired.job.is_none()`
+///    (logical-workload deletion).
 ///
 /// Returns `None` otherwise — i.e. for non-Service kinds, when the
 /// digest is absent (the runtime hydrator has not populated it), when
-/// no terminal-state observation row exists yet, or when the digest
-/// is already recorded as released.
+/// the workload's intent is still declared (`desired.job.is_some()` —
+/// a stopped-or-crashed-but-still-declared Service RETAINS its VIP), or
+/// when the digest is already recorded as released.
+///
+/// **Withhold-not-release** per ADR-0049 (amendment 2026-06-28, D1):
+/// the VIP is an identity bound to the DECLARED workload and is released
+/// only on intent withdrawal, symmetric with the dial-by-name frontend
+/// `F` (ADR-0072 `FrontendAddrAllocator::release` = deletion-only). The
+/// gate keys on `desired.job.is_none()` — the same signal the Absent/GC
+/// branch in `reconcile_inner` uses — NOT on a terminal alloc,
+/// `desired_to_stop`, or any GC/terminal stamp. (Superseded the original
+/// release-on-terminal gate; § 6 / amendment 2026-05-15.)
 ///
 /// The caller (the `WorkloadLifecycle::reconcile` wrapper) appends the
 /// returned action to the inner reconcile's action list and stamps the
-/// returned digest onto `next_view.released_for_terminal` so the next
-/// tick short-circuits. Per ADR-0049 (amended 2026-05-15) +
-/// `.claude/rules/development.md` § "Persist inputs, not derived
-/// state".
+/// returned digest onto `next_view.released_for_deletion` so the next
+/// tick short-circuits. Per `.claude/rules/development.md` § "Persist
+/// inputs, not derived state".
 fn service_vip_release_emission(
     desired: &WorkloadLifecycleState,
-    actual: &WorkloadLifecycleState,
     view: &WorkloadLifecycleView,
 ) -> Option<(Action, crate::id::ContentHash)> {
     if desired.workload_kind != WorkloadKind::Service {
         return None;
     }
     let digest = desired.service_spec_digest?;
-    if view.released_for_terminal.contains(&digest) {
+    if view.released_for_deletion.contains(&digest) {
         return None;
     }
-    let terminal_observed = actual.allocations.values().any(|row| row.terminal.is_some());
-    if !terminal_observed {
+    // ADR-0049 (amendment 2026-06-28, D1) — withhold-not-release. The
+    // VIP is an identity bound to the DECLARED workload; release it only
+    // when the workload's intent is withdrawn (logical-workload
+    // deletion), detected as `desired.job.is_none()` — the same signal
+    // the reconciler's Absent/GC branch (`reconcile_inner`,
+    // `match desired.job.as_ref() { None => … }`) keys on. A
+    // stopped-or-crashed-but-still-declared Service (`desired.job.is_some()`)
+    // RETAINS its VIP, symmetric with the dial-by-name frontend `F`
+    // (ADR-0072: `FrontendAddrAllocator::release` = deletion-only).
+    //
+    // MUST NOT key on `desired_to_stop`, `is_operator_stopped`,
+    // `row.terminal`, or the GC terminal stamp — those all fire on
+    // stop-while-declared, the exact case that must now retain the VIP.
+    // A stop intent (`POST /v1/jobs/{id}/stop`) retains the spec key, so
+    // under a stop `desired.job` stays `Some(_)`.
+    if desired.job.is_some() {
         return None;
     }
     let target = format!("job-lifecycle/{}", desired.workload_id.as_str());
@@ -1164,8 +1187,18 @@ pub struct WorkloadLifecycleView {
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
     /// Set of `spec_digest`s for which `Action::ReleaseServiceVip`
     /// has already been emitted.
-    #[serde(default)]
-    pub released_for_terminal: BTreeSet<crate::id::ContentHash>,
+    ///
+    /// Records the *input* "we already emitted release for this digest;
+    /// do not re-emit" (per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state"). Per ADR-0049 (amendment 2026-06-28)
+    /// the release fires on logical-workload **deletion**
+    /// (`desired.job.is_none()`), not on a terminal alloc — hence the
+    /// `_for_deletion` name. The CBOR `#[serde(alias = ...)]` keeps any
+    /// pre-rename persisted `released_for_terminal` blob readable
+    /// (additive serde evolution per § "Reconciler I/O → Schema
+    /// evolution"); the semantics are unchanged.
+    #[serde(default, alias = "released_for_terminal")]
+    pub released_for_deletion: BTreeSet<crate::id::ContentHash>,
 }
 
 #[cfg(test)]
@@ -1310,5 +1343,174 @@ mod project_service_listen_ports_tests {
                 "projected listener-port set must equal the declared listener set",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod service_vip_release_emission_tests {
+    //! Direct unit partition for [`service_vip_release_emission`] — the
+    //! private release-emission gate. The function signature IS the
+    //! driving port (port-to-port at the domain scope), so calling it
+    //! directly is the correct port-to-port shape for this seam.
+    //!
+    //! Pins the **withhold-not-release** trigger per ADR-0049
+    //! (amendment 2026-06-28, D1 / crafter-facing design spec): the VIP
+    //! is an identity bound to the *declared* workload and is released
+    //! ONLY on logical-workload deletion (`desired.job.is_none()`),
+    //! NEVER on a transient terminal-alloc while the workload stays
+    //! declared. This is symmetric with the dial-by-name frontend `F`
+    //! (ADR-0072: `FrontendAddrAllocator::release` = deletion-only).
+    //!
+    //! `desired.job` is the SSOT for "declared": the production hydrator
+    //! (`reconciler_runtime::read_job`) returns `Some(job)` for a
+    //! declared Service (the kind-agnostic projection) and `None` only
+    //! when the spec intent is absent (withdrawn). A stop intent
+    //! (`POST /v1/jobs/{id}/stop`) retains the spec key, so under a stop
+    //! `desired.job` stays `Some(_)` — the case that must now RETAIN the
+    //! VIP. The gate keys on `desired.job.is_none()` alone, never on
+    //! `desired_to_stop`, `is_operator_stopped`, or `row.terminal`.
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::num::NonZeroU32;
+
+    use crate::aggregate::{Exec, Job, WorkloadDriver, WorkloadKind};
+    use crate::id::{ContentHash, WorkloadId};
+    use crate::reconcilers::Action;
+    use crate::traits::driver::Resources;
+
+    use super::{WorkloadLifecycleState, WorkloadLifecycleView, service_vip_release_emission};
+
+    fn wid(s: &str) -> WorkloadId {
+        WorkloadId::new(s).expect("valid WorkloadId")
+    }
+
+    fn make_job(id: &str) -> Job {
+        Job {
+            id: wid(id),
+            replicas: NonZeroU32::new(1).expect("1 is non-zero"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            driver: WorkloadDriver::Exec(Exec { command: "/bin/serve".to_string(), args: vec![] }),
+        }
+    }
+
+    fn fixture_digest() -> ContentHash {
+        ContentHash::of(b"adr-0049-2026-06-28-withhold-fixture-digest")
+    }
+
+    /// Build the `desired` Service state the new release gate reads.
+    ///
+    /// `declared` selects the intent-presence axis the gate keys on:
+    /// - `declared == true`  → `desired.job = Some(_)` (intent retained;
+    ///   a stop retains the spec key, so `desired_to_stop` is also true).
+    ///   The VIP MUST be retained.
+    /// - `declared == false` → `desired.job = None` (intent withdrawn /
+    ///   logical deletion). The VIP MUST be released.
+    ///
+    /// The gate is `actual`-independent (a terminal alloc no longer
+    /// triggers release), so the fixture builds only `desired`. The
+    /// "terminal alloc present yet still no release" falsifiability is
+    /// covered at the reconciler-level acceptance test
+    /// (`workload_lifecycle_release_service_vip.rs`), which drives a real
+    /// terminal alloc through the full `reconcile`.
+    fn desired_service_state(
+        workload_id: &str,
+        digest: ContentHash,
+        declared: bool,
+    ) -> WorkloadLifecycleState {
+        WorkloadLifecycleState {
+            workload_id: wid(workload_id),
+            job: if declared { Some(make_job(workload_id)) } else { None },
+            // A stop intent retains the spec key, so under a stop both
+            // `desired_to_stop == true` AND `desired.job.is_some()`.
+            // The new gate MUST ignore `desired_to_stop`.
+            desired_to_stop: declared,
+            nodes: BTreeMap::new(),
+            allocations: BTreeMap::new(),
+            workload_kind: WorkloadKind::Service,
+            service_spec_digest: Some(digest),
+            probe_descriptors: Vec::new(),
+            service_ports: Vec::new(),
+        }
+    }
+
+    /// WITHHOLD: a Service whose intent is STILL DECLARED
+    /// (`desired.job.is_some()`) MUST NOT emit `ReleaseServiceVip` — the
+    /// VIP is an identity retained across the stopped-but-declared window
+    /// (ADR-0049 D1), symmetric with the frontend `F`.
+    ///
+    /// This is the #251 RED → GREEN pin on the production gate. On the
+    /// superseded release-on-terminal gate a declared Service with a
+    /// terminal alloc returned `Some(ReleaseServiceVip)` (RED — which
+    /// evicted the VIP memo mid-stop and broke name-retraction); on the
+    /// new release-on-deletion gate a declared Service returns `None`.
+    #[test]
+    fn declared_service_retains_vip() {
+        let digest = fixture_digest();
+        let desired = desired_service_state("payments", digest, /* declared */ true);
+        let view = WorkloadLifecycleView::default();
+
+        let release = service_vip_release_emission(&desired, &view);
+
+        assert!(
+            release.is_none(),
+            "a still-declared Service (desired.job.is_some()) MUST retain its VIP — \
+             release is deletion-only per ADR-0049 (2026-06-28). got {release:?}",
+        );
+    }
+
+    /// RELEASE-ON-DELETION: when the spec intent is WITHDRAWN
+    /// (`desired.job.is_none()` — the same Absent/GC signal the
+    /// reconciler keys on) and the digest is not already released, a
+    /// Service MUST emit exactly one `ReleaseServiceVip` carrying that
+    /// digest (ADR-0049 D1 positive direction).
+    #[test]
+    fn withdrawn_service_intent_releases_vip() {
+        let digest = fixture_digest();
+        let desired = desired_service_state("payments", digest, /* declared */ false);
+        let view = WorkloadLifecycleView::default();
+
+        let release = service_vip_release_emission(&desired, &view);
+
+        match release {
+            Some((Action::ReleaseServiceVip { spec_digest, .. }, recorded)) => {
+                assert_eq!(
+                    spec_digest, digest,
+                    "release action must carry the workload's spec_digest"
+                );
+                assert_eq!(
+                    recorded, digest,
+                    "the recorded digest (stamped into released_for_deletion) must match"
+                );
+            }
+            other => panic!(
+                "withdrawn Service intent (desired.job.is_none()) MUST emit \
+                 ReleaseServiceVip; got {other:?}"
+            ),
+        }
+    }
+
+    /// Idempotency short-circuit is unchanged by the gate swap: once the
+    /// digest is recorded as already-released, a withdrawn intent does
+    /// NOT re-emit. Pins that the rename of the View field preserved the
+    /// short-circuit's role.
+    #[test]
+    fn withdrawn_service_does_not_reemit_when_already_recorded() {
+        let digest = fixture_digest();
+        let desired = desired_service_state("payments", digest, /* declared */ false);
+        let mut released = BTreeSet::new();
+        released.insert(digest);
+        let view = WorkloadLifecycleView {
+            restart_counts: BTreeMap::new(),
+            last_failure_seen_at: BTreeMap::new(),
+            released_for_deletion: released,
+        };
+
+        let release = service_vip_release_emission(&desired, &view);
+
+        assert!(
+            release.is_none(),
+            "re-tick with the digest already in released_for_deletion MUST NOT \
+             re-emit ReleaseServiceVip; got {release:?}",
+        );
     }
 }

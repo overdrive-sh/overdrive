@@ -179,7 +179,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -353,7 +353,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -453,7 +453,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_terminal: ::std::collections::BTreeSet::new() };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new() };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the
@@ -563,12 +563,13 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // `TerminalCondition`, preserving ADR-0037's "every terminal
         // claim has a single typed source" invariant.
         | Action::DataplaneUpdateService { .. }
-        // service-vip-allocator step 03-01: ReleaseServiceVip carries
-        // no terminal claim — Service VIP release is a follow-on
-        // dispatch triggered BY an already-terminal observation row,
-        // not a new terminal claim. The reconciler that emits Release
-        // is also the writer of the terminal claim via StopAllocation /
-        // FinalizeFailed above.
+        // ReleaseServiceVip carries no terminal claim — Service VIP
+        // release is a follow-on dispatch triggered BY logical-workload
+        // deletion (`desired.job.is_none()`, ADR-0049 amendment
+        // 2026-06-28), not a new terminal claim. The reconciler that
+        // emits Release is also the writer of the terminal claim via
+        // StopAllocation / FinalizeFailed above (the GC branch on intent
+        // withdrawal).
         | Action::ReleaseServiceVip { .. }
         // backend-discovery-bridge-service-reachability step 01-01:
         // WriteServiceBackendRow carries no terminal claim — the

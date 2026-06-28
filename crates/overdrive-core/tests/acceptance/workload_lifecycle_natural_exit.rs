@@ -356,7 +356,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
