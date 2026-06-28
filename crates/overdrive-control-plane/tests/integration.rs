@@ -314,6 +314,26 @@ mod integration {
     /// (ADR-0068).
     mod dns_responder_nxdomain;
 
+    /// dial-by-name-responder step 03-02 (ADR-0072 REV-2, GH #243; US-DBN-3 ·
+    /// K-DBN-3) — the BIDIRECTIONAL PING-PONG demo, the operator-runnable proof.
+    /// Two services dial each other by name: `a` resolves `b.svc.overdrive.local`
+    /// and calls B, `b` resolves `a.svc.overdrive.local` and calls A; each call
+    /// increments a counter + refreshes a date on a ~10s cadence; each hop is
+    /// resolved through the in-agent responder, then intercepted + mTLS'd
+    /// (S-DBN-PINGPONG). Drives ONLY production: two `overdrive deploy`s
+    /// (`examples/dial-by-name-responder/{a,b}.toml`) + a staged tiny Rust
+    /// ping-pong bin against `run_server` — NO test binds `:53`, installs a
+    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the egress
+    /// capture. Each egress hop uses the CORRECTED PLAINTEXT-egress model (the
+    /// dialer speaks plaintext; the mTLS proof lives on the inter-agent
+    /// leg-B ↔ leg-C wire — CLAUDE.md § "East-west mTLS tests" / the 02-02 RCA).
+    /// `#[should_panic(expected = "RED scaffold")]` per
+    /// `distill/red-classification.md` (S-DBN-PINGPONG): the operator-runnable
+    /// bidirectional proof graduates to the E05 EDD expectation (honest
+    /// `pending`, #227/#75), NOT an in-process `#[test]`. Root + Lima; SKIP
+    /// otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
+    mod dns_responder_ping_pong;
+
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.
     pub mod workload_identity_manager {

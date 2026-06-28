@@ -12,6 +12,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E02](E02-udp-service-reverse-path-vip-sourced/) | E | deployed UDP service's reply sourced from VIP, not backend IP | K1 | S-04-A, K1, roadmap 01-03, ADR-0060, ADR-0061, US-04 | `pending` (remote-path) |
 | [E03](E03-ca-full-chain-verifies/) | E | full Root → Intermediate → SVID chain verifies under `openssl verify` | K1 | S-04-07, ADR-0063 D1, built-in-ca K1 | `pending` |
 | [E04](E04-workload-reachable-at-canonical-address-mtls/) | E | a mesh workload is reachable at its canonical `workload_addr:service_port` over mTLS, end to end | K1 | S-WS, roadmap 03-02, GH #241, canonical-address design + ADR | `pending` |
+| [E05](E05-dial-by-name-ping-pong-mtls/) | E | two services dial each other by name; counters advance on a ~10s cadence; each hop is mTLS'd | K-DBN-3 | S-DBN-PINGPONG, roadmap 03-02, ADR-0072 REV-2, GH #243, slice-02 | `pending` |
 | [O04](O04-ca-refuse-to-start-actionable-error/) | O | control plane refuses to start on root-key decrypt failure with an actionable, cause-distinct error (no silent re-mint) | K3 | S-02-06/07, ADR-0063 D3/Earned-Trust, journey error_paths step 1 | `pending` |
 | [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `alloc status`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
@@ -57,6 +58,21 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   disposable full-system Lima VM EDD harness) on **#75** (the Image Factory OS
   image). Neither has landed, so E04 cannot be captured against the built binary
   yet.
+- **dial-by-name-responder** (GH #243, ADR-0072 REV-2) — E05 (two services dial
+  each other by name; both counters advance on a ~10s cadence over a 60s window;
+  each hop intercepted + mTLS'd — the operator-runnable bidirectional proof,
+  K-DBN-3). The in-process dial-by-name loop is covered by the Tier-3 modules
+  `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs`
+  (single-direction, GREEN) and `dns_responder_ping_pong.rs` (the bidirectional
+  RED scaffold, with a test PKI seam); E05 captures the black-box
+  operator-observable slice those tiers under-serve. `pending` **by design**: the
+  black-box bidirectional mesh-mTLS E-surface capture needs a converged
+  full-system two-workload deploy with the PRODUCTION workload-identity CA proven
+  black-box, provided by **#227** (the disposable full-system Lima VM EDD
+  harness) on **#75** (the Image Factory OS image) — the SAME precondition as
+  E04. The example specs `examples/dial-by-name-responder/{a,b}.toml` + a real
+  on-disk staged Rust ping-pong bin are READY for the capture; neither harness
+  has landed, so E05 cannot be captured against the built binary yet.
 
 ## Adding an expectation
 

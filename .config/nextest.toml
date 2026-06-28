@@ -333,6 +333,7 @@ filter = '''
             | test(backend_discovery_bridge)
             | test(dns_responder_walking_skeleton)
             | test(dns_responder_nxdomain)
+            | test(dns_responder_ping_pong)
         ))
     )
 '''
@@ -366,6 +367,22 @@ test-group = 'host-kernel-shared'
 # earlier omission from the serialization group when the NXDOMAIN tests
 # landed — joining the existing single-writer domain is required discipline,
 # not scope creep.)
+#
+# dial-by-name-responder 03-02 bidirectional ping-pong —
+# `dns_responder_ping_pong` (the operator-runnable two-deploy demo) joins for
+# the SAME reason. When un-scaffolded (the `#[should_panic]` RED scaffold goes
+# GREEN once the full-system EDD harness #227/#75 lands) it boots a real
+# `EbpfDataplane` via `run_server_with_obs_and_driver` (`dataplane_override:
+# None`) — the same process-global `:53` bind + root `cgroup_sock_addr` attach +
+# XDP attach to the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
+# `dns_responder_walking_skeleton` / `dns_responder_nxdomain`. Run concurrently
+# in the full integration suite two collide on `:53` EADDRINUSE /
+# `IfaceXdpSlotBusy`, so the module MUST share the single-writer group. Added
+# now (not deferred to the GREEN step) so the membership is in place before the
+# fixture ever boots — joining the existing single-writer domain is required
+# discipline, not scope creep. Matched BY-MODULE
+# (`test(dns_responder_ping_pong)`), rename-proof — mirrors the sibling
+# assignments.
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the

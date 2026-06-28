@@ -1,0 +1,61 @@
+# dial-by-name-responder/a.toml — S-DBN-PINGPONG / US-DBN-3 / K-DBN-3 demo
+# fixture (the "A" half of the bidirectional ping-pong).
+#
+# This file introduces the per-feature `examples/<feature>/` subdir
+# convention (precedents: the flat `examples/dns-resolver.toml` /
+# `examples/coinflip-as-service.toml`). A and B form ONE demo: `overdrive
+# deploy a.toml` then `overdrive deploy b.toml` against a booted `overdrive
+# serve` produces an observable advancing ping-pong — A resolves
+# `b.svc.overdrive.local` and calls B, B resolves `a.svc.overdrive.local`
+# and calls A, each call increments a counter + refreshes a date on a ~10s
+# cadence, and each hop is intercepted + mTLS'd by the platform.
+#
+# [service].id = "a"  ⇒ the mesh name STEM: this service is reachable at
+# `a.svc.overdrive.local` (= `format!("a.{}", MeshServiceName::SUFFIX)`).
+# The PEER it dials is `b.svc.overdrive.local` (passed to the bin via
+# OVERDRIVE_PEER_NAME below).
+#
+# Client-program form — PINNED (slice-02 decision, user 2026-06-24): a tiny
+# Rust ping-pong bin, staged at a REAL on-disk path before the demo runs (the
+# `coinflip-helper` precedent — a real cargo `[[bin]]` materialised into
+# `/tmp/` by its test, NOT a checked-in binary, NOT a phantom path; the
+# `dns-resolver.toml` collision class K3). The `command` below points at that
+# staged path. The bin: binds a TCP listener on its service port; on each
+# inbound connection increments a counter + writes a fresh RFC-3339 date and
+# replies; on a ~10s loop resolves OVERDRIVE_PEER_NAME via getaddrinfo
+# (PLAINTEXT — the workload is identity-unaware; the agent originates mTLS on
+# the inter-agent leg, CLAUDE.md § "East-west mTLS tests") and dials it,
+# bumping a visible round-trip counter on success.
+#
+# Port choice — 18971, NOT 5353 (systemd-resolved owns UDP 5353 / mDNS in the
+# dev Lima VM; a backend binding 5353 fails `bind(): Address already in use`,
+# per the `dns-resolver.toml` RCA), and NOT 53 (the in-agent DNS responder
+# binds the per-host `:53`). 18971 is a free, unprivileged TCP port in the VM.
+# B uses 18972 so the two specs never collide on a shared port observation.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/E05-dial-by-name-ping-pong-mtls/runner.sh
+# and by the Tier-3 acceptance scaffold
+#   crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs
+
+[service]
+id = "a"
+replicas = 1
+
+[exec]
+# Staged tiny Rust ping-pong bin (a REAL on-disk path, materialised before the
+# demo — no phantom path). The Tier-3 acceptance test compiles + stages the
+# bin into this path inside Lima before deploy; the EDD runner stages it the
+# same way once the full-system harness (#227/#75) lands.
+command = "/tmp/overdrive-ping-pong"
+# OVERDRIVE_SELF_PORT — the listener port (matches [[listener]].port below).
+# OVERDRIVE_PEER_NAME — the mesh name this half DIALS (B's name).
+args = ["--self-port", "18971", "--peer-name", "b.svc.overdrive.local", "--peer-port", "18972"]
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[listener]]
+port = 18971
+protocol = "tcp"
