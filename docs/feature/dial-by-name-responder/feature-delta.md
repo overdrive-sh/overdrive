@@ -422,7 +422,7 @@ first slice (`spike.md`).
 
 - **SHIPPED:** `resolv.conf` injection (D-TME-9), the `ServiceBackendsResolve` index (D-TME-11, `01-03`), the `MtlsResolve` consumer + intercept path (transparent-mtls arc).
 - **BLOCKING (Slice 00):** the one-listener-many-netns routing assumption (spike, no Tier-2 backstop).
-- **For the demo (US-DBN-3):** the ping-pong program — DECIDED (2026-06-24) as a tiny Rust bin staged into the VM (the `coinflip-helper` precedent) — built and staged at a real on-disk `command` path in the deploy env.
+- **For the demo (US-DBN-3):** the ping-pong program — DECIDED (2026-06-24) as a tiny Rust bin staged into the VM (the `coinflip-helper` precedent); **AS-LANDED (commit 9579f6ae) as a CHECKED-IN `examples/dial-by-name-responder/ping_pong.py` run via `/usr/bin/python3` — the staged-Rust-bin form was itself the phantom-path class it meant to avoid (`overdrive deploy` failed unless the test had first `rustc`-staged the bin), so it was superseded by a checked-in script that runs by hand with no build step (K3 intent satisfied better, not abandoned).**
 
 ---
 
@@ -438,7 +438,7 @@ integration risk, validation. (Addresses `review-discuss.md` High #3.)
 | `answered_backend_addr` | the `running`-AND-healthy `service_backends` row (`SocketAddrV4`, headless D-TME-10) | the workload's `getaddrinfo` + `connect`; then `MtlsResolve.resolve` (the intercept) | this feature (the responder reads + answers) | a non-byte-identical addr, OR an unhealthy addr (→ `MeshUnreachable`), vs what `MtlsResolve` recognizes as `Mesh` → the resolved peer is not the intercepted peer | K-DBN-4 single-source oracle: feed the answered addr into `resolve`; assert byte-equality AND `Mesh` classification |
 | `responder_addr` | `WorkloadNetnsPlan.host_addr` (per-netns gateway, `Ipv4Addr`, D-TME-9) — written to `resolv.conf` by `veth_provisioner.rs` `WriteResolvConf` (SHIPPED) | the workload's stub resolver (the `nameserver` it queries); the in-agent listener (the addr it must answer on, for EVERY netns) | transparent-mtls arc (injection shipped); this feature answers on it | one listener may NOT be able to answer on N per-netns gateway addrs (the load-bearing unvalidated routing assumption) | **Slice 00 (the spike)** — real-kernel one-listener-many-netns probe; BLOCKING |
 | `mesh_dns_name` | the `<job>.svc.overdrive.local` grammar (job name ← the deploy spec `[service].id`) | the workload's query; the responder's name→backend lookup | this feature (the responder parses + matches the suffix) | name-grammar drift (suffix, case, label limits) vs what workloads dial | US-DBN-2 / US-DBN-4 ACs: `getaddrinfo("<server>.svc.overdrive.local")` resolves; unknown name → NXDOMAIN |
-| `ping_pong_command_path` | the staged tiny Rust ping-pong bin's on-disk path in the deploy env (decided 2026-06-24); referenced by `examples/dial-by-name-responder/{a,b}.toml` `[exec].command` | `overdrive deploy` (the two specs); the workloads at runtime | this feature (the demo) | a phantom `command` path → the alloc never reaches Running → the demo silently can't run (the `dns-resolver.toml` collision class) | US-DBN-3 AC: `command` points at a real on-disk binary present in the deploy env, verified before the demo runs |
+| `ping_pong_command_path` | **AS-LANDED (commit 9579f6ae, superseding the 2026-06-24 staged-Rust-bin decision):** the CHECKED-IN `examples/dial-by-name-responder/ping_pong.py` (a real on-disk stdlib-only script next to the specs), referenced by `examples/dial-by-name-responder/{a,b}.toml` `[exec].command = "/usr/bin/python3"` with the script path as the first arg — no build/staging step. The original 2026-06-24 decision (a `rustc`-staged Rust bin at `/tmp/overdrive-ping-pong`) was itself the phantom-path class it meant to avoid (`overdrive deploy a.toml` failed unless the test had first staged the bin), so it was superseded by the checked-in script | `overdrive deploy` (the two specs); the workloads at runtime | this feature (the demo) | a phantom `command` path → the alloc never reaches Running → the demo silently can't run (the `dns-resolver.toml` collision class) | US-DBN-3 AC: `command` (`/usr/bin/python3`) points at a real on-disk binary present in the deploy env, and the checked-in `ping_pong.py` resolves against `serve`'s cwd — runnable by hand with no build step |
 | `edd_ping_pong_evidence` | the `verification/expectations/` capture of the demo (proposed `E05-dial-by-name-ping-pong-mtls`), black-box against the built `overdrive` binary under Lima | EDD different-fox review; the operator-surface proof (K-DBN-3) | this feature (the EDD expectation) | a fabricated / narrated capture (forbidden by `verification.md`); a stale capture vs current HEAD | honest `pending` until the full-system EDD harness (#227/#75) lands (mirrors E04); captured + different-fox-reviewed, never self-stamped |
 
 ---
@@ -494,7 +494,7 @@ invented issues. (Addresses `review-discuss.md` Blocking #2.)
 2. **Journey:** PROPOSE a new journey `dial-a-mesh-peer-by-name.yaml` — do NOT extend `enforce-transparent-mtls-on-the-wire.yaml` (pure enforcement, no operator verb; this leg HAS an operator-observable surface via the demo).
 3. **Scope:** the ping-pong demo is IN scope (operator-runnable proof, cannot run until the responder answers → scoped inside this feature, not built standalone).
 4. **Slicing:** 4 slices (00 spike → 01 walking skeleton A→B → 02 bidirectional ping-pong → 03 empty-candidate honesty). Spike-first per `spike.md`.
-5. **Ping-pong program shape (user, 2026-06-24):** a tiny **Rust bin staged into the VM** (the `coinflip-helper` precedent — clean HTTP/TCP + counter/date), NOT a shell+`curl`/`socat` loop — built and staged at a real on-disk `command` path before the demo runs.
+5. **Ping-pong program shape (user, 2026-06-24):** a tiny **Rust bin staged into the VM** (the `coinflip-helper` precedent — clean HTTP/TCP + counter/date), NOT a shell+`curl`/`socat` loop — built and staged at a real on-disk `command` path before the demo runs. **SUPERSEDED at DELIVER (commit 9579f6ae): landed as a CHECKED-IN `examples/dial-by-name-responder/ping_pong.py` run via `/usr/bin/python3` — the staged-Rust-bin form was itself the phantom-path class the decision meant to avoid (`overdrive deploy` failed unless the test had first `rustc`-staged the bin); a checked-in stdlib-only script runs by hand with no build step, better serving the K3 / no-phantom-path intent.**
 
 ### Scope Assessment: PASS — 4 stories, 1–2 modules (the in-agent responder + the `examples/` demo), estimated ~4–6 days incl. spike
 - Stories: 4 (≤10 ✅). Bounded contexts/modules: the in-agent name responder reading the existing resolve index (1 new surface) + the demo (`examples/` + a small program) (≤3 ✅). Walking skeleton integration points: serve + deploy + the resolve index (≤5 ✅). Multiple independent outcomes that could ship separately? No — all serve the single dial-by-name reachability outcome. **Right-sized; no split needed.**
@@ -1015,7 +1015,7 @@ features, and runs the fail-for-right-reason gate
 | `crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs` (NEW) | 3 | S-DBN-PINGPONG (+ the `E05` EDD expectation, honest `pending`) | RE-DISTILL |
 | `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs` (NEW) | 3 | S-DBN-NXDOMAIN-01..03 | RE-DISTILL |
 | `crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs` (NEW) | 3 | S-DBN-BIND-01..03 | PRESERVED |
-| `examples/dial-by-name-responder/{a,b}.toml` + the staged ping-pong bin | 3 | S-DBN-PINGPONG fixtures (real on-disk `command` path) | RE-DISTILL (dial stable frontend name) |
+| `examples/dial-by-name-responder/{a,b}.toml` + the checked-in `ping_pong.py` (run via `/usr/bin/python3`; AS-LANDED, commit 9579f6ae, superseding the staged-Rust-bin form) | 3 | S-DBN-PINGPONG fixtures (real on-disk `command` path, no build step) | RE-DISTILL (dial stable frontend name) |
 
 **No `__SCAFFOLD__` / `// SCAFFOLD: true` marker sweep this wave** — the
 Rust RED convention is `todo!("RED scaffold: …")` (production) +
@@ -1114,9 +1114,12 @@ trigger).
   SCOPE DECISION)**: the `nix` `socket`/`uio` features (the socket loop);
   the NEW `dns_responder/frontend_addr_allocator.rs` + the
   `mtls_resolve_adapter.rs` `by_frontend`/`classify` re-key (REV-2 01-04 /
-  02-00 — not yet in `crates/`); the staged tiny Rust ping-pong bin at a
-  real on-disk `command` path (decided 2026-06-24, the `coinflip-helper`
-  precedent). **NOTE**: `hickory-proto.workspace = true` is now COMMITTED
+  02-00 — not yet in `crates/`); the ping-pong client at a
+  real on-disk `command` path (decided 2026-06-24 as a staged Rust bin;
+  **AS-LANDED a CHECKED-IN `examples/dial-by-name-responder/ping_pong.py`
+  run via `/usr/bin/python3`, commit 9579f6ae — the staged-Rust-bin form
+  was itself the phantom-path class it meant to avoid**). **NOTE**:
+  `hickory-proto.workspace = true` is now COMMITTED
   (`04fa3d18`, the 01-02 wire codec) — no longer a DELIVER-add.
 - **Tier-3 obligation**: re-confirm the spike verdict on the pinned-6.18
   appliance kernel in the DELIVER Tier-3 matrix (ADR-0068; the MERGE

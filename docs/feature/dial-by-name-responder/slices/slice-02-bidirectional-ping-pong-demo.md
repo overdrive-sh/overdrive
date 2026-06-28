@@ -27,7 +27,7 @@ ping-pong.
 - Two specs `examples/dial-by-name-responder/{a,b}.toml` — `[service]`/`[exec]`/`[resources]`/`[[listener]]` (the `overdrive deploy` schema). Introduces the `examples/<feature>/` subdir convention.
 - A small **ping-pong program**: resolve peer by name → call on a ~10s loop; on inbound call, increment a counter + set a fresh date + reply.
 - `command` MUST point at a **real on-disk binary** in the deploy env (no phantom paths). Ports avoid dev-VM collisions (NOT 5353 — `systemd-resolved` owns it, per `dns-resolver.toml`).
-- **Program shape DECIDED (user, 2026-06-24): a tiny Rust bin staged into the VM** (the `coinflip-helper` precedent — clean HTTP/TCP + counter/date), built and staged at a real on-disk `command` path before the demo runs.
+- **Program shape DECIDED (user, 2026-06-24): a tiny Rust bin staged into the VM** (the `coinflip-helper` precedent — clean HTTP/TCP + counter/date), built and staged at a real on-disk `command` path before the demo runs. **AS-LANDED (commit 9579f6ae): a CHECKED-IN `examples/dial-by-name-responder/ping_pong.py` run via `/usr/bin/python3` — the staged-Rust-bin form was itself the phantom-path class it meant to avoid (`overdrive deploy` failed unless the test had first `rustc`-staged the bin), so it was superseded by a checked-in stdlib-only script that runs by hand with no build step (K3 intent satisfied better, not abandoned).**
 
 ## Carpaccio taste tests
 
@@ -47,5 +47,5 @@ ping-pong.
 ## Dependencies
 
 - **Slice 01** (the A→B skeleton).
-- The ping-pong program — a tiny Rust bin (decided 2026-06-24) — built + staged at its `command` path in the deploy env.
-- Real on-disk `command` target staged in the deploy env.
+- The ping-pong program — decided 2026-06-24 as a tiny Rust bin; **AS-LANDED (commit 9579f6ae) as a CHECKED-IN `examples/dial-by-name-responder/ping_pong.py` run via `/usr/bin/python3`, no build/staging step**.
+- Real on-disk `command` target in the deploy env (`/usr/bin/python3` + the checked-in `ping_pong.py` next to the specs).
