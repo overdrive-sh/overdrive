@@ -4,6 +4,12 @@ Issue: overdrive-sh/overdrive#251
 Method: Toyota 5 Whys (multi-causal), evidence at every level (file:line or pasted Lima output).
 Verdict: **Mechanism 3** (NOT mechanism 1 or 2 as framed in the issue). Pinned with a live Lima population-diff probe.
 
+> **⬆ AS-LANDED (2026-06-28):** the shipped fix (`88679ed8`, `Closes #251`) is the
+> `service_vip_release_emission` **gate-swap** (release-on-deletion / retain-on-stop) —
+> **NOT** the "Option A" prescribed below. The *diagnosis* (mechanism 3) stands and is
+> what the landed fix addresses; the *prescription* (§ "The pinned fix-site", §
+> "Proposed minimal fix") is **SUPERSEDED** — see § **As-Landed Addendum** below.
+
 ---
 
 ## TL;DR (decision-ready)
@@ -12,7 +18,53 @@ The zero-backend `service_backends` retraction row **is never written on the ope
 
 It is a **race between two terminal effects of one stop**: (a) the VIP-memo release and (b) the bridge's zero-backend retraction — where (a) destroys the input (b) needs. The population diff proves the race: a **server-only** fixture writes the retraction (bridge wins the race); a **server+client** fixture does not (release wins the race).
 
-**Pinned fix-site:** `crates/overdrive-control-plane/src/reconciler_runtime.rs::hydrate_bridge_desired_listeners` (≈L2080–2154) — specifically its dependence on the live VIP memo (`state.allocator.lock().await.get(&digest)`, L2120–2135) to project a stopped-but-declared Service's listeners. The bridge must be able to project the listener set (and thus emit the zero-backend retraction) for a Service whose VIP memo has been released-on-terminal.
+**Pinned fix-site (SUPERSEDED — see § As-Landed Addendum):** the *prescribed* site below was
+`reconciler_runtime.rs::hydrate_bridge_desired_listeners`; the **shipped** fix-site is
+`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs::service_vip_release_emission`
+(L901–933). `hydrate_bridge_desired_listeners` was **not touched** — retaining the VIP keeps
+its memo present, so the bridge's existing projection works unchanged.
+
+---
+
+## ⬆ As-Landed Addendum (2026-06-28) — the shipped fix is the `service_vip_release_emission` gate-swap, NOT Option A
+
+**The fix that shipped (`88679ed8`, `Closes #251`) is a THIRD option, not the "Option A"
+recommended in § "Proposed minimal fix" below.** Those prescription sections are **SUPERSEDED**
+by this addendum. The **diagnosis is unchanged and correct** — mechanism 3 (the
+`ReleaseServiceVip` executor evicts the VIP memo that `hydrate_bridge_desired_listeners`
+depends on, racing the zero-backend retraction), pinned by the live population-diff probe in
+§ "Evidence". Only the *prescription* changed.
+
+**As-landed fix-site:** `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs::service_vip_release_emission`
+(L901–933) — NOT `reconciler_runtime.rs::hydrate_bridge_desired_listeners`, which was **not
+touched**. The release-emission gate changed from **release-on-terminal**
+(`actual.allocations…any(|r| r.terminal.is_some())`) to **release-on-deletion**
+(`if desired.job.is_some() { return None; }`). A stopped-but-still-declared Service now
+**RETAINS** its VIP, so the memo the bridge reads is **never evicted on stop** — the bridge's
+existing dependency is satisfied unchanged, the zero-backend retraction fires, the `name_index`
+folds it, and resolution collapses to NXDOMAIN. **No bridge edit** (the root of the race is
+*removed*, not worked around).
+
+**Why "Option A" was REJECTED:** Option A keeps **release-on-terminal** (this doc's own § "Risk":
+*"`ReleaseServiceVip` still runs and returns the VIP to the pool"*) and makes the bridge robust
+to the eviction. That contradicts the **withhold-not-release** contract — the VIP is an
+*identity* retained across a transient stop and released only on logical-workload deletion,
+**symmetric with the dial-by-name frontend `F`** (ADR-0072). Retaining the VIP (rather than
+working around its release) was ratified as the **ADR-0049 §6 amendment (2026-06-28)**, backed
+by prior-art research (`docs/research/orchestration/service-vip-dns-lifecycle-stop-vs-delete-k8s-nomad.md`):
+both Kubernetes ClusterIP and Consul mesh VIP retain the stable virtual IP across
+stop/scale-to-zero and release only on delete — Overdrive's release-on-terminal was the
+outlier. (This RCA's § "Why here, not elsewhere" reasoning — *"removing/deferring the release
+would regress the VIP-reuse contract (ADR-0049)"* — is what pointed at Option A; the ADR-0049
+amendment supersedes that premise.)
+
+**Deletion-path note (ADR-0049 D3):** the v1 hydrator (`read_job`) zeroes
+`service_spec_digest` alongside `desired.job` on intent withdrawal, so the new
+release-on-deletion branch is **inert on the v1 convergence path** until a deletion verb
+supplies the digest at hydrate time — tracked in **#211**. Today the VIP (like `F`) is retained
+for the process lifetime. The inert path is pinned by
+`workload_lifecycle.rs::withdrawn_service_without_digest_emits_no_release` and the inline note
+at `vip_allocator_lifecycle.rs:733-748`.
 
 ---
 
@@ -105,6 +157,12 @@ Why Run A differs (no contradiction): with only one Service, the bridge's post-T
 
 ## The pinned fix-site & why it (not the adjacent candidates) is correct
 
+> **SUPERSEDED (2026-06-28) — see § As-Landed Addendum.** This section reasoned toward Option A
+> (keep release-on-terminal, make the bridge robust to the eviction). The shipped fix instead
+> *removed the release on stop* (`service_vip_release_emission` → release-on-deletion), so the
+> bridge was not touched. The bullet below — *"removing/deferring the release would regress the
+> VIP-reuse contract"* — was the premise the ADR-0049 §6 amendment reversed.
+
 **Site:** `crates/overdrive-control-plane/src/reconciler_runtime.rs::hydrate_bridge_desired_listeners` (≈L2080–2154), at the VIP-memo dependency (L2120–2135).
 
 **Why here, not elsewhere:**
@@ -118,6 +176,12 @@ The fix must let the bridge project the Service's listener set (VIP + per-listen
 ---
 
 ## Proposed minimal fix (smallest change that drives the WITHHOLD seam, without releasing `F`)
+
+> **SUPERSEDED (2026-06-28) — NOT the shipped fix; see § As-Landed Addendum.** Neither Option A
+> nor Option B was taken. The shipped fix is a third option: retain the VIP until deletion
+> (`service_vip_release_emission` gate-swap), so the memo is never evicted on stop and the
+> bridge needs no change. Option A was rejected because it keeps release-on-terminal, which
+> contradicts the withhold-not-release amendment (ADR-0049 §6, 2026-06-28).
 
 The bridge needs the VIP to derive the listeners' `service_id`s. Two candidate shapes — recommend **Option A**:
 
@@ -133,8 +197,12 @@ The bridge needs the VIP to derive the listeners' `service_id`s. Two candidate s
 
 ## Files affected
 
-**Production (the fix):**
-- `crates/overdrive-control-plane/src/reconciler_runtime.rs` — `hydrate_bridge_desired_listeners` (the released-memo-but-declared fallback). Single function.
+**Production (the fix) — AS-LANDED (`88679ed8`):**
+- `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` — `service_vip_release_emission`
+  (L901–933): release-emission gate swapped from release-on-terminal to release-on-deletion
+  (`desired.job.is_none()`), plus the `released_for_terminal` → `released_for_deletion` View-field
+  rename (`#[serde(alias = "released_for_terminal")]`). `reconciler_runtime.rs::hydrate_bridge_desired_listeners`
+  was **NOT** modified (the originally-prescribed Option-A site).
 
 **Regression test to un-ignore (primary Tier-3 oracle):**
 - `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs::after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr` — remove the `#[ignore]` (body intact). Note its docstring/`#[ignore]` reason text also references the (now-corrected) mechanism framing — update the prose to cite mechanism 3 when un-ignoring.
