@@ -770,3 +770,298 @@ instance for the latest generation).
   reconciler's generation gate. ADR-0073 § item 1 pins the source + race
   semantics. **No residual open question.**
 - **Whether a stray `workloads/<id>/generation` key needs explicit reaping on #211 deletion** — harmless today (reconciler GCs on `job.is_none()`); revisit when #211 lands.
+
+---
+
+# Wave: DISTILL (GH #249) — Quinn (nw-acceptance-designer), 2026-06-30
+
+> The executable acceptance specification for this feature. Compact `[REF]`
+> form, matching the file's lean-density posture. The GIVEN/WHEN/THEN scenario
+> SSOT lives in `docs/feature/backend-instance-replacement/distill/test-scenarios.md`
+> (the **24-scenario** executable spec — **no `.feature` files**, per
+> `.claude/rules/testing.md`); the RED-classification PLAN in
+> `distill/red-classification.md`. These `[REF]` sections are the pointers +
+> structured summaries. **Wave-Decision Reconciliation HARD GATE: PASS — 0
+> contradictions** across DISCUSS / DESIGN (no `devops/` delta dir → WARN,
+> default infra; the Tier-3 obligation is the oracle gate). Lang: Rust
+> (`[lang-mode] rust`). Policy: `inherit`
+> (`docs/architecture/atdd-infrastructure-policy.md` exists; the BIR rows
+> appended below). **No file is written under `crates/` this wave** (the
+> Scaffold MANIFEST SCOPE DECISION — DELIVER's RED phase materialises them).
+
+## Wave: DISTILL / [REF] Inherited commitments
+
+| Origin | Commitment | DDD | Impact |
+|--------|------------|-----|--------|
+| DESIGN/DDD-1,2 | Verb `overdrive workload restart <id>` (new `workload` namespace), single verb with rollout-restart breadth (running → stop-then-start; stopped → start; absent → 404) | DDD-1, DDD-2 | S-BIR-CLI-RESTART-SUCCESS drives the verb as a real subprocess; S-BIR-RESTART-STOPPED + S-BIR-RESTART-RUNNING-STOP/-PLACE pin both origins of the rollout-restart breadth at the reconciler |
+| DESIGN/DDD-3,5 | Mechanism = a minimal desired-run `generation: u64` sibling key (`workloads/<id>/generation`, 8-byte BE); the reconciler places when `observed_generation < generation` | DDD-3, DDD-5 | S-BIR-RESTART-* + S-BIR-COALESCE-*/SEQUENTIAL make the generation gate the placement driver; S-BIR-TXN-04 pins the BE codec defensive decode |
+| DESIGN/DDD-9 | TOCTOU-safe: generation bump + sentinel delete in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` (read-modify-write inside the write txn) + `Delete`; NO `Conflict` retry | DDD-9 | S-BIR-TXN-01..04 (real redb) make the atomic monotonic bump a store-acceptance mutation target — N concurrent ⇒ final == N; S-BIR-HANDLER-TXN asserts the one-txn `[IncrementU64, Delete]` op set at the handler |
+| DESIGN/DDD-6,13 | Reconciler edit gates the line-520 veto on `restart_pending` AND scopes it to the **current instance** (`!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)` — NOT `any(...)`); stamps `observed = desired` on the placement tick only | DDD-6, DDD-13 | S-BIR-REGRESSION-STOPPED + S-BIR-REGRESSION-RUNNING (the R1-crash regression — a post-restart crash must NOT wedge on a superseded Operator row) + S-BIR-BUG3-PRESERVED (the scoped veto must STILL fire on a *current* Operator-stop) are the two halves; S-BIR-CURRENT-ALLOC pins the numeric-suffix helper. All mandatory mutation targets (`any(...) → current_alloc(...)`) |
+| DESIGN/DDD-7 | Bug-3 preserved — only `restart` bumps the generation; `deploy` never does | DDD-7 | S-BIR-BUG3-PRESERVED: a same-spec deploy (no bump) leaves `observed == desired`, the scoped veto stands, the workload stays stopped |
+| DESIGN/DDD-8,11 | HTTP `POST /v1/jobs/:id/restart` (mirror `stop`); 404 `NotFound{workloads/<id>}` on absent aggregate; `RestartOutcome ∈ {Restarted, Resumed}` classified from the check-exists `/stop` read (cosmetic) | DDD-8, DDD-11 | S-BIR-HANDLER-404 (404 posture, no txn, no enqueue) + S-BIR-HANDLER-OUTCOME-RESUMED/-RESTARTED (the cosmetic label classification) |
+| DESIGN/DDD-10 | `restart` idempotency = **level-triggered coalescing**: generation advances monotonically per call; the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle | DDD-10 | S-BIR-COALESCE-PLACE/-NO-REPLAY (two pre-placement restarts → one fresh instance, no replay) + S-BIR-SEQUENTIAL (a post-placement restart re-enters → another instance); S-BIR-STOP-ONCE pins exactly-one-stop across the draining ticks |
+| DISCUSS/US-BIR-1 | New instance (A1 ≠ A2, new `workload_addr`), `jobs/<id>` intent retained, operator-stop sentinel cleared, honest 404 | n/a | S-BIR-RESTART-STOPPED (A1≠A2, intent untouched), S-BIR-HANDLER-TXN (intent retained, distinct from #211), S-BIR-HANDLER-404, and the Tier-3 oracle S-DBN-WS-STABLE (`alloc_b1 ≠ alloc_b2`) |
+| DISCUSS/US-BIR-2 | Stable `F` byte-identical across the cycle; next connect lands the new backend; in-flight churn fails fast bounded by `TCP_USER_TIMEOUT` (NO `sock_destroy`) | n/a | The Tier-3 oracle: S-DBN-WS-STABLE (`f1_again == f1`, dial lands B2), S-DBN-CHURN (fail-fast within `CHURN_BOUND`), S-DBN-NXDOMAIN-02-RECOVERY (recovered `<job>` re-resolves the same F) |
+| DISCUSS/Verification plan | The three #249-deferred ATs (S-DBN-WS-STABLE, S-DBN-CHURN, S-DBN-NXDOMAIN-02-RECOVERY) are the terminal quality gate / DoD — un-ignored + GREEN driving the production verb | n/a | slice-04 removes the `#[ignore = "…#249…"]` strings (removed, not rewritten) and swaps the cycle/recovery for the production `overdrive workload restart` action; assertions unchanged |
+| CLAUDE.md | Implement to the design — never invent API surface; vertical slices through production entry points | n/a | DISTILL picks NO new signature (the six are pinned in ADR-0073); no AT installs/clears a key, binds a socket, or supplies an address production omits — the oracle drives the production verb |
+
+## Wave: DISTILL / [REF] Scenario list with tags
+
+> **24 scenarios** (4 Tier-1 store / 11 Tier-1 reconciler / 4 Tier-1/2 handler /
+> 2 Tier-3 CLI / 3 Tier-3 oracle). Error-path coverage **14/24 ≈ 58 %** (≥40 %
+> target met). Full GIVEN/WHEN/THEN + per-scenario Universe + mutation-target
+> notes in `distill/test-scenarios.md`. The three `@oracle` rows are
+> ALREADY-AUTHORED `#[ignore]`'d ATs (un-ignored by slice-04), not new scaffolds.
+> **(rev1): three multi-`When` scenarios split per the GWT rule —
+> `S-BIR-RESTART-RUNNING` → `-STOP`/`-PLACE`, `S-BIR-HANDLER-OUTCOME` →
+> `-RESUMED`/`-RESTARTED`, `S-BIR-CLI-RESTART` → `-SUCCESS`/`-UNKNOWN`;
+> `@walking_skeleton` dropped from the CLI proofs. (rev3): `S-BIR-COALESCE` split
+> into `-PLACE`/`-NO-REPLAY` (the hidden two-tick trajectory); design-contract
+> scenarios relabelled off `US-BIR-1 AC5` to their true source (TXN → AC4/DDD-9;
+> COALESCE/SEQUENTIAL → DDD-10).**
+
+| Scenario | Tags | Tier | Story / AC |
+|---|---|---|---|
+| S-BIR-TXN-01..04 | `@store` `@real-io` (`@property`/`@concurrency`/`@error_path`) | 1-store | US-BIR-1 AC4 / DDD-9 / K-BIR-1 |
+| S-BIR-RESTART-STOPPED | `@reconciler` `@in-memory` `@kpi` | 1 | US-BIR-1 AC2/3/4 |
+| S-BIR-RESTART-RUNNING-STOP | `@reconciler` `@in-memory` | 1 | US-BIR-1 AC2 (R2) |
+| S-BIR-RESTART-RUNNING-PLACE | `@reconciler` `@in-memory` | 1 | US-BIR-1 AC2/3 (R3) |
+| S-BIR-STOP-ONCE | `@reconciler` `@in-memory` `@error_path` | 1 | US-BIR-1 (R2→R5) |
+| S-BIR-COALESCE-PLACE / -NO-REPLAY | `@reconciler` `@in-memory` `@concurrency` | 1 | DDD-10 / K-BIR-1 (coalescing) |
+| S-BIR-SEQUENTIAL | `@reconciler` `@in-memory` | 1 | DDD-10 / K-BIR-1 (sequential) |
+| S-BIR-REGRESSION-STOPPED / -RUNNING | `@reconciler` `@in-memory` `@error_path` `@regression` | 1 | DDD-13 / R1-crash (mandatory mutation) |
+| S-BIR-BUG3-PRESERVED | `@reconciler` `@in-memory` `@error_path` `@regression` | 1 | DDD-7 / Bug-3 |
+| S-BIR-CURRENT-ALLOC | `@reconciler` `@in-memory` `@property` | 1 | DDD-13 (numeric vs lexical) |
+| S-BIR-HANDLER-404 | `@driving_adapter` `@error_path` | 1/2 | US-BIR-1 AC5 (404) |
+| S-BIR-HANDLER-TXN | `@driving_adapter` | 1/2 | US-BIR-1 AC3/4 |
+| S-BIR-HANDLER-OUTCOME-RESUMED / -RESTARTED | `@driving_adapter` | 1/2 | DDD-11 |
+| S-BIR-CLI-RESTART-SUCCESS | `@driving_adapter` `@real-io` | 3 | US-BIR-1 |
+| S-BIR-CLI-RESTART-UNKNOWN | `@driving_adapter` `@real-io` `@error_path` | 3 | US-BIR-1 (404) |
+| S-DBN-WS-STABLE | `@real-io` `@frontend` `@churn` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-1/2 |
+| S-DBN-CHURN | `@real-io` `@churn` `@error_path` `@kpi` `@oracle` | 3 | US-BIR-2 / K-BIR-3 |
+| S-DBN-NXDOMAIN-02-RECOVERY | `@real-io` `@error_path` `@frontend` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-2 |
+
+## Wave: DISTILL / [REF] WS strategy (Architecture of Reference)
+
+**No new Tier-3 product oracle; one new CLI driving-adapter proof** (brownfield —
+DISCUSS D2). **(rev1, review-distill 2026-06-30 Medium):** the feature's
+end-to-end walking skeleton is the **reused** dial-by-name Tier-3 oracle
+(S-DBN-WS-STABLE et al.) — the feature unblocks those three deferred ATs and the
+terminal slice (slice-04) un-ignores them; it does NOT author a new product
+oracle. The two new CLI scenarios (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN) are
+*driving-adapter* proofs (Mandate / RCA-P1), NOT the walking skeleton, so they
+carry `@driving_adapter @real-io` (no `@walking_skeleton` tag). Per the project
+Architecture of Reference (port class → treatment):
+
+- **Driving** (entry points) = real adapters: `overdrive workload restart`
+  (CLI subprocess + `POST /v1/jobs/:id/restart`), `overdrive serve`
+  (`run_server_with_obs_and_driver`), `overdrive deploy` (`POST /v1/jobs`),
+  `getaddrinfo`/`getent`. The CLI driving-adapter proofs
+  (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN) and the three reused Tier-3 oracle ATs
+  (the e2e walking skeleton) close the loop through these.
+- **Driven internal** = real: `IntentStore`/`LocalIntentStore` over real redb
+  (S-BIR-TXN-* + the handler txn); the `WorkloadLifecycle` reconciler is pure-sync
+  (Tier-1, direct `reconcile()` invocation — no adapter, no Sim).
+- **Driven internal — reused, must-not-regress**: the `FrontendAddrAllocator`
+  idempotent `assign` (the `F`-byte-stability guardrail), the re-keyed
+  `MtlsResolve`, the intercept worker `TCP_USER_TIMEOUT` legs — exercised real at
+  Tier-3 by the oracle.
+- **Driven external / non-deterministic** = none new (no clock/email/SMS/LLM/3rd-party;
+  the reconciler reads `tick.now` only via the existing `TickContext`).
+
+## Wave: DISTILL / [REF] Scaffold MANIFEST
+
+**SCOPE DECISION**: DISTILL produces this MANIFEST, NOT landed `.rs` files. The
+scaffolds NAME production types not yet in `crates/` (`TxnOp::IncrementU64`,
+`RestartWorkloadResponse`, `WorkloadCommand::Restart`,
+`IntentKey::for_workload_generation`, the reconciler generation fields +
+`current_alloc`) — a compile-able RED scaffold would require writing the
+half-built surface into `crates/`, which perturbs the workspace build and
+violates "Implement to the design — never invent API surface" (the surface is
+built per ADR-0073 in DELIVER, slice by slice). **NO file is written under
+`crates/` this wave.** DELIVER's RED phase materialises each file below with the
+`todo!("RED scaffold: …")` / `#[should_panic(expected = "RED scaffold")]`
+markers and runs the fail-for-right-reason gate (`distill/red-classification.md`).
+
+### Production scaffolds (DELIVER materialises; the six pinned signatures, per ADR-0073)
+
+| Path | Stubs (the PINNED signature) | Scenarios it RED's |
+|---|---|---|
+| `crates/overdrive-core/src/traits/intent_store.rs` | `TxnOp::IncrementU64 { key }` variant + its rustdoc behavior contract (preconditions/postconditions/edge/monotonic-atomic invariant per `development.md`) | S-BIR-TXN-01..04, S-BIR-HANDLER-TXN |
+| `crates/overdrive-store-local/src/redb_backend.rs` | the `IncrementU64` match arm (the `put_if_absent` get-then-write-in-one-txn shape; BE-u64 read, absent/short ⇒ 0, saturating `+1`) | S-BIR-TXN-01..04 |
+| (test-double impls) `FaultInjectingIntentStore`, `CountingIntentStore` | the `IncrementU64` arm via exhaustive-match (RED scaffold if unimplemented) | S-BIR-HANDLER-404/TXN (counting), S-BIR-TXN-* |
+| `crates/overdrive-core/src/aggregate/mod.rs` (~1181) | `IntentKey::for_workload_generation(&WorkloadId) -> Self` → `workloads/<id>/generation` | S-BIR-HANDLER-TXN, S-BIR-RESTART-* |
+| `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` | `WorkloadLifecycleState.generation: u64` + `WorkloadLifecycleView.observed_generation: u64` (`#[serde(default)]`); `current_alloc(&[&AllocStatusRow]) -> Option<&AllocStatusRow>` (numeric `mint_alloc_id`-suffix max); the line-485/520 veto gated `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`; stamp `observed = desired` on the placement tick (R3/R4) | S-BIR-RESTART-*, S-BIR-STOP-ONCE, S-BIR-COALESCE-*/SEQUENTIAL, S-BIR-REGRESSION-*, S-BIR-BUG3-PRESERVED, S-BIR-CURRENT-ALLOC |
+| `crates/overdrive-control-plane/src/reconciler_runtime.rs` (~1659) | `hydrate_desired` generation read (sibling of `stop_intent_present`) | S-BIR-RESTART-* (via the runtime) |
+| `crates/overdrive-control-plane/src/handlers.rs` | `restart_workload(State<AppState>, Path<String>) -> Result<Json<RestartWorkloadResponse>, ControlPlaneError>` (mirrors `stop_workload`: parse → get(for_workload)[+ get(for_workload_stop)] else 404 → `txn[IncrementU64, Delete]` → enqueue → 200) | S-BIR-HANDLER-404/TXN/OUTCOME |
+| `crates/overdrive-control-plane/src/api.rs` | `RestartWorkloadResponse { workload_id, outcome }` + `RestartOutcome ∈ {Restarted, Resumed}` (sibling of `StopWorkloadResponse`/`StopOutcome`) | S-BIR-HANDLER-OUTCOME-RESUMED/-RESTARTED, S-BIR-CLI-RESTART-SUCCESS |
+| `crates/overdrive-control-plane/src/lib.rs` (~2332) | `.route("/v1/jobs/:id/restart", post(handlers::restart_workload))` | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN, S-BIR-HANDLER-* |
+| `crates/overdrive-cli/src/cli.rs` | `Command::Workload(WorkloadCommand)` + `WorkloadCommand::Restart { id }` | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN |
+| `crates/overdrive-cli/src/commands/workload.rs` (NEW module) | `restart(RestartArgs{id, config_path}) -> Result<RestartOutput{workload_id, outcome, endpoint}, CliError>` | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN |
+| `crates/overdrive-cli/src/http_client.rs` | `ApiClient::restart_workload(&self, id) -> Result<RestartWorkloadResponse, CliError>` → `POST v1/jobs/{id}/restart` | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN |
+
+### Test scaffolds (DELIVER materialises; `#[should_panic(expected = "RED scaffold")]`)
+
+| Path | Tier | Scenarios |
+|---|---|---|
+| `crates/overdrive-store-local/tests/acceptance/txn_increment_u64.rs` (NEW; gated, real redb) | 1-store | S-BIR-TXN-01..04 |
+| `crates/overdrive-core/tests/acceptance/workload_lifecycle_restart.rs` (NEW) | 1 | S-BIR-RESTART-STOPPED, S-BIR-RESTART-RUNNING-STOP, S-BIR-RESTART-RUNNING-PLACE, S-BIR-STOP-ONCE, S-BIR-COALESCE-PLACE, S-BIR-COALESCE-NO-REPLAY, S-BIR-SEQUENTIAL, S-BIR-REGRESSION-*, S-BIR-BUG3-PRESERVED, S-BIR-CURRENT-ALLOC |
+| `crates/overdrive-control-plane/tests/acceptance/restart_workload_unknown.rs` (NEW) | 1/2 | S-BIR-HANDLER-404 |
+| `crates/overdrive-control-plane/tests/acceptance/restart_workload_intent_key.rs` (NEW) | 1/2 | S-BIR-HANDLER-TXN |
+| `crates/overdrive-control-plane/tests/acceptance/restart_workload_outcome.rs` (NEW) | 1/2 | S-BIR-HANDLER-OUTCOME-RESUMED, S-BIR-HANDLER-OUTCOME-RESTARTED |
+| `crates/overdrive-cli/tests/integration/workload_restart.rs` (NEW; gated, subprocess) | 3 | S-BIR-CLI-RESTART-SUCCESS, S-BIR-CLI-RESTART-UNKNOWN |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs` (EXISTING — slice-04 un-ignores ×2) | 3 | S-DBN-WS-STABLE, S-DBN-CHURN |
+| `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs` (EXISTING — slice-04 un-ignores ×1) | 3 | S-DBN-NXDOMAIN-02-RECOVERY |
+
+**No `__SCAFFOLD__` / `// SCAFFOLD: true` marker sweep this wave** — the Rust RED
+convention is `todo!("RED scaffold: …")` (production) +
+`#[should_panic(expected = "RED scaffold")]` (test), discoverable via `grep -rn
+'RED scaffold' crates/`, per `.claude/rules/testing.md` § "RED scaffolds".
+DELIVER injects the file-level `#[expect(clippy::todo, …)]` per the active slice
+and strips it once the last scaffold lands GREEN.
+
+## Wave: DISTILL / [REF] Test placement
+
+| Surface | Directory | Precedent justification |
+|---|---|---|
+| `TxnOp::IncrementU64` concurrency | `crates/overdrive-store-local/tests/acceptance/` | `put_if_absent.rs`, `local_store_basic_ops.rs` already test `LocalIntentStore` over real redb here (gated `integration-tests`) |
+| `WorkloadLifecycle` reconcile() decision logic | `crates/overdrive-core/tests/acceptance/` | `workload_lifecycle_reconcile_branches.rs`, `workload_lifecycle_terminal_decision.rs`, `workload_lifecycle_backoff.rs` are the direct siblings (pure-sync `reconcile()` over constructed `(desired, actual, view, tick)`) |
+| `restart_workload` handler | `crates/overdrive-control-plane/tests/acceptance/` | `job_stop_unknown.rs`, `job_stop_intent_key.rs`, `job_stop_idempotent.rs` are the 1:1 sibling pattern (the handler mirrors `stop_workload`) |
+| `overdrive workload restart` CLI | `crates/overdrive-cli/tests/integration/` (gated, subprocess) | `deploy.rs`, `alloc_status.rs` are the driving-adapter subprocess precedents |
+| Tier-3 oracle (cycle / churn / recovery) | `crates/overdrive-control-plane/tests/integration/` (EXISTING files) | `dns_responder_walking_skeleton.rs` + `dns_responder_nxdomain.rs` already hold the ATs; slice-04 edits in place |
+
+## Wave: DISTILL / [REF] Driving-adapter coverage
+
+User-facing driving surfaces, each with ≥1 real-protocol scenario:
+`overdrive workload restart` (S-BIR-CLI-RESTART-SUCCESS subprocess + the
+unknown-id error S-BIR-CLI-RESTART-UNKNOWN), `POST /v1/jobs/:id/restart`
+(S-BIR-HANDLER-* + S-BIR-CLI-RESTART-* end-to-end), `overdrive serve`/`run_server`
+(the three oracle ATs),
+`overdrive deploy` (reused — the oracle deploys through it), `overdrive alloc
+status` (S-DBN-WS-STABLE `alloc_b1 ≠ alloc_b2`), `getaddrinfo`/`getent`
+(S-DBN-WS-STABLE / S-DBN-NXDOMAIN-02-RECOVERY). No uncovered DESIGN entry point.
+Full table in `distill/test-scenarios.md` § "Driving-adapter verification".
+
+## Wave: DISTILL / [REF] Project Infrastructure Policy rows (appended)
+
+The policy at `docs/architecture/atdd-infrastructure-policy.md` exists (inherit
+mode). Backend-instance-replacement's port rows are **appended to that policy
+file this wave** (rev2, review-distill 2026-06-30 Finding-1 — the mechanisms are
+pinned by ADR-0073, not open choices, so no soft-prompt was needed; the policy
+file is the test-mechanism SSOT and must not be left stale at handoff). This
+section is the pointer/audit summary; the file is authoritative:
+
+- **Driving** — `overdrive workload restart <id>` (CLI subprocess from
+  `tmp_path` under Lima) → `POST /v1/jobs/:id/restart`; the in-process axum
+  handler for the acceptance-layer handler tests.
+- **Driven internal (real)** — `IntentStore` via `LocalIntentStore` over real
+  redb (`TempDir`), gated `integration-tests` — the `TxnOp::IncrementU64`
+  atomic-monotonic acceptance test (N concurrent ⇒ final == N).
+- **Driven internal (pure — no Sim, no port trait)** — the `WorkloadLifecycle`
+  `reconcile()` decision logic (Tier-1, direct invocation over constructed
+  `(desired, actual, view, tick)`) + the `current_alloc` pure helper. No Sim
+  adapter — the reconciler IS pure-sync.
+- **Driven external / non-deterministic** — none new (`Clock`/`tick.now` reused;
+  the in-flight churn surface is the reused Tier-3 intercept worker
+  `TCP_USER_TIMEOUT`, real, NOT `sock_destroy`; no email/SMS/payment/LLM/3rd-party).
+
+## Wave: DISTILL / [REF] Outcomes registered
+
+Per the outcomes-registry trigger (`nw-distill` § "Register Outcomes"),
+registration is at DELIVER (when the surfaces land — they are not yet built; the
+dial-by-name precedent defers identically). The NEW typed contract surfaces this
+feature introduces, to be registered as OUT-BIR rows in
+`docs/product/outcomes/registry.yaml` (`feature: backend-instance-replacement`):
+
+- `OUT-BIR-RESTART` (`operation`) — `overdrive workload restart <id>` →
+  `POST /v1/jobs/:id/restart`: replace a declared workload's instance (new
+  AllocationId, intent retained, honest 404).
+- `OUT-BIR-GENERATION-BUMP` (`specification`) — the desired-run generation
+  precursor + `TxnOp::IncrementU64` atomic-monotonic bump-and-clear.
+- `OUT-BIR-CURRENT-INSTANCE-VETO` (`invariant`) — the operator-stop veto is
+  scoped to the current instance; a superseded prior-generation Operator-stop row
+  never vetoes (and a current one always does).
+
+DISTILL does NOT mutate the registry this wave (the surfaces are not yet built).
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+- **SHIPPED**: `stop_workload` + `for_workload_stop` sentinel; the
+  `WorkloadLifecycle` operator-stop/SystemGc asymmetry; `IntentStore::txn` /
+  `get` / `delete`; the dial-by-name responder + `FrontendAddrAllocator`
+  idempotent `assign` + re-keyed `MtlsResolve` + intercept path (#243 / #26 /
+  #236); `mint_alloc_id(attempt = allocs_vec.len())`; **the three #249-deferred
+  oracle ATs** (already authored, `#[ignore]`'d — 02-02 ×2 + 03-01 ×1).
+- **DELIVER's RED-phase surface (NOT added this wave — see Scaffold MANIFEST
+  SCOPE DECISION)**: the `TxnOp::IncrementU64` variant + its `LocalIntentStore`
+  arm + test-double arms; the `restart_workload` handler/route/api-types; the
+  `overdrive workload restart` CLI verb + http-client method + `commands::workload`
+  module; `IntentKey::for_workload_generation`; the `WorkloadLifecycle`
+  generation fields + `current_alloc` helper + the current-instance-scoped veto
+  edit. All pinned in ADR-0073 § "The six pinned signatures".
+- **Tier-3 obligation**: the three oracle ATs GREEN on the pinned-6.18
+  appliance-kernel Tier-3 matrix (ADR-0068; the MERGE GATE). Dev-Lima is
+  necessary-but-not-sufficient. Sweep leaked Lima cgroup/XDP/nft/netns state
+  before re-running (project memory `reference_pre_push_flaky_foundational_crate_lima_cleanup`).
+- **No DEVOPS delta dir** — default infra used, WARN logged, not a blocker. The
+  default environment matrix (`clean` / `with-pre-commit` / `with-stale-config`)
+  is **mapped-or-waived** to the codebase tier model in `distill/test-scenarios.md`
+  § "Environment mapping" (rev1, review-distill 2026-06-30 Finding-2): `clean` →
+  the fresh-`tmp_path` CLI subprocess + the fresh-netns/pinned-6.18 Lima oracle;
+  `with-pre-commit` and `with-stale-config` **waived** (the feature touches no
+  pre-commit hook and no config-migration surface). The real environments are the
+  tiers (Tier-1 pure / Tier-1 store-acceptance real-redb / Tier-3 pinned-6.18 Lima).
+
+## Wave: DISTILL / [REF] Wave-decisions (DISTILL — folded, compact)
+
+1. **Reconciliation HARD GATE: PASS — 0 contradictions** across DISCUSS /
+   DESIGN. All six DISCUSS invariants are satisfied by ADR-0073; the
+   generation-precursor + current-instance-scoped veto is a *refinement* the
+   DISCUSS gap table already anticipated ("clearing the sentinel alone is
+   necessary-but-not-sufficient"), not a contradiction. DESIGN's own
+   back-propagation note: "DISCUSS assumptions changed: None." No `devops/` dir
+   → default infra, WARN, not a blocker.
+2. **24 scenarios, 14/24 ≈ 58 % error/edge** (≥40 % met). 4 Tier-1 store (real
+   redb) + 11 Tier-1 reconciler (pure `reconcile()`) + 4 Tier-1/2 handler + 2
+   Tier-3 CLI + 3 Tier-3 oracle (already authored, un-ignored by slice-04). No
+   Tier 2 (no new kernel-side program; the churn surface is the reused intercept
+   worker). **(rev1+rev3):** four multi-`When`/hidden-trajectory scenarios split
+   to one-driving-action-each per the GWT rule (`S-BIR-RESTART-RUNNING`,
+   `S-BIR-HANDLER-OUTCOME`, `S-BIR-CLI-RESTART`, `S-BIR-COALESCE`).
+3. **No new API signature picked.** The six pinned signatures are in ADR-0073;
+   DISTILL maps scenarios onto them and does NOT invent surface (CLAUDE.md). The
+   reconciler `current_alloc` helper, the `generation`/`observed_generation`
+   fields, and the `TxnOp::IncrementU64` variant are all ADR-pinned.
+4. **No `crates/` files written this wave** (the Scaffold MANIFEST SCOPE
+   DECISION) — the production + test scaffolds are DELIVER's RED-phase
+   materialisation. The three oracle ATs are existing `#[ignore]`'d files
+   slice-04 edits in place.
+5. **Mandatory mutation targets named**: the `any(...) → current_alloc(...)` veto
+   scoping (S-BIR-REGRESSION-* + S-BIR-BUG3-PRESERVED + S-BIR-CURRENT-ALLOC) and
+   the `IncrementU64` `+1 → +0` bump (S-BIR-TXN-02) — reconciler-logic + store
+   primitives are mandatory mutation surfaces per `.claude/rules/testing.md`.
+6. **Pillar compliance**: scenario titles use domain language ("brings up a new
+   instance", "re-resolves the same address", "fails fast then the next dial is
+   live", "does NOT resurrect", "crash-restarted, not wedged") — no
+   `generation`/`TxnOp`/`current_alloc` jargon in the `Scenario:` titles
+   (mechanism lives in the per-scenario notes, not the title).
+7. **(rev1, review-distill 2026-06-30) GWT one-action split**: three multi-`When`
+   scenarios split to one behaviour each — `S-BIR-RESTART-RUNNING` →
+   `-STOP` (R2) / `-PLACE` (R3); `S-BIR-HANDLER-OUTCOME` → `-RESUMED` / `-RESTARTED`;
+   `S-BIR-CLI-RESTART` → `-SUCCESS` / `-UNKNOWN`. The `@walking_skeleton` tag is
+   dropped from the CLI proofs (the feature's e2e skeleton is the reused
+   dial-by-name oracle, not the CLI adapter proof) — WS-strategy wording corrected
+   to "No new Tier-3 product oracle; one new CLI driving-adapter proof".
+8. **(rev1) Environment mapping closed**: the no-`devops/` default matrix is
+   mapped-or-waived to the tier model in `distill/test-scenarios.md` §
+   "Environment mapping" (`clean` mapped; `with-pre-commit`/`with-stale-config`
+   waived — no such surface).
+
+## Changelog (DISTILL)
+
+| Date | Change |
+|---|---|
+| 2026-06-30 (DISTILL) | DISTILL wave (Quinn): Reconciliation HARD GATE PASS (0 contradictions, DISCUSS↔DESIGN). Authored the initial executable spec (`distill/test-scenarios.md`, no `.feature` files — initially 20 scenarios, later split to **24** in rev1/rev3 below) + the RED-classification PLAN (`distill/red-classification.md`) + these DISTILL `[REF]` sections + the Scaffold MANIFEST. No `crates/` files written (DELIVER's RED phase materialises them). The three #249-deferred oracle ATs mapped as the terminal gate (slice-04 un-ignores). Mandatory mutation targets named (`any→current_alloc`, `IncrementU64 +1→+0`). (Current scenario count + error/edge ratio: see the rev3 row.) |
+| 2026-06-30 (DISTILL rev1, post-review) | Resolved the three `review-distill.md` findings (verdict was `rejected_pending_revisions`): **(High/GWT)** split three multi-`When` scenarios into one-behaviour-each (`S-BIR-RESTART-RUNNING` → `-STOP`/`-PLACE`, `S-BIR-HANDLER-OUTCOME` → `-RESUMED`/`-RESTARTED`, `S-BIR-CLI-RESTART` → `-SUCCESS`/`-UNKNOWN`) → **23 scenarios**, 13/23 ≈ 57 % error/edge. **(High/traceability)** added the § "Environment mapping" table to `test-scenarios.md` (default matrix mapped-or-waived to the tier model). **(Medium/WS wording)** reworded WS strategy to "No new Tier-3 product oracle; one new CLI driving-adapter proof" and dropped `@walking_skeleton` from the CLI scenarios. Updated `test-scenarios.md`, `red-classification.md`, and these DISTILL `[REF]` sections + Scaffold MANIFEST + scenario list consistently. No `crates/` files written. |
+| 2026-06-30 (DISTILL rev3, post-re-review) | Resolved the three NEW `review-distill.md` findings (rev3; rev2's three prior findings confirmed closed): **(High/GWT)** split `S-BIR-COALESCE` (which hid a second `reconcile()` tick in a `Then`) into `S-BIR-COALESCE-PLACE` (the single placement that stamps `observed = desired`) + `S-BIR-COALESCE-NO-REPLAY` (a follow-up reconcile emits no second instance) — one driving action each → **24 scenarios**, 14/24 ≈ 58 % error/edge. **(Medium/traceability)** relabelled design-contract scenarios off the not-found `US-BIR-1 AC5` to their true source — `S-BIR-TXN-01..04` → `US-BIR-1 AC4 / DDD-9 / K-BIR-1`, `S-BIR-COALESCE-*` + `S-BIR-SEQUENTIAL` → `DDD-10 / K-BIR-1`; `S-BIR-HANDLER-404` + `S-BIR-CLI-RESTART-UNKNOWN` kept on `US-BIR-1 AC5`. **(Low/consistency)** reworded the initial DISTILL changelog row so its scenario count is not stale. Updated `test-scenarios.md`, `red-classification.md`, and these DISTILL `[REF]` sections (scenario list, counts, Scaffold MANIFEST, wave-decisions). No `crates/` files written. |
+| 2026-06-30 (DISTILL rev2, post-re-review) | Resolved the three NEW `review-distill.md` findings (rev2; rev1's three prior findings confirmed closed): **(High/policy)** **appended the BIR port rows to the actual `docs/architecture/atdd-infrastructure-policy.md`** (Driving: `overdrive workload restart` CLI + `restart_workload` handler + `WorkloadLifecycle.reconcile`; Driven-internal: `IntentStore` real-redb; Driven-external: none new) — the mechanisms are ADR-0073-pinned, no soft-prompt needed; this feature-delta § is now the pointer/audit summary, the policy file is authoritative. **(High/GWT)** reframed `S-BIR-SEQUENTIAL`, `S-BIR-REGRESSION-STOPPED`, `S-BIR-REGRESSION-RUNNING` to a single driving action (`reconcile()`) — the second-restart / crash external state moved into `Given`. **(Medium/adapter `@real-io`)** corrected the adapter-coverage table to name the real-I/O proof per `IntentStore` path (CLI subprocess for `get`/`delete`/route; store-acceptance for `txn`) and marked the `@driving_adapter` handler scenarios as focused in-process coverage (counting/fault double), not the Mandate-6 real-I/O proof. Scenario count unchanged (23). No `crates/` files written. |
