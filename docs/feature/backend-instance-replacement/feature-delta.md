@@ -11,6 +11,19 @@
 > explicit lifecycle verb; `overdrive deploy` stays pure-declare. The verb's exact
 > name + semantics is the OPEN part — a hard DESIGN gate. See `[D1]`.**
 
+> **⚠ DESIGN CLOSED `[D1]` (2026-06-29; revised post-review). READ THIS FIRST.**
+> The implementable contract is **ADR-0073** + the **`## Wave: DESIGN`** section
+> near the end of this file. Verb = **`overdrive workload restart <id>`**; HTTP =
+> **`POST /v1/jobs/:id/restart`**; mechanism = the **generation precursor** bumped
+> by the **atomic `TxnOp::IncrementU64`** store primitive; `RestartOutcome ∈
+> {restarted, resumed}` (cosmetic, from the check-exists `/stop` read); running-
+> origin sequencing per ADR-0073's R1–R5 state table.
+> **Every "DESIGN owns / DESIGN-open / design-open" phrase in the DISCUSS `[REF]`
+> sections below is HISTORICAL DISCUSS RECORD — those decisions are now CLOSED per
+> ADR-0073.** The DISCUSS narrative is preserved verbatim (not rewritten) to keep
+> the record; DELIVER implements per ADR-0073 and the `## Wave: DESIGN` section,
+> NOT per any "open" wording below.
+
 ## Reading checklist
 
 - ✓ `docs/product/jobs.yaml` — J-OPS-003 (the closest validated lifecycle job: schedule, supervise, converge to declared replica count, restart-on-crash, stop-cleanly); J-OPS-002 / J-OPS-004 (sibling control-surface jobs); J-MESH-001 (the dial-by-name arc whose three deferred ATs — 02-02 ×2 + 03-01 ×1 — this feature unblocks); header precedent ("JTBD distilled from whitepaper/issue, not interviews")
@@ -149,7 +162,16 @@ specifies (and `[D1]` records HOW to deliver it as the open DESIGN decision).
 
 ## `[REF]` THE DESIGN DECISION (partly DECIDED in DISCUSS; verb-semantics OPEN — **hard gate for DESIGN**)
 
-### `[D1]` An explicit lifecycle verb (`deploy` stays pure-declare); exact verb name + semantics is the OPEN part
+> **⚠ SUPERSEDED BY DESIGN / ADR-0073 (2026-06-29).** Everything below in this
+> `[D1]` section is the **historical DISCUSS record** of the open decision. The
+> decision is now CLOSED: verb = **`overdrive workload restart <id>`**, HTTP =
+> **`POST /v1/jobs/:id/restart`**, mechanism = the **generation precursor +
+> atomic `TxnOp::IncrementU64` bump**. The authoritative, implementable contract
+> is **ADR-0073** + the **`## Wave: DESIGN`** section of this file (below). DELIVER
+> implements per ADR-0073 — do NOT treat any "OPEN for DESIGN" wording below as a
+> live instruction. The text is retained only to preserve the DISCUSS narrative.
+
+### `[D1]` An explicit lifecycle verb (`deploy` stays pure-declare); exact verb name + semantics is the OPEN part *(DISCUSS-era; SUPERSEDED — see banner above)*
 
 The user scoped DISCUSS to "*formalize requirements + the new-verb vs
 sentinel-clearing decision, then hand to DESIGN*." DISCUSS makes the *new-verb vs
@@ -342,6 +364,64 @@ production replace action exists:**
 - All three cycle/recover via the **production replace action** (`[D1]`), NOT a test-only intent-key clear or a `stop_and_converge`-then-same-spec-redeploy that would dead-end.
 - All three GREEN on the pinned-6.18 appliance-kernel Tier-3 matrix (the merge gate; dev-Lima is necessary-but-not-sufficient).
 - No AT installs/clears a rule/key, binds a socket, or supplies an address production does not itself install/clear/bind/supply (CLAUDE.md vertical-slice rule).
+
+**Restart cardinality acceptance cases (added/revised post-review — proves the
+atomic monotonic bump AND the level-triggered coalescing contract, ADR-0073
+§ item 4 + § "Idempotency posture: level-triggered coalescing"):**
+- **Store-level (`tests/acceptance/txn_increment_u64.rs`, real redb, gated
+  `integration-tests`):** N concurrent `txn(vec![IncrementU64{gen_key},
+  Delete{stop_key}])` against one `LocalIntentStore` ⇒ final `get(gen_key)`
+  decodes to exactly **N** (monotonic, no lost bump). Single-restart ⇒ `0 → 1`;
+  absent-key ⇒ absent ⇒ `1`; corrupt `>8`-byte row ⇒ `0 ⇒ 1`. A mutation
+  swapping `+1 → +0` (or dropping the saturating add) MUST be killed.
+- **Behavior-level — CONCURRENT (coalescing):** two *concurrent* `overdrive
+  workload restart <id>` calls that both land before the reconciler places
+  leave `desired.generation` advanced by **2** (monotonic, no lost bump —
+  audited) **AND** the reconciler converges to **exactly one** fresh instance
+  for the latest generation (coalescing) — **NOT two**. The reconciler never
+  wedges (`generation` never goes backwards). This is the by-design
+  level-triggered contract: a double-fired restart must not thrash the workload
+  through back-to-back instances.
+- **Behavior-level — SEQUENTIAL (each cycles):** two *sequential* `overdrive
+  workload restart <id>` calls — the second issued after the first placement has
+  stamped `observed = 1` — DO yield **two** fresh instances (`payments-1` then
+  `payments-2`): `restart` #2 sees `observed = 1 < desired = 2` → places again.
+  This pins the sequential-vs-concurrent distinction: sequential restarts each
+  cycle the workload (the normal operator loop), only concurrent / pre-placement
+  restarts coalesce.
+
+**REGRESSION acceptance case — fresh-alloc crash after restart converges, does
+NOT wedge on the stale operator-stop row (added post-iteration-3-review; proves
+the current-instance-scoped veto, ADR-0073 § 5 → "Why the veto must be scoped to
+the current instance" + R1-crash):**
+
+This is the **mandatory regression case that pins the post-iteration-2 blocking
+fix forever**. It is reconciler decision logic → a **mandatory mutation-testing
+target** (`.claude/rules/testing.md` § "Mutation testing" → "Reconciler logic"):
+a mutation that reverts the veto to `any(is_operator_stopped)` (or that drops the
+`current_alloc(...)` scoping) MUST be killed by this case.
+
+- **Stopped-origin:** deploy `payments` → it reaches Running (`payments-0`) →
+  `overdrive workload restart payments` → fresh `payments-1` reaches Running
+  (the superseded `payments-0 / Terminated{Operator}` row is retained) →
+  **`payments-1` CRASHES** (terminal a crash reason — `Failed` /
+  `Terminated`, NOT `Stopped{Operator}`). **Assert:** the reconciler
+  crash-restarts the fresh instance (emits `RestartAllocation` for `payments-1` /
+  a NEW Running alloc converges), and does **NOT** return no-actions wedged on the
+  stale `payments-0 / Operator` row. (Under the buggy `any(...)` veto this would
+  wedge: line-485 finds no Running, the veto fires on `payments-0`, the
+  `is_restartable` branch is never reached.)
+- **Running-origin:** deploy `coinflip` (Running `coinflip-0`) → restart (R2
+  stops `coinflip-0` → R3 places fresh `coinflip-1`) → `coinflip-1` reaches
+  Running → **`coinflip-1` CRASHES**. **Assert:** crash-restart of `coinflip-1`
+  converges (NOT wedged on the now-superseded `coinflip-0 / Operator` row).
+- **Bug-3 still preserved (the same scoped veto must NOT over-fix):** operator
+  stops `payments` → same-spec `deploy` (no generation bump → `restart_pending =
+  false`) → the **current** instance is the operator-stopped `payments-0` →
+  the scoped veto fires → the workload stays stopped (a re-deploy does NOT
+  resurrect it). This and the crash-converges case above are two halves of the
+  same property: the veto fires on a *current* operator-stop, never on a
+  *superseded* one.
 
 **Gate scenarios (the oracle, not user-story UAT):**
 
@@ -568,3 +648,125 @@ Stories: 2 (US-BIR-1, US-BIR-2; ≤10 ✅) + a terminal verification gate (the T
 | 2026-06-29 | Initial DISCUSS feature-delta for backend-instance-replacement (GH #249), authored by Luna. EXTEND J-OPS-003 (not a new job). 3 stories (US-BIR-1/2/3 — US-BIR-3 later refolded into the verification gate, rev2), 4 carpaccio slices (terminal slice un-ignores all three #249 ATs — 02-02 S-DBN-WS-STABLE/CHURN + 03-01 S-DBN-NXDOMAIN-02 RECOVERY). KPIs K-BIR-1..4. DoR PASS. |
 | 2026-06-29 (rev, post-review) | Reviewer + operator pass: (1) oracle corrected from two ATs to **three** across two files — added the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg (`recovered_job_after_stop_resolves_to_the_same_stable_frontend`) to US-BIR-3 / slice-04 / K-BIR-4 / the registry. (2) `[D1]` mechanism DECIDED (operator-ratified): an **explicit lifecycle verb**; `overdrive deploy` stays **pure-declare** — overloading deploy ruled out (k8s `apply` vs `rollout restart`); verb name + semantics remains the OPEN, **hard DESIGN gate**. (3) Deferrals operator-approved + tracked as **#253** (rolling/zero-downtime) and **#254** (multi-replica replace). (4) SSOT edits (J-OPS-003, journey, Ana persona) operator-ratified. |
 | 2026-06-29 (rev2, post-review) | Second review pass: (1) **US-BIR-3 removed as a user story** — a "land three tests green" outcome is a CI-runner result, not a user-invocable operator action; refolded into the **terminal verification plan / quality gate** for US-BIR-1 + US-BIR-2 (the three ATs stay as mandatory oracle evidence). Now **2 stories** + 1 terminal verification gate. (2) Journey actor/arc discontinuity fixed — `dial-a-mesh-peer-by-name.yaml` step 4 carries an explicit Ana actor-handoff + lifecycle micro-arc (Sam owns steps 1-3, Ana owns step 4). (3) **Per-slice effort estimates** added (slice-01 ≈1d, 02/03/04 ≈0.5d each → ≈2.5d DELIVER; ~3–5d incl. DESIGN `[D1]`). |
+| 2026-06-29 (DESIGN) | DESIGN wave (Morgan): `[D1]` closed. Verb = `overdrive workload restart <id>` (new `workload` namespace, #220-aligned); mechanism = minimal desired-run `generation` precursor (gates the line-520 veto; supersedes the stale operator-stop observation-veto). ADR-0073 written. DESIGN sections appended below. |
+| 2026-06-30 (DESIGN rev, post-review iteration 3) | DESIGN iteration-3 review revision (Morgan) — resolves the iteration-3 Critical (a post-iteration-2 **blocking correctness bug** in the reconciler gate). The iteration-2 veto keyed off `allocs_vec.iter().any(is_operator_stopped)` across ALL alloc history; because `mint_alloc_id` deliberately RETAINS the superseded `payments-0 / Terminated{Operator}` row (that retention is how `A1 ≠ A2` is achieved), a superseded prior-generation Operator-stop row re-armed the veto after the fresh instance was placed and `restart_pending` flipped false — so the fresh instance's later crash hit the veto (line 485 finds no Running → veto fires on the stale row) and **never reached the `is_restartable` crash-restart branch, wedging the fresh instance forever** (both stopped-origin and running-origin). **Fix:** scope the veto to the workload's **CURRENT instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where `current_alloc` is a pure helper returning the latest-placed alloc (numerically-highest `mint_alloc_id` attempt suffix — NOT `BTreeMap`/`.values()` order, which is LEXICAL: `alloc-x-10 < alloc-x-2`). A superseded prior-generation row is never the current instance, so it can never veto. Added a new **R1-crash** row to the R1–R5 table (post-restart fresh-alloc failure → `RestartAllocation`, NOT veto), made the stale-row-does-not-veto invariant explicit, added a **REGRESSION acceptance case** (deploy → stop → restart → fresh Running → fresh crash → assert crash-restart of the fresh instance, both origins) named a mandatory mutation target, and a `current_alloc` CREATE-NEW (minimal, pure) helper row. **NO rkyv `AllocStatusRow` schema change** — reuses the alloc-id-suffix monotonicity (rows never deleted), so no per-row `generation` field, no ADR-0048 envelope bump (the lightest of the review's three acceptable shapes — no View bookkeeping, no per-row marker). Bug-3 walk re-confirmed: the *current* instance IS the operator-stopped row in the re-deploy scenario, so the scoped veto still fires (scoping narrows which row arms, never weakens). Updated ADR-0073 (§ Status, § Context forward-pointer, § 5 reconciler edit + R1-crash + the dedicated "Why the veto must be scoped to the current instance" subsection + Bug-3 argument), this feature-delta (DDD-6 amended + DDD-13, component decomposition, verification plan regression case), `design/wave-decisions.md`, `c4-diagrams.md` (L2/L3 + properties), `brief.md`. Locked decisions unchanged (verb, generation precursor, `TxnOp::IncrementU64`, coalescing/level-triggered contract, thin #180 seam, `replicas=1`). No new ADR; no scope re-opened. — Morgan. |
+| 2026-06-29 (DESIGN rev, post-review) | DESIGN-review revision (Morgan) — resolves the review's 1 Critical + 3 findings. **(Critical)** the generation bump is now atomic + monotonic via a NEW `TxnOp::IncrementU64` store primitive (read-modify-write inside the redb write txn); the prior `Put`-gen + retry-on-`TxnOutcome::Conflict` was a lost-bump + backwards-wedge bug — `LocalIntentStore::txn` returns `Committed` unconditionally, so the `Conflict` retry path is unreachable. The new variant carries a trait behavior contract (`development.md`) + a `txn_increment_u64` concurrency acceptance test (N concurrent ⇒ final == N). **(Finding 2)** `RestartOutcome` PINNED to two variants classified from the check-exists `/stop` read (cosmetic; placement is the reconciler's) — open question CLOSED. **(Finding 3)** delivery-facing language (feature-delta `[D1]` section, all three slice briefs) updated to "implemented per ADR-0073" with the concrete verb/HTTP/mechanism; the DISCUSS `[D1]` record marked SUPERSEDED, not silently rewritten. **(Finding 4)** running-origin sequencing PINNED as the R1–R5 state-transition table in ADR-0073 (stamp `observed_generation` on the placement tick only; exactly one `StopAllocation` across draining ticks). Reuse Analysis: +1 CREATE-NEW (`TxnOp::IncrementU64`, on the `IntentStore` port — honest, forward-compat seam reused by #180). Updated ADR-0073, this feature-delta, `design/wave-decisions.md`, slices 01/02/03, `c4-diagrams.md` L1/L2/L3, `brief.md`. — Morgan. |
+
+---
+
+## Wave: DESIGN / `[REF]` Decision (`[D1]` closed)
+
+> Authored by Morgan (nw-solution-architect), 2026-06-29. Guide mode (guided
+> session pre-run by the orchestrator; locked decision set formalized here).
+> Lean density. **Full record: `docs/product/architecture/adr-0073-…md`** +
+> `design/wave-decisions.md`. C4 diagrams below + in `c4-diagrams.md`.
+
+**`[D1]` resolution.** Verb: **`overdrive workload restart <id>`** — a new
+top-level `workload` subcommand namespace (NOT under `job`; aligns with #220's
+`workload describe`). Semantics: single verb, rollout-restart breadth (running
+→ stop-then-start; operator-stopped → start; non-existent → 404). Mechanism: a
+minimal **desired-run `generation: u64`** intent record; the `WorkloadLifecycle`
+reconciler places a fresh instance when `observed_generation < generation`.
+`overdrive deploy` stays pure-declare (never bumps the generation → Bug 3
+preserved). HTTP: `POST /v1/jobs/:id/restart` (mirrors `stop`). Response: `{
+workload_id, outcome }` with `outcome ∈ { restarted, resumed }`; 404 on absent
+`workloads/<id>`. TOCTOU-safe: generation bump + sentinel delete in one
+`IntentStore::txn`. See ADR-0073 for the six pinned signatures and the
+before/after of the reconciler edit.
+
+### `[REF]` DDD (design decisions, numbered, with verdicts)
+
+| # | Decision | Verdict | One-line rationale |
+|---|---|---|---|
+| DDD-1 | Verb name + namespace | `overdrive workload restart <id>` (new `workload` namespace) | Operator-mandated; #220-aligned; `job` namespace stays list/stop only |
+| DDD-2 | Single verb, rollout-restart breadth | One `restart` covers running + stopped origins | One verb covers both US-BIR-1 happy paths; matches `kubectl rollout restart` |
+| DDD-3 | Mechanism = desired-run generation precursor | `workloads/<id>/generation` u64; reconciler gates on `observed_generation < generation` | Forward-compat seam reused by #64/#253/#254; supersedes the stale line-520 observation-veto |
+| DDD-4 | Seam is THIN | Only `generation`/`observed_generation`; NO revision rows / RevisionId / retention | ADR-0050 OQ-1 deferred those to #180; over-pulling = the rejected Alt-C |
+| DDD-5 | Generation value shape | Standalone sibling key, 8-byte big-endian u64 | No ADR-0048 envelope bump / golden fixture; sibling-key precedent (`/stop`, `/kind`) |
+| DDD-6 | Reconciler edit | Gate line-520 veto on `observed_generation < desired.generation` **AND scope it to the current instance** (`!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)` — NOT `any(...)` across history); stamp on placement | Clearing the sentinel alone is necessary-but-not-sufficient (observed Operator row persists); the `any(...)` form let a superseded prior-generation Operator-stop row re-arm the veto and wedge the fresh instance's later crash (iteration-3 Critical) |
+| DDD-13 | Veto scoped to the CURRENT instance (post-iteration-3) | The veto fires only when `current_alloc(&allocs_vec)` (the latest-placed alloc — numerically-highest `mint_alloc_id` attempt index) is itself operator-stopped; superseded prior-generation Operator-stop rows NEVER veto. Reuses the existing alloc-id-suffix monotonicity (rows never deleted) — **NO `generation` field on the rkyv `AllocStatusRow`, NO ADR-0048 envelope bump**. | Resolves the iteration-3 Critical: an operator-stop from a superseded generation is history, not current intent; the lightest of the review's three acceptable shapes (no View bookkeeping, no per-row marker). ADR-0073 § 5 → "Why the veto must be scoped to the current instance" + R1-crash |
+| DDD-7 | Bug-3 preservation | Only `restart` bumps; `deploy` never does | Same-spec re-deploy can't resurrect an operator-stopped workload |
+| DDD-8 | HTTP route under `/v1/jobs/:id/restart` | Mirror `stop`, not `/v1/workloads/:id` | Consistency with the live `/v1/jobs` family; verb/path split already shipped for `job stop` |
+| DDD-9 | TOCTOU-safe bump+clear | Single `IntentStore::txn` carrying NEW `TxnOp::IncrementU64 { gen_key }` (read-modify-write *inside* the write txn) + `Delete { stop_key }`; NO `Conflict` retry | `development.md` § "Check-and-act must be atomic"; redb serializes writers ⇒ atomic + monotonic. **Revised post-review** — the prior `Put`-gen + retry-on-`Conflict` relied on a conflict `LocalIntentStore::txn` never produces (it returns `Committed` unconditionally), a lost-bump + backwards-wedge bug. |
+| DDD-10 | `restart` idempotency posture | **Level-triggered coalescing**: generation advances monotonically per call (audited); the reconciler converges to **one** fresh instance for the latest generation. Sequential restarts each cycle; concurrent / pre-placement restarts coalesce. Only 404 refuses. | Correct rollout-restart posture (a level, not a command queue — coalescing is the architecturally correct contract per ADR-0064's two-primitive doctrine, not a concession); differs from `stop`'s sticky idempotency; ADR-0073 § "Idempotency posture: level-triggered coalescing" |
+| DDD-11 | `RestartOutcome` classification (PINNED, was open) | Two variants ship; classified from the check-exists read's `/stop` lookup (present ⇒ `Resumed`, absent ⇒ `Restarted`), before the bump; label is cosmetic, placement is the reconciler's | Resolves review Finding 2 — ADR-0073 § item 1. No residual open question. |
+
+### `[REF]` Component decomposition
+
+| Component | Path | Change-type |
+|---|---|---|
+| `WorkloadCommand::Restart` + handler | `crates/overdrive-cli/src/cli.rs`, `commands/workload.rs` (new) | CREATE NEW (namespace) + EXTEND (cli enum) |
+| `restart_workload` handler | `crates/overdrive-control-plane/src/handlers.rs` | CREATE NEW (mirrors `stop_workload`) |
+| `RestartWorkloadResponse` / `RestartOutcome` | `crates/overdrive-control-plane/src/api.rs` | EXTEND (sibling of `StopWorkloadResponse`) |
+| `restart_workload` route | `crates/overdrive-control-plane/src/lib.rs:2332` | EXTEND (one `.route(...)`) |
+| `ApiClient::restart_workload` | `crates/overdrive-cli/src/http_client.rs` | EXTEND (sibling of `stop_workload`) |
+| `IntentKey::for_workload_generation` | `crates/overdrive-core/src/aggregate/mod.rs:1181` | EXTEND (sibling of `for_workload_stop`) |
+| `WorkloadLifecycleState.generation` / `.observed_generation` (View) | `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs` | EXTEND (additive fields) |
+| line-520 veto gate (current-instance-scoped) + placement stamp | `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:485,520,725` | EXTEND (the reconciler edit) — gate on `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)` (NOT `any(...)`); stamp `observed_generation` on the placement tick |
+| `current_alloc` pure helper | `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:863` (co-located with `mint_alloc_id`) | CREATE NEW (minimal, pure) — returns the latest-placed alloc by numeric attempt-suffix max; NO new per-row state |
+| `hydrate_desired` generation read | `crates/overdrive-control-plane/src/reconciler_runtime.rs:1659` | EXTEND (sibling of `stop_intent_present`) |
+
+### `[REF]` Driving ports
+
+- **`overdrive workload restart <id>`** (new CLI verb) → `POST /v1/jobs/:id/restart` → `restart_workload` handler. The new production operator entry point.
+- **`overdrive serve`** (`run_server` composition root) + **`overdrive deploy <SPEC>`** — unchanged production entry points every slice drives through.
+
+### `[REF]` Driven ports + adapters
+
+- **`IntentStore`** (port) — `txn` (atomic bump+clear via the NEW `TxnOp::IncrementU64` read-modify variant + `Delete`), `get` (check-exists 404 + cosmetic `/stop` label read). Adapter: `LocalIntentStore` (prod redb; the DST/sim path uses the SAME tempdir-backed `LocalIntentStore` — `SimIntentStore` is a doc alias, not a second adapter). **One NEW `TxnOp` variant** (`IncrementU64`) — the existing `Put`/`Delete`/`put_if_absent` surface genuinely cannot express atomic monotonic increment. Carries a trait behavior contract (preconditions/postconditions/edge/invariant per `development.md`) + a concurrency acceptance test (`tests/acceptance/txn_increment_u64.rs`, real redb, N concurrent restarts ⇒ final value == N). See ADR-0073 § item 4.
+- **`ObservationStore`** (port) — read-only here (the reconciler reads `actual.allocations`; the handler does not touch it). No change.
+- **No external integrations.** Wholly internal control-plane lifecycle path; no third-party APIs → no contract-test annotation needed for platform-architect.
+
+### `[REF]` Technology choices
+
+| Choice | Tech | License | Rationale |
+|---|---|---|---|
+| Generation value codec | `u64::to_be_bytes` / `from_be_bytes` (std) | — | Branch-free read, hex-debuggable, no envelope bump |
+| HTTP | axum (existing) | MIT | Mirror `stop_workload` route/handler shape |
+| CLI parse | clap (existing) | MIT/Apache-2.0 | New `WorkloadCommand` subcommand |
+| Atomic mutation | `IntentStore::txn` + NEW `TxnOp::IncrementU64` variant | — | Atomic monotonic bump+clear in one commit (redb serializes writers) |
+
+All choices reuse the existing OSS stack; no new dependency introduced.
+
+### `[REF]` Reuse Analysis (HARD GATE)
+
+> Default EXTEND; CREATE NEW requires proof extending is impossible.
+
+| Overlapping component | Verdict | Evidence |
+|---|---|---|
+| Stop handler shape (`stop_workload`) | **EXTEND** | `restart_workload` is a structural mirror — parse→404-check→atomic-mutate→enqueue→respond. Reuses `parse_workload_id_path`, `ControlPlaneError::NotFound`, `enqueue_workload_lifecycle_eval`. |
+| `WorkloadLifecycle` reconciler | **EXTEND** | Two additive fields + a gate on the existing line-520/485 branches + a stamp on the existing placement arm. No new reconciler. |
+| `IntentKey` | **EXTEND** | New `for_workload_generation` constructor alongside `for_workload_stop` / `for_workload_kind` — same `workloads/<id>/…` sibling-key family. |
+| `ApiClient` http-client | **EXTEND** | `restart_workload` reuses `post_typed`; identical shape to `stop_workload`. |
+| `StopWorkloadResponse` / `StopOutcome` (api.rs) | **EXTEND** | `RestartWorkloadResponse` / `RestartOutcome` are siblings; the `StopOutcome` docstring already anticipates "future verbs (start, restart, cancel) can extend the enum additively." |
+| `hydrate_desired` | **EXTEND** | Add a generation read sibling to `stop_intent_present`. |
+| `Command::Workload(WorkloadCommand)` namespace | **CREATE NEW** (minimal) | No `workload` namespace exists; `job` is list/stop only. The verb is operator-mandated NOT to live under `job` (#220 alignment). Minimal: one enum + one variant. Extending `JobCommand` is *impossible without violating the locked verb decision*. |
+| `restart_workload` handler + route | **CREATE NEW** (minimal) | No restart handler exists; it is the new driving port. Minimal: mirrors `stop_workload` 1:1. |
+| `workloads/<id>/generation` key + value codec | **CREATE NEW** (minimal) | No generation surface exists pre-#249 (ADR-0050 deferred it to #180). Minimal: one key constructor + 8-byte BE codec. The forward-compat seam the locked decision mandates; extending an existing key is impossible (none carries a generation). |
+| `TxnOp::IncrementU64` store primitive | **CREATE NEW** (minimal, on the `IntentStore` port) | **Added post-review** (resolves the Critical atomicity blocker). The existing `Put` (blind write — TOCTOU under concurrency) / `put_if_absent` (insert-if-absent, no increment) / `get`+`Put` (the rejected race) genuinely cannot express atomic monotonic increment. Minimal: one `TxnOp` variant + one redb match arm (the `put_if_absent` get-then-insert-in-one-write-txn shape). NOT throwaway — #180's generation model reuses it verbatim (forward-compat seam). Carries a trait behavior contract + a concurrency acceptance test. |
+
+**Zero unjustified CREATE NEW.** Each of the four CREATE-NEW surfaces is the
+minimal genuinely-new addition the locked decision (and the atomicity fix)
+requires, with proof that extending an existing surface is impossible or
+violates the mandate. The `TxnOp::IncrementU64` row is the honest record of the
+post-review atomicity fix — the existing port surface could not produce the
+atomic monotonic bump the level-triggered restart contract needs (the generation
+must advance monotonically per call so the reconciler can converge to one fresh
+instance for the latest generation).
+
+### `[REF]` Open questions deferred to DISTILL/DELIVER
+
+- **Concrete existing-branch *wiring* of the running-origin state machine.** The
+  **state machine itself is now PINNED** as the R1–R5 transition table in
+  ADR-0073 item 5 (resolves review Finding 4) — `restart_pending` × actual-state
+  → action + the `observed_generation` stamp timing (stamp on the placement tick
+  R3/R4, never on the stop tick R2/R5; exactly one `StopAllocation` across
+  draining ticks). DELIVER pins only which existing reconciler branch each row
+  maps to as it exercises the oracle; the machine is the contract, not open.
+- ~~`RestartOutcome` origin classification in the handler~~ **CLOSED (review
+  Finding 2).** Two variants ship; the label is classified from the
+  check-exists read's `/stop` lookup (present ⇒ `Resumed`, absent ⇒
+  `Restarted`), before the bump txn, and is cosmetic — placement is the
+  reconciler's generation gate. ADR-0073 § item 1 pins the source + race
+  semantics. **No residual open question.**
+- **Whether a stray `workloads/<id>/generation` key needs explicit reaping on #211 deletion** — harmless today (reconciler GCs on `job.is_none()`); revisit when #211 lands.

@@ -22,11 +22,11 @@ byte-exact; `F1 ∈ 10.98.0.0/16` is never a backend addr `∈ 10.99.0.0/16`.
 
 `overdrive serve` + deploy `server` (Running behind `F1`, backend `B1`) + a deployed
 client resolves `server.svc.overdrive.local` → `F1`, connect lands `B1` (byte-exact) +
-the replace action on `server` (→ `B2`) + client re-resolves → SAME `F1`, connect lands `B2`.
+`overdrive workload restart server` (→ `B2`) + client re-resolves → SAME `F1`, connect lands `B2`.
 
-## Behavior (DESIGN owns API)
+## Behavior (implemented per ADR-0073)
 
-- The replace action retains the per-logical-workload `F`-binding across the cycle (no churn, no release).
+- `overdrive workload restart <id>` (the slice-01 verb) retains the per-logical-workload `F`-binding across the cycle (no churn, no release).
 - The re-keyed `MtlsResolve` translates `F` → the NEW live backend per-connect.
 - Single-source: the resolved `F` is the addr `MtlsResolve.resolve` recognizes and classifies `Mesh`.
 
@@ -45,5 +45,5 @@ the replace action on `server` (→ `B2`) + client re-resolves → SAME `F1`, co
 
 ## Dependencies
 
-- **slice-01** (the replace action exists).
+- **slice-01** (the `overdrive workload restart <id>` verb exists, per ADR-0073).
 - SHIPPED: dial-by-name responder + `FrontendAddrAllocator` idempotent `assign` + re-keyed `MtlsResolve` + intercept path (#243 / #26 / #236).

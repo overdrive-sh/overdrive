@@ -931,7 +931,9 @@ changelog:
       — it conflates declare-intent with a lifecycle side-effect (the k8s `apply` vs
       `rollout restart` distinction) and would break deploy's honest same-spec=no-op
       contract. The verb's name + semantics (restart-with-rollout-breadth vs
-      resume/start) is the OPEN DESIGN decision. Enriched J-OPS-003's motivation/outcome + source to name the replace
+      resume/start) was the then-OPEN DESIGN decision, since CLOSED in DESIGN per
+      ADR-0073 — `overdrive workload restart <id>` (back-propagated 2026-06-29).
+      Enriched J-OPS-003's motivation/outcome + source to name the replace
       transition; J-OPS-003 served_by_phase unchanged (1). EXTENDED the journey
       docs/product/journeys/dial-a-mesh-peer-by-name.yaml with a replace/cycle step
       (the operable form of its STABLE/CHURN cycle) + a no-such-workload error path;

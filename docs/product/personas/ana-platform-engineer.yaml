@@ -24,6 +24,8 @@ schema_version: 1
 # Origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200);
 #   lifecycle-replacement lens added by backend-instance-replacement DISCUSS
 #   wave (2026-06-29, GH #249).
+# 2026-06-29 — back-propagated DESIGN-closed verb `overdrive workload restart <id>`
+#   per ADR-0073 (was DESIGN-open placeholder).
 
 persona:
   id: ana-platform-engineer
@@ -51,7 +53,7 @@ persona:
     entry_points:
       - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
       - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
-      - "Lifecycle (GH #249): replaces a declared workload's instance via an explicit lifecycle verb (name DESIGN-open — e.g. `overdrive job restart <id>`; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive alloc status --job <id>`"
+      - "Lifecycle (GH #249): replaces a declared workload's instance via the explicit lifecycle verb `overdrive workload restart <id>` (decided per ADR-0073; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive alloc status --job <id>`"
     triggers:
       - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
       - "Ana sees `alloc status: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"

@@ -4,6 +4,7 @@
 > **Terminal verification gate for US-BIR-1 + US-BIR-2 — NOT a user story** (a green test
 > run is the oracle/DoD, not a user-invocable operator outcome).
 > Job: J-OPS-003 (extended). **TERMINAL SLICE — lands the feature against its oracle.** Effort: ≈0.5d.
+> Drives the production **`overdrive workload restart <id>`** verb (per ADR-0073) — built by slices 01–03.
 
 ## Goal (one line)
 
@@ -40,8 +41,9 @@ post-cycle/post-churn dial lands `B2`, the recovered `<job>` re-resolves the SAM
 ## Thinnest change
 
 In each of the three ATs: replace the `stop_and_converge(&skeleton, <id>)` +
-`deploy_and_wait_running(… <kind>_service_spec …)` cycle/recovery with the production replace
-action (`[D1]`); remove the `#[ignore = "…#249…"]` attribute. The rest of each AT (the
+`deploy_and_wait_running(… <kind>_service_spec …)` cycle/recovery with the production
+**`overdrive workload restart <id>`** action (`POST /v1/jobs/:id/restart`, per ADR-0073);
+remove the `#[ignore = "…#249…"]` attribute. The rest of each AT (the
 assertions, the wire-capture / `getent` oracle) is unchanged.
 
 ## Carpaccio taste tests
@@ -53,7 +55,7 @@ assertions, the wire-capture / `getent` oracle) is unchanged.
 ## Acceptance (= terminal verification-gate criteria; proves US-BIR-1 + US-BIR-2)
 
 - [ ] All **three** `#[ignore = "…#249…"]` attributes removed: `answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend` + `in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend` (in `dns_responder_walking_skeleton.rs`) AND `recovered_job_after_stop_resolves_to_the_same_stable_frontend` (in `dns_responder_nxdomain.rs`). The strings are *removed*, not rewritten — no stale #249 forward-pointer remains.
-- [ ] All three ATs cycle/recover the instance via the **production replace action** (`[D1]`), NOT a test-only intent-key clear or a `stop_and_converge`-then-same-spec-redeploy that dead-ends.
+- [ ] All three ATs cycle/recover the instance via the **production `overdrive workload restart <id>` action** (`POST /v1/jobs/:id/restart`, per ADR-0073), NOT a test-only intent-key clear or a `stop_and_converge`-then-same-spec-redeploy that dead-ends.
 - [ ] All three ATs GREEN on the pinned-6.18 appliance-kernel Tier-3 matrix (the merge gate; dev-Lima is necessary-but-not-sufficient).
 - [ ] No AT installs/clears a rule/key, binds a socket, or supplies an address production does not itself install/clear/bind/supply.
 

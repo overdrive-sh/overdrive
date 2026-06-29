@@ -123,7 +123,7 @@ steps:
       `overdrive deploy` commands.
   - id: 4
     name: "An operator replaces a declared workload's instance — same name, new instance, intent retained"
-    command: "(operator replace action — an explicit lifecycle verb, name DESIGN-open per backend-instance-replacement [D1]: e.g. overdrive job restart <id>; NOT overdrive deploy, which stays pure-declare)"
+    command: "(operator replace action — the explicit lifecycle verb overdrive workload restart <id>, decided per ADR-0073; NOT overdrive deploy, which stays pure-declare)"
     summary: >
       Ana (an operator, lifecycle lens — see ana-platform-engineer.yaml) cycles a
       declared mesh workload's instance: the current instance (A1, old
@@ -144,7 +144,8 @@ steps:
       once it recovers) operable through a production verb. Operator-observable via a NEW AllocationId
       in `overdrive alloc status`. Feature: backend-instance-replacement (GH #249);
       the mechanism is DECIDED — an explicit lifecycle verb, NOT overloaded `deploy`
-      (which stays pure-declare); the verb's name + semantics is the DESIGN-wave decision.
+      (which stays pure-declare); the verb's name + semantics is decided in DESIGN per
+      ADR-0073 — `overdrive workload restart <id>`.
 
 error_paths:
   - step: 1
@@ -185,7 +186,7 @@ related_features:
   - id: transparent-mtls-host-socket
     role: "Ships the intercept + MtlsResolve + the agent-light L4 proxy this journey's name answers feed into (GH #26/#236). The name layer is byte-consistent with what the intercept path enforces — one source, three readers."
   - id: backend-instance-replacement
-    role: "Ships the operator replace action (GH #249, maps to J-OPS-003) that makes step 4's cycle operable: end the current instance, clear the sticky operator-stop sentinel, bring up a NEW instance (new AllocationId + workload_addr) while jobs/<id> stays declared, with the F-binding byte-stable across the cycle. Unblocks this journey's three #249-deferred ATs (02-02 S-DBN-WS-STABLE + S-DBN-CHURN, and the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg). Mechanism DECIDED: an explicit lifecycle verb, NOT overloaded `deploy`; the verb's name + semantics is a DESIGN-wave decision."
+    role: "Ships the operator replace action (GH #249, maps to J-OPS-003) that makes step 4's cycle operable: end the current instance, clear the sticky operator-stop sentinel, bring up a NEW instance (new AllocationId + workload_addr) while jobs/<id> stays declared, with the F-binding byte-stable across the cycle. Unblocks this journey's three #249-deferred ATs (02-02 S-DBN-WS-STABLE + S-DBN-CHURN, and the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg). Mechanism DECIDED: an explicit lifecycle verb, NOT overloaded `deploy`; the verb's name + semantics is decided in DESIGN per ADR-0073 — `overdrive workload restart <id>`."
 
 deferred_outside_this_journey:
   - "The VIP path (<job>.svc.overdrive.local -> fdc2::/16 VIP + XDP SERVICE_MAP) -> GH #61 (depends on #167). D-TME-10's headless choice avoids it; the two addressing models can coexist (K8s ships both)."
@@ -230,3 +231,12 @@ changelog:
       DESIGN-wave decision. related_jobs now [J-MESH-001, J-OPS-003]. Existing steps
       1-3 + error-path-1 + the integration_validation + the deferred list
       unmodified. See docs/feature/backend-instance-replacement/.
+  - date: 2026-06-29
+    feature: backend-instance-replacement
+    change: >
+      Back-propagated DESIGN-closed verb `overdrive workload restart <id>` per
+      ADR-0073 (was DESIGN-open placeholder). [D1] is CLOSED: step-4 command,
+      step-4 summary prose, and the backend-instance-replacement related_feature
+      role now name the locked verb in place of the `overdrive job restart` /
+      "name DESIGN-open" placeholder. The "NOT overdrive deploy, which stays
+      pure-declare" clause is retained (still load-bearing). No scope re-opened.

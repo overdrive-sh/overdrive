@@ -20,12 +20,12 @@ subsequent fresh connect to `F` lands `B2` byte-exact.
 ## Thinnest serve+deploy loop
 
 `overdrive serve` + deploy `server` (Running, `B1`) + a deployed client opens an in-flight
-connection through the intercept to `B1` (data flowing) + the replace action on `server`
+connection through the intercept to `B1` (data flowing) + `overdrive workload restart server`
 mid-connection + the in-flight read returns promptly + a subsequent fresh connect lands `B2`.
 
-## Behavior (DESIGN owns API)
+## Behavior (implemented per ADR-0073)
 
-- Cycling the backend mid-connection causes the in-flight connection to fail fast (the pump task + `TCP_USER_TIMEOUT`/keepalive on the worker proxy legs), bounded — NOT an indefinite hang, NO `sock_destroy`.
+- Cycling the backend mid-connection (via the slice-01 `overdrive workload restart` verb) causes the in-flight connection to fail fast (the pump task + `TCP_USER_TIMEOUT`/keepalive on the worker proxy legs), bounded — NOT an indefinite hang, NO `sock_destroy`.
 - A subsequent fresh connect to `F` re-resolves and lands the new live backend `B2`.
 
 ## Carpaccio taste tests
@@ -42,5 +42,5 @@ mid-connection + the in-flight read returns promptly + a subsequent fresh connec
 
 ## Dependencies
 
-- **slice-01/02** (the replace action + stable `F`).
+- **slice-01/02** (the `overdrive workload restart <id>` verb, per ADR-0073, + stable `F`).
 - SHIPPED: the intercept worker `TCP_USER_TIMEOUT`/keepalive legs (`mtls_intercept_worker.rs`).
