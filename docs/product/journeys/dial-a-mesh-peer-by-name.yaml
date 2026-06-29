@@ -79,10 +79,18 @@ journey:
     actor: Ana, an application developer who
     writes an ordinary program doing getaddrinfo + connect — no mesh awareness —
     and expects it to Just Work.
+    ACTOR HANDOFF AT STEP 4 (added 2026-06-29, backend-instance-replacement / #249):
+    steps 1-3 are Sam's REACHABILITY lens (above); step 4 (instance replacement) is
+    owned by a DIFFERENT primary actor and lens — ANA, the operator/lifecycle engineer
+    (see docs/product/personas/ana-platform-engineer.yaml). Cycling a declared
+    workload's instance is an operator/lifecycle act, not a reachability check, so it
+    carries its own actor and its own micro-arc (emotional_arc.step_4_ana below). The
+    two are deliberately distinct, not a continuation of Sam's arc.
   emotional_arc:
     start: "Skeptical — 'the wire is enforceable, but can an unmodified workload even FIND its peer by name in a deploy, and will the platform ever hand it a dead address?'"
     middle: "Reassured — the walking skeleton resolves one name to one running-and-healthy backend through serve+deploy and the hop goes TLS 1.3; the ping-pong demo advances counters he watches himself."
     end: "Confident — 'an ordinary workload dials by name and lands at a LIVE peer the mesh then mTLS's, and a no-backend query returns NOTHING, never a stale addr. I ran the proof myself with two overdrive deploys.'"
+    step_4_ana: "ANA's lifecycle micro-arc (step 4 only — distinct actor/lens from Sam's reachability arc above). Anxious → Confident: 'I stopped a declared workload to roll it and NOTHING came back up — stop is sticky/overriding and a same-spec re-deploy is a no-op, so the instance was stuck with no path forward and no error saying why. Now I roll it with one explicit lifecycle action, a NEW instance comes up (new AllocationId, new workload_addr) while the job stays declared, and the name keeps resolving the SAME F — I confirm it myself in overdrive alloc status.'"
 
 steps:
   - id: 1
@@ -113,6 +121,30 @@ steps:
       date on a ~10s cadence; each hop is resolved through the responder then
       intercepted + mTLS'd. Sam watches the counters advance with two
       `overdrive deploy` commands.
+  - id: 4
+    name: "An operator replaces a declared workload's instance — same name, new instance, intent retained"
+    command: "(operator replace action — an explicit lifecycle verb, name DESIGN-open per backend-instance-replacement [D1]: e.g. overdrive job restart <id>; NOT overdrive deploy, which stays pure-declare)"
+    summary: >
+      Ana (an operator, lifecycle lens — see ana-platform-engineer.yaml) cycles a
+      declared mesh workload's instance: the current instance (A1, old
+      workload_addr) ends and a NEW instance (A2, new workload_addr) comes up while
+      jobs/<id> stays declared (distinct from #211 deletion, which withdraws intent;
+      distinct from crash-restart, which reuses the alloc_id/slot). The
+      per-logical-workload F-binding is byte-stable across the cycle (the
+      FrontendAddrAllocator's idempotent assign — withhold-not-release), so a peer
+      re-resolving <job>.svc.overdrive.local gets the SAME F and the next connect
+      lands the NEW backend (no stale address — the SQ1-elimination guarantee). The
+      production gap this closes: `overdrive job stop` writes a sticky/overriding
+      stop sentinel (IntentKey::for_workload_stop) the WorkloadLifecycle reconciler
+      honors as a terminal intentional stop, and a same-spec re-deploy cannot clear
+      it — so today nothing brings a fresh instance back up after a clean stop. This
+      step makes the STABLE/CHURN cycle behavior AND the withhold-not-release recovery
+      observable (the three #249-deferred ATs: 02-02 S-DBN-WS-STABLE + S-DBN-CHURN, and
+      the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg — a stopped <job> re-resolving the SAME F
+      once it recovers) operable through a production verb. Operator-observable via a NEW AllocationId
+      in `overdrive alloc status`. Feature: backend-instance-replacement (GH #249);
+      the mechanism is DECIDED — an explicit lifecycle verb, NOT overloaded `deploy`
+      (which stays pure-declare); the verb's name + semantics is the DESIGN-wave decision.
 
 error_paths:
   - step: 1
@@ -129,6 +161,14 @@ error_paths:
       service_backends rows the intercept reads) is the single source of liveness
       truth; an unhealthy backend is MeshUnreachable to the intercept, so it is
       never answered.
+  - step: 4
+    failure: "The operator runs the replace action on a workload that was never declared (no jobs/<id> intent row)"
+    recovery: >
+      The replace action is rejected with an honest not-found (404-shape) error —
+      the same posture `overdrive job stop` takes on an unknown id — NOT a silent
+      no-op and NOT a spurious fresh placement. Replacing a non-existent workload is
+      operator error, not an idempotent no-op. (Feature: backend-instance-replacement,
+      GH #249.)
 
 integration_validation:
   shared_artifacts_summary:
@@ -137,13 +177,15 @@ integration_validation:
     - "The per-netns responder address — single source is the WorkloadNetnsPlan host_addr (the per-netns gateway, an Ipv4Addr; D-TME-9), written into the netns resolv.conf by veth_provisioner.rs WriteResolvConf. Consumed by the workload's stub resolver (the nameserver it queries) and by the in-agent listener (the address it must answer on for EVERY netns). Validation: the one-listener-many-netns assumption — one host-side listener answers on each per-netns gateway addr — is what Slice 00 (the spike) proves before the walking skeleton."
     - "The ping-pong EDD evidence — single source is the verification/expectations/ capture of the dial-by-name-responder demo (proposed E05-dial-by-name-ping-pong-mtls), captured black-box against the built overdrive binary under Lima, different-fox-reviewed. Consumed as the operator-surface proof anchored to US-DBN-3 + K-DBN-3. Validation: counters/dates advance on a ~10s cadence and each hop carries TLS 1.3 records; honest `pending` until the full-system EDD harness (#227/#75) lands (mirrors E04 — never a fabricated capture)."
 
-related_jobs: [J-MESH-001]
+related_jobs: [J-MESH-001, J-OPS-003]
 
 related_features:
   - id: dial-by-name-responder
     role: "Ships the in-agent name responder (GH #243). The reachability leg of the mesh; a THIRD SIBLING reader over the SAME service_backends rows (D-TME-11 — NOT the addr-keyed intercept struct), returns the headless addr MtlsResolve recognizes and classifies Mesh (D-TME-10). Answers <job>.svc.overdrive.local from service_backends ∩ running-and-healthy."
   - id: transparent-mtls-host-socket
     role: "Ships the intercept + MtlsResolve + the agent-light L4 proxy this journey's name answers feed into (GH #26/#236). The name layer is byte-consistent with what the intercept path enforces — one source, three readers."
+  - id: backend-instance-replacement
+    role: "Ships the operator replace action (GH #249, maps to J-OPS-003) that makes step 4's cycle operable: end the current instance, clear the sticky operator-stop sentinel, bring up a NEW instance (new AllocationId + workload_addr) while jobs/<id> stays declared, with the F-binding byte-stable across the cycle. Unblocks this journey's three #249-deferred ATs (02-02 S-DBN-WS-STABLE + S-DBN-CHURN, and the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg). Mechanism DECIDED: an explicit lifecycle verb, NOT overloaded `deploy`; the verb's name + semantics is a DESIGN-wave decision."
 
 deferred_outside_this_journey:
   - "The VIP path (<job>.svc.overdrive.local -> fdc2::/16 VIP + XDP SERVICE_MAP) -> GH #61 (depends on #167). D-TME-10's headless choice avoids it; the two addressing models can coexist (K8s ships both)."
@@ -165,3 +207,26 @@ changelog:
       one-listener-many-netns routing mechanism is the load-bearing unvalidated
       assumption, gated by a SPIKE-first slice (spike.md). Distilled from the
       issue + the finalized arc, not from user interviews.
+  - date: 2026-06-29
+    feature: backend-instance-replacement
+    change: >
+      EXTENDED with step 4 (operator replaces a declared workload's instance —
+      same name, new instance, intent retained) + a step-4 no-such-workload error
+      path + a backend-instance-replacement related_feature, by the DISCUSS wave
+      for GH #249. This step is the OPERABLE form of the journey's STABLE/CHURN
+      cycle AND its withhold-not-release recovery: the three #249-deferred ATs
+      (02-02 S-DBN-WS-STABLE + S-DBN-CHURN prove the F-binding is byte-stable across a
+      backend cycle and that in-flight churn fails fast; the 03-01 S-DBN-NXDOMAIN-02
+      RECOVERY leg proves a stopped <job> re-resolves the SAME F once it recovers) — but
+      cycling/recovering to a NEW AllocationId/workload_addr while jobs/<id> stays
+      declared needs a production replace verb that did not exist — `overdrive job stop`
+      writes a sticky/overriding stop sentinel a same-spec re-deploy cannot clear. Step 4 is
+      authored through ANA's lifecycle/ops lens (ana-platform-engineer.yaml), a
+      different lens than Sam's security/reachability lens on steps 1-3 — the act of
+      cycling an instance is an operator/lifecycle act. Maps to J-OPS-003 (the
+      replace transition is the third lifecycle transition of that convergence job,
+      not a new job). The MECHANISM is DECIDED — an explicit lifecycle verb, NOT
+      overloaded `deploy` (pure-declare); the verb's name + semantics is the
+      DESIGN-wave decision. related_jobs now [J-MESH-001, J-OPS-003]. Existing steps
+      1-3 + error-path-1 + the integration_validation + the deferred list
+      unmodified. See docs/feature/backend-instance-replacement/.

@@ -182,18 +182,28 @@ jobs:
     motivation: >
       I want the platform to schedule the job onto the local host, start
       a real OS process under cgroup-isolated supervision, and converge
-      the running set to the declared replica count — including
-      restarting on crash and stopping cleanly on `overdrive job stop`
-      — without me having to babysit the process or invent ad-hoc
-      supervision,
+      the running set to the declared replica count — across the FULL set
+      of lifecycle transitions: starting on submit, restarting on crash,
+      stopping cleanly on `overdrive job stop`, AND replacing the current
+      instance with a fresh one (a new AllocationId + new workload_addr)
+      while the workload's intent stays declared — without me having to
+      babysit the process or invent ad-hoc supervision,
     outcome: >
       so the §18 reconciler primitive moves from "registered and idle"
       to "actively converging declared intent into running workloads",
       the workload-versus-control-plane cgroup split protects platform
       responsiveness under workload pressure, and `alloc status` honestly
       reflects whether each allocation is Pending (with a reason),
-      Running, Draining, Terminated, or Failed (with backoff state).
-    source: whitepaper §6 (Process driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); phase-1-first-workload scope
+      Running, Draining, Terminated, or Failed (with backoff state) — and
+      so an operator can ROLL one instance of a still-declared workload
+      (end the current instance, bring up a fresh one) with one honest
+      action, without the platform silently refusing to bring anything
+      back up after a clean operator stop (the backend-instance-replacement
+      gap, GH #249). The three existing verbs do NOT serve the replace
+      transition: `job stop` writes a sticky/overriding stop sentinel a
+      same-spec re-deploy cannot clear, crash-restart reuses the
+      alloc_id/slot, and deletion (#211) withdraws intent entirely.
+    source: whitepaper §6 (Process driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition)
     served_by_phase: 1
     status: active
 
@@ -893,3 +903,40 @@ changelog:
       journey docs/product/journeys/dial-a-mesh-peer-by-name.yaml; personas
       untouched (Ana referenced inline only). Existing entries unmodified. See
       docs/feature/dial-by-name-responder/.
+  - date: 2026-06-29
+    change: >
+      EXTENDED J-OPS-003 for the backend-instance-replacement feature (GH #249),
+      authored by the DISCUSS wave. VERDICT: EXTEND J-OPS-003, NOT mint a new
+      sibling job. Justification: replacing a declared workload's instance is the
+      SAME convergence job at finer granularity — same progress ("the platform
+      converges declared intent into running workloads"), same actor-circumstance
+      (Ana running her actual workload on the single-node control plane), same
+      failure-mode class (declared intent NOT converged into a running instance).
+      It is the THIRD lifecycle transition of the same job, alongside the
+      restart-on-crash and stop-cleanly transitions J-OPS-003 already names. This
+      follows the udp-sendmsg4 ELEVATION precedent (2026-06-05, "elevate under an
+      existing job rather than mint a new one — the SAME job at finer
+      granularity"), NOT the J-SEC-002 MINT precedent (which required a genuinely
+      distinct progress + failure mode). A "replace-after-stop" sibling job would
+      share J-OPS-003's exact outcome statement and would fragment it the way a
+      per-idiom job would have fragmented J-OPS-004. The gap closed: Overdrive has
+      no production path to end the current instance (A1, workload_addr) and bring
+      up a NEW instance (A2, new workload_addr) while jobs/<id> stays declared —
+      `job stop` writes a sticky/overriding stop sentinel
+      (IntentKey::for_workload_stop) a same-spec re-deploy cannot clear,
+      crash-restart reuses the alloc_id/slot, and deletion (#211) withdraws intent
+      (the opposite). The DISCUSS wave DECIDED the MECHANISM (operator-ratified
+      2026-06-29): an explicit lifecycle verb; `overdrive deploy` stays pure-declare.
+      Overloading a same-spec re-deploy with sentinel-clearing semantics was RULED OUT
+      — it conflates declare-intent with a lifecycle side-effect (the k8s `apply` vs
+      `rollout restart` distinction) and would break deploy's honest same-spec=no-op
+      contract. The verb's name + semantics (restart-with-rollout-breadth vs
+      resume/start) is the OPEN DESIGN decision. Enriched J-OPS-003's motivation/outcome + source to name the replace
+      transition; J-OPS-003 served_by_phase unchanged (1). EXTENDED the journey
+      docs/product/journeys/dial-a-mesh-peer-by-name.yaml with a replace/cycle step
+      (the operable form of its STABLE/CHURN cycle) + a no-such-workload error path;
+      EXTENDED docs/product/personas/ana-platform-engineer.yaml's header note (Ana
+      now also anchors the lifecycle-replacement journey). Distilled from the issue
+      + grounded reconciler/handler/AT code, not from user interviews (per the
+      header precedent). Existing entries otherwise unmodified. See
+      docs/feature/backend-instance-replacement/.

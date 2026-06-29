@@ -1,22 +1,34 @@
 schema_version: 1
 
-# Persona for the UDP dataplane-reachability journeys.
+# Persona for the UDP dataplane-reachability journeys AND the
+# workload-lifecycle-replacement journey.
 #
-# Ana is the operator who declares UDP-bearing Service workloads on
-# Overdrive and expects them to be reachable from real, unmodified
-# clients. She now anchors TWO UDP journeys, which is why she is
-# promoted to a first-class persona record:
+# Ana is the operator who declares Service workloads on Overdrive and
+# expects them to be reachable from real, unmodified clients AND to
+# converge to her declared intent across the full lifecycle. She anchors
+# THREE journeys, which is why she is a first-class persona record:
 #   - submit-a-udp-service.yaml         — connected-UDP / XDP REVERSE_NAT
 #                                          wire path (remote backends).
 #   - reach-an-unconnected-udp-service.yaml — unconnected-UDP / same-host
 #                                          cgroup sendmsg4+recvmsg4 path.
+#   - dial-a-mesh-peer-by-name.yaml step 4 — the LIFECYCLE-REPLACEMENT
+#                                          step (GH #249): replace a declared
+#                                          workload's instance (new instance,
+#                                          intent retained) through an operator
+#                                          replace action. Here her lens is
+#                                          lifecycle/ops, not the UDP-reachability
+#                                          lens of the first two (and distinct
+#                                          from Sam's security lens on that
+#                                          journey's steps 1-3).
 # Pairs with maya-agent-developer.yaml and priya-evaluator.yaml.
-# Origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200).
+# Origin: unconnected-udp-sendmsg4 DISCUSS wave (2026-06-05, GH #200);
+#   lifecycle-replacement lens added by backend-instance-replacement DISCUSS
+#   wave (2026-06-29, GH #249).
 
 persona:
   id: ana-platform-engineer
   name: "Ana Moreno"
-  role: "Overdrive platform engineer running UDP-bearing services on a single-node dev host"
+  role: "Overdrive platform engineer running Service workloads (UDP-bearing and mesh) on a single-node dev host — reachability AND full lifecycle"
   one_liner: >
     Runs UDP-bearing services (DNS resolvers, QUIC edge endpoints, game
     servers, syslog collectors) and expects UDP to be a first-class
@@ -39,16 +51,23 @@ persona:
     entry_points:
       - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
       - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
+      - "Lifecycle (GH #249): replaces a declared workload's instance via an explicit lifecycle verb (name DESIGN-open — e.g. `overdrive job restart <id>`; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive alloc status --job <id>`"
     triggers:
       - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
       - "Ana sees `alloc status: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
+      - "Lifecycle (GH #249): Ana stops a declared workload to roll it (new build, wedged instance, fresh `workload_addr`), re-runs `overdrive deploy <spec>`, and NOTHING comes back up — the operator-stop sentinel is sticky/overriding and the same-spec resubmit is a no-op — so she needs an explicit way to bring up a fresh instance without deleting/redeclaring the workload"
 
   motivations:
     functional: >
       A datagram a same-host client addresses to her service VIP reaches
       a healthy backend, and the reply appears to come from the VIP —
       regardless of whether the client connected first (the unconnected
-      sendto idiom every DNS resolver uses).
+      sendto idiom every DNS resolver uses). And (lifecycle, GH #249): when
+      a declared workload's instance must be rolled (new build, wedged
+      instance, fresh workload_addr), she can END the current instance and
+      bring up a FRESH one (new AllocationId + workload_addr) WITHOUT
+      deleting/redeclaring the workload — intent stays declared and the mesh
+      name keeps resolving the SAME frontend F.
     emotional: >
       Relief from the anxiety of the half-working service — the class of
       defect where deploy succeeds, alloc status shows Running, a
@@ -84,10 +103,12 @@ persona:
     - "A reply that leaks the backend IP as its source, so the client discards it via source validation and the query silently times out"
     - "A forward-only fix that 'works' in a hand-written connected-UDP test but fails for the real unconnected resolver — the silent asymmetry"
     - "A diagnosis that requires reading kernel source instead of `dig`, `tcpdump`, and `bpftool map dump`"
+    - "Lifecycle (GH #249): a declared workload she STOPPED that is now stuck with no way back up — `job stop` is sticky/overriding and a same-spec re-deploy is a no-op, with no error explaining why and no verb to roll it"
 
   success_signals:
     - "`dig @<vip> example.com` against a same-host resolver service returns a correct answer on the first try"
     - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
     - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
+    - "Lifecycle (GH #249): after the replace action, `overdrive alloc status --job <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
 
-  related_jobs: [J-OPS-004, J-PLAT-004]
+  related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]
