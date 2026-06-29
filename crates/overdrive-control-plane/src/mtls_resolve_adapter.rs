@@ -119,20 +119,52 @@
 //! via `relist_into`) is exercised at List-at-probe, on watch-close, AND now on
 //! `Lagged`.
 //!
-//! # Classification (C1 + C4, verbatim with the shipped 01-01 port rustdoc)
+//! # Classification — the THREE-way re-key (02-00; ADR-0072 REV-2 Finding-1/3)
 //!
-//! - `orig_dst` HITS a `running`-and-healthy mesh backend in the index →
-//!   [`Mesh(ResolvedBackend { addr, expected_svid: None })`](MtlsResolution::Mesh).
-//! - `orig_dst` MISSES (no mesh backend), index readable →
-//!   [`NonMesh`](MtlsResolution::NonMesh) (cleartext pass-through, by design).
-//!   **A miss is `NonMesh`, NOT `MeshUnreachable`** — making a miss fail-closed
-//!   would break legitimate external / non-mesh egress (C4 scoping note); the
-//!   residual convergence window is covered by (a) fail-toward-handshake (#236).
-//! - A matched backend is **present-but-unreachable** (`Backend.healthy ==
-//!   false` — the readiness gate, recomputed from probe results by
-//!   `service_lifecycle`) →
-//!   [`MeshUnreachable`](MtlsResolution::MeshUnreachable) (fail-closed, NO
-//!   cleartext).
+//! [`BackendIndex::classify`] takes `(orig_dst, proto)` and is a THREE-way
+//! branch. The contract (pinned per `.claude/rules/development.md` § "Trait
+//! definitions specify behavior"; the `mtls_resolve_rekey` equivalence test is
+//! the enforcement):
+//!
+//! 1. **`by_frontend` HIT** — `(orig_dst, proto)` keyed by [`FrontendKey`] is a
+//!    mesh frontend endpoint `(F, listener.port, listener.protocol)`. Translate
+//!    to its `ServiceId`, select that service's **FIRST-by-`Ord`**
+//!    running-AND-healthy backend →
+//!    [`Mesh(ResolvedBackend { addr, expected_svid: None })`](MtlsResolution::Mesh)
+//!    (a frontend HIT is ALWAYS mesh — NEVER `NonMesh`, NEVER an unhealthy
+//!    backend). With NO healthy backend right now →
+//!    [`MeshUnreachable`](MtlsResolution::MeshUnreachable) (the service is KNOWN
+//!    but has no live backend: fail-closed, NO cleartext). `F` is the SAME
+//!    stable frontend the
+//!    [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
+//!    binds and the DNS `name_index` answers — there is NO second `<job> → F`
+//!    source (DDN-2).
+//! 2. **`by_frontend` MISS, `orig_dst.ip() ∈ 10.98.0.0/16`** —
+//!    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is early
+//!    (race) OR to a withdrawn `<job>` → [`MeshUnreachable`] (refuse, NO
+//!    cleartext). The membership test is a `contains` against the ONE pinned
+//!    [`WORKLOAD_FRONTEND_BASE`] const — never a broader "any reserved subnet"
+//!    helper.
+//! 3. **`by_frontend` MISS, outside the subnet** — fall through to the
+//!    pre-REV-2 `by_addr` classification verbatim (the additive-EXTEND
+//!    backward-compat path, [`BackendIndex::classify_by_addr`]):
+//!    - `orig_dst` HITS a `running`-and-healthy mesh backend →
+//!      [`Mesh`](MtlsResolution::Mesh);
+//!    - a matched backend is **present-but-unreachable** (`Backend.healthy ==
+//!      false`) → [`MeshUnreachable`](MtlsResolution::MeshUnreachable);
+//!    - `orig_dst` MISSES (no mesh backend, outside the frontend subnet) →
+//!      [`NonMesh`](MtlsResolution::NonMesh) (cleartext pass-through, by design).
+//!      **A general miss is `NonMesh`, NOT `MeshUnreachable`** — making EVERY
+//!      miss fail-closed would break legitimate external / non-mesh egress (C4
+//!      scoping note); the residual convergence window is covered by (a)
+//!      fail-toward-handshake (#236).
+//!
+//! The v1 resolve call site keys [`Proto::Tcp`] because the worker-layer
+//! outbound capture is TCP-only today (`mtls_intercept_worker.rs:792-794`); the
+//! future-UDP capture surfaces the captured proto into `resolve` — the index key
+//! already carries the axis, so that is a capture/plumbing change, NOT an
+//! index-key change.
+//!
 //! - A store-layer READ FAULT (a failed List/subscribe at probe time, or a
 //!   FAULTED watch at resolve time) surfaces per the 01-01 error split as an
 //!   `Err` of [`MtlsResolveError::StoreUnreadable`] (resolve) /
@@ -166,8 +198,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceId;
 use overdrive_core::traits::dataplane::Backend;
+
+use crate::dns_responder::frontend_addr_allocator::{
+    FrontendAddrAllocator, WORKLOAD_FRONTEND_BASE,
+};
+use crate::dns_responder::name_index::job_of;
 use overdrive_core::traits::mtls_resolve::{
     MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend, Result,
 };
@@ -177,8 +215,40 @@ use overdrive_core::traits::observation_store::{
 use parking_lot::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
+/// The re-keyed `by_frontend` lookup key (ADR-0072 REV-2 Finding-1) — a
+/// **mesh frontend endpoint** `(F, listener.port, listener.protocol)`.
+///
+/// A named newtype rather than a bare `(SocketAddrV4, Proto)` tuple so the
+/// proto-discrimination contract is explicit at the type level: one frontend
+/// IP `F` fronting N distinct `(port, proto)` listeners derives N DISTINCT
+/// keys. A bare `SocketAddrV4` is ip+port ONLY and **cannot distinguish
+/// `tcp/53` from `udp/53`** — the collision Finding-1 names; the `Proto` axis
+/// is what the key carries to prevent two same-`(F, port)` listeners on
+/// different L4 protos from colliding onto one entry before their distinct
+/// `ServiceId` values are ever read. `Ord` (deriving from the field order
+/// `addr` then `proto`) keeps the `BTreeMap<FrontendKey, ServiceId>` iteration
+/// deterministic across seeds (§ "Ordered-collection choice").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FrontendKey {
+    /// The mesh frontend endpoint `(F, listener.port)` — `F` drawn from
+    /// [`WORKLOAD_FRONTEND_BASE`] (`10.98.0.0/16`); the port is the listener's.
+    pub addr: SocketAddrV4,
+    /// The listener's L4 protocol — the axis that discriminates two
+    /// same-`(F, port)` listeners on different protos.
+    pub proto: Proto,
+}
+
+impl FrontendKey {
+    /// Construct a frontend key from its endpoint and protocol.
+    #[must_use]
+    pub const fn new(addr: SocketAddrV4, proto: Proto) -> Self {
+        Self { addr, proto }
+    }
+}
+
 /// The in-RAM, OWNERSHIP-AWARE address-keyed reverse index of the `running`
-/// `service_backends` set — the C4 read-mechanism private detail.
+/// `service_backends` set — the C4 read-mechanism detail, EXTENDED by 02-00
+/// with the `by_frontend` re-key (ADR-0072 REV-2).
 ///
 /// # Why ownership-aware (F-A — the security fix)
 ///
@@ -204,7 +274,7 @@ use tokio::task::JoinHandle;
 /// stale backend after a service's backend set shrinks, and never evicts a
 /// DIFFERENT service's backend).
 #[derive(Default)]
-struct BackendIndex {
+pub struct BackendIndex {
     /// `addr → { service → that service's `Backend` at this addr }`. The
     /// point-lookup surface `resolve` consults. Only V4 backends are indexed
     /// (a V6 `Backend.addr` never matches a V4 `orig_dst`, so it is simply
@@ -218,6 +288,18 @@ struct BackendIndex {
     /// or replaced backend set leaves no stale entries AND never touches
     /// another service's contribution.
     addrs_by_service: BTreeMap<ServiceId, Vec<SocketAddrV4>>,
+    /// `(F, listener.port, proto) → ServiceId` — the 02-00 re-key
+    /// (ADR-0072 REV-2). A mesh frontend endpoint translates to the `ServiceId`
+    /// it fronts; a [`classify`](Self::classify) hit then selects that
+    /// service's FIRST-by-`Ord` running-AND-healthy backend (the Cilium
+    /// ClusterIP → backend translation). The `ServiceId` VALUE is the row's
+    /// existing content-addressed `service_id` ([`ServiceBackendRow::service_id`]),
+    /// NOT a re-derivation. The `F` keyed here is the SAME stable frontend the
+    /// `FrontendAddrAllocator` binds and the DNS `name_index` answers — there is
+    /// NO second `<job> → F` source (DDN-2 single-owner invariant). A `BTreeMap`
+    /// (not `HashMap`) — observed under proptest/DST, deterministic iteration
+    /// (§ "Ordered-collection choice").
+    by_frontend: BTreeMap<FrontendKey, ServiceId>,
 }
 
 impl BackendIndex {
@@ -231,7 +313,7 @@ impl BackendIndex {
     /// `by_addr[addr]`, and the addr key is dropped iff its inner per-service
     /// map becomes empty (i.e. no OTHER service still claims it). A different
     /// service's backend at a shared addr is never evicted.
-    fn apply_row(&mut self, service_id: ServiceId, backends: &[Backend]) {
+    pub fn apply_row(&mut self, service_id: ServiceId, backends: &[Backend]) {
         if let Some(stale) = self.addrs_by_service.remove(&service_id) {
             for addr in stale {
                 if let Some(by_service) = self.by_addr.get_mut(&addr) {
@@ -252,13 +334,27 @@ impl BackendIndex {
         self.addrs_by_service.insert(service_id, contributed);
     }
 
-    /// Rebuild the WHOLE index from an authoritative snapshot (the List leg of
-    /// List-then-Watch + the relist recovery). Every prior entry is dropped and
-    /// the snapshot's rows are re-applied — a snapshot IS the complete current
-    /// state (the keyless enumerate returns every LWW winner), so a full
+    /// Rebuild the `by_addr` projection from an authoritative `service_backends`
+    /// liveness snapshot (the List leg of List-then-Watch + the relist recovery).
+    /// Every prior `by_addr` / `addrs_by_service` entry is dropped and the
+    /// snapshot's rows are re-applied — a snapshot IS the complete current
+    /// liveness state (the keyless enumerate returns every LWW winner), so a full
     /// replace cannot strand a service the snapshot omitted (a service whose
     /// backends were removed is simply absent from the snapshot and from the
     /// rebuilt index).
+    ///
+    /// `by_frontend` is INTENTIONALLY left untouched: the `service_backends`
+    /// liveness snapshot carries NO frontend-binding information — the
+    /// `<job> → F` bindings are owned by the
+    /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
+    /// (DDN-2) and projected into `by_frontend` by [`Self::bind_frontend`], not by
+    /// a liveness relist. Wiping `by_frontend` on a liveness `Lagged` relist would
+    /// drop every frontend mapping and break withhold-not-release.
+    ///
+    /// Visibility: private (the `name_index.rs` precedent), consumed only by
+    /// [`ServiceBackendsResolve::relist_into`] within this module — never a
+    /// cross-crate caller (the pinned 02-00 surface is `by_frontend` /
+    /// `FrontendKey` / `classify` only).
     fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
         self.by_addr.clear();
         self.addrs_by_service.clear();
@@ -267,29 +363,214 @@ impl BackendIndex {
         }
     }
 
-    /// Point-lookup `orig_dst` and CLASSIFY it into an [`MtlsResolution`] arm
-    /// (the pure classification the mutation gate targets — C1/C4):
+    /// Bind a mesh frontend endpoint `key = (F, listener.port, proto)` to the
+    /// `ServiceId` it fronts — the 02-00 `by_frontend` re-key write half
+    /// (ADR-0072 REV-2).
+    ///
+    /// # The enforced invariant (DDN-2 — byte-identity via the ONE allocator)
+    ///
+    /// `F` is the SAME stable frontend the
+    /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
+    /// binds — the caller derives `F` for `<job>` from the ONE allocator
+    /// instance, the SAME instance the DNS `name_index` answers `<job>` from.
+    /// There is NO second `<job> → F` source: the `F` keyed here is
+    /// byte-identical to the `F` DNS answers (the DDN-2 single-owner invariant,
+    /// enforced by the COHERENCE-01 byte-identity property in
+    /// `dns_name_index.rs`). A second `<job> → F` source (a divergent allocator,
+    /// a re-derivation, a stale cache) would make the two projections key/answer
+    /// DIFFERENT `F`s — exactly what byte-identity forbids.
+    ///
+    /// # No write-time ordering barrier between the two projections
+    ///
+    /// `by_frontend` (this re-key projection) and the DNS `name_index` are fed
+    /// by TWO INDEPENDENT single-owner drains (`mtls_resolve_adapter` and
+    /// `name_index`), each reading the ONE shared allocator — there is NO single
+    /// ordered drain and NO temporal guarantee that `by_frontend` is bound before
+    /// `name_index` exposes `F` (or vice versa). The two drains have no inter-drain
+    /// ordering. Security does NOT rest on that ordering: even if `name_index`
+    /// exposes `F` for a `<job>` whose `(F, listener.port, proto)` key is not yet
+    /// bound here, a dial to that `F` MISSES `by_frontend`, falls into
+    /// [`classify`](Self::classify) arm 2 (`F ∈ 10.98.0.0/16` →
+    /// [`MeshUnreachable`](MtlsResolution::MeshUnreachable)) and fails closed — NEVER
+    /// cleartext (the FAILCLOSED-01 security half). Convergence (the bind landing)
+    /// is an availability nicety, not the security guarantee.
+    ///
+    /// # Test-only construction seam (N1)
+    ///
+    /// As of 02-01 this method has NO production caller — the production drain
+    /// feeds `by_frontend` exclusively through the pure-reader
+    /// [`project_by_frontend`](Self::project_by_frontend) /
+    /// [`project_row_by_frontend`](Self::project_row_by_frontend) projection
+    /// over the SHARED [`FrontendAddrAllocator`] snapshot (REV-3). `bind_frontend`
+    /// survives ONLY as a direct-construction seam for the 02-00 acceptance
+    /// tests (`mtls_resolve_rekey.rs`, `dns_name_index.rs`), which build a
+    /// `by_frontend` map by hand to exercise `classify`. It is deliberately
+    /// retained (not deleted per `development.md` § "Deletion discipline")
+    /// because those tests depend on it; do not reach for it from a production
+    /// path — the production feeder is the `project_*` projection.
+    pub fn bind_frontend(&mut self, key: FrontendKey, service_id: ServiceId) {
+        self.by_frontend.insert(key, service_id);
+    }
+
+    /// PURE-READER `by_frontend` projection (02-01; ADR-0072 REV-3) — rebuild
+    /// the `by_frontend` map from the authoritative `service_backends` rows AND
+    /// the SHARED [`FrontendAddrAllocator`] snapshot, WITHOUT mutating the
+    /// allocator.
+    ///
+    /// This mirrors the `name_index` drain's row→`<job>`→snapshot pattern
+    /// ([`crate::dns_responder::name_index`] `replace_from_snapshot`): for each
+    /// row, each running backend's `alloc` SpiffeId yields a `<job>`
+    /// ([`job_of`]); the SHARED allocator's snapshot supplies its stable
+    /// frontend `F` (a read-only `snapshot.get(<job>)` — NEVER `assign`, the
+    /// REV-3 pure-reader invariant), and the backend's own listener port +
+    /// `Proto::Tcp` (the v1 capture proto the [`Self::classify`] lookup keys —
+    /// `mtls_intercept_worker.rs:792-794`) complete the [`FrontendKey`]. A
+    /// `<job>` the allocator does NOT yet bind is WITHHELD (no entry) — NEVER
+    /// fabricated; a dial to its `F` then fails closed via [`Self::classify`]
+    /// arm 2 (the FAILCLOSED-01 security half; convergence is the availability
+    /// nicety). The `<job> → F` binding has exactly ONE source — the shared
+    /// allocator the DNS `name_index` answers from — so the `F` keyed here is
+    /// byte-identical to the `F` DNS answers (DDN-2 single-owner invariant).
+    ///
+    /// The full `by_frontend` is REPLACED from the rows + snapshot (not merged):
+    /// a `<job>` whose Service was removed (absent from `rows`) or whose `F` was
+    /// released (absent from the snapshot) drops its `by_frontend` entry,
+    /// matching the full-row-replace contract of [`Self::replace_from_snapshot`].
+    fn project_by_frontend(
+        &mut self,
+        rows: &[ServiceBackendRow],
+        frontend_snapshot: &BTreeMap<overdrive_core::id::MeshServiceName, std::net::Ipv4Addr>,
+    ) {
+        self.by_frontend.clear();
+        for row in rows {
+            self.project_row_by_frontend(row, frontend_snapshot);
+        }
+    }
+
+    /// Project ONE `service_backends` row's frontend keys (the incremental
+    /// per-row companion to [`Self::project_by_frontend`], used by the watch
+    /// drain). First evicts the row's service's prior `by_frontend` entries
+    /// (full-row replace — a shrunk backend set or a released `F` drops stale
+    /// keys), then inserts the current `<job> → F` keys read from the shared
+    /// allocator snapshot (the REV-3 pure read — NEVER `assign`).
+    fn project_row_by_frontend(
+        &mut self,
+        row: &ServiceBackendRow,
+        frontend_snapshot: &BTreeMap<overdrive_core::id::MeshServiceName, std::net::Ipv4Addr>,
+    ) {
+        // Evict this service's prior frontend keys (full-row replace, scoped to
+        // `service_id`): a different service's frontend key is never touched.
+        self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
+        for backend in &row.backends {
+            // A backend whose SpiffeId is not the `/job/<job>/alloc/<alloc>`
+            // shape (or whose `<job>` is not a v1 mesh name) contributes no
+            // frontend key — it is not mesh-dialable by name.
+            let Some(job) = job_of(&backend.alloc) else { continue };
+            // READ the shared allocator's EXISTING binding (REV-3 pure reader).
+            // WITHHOLD a `<job>` the allocator does not yet bind.
+            let Some(&frontend_ip) = frontend_snapshot.get(&job) else { continue };
+            // The frontend endpoint re-uses the backend's listener port
+            // verbatim; only the IP changes (workload_addr → F). The v1 capture
+            // is TCP, so the key carries `Proto::Tcp` — the same proto
+            // `classify` looks up.
+            let key =
+                FrontendKey::new(SocketAddrV4::new(frontend_ip, backend.addr.port()), Proto::Tcp);
+            self.by_frontend.insert(key, row.service_id);
+        }
+    }
+
+    /// The FIRST-by-`Ord` running-AND-healthy backend `addr` for `service_id`,
+    /// or `None` when the service has no healthy backend right now (BLOCKER-2:
+    /// the deterministic tie-break that keeps DST replay-equivalence — v1
+    /// single-replica is degenerate, but the rule is mutation-gate-able). The
+    /// service's healthy backend addrs are scanned in `Ord` order (a `BTreeMap`
+    /// range over `by_addr` would also serve; the per-service addr set is small)
+    /// and the smallest is returned.
+    fn first_healthy_backend_for(&self, service_id: ServiceId) -> Option<SocketAddrV4> {
+        let addrs = self.addrs_by_service.get(&service_id)?;
+        addrs
+            .iter()
+            .filter(|addr| {
+                self.by_addr
+                    .get(addr)
+                    .and_then(|by_service| by_service.get(&service_id))
+                    .is_some_and(|backend| backend.healthy)
+            })
+            .copied()
+            .min()
+    }
+
+    /// Point-lookup `orig_dst`/`proto` and CLASSIFY it into an
+    /// [`MtlsResolution`] arm — the THREE-way re-keyed classification the
+    /// mutation gate targets (C1/C4 + ADR-0072 REV-2 Finding-1/Finding-3):
+    ///
+    /// 1. **`by_frontend` HIT** — `(orig_dst, proto)` is a mesh frontend
+    ///    endpoint. Translate to its `ServiceId`, select that service's
+    ///    FIRST-by-`Ord` running-AND-healthy backend → `Mesh { addr, None }`
+    ///    (a frontend HIT is ALWAYS mesh — NEVER `NonMesh`, NEVER an unhealthy
+    ///    backend). With NO healthy backend right now → `MeshUnreachable`
+    ///    (fail-closed: the service is KNOWN but has no live backend).
+    /// 2. **`by_frontend` MISS, but `orig_dst.ip() ∈ 10.98.0.0/16`** —
+    ///    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is
+    ///    early (race) OR to a withdrawn `<job>`. → `MeshUnreachable` (refuse,
+    ///    NO cleartext). The membership test is `WORKLOAD_FRONTEND_BASE.contains`
+    ///    against the ONE pinned const — NEVER a broader "any reserved subnet"
+    ///    helper.
+    /// 3. **`by_frontend` MISS, outside the subnet** — fall through to today's
+    ///    `by_addr` lookup verbatim (the additive-EXTEND backward-compat path):
+    ///    - any contributing service has a `running`-and-`healthy` backend at
+    ///      the addr → `Mesh { addr, None }` (the F-A any-healthy-at-addr rule);
+    ///    - the addr is claimed but no healthy backend there → `MeshUnreachable`;
+    ///    - the addr is unclaimed (a true non-mesh dst outside the frontend
+    ///      subnet) → `NonMesh` (cleartext pass-through, by design — the live
+    ///      rustdoc requires a GENERAL miss stay `NonMesh`).
+    pub fn classify(&self, orig_dst: SocketAddrV4, proto: Proto) -> MtlsResolution {
+        // Arm 1 — `by_frontend` HIT: translate the frontend endpoint to its
+        // ServiceId, then select that service's FIRST-by-`Ord` running-AND-healthy
+        // backend → Mesh (else MeshUnreachable on zero-healthy). A frontend HIT is
+        // ALWAYS mesh — NEVER `NonMesh`, NEVER an unhealthy backend.
+        if let Some(&service_id) = self.by_frontend.get(&FrontendKey::new(orig_dst, proto)) {
+            // `Some(addr)` → the service's first-by-Ord healthy backend → Mesh;
+            // `None` → the service is KNOWN (the key matched) but has no healthy
+            // backend right now → MeshUnreachable (fail-closed, NO cleartext).
+            return self
+                .first_healthy_backend_for(service_id)
+                .map_or(MtlsResolution::MeshUnreachable, |addr| {
+                    MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None })
+                });
+        }
+        // Arm 2 — `by_frontend` MISS but `orig_dst.ip() ∈ 10.98.0.0/16` →
+        // MeshUnreachable (fail-closed-on-frontend-subnet-miss, NO cleartext — a
+        // mesh dial that is early (race) OR to a withdrawn <job>). The membership
+        // test is `WORKLOAD_FRONTEND_BASE.contains` against the ONE pinned const,
+        // NEVER a broader "any reserved subnet" helper.
+        if WORKLOAD_FRONTEND_BASE.contains(orig_dst.ip()) {
+            return MtlsResolution::MeshUnreachable;
+        }
+        // Arm 3 — outside the subnet: today's `by_addr` classification verbatim
+        // (the additive-EXTEND backward-compat fall-through). A true non-mesh dst
+        // outside the frontend subnet stays `NonMesh` (cleartext, by design).
+        self.classify_by_addr(orig_dst)
+    }
+
+    /// The pre-REV-2 `by_addr` classification, preserved verbatim as the
+    /// additive-EXTEND fall-through (arm 3 of [`classify`](Self::classify)):
     ///
     /// - ANY contributing service has a `running`-and-`healthy` backend at the
-    ///   addr → `Mesh { addr, expected_svid: None }` (`expected_svid` is
-    ///   `None` for every backend in v1 — the identity join is #242). This is
-    ///   the **any-healthy-at-addr** rule (F-A): a deterministic disjunction
-    ///   over the contributing services, NOT last-writer-wins. If two services
-    ///   claim the addr and at least one is healthy, the addr is `Mesh`
-    ///   independent of apply order;
+    ///   addr → `Mesh { addr, expected_svid: None }` (the **any-healthy-at-addr**
+    ///   rule, F-A: a deterministic disjunction over contributing services, NOT
+    ///   last-writer-wins);
     /// - the addr is claimed but NO contributing service has a healthy backend
-    ///   there → `MeshUnreachable` (fail-closed, the readiness-gate "present
-    ///   but unreachable" arm);
+    ///   there → `MeshUnreachable` (the readiness-gate "present but unreachable"
+    ///   arm);
     /// - the addr is unclaimed (no entry) → `NonMesh` (cleartext pass-through,
-    ///   by design — a miss is NEVER `MeshUnreachable` in v1).
+    ///   by design — a general miss is NEVER `MeshUnreachable`).
     ///
     /// An addr key is present in `by_addr` IFF at least one service claims it:
     /// [`Self::apply_row`] drops an addr key the moment its inner per-service
     /// map empties and never inserts an empty inner map, so a `Some(by_service)`
-    /// here is always non-empty. The two present-key arms (`any-healthy` →
-    /// `Mesh`, else `MeshUnreachable`) therefore partition every reachable
-    /// present-key state without a redundant non-empty guard.
-    fn classify(&self, orig_dst: SocketAddrV4) -> MtlsResolution {
+    /// here is always non-empty.
+    fn classify_by_addr(&self, orig_dst: SocketAddrV4) -> MtlsResolution {
         match self.by_addr.get(&orig_dst) {
             Some(by_service) if by_service.values().any(|backend| backend.healthy) => {
                 MtlsResolution::Mesh(ResolvedBackend { addr: orig_dst, expected_svid: None })
@@ -311,6 +592,15 @@ pub struct ServiceBackendsResolve {
     /// the Watch leg reads
     /// [`subscribe_all_events`](ObservationStore::subscribe_all_events).
     store: Arc<dyn ObservationStore>,
+    /// The SHARED [`FrontendAddrAllocator`] — the single `<job> → F` owner
+    /// (DDN-2; 02-01). The `by_frontend` projection READS this allocator's
+    /// snapshot (a pure read — NEVER `assign`, the REV-3 pure-reader invariant)
+    /// to key `(F, listener.port, proto) → ServiceId`. It is the SAME
+    /// `Arc`-shared instance the DNS `name_index` answers `F` from, so the `F`
+    /// keyed in `by_frontend` is byte-identical to the `F` DNS answers. The
+    /// `<job> → F` binding is WRITTEN only by the 01-05 deploy-time assigner —
+    /// NEVER by this drain.
+    frontend: FrontendAddrAllocator,
     /// The C4 in-RAM ownership-aware `addr → {service → Backend}` reverse index
     /// (F-A), behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
@@ -334,17 +624,22 @@ pub struct ServiceBackendsResolve {
 }
 
 impl ServiceBackendsResolve {
-    /// Construct the adapter from its REQUIRED [`ObservationStore`]. Mandatory,
-    /// not defaulted, no builder — a caller that forgets the store fails to
-    /// construct (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// The index starts empty and no watch is open yet;
-    /// [`probe`](MtlsResolve::probe) Lists the snapshot into the index and
-    /// opens the single-owner watch (the Earned-Trust "wire → probe → use"
-    /// gate).
+    /// Construct the adapter from its REQUIRED [`ObservationStore`] and the
+    /// SHARED [`FrontendAddrAllocator`] (02-01). Both mandatory, not defaulted,
+    /// no builder — a caller that forgets either fails to construct
+    /// (`.claude/rules/development.md` § "Port-trait dependencies"). The
+    /// `frontend` allocator is the SAME `Arc`-shared instance the DNS
+    /// `name_index` answers `F` from (DDN-2 single-owner); the `by_frontend`
+    /// projection READS its snapshot (pure read — never `assign`). The index
+    /// starts empty and no watch is open yet; [`probe`](MtlsResolve::probe)
+    /// Lists the snapshot into the index, projects `by_frontend` from the
+    /// allocator, and opens the single-owner watch (the Earned-Trust
+    /// "wire → probe → use" gate).
     #[must_use]
-    pub fn new(store: Arc<dyn ObservationStore>) -> Self {
+    pub fn new(store: Arc<dyn ObservationStore>, frontend: FrontendAddrAllocator) -> Self {
         Self {
             store,
+            frontend,
             index: Arc::new(RwLock::new(BackendIndex::default())),
             // Healthy until proven otherwise: a resolve before any probe (which
             // the composition root forbids — wire → probe → use) reads an empty
@@ -363,7 +658,7 @@ impl ServiceBackendsResolve {
     /// A store-read fault surfaces as the `String` the probe/resolve callers
     /// map to `Probe` / `StoreUnreadable`.
     async fn relist(&self) -> std::result::Result<(), String> {
-        Self::relist_into(&self.store, &self.index).await
+        Self::relist_into(&self.store, &self.index, &self.frontend).await
     }
 
     /// The relist primitive used by both [`Self::relist`] (the probe-time List
@@ -376,10 +671,22 @@ impl ServiceBackendsResolve {
     async fn relist_into(
         store: &Arc<dyn ObservationStore>,
         index: &Arc<RwLock<BackendIndex>>,
+        frontend: &FrontendAddrAllocator,
     ) -> std::result::Result<(), String> {
         let rows = store.all_service_backends_rows().await.map_err(|err| err.to_string())?;
-        // Apply in a sync critical section — the await already returned.
-        index.write().replace_from_snapshot(&rows);
+        // Read the shared allocator snapshot OUTSIDE the index lock (a `Mutex`
+        // lock that does not cross the index `RwLock` — both are sync, neither
+        // crosses the `.await`). The `by_frontend` projection is a PURE READ of
+        // this snapshot (REV-3: never `assign`).
+        let frontend_snapshot = frontend.snapshot();
+        // Apply in a sync critical section — the await already returned. Scope
+        // the write guard so it drops before the function returns
+        // (clippy::significant_drop_tightening).
+        {
+            let mut index = index.write();
+            index.replace_from_snapshot(&rows);
+            index.project_by_frontend(&rows, &frontend_snapshot);
+        }
         Ok(())
     }
 
@@ -408,6 +715,7 @@ impl ServiceBackendsResolve {
     fn spawn_drain(
         store: Arc<dyn ObservationStore>,
         index: Arc<RwLock<BackendIndex>>,
+        frontend: FrontendAddrAllocator,
         watch_healthy: Arc<AtomicBool>,
         mut subscription: overdrive_core::traits::observation_store::LagAwareSubscription,
     ) -> JoinHandle<()> {
@@ -420,8 +728,14 @@ impl ServiceBackendsResolve {
             while let Some(event) = subscription.next().await {
                 match event {
                     SubscriptionEvent::Row(ObservationRow::ServiceBackend(row)) => {
-                        // Sync critical section — no lock across the `.await`.
-                        index.write().apply_row(row.service_id, &row.backends);
+                        // Read the shared allocator snapshot, then fold the row +
+                        // project its frontend keys in one sync critical section
+                        // (no lock across the `.await`). The `by_frontend`
+                        // projection is a PURE READ of the snapshot (REV-3).
+                        let frontend_snapshot = frontend.snapshot();
+                        let mut index = index.write();
+                        index.apply_row(row.service_id, &row.backends);
+                        index.project_row_by_frontend(&row, &frontend_snapshot);
                     }
                     // Non-`service_backends` rows are not part of the resolve
                     // index — ignore them (the watch is the whole observation
@@ -434,7 +748,7 @@ impl ServiceBackendsResolve {
                         // the index uncertifiable — fault the watch so
                         // `resolve` returns `StoreUnreadable`, and stop draining
                         // (the index can no longer be kept current).
-                        if Self::relist_into(&store, &index).await.is_err() {
+                        if Self::relist_into(&store, &index, &frontend).await.is_err() {
                             watch_healthy.store(false, Ordering::SeqCst);
                             return;
                         }
@@ -510,6 +824,7 @@ impl MtlsResolve for ServiceBackendsResolve {
             let handle = Self::spawn_drain(
                 Arc::clone(&self.store),
                 Arc::clone(&self.index),
+                self.frontend.clone(),
                 Arc::clone(&self.watch_healthy),
                 subscription,
             );
@@ -535,8 +850,12 @@ impl MtlsResolve for ServiceBackendsResolve {
         // Read-only point lookup + pure classification. The read guard is taken
         // and dropped within this expression — no lock is held across an
         // `.await` (there is no `.await` in the classify path; the drain task
-        // owns all index writes).
-        Ok(self.index.read().classify(orig_dst))
+        // owns all index writes). The v1 resolve call site keys `Proto::Tcp`
+        // because the worker-layer outbound capture is TCP-only today
+        // (`mtls_intercept_worker.rs:792-794`); the future-UDP capture surfaces
+        // the captured proto here — the index key already carries the axis, so
+        // it is a capture/plumbing change, NOT an index-key change.
+        Ok(self.index.read().classify(orig_dst, Proto::Tcp))
     }
 }
 
@@ -550,6 +869,10 @@ mod tests {
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use proptest::prelude::*;
 
+    // `Proto` flows in via `super::*` (imported at the module top for the
+    // re-keyed `classify` signature). The existing `by_addr` unit tests key
+    // `Proto::Tcp` — their `10.0.0.x` addrs are outside `10.98.0.0/16` and never
+    // in `by_frontend`, so they reach the unchanged arm-3 `by_addr` path.
     use super::*;
 
     // ---- test fixtures -----------------------------------------------------
@@ -605,7 +928,10 @@ mod tests {
                 .await
                 .expect("write service_backends row");
         }
-        let adapter = ServiceBackendsResolve::new(Arc::clone(store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         // List-at-probe seeds the pre-existing rows into the index.
         adapter.probe().await.expect("probe Lists the pre-existing rows");
         adapter
@@ -679,7 +1005,10 @@ mod tests {
 
         // Construct + probe AFTER the write. A forward-only observe-only adapter
         // would never see this row; List-at-probe seeds it.
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe Lists the pre-existing snapshot");
 
         assert_eq!(
@@ -769,7 +1098,10 @@ mod tests {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Deaf));
         let lagged_addr = v4(10, 0, 0, 42, 6000);
 
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe on an empty store is Ok");
         // The address is a miss right now (the row does not exist yet).
         assert_eq!(
@@ -837,7 +1169,10 @@ mod tests {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::LaggedChannel));
         let dropped_addr = v4(10, 0, 0, 77, 7443);
 
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
         adapter.probe().await.expect("probe on an empty store opens the channel watch");
 
         // (2) miss before anything is written.
@@ -894,7 +1229,10 @@ mod tests {
     #[tokio::test]
     async fn watch_failure_makes_resolve_return_store_unreadable() {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Closed));
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
 
         // Probe succeeds (List Ok, subscribe_all_events Ok) — but the
         // subscription the double hands back is already closed, so the drain
@@ -929,7 +1267,10 @@ mod tests {
     async fn store_read_fault_at_probe_returns_probe() {
         let store = Arc::new(ScriptableStore::with_watch(WatchMode::Live));
         store.arm_list_fault();
-        let adapter = ServiceBackendsResolve::new(Arc::clone(&store) as Arc<dyn ObservationStore>);
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+        );
 
         let err = adapter.probe().await.expect_err("an errored List surfaces as Err at probe time");
         assert!(
@@ -945,6 +1286,93 @@ mod tests {
         let store = fresh_store();
         let adapter = adapter_listing_rows(&store, vec![]).await;
         adapter.probe().await.expect("probe on a readable (empty) store is Ok");
+    }
+
+    // ---- 02-01: by_frontend pure-reader drain projection -------------------
+
+    /// 02-01 — the `by_frontend` projection is a PURE READER of the SHARED
+    /// `FrontendAddrAllocator`: a dial to a `<job>`'s stable frontend `F`
+    /// translates to that `<job>`'s service's healthy backend, where `F` comes
+    /// from the allocator (NOT a re-derivation), and the projection NEVER
+    /// `assign`s (a `<job>` the allocator does not yet bind is WITHHELD).
+    ///
+    /// Port-to-port through `MtlsResolve` (`probe` projects `by_frontend` from
+    /// the allocator's snapshot at the List leg; `resolve` translates `F:port`).
+    /// Falsifiable: delete the `project_by_frontend` call in `relist_into` and
+    /// the dial to `F` MISSES `by_frontend`, falls into the `∈ 10.98.0.0/16`
+    /// fail-closed arm → `MeshUnreachable` (the test's `Mesh` assertion goes
+    /// RED). Two cases in one walkthrough: (A) allocator binds the `<job>` → `F`
+    /// translates to the backend (`Mesh`); (B) the allocator does NOT bind a
+    /// second `<job>` → its `F` is WITHHELD (no `by_frontend` entry → the
+    /// frontend-subnet-miss fail-closed arm → `MeshUnreachable`, NEVER `Mesh`).
+    #[tokio::test]
+    async fn by_frontend_projection_reads_the_shared_allocator_and_never_assigns() {
+        use overdrive_core::id::{AllocationId, MeshServiceName, WorkloadId};
+
+        let store = fresh_store();
+        let frontend = FrontendAddrAllocator::new();
+
+        // The allocator is the SINGLE source of `F`: pre-bind `<job> = bound`
+        // (the 01-05 deploy-time assigner's job) and LEAVE `<job> = withheld`
+        // unbound (the race / not-yet-assigned case — its row exists but the
+        // allocator does not bind its `F`, so the projection WITHHOLDS it).
+        let bound_job = MeshServiceName::new("bound.svc.overdrive.local").expect("valid mesh name");
+        let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
+
+        // A backend whose alloc SpiffeId is the `/job/<job>/alloc/<alloc>` shape
+        // the projection parses (`job_of`). The backend's listener port is the
+        // port the frontend key re-uses verbatim.
+        let backend_port = 8080;
+        let backend_addr = v4(10, 99, 0, 6, backend_port);
+        let mk_backend = |job_label: &str, addr: SocketAddrV4, healthy: bool| Backend {
+            alloc: SpiffeId::for_allocation(
+                &WorkloadId::new(job_label).expect("valid workload id"),
+                &AllocationId::new("alloc-1").expect("valid alloc id"),
+            ),
+            addr: SocketAddr::V4(addr),
+            weight: 1,
+            healthy,
+        };
+
+        // Both services have a healthy backend row; only `bound` has an
+        // allocator F. Write the rows, THEN probe the SHARED allocator-bearing
+        // adapter so the List-at-probe leg projects `by_frontend` from it.
+        for row in [
+            backends_row(101, vec![mk_backend("bound", backend_addr, true)], 1),
+            backends_row(202, vec![mk_backend("withheld", v4(10, 99, 0, 10, 9000), true)], 1),
+        ] {
+            store.write(ObservationRow::ServiceBackend(row)).await.expect("write row");
+        }
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(&store) as Arc<dyn ObservationStore>,
+            frontend.clone(),
+        );
+        adapter.probe().await.expect("probe projects by_frontend from the shared allocator");
+
+        // (A) a dial to the bound job's frontend `F:port` translates to its
+        // backend (Mesh) — `F` is the allocator's binding, not a re-derivation.
+        let f_endpoint = SocketAddrV4::new(f_bound, backend_port);
+        assert_eq!(
+            adapter.resolve(f_endpoint).await.expect("resolve F is Ok"),
+            MtlsResolution::Mesh(ResolvedBackend { addr: backend_addr, expected_svid: None }),
+            "by_frontend must translate the allocator's F to the job's healthy backend",
+        );
+
+        // (B) the withheld job has NO allocator binding → its frontend key is
+        // never projected. The allocator still binds ONLY `bound` (the
+        // projection never `assign`ed `withheld`): a dial to ANY unbound
+        // frontend-subnet addr MISSES by_frontend and fails closed.
+        assert_eq!(
+            frontend.snapshot().len(),
+            1,
+            "the pure-reader projection must NOT assign — only the pre-bound job is held",
+        );
+        let unbound_frontend = SocketAddrV4::new(std::net::Ipv4Addr::new(10, 98, 0, 250), 9000);
+        assert_eq!(
+            adapter.resolve(unbound_frontend).await.expect("resolve is Ok"),
+            MtlsResolution::MeshUnreachable,
+            "a frontend-subnet dial the allocator does not bind fails closed (never Mesh)",
+        );
     }
 
     // ---- F-A: ownership-aware index (the security proof) -------------------
@@ -979,7 +1407,7 @@ mod tests {
         index.apply_row(svc(1), &[backend(shared, true)]);
         index.apply_row(svc(2), &[backend(shared, true)]);
         assert_eq!(
-            index.classify(shared),
+            index.classify(shared, Proto::Tcp),
             MtlsResolution::Mesh(ResolvedBackend { addr: shared, expected_svid: None }),
             "an addr claimed by two healthy services is Mesh",
         );
@@ -988,7 +1416,7 @@ mod tests {
         index.apply_row(svc(1), &[]);
 
         assert_eq!(
-            index.classify(shared),
+            index.classify(shared, Proto::Tcp),
             MtlsResolution::Mesh(ResolvedBackend { addr: shared, expected_svid: None }),
             "B's still-healthy claim must survive A's shrink — no global eviction",
         );
@@ -1013,13 +1441,21 @@ mod tests {
         let mut index = BackendIndex::default();
         index.apply_row(svc(1), &[backend(shared, false)]);
         index.apply_row(svc(2), &[backend(shared, true)]);
-        assert_eq!(index.classify(shared), expected, "any-healthy: unhealthy-then-healthy");
+        assert_eq!(
+            index.classify(shared, Proto::Tcp),
+            expected,
+            "any-healthy: unhealthy-then-healthy"
+        );
 
         // Order 2: healthy B first, unhealthy A last — same verdict.
         let mut index = BackendIndex::default();
         index.apply_row(svc(2), &[backend(shared, true)]);
         index.apply_row(svc(1), &[backend(shared, false)]);
-        assert_eq!(index.classify(shared), expected, "any-healthy: healthy-then-unhealthy");
+        assert_eq!(
+            index.classify(shared, Proto::Tcp),
+            expected,
+            "any-healthy: healthy-then-unhealthy"
+        );
 
         // And when EVERY contributor at the addr is unhealthy → MeshUnreachable
         // (the addr is claimed but unreachable), never NonMesh.
@@ -1027,7 +1463,7 @@ mod tests {
         index.apply_row(svc(1), &[backend(shared, false)]);
         index.apply_row(svc(2), &[backend(shared, false)]);
         assert_eq!(
-            index.classify(shared),
+            index.classify(shared, Proto::Tcp),
             MtlsResolution::MeshUnreachable,
             "an addr claimed only by unhealthy backends is MeshUnreachable",
         );
@@ -1036,13 +1472,20 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(64))]
 
-        /// PBT (criterion 5/6) over the pure classification (the mutation-gate
-        /// target): a single backend at an arbitrary V4 addr classifies by its
+        /// PBT (criterion 5/6) over the pure `by_addr` classification (arm 3,
+        /// the mutation-gate target): a single backend at an arbitrary V4 addr
+        /// OUTSIDE the `10.98.0.0/16` frontend subnet classifies by its
         /// `healthy` bit — `healthy` ⇒ `Mesh { addr, None }`; `!healthy` ⇒
-        /// `MeshUnreachable` — and a DIFFERENT addr always ⇒ `NonMesh`. The
-        /// property holds over the whole address space, pinning the
-        /// healthy-filter branch + the hit/miss boundary the match-arm
-        /// mutations target.
+        /// `MeshUnreachable` — and a DIFFERENT addr (also outside the subnet)
+        /// always ⇒ `NonMesh`. The property holds over the `by_addr` address
+        /// space, pinning the healthy-filter branch + the hit/miss boundary the
+        /// match-arm mutations target.
+        ///
+        /// Constrained OUTSIDE `10.98.0.0/16` (02-00): an addr inside the
+        /// frontend subnet now routes to the fail-closed arm-2 (a MISS there is
+        /// `MeshUnreachable`, NOT `NonMesh`), which `mtls_resolve_rekey.rs`
+        /// FAILCLOSED-01 covers directly — this property remains the arm-3
+        /// `by_addr` totality it was authored for.
         ///
         /// Universe (observable): the [`MtlsResolution`] arm returned by
         /// `resolve` for the queried addr.
@@ -1054,6 +1497,11 @@ mod tests {
             // A distinct miss addr (port offset guarantees it differs from the hit).
             miss_port in 1u16..=u16::MAX,
         ) {
+            // Exclude `10.98.0.0/16` (the frontend subnet) from BOTH the hit and
+            // the flipped-high-octet miss, so this stays an arm-3 `by_addr`
+            // totality test (the subnet arm is FAILCLOSED-01's surface).
+            prop_assume!(!(a == 10 && b == 98));
+            prop_assume!(!((a ^ 0xFF) == 10 && b == 98));
             let hit = v4(a, b, c, d, port);
             // Force the miss addr to differ from the hit (flip the high octet).
             let miss = v4(a ^ 0xFF, b, c, d, miss_port);

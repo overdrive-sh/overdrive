@@ -21,6 +21,7 @@
 //! [`CertSerial`] (hex) are case-sensitive — they are not human-typed.
 
 use std::fmt::{self, Display, Formatter};
+use std::net::SocketAddrV4;
 use std::num::NonZeroU16;
 use std::str::FromStr;
 
@@ -88,6 +89,22 @@ pub enum IdParseError {
 /// re-introduced a journal-key collision (two distinct correlation keys
 /// sharing a truncated prefix collapsed to one id).
 pub const LABEL_MAX: usize = 253;
+
+/// The DNS single-*label* octet maximum (RFC 1035 §2.3.4): one label of a
+/// domain name is hard-capped at 63 octets, distinct from [`LABEL_MAX`] (253),
+/// which is the DNS-*name* (whole FQDN) maximum (RFC 1035 §3.1).
+///
+/// This is a real protocol constant — the `hickory-proto` codec enforces it on
+/// the wire — mirroring the codebase's existing `RECONCILER_NAME_MAX` /
+/// `WORKFLOW_NAME_MAX` (both 63). It bounds a [`MeshServiceName`]'s `<job>`,
+/// which is a single DNS label (the first label of
+/// `<job>.svc.overdrive.local`); a `<job>` longer than 63 octets would make
+/// `hickory_proto::rr::Name::from_str` reject the rendered name and panic the
+/// responder's wire encoder. NOT a "bespoke smaller ceiling" of [`LABEL_MAX`]
+/// (`development.md` § "One shared length ceiling for label-shaped ids") — that
+/// rule governs *derived* label-shaped ids sized off the DNS-name max; a DNS
+/// *label* legitimately uses its own RFC-1035 protocol limit.
+pub const DNS_LABEL_OCTET_MAX: usize = 63;
 
 fn validate_label(kind: &'static str, raw: &str) -> Result<String, IdParseError> {
     if raw.is_empty() {
@@ -776,6 +793,212 @@ impl From<CorrelationKey> for String {
 }
 
 use std::fmt::Write as _;
+
+// -----------------------------------------------------------------------------
+// MeshServiceName — `<job>.svc.overdrive.local` mesh-DNS grammar.
+// -----------------------------------------------------------------------------
+
+/// Mesh service name — the `<job>.svc.overdrive.local` grammar a workload
+/// dials to reach another workload by name (dial-by-name-responder,
+/// ADR-0072 / US-DBN-2).
+///
+/// The newtype carries a validated `<job>` label; the fixed
+/// [`SUFFIX`](Self::SUFFIX) is grammar, not stored state. [`as_str`](Self::as_str)
+/// returns the canonical lowercase `<job>` label; [`Display`] renders the
+/// full `<job>.svc.overdrive.local` name.
+///
+/// # Grammar
+///
+/// The bespoke [`FromStr`] enforces a suffix grammar that the shared
+/// [`validate_label`] cannot: `validate_label` permits `.` (so `JobId` may
+/// be `region.eu-west-1`), which means it would accept any dotted string —
+/// it cannot reject the wrong suffix. `MeshServiceName::new` therefore
+/// case-folds, strips the terminal `.svc.overdrive.local`, and validates
+/// the remaining `<job>` label through `validate_label` (reusing the shared
+/// DNS-1123 character-class + [`LABEL_MAX`] ceiling — no bespoke smaller
+/// magic number, per `.claude/rules/development.md` § "One shared length
+/// ceiling for label-shaped ids").
+///
+/// # Completeness
+///
+/// Case-insensitive parse, lowercase canonical `Display`, serde matching
+/// `Display`/`FromStr` exactly — the standard human-typed-id shape.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
+pub struct MeshServiceName(String);
+
+impl MeshServiceName {
+    /// The fixed mesh-DNS suffix — note NO leading dot; the separator is the
+    /// `.` between the `<job>` label and this suffix.
+    pub const SUFFIX: &'static str = "svc.overdrive.local";
+
+    /// Construct from a full `<job>.svc.overdrive.local` name, validating the
+    /// suffix grammar and canonicalising the `<job>` label to lowercase.
+    ///
+    /// Case-folds, strips the terminal `.svc.overdrive.local` (the wrong /
+    /// missing / non-terminal suffix all surface as an
+    /// [`IdParseError::InvalidFormat`]), caps the `<job>` at the DNS
+    /// single-label octet limit [`DNS_LABEL_OCTET_MAX`] (63 octets — RFC 1035
+    /// §2.3.4; corrected ADR-0072 DDN-7), then validates the remaining `<job>`
+    /// label through the shared [`validate_label`] — reusing the DNS-1123
+    /// character class and the start/end-alphanumeric rule. An empty,
+    /// over-63-octet, or out-of-class label maps to the existing `Empty` /
+    /// `TooLong { max: 63 }` / `InvalidChar` / `InvalidFormat` variants.
+    ///
+    /// The 63-octet cap is the DNS-*label* maximum, NOT [`LABEL_MAX`] (253, the
+    /// DNS-*name* max) — a single label is hard-capped at 63 on the wire, so a
+    /// longer `<job>` would make `hickory_proto::rr::Name::from_str` reject the
+    /// rendered name and panic the responder's encoder. This is a real protocol
+    /// constant (mirroring `RECONCILER_NAME_MAX` / `WORKFLOW_NAME_MAX` = 63),
+    /// not a bespoke-smaller ceiling of [`LABEL_MAX`] (`development.md` § "One
+    /// shared length ceiling for label-shaped ids" governs *derived* ids sized
+    /// off the DNS-name max; a DNS label uses its own RFC-1035 limit).
+    ///
+    /// **v1 single-label contract (ADR-0072:279):** the `<job>` is a *single*
+    /// label — single-node, NO namespace segment. The shared [`validate_label`]
+    /// PERMITS `.` (id.rs:102) because other label newtypes (`WorkloadId` /
+    /// `NodeId`) legitimately carry dotted forms (`region.eu-west-1`); so this
+    /// constructor adds a single-label guard ON TOP of `validate_label` — a
+    /// dotted `<job>` (e.g. `foo.bar.svc.overdrive.local` → `<job>` =
+    /// `"foo.bar"`) is rejected as [`IdParseError::InvalidChar`] at the
+    /// offending `.`. A dotted deploy-spec service id is therefore simply not
+    /// mesh-dialable by name in v1, which is exactly the design's intended
+    /// scope (NO namespace segment), not a regression.
+    pub fn new(raw: &str) -> Result<Self, IdParseError> {
+        const KIND: &str = "MeshServiceName";
+        let lowered = raw.to_ascii_lowercase();
+        // The separator-plus-suffix that a valid name must end with:
+        // ".svc.overdrive.local". Stripping it leaves the `<job>` label.
+        let job = lowered.strip_suffix(Self::SUFFIX).and_then(|s| s.strip_suffix('.')).ok_or(
+            IdParseError::InvalidFormat { kind: KIND, expected: "<job>.svc.overdrive.local" },
+        )?;
+        // Single-label guard: the v1 `<job>` is ONE label with no namespace
+        // segment. `validate_label` would accept an interior `.`, so reject a
+        // dotted `<job>` here (at the offending `.`'s position within the
+        // `<job>` part) BEFORE delegating the remaining (now dot-free) rules.
+        if let Some(index) = job.find('.') {
+            return Err(IdParseError::InvalidChar { kind: KIND, ch: '.', index });
+        }
+        // DNS single-label octet cap: the `<job>` is one DNS LABEL (the first
+        // label of `<job>.svc.overdrive.local`), hard-capped at
+        // `DNS_LABEL_OCTET_MAX` = 63 octets (RFC 1035 §2.3.4; corrected
+        // ADR-0072 DDN-7, 2026-06-25). This is a real protocol constant, NOT a
+        // bespoke-smaller ceiling of `LABEL_MAX` — a `<job>` longer than 63
+        // octets would make `hickory_proto::rr::Name::from_str` reject the
+        // rendered name and panic the responder's wire encoder. The check fires
+        // UNIFORMLY ahead of `validate_label`'s 253 ceiling, so EVERY over-63
+        // label (64, 100, 300, …) reports `TooLong { max: 63 }` — never
+        // `max: 253` for the 254+ range.
+        if job.len() > DNS_LABEL_OCTET_MAX {
+            return Err(IdParseError::TooLong { kind: KIND, max: DNS_LABEL_OCTET_MAX });
+        }
+        // `validate_label` re-lowercases (a no-op here) and enforces the
+        // DNS-1123 label rules (empty / character-class / start-end-alphanumeric)
+        // on the now-dot-free, ≤ 63-octet `<job>` part. The reported `kind` is
+        // "MeshServiceName" so the error names the rejecting newtype, not the
+        // inner helper. (`validate_label`'s own `LABEL_MAX` = 253 check is
+        // structurally unreachable here — the 63-octet guard above already
+        // rejected anything longer.)
+        validate_label(KIND, job).map(Self)
+    }
+
+    /// Borrow the canonical lowercase `<job>` label.
+    #[inline]
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Display for MeshServiceName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}", self.0, Self::SUFFIX)
+    }
+}
+
+impl FromStr for MeshServiceName {
+    type Err = IdParseError;
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::new(raw)
+    }
+}
+
+impl TryFrom<String> for MeshServiceName {
+    type Error = IdParseError;
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(&raw)
+    }
+}
+
+impl TryFrom<&str> for MeshServiceName {
+    type Error = IdParseError;
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        Self::new(raw)
+    }
+}
+
+impl From<MeshServiceName> for String {
+    fn from(v: MeshServiceName) -> Self {
+        v.to_string()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// NameAnswer — the pure v1 DNS query result for the dial-by-name responder.
+// -----------------------------------------------------------------------------
+
+/// The pure, wire-free result of a dial-by-name query (dial-by-name-responder,
+/// ADR-0072 DDN-4 / D-DBN-2). `answer_for(name, qtype, &index)` returns one of
+/// these three variants; `dns_responder::wire::encode` later renders it to DNS
+/// bytes. The variant names ARE the contract (ADR-0072 § Pinned signatures).
+///
+/// # Home-module choice (ADR-0072 § Components latitude)
+///
+/// ADR-0072 § Component decomposition grants DELIVER latitude on `NameAnswer`'s
+/// home — `crates/overdrive-core/src/` "(`id.rs` or a small `dns` module)".
+/// This step lands it in `id.rs` alongside [`MeshServiceName`] (the name
+/// layer's other core type): the two are the dial-by-name domain vocabulary,
+/// co-locating them keeps the name-layer types in one place, avoids a new
+/// `lib.rs` `pub mod dns;` re-export, and matches the first-named option in the
+/// Component table. Reachable as `overdrive_core::id::NameAnswer`.
+///
+/// # Hickory-free (DDN-4 / D-DBN-5 ACL boundary)
+///
+/// `NameAnswer` names ONLY std types (`SocketAddrV4`). It MUST NOT reference any
+/// `hickory_proto` type — `overdrive-core` stays hickory-free; only `wire.rs`
+/// (in `overdrive-control-plane`) crosses the codec boundary.
+///
+/// # The v1 answer contract
+///
+/// - `Records(addrs)` — the name has ≥1 running-AND-healthy IPv4 backend; an
+///   `A` query is answered with one A record per addr.
+/// - `NoData` — the name IS currently resolvable (≥1 running-and-healthy
+///   backend) but has no record of the queried type (`AAAA` in v1, since the
+///   substrate is IPv4): NOERROR with no answer + a negative-TTL SOA.
+/// - `NxDomain` — 0 running-and-healthy backends (declared-but-not-running,
+///   unhealthy, OR unknown all collapse in v1): NXDOMAIN + a negative-TTL SOA.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NameAnswer {
+    /// ≥1 running-AND-healthy IPv4 backend → one A record per addr.
+    Records(Vec<SocketAddrV4>),
+    /// Live name, no record of the queried type (AAAA in v1) → NODATA + SOA.
+    NoData,
+    /// 0 running-and-healthy backends → NXDOMAIN + SOA.
+    NxDomain,
+}
 
 // -----------------------------------------------------------------------------
 // Phase 2.2 newtypes — `ServiceVip`, `ServiceId`, `BackendId`.

@@ -1,0 +1,167 @@
+schema_version: 1
+
+# Product-level journey for dial-by-name reachability (GH #243).
+#
+# This is the REACHABILITY leg of the transparent-mtls arc (#236) — distinct
+# from the ENFORCEMENT journey enforce-transparent-mtls-on-the-wire.yaml
+# (J-SEC-003 / #26). Enforcement answers "is the wire actually encrypted with
+# the workload's SVID?"; THIS journey answers "can an unmodified, identity-
+# unaware workload even FIND its mesh peer by name — and does the platform never
+# hand it a stale address?". The two are independently satisfiable and
+# independently failable, which is why J-MESH-001 was MINTED rather than folded
+# into J-SEC-003 (see jobs.yaml changelog 2026-06-24).
+#
+# Do NOT extend enforce-transparent-mtls-on-the-wire.yaml: that journey is pure
+# enforcement with NO operator verb (TEST-tier observables only). THIS journey
+# HAS an operator-observable surface — the dial-by-name-responder ping-pong demo
+# (two `overdrive deploy`s, counters/dates advancing) — so it is its own journey.
+#
+# MECHANISM (pinned by the finalized arc, D-TME-9/10/11):
+#   - D-TME-9  resolv.conf injection is SHIPPED — each per-workload netns
+#     /etc/resolv.conf carries `nameserver <responder_addr>`, where
+#     responder_addr is the per-netns gateway (plan.host_addr; the Fly fdaa::3
+#     model, collision-free by construction). veth_provisioner.rs WriteResolvConf.
+#   - D-TME-10 return shape is HEADLESS — answer with a running-AND-healthy
+#     service_backends addr, the SAME address MtlsResolve.resolve recognizes and
+#     classifies Mesh (one source, byte-consistent; an unhealthy addr is
+#     MeshUnreachable, so it is never answered). NO VIP, NO #167, NO #61.
+#   - D-TME-11 read mechanism is a SIBLING name-keyed reader over the SAME
+#     service_backends rows the address-keyed ServiceBackendsResolve intercept
+#     index folds (same ObservationStore surface, same List-then-Watch +
+#     relist-on-Lagged pattern) — NOT a widening of the addr-keyed struct. This
+#     feature adds the THIRD reader of the surface (outbound resolve + inbound
+#     install + name answers); byte-consistency is the shared rows, not a shared
+#     struct (DESIGN DDN-1).
+#
+# WHERE IT RUNS — in the agent, userspace, NOT a daemon, NOT in-kernel. One
+# in-agent name-answering listener serves every per-workload netns gateway addr,
+# sharing the agent's ServiceBackendsResolve view. Synthesizing DNS in eBPF is
+# brittle (no string/compression/TCP-fallback/EDNS) and would duplicate
+# service_backends into a BPF map against the verifier budget — neither Cilium
+# (CoreDNS userspace) nor Fly (fdaa::3 userspace) answers names in-kernel.
+#
+# The load-bearing UNVALIDATED mechanism (gated by a SPIKE-first slice per
+# spike.md): can ONE in-agent listener answer DNS sent to N distinct per-netns
+# gateway addresses? Real-kernel netns/routing/binding question, no Tier-2
+# backstop. Validate before the walking skeleton.
+#
+# Lightweight depth (D3): happy path + the load-bearing empty-candidate error
+# path; no rich human emotional arc (Sam's is the same skeptical->confident
+# security-review arc, here through a reachability lens). Maps to J-MESH-001.
+#
+# Feature origin: dial-by-name-responder DISCUSS wave (2026-06-24). The
+# authoritative detailed version lives in
+# docs/feature/dial-by-name-responder/feature-delta.md. This file is the
+# product-level summary for cross-feature reference.
+
+journey:
+  name: "Dial a mesh peer by name and land at a live instance"
+  goal: >
+    An unmodified, identity-unaware workload calls
+    getaddrinfo("<job>.svc.overdrive.local") and connects; an in-agent
+    name-answering listener (a third SIBLING reader over the SAME service_backends
+    rows the ServiceBackendsResolve index reads — same ObservationStore surface,
+    NOT the addr-keyed intercept struct, D-TME-11) answers A with a
+    running-AND-healthy IPv4 service_backends addr (headless, D-TME-10) — the
+    same addr MtlsResolve recognizes AND classifies Mesh (SocketAddrV4) — and AAAA
+    as NODATA (the v1 substrate is IPv4; no IPv6 record), or NXDOMAIN when no
+    running-and-healthy backend exists (declared-but-not-running, unhealthy, and
+    unknown collapse in v1); the existing intercept path then mTLS's the hop. So
+    the mesh is reachable from ordinary code (no SDK, no SVID, no mesh awareness in
+    the workload), not only enforceable on a connection that already exists.
+    Operator-observable via the dial-by-name-responder ping-pong demo.
+  persona: >
+    Sam, platform/security engineer (see
+    docs/product/personas/sam-platform-security-engineer.yaml), through a
+    REACHABILITY lens. Verifies that an unmodified workload reaches its mesh peer
+    by name and lands at a LIVE (running-AND-healthy/ready) instance, and that the
+    name layer never returns a stale or unhealthy address. Secondary (relates-to)
+    actor: Ana, an application developer who
+    writes an ordinary program doing getaddrinfo + connect — no mesh awareness —
+    and expects it to Just Work.
+  emotional_arc:
+    start: "Skeptical — 'the wire is enforceable, but can an unmodified workload even FIND its peer by name in a deploy, and will the platform ever hand it a dead address?'"
+    middle: "Reassured — the walking skeleton resolves one name to one running-and-healthy backend through serve+deploy and the hop goes TLS 1.3; the ping-pong demo advances counters he watches himself."
+    end: "Confident — 'an ordinary workload dials by name and lands at a LIVE peer the mesh then mTLS's, and a no-backend query returns NOTHING, never a stale addr. I ran the proof myself with two overdrive deploys.'"
+
+steps:
+  - id: 1
+    name: "An unmodified workload resolves its peer by name to a running-and-healthy backend"
+    command: "(workload getaddrinfo; in-agent responder answers from service_backends ∩ running-and-healthy as a SIBLING name-keyed reader over the SAME ObservationStore rows — the THIRD reader of the surface, NOT the addr-keyed intercept struct, D-TME-11)"
+    summary: >
+      The identity-unaware workload calls getaddrinfo("<peer>.svc.overdrive.local").
+      The injected resolv.conf (D-TME-9) points at the per-netns gateway; the
+      in-agent name-answering listener receives the query and answers A from the
+      running-AND-healthy backends over the SAME service_backends rows the intercept
+      reads (the running-and-healthy backend's IPv4 addr — the by_name index gates
+      Backend.healthy == true, matching the intercept's Mesh set), and AAAA as
+      NODATA (the v1 substrate is IPv4) — no SDK, no mesh awareness in the workload.
+  - id: 2
+    name: "The resolved addr is the one the intercept path recognizes (headless, one source)"
+    command: "(internal — D-TME-10 single-source headless return; no VIP, no #167/#61)"
+    summary: >
+      The answered address is byte-identical to the address MtlsResolve.resolve
+      recognizes for the same flow (one source, three readers) — no VIP, no
+      translation layer. The workload connects; the existing transparent-mtls
+      intercept path mTLS's the hop.
+  - id: 3
+    name: "The ping-pong demo advances — two services dial each other by name, each hop mTLS'd"
+    command: "overdrive deploy examples/dial-by-name-responder/a.toml + b.toml"
+    summary: >
+      The operator-runnable proof: A calls b.svc.overdrive.local, B calls
+      a.svc.overdrive.local; each call increments a counter and stamps a fresh
+      date on a ~10s cadence; each hop is resolved through the responder then
+      intercepted + mTLS'd. Sam watches the counters advance with two
+      `overdrive deploy` commands.
+
+error_paths:
+  - step: 1
+    failure: "No running-and-healthy backend for the queried name (service deployed but Pending, backends unhealthy / not-ready, all backends stopped, or unknown name)"
+    recovery: >
+      The responder returns NXDOMAIN (no running-and-healthy backend —
+      declared-but-not-running, unhealthy, and unknown are indistinguishable in v1)
+      — never a stale, cached, unhealthy, or last-known address. The workload sees
+      "no such name yet" and retries later (succeeding once a backend is
+      running-AND-healthy), rather than being pointed at a dead or not-ready
+      instance and failing two layers downstream. Mirrors the arc's fail-closed /
+      fail-honest discipline and the K8s-headless / Fly .internal empty-endpoint-set
+      shape. The `running-and-healthy` filter on the name index (over the SAME
+      service_backends rows the intercept reads) is the single source of liveness
+      truth; an unhealthy backend is MeshUnreachable to the intercept, so it is
+      never answered.
+
+integration_validation:
+  shared_artifacts_summary:
+    - "The service_backends observation surface (the answered backend set) — single source is the ObservationStore service_backends rows (the SAME rows the address-keyed ServiceBackendsResolve intercept index folds), read via List-then-Watch + relist-on-Lagged (D-TME-11). The responder is a THIRD SIBLING reader over those rows — it keeps its OWN name-keyed by_name index and does NOT widen or read the addr-keyed intercept struct (the security path stays untouched), and it opens NO second source of backend truth. Consumed by the name-answering listener to compute service_backends ∩ running-and-healthy (the by_name index gates Backend.healthy == true). Validation: a name answer's backend set is drawn ONLY from the surface's running-and-healthy rows (no separate cache, no stale snapshot); mtls_resolve_adapter.rs is untouched."
+    - "The answered backend address — single source is the running-AND-healthy service_backends row (a SocketAddrV4; headless, D-TME-10). v1 answers it as the A record (IPv4); AAAA is NODATA. It is byte-identical to the address MtlsResolve.resolve recognizes AND classifies Mesh for the same flow (one source, three readers) — no VIP, no #167 translation; an unhealthy addr would classify MeshUnreachable, so it is never answered. Consumed by the workload's getaddrinfo + connect, then by the intercept path. Validation: feed the answered addr into MtlsResolve and assert byte-equality AND Mesh classification (the single-source oracle, K-DBN-4)."
+    - "The per-netns responder address — single source is the WorkloadNetnsPlan host_addr (the per-netns gateway, an Ipv4Addr; D-TME-9), written into the netns resolv.conf by veth_provisioner.rs WriteResolvConf. Consumed by the workload's stub resolver (the nameserver it queries) and by the in-agent listener (the address it must answer on for EVERY netns). Validation: the one-listener-many-netns assumption — one host-side listener answers on each per-netns gateway addr — is what Slice 00 (the spike) proves before the walking skeleton."
+    - "The ping-pong EDD evidence — single source is the verification/expectations/ capture of the dial-by-name-responder demo (proposed E05-dial-by-name-ping-pong-mtls), captured black-box against the built overdrive binary under Lima, different-fox-reviewed. Consumed as the operator-surface proof anchored to US-DBN-3 + K-DBN-3. Validation: counters/dates advance on a ~10s cadence and each hop carries TLS 1.3 records; honest `pending` until the full-system EDD harness (#227/#75) lands (mirrors E04 — never a fabricated capture)."
+
+related_jobs: [J-MESH-001]
+
+related_features:
+  - id: dial-by-name-responder
+    role: "Ships the in-agent name responder (GH #243). The reachability leg of the mesh; a THIRD SIBLING reader over the SAME service_backends rows (D-TME-11 — NOT the addr-keyed intercept struct), returns the headless addr MtlsResolve recognizes and classifies Mesh (D-TME-10). Answers <job>.svc.overdrive.local from service_backends ∩ running-and-healthy."
+  - id: transparent-mtls-host-socket
+    role: "Ships the intercept + MtlsResolve + the agent-light L4 proxy this journey's name answers feed into (GH #26/#236). The name layer is byte-consistent with what the intercept path enforces — one source, three readers."
+
+deferred_outside_this_journey:
+  - "The VIP path (<job>.svc.overdrive.local -> fdc2::/16 VIP + XDP SERVICE_MAP) -> GH #61 (depends on #167). D-TME-10's headless choice avoids it; the two addressing models can coexist (K8s ships both)."
+  - "Backend addressing / inbound install (the production inbound nft-TPROXY rule's virt source) -> GH #241."
+  - "Intended-peer / expected-SVID pinning (verify the resolved peer is the INTENDED destination, not merely SOME valid cluster workload) -> GH #178 (split -> #242). This journey returns an addr, not an expected identity; v1 is chain-to-bundle authn only."
+  - "Cross-node / multi-node name resolution, gossiped name state -> OUT of Phase-2 single-node scope (one node's workloads). No forward-pointer issue: #36 is generic node enrollment, not cross-node name resolution."
+
+changelog:
+  - date: 2026-06-24
+    feature: dial-by-name-responder
+    change: >
+      Initial product-level journey for dial-by-name reachability (GH #243),
+      authored by the DISCUSS wave. Maps to the newly-minted J-MESH-001 (the
+      reachability leg of the transparent-mtls arc #236). Does NOT extend
+      enforce-transparent-mtls-on-the-wire.yaml (distinct job: reachability vs
+      enforcement; this leg HAS an operator-observable surface via the ping-pong
+      demo). Pinned to the finalized arc contracts D-TME-9/10/11
+      (docs/evolution/2026-06-22-transparent-mtls-enrollment.md). The
+      one-listener-many-netns routing mechanism is the load-bearing unvalidated
+      assumption, gated by a SPIKE-first slice (spike.md). Distilled from the
+      issue + the finalized arc, not from user interviews.

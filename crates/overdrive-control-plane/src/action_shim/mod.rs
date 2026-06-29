@@ -289,6 +289,16 @@ fn build_alloc_status_row(
     // `AllocStatusRowV1::started_at` docstring on the
     // input-vs-derived discipline.
     started_at: Option<overdrive_core::UnixInstant>,
+    // The canonical per-instance workload address (GH #241 /
+    // AllocStatusRowV2), a REQUIRED parameter so every writer must decide
+    // it explicitly: `Some(addr)` for a Running mesh alloc that owns a
+    // per-instance address, `None` for a host-netns alloc or any
+    // non-Running (Failed / Terminated) row. Making it a parameter rather
+    // than a defaulted `None` field kills the forgot-to-forward-carry bug
+    // class — a successor / terminal writer can no longer silently drop the
+    // prior row's address (the dial-by-name walking-skeleton backend-drop;
+    // the residual host_ipv4-fallback masking is tracked in #248).
+    workload_addr: Option<std::net::Ipv4Addr>,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
     AllocStatusRow {
@@ -315,15 +325,16 @@ fn build_alloc_status_row(
         listeners: Vec::new(),
         started_at,
         // canonical-workload-address-inbound-tproxy (GH #241 /
-        // AllocStatusRowV2): default `None` at this shared row-builder
-        // seam. The INITIAL population is the Running-row write site's
-        // responsibility (the StartAllocation / RestartAllocation arms
-        // copy `spec.workload_addr` onto the row after building it,
-        // step 01-02 D-A1 / D-BLOCKER2). Successor / terminal writers
-        // (FinalizeFailed, exit observer) forward-carry the prior row's
-        // value. Stays `None` for host-netns allocs (every current
-        // fixture, where the C3 seam never provisioned an address).
-        workload_addr: None,
+        // AllocStatusRowV2): supplied by the REQUIRED `workload_addr`
+        // parameter (above) — every writer decides it explicitly rather
+        // than the builder defaulting `None` and relying on callers to
+        // remember a post-build copy. StartAllocation / RestartAllocation
+        // pass `spec.workload_addr` on the Running write; FinalizeFailed's
+        // Stable (still-Running) arm forward-carries `prior_row.workload_addr`;
+        // genuine-terminal / Failed / Terminated rows pass `None` (a
+        // non-Running alloc is not a live backend). See #248 for the
+        // residual host_ipv4-fallback masking.
+        workload_addr,
     }
 }
 
@@ -389,6 +400,16 @@ fn build_lifecycle_event(
 /// `Ok(())` after writing its Failed row. The obs-store write is the one
 /// fallible step propagated as `ShimError`.
 #[allow(clippy::too_many_arguments)]
+// mutants: skip — no killer test exercises the mtls-intercept-install
+// fail-closed path (`mtls_worker` is a concrete `Arc<MtlsInterceptWorker>`,
+// not a port, so there is no install-failure seam), so cargo-mutants'
+// whole-body `-> Ok(())` mutant is MISSED — a fail-closed security handler
+// silently turned into a no-op would pass the suite. Pre-existing
+// transparent-mtls-host-socket helper (step 06-03 / `5d7fbae0`), surfaced
+// by the dial-by-name 02-02 mutation review. The REAL suppression is the
+// `.cargo/mutants.toml` `exclude_re` entry (a bare comment suppresses
+// nothing — `.claude/rules/testing.md`); the fault-injection seam + killer
+// test are tracked in overdrive-sh/overdrive#250 (remove both when it lands).
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
@@ -427,6 +448,10 @@ async fn fail_closed_on_mtls_install(
         None,
         running_row.kind,
         running_row.started_at,
+        // Failed row supersedes the prior Running row — a failed alloc is
+        // not a live backend (the bridge renders only `state == Running`),
+        // so it carries no per-instance address.
+        None,
     );
     obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
     emit_event(bus, build_lifecycle_event(&failed_row, prior_state, TransitionSource::Reconciler));
@@ -509,6 +534,9 @@ async fn fail_closed_on_netns_provision(
         None,
         None,
         kind,
+        None,
+        // Pre-Running provision failure — the alloc never reached Running
+        // and owns no per-instance address.
         None,
     );
     obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
@@ -1002,6 +1030,17 @@ async fn dispatch_single(
             // and stays `None` here. Same forward-carry pattern as
             // `stderr_tail` / `detail` / `kind`.
             let prior_started_at = prior_row.started_at;
+            // Forward-carry the prior row's canonical workload address. The
+            // `Stable` (still-Running) arm below keeps the alloc Running, so it
+            // MUST keep its per-instance backend address too — dropping it to
+            // `None` here is the walking-skeleton backend-drop the GAP-9 guard
+            // only HALF-closed (it preserved the Running *state* but not the
+            // address, so the BackendDiscoveryBridge silently reverted to its
+            // host_ipv4 fallback and the dial-by-name egress translation
+            // targeted an unreachable addr). A genuine terminal (`Failed`)
+            // passes `None` below — a dead alloc is not a live backend. The
+            // residual host_ipv4-fallback masking is tracked in #248.
+            let prior_workload_addr = prior_row.workload_addr;
             // GAP-9 — a `Stable` terminal is a SUCCESS claim, not a
             // failure: the Service alloc has passed its startup probes
             // and is healthily serving. It MUST remain `Running` so the
@@ -1054,6 +1093,10 @@ async fn dispatch_single(
                 prior_stderr_tail,
                 prior_row.kind,
                 prior_started_at,
+                // Keep the per-instance address only while the row stays
+                // Running (the Stable success claim); a genuine terminal
+                // drops it to `None` — a dead alloc is not a live backend.
+                if is_stable { prior_workload_addr } else { None },
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:
@@ -1192,7 +1235,18 @@ async fn dispatch_single(
             // EarlyExit / StartupProbeFailed / Stable gates branch
             // on `None` explicitly (no silent-zero collapse).
             let started_at = if state == AllocState::Running { Some(tick.now_unix) } else { None };
-            let mut row = build_alloc_status_row(
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): the StartAllocation Running write is the INITIAL
+            // population of the canonical workload address — `spec.workload_addr`
+            // (injected at the C3 provision seam off `plan.workload_addr`), an
+            // OBSERVED INPUT (the materialised slot×base-at-provision snapshot
+            // the node provisioned this alloc into; no recompute, no derivation).
+            // A failed start (`state == Failed`) never reached the provisioned
+            // netns, so it carries `None`. Successor / terminal writers (exit
+            // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
+            let workload_addr =
+                if state == AllocState::Running { spec.workload_addr } else { None };
+            let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
@@ -1204,21 +1258,8 @@ async fn dispatch_single(
                 None,
                 kind,
                 started_at,
+                workload_addr,
             );
-            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
-            // #241): the StartAllocation Running write is the INITIAL
-            // population of the canonical workload address. Copy
-            // `spec.workload_addr` (injected at the C3 provision seam off
-            // `plan.workload_addr`) straight onto the row — an OBSERVED INPUT,
-            // the materialised slot×base-at-provision snapshot the node
-            // provisioned this alloc into (no recompute, no derivation). On a
-            // failed start (`state == Failed`) the alloc never reached the
-            // provisioned netns, so the absent value carries forward; the
-            // builder already defaults `None`. Successor / terminal writers
-            // (exit observer, FinalizeFailed) forward-carry `prior.workload_addr`.
-            if state == AllocState::Running {
-                row.workload_addr = spec.workload_addr;
-            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites
@@ -1412,7 +1453,18 @@ async fn dispatch_single(
                 // ever reached Running.
                 prior_row.started_at
             };
-            let mut row = build_alloc_status_row(
+            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
+            // #241): a restart re-provisions the netns/veth under the same
+            // slot (idempotent converge-on-boot) — `spec.workload_addr` is
+            // re-injected at the C3 seam. On reaching Running, populate the
+            // row's canonical address from the freshly-provisioned spec, same
+            // observed-input semantics as the StartAllocation arm above. A
+            // rejected restart (`state == Failed`) carries `None`; the prior
+            // generation's address (if any) is irrelevant to a never-Running
+            // attempt.
+            let workload_addr =
+                if state == AllocState::Running { spec.workload_addr } else { None };
+            let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
@@ -1424,19 +1476,8 @@ async fn dispatch_single(
                 None,
                 kind,
                 started_at,
+                workload_addr,
             );
-            // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER2, GH
-            // #241): a restart re-provisions the netns/veth under the same
-            // slot (idempotent converge-on-boot) — `spec.workload_addr` is
-            // re-injected at the C3 seam. On reaching Running, populate the
-            // row's canonical address from the freshly-provisioned spec, same
-            // observed-input semantics as the StartAllocation arm above. A
-            // rejected restart (`state == Failed`) carries the builder's
-            // `None`; the prior generation's address (if any) is irrelevant to
-            // a never-Running attempt.
-            if state == AllocState::Running {
-                row.workload_addr = spec.workload_addr;
-            }
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
             // before emitting ExitEvent. The two firing sites
@@ -1546,6 +1587,10 @@ async fn dispatch_single(
                 None,
                 prior_row.kind,
                 prior_started_at,
+                // Terminated row — a stopped alloc is not a live backend (the
+                // bridge renders only `state == Running`), so it carries no
+                // per-instance address.
+                None,
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:

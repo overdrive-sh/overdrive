@@ -1195,7 +1195,12 @@ the responder returns a `running` backend addr straight from `service_backends`
 address **IS** the `orig_dst` that `MtlsResolve.resolve` later recognizes — DNS
 and the resolve port read the *same* `service_backends` source, so `orig_dst` is
 byte-consistent by construction with **no translation layer** and **no #167
-dependency in v1**. Headless keeps `MtlsResolve` v1 thin (identity-only lookup, no
+dependency in v1**. *(D-TME-10 forward-reference SUPERSEDED by ADR-0072 REV-2 / §36
+below: the responder answers a STABLE per-`<job>` frontend addr `F` in
+`10.98.0.0/16` and `MtlsResolve` is re-keyed to translate `(F, listener.port[,
+proto])` → a live backend — a translation layer, VIP-shaped via nft-TPROXY but NOT
+#167/#61. The byte-consistency anchor moved from the backend addr to `F`. This §35
+text records ADR-0071's original contract; the live name-answer shape is §36.)* Headless keeps `MtlsResolve` v1 thin (identity-only lookup, no
 LB — LB-pick is the #178-deferred multi-backend policy) and is forward-compatible
 (multi-node can add a VIP-recognizing arm fed by #167 + the XDP `SERVICE_MAP` LB
 *alongside* headless, K8s ships both, without reworking the v1 enforce path). VIP
@@ -1293,12 +1298,12 @@ C4Container
       Container(resolvconf, "netns resolv.conf", "per-netns mount (Fly.io fdaa::3 model)", "Holds the injected node-local DNS responder address; the workload's libc getaddrinfo reaches the responder with zero app config")
     }
     Container(provisioner, "netns+veth provisioner", "Rust (overdrive-control-plane, Q2 extend)", "Creates+converges per-alloc netns/veth; tx off; routes; injects resolv.conf (converge-on-boot)")
-    Container(dns, "Node-local DNS responder", "(#61 daemon, NOT built here)", "Answers <job>.svc.overdrive.local by reading service_backends; returns a running backend addr B (headless, v1)")
+    Container(dns, "Node-local DNS responder", "(#243 in-agent sibling reader — built per ADR-0072; REV-2: answers a STABLE per-<job> frontend addr, see §36)", "Answers <job>.svc.overdrive.local by reading service_backends. REV-1 (retained): returned the backend addr B directly (headless). REV-2 (current, §36): returns the STABLE per-<job> frontend addr F in 10.98.0.0/16; MtlsResolve translates F -> live backend")
     Container(nft, "nft-TPROXY shared routing infra", "nft + ip rule/route", "PREROUTING capture (both directions); shared chain + fwmark + F5 exemption (#234)")
     Container(worker, "MtlsInterceptWorker", "Rust (overdrive-worker)", "Per-alloc install/teardown; leg-F + leg-C IP_TRANSPARENT listeners; accept→enforce loops; getsockname orig-dst")
     Container(enforce, "HostMtlsEnforcement", "Rust (overdrive-dataplane)", "4-method MtlsEnforcement: rustls handshake → kTLS arm → agent-light pumps (UNCHANGED, ADR-0069/0070)")
     Container(resolveadapter, "ServiceBackendsResolve", "Rust (adapter-host)", "MtlsResolve v1: orig_dst → MtlsResolution{Mesh|NonMesh|MeshUnreachable}; ResolvedBackend{addr, expected_svid=None}; reads service_backends filtered to running; probe refuses boot on unreadable store; #178 owns the expected-SVID join")
-    ContainerDb(obs, "ObservationStore (service_backends)", "Corrosion / LocalObservationStore", "Backend set + health (#69/#174) — single source: DNS and MtlsResolve both read it")
+    ContainerDb(obs, "ObservationStore (service_backends)", "Corrosion / LocalObservationStore", "Backend set + health (#69/#174) — single source: DNS and MtlsResolve are sibling readers over the SAME rows (DNS via its OWN by_name index per ADR-0072 DDN-1, NOT the addr-keyed intercept struct)")
   }
   System_Ext(peeragent, "Peer workload's node-agent", "Presents the peer workload's SVID; terminates the other half")
 
@@ -1306,16 +1311,28 @@ C4Container
   Rel(provisioner, resolvconf, "Injects node-local DNS responder address into")
   Rel(workload, resolvconf, "Resolves <job>.svc.overdrive.local via")
   Rel(resolvconf, dns, "Points libc getaddrinfo at")
-  Rel(dns, obs, "Returns a running backend addr B from")
+  Rel(dns, obs, "Returns a running-AND-healthy backend addr B from")
   Rel(dns, workload, "Answers getaddrinfo with addr B (headless)")
   Rel(workload, nft, "connect(B) egress ingresses host-side veth, captured by")
   Rel(nft, worker, "Redirects to agent leg-F / leg-C listeners")
   Rel(worker, worker, "Recovers orig_dst = B via getsockname (both legs)")
   Rel(worker, resolveadapter, "Resolves orig_dst = B per connection via (→ MtlsResolution: Mesh=enforce / NonMesh=pass-through / MeshUnreachable=fail-closed)")
-  Rel(resolveadapter, obs, "Reads running backends from (same source DNS read)")
+  Rel(resolveadapter, obs, "Reads the same service_backends rows DNS reads; healthy classification (Mesh/MeshUnreachable) is ServiceBackendsResolve's")
   Rel(worker, enforce, "Hands InterceptedConnection (Routed::Outbound{peer:B}) to")
   Rel(enforce, peeragent, "mTLS 1.3 (kTLS) to")
 ```
+
+> **Node-local DNS responder — built in-agent per ADR-0072 (#243).** The
+> `dns` container's earlier "#61 daemon, NOT built here" placeholder is
+> superseded: the responder is the **in-agent sibling name-keyed reader**
+> designed in ADR-0072 (DDN-1/DDN-2), not a standalone daemon. It reads the
+> SAME `service_backends` rows as `MtlsResolve` but through its OWN `by_name`
+> index (DDN-1), gates `Backend.healthy == true` (running-AND-healthy — an
+> unhealthy addr classifies `MeshUnreachable` and is never answered), and is
+> NOT the addr-keyed intercept struct. The ADR-0071 decision below is
+> unchanged; this note only corrects the responder's ownership pointer (#243
+> corrected the earlier "#61 owns the DNS daemon" framing — #61 is the VIP
+> path).
 
 ---
 
@@ -1713,6 +1730,254 @@ Rules to enforce:
 | 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks the first external/root rotation workflow consumer. *(Historical: "unblocks #40"; SUPERSEDED — #40 is the now-closed internal SVID reissue `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* Amends ADR-0064 §2/§3/§5/§6 | Proposed |
 | 0069 | **Transparent mTLS via a universal agent-light L4 proxy** — folds #222 into #26; ONE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel). Workload's outbound TCP transparently intercepted (`cgroup_connect4`-rewrite default / TPROXY alt) to an agent-owned plaintext leg F; the agent drains plaintext losslessly + rustls TLS 1.3 handshake on a peer-facing leg B presenting the held SVID (read via `IdentityRead`, never minted/cached) + arms kTLS on leg B (reusing `ktls::KtlsStream` for control records). Steady state: **forward F→B = in-kernel sockmap EGRESS-redirect (`bpf_sk_redirect_map`, flags=0) → kTLS-TX, AGENT-IDLE**; **return B→F = `splice(2)` via `tls_sw_splice_read` on a plain (no-psock) kTLS-RX leg, AGENT-LIGHT zero-copy (~1 splice/record)**. New driven port `MtlsEnforcement` in `overdrive-core` (does NOT fit `Dataplane` — per-connection socket ops, not map writes) + host adapter (`adapter-host`, over sockops/sk_msg/sockmap/kTLS/splice/cgroup_connect4, consumes `IdentityRead`) + `SimMtlsEnforcement` for DST. Earned-Trust `probe()` (wire→probe→use; sentinel handshake + splice-read + egress-redirect, refuse-to-start on failure). Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways; proxy proven agent-light both directions. **Amends whitepaper §7/§8** (two mechanisms → one); **supersedes** in-band kTLS-on-own-socket as v1 — retained as a post-v1 optimization tracked in **#231** (restart-survival + 1-socket density). J-SEC-003 / GH #26 (folds #222) | Accepted |
 | 0070 | **Transparent-mTLS connection liveness — kernel TCP timeouts + per-connection self-supervision** — refines ADR-0069 § ATAM "Pump supervision policy (F6)" / the SD-4 supervision shape. v1 supervises connection liveness with **(C) `TCP_USER_TIMEOUT` + keepalive on the spliced legs** (kernel reaps transport-death; Linkerd/ztunnel precedent) **+ (B) per-connection self-supervision** in each SD-2 port-owned enforce task (self-tear-down fail-closed on EOF/error). **Rejects (A) a central tick enumerator** over the live-connection set (no surveyed production dataplane uses it for liveness; `reconcilers.md` disqualifies it — a stalled connection is not desired-vs-actual config drift). The central `MtlsSupervisor` (step 04-01) + its tests are **deleted** (delete, not refactor). The 4-method `MtlsEnforcement` contract is UNCHANGED — `liveness`/`PumpLiveness`/`pump_stall_deadline` are RETAINED (the `Gone` post-teardown no-leak observable the equivalence + F4 tests assert, plus the (B) verdict + the reserved hook for the deferred watchdog). Two NAMED deferrals (no issue created): the kernel-invisible progress-stall watchdog (Tier-3 spike; the kTLS-spliced progress predicate is undocumented upstream) and the Phase-5 policy-plane force-close (revocation/authz drain — a central registry IS correct THERE, not for v1 liveness). Decided on `transparent-mtls-connection-supervision-research.md` (22 sources). Refines ADR-0069 (locked core UNCHANGED: D-MTLS-1/fold/OQ-2/SD-1(a)/SD-2/SD-3/4-method contract/F3/F4-7/F5/authn-only). GH #26 | Accepted |
+| 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm 6.18 appliance in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
+
+---
+
+## Phase 2 dial-by-name-responder extension (ADR-0072, GH #243)
+
+### 36. Node-local in-agent DNS responder — the THIRD reader of the `service_backends` observation surface
+
+**Scope**: the **name-answering** layer for east-west mesh reachability under
+the **stable-frontend / ClusterIP-split** model. ADR-0071 (§35) shipped
+`resolv.conf` injection (each per-netns `/etc/resolv.conf` points at the
+per-netns gateway) and named the node-local DNS responder daemon as a DEPENDENCY
+*"(#61 daemon, NOT built here)"*; the arc was finalized with that responder
+reframed from #61 (VIP) onto **#243**. **This section builds it.** The DNS
+responder itself is a new READER of an existing observation surface (it adds no
+enforcement surface of its own). REV-2's ClusterIP split, however, makes ONE
+**additive edit to the security-critical resolve/enforcement path**: it re-keys
+`MtlsResolve` (`BackendIndex` gains `by_frontend: BTreeMap<FrontendKey,
+ServiceId>` + a three-way `classify` arm, including the fail-closed
+frontend-subnet-miss → `MeshUnreachable` branch) so the answered stable frontend
+addr translates to a current live backend. That re-key edits
+`mtls_resolve_adapter.rs` and is pinned in the `MtlsResolve` trait docstring + a
+DST equivalence test; this section does NOT claim it leaves the security-critical
+path untouched (it deliberately and additively extends it). Full rationale +
+alternatives: **ADR-0072**; `docs/feature/dial-by-name-responder/feature-delta.md`.
+
+> **REVISED (REV-2, 2026-06-25) — FINAL. Both forks RATIFIED; the gating spike
+> returned WORKS.** The user ratified shifting the answered address from a
+> *volatile per-instance backend addr* (the headless-v1 contract described below)
+> to a **stable per-`<job>` frontend addr** while the already-live dataplane
+> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071 / ADR-0053) owns backend
+> churn — the **ClusterIP split**. DNS answers a stable address; the dataplane
+> translates frontend → current live backend and enforces SPIFFE mTLS. This
+> **supersedes the "headless / answer-the-backend-addr / NO VIP" contract below**
+> (now read through ADR-0072 § "Changed Assumptions (REV-2)"). It is NOT the #61
+> IPv6-VIP / XDP-VIP-LB path — the stable IPv4 frontend is VIP-*shaped* but
+> delivered via nft-TPROXY, no XDP / `SERVICE_MAP` / #167. The two forks are
+> DECIDED: **REV-1a = 1a-A** (a NEW per-`<job>` `FrontendAddrAllocator`, sibling
+> to `NetSlotAllocator`, carving from **`WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`**)
+> and **REV-1b = 1b-A** (an additive `by_frontend: BTreeMap<FrontendKey,
+> ServiceId>` map, `FrontendKey = (SocketAddrV4, Proto)` — the proto axis is
+> carried so `tcp/53`/`udp/53` never collide, Finding 1 — on `BackendIndex` + a
+> `classify` translation arm). The frontend
+> subnet is pinned to **`10.98.0.0/16`** — the spike's `10.96.0.0/16` candidate
+> was REJECTED for a total collision with the live service-VIP allocator default
+> (`VipRange::default() = 10.96.0.0/16`, `crates/overdrive-dataplane/src/allocators/vip_range.rs`;
+> the same `/16` shown in the VIP-allocator config examples in this brief);
+> `10.98.0.0/16` is disjoint from both VIP `10.96.0.0/16` and workload
+> `10.99.0.0/16`. **BLOCKER-1 (dataplane capture of the frontend subnet) is
+> RESOLVED → WORKS** on a real kernel
+> (`spike/findings-blocker1-frontend-addr-capture.md`): a non-`/30` frontend addr
+> routes out the workload netns via the per-netns default route production already
+> installs, is captured by the destination-blind egress nft-TPROXY, and `orig_dst`
+> is recovered verbatim — **no new routing/capture dataplane work; REV-2 stays
+> thin**. **BLOCKER-2 (multi-replica selection) is pinned: deterministic
+> first-by-`Ord`** for v1. Committed steps 01-01/01-02 are unaffected (the
+> `SocketAddrV4` substrate + the `hickory-proto` codec carry any IPv4 addr).
+> Code-grounded inputs: the two `docs/research/networking/dial-by-name-*` research
+> docs + `findings-blocker1-frontend-addr-capture.md`. The `MtlsResolve` re-key is
+> an EDIT to the security-critical resolve index (`mtls_resolve_adapter.rs`) —
+> superseding REV-1's "intercept struct provably untouched" — pinned in the trait
+> docstring + a DST equivalence test. NO `sock_destroy` in the thin path (the
+> terminating-proxy pump task + `TCP_USER_TIMEOUT` surface backend death;
+> `sock_destroy` is #61 scope). The only remaining user-gated item is the #61
+> corrected-scope GitHub edit (relayed by the orchestrator, not run here).
+
+> **The prose below is the REV-2 contract (supersedes headless v1 — see ADR-0072
+> § Changed Assumptions).** DNS answers a stable per-`<job>` frontend addr `F`;
+> `MtlsResolve` translates `(F, listener.port[, proto])` → the current live
+> backend. (ADR-0072 retains the verbatim superseded REV-1 contract for its
+> audit trail; this brief is the architecture SUMMARY and carries only the live
+> REV-2 contract.)
+
+**The gap it closes**: an unmodified workload's
+`getaddrinfo("<peer>.svc.overdrive.local")` reaches the injected stub resolver,
+**nothing answers**, and resolution times out in every deploy — the
+dial-by-name leg the transparent-mTLS arc deferred (#236). With the responder,
+the query resolves to the peer's **stable per-`<job>` frontend addr `F`** (in
+`10.98.0.0/16`), the workload connects to `F`, the existing nft-TPROXY intercept
+path captures it, and the re-keyed `MtlsResolve` translates `F` → a current
+running-AND-healthy backend and mTLS's the hop. Because `F` is stable, the
+answer never goes stale when the backend cycles (the SQ1 fix).
+
+**One source, THREE readers (made precise)**: the responder is the third reader
+of the **ObservationStore `service_backends` surface** — NOT a reader of the
+addr-keyed intercept-index *struct*. Both `ServiceBackendsResolve` (outbound
+resolve) and `DnsResponder` (name answers), plus the inbound install (#241),
+fold the SAME `ServiceBackendRow` rows from the SAME `ObservationStore` via the
+SAME List-then-Watch contract. Byte-consistency (REV-2): the answered `F` is
+byte-identical to the addr `MtlsResolve` is re-keyed to recognize, and the
+translation always lands a `Mesh` backend — consistency is a property of the
+shared rows + the shared `<job>→F` binding, not of a shared in-RAM struct.
+
+**The v1 DNS answer contract** (honored exactly — the answered `A` is the stable
+frontend `F`, REV-2):
+
+| Query | `<job>` has ≥1 running-AND-healthy IPv4 backend | `<job>` has 0 running-and-healthy backends* |
+|---|---|---|
+| `A` | NOERROR + A (the **stable per-`<job>` frontend addr `F`**) | NXDOMAIN (+ 1 s-MINIMUM SOA) |
+| `AAAA` | NOERROR / NODATA (ANCOUNT=0, same SOA in authority) | NXDOMAIN (+ 1 s SOA) |
+
+\* *declared-but-not-running, unhealthy / not-ready, AND unknown all collapse in
+v1 (the responder reads only the running-AND-healthy set — the `name_index`
+gates on `Backend.healthy == true`); on a transient zero-healthy state the
+`name_index` WITHHOLDS the answer (→ NXDOMAIN) while the `FrontendAddrAllocator`
+RETAINS `F` (Finding-2: `F` is per-logical-workload, released only on deletion).
+A stale/cached/unhealthy/guessed addr is NEVER returned; the translated backend
+classifies `Mesh` (an unhealthy backend → `MeshUnreachable`, fail-closed).*
+
+**Name→frontend mapping (REV-2, VERIFIED)**: `<job>` ← the SVID job segment of
+`Backend.alloc: SpiffeId` (path `spiffe://overdrive.local/job/<WorkloadId>/alloc/<id>`,
+`SpiffeId::for_allocation`); `WorkloadId` IS the deploy `[service].id`.
+`service_backends` rows are built by `BackendDiscoveryBridge` from
+`actual.actual.running` only, so "∩ running" holds by construction. The
+`name_index` maps `<job>` → the **stable frontend addr `F`** (1a-A) — NOT → the
+volatile backend-addr set (REV-1, superseded) — and gates the answer on the
+`<job>` having ≥1 running-AND-healthy backend right now (else WITHHOLD →
+NXDOMAIN). The backend churn is owned by the dataplane's per-connection
+`MtlsResolve` translation, not by the DNS answer.
+
+**Component boundaries** (REV-2 — adds the frontend allocator + the resolve
+re-key to the REV-1 set):
+
+| Component | Home | Change |
+|---|---|---|
+| `MeshServiceName` newtype + `NameAnswer` enum | `overdrive-core` (`id.rs` / small `dns` module) | CREATE NEW |
+| `dns_responder/name_index.rs` (`name_index`: `<job>` → stable frontend `F`, List-then-Watch) | `overdrive-control-plane/src/dns_responder/` | CREATE NEW |
+| `dns_responder/answer.rs` (pure `answer_for`) | `overdrive-control-plane/src/dns_responder/` | CREATE NEW |
+| `dns_responder/wire.rs` (hickory-proto encode/decode) | `overdrive-control-plane/src/dns_responder/` | CREATE NEW |
+| `dns_responder/responder.rs` (`DnsResponder` adapter + `IP_PKTINFO` socket loop) | `overdrive-control-plane/src/dns_responder/` | CREATE NEW |
+| `DnsResponderError` (typed `thiserror`) | `dns_responder/` | CREATE NEW |
+| `FrontendAddrAllocator` (per-`<job>` stable `F` in `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`; 1a-A) | `overdrive-control-plane` (sibling to `NetSlotAllocator`) | CREATE NEW (REV-2) |
+| `BackendIndex` re-key — add `by_frontend: BTreeMap<FrontendKey, ServiceId>` (`FrontendKey = (SocketAddrV4, Proto)`) + three-way `classify` arm (1b-A) | `overdrive-control-plane/src/mtls_resolve_adapter.rs` | EXTEND (REV-2 — edits the security-critical resolve index; trait docstring + DST equivalence test pin the contract) |
+| `run_server_with_obs_and_driver` composition | `overdrive-control-plane/src/lib.rs` (~1893-1957) | EXTEND (REV-2: also wires `FrontendAddrAllocator` on `AppState` + the re-keyed resolve) |
+| `hickory-proto` workspace dep | root `Cargo.toml` | ADD (Apache-2.0/MIT) |
+
+**Pinned signatures** (CLAUDE.md "implement to the design"):
+
+- `MeshServiceName` — label-shaped newtype, `const SUFFIX = "svc.overdrive.local"`,
+  single `<job>` label (≤ 63 octets, the DNS single-label max, RFC 1035 §2.3.4;
+  NOT `LABEL_MAX`/253 which is the DNS-name max), case-insensitive `FromStr`,
+  canonical lowercase `Display`, serde matching, mandatory proptest round-trip.
+- `enum NameAnswer { Records(Vec<SocketAddrV4>), NoData, NxDomain }` (the pure
+  classification result — variant names PINNED in DESIGN; the three arms are
+  fixed by the contract table: `Records` = ≥1 running-and-healthy backend,
+  `NoData` = AAAA on a live name, `NxDomain` = 0 running-and-healthy).
+- `answer_for(name: &MeshServiceName, qtype: hickory_proto::rr::RecordType, index: &NameIndex) -> NameAnswer`
+  — pure, the mutation-gate target. The `qtype` type is PINNED to
+  `hickory_proto::rr::RecordType` (reuse the codec vocabulary; `NameAnswer`
+  itself stays hickory-free — only `qtype` crosses the `wire.rs` ACL boundary).
+- `DnsResponder::new(store: Arc<dyn ObservationStore>, clock: Arc<dyn Clock>, slots: veth_provisioner::NetSlotAllocator) -> Self`
+  — required deps, no builder, no default. The `NetSlotAllocator` handle is the
+  PINNED fallback gateway-set source (DDN-5): on the per-addr fallback path it
+  re-derives `responder_addr_for_slot(slot)` over `slots.snapshot()` on the
+  converge tick (add/drop sockets as slots come/go); the wildcard path never
+  reads it.
+- `async fn probe(&self) -> Result<(), DnsResponderError>` — binds (wildcard
+  first, per-addr fallback on `EADDRINUSE`) + Lists the snapshot into the
+  `by_name` index + opens the single-owner watch; refuses boot on failure.
+- `async fn serve(self: Arc<Self>)` — the `IP_PKTINFO` recv/decode/`answer_for`/
+  encode/sendmsg loop (source-pinned `ipi_spec_dst`).
+- `enum DnsResponderError { Bind { addr, source }, ListSeed { reason }, Probe { reason }, Socket { source } }`
+  — typed (no `Internal(String)`); each → a distinct `health.startup.refused`
+  reason. Mirrors the `MtlsResolveError::{Probe, StoreUnreadable}` shape.
+
+**Read mechanism** (REV-2; mirrors `ServiceBackendsResolve` D-TME-11): the
+`name_index` maps `<job>` (`MeshServiceName`) → the **stable frontend addr `F`**
+(from the `FrontendAddrAllocator` binding), behind a `parking_lot::RwLock`,
+`Arc`-shared with a single-owner drain task that folds
+`SubscriptionEvent::Row(ServiceBackend(..))` and relists on
+`SubscriptionEvent::Lagged` via `all_service_backends_rows`; `BTreeMap`-backed
+(iteration observed, deterministic). `BackendDiscoveryBridge`'s running-only
+construction guarantees the ∩-running filter at the row; the index ADDITIONALLY
+gates `Backend.healthy == true` and WITHHOLDS the answer on a transient
+zero-healthy state (Finding-2). **DNS↔resolve coherence (Finding-3):** a SINGLE
+ordered drain updates `by_frontend` (resolve) BEFORE `name_index` exposes `F`
+(option (b) write-time barrier), so DNS never answers an `F` the resolve index
+has not learned; a residual frontend-subnet miss in `classify` fails CLOSED
+(`MeshUnreachable`, never cleartext).
+
+**Source-pinning verdict (`hickory-server` vs `hickory-proto`)**:
+`hickory-proto` codec + our OWN socket loop. The spike empirically proved
+`IP_PKTINFO` `ipi_spec_dst` source-pinning on ONE wildcard `0.0.0.0:53` socket
+is MANDATORY (`getaddrinfo`/glibc rejects a reply whose source ≠ the queried
+gateway); `hickory-server`'s UDP server gives no per-packet reply-source control
+on a multi-homed wildcard socket, so it cannot satisfy it.
+
+**Spike-pinned constraints (DELIVER MUST honor)**: `IP_PKTINFO` source-pinning
+mandatory; acceptance = `getaddrinfo`/`getent`, never `dig @gw`; responder runs
+in the ROOT netns answering on each per-netns gateway addr (no per-netns
+listener); `ip_forward=1` prerequisite; verdict pinned to dev-Lima
+`7.0.0-22-generic` — **re-confirm on the 6.18 appliance kernel in the DELIVER
+Tier-3 matrix** (DEVOPS/Tier-3 obligation).
+
+#### C4 Level 1 — System Context (dial-by-name responder, REV-2 stable-frontend)
+
+```mermaid
+C4Context
+  title System Context — dial-by-name name resolution (REV-2 stable-frontend / ClusterIP split)
+
+  System_Boundary(node, "Overdrive node") {
+    System(agent, "Overdrive node-agent", "Holds the resolve index (re-keyed), the intercept path, the frontend allocator, AND the name responder (in-agent, one process)")
+    System(clientwl, "Client workload", "Identity-unaware, unmodified; getaddrinfo(<peer>.svc.overdrive.local) + connect in its own netns")
+    System(serverwl, "Server workload", "A running mesh backend in its own netns")
+  }
+  System_Ext(obs, "ObservationStore (service_backends)", "The single source: running-AND-healthy backend rows; THREE readers fold it")
+
+  Rel(clientwl, agent, "getaddrinfo(<peer>.svc.overdrive.local) via injected resolv.conf (per-netns gateway)")
+  Rel(agent, clientwl, "Answers A with the STABLE per-<job> frontend addr F (in 10.98.0.0/16) / NXDOMAIN if no running-and-healthy backend")
+  Rel(agent, obs, "Reads service_backends ∩ running-AND-healthy (the THIRD sibling reader over the same rows; not the addr-keyed struct)")
+  Rel(clientwl, serverwl, "connect(F) — captured by the intercept path; MtlsResolve translates F -> live backend, mTLS'd")
+```
+
+#### C4 Level 2 — Container diagram (REV-2 stable-frontend / ClusterIP split)
+
+```mermaid
+C4Container
+  title Container Diagram — node-local DNS responder (REV-2 stable-frontend / ClusterIP split)
+
+  Person(none, "(no operator verb)", "Feature has no CLI/HTTP surface; the observable is the workload's getaddrinfo result + the ping-pong demo")
+
+  System_Boundary(node, "Overdrive node-agent (one process)") {
+    Container_Boundary(wlns, "Workload netns + veth (per allocation)") {
+      Container(workload, "Exec workload", "Process in its own netns", "Unmodified; getaddrinfo(<peer>.svc.overdrive.local) → connect to F")
+      Container(resolvconf, "netns resolv.conf", "per-netns mount (D-TME-9, SHIPPED)", "nameserver = per-netns gateway (plan.host_addr)")
+    }
+    Container(responder, "DnsResponder", "Rust (overdrive-control-plane, adapter-host) — NEW", "0.0.0.0:53 wildcard (SO_REUSEADDR + IP_PKTINFO); recv → answer_for → encode → sendmsg with ipi_spec_dst = queried gateway; per-addr fallback on EADDRINUSE re-derives gateways from NetSlotAllocator on the converge tick")
+    Container(nameindex, "name_index", "Rust — NEW", "Maps <job> -> STABLE per-<job> frontend addr F (REV-2: NOT -> backend addrs); List-then-Watch + relist-on-Lagged + single-owner drain over the SAME service_backends rows; gates Backend.healthy == true, WITHHOLDS on zero-healthy")
+    Container(falloc, "FrontendAddrAllocator", "Rust — NEW (1a-A)", "Binds <job> -> F in 10.98.0.0/16; stable across alloc cycles; release only on logical-workload deletion (the Overdrive ClusterIP analogue)")
+    Container(answer, "answer_for (pure) + wire (hickory-proto)", "Rust — NEW", "Pure classification → NameAnswer (Records(vec![F])); hickory-proto encode/decode (A / SOA / NODATA / NXDOMAIN)")
+    Container(tproxy, "nft-TPROXY interceptor", "ADR-0071 Path-A (reused verbatim)", "Captures the connect to (F, listener.port); recovers orig_dst verbatim")
+    Container(resolveadapter, "MtlsResolve (re-keyed, 1b-A)", "Rust (adapter-host) — EXTENDED (REV-2)", "by_frontend: BTreeMap<FrontendKey,ServiceId> (FrontendKey=(SocketAddrV4,Proto)); translates (F, listener.port, proto) -> current running-AND-healthy backend B; three-way classify (hit -> Mesh; frontend-subnet miss -> MeshUnreachable fail-closed; else by_addr)")
+    ContainerDb(obs, "ObservationStore (service_backends)", "Corrosion / LocalObservationStore", "Single source — three readers fold the SAME rows")
+  }
+  Container(backend, "Server workload", "a running mesh backend at B in its own netns", "")
+
+  Rel(workload, resolvconf, "Resolves <peer>.svc.overdrive.local via")
+  Rel(resolvconf, responder, "Points getaddrinfo at the per-netns gateway, where the wildcard responder receives it")
+  Rel(responder, nameindex, "Looks up MeshServiceName -> stable frontend F in")
+  Rel(nameindex, falloc, "Reads the <job> -> F binding from")
+  Rel(responder, answer, "Classifies + encodes (A = F) via")
+  Rel(nameindex, obs, "List-at-probe + watch + relist; ordered drain updates by_frontend BEFORE exposing F (Finding-3)")
+  Rel(resolveadapter, obs, "Reads the SAME service_backends rows (sibling reader, byte-consistent on the <job>->F binding)")
+  Rel(responder, workload, "A = STABLE frontend addr F (byte-identical to what MtlsResolve is re-keyed to recognize; translation lands a Mesh backend) / NXDOMAIN")
+  Rel(workload, tproxy, "connect((F, listener.port)) captured by")
+  Rel(tproxy, resolveadapter, "hands orig_dst = (F, listener.port) to")
+  Rel(resolveadapter, backend, "mTLS-originates to current backend B")
+```
 
 ---
 

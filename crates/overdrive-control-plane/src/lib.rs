@@ -60,6 +60,12 @@ pub mod cgroup_preflight;
 // surfaces as `ControlPlaneError::Validation { field:
 // Some("dataplane"), .. }`.
 pub mod dataplane_config;
+// dial-by-name-responder (ADR-0072, GH #243) — the in-agent name layer:
+// the third reader of the `ObservationStore` `service_backends` surface,
+// answering `<job>.svc.overdrive.local` queries. Step 01-02 lands only the
+// `wire` codec (DNS decode/encode behind the DDN-4/D-DBN-5 ACL boundary);
+// `answer.rs` / `name_index.rs` / `responder.rs` are later slices.
+pub mod dns_responder;
 pub mod error;
 pub mod handlers;
 // workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
@@ -340,6 +346,26 @@ pub struct AppState {
     /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
     /// on a fresh process boot nothing is held (criterion 6).
     pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
+    /// Per-host stable per-`<job>` frontend-address allocator
+    /// (dial-by-name-responder step 01-05; ADR-0072 REV-2/REV-3, GH #243).
+    /// The SINGLE source of frontend truth (DDN-2): the ONE `Arc`-shared
+    /// instance the deploy-time WRITER (the `submit_workload` Service arm +
+    /// the boot rebuild) populates AND the `name_index` (01-03) / `by_frontend`
+    /// (02-00) READERS observe. The 01-05 assign-on-declare writes the
+    /// `<job> → F` binding; 02-01 LATER injects the SAME cloned instance into
+    /// the `DnsResponder` + re-keyed `MtlsResolve` readers.
+    ///
+    /// Plain `Clone` value field (mirrors `net_slot_allocator`), NOT an outer
+    /// `Arc<Mutex<…>>`: [`crate::dns_responder::frontend_addr_allocator::
+    /// FrontendAddrAllocator`] holds its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY,
+    /// so a `.clone()` shares the same held map — exactly how the single
+    /// instance is shared across writer + readers. Ephemeral runtime state,
+    /// NEVER persisted: empty on a fresh boot, re-populated by the
+    /// converge-on-boot rebuild
+    /// ([`crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent`])
+    /// from the declared-Service intent SSOT.
+    pub frontend_addr_allocator:
+        crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -507,6 +533,12 @@ impl AppState {
             host_ipv4,
             workflow_engine,
             None,
+            // Fixture surface: a fresh empty per-host frontend-address allocator
+            // (ripple-free, same posture as the `None` mtls_worker default). The
+            // PRODUCTION boot path (`run_server`) constructs the ONE shared
+            // instance and passes it through `new_with_workflow_engine` so it is
+            // shared with the re-keyed `MtlsResolve` + the `DnsResponder`.
+            crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
         )
     }
 
@@ -537,6 +569,8 @@ impl AppState {
         host_ipv4: std::net::Ipv4Addr,
         workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
         mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+        frontend_addr_allocator:
+            crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -566,6 +600,19 @@ impl AppState {
             // On a fresh process boot nothing is held; still-Running allocs
             // re-assign on their next lifecycle pass (criterion 6).
             net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
+            // The per-host frontend-address allocator is now a CONSTRUCTOR
+            // PARAMETER (02-01) — NOT default-constructed here. DDN-2 requires
+            // ONE `Arc`-shared instance the composition root injects into BOTH
+            // the re-keyed `MtlsResolve` (`by_frontend`) AND the `DnsResponder`
+            // (`name_index`), so the `F` keyed in `by_frontend` is
+            // byte-identical to the `F` DNS answers. `run_server` constructs the
+            // ONE allocator before the `MtlsResolve` (which is moved into the
+            // worker) and passes the SAME handle here so the responder built
+            // after `AppState::new` shares it. The convenience [`Self::new`]
+            // default-constructs a fresh empty allocator for the fixture surface
+            // (ripple-free). It self-shares on clone, so a `.clone()` shares the
+            // same held map.
+            frontend_addr_allocator,
         }
     }
 }
@@ -774,6 +821,19 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub mtls_probe_fault: Option<String>,
 
+    /// Test-only fault-injection seam for the dial-by-name `DnsResponder`
+    /// Earned-Trust probe (dial-by-name-responder, step 02-01, S-DBN-BIND-03).
+    /// When `Some(msg)`, the boot path short-circuits `DnsResponder::probe()`
+    /// to `Err(DnsResponderError::Probe { reason: msg })` BEFORE the responder
+    /// is declared usable, so the `run_server` boot-refusal + per-variant
+    /// `health.startup.refused` reason-mapping + `ControlPlaneError::DnsResponderBoot`
+    /// fail-closed branch is exercised without needing a real `:53` bind
+    /// collision or an unreadable store. Mirrors `mtls_probe_fault` above;
+    /// gated behind `#[cfg(feature = "integration-tests")]` on both the field
+    /// and its use site so production builds compile it out entirely.
+    #[cfg(feature = "integration-tests")]
+    pub dns_probe_fault: Option<String>,
+
     /// Test-only PKI-injection seam for the transparent-mTLS layer
     /// (transparent-mtls-host-socket, step 06-03, criteria[1]). When
     /// `Some(read)`, the boot composes `HostMtlsEnforcement` over THIS
@@ -823,6 +883,8 @@ impl std::fmt::Debug for ServerConfig {
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field("dns_probe_fault", &self.dns_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field(
             "mtls_identity_override",
@@ -908,6 +970,12 @@ impl ServerConfig {
             // fail-closed branch.
             #[cfg(feature = "integration-tests")]
             mtls_probe_fault: None,
+            // dial-by-name-responder step 02-01 (S-DBN-BIND-03): default no
+            // DNS-probe fault; the `run_server` refusal test sets `Some(..)`
+            // to exercise the `DnsResponderBoot` + reason-mapping fail-closed
+            // branch without a real `:53` bind / store fault.
+            #[cfg(feature = "integration-tests")]
+            dns_probe_fault: None,
             // transparent-mtls-host-socket step 06-03: default no
             // identity override; the criteria[1] e2e sets `Some(..)`
             // to a `TestPki`-rooted `IdentityRead` so the agent's
@@ -958,6 +1026,20 @@ pub struct ServerHandle {
     /// ADR-0064 §4 / brief.md §92; spawned in
     /// [`run_server_with_obs_and_driver`].
     emit_drain_task: tokio::task::JoinHandle<()>,
+    /// `JoinHandle` for the dial-by-name `DnsResponder` serve loop
+    /// (dial-by-name-responder step 02-01, DDN-6). `None` on a non-mTLS
+    /// boot (no responder is composed there — the same gate the netns
+    /// adopt / frontend rebuild use); `Some(handle)` once the responder
+    /// probed Ok and its `recvmsg`/`sendmsg` `IP_PKTINFO` serve loop was
+    /// spawned. Held so the loop is aborted when the handle drops on
+    /// shutdown (the loop owns its bound `:53` sockets).
+    dns_responder_task: Option<tokio::task::JoinHandle<()>>,
+    /// The dial-by-name `DnsResponder` itself, held so [`Self::shutdown`] can
+    /// signal its serve loop to STOP (`responder.stop()`) before aborting the
+    /// task. The serve loop's `recvmsg` is `SO_RCVTIMEO`-bounded, so `stop()`
+    /// makes it exit within one poll window rather than leaking an
+    /// uncancellable blocking syscall. `None` on a non-mTLS boot.
+    dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>>,
     /// Token observed by the convergence-tick spawn loop. Cancelled
     /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
     /// holding `Arc<dyn Driver>` references stop driving the driver
@@ -1052,6 +1134,19 @@ impl ServerHandle {
         //    Per `fix-exec-driver-exit-watcher` Step 01-02 follow-up.
         self.exit_observer_shutdown.cancel();
         let _ = self.exit_observer_task.await;
+
+        // 5. Stop the dial-by-name `DnsResponder` serve loop (step 02-01).
+        //    `stop()` sets the loop's flag; the `SO_RCVTIMEO`-bounded `recvmsg`
+        //    wakes within one poll window and the blocking tasks exit, releasing
+        //    their bound `:53` sockets — so they do NOT leak an uncancellable
+        //    syscall that hangs runtime teardown. `abort()` is the belt-and-
+        //    braces backstop. `None` on a non-mTLS boot (no responder composed).
+        if let Some(responder) = self.dns_responder {
+            responder.stop();
+        }
+        if let Some(task) = self.dns_responder_task {
+            task.abort();
+        }
     }
 }
 
@@ -1824,6 +1919,18 @@ pub async fn run_server_with_obs_and_driver(
     let compose_mtls = config.dataplane_override.is_none() || config.mtls_probe_fault.is_some();
     #[cfg(not(feature = "integration-tests"))]
     let compose_mtls = config.dataplane_override.is_none();
+
+    // Construct the ONE per-host `FrontendAddrAllocator` (DDN-2 single-owner;
+    // dial-by-name-responder step 02-01) BEFORE the `MtlsResolve` so the SAME
+    // `Arc`-shared handle feeds BOTH the re-keyed resolve (`by_frontend`) below
+    // AND the `DnsResponder` (`name_index`) + `AppState` after the worker move.
+    // It self-shares on clone, so `frontend_addr_allocator.clone()` shares the
+    // same held map — the `F` keyed in `by_frontend` is byte-identical to the
+    // `F` DNS answers. Empty on boot; the converge-on-boot rebuild (01-05)
+    // re-populates it from the declared-Service intent SSOT after `AppState`.
+    let frontend_addr_allocator =
+        crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new();
+
     let mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>> =
         if compose_mtls {
             // (1) construct the enforcement port over the held identity +
@@ -1901,9 +2008,16 @@ pub async fn run_server_with_obs_and_driver(
             // boot fail-closed (`health.startup.refused`) rather than serve an
             // empty-but-trusted index that would degrade to silent cleartext.
             // wire → probe → use (principle 12).
-            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> = Arc::new(
-                crate::mtls_resolve_adapter::ServiceBackendsResolve::new(Arc::clone(&obs)),
-            );
+            let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
+                Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
+                    Arc::clone(&obs),
+                    // The SAME shared allocator the DNS `name_index` answers `F`
+                    // from — so the `by_frontend` `F` is byte-identical to the
+                    // `F` DNS answers (DDN-2 single-owner). The resolve's own
+                    // single-owner drain projects `by_frontend` as a pure reader
+                    // of this allocator's snapshot (REV-3 — never `assign`).
+                    frontend_addr_allocator.clone(),
+                ));
             if let Err(source) = resolve.probe().await {
                 tracing::warn!(
                     name: "health.startup.refused",
@@ -1954,7 +2068,38 @@ pub async fn run_server_with_obs_and_driver(
         // production / Tier-3 boot (real dataplane), `None` under a
         // `SimDataplane` override.
         mtls_worker,
+        // dial-by-name-responder step 02-01: the ONE shared per-host
+        // `FrontendAddrAllocator` (DDN-2). Cloned (self-shares the held map) so
+        // the original binding survives to construct the `DnsResponder` after
+        // `AppState`; `state.frontend_addr_allocator` and the responder's handle
+        // are the SAME allocator, and the SAME one already injected into the
+        // re-keyed `MtlsResolve` above.
+        frontend_addr_allocator.clone(),
     );
+
+    // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
+    // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a
+    // non-mTLS boot (no responder is composed there — the SAME gate the netns
+    // adopt / frontend rebuild use); `Some(handle)` once the responder probes
+    // Ok and its serve loop is spawned inside the real-dataplane block below.
+    // `let mut … = None` then conditionally `Some(...)` inside the
+    // `mtls_worker.is_some()` block — NOT collapsible to a `let x = if {…} else
+    // {None}` expression because the block contains several `?`-propagating
+    // boot-refusal `return Err(...)` paths (netns adopt, nft sweep, frontend
+    // rebuild, responder probe) that must short-circuit `run_server`, not the
+    // expression. The seq form is the correct shape here.
+    #[allow(
+        clippy::useless_let_if_seq,
+        reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
+                  a let-else-None expression cannot host them"
+    )]
+    let mut dns_responder_task: Option<tokio::task::JoinHandle<()>> = None;
+    #[allow(
+        clippy::useless_let_if_seq,
+        reason = "the conditioning block has multiple ?-propagating boot-refusal returns; \
+                  a let-else-None expression cannot host them"
+    )]
+    let mut dns_responder: Option<Arc<crate::dns_responder::responder::DnsResponder>> = None;
 
     // Adopt-on-restart boot recovery (transparent-mtls-enrollment step 04-04,
     // D-TME-12 §1–§4). On a `serve` restart the in-RAM `NetSlotAllocator` map
@@ -2022,6 +2167,102 @@ pub async fn run_server_with_obs_and_driver(
                 return Err(error::ControlPlaneError::NftRuleSweep(source));
             }
         }
+
+        // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
+        // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
+        // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
+        // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
+        // pass re-derives every `<job> → F` binding from the declared-Service intent
+        // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
+        // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
+        // the netns adopt + nft sweep above (preserving the PINNED boot order
+        // adopt → GC → sweep → rebuild → serve) and BEFORE the convergence loop /
+        // responder serve spawn (so the `name_index` reader the responder reads —
+        // once 02-01 injects the shared instance — never observes an
+        // empty-but-trusted allocator).
+        //
+        // GATED on `state.mtls_worker.is_some()` — the SAME composition gate the
+        // netns adopt above uses, and (the load-bearing reason) the SAME gate the
+        // 02-01 responder + its `name_index` reader are themselves built behind
+        // (feature-delta DDN-6; the responder is constructed inside this very
+        // real-dataplane block). On a non-mTLS boot there is therefore NO
+        // responder and NO reader to serve — populating the allocator there is
+        // wasted work, not a fix. Re-gating restores the roadmap 01-05 pin
+        // ("gated by the SAME `mtls_worker.is_some()` block") AND keeps the
+        // rebuild and its only consumer behind one gate. A rebuild failure
+        // (unreadable intent SSOT, or frontend-block exhaustion mid-rebuild)
+        // refuses the boot fail-closed via the typed
+        // `ControlPlaneError::FrontendRebuild` (never flattened to `Internal`).
+        crate::dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.frontend_addr_allocator,
+        )
+        .await?;
+
+        // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
+        // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
+        // converge-on-boot frontend rebuild (so its internal `NameIndex` reads a
+        // populated allocator, never empty-but-trusted) and BEFORE the listener
+        // binds, inside the SAME `mtls_worker.is_some()` real-dataplane block
+        // that gates the netns / intercept path. It holds:
+        //   - `state.obs` — the `service_backends` List/Watch source the
+        //     internal `NameIndex` reads (the third sibling reader, DDN-1);
+        //   - `config.clock` — the SOA SERIAL source for `wire::encode`;
+        //   - `state.net_slot_allocator` — the DDN-5 per-gateway-addr fallback
+        //     source (`snapshot()` → `responder_addr_for_slot`);
+        //   - `state.frontend_addr_allocator` — the SAME shared
+        //     `FrontendAddrAllocator` injected into the re-keyed `MtlsResolve`
+        //     above, so the `F` the `name_index` answers is byte-identical to
+        //     the `F` `by_frontend` recognizes (DDN-2 single-owner).
+        // Earned-Trust (wire → probe → use): `probe()` binds `:53` (wildcard
+        // first, per-gateway-addr fallback) AND List-seeds the `name_index`. A
+        // bind / List-seed failure REFUSES the boot fail-closed with a
+        // per-variant `health.startup.refused` reason (a responder that bound
+        // lazily could start and THEN fail to answer — the silent-degradation
+        // footgun). Mirrors the `MtlsResolve.probe()` refuse-boot block above.
+        let responder = Arc::new(crate::dns_responder::responder::DnsResponder::new(
+            Arc::clone(&state.obs),
+            config.clock.clone(),
+            state.net_slot_allocator.clone(),
+            state.frontend_addr_allocator.clone(),
+        ));
+        // The test-only `dns_probe_fault` seam forces the DNS responder probe
+        // to fail with a `DnsResponderError::Probe` so the `run_server`
+        // refusal + reason-mapping path (BIND-03's composition-root half) is
+        // exercised without needing a real bind / store fault. Mirrors the
+        // `mtls_probe_fault` seam above. `None` in production / unset tests →
+        // the real `probe()` runs.
+        #[cfg(feature = "integration-tests")]
+        let dns_probe_result = match config.dns_probe_fault.clone() {
+            Some(message) => {
+                Err(crate::dns_responder::responder::DnsResponderError::Probe { reason: message })
+            }
+            None => responder.probe().await,
+        };
+        #[cfg(not(feature = "integration-tests"))]
+        let dns_probe_result = responder.probe().await;
+        if let Err(source) = dns_probe_result {
+            // Per-variant refusal reason — the enum owns its own vocabulary
+            // (`development.md` § "Label enums own their string representation"),
+            // so the mapping is tested in-process (`boot_refusal_reason`) rather
+            // than as an inline match a mutation gate cannot reach through the
+            // Tier-3 probe path.
+            let reason = source.boot_refusal_reason();
+            tracing::warn!(
+                name: "health.startup.refused",
+                reason,
+                error = %source,
+                "dial-by-name DNS responder probe failed; refusing to boot \
+                 (a lazily-bound responder would start and then fail to answer)"
+            );
+            return Err(error::ControlPlaneError::DnsResponderBoot(source));
+        }
+        // Probe Ok — spawn the source-pinned serve loop and hold both the task
+        // handle AND the responder (so shutdown can `stop()` the SO_RCVTIMEO-
+        // bounded serve loop before aborting).
+        dns_responder_task = Some(tokio::spawn(Arc::clone(&responder).serve()));
+        dns_responder = Some(responder);
     }
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -2133,6 +2374,8 @@ pub async fn run_server_with_obs_and_driver(
         convergence_task,
         exit_observer_task,
         emit_drain_task,
+        dns_responder_task,
+        dns_responder,
         convergence_shutdown,
         exit_observer_shutdown,
         emit_drain_shutdown,

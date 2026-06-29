@@ -151,13 +151,13 @@ mod acceptance {
     // ADR-0047 §1.
     mod workload_lifecycle_natural_exit;
 
-    // service-vip-allocator step 03-01 — `WorkloadLifecycle::reconcile`
-    // emits `Action::ReleaseServiceVip` exactly once when a Service-kind
-    // workload's allocation reaches a terminal-state observation row.
-    // Per-layer scope: reconciler emission only (action-shim dispatch is
-    // step 03-02; end-to-end lifecycle is step 03-03). Per ADR-0049
-    // (amended 2026-05-15) + persist-inputs discipline on
-    // `released_for_terminal: BTreeSet<ContentHash>`.
+    // `WorkloadLifecycle::reconcile` emits `Action::ReleaseServiceVip`
+    // exactly once on logical-workload DELETION (`desired.job.is_none()`)
+    // and RETAINS the VIP across a transient stop while the workload
+    // stays declared. Per-layer scope: reconciler emission only. Per
+    // ADR-0049 (amendment 2026-06-28 — withhold-not-release; #251) +
+    // persist-inputs discipline on
+    // `released_for_deletion: BTreeSet<ContentHash>`.
     mod workload_lifecycle_release_service_vip;
 
     // backend-discovery-bridge-service-reachability — UI-06

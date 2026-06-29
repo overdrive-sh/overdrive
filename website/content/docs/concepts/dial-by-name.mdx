@@ -1,0 +1,178 @@
+---
+title: Dial by Name
+description: How a workload reaches another service by name. Your code connects to a service like payments.svc.overdrive.local the way it would connect to any hostname; the platform finds a running copy, opens the connection, and encrypts it. No hardcoded addresses, no service-discovery client, nothing to switch on. If no copy is running under that name, the lookup fails cleanly instead of pointing at a dead address.
+---
+
+Your code wants to talk to another service. Say a `web` service needs to reach
+`payments`. It connects to `payments` by name — the same way it would connect to
+any hostname — and the platform does the rest: it finds a running copy of
+`payments`, opens the connection, and [encrypts it](/docs/concepts/transparent-mtls).
+Your code hardcodes no IP address, ships no service-discovery library, and runs no
+networking logic. It uses a name. The platform turns that name into a live,
+secured connection.
+
+This works the moment you deploy. There is nothing to switch on.
+
+<Callout title="The short version">
+	A workload reaches another service by its name — `web` reaches `payments` by
+	connecting to `payments.svc.overdrive.local` — and the platform connects it to a
+	running copy and encrypts the link, with no configuration. If nothing is running
+	under that name, the lookup fails instead of handing back a dead address. This
+	covers process workloads on a single node. IPv6 lookups, sealed-VM workloads, and
+	a separate virtual-IP load balancer are not part of it. See
+	[Where it stands](#where-it-stands).
+</Callout>
+
+## Why a name instead of an address
+
+An address is a moving target. A service restarts, gets rescheduled to another
+slot, or scales from one copy to three, and the address you would have hardcoded
+is now wrong. Code that pins an address breaks the first time the thing behind it
+moves. A name doesn't move. `payments` is `payments` whether it restarted ten
+seconds ago or has never run at all.
+
+The usual fix is a service-discovery client: a library your code calls to look up
+"where is `payments` right now?" before each connection. That works, but it puts
+the lookup inside your application — a dependency to add, a client to configure, an
+API to learn. Dial by name moves the lookup out of your code and into the
+platform, behind a mechanism your code already knows how to use: resolving a
+hostname.
+
+## Like a company's main phone line
+
+You don't dial a coworker's desk extension to reach their department. You call the
+company's main number, and a switchboard connects you to whoever in that
+department is free. The main number never changes, even as people join, leave, or
+step away from their desk.
+
+Dial by name works the same way. Each service gets one fixed "main number" — a
+stable address that stays the same for as long as the service exists. Your code
+always dials that one address. Behind it, the platform connects each call to a
+copy of the service that is actually running right now. Copies can restart, scale
+up, or move; the name and the address they answer at do not change, so your code
+never has to notice.
+
+## Using it
+
+There is no API and no flag. Deploy two services and have one connect to the
+other by name. The `examples/dial-by-name-responder/` demo does exactly this: a
+service `a` and a service `b`, each running a small program that reaches the other
+by name — `a` connects to `b.svc.overdrive.local`, `b` connects to
+`a.svc.overdrive.local` — on a roughly ten-second loop, each bumping a counter
+and stamping a fresh timestamp on every round trip. Deploy both against a running
+node and the two counters climb. That is names resolving and connections
+completing, in both directions, with nothing configured to make it happen.
+
+## How it works
+
+Under the surface, a name becomes an address, the connection to that address gets
+captured and encrypted, and a failed lookup is reported honestly. The pieces:
+
+<Mermaid chart={`
+flowchart LR
+  wl["Your workload<br/>connects to a name"]
+  r["Node responder<br/>answers with the address"]
+  cap["Platform<br/>captures the connection"]
+  enc["mTLS<br/>to a running copy"]
+  wl --> r --> wl
+  wl --> cap --> enc
+`} />
+
+### Something has to answer the name
+
+Resolving a name to an address is what DNS does, and an unmodified workload
+already speaks it — that is what `getaddrinfo` and every "connect to a hostname"
+call do underneath. Each workload is handed a DNS setting that points its name
+lookups at the node agent. The agent runs a small **responder** that answers those
+lookups for mesh names ending in `.svc.overdrive.local`. Without it, the lookup
+goes nowhere and the connection fails before it starts. The responder is the thing
+that answers.
+
+The responder and the [encryption layer](/docs/concepts/transparent-mtls) read the
+same live list of running services. So a name resolves to a service that is
+genuinely up, and the connection that follows lands on a copy that is genuinely
+running — the answer and the destination can't drift apart, because they come from
+one source.
+
+### One fixed address, whichever copy is up
+
+The address the responder hands back is the service's stable "main number," not
+the address of one particular copy. Pinning the name to a single copy's address
+would mean re-answering every time that copy restarted — and a caller that had
+already looked up the old address (name lookups get cached) would connect to a
+copy that no longer exists. The stable address sidesteps that. The name always
+resolves to the same address, and the platform connects that address to a copy
+that's running at the moment of the call.
+
+### A name with nothing behind it fails cleanly
+
+If a service has no running copy, its name does not resolve — the lookup returns
+"no such name." This is deliberate. Handing back a stale address would let the
+connection attempt a copy that isn't there, fail slowly, and look like a network
+problem. A clean "not found" fails fast and points at the real cause: nothing is
+running to answer. The platform never substitutes a dead address for an honest
+failure.
+
+The address itself is reserved for the service even while it has no running copy,
+so a service that loses its last copy and gets one back keeps the same address the
+whole time. The name simply stops resolving while nothing is up and starts again
+when a copy returns.
+
+### One responder answers every workload
+
+Each workload runs in its own isolated network sandbox, and each sandbox sends its
+name lookups to its own gateway address. A single responder on the node answers
+all of them. It replies to each lookup from the exact address that workload asked —
+the system resolver rejects a DNS answer that arrives from any other address, so
+this detail is what makes ordinary hostname resolution work rather than silently
+time out.
+
+### It refuses to start half-working
+
+When a node starts, it checks the responder before it begins serving: the
+responder must claim its listening socket and load the current list of services.
+If that check fails, the node refuses to start rather than come up unable to
+resolve names. A node either boots able to resolve, connect, and encrypt mesh
+traffic, or it does not boot. It never runs in a state where name lookups quietly
+fail.
+
+## How we know it works
+
+The proof is the ping-pong demo run for real, and a stricter automated version of
+it. A real-kernel integration test deploys a workload, resolves a peer's name from
+inside that workload through the ordinary system resolver — not a lenient
+diagnostic tool — and confirms the connection that follows is captured and
+mutually encrypted. These run under the project's Lima harness, the canonical path
+for anything that touches network sandboxes, real sockets, or the DNS resolver.
+
+## Where it stands
+
+Dial by name runs in `overdrive serve`, alongside the layer that encrypts the
+connections it sets up:
+
+- **Automatic, with no operator verb.** There is no command to enable it. A
+  deployed service is reachable by its `<name>.svc.overdrive.local` name with no
+  further configuration.
+- **A fixed address per service.** A name resolves to one address held for the
+  life of the service, and the platform connects that address to a running copy
+  per call. The address is reserved through outages and released when the service
+  is deleted. Deleting a service is itself unbuilt, so a deployed service keeps its
+  address for as long as the node runs.
+- **IPv4 answers only.** Names resolve to IPv4 addresses. There are no IPv6 mesh
+  answers.
+- **No virtual-IP load balancer.** The name resolves to a stable address that the
+  encryption layer steers to a running copy per connection. The separate
+  virtual-IP path with kernel-side load balancing is not built.
+- **Process workloads, single node.** Sealed-VM and unikernel workloads, and the
+  multi-node mesh, are outside this scope.
+
+## Where to go next
+
+- The layer that captures and encrypts the connection once a name resolves:
+  [transparent mTLS](/docs/concepts/transparent-mtls).
+- The identity each encrypted connection carries:
+  [the built-in CA](/docs/concepts/identity).
+- Where the responder sits in the running node:
+  [the architecture overview](/docs/concepts/architecture).
+- Deploying a service so its name resolves:
+  [deploy a workload](/docs/how-to/deploy-a-workload).

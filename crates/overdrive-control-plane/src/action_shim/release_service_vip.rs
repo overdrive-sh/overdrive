@@ -23,10 +23,11 @@
 //!
 //! `PersistentServiceVipAllocator::release` is idempotent — releasing
 //! a digest not in the memo is a no-op (returns Ok(())). The
-//! reconciler's `released_for_terminal` gate (step 03-01) prevents
-//! re-emission across ticks, but a duplicate `Action::ReleaseServiceVip`
-//! for an already-released digest on the dispatch path does NOT
-//! panic; it logs a debug event and returns Ok.
+//! reconciler's `released_for_deletion` gate (ADR-0049 amendment
+//! 2026-06-28 — release on intent withdrawal) prevents re-emission
+//! across ticks, but a duplicate `Action::ReleaseServiceVip` for an
+//! already-released digest on the dispatch path does NOT panic; it logs
+//! a debug event and returns Ok.
 
 use std::sync::Arc;
 

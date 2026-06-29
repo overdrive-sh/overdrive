@@ -331,10 +331,70 @@ filter = '''
         | (package(overdrive-control-plane) & (
             test(serve_boot_provisions_veth)
             | test(backend_discovery_bridge)
+            | test(dns_responder_walking_skeleton)
+            | test(dns_responder_nxdomain)
+            | test(dns_responder_ping_pong)
+            | test(dns_responder_bind)
         ))
     )
 '''
 test-group = 'host-kernel-shared'
+
+# dial-by-name-responder 02-02 (review-resolution) — `dns_responder_walking_skeleton`
+# joins `host-kernel-shared` above. Both WS tests in that module boot a real
+# `EbpfDataplane` via `run_server_with_obs_and_driver` (`dataplane_override:
+# None`) — the SAME root `cgroup_sock_addr` attach as `serve_boot_provisions_veth`
+# / `backend_discovery_bridge`, PLUS an XDP attach to the FIXED
+# `ovd-veth-cli` / `ovd-veth-bk` ifaces. Two run concurrently → the loser's boot
+# hits `IfaceXdpSlotBusy { iface: "ovd-veth-cli" }` (the XDP-slot analogue of the
+# root-attach race this block guards). They were MISSING from the single-writer
+# group when 02-02 landed, which env-blocked the step's mutation-gate baseline
+# (cargo-mutants runs the full integration suite under default concurrency per
+# mutant). Matched BY-MODULE (`test(dns_responder_walking_skeleton)`), rename-
+# proof — a future WS test in this file joins the single-writer domain
+# automatically (same discipline as the mtls / root-attacher blocks above).
+#
+# dial-by-name-responder NXDOMAIN follow-up — `dns_responder_nxdomain` (the
+# empty-candidate-honesty Tier-3 module: withhold-then-resolve / unknown-name)
+# joins for the SAME reason. Its three tests boot a real `EbpfDataplane` via
+# `run_server_with_obs_and_driver` (`dataplane_override: None`) — the same
+# process-global `:53` bind + root `cgroup_sock_addr` attach + XDP attach to
+# the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
+# `dns_responder_walking_skeleton`. Run concurrently in the full integration
+# suite two collide on `:53` EADDRINUSE / `IfaceXdpSlotBusy`, so the module
+# MUST share the single-writer group. Matched BY-MODULE
+# (`test(dns_responder_nxdomain)`), rename-proof — mirrors the
+# `dns_responder_walking_skeleton` assignment. (Corrects the new module's
+# earlier omission from the serialization group when the NXDOMAIN tests
+# landed — joining the existing single-writer domain is required discipline,
+# not scope creep.)
+#
+# dial-by-name-responder 03-02 bidirectional ping-pong —
+# `dns_responder_ping_pong` (the operator-runnable two-deploy demo, now a REAL
+# in-process `#[tokio::test]` — review-03-02.md resolution (a) replaced the
+# earlier `#[should_panic]` scaffold with the live bidirectional proof) joins
+# for the SAME reason. It boots a real `EbpfDataplane` via
+# `run_server_with_obs_and_driver` (`dataplane_override: None`) and deploys TWO
+# mesh peers (a + b) — the same process-global `:53` bind + root
+# `cgroup_sock_addr` attach + XDP attach to the FIXED `ovd-veth-cli` /
+# `ovd-veth-bk` ifaces as `dns_responder_walking_skeleton` /
+# `dns_responder_nxdomain`. Run concurrently in the full integration suite two
+# collide on `:53` EADDRINUSE / `IfaceXdpSlotBusy`, so the module MUST share the
+# single-writer group. Matched BY-MODULE (`test(dns_responder_ping_pong)`),
+# rename-proof — mirrors the sibling assignments.
+#
+# dial-by-name-responder S-DBN-BIND (`dns_responder_bind`) joins for the SAME
+# reason — corrected here (03-02) after it surfaced as a pre-existing
+# serialization gap: its `S-DBN-BIND-01/02` tests bind the process-global
+# wildcard `0.0.0.0:53` and its `S-DBN-BIND-03` boots the real `EbpfDataplane`
+# composition root via `run_server_with_obs_and_driver` (XDP attach to the same
+# FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces). Run concurrently with its three
+# serialized siblings it collided on `:53` EADDRINUSE / `IfaceXdpSlotBusy`
+# (empty-resolve + boot-fault failures). It boots the same process-global state
+# the other three already serialize against, so it MUST share the single-writer
+# group too — joining the existing single-writer domain is required discipline,
+# not scope creep (same lesson as the NXDOMAIN module's earlier omission).
+# Matched BY-MODULE (`test(dns_responder_bind)`), rename-proof.
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the

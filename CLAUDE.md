@@ -232,6 +232,56 @@ must be re-supplied by the control plane is a **#26-coupled, Tier-3-spike
 question** — do not assume it without confirming the kernel/kTLS survival
 semantics on a real kernel.
 
+## East-west mTLS tests — the egress DIALER speaks PLAINTEXT; the captured leg's encryption flips by direction
+
+The workload-identity model above has a load-bearing **testing** corollary
+that is easy to get exactly backwards. A test (or any client) that dials a
+mesh peer — by name, by VIP, by frontend `F` — on the **EGRESS** path MUST
+speak **plaintext** over an ordinary `TcpStream`. It models an
+identity-unaware workload: the workload opens a normal socket and the agent
+transparently *originates* the mTLS on the inter-agent **leg-B → leg-C**
+hop. The egress capture lands on the agent's **plaintext, workload-facing
+leg-F** — so a test client that speaks rustls TLS toward the dialed address
+opens a **second, peerless TLS session that leg-F never terminates**: its
+`ClientHello` tunnels through as plaintext, no `ServerHello` ever returns,
+and the handshake **stalls → RST**. No error, no rejection — just a hang.
+
+This is the **opposite** of the INBOUND keystone
+(`canonical_address_inbound_walking_skeleton.rs`): there, a *peer-originated*
+connect to the workload's address is captured at **prerouting → leg-C** (a
+TLS leg), so an external rustls peer legitimately plays the *originating*
+agent's leg-B and its TLS terminates at leg-C. **Do NOT copy the keystone's
+"client presents TLS" dial shape onto an egress / dial-by-name test** — the
+captured leg has the opposite encryption role (leg-F plaintext, not leg-C
+TLS).
+
+Consequences for writing an egress mesh test:
+
+- **The dialer is plaintext.** `TcpStream::connect` → `write_all(REQUEST)`
+  → read `RESPONSE`; keep a byte-distinct REQUEST/RESPONSE litmus so the
+  assertion proves the real server→client reply pipe, not an echo. No
+  client-side rustls, no client SVID, no SNI.
+- **Prove the hop is mTLS'd on the INTER-AGENT wire, not the client
+  handshake.** Because the client is plaintext by design, the AC's "the
+  peer wire carries TLS 1.3 application_data records (`0x17`) with zero
+  cleartext" is observed on the **leg-B ↔ leg-C** segment (e.g. `ss -K` /
+  kTLS, `tcpdump`, or a wire-scan of the records — the
+  `WireScan { to, from, plaintext: 0 }` shape), NOT from the dialer. Drop
+  this and a future cleartext-passthrough regression on the Mesh path
+  slips past the test.
+- **The server side still holds SVIDs.** Keep `mtls_identity_override` /
+  the server `HeldServerIdentity` PKI — the *agent's* leg-B/leg-C need the
+  material; only the *test client's* TLS is wrong.
+
+**Precedent** (dial-by-name-responder 02-02): an egress walking-skeleton
+test client copied the keystone's TLS-presenting dial shape and stalled at
+the agent leg; the symptom ("no agent-side rejection, the handshake just
+doesn't complete") survived a multi-layer investigation before a
+population-diff probe — a *plaintext* dial to the same `F` round-tripped
+byte-exact while the rustls dial stalled — pinned it as a test-harness
+model error, not a datapath defect. RCA:
+`docs/analysis/root-cause-analysis-dial-by-name-agent-originated-mtls-stall.md`.
+
 ## Mutation Testing Strategy
 
 This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.

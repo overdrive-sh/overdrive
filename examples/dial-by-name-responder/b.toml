@@ -1,0 +1,49 @@
+# dial-by-name-responder/b.toml — S-DBN-PINGPONG / US-DBN-3 / K-DBN-3 demo
+# fixture (the "B" half of the bidirectional ping-pong).
+#
+# The mirror of `a.toml` (read a.toml's header for the full convention +
+# port-choice + client-program-form rationale). A and B form ONE demo: `od
+# deploy a.toml` then `od deploy b.toml` against a booted `overdrive serve`.
+#
+# [service].id = "b"  ⇒ reachable at `b.svc.overdrive.local`. The PEER it
+# dials is `a.svc.overdrive.local` (`--peer-name` below). So A↔B form a closed
+# two-hop ping-pong loop: A dials b, B dials a.
+#
+# Client-program form — the SAME checked-in `ping_pong.py` next to this spec,
+# run by /usr/bin/python3 (no build step, no phantom path); the only difference
+# from a.toml is the `--self-port` / `--peer-name` / `--peer-port` args (this
+# half listens on 18972 and dials a.svc on 18971). The script dials its peer
+# PLAINTEXT (workload-identity model; the agent originates mTLS on the
+# inter-agent leg — CLAUDE.md § "East-west mTLS tests").
+#
+# Port choice — 18972, NOT 5353 (systemd-resolved owns it in the dev Lima VM)
+# and NOT 53 (the in-agent DNS responder). 18972 is a free, unprivileged TCP
+# port; a.toml uses 18971 so the two never collide on a shared port.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/E05-dial-by-name-ping-pong-mtls/runner.sh
+# and by the Tier-3 acceptance scaffold
+#   crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs
+
+[service]
+id = "b"
+replicas = 1
+
+[exec]
+# The SAME checked-in `ping_pong.py` as a.toml, run by /usr/bin/python3 (no
+# phantom path), parameterised by args. Script path relative to the repo root.
+command = "/usr/bin/python3"
+args = [
+    "examples/dial-by-name-responder/ping_pong.py",
+    "--self-port", "18972",
+    "--peer-name", "a.svc.overdrive.local",
+    "--peer-port", "18971",
+]
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[listener]]
+port = 18972
+protocol = "tcp"

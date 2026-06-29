@@ -1,0 +1,552 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "dial-by-name-responder",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T20:20:14Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T20:23:27Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: merged into RED_ACCEPTANCE \u2014 NAME-01/02/04 proptests ARE the mandatory PBT unit coverage; no below-port helper warrants a separate unit layer",
+      "t": "2026-06-24T20:23:27Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T20:25:48Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T20:29:17Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T21:25:15Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T21:34:23Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: merged into RED_ACCEPTANCE \u2014 the S-DBN-WIRE-01..04 proptests ARE the mandatory PBT coverage of the wire codec port; no below-port helper warrants a separate unit layer",
+      "t": "2026-06-24T21:34:28Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T21:43:50Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-24T21:47:43Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T09:40:48Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T09:41:35Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: merged into RED_ACCEPTANCE \u2014 the FRONTEND-01..04 proptests ARE the mandatory PBT coverage; the pure smallest-free scan + atomic wrapper are exercised through the public assign/release/snapshot port surface; no below-port helper warrants a separate unit layer",
+      "t": "2026-06-25T09:41:46Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T09:44:11Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T09:46:40Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:11:32Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:16:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the ANSWER-*/IDX-* proptests ARE the mandatory PBT coverage of the answer_for + NameIndex driving ports (port-to-port at domain scope); no below-port unit needed to reach GREEN",
+      "t": "2026-06-25T11:16:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:30:33Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T11:32:44Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:24:37Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:32:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the four ATs through the submit_workload + rebuild driving ports are the mandatory coverage of both writer call sites; the allocator's pure assign idempotency/exhaustion is already Tier-1 + mutation-gated at 01-04, and no below-port helper needs separate unit coverage to reach GREEN (mirrors prior steps 01-03/01-04).",
+      "t": "2026-06-25T17:32:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:37:14Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T17:37:22Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:02:49Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:04:33Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the ATs through the driving ports (submit_workload handler + rebuild_frontend_addrs_from_intent boot pass + answer_for/NameIndex reader path) are the coverage; mirrors prior 01-0x steps. No new pure-domain unit decomposition required.",
+      "t": "2026-06-25T18:04:39Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:07:23Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:09:25Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:19:29Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:21:12Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the AT (boot_rebuild_ignores_service_payload_under_a_sub_key_path) is the kill coverage; no unit decomposition needed for a test-only mutation corrective",
+      "t": "2026-06-25T18:21:12Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:22:17Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:24:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T18:53:40Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:03:47Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the mtls_resolve_rekey.rs + dns_name_index.rs COHERENCE-01 proptests ARE the mandatory PBT coverage of the re-keyed BackendIndex/classify data structure (driven port-to-port at the data-structure scope); no below-port helper warrants a separate unit layer (mirrors the 01-01..01-05 pattern).",
+      "t": "2026-06-25T19:03:47Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:12:57Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T19:15:40Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:33:05Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: hardening existing-GREEN tests against reframed criteria \u2014 no new production behavior; the litmus (inject a classify bug \u2192 oracle/byte-identity diverges) is a guard, not a logged RED",
+      "t": "2026-06-25T20:43:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: hardening existing-GREEN tests against reframed criteria \u2014 no new production behavior; the litmus (inject a classify bug \u2192 oracle/byte-identity diverges) is a guard, not a logged RED",
+      "t": "2026-06-25T20:43:50Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:43:54Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-25T20:44:49Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T05:38:47Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: documenting an already-run mutation gate + dropping a near-vacuous test (N3); no new acceptance test, no new production behavior",
+      "t": "2026-06-26T05:38:52Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: N3 removes a vacuous test rather than adding one; no below-port helper introduced",
+      "t": "2026-06-26T05:38:52Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T05:40:17Z"
+    },
+    {
+      "sid": "02-00",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T05:45:41Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T06:14:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T06:17:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS: by_frontend pure-reader projection unit test (mtls_resolve_adapter.rs) \u2014 the new below-port mutable logic the Tier-3 ATs do not isolate",
+      "t": "2026-06-26T07:04:37Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T07:04:37Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-26T07:06:38Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test-only step adds no new below-port mutable production logic; the four Tier-3 ATs drive already-mutation-gated production (answer_for 01-03, wire.rs 01-02, FrontendAddrAllocator 01-04, re-keyed classify 02-00, responder.rs/lib.rs 02-01) \u2014 mirrors 01-0x/02-00 precedent",
+      "t": "2026-06-27T03:15:47Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-06-27T13:47:35Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-27T13:47:46Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:09:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:14:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier-3 step adds NO new below-port mutable production source; WITHHOLD/retain logic already mutation-gated at 01-03 (answer_for NxDomain arm + NameIndex healthy-gate seam) and 01-04 (FrontendAddrAllocator release only-on-deletion). Mirrors 02-02 RED_UNIT SKIP precedent.",
+      "t": "2026-06-28T03:14:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: NXDOMAIN-01 PASS (isolated) + NXDOMAIN-03 PASS (isolated); NXDOMAIN-02 FAIL (isolated) \u2014 surfaces a production WITHHOLD-on-stop gap: after POST /v1/jobs/{id}/stop converges the alloc to Terminated, the service_backends healthy row is NOT dropped, so the responder keeps answering the stale F indefinitely (getent -> [10.98.0.1] code 0 forever; never NXDOMAIN). The WITHHOLD-on-zero-healthy seam is not driven by the production stop path. Fixing requires changing READ-ONLY production (backend_discovery_bridge re-eval on alloc-Terminated / action-shim re-enqueue) = OUT OF BOUNDS, design-gap BLOCKER. NXDOMAIN-02 recovery leg separately #249-blocked (ignored). Secondary: the 3 active tests interfere when run in parallel (shared :53 responder + FrontendAddrAllocator + identical server name) \u2014 pass individually, collide together. Sibling 02-02 hit-path test still GREEN. COMMIT withheld pending user decision.",
+      "t": "2026-06-28T03:20:35Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-06-28T03:21:17Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:26:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T03:29:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:33:21Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:40:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-DBN-PINGPONG is a single-example golden Tier-3 bidirectional walkthrough (criterion 1: no PBT at Tier 3) over already-gated 01/02 production logic; criterion 6 forbids any new below-port mutable production source. No unit test to author \u2014 mirrors the 02-02 / 03-01 RED_UNIT SKIP rationale.",
+      "t": "2026-06-28T12:40:22Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:41:19Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T12:43:14Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:46:16Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:57:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new below-port mutable production source \u2014 the bidirectional dial-by-name datapath (responder serve, re-keyed MtlsResolve, FrontendAddrAllocator, egress leg-B interception) is already mutation-gated production from steps 01/02; this step authors a Tier-3 acceptance test only. Mirrors the 02-02 / 03-01 RED_UNIT skip rationale.",
+      "t": "2026-06-28T13:57:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T13:57:18Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: c7112ce8",
+      "t": "2026-06-28T13:59:37Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-28T14:00:18Z"
+    }
+  ]
+}

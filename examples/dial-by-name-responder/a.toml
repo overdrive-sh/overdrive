@@ -1,0 +1,72 @@
+# dial-by-name-responder/a.toml — S-DBN-PINGPONG / US-DBN-3 / K-DBN-3 demo
+# fixture (the "A" half of the bidirectional ping-pong).
+#
+# This file introduces the per-feature `examples/<feature>/` subdir
+# convention (precedents: the flat `examples/dns-resolver.toml` /
+# `examples/coinflip-as-service.toml`). A and B form ONE demo: `overdrive
+# deploy a.toml` then `overdrive deploy b.toml` against a booted `overdrive
+# serve` produces an observable advancing ping-pong — A resolves
+# `b.svc.overdrive.local` and calls B, B resolves `a.svc.overdrive.local`
+# and calls A, each call increments a counter + refreshes a date on a ~10s
+# cadence, and each hop is intercepted + mTLS'd by the platform.
+#
+# [service].id = "a"  ⇒ the mesh name STEM: this service is reachable at
+# `a.svc.overdrive.local` (= `format!("a.{}", MeshServiceName::SUFFIX)`).
+# The PEER it dials is `b.svc.overdrive.local` (passed to the script via
+# `--peer-name` below).
+#
+# Client-program form — a CHECKED-IN Python script (`ping_pong.py`) living in
+# THIS directory, next to the specs — a real, runnable example with no build
+# step (run it by hand: `python3 ping_pong.py --self-port 18971 --peer-name
+# 127.0.0.1 --peer-port 18972`). `command` is `/usr/bin/python3` (present in the
+# dev Lima VM; the `dns-resolver.toml` /usr/bin/socat precedent) and the first
+# arg is the script path. The script: binds a TCP listener on its service port;
+# on each inbound connection increments a counter + stamps a fresh ISO-8601 date
+# and replies; on a ~10s loop resolves the peer name via getaddrinfo (PLAINTEXT —
+# the workload is identity-unaware; the agent originates mTLS on the inter-agent
+# leg, CLAUDE.md § "East-west mTLS tests") and dials it, bumping a visible
+# round-trip counter on success.
+#
+# Path resolution: the script path is relative to the REPO ROOT. `ExecDriver`
+# runs `command` verbatim with no `current_dir` set and only enters the
+# workload's NETWORK namespace (no mount-namespace isolation), so the workload
+# inherits `overdrive serve`'s cwd and sees the host filesystem. Run `overdrive
+# serve` from the repo root so this path resolves.
+#
+# Port choice — 18971, NOT 5353 (systemd-resolved owns UDP 5353 / mDNS in the
+# dev Lima VM; a backend binding 5353 fails `bind(): Address already in use`,
+# per the `dns-resolver.toml` RCA), and NOT 53 (the in-agent DNS responder
+# binds the per-host `:53`). 18971 is a free, unprivileged TCP port in the VM.
+# B uses 18972 so the two specs never collide on a shared port observation.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/E05-dial-by-name-ping-pong-mtls/runner.sh
+# and by the Tier-3 acceptance scaffold
+#   crates/overdrive-control-plane/tests/integration/dns_responder_ping_pong.rs
+
+[service]
+id = "a"
+replicas = 1
+
+[exec]
+# The checked-in `ping_pong.py` next to this spec, run by the real on-disk
+# /usr/bin/python3 (no build step, no phantom path). Script path is relative to
+# the repo root (see the header note on path resolution).
+command = "/usr/bin/python3"
+# arg[0] — the script. --self-port: the listener port (matches [[listener]].port
+# below). --peer-name: the mesh name this half DIALS (B's name). --peer-port: B's
+# listener port.
+args = [
+    "examples/dial-by-name-responder/ping_pong.py",
+    "--self-port", "18971",
+    "--peer-name", "b.svc.overdrive.local",
+    "--peer-port", "18972",
+]
+
+[resources]
+cpu_milli = 250
+memory_bytes = 67108864
+
+[[listener]]
+port = 18971
+protocol = "tcp"

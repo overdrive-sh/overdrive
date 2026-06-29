@@ -78,6 +78,15 @@ mod integration {
     /// on `SimDataplane::local_backend_for`.
     mod deregister_local_backend_dispatch;
     mod describe_round_trip;
+    /// dial-by-name-responder step 02-01 (ADR-0072 REV-2, GH #243) — Tier-3
+    /// acceptance for the `DnsResponder` socket loop + the `run_server`
+    /// Earned-Trust boot gate (S-DBN-BIND-01/02/03). Drives the PRODUCTION
+    /// `DnsResponder::{probe,serve}` (wildcard `0.0.0.0:53` IP_PKTINFO bind,
+    /// per-gateway-addr fallback, `ipi_spec_dst` source-pin) and the boot
+    /// refuse-on-unbindable-port / unreadable-store path. `getent` is the
+    /// source-pin litmus (NEVER `dig` alone, DDN-5). Root + Lima; SKIP
+    /// otherwise. No Tier-2 backstop (DDN-4) — irreducibly real-kernel.
+    mod dns_responder_bind;
     /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
     /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
     /// 2026-05-10. Real `/bin/sh` workload writes 7 stderr lines;
@@ -272,6 +281,58 @@ mod integration {
     /// mTLS terminates, and the round-trip completes. Root + CAP_NET_ADMIN;
     /// SKIP otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
     mod canonical_address_inbound_walking_skeleton;
+
+    /// dial-by-name-responder step 02-02 (ADR-0072 REV-2, GH #243) — the
+    /// WALKING-SKELETON vertical slice. Four Tier-3 scenarios sharing one
+    /// real-`EbpfDataplane` + `mtls_identity_override` boot fixture (the
+    /// keystone shape): a deployed workload resolves its peer's STABLE
+    /// frontend `F ∈ 10.98.0.0/16` via `getaddrinfo`/`getent` (NOT `dig` —
+    /// K2) from inside its production-provisioned netns, the connect to `F`
+    /// is captured by the production egress nft-TPROXY rule, the re-keyed
+    /// `MtlsResolve` translates `F` → the live backend, and the hop is
+    /// mTLS'd (S-DBN-WS); `F` is byte-stable across a backend alloc cycle
+    /// (S-DBN-WS-STABLE — the SQ1 elimination); the answered `F` is the addr
+    /// `MtlsResolve` recognizes + translates (S-DBN-SINGLE-SRC); in-flight
+    /// churn fails fast bounded by `TCP_USER_TIMEOUT`, no `sock_destroy`
+    /// (S-DBN-CHURN). Drives ONLY production: NO test binds `:53`, installs a
+    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the
+    /// egress capture. Root + Lima; SKIP otherwise. MERGE-BLOCKING on the
+    /// pinned-6.18 Tier-3 matrix (ADR-0068).
+    mod dns_responder_walking_skeleton;
+
+    /// dial-by-name-responder EMPTY-CANDIDATE HONESTY (roadmap 03-01;
+    /// US-DBN-4 · K-DBN-2). Tier-3 `getent` observables that the production
+    /// responder WITHHOLDS the answer (NXDOMAIN) for a name with no
+    /// running-and-healthy backend (S-DBN-NXDOMAIN-01 query-before-healthy;
+    /// S-DBN-NXDOMAIN-02 withheld-after-stop, F-not-released; S-DBN-NXDOMAIN-03
+    /// unknown name), resolving to the stable frontend `F` once a backend is
+    /// running-and-healthy. Drives ONLY production: NO test binds `:53`,
+    /// installs a `resolv.conf`, allocates `F`, or programs a map. Root + Lima;
+    /// SKIP otherwise. The NXDOMAIN-02 recovery-after-stop observable is
+    /// `#[ignore]`'d to overdrive#249 (sticky operator-stop; same dependency as
+    /// 02-02 S-DBN-WS-STABLE). MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix
+    /// (ADR-0068).
+    mod dns_responder_nxdomain;
+
+    /// dial-by-name-responder step 03-02 (ADR-0072 REV-2, GH #243; US-DBN-3 ·
+    /// K-DBN-3) — the BIDIRECTIONAL PING-PONG demo, the operator-runnable proof.
+    /// Two services dial each other by name: `a` resolves `b.svc.overdrive.local`
+    /// and calls B, `b` resolves `a.svc.overdrive.local` and calls A; each call
+    /// increments a counter + refreshes a date on a ~10s cadence; each hop is
+    /// resolved through the in-agent responder, then intercepted + mTLS'd
+    /// (S-DBN-PINGPONG). Drives ONLY production: two `overdrive deploy`s
+    /// (`examples/dial-by-name-responder/{a,b}.toml`) + a staged tiny Rust
+    /// ping-pong bin against `run_server` — NO test binds `:53`, installs a
+    /// `resolv.conf`, allocates `F`, programs a map, or hand-installs the egress
+    /// capture. Each egress hop uses the CORRECTED PLAINTEXT-egress model (the
+    /// dialer speaks plaintext; the mTLS proof lives on the inter-agent
+    /// leg-B ↔ leg-C wire — CLAUDE.md § "East-west mTLS tests" / the 02-02 RCA).
+    /// `#[should_panic(expected = "RED scaffold")]` per
+    /// `distill/red-classification.md` (S-DBN-PINGPONG): the operator-runnable
+    /// bidirectional proof graduates to the E05 EDD expectation (honest
+    /// `pending`, #227/#75), NOT an in-process `#[test]`. Root + Lima; SKIP
+    /// otherwise. MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068).
+    mod dns_responder_ping_pong;
 
     /// workload-identity-manager (GH #35) — DISTILL RED scaffolds for the
     /// Layer-3 walking skeleton and bounded audited restart re-issue.

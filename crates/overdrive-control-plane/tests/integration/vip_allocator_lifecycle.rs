@@ -38,8 +38,9 @@
 //! file RED.
 //!
 //! Reconciler-tick coverage: the reconciler's emission contract for
-//! `Action::ReleaseServiceVip` on a terminal-state observation has its
-//! own acceptance test
+//! `Action::ReleaseServiceVip` on logical-workload deletion
+//! (`desired.job.is_none()`, ADR-0049 amendment 2026-06-28 —
+//! withhold-not-release) has its own acceptance test
 //! (`crates/overdrive-core/tests/acceptance/workload_lifecycle_release_
 //! service_vip.rs`, step 03-01). The action-shim dispatch contract has
 //! its own acceptance test
@@ -281,15 +282,22 @@ async fn dispatch_release(
 }
 
 // ---------------------------------------------------------------------------
-// S-VIP-06 — terminal-state release chains through submit + dispatch
+// S-VIP-06 — submit → ReleaseServiceVip dispatch → release chains
 // ---------------------------------------------------------------------------
 
 /// S-VIP-06 (end-to-end). Submits a Service spec through the production
 /// `submit_workload` handler, captures the issued VIP, dispatches a
 /// hand-constructed `Action::ReleaseServiceVip` (the same action the
-/// runtime tick would produce for a terminal observation, per step
-/// 03-01 + 03-02), and asserts the allocator no longer carries the
-/// digest.
+/// reconciler tick now emits on logical-workload deletion —
+/// `desired.job.is_none()` — per ADR-0049 amendment 2026-06-28 + the
+/// action-shim arm of step 03-02), and asserts the allocator no longer
+/// carries the digest.
+///
+/// This test exercises the action-shim *executor* (release-when-
+/// dispatched), which is unchanged by the withhold-not-release reversal;
+/// the *trigger* (when the reconciler emits the action) is pinned by
+/// `workload_lifecycle_release_service_vip.rs` and the convergence-tick
+/// tests below.
 ///
 /// The load-bearing post-condition is `allocator.get(&digest) == None`
 /// AFTER the dispatch — if the action shim's release arm regressed (e.g.
@@ -300,7 +308,7 @@ async fn dispatch_release(
 /// digest comes from the handler's content-addressed derivation rather
 /// than a hand-rolled fixture.
 #[tokio::test]
-async fn terminal_state_releases_vip_end_to_end() {
+async fn submit_then_release_dispatch_frees_vip_end_to_end() {
     let tmp = TempDir::new().expect("tempdir");
     let (state, allocator) = build_state_with_range(&tmp, VipRange::default());
 
@@ -331,9 +339,9 @@ async fn terminal_state_releases_vip_end_to_end() {
     }
 
     // ---- (3) Dispatch the Action::ReleaseServiceVip — the same action
-    //         the reconciler tick would emit on a terminal-state
-    //         observation (per step 03-01). The dispatch arm under audit
-    //         is the production seam from step 03-02.
+    //         the reconciler tick now emits on intent withdrawal
+    //         (desired.job.is_none(); ADR-0049 2026-06-28). The dispatch
+    //         arm under audit is the production seam from step 03-02.
     dispatch_release(Arc::clone(&allocator), "payments", digest_bytes).await;
 
     // ---- (4) Post-condition: the allocator has released the digest.
@@ -594,52 +602,14 @@ async fn build_state_with_range_and_reconciler(
     (state, allocator)
 }
 
-/// Regression: `hydrate_desired` must populate `service_spec_digest`
-/// from the persisted `WorkloadIntent` so the reconciler's
-/// `service_vip_release_emission` gate fires on the production
-/// `run_convergence_tick` path — not only in unit tests that construct
-/// `WorkloadLifecycleState` directly.
-///
-/// Before the fix, `hydrate_desired` hardcoded `service_spec_digest =
-/// None`, which short-circuited the release gate (condition 2 in
-/// `service_vip_release_emission`: `desired.service_spec_digest?`).
-/// Every VIP allocated at submit time was permanently held in the
-/// allocator memo regardless of terminal-state observations.
-#[tokio::test]
-async fn convergence_tick_releases_vip_on_terminal_service() {
-    use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
-
-    let tmp = TempDir::new().expect("tempdir");
-    let (state, allocator) = build_state_with_range_and_reconciler(&tmp, VipRange::default()).await;
-
-    // ---- (1) Submit a Service workload through the production handler.
-    let spec = service_spec("svc-release", 8080);
-    let resp = submit_json(
-        state.clone(),
-        SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) },
-    )
-    .await
-    .expect("Service submit must succeed");
-    assert_eq!(resp.outcome, IdempotencyOutcome::Inserted);
-
-    // ---- (2) Pre-condition: the allocator carries the digest.
-    let digest_bytes = digest_for_spec(spec);
-    {
-        let guard = allocator.lock().await;
-        assert!(
-            guard.get(&digest_bytes).is_some(),
-            "pre-condition: allocator must carry the digest after submit"
-        );
-        drop(guard);
-    }
-
-    // ---- (3) Write a terminal alloc-status observation row.
-    let workload_id = overdrive_core::id::WorkloadId::new("svc-release").expect("WorkloadId");
+/// Write a terminal Operator-stopped alloc-status observation row for
+/// the given workload through the production `ObservationStore`.
+async fn write_terminal_alloc_row(state: &AppState, workload_id: &str, alloc_id: &str) {
+    let wid = overdrive_core::id::WorkloadId::new(workload_id).expect("WorkloadId");
     let writer = NodeId::new("local").expect("NodeId");
     let terminal_row = overdrive_core::traits::observation_store::AllocStatusRow {
-        alloc_id: overdrive_core::id::AllocationId::new("alloc-svc-release-0")
-            .expect("AllocationId"),
-        workload_id: workload_id.clone(),
+        alloc_id: overdrive_core::id::AllocationId::new(alloc_id).expect("AllocationId"),
+        workload_id: wid,
         node_id: writer.clone(),
         state: overdrive_core::traits::observation_store::AllocState::Terminated,
         updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {
@@ -668,12 +638,12 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
         )))
         .await
         .expect("write terminal observation row");
+}
 
-    // ---- (4) Write a stop intent so desired_to_stop fires.
-    let stop_key = overdrive_core::aggregate::IntentKey::for_workload_stop(&workload_id);
-    state.store.put(stop_key.as_bytes(), &[1u8]).await.expect("put stop intent");
-
-    // ---- (5) Drive convergence ticks — should emit ReleaseServiceVip.
+/// Drive N convergence ticks of the `job-lifecycle` reconciler for the
+/// given workload through the production `run_convergence_tick`.
+async fn drive_convergence_ticks(state: &AppState, workload_id: &str, ticks: u64) {
+    use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
     let reconciler_name =
         overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("reconciler name");
     let target_resource =
@@ -681,9 +651,9 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
             .expect("valid target");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
-    for tick_n in 0..10_u64 {
+    for tick_n in 0..ticks {
         run_convergence_tick(
-            &state,
+            state,
             &reconciler_name,
             &target_resource,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
@@ -693,14 +663,88 @@ async fn convergence_tick_releases_vip_on_terminal_service() {
         .await
         .expect("convergence tick");
     }
+}
 
-    // ---- (6) Post-condition: the allocator MUST have released the digest.
+/// WITHHOLD (#251 regression on the production convergence path): a
+/// stopped-but-STILL-DECLARED Service RETAINS its VIP across the
+/// terminal window. The operator-stop intent retains the spec key, so
+/// `desired.job` stays `Some(_)` through the production hydrator
+/// (`read_job` projects a declared Service onto a kind-agnostic Job) —
+/// the new `service_vip_release_emission` gate (ADR-0049 amendment
+/// 2026-06-28) keys on `desired.job.is_none()` and MUST NOT fire here.
+///
+/// On the superseded release-on-terminal gate this released the VIP
+/// mid-stop, which evicted the allocator memo the bridge's
+/// `hydrate_bridge_desired_listeners` depends on and broke the
+/// name-retraction (#251). Retaining the VIP keeps the memo present so
+/// the bridge can collapse the name to NXDOMAIN while identity survives.
+#[tokio::test]
+async fn convergence_tick_retains_vip_on_stopped_but_declared_service() {
+    let tmp = TempDir::new().expect("tempdir");
+    let (state, allocator) = build_state_with_range_and_reconciler(&tmp, VipRange::default()).await;
+
+    // ---- (1) Submit a Service workload through the production handler.
+    let spec = service_spec("svc-keep", 8080);
+    let resp = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec.clone()) },
+    )
+    .await
+    .expect("Service submit must succeed");
+    assert_eq!(resp.outcome, IdempotencyOutcome::Inserted);
+
+    // ---- (2) Pre-condition: the allocator carries the digest.
+    let digest_bytes = digest_for_spec(spec);
     {
         let guard = allocator.lock().await;
         assert!(
-            guard.get(&digest_bytes).is_none(),
-            "regression: convergence tick must release the VIP on a terminal Service workload"
+            guard.get(&digest_bytes).is_some(),
+            "pre-condition: allocator must carry the digest after submit"
+        );
+        drop(guard);
+    }
+
+    // ---- (3) Write a terminal alloc-status row + a STOP intent. The
+    //         stop intent RETAINS the spec key — desired.job stays
+    //         Some(_) — so this is the stopped-but-declared case.
+    write_terminal_alloc_row(&state, "svc-keep", "alloc-svc-keep-0").await;
+    let workload_id = overdrive_core::id::WorkloadId::new("svc-keep").expect("WorkloadId");
+    let stop_key = overdrive_core::aggregate::IntentKey::for_workload_stop(&workload_id);
+    state.store.put(stop_key.as_bytes(), &[1u8]).await.expect("put stop intent");
+
+    // ---- (4) Drive convergence ticks.
+    drive_convergence_ticks(&state, "svc-keep", 10).await;
+
+    // ---- (5) Post-condition: the allocator MUST STILL carry the digest
+    //         — the VIP is retained because the workload is still
+    //         declared (intent not withdrawn).
+    {
+        let guard = allocator.lock().await;
+        assert!(
+            guard.get(&digest_bytes).is_some(),
+            "withhold-not-release: a stopped-but-declared Service MUST retain its VIP \
+             across convergence ticks (ADR-0049 2026-06-28; #251)"
         );
         drop(guard);
     }
 }
+
+// NOTE (design gap surfaced during #251 fix, NOT improvised past):
+// A production-convergence-path positive test for release-on-deletion
+// is intentionally NOT added here. Through `read_job`, withdrawing the
+// `workloads/<id>` spec intent zeroes BOTH `desired.job` (the trigger)
+// AND `desired.service_spec_digest` (the digest the release action needs
+// — `read_job` returns `intent_digest: None` once the intent is absent,
+// so the hydrator sets `service_spec_digest = None`). The new gate's
+// `desired.service_spec_digest?` extraction then short-circuits and no
+// release fires on the convergence path. This matches ADR-0049's D3
+// posture — deletion is UNWIRED today and a stopped/deleted Service
+// retains its VIP for the process lifetime (the 65 533-VIP pool absorbs
+// it). The gate's positive direction (`desired.job.is_none()` ⇒ release,
+// given a digest) is pinned at the unit level
+// (`workload_lifecycle.rs::service_vip_release_emission_tests::
+// withdrawn_service_intent_releases_vip`). Wiring a production deletion
+// path that ALSO supplies the digest at hydrate time is separate scope —
+// tracked in overdrive-sh/overdrive#211 (workload deletion / intent
+// withdrawal + service+dataplane teardown), per ADR-0049 D3/D5. Surfaced
+// here, not improvised past.

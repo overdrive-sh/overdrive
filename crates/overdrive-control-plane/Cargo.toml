@@ -136,6 +136,12 @@ rustls.workspace = true
 rcgen.workspace  = true
 hyper.workspace  = true
 rustls-pemfile.workspace = true
+# `hickory-proto` — the DNS wire codec for `dns_responder::wire`
+# (dial-by-name-responder, ADR-0072 DDN-3). Decodes the inbound query +
+# encodes the A / NODATA-SOA / NXDOMAIN-SOA reply. The ACL boundary
+# (DDN-4/D-DBN-5): only `wire.rs` names a hickory type; the pure
+# `NameAnswer`/`answer_for` core in `overdrive-core` stays hickory-free.
+hickory-proto.workspace = true
 
 # TLS bootstrap — trust-triple serialisation + helpers per ADR-0010
 # and ADR-0019 (on-disk format TOML).

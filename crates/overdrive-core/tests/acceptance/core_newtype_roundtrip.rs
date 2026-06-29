@@ -13,7 +13,8 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, WorkloadId};
+use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
 // §2.1 — scenario 1: Newtype round-trip through Display and FromStr is
@@ -135,4 +136,134 @@ fn job_id_parses_from_realistic_config_value() {
     // "\"payments-api-v2\"".
     let json = serde_json::to_string(&id).expect("serialises");
     assert_eq!(json, "\"payments-api-v2\"");
+}
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-01 — Mesh service name round-trips through Display / FromStr / serde
+//
+// PROPERTY: for every valid <job> label L, a MeshServiceName built from
+// "<L>.svc.overdrive.local" survives Display -> FromStr (re-parse equals
+// original), as_str() yields the canonical lowercase <job> label, and serde
+// round-trips to the quoted Display form (serde matches Display/FromStr
+// exactly — the mandatory newtype rule). Mesh-DNS grammar for
+// dial-by-name-responder (ADR-0072 / US-DBN-2). The newtype's own public
+// surface IS the driving port (pure-function port-to-port).
+//
+// Pinned domain-readable canonical case: "server".
+// -----------------------------------------------------------------------------
+
+/// A valid v1 `<job>` label: lowercase ascii alphanumerics with `-`/`_` in the
+/// interior (NOT `.` — the v1 contract is a SINGLE label, NO namespace
+/// segment, ADR-0072:279; `validate_label` permits `.` for OTHER newtypes, but
+/// `MeshServiceName::new` adds a single-label guard on top). Must start AND end
+/// with an alphanumeric. Sized to reach the `<job>` ≤ `DNS_LABEL_OCTET_MAX`
+/// (63) ceiling — the `<job>` is a single DNS LABEL, hard-capped at 63 octets
+/// (RFC 1035 §2.3.4; corrected ADR-0072 DDN-7), NOT the 253 DNS-name max.
+/// Interior `{0,61}` so the longest generated single label is `1 + 61 + 1 = 63`
+/// chars, pinning the positive length boundary for `MeshServiceName`.
+fn valid_job_label() -> impl Strategy<Value = String> {
+    prop_oneof![
+        // Single-char labels (the boundary: start == end == alphanumeric).
+        "[a-z0-9]",
+        // Multi-char single labels: alnum boundary + interior class (no `.`) +
+        // alnum boundary, up to the DNS_LABEL_OCTET_MAX (63) ceiling. Includes
+        // the pinned domain-readable "server" / "payments-api" shapes.
+        "[a-z0-9][a-z0-9_-]{0,61}[a-z0-9]",
+    ]
+}
+
+proptest! {
+    /// S-DBN-NAME-01: Display -> FromStr -> serde round-trip, and as_str()
+    /// yields the canonical lowercase <job> label.
+    #[test]
+    fn mesh_service_name_round_trips_through_display_from_str_and_serde(
+        label in valid_job_label(),
+    ) {
+        let full = format!("{label}.{}", MeshServiceName::SUFFIX);
+        let name = MeshServiceName::new(&full).expect("valid mesh service name");
+
+        // as_str() is the canonical lowercase <job> label (the generator
+        // already produces lowercase, so this is identity here; the case-fold
+        // invariant is exercised by S-DBN-NAME-02).
+        prop_assert_eq!(name.as_str(), label.as_str());
+
+        // Display -> FromStr round-trip is lossless.
+        let rendered = name.to_string();
+        prop_assert_eq!(&rendered, &full);
+        let reparsed = MeshServiceName::from_str(&rendered).expect("display output re-parses");
+        prop_assert_eq!(&reparsed, &name);
+
+        // serde matches Display/FromStr exactly: JSON is the quoted Display form.
+        let json = serde_json::to_string(&name).expect("serialises");
+        prop_assert_eq!(&json, &format!("\"{full}\""));
+        let back: MeshServiceName = serde_json::from_str(&json).expect("deserialises");
+        prop_assert_eq!(&back, &name);
+    }
+}
+
+#[test]
+fn mesh_service_name_canonical_example_round_trips() {
+    // Pinned domain-readable canonical case (S-DBN-NAME-01 @example("server")).
+    let name = MeshServiceName::new("server.svc.overdrive.local").expect("valid");
+    assert_eq!(name.as_str(), "server");
+    assert_eq!(name.to_string(), "server.svc.overdrive.local");
+    let json = serde_json::to_string(&name).expect("serialises");
+    assert_eq!(json, "\"server.svc.overdrive.local\"");
+    let back: MeshServiceName = serde_json::from_str(&json).expect("deserialises");
+    assert_eq!(back, name);
+}
+
+// -----------------------------------------------------------------------------
+// S-DBN-NAME-02 — Mesh service name parse is case-insensitive, canonical form
+// is lowercase
+//
+// PROPERTY: for every valid <job> label L and every case-permutation P of
+// "<L>.svc.overdrive.local" (mixed case in BOTH the label AND the suffix),
+// MeshServiceName::new(P) succeeds and equals new() of the all-lowercase form,
+// and Display emits the lowercase canonical. Workloads type the name as it
+// appears in their config; the suffix grammar and the <job> label both fold
+// case (the validate_label precedent, id.rs:99).
+// -----------------------------------------------------------------------------
+
+/// Randomly upper/lower-case each ASCII alphabetic char of `s`, driven by a
+/// proptest-generated bit per character (so shrinking is deterministic).
+fn permute_case(s: &str, flips: &[bool]) -> String {
+    s.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if flips.get(i).copied().unwrap_or(false) {
+                c.to_ascii_uppercase()
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
+        .collect()
+}
+
+proptest! {
+    /// S-DBN-NAME-02: case-insensitive parse, lowercase canonical.
+    #[test]
+    fn mesh_service_name_parse_is_case_insensitive_with_lowercase_canonical(
+        label in valid_job_label(),
+        // One case-flip bit per character of the full name (label + "." +
+        // suffix). The label can reach DNS_LABEL_OCTET_MAX (63) and the suffix
+        // is 19 chars, so the full name is at most 63 + 1 + 19 = 83 chars; size
+        // the flips to 0..=83 so the case-fold property is exercised across the
+        // ENTIRE name (a shorter bound would leave a long name's tail
+        // unflipped, never testing case-folding there).
+        flips in proptest::collection::vec(any::<bool>(), 0..=83),
+    ) {
+        let full_lower = format!("{label}.{}", MeshServiceName::SUFFIX);
+        let permuted = permute_case(&full_lower, &flips);
+
+        let from_permuted = MeshServiceName::new(&permuted).expect("case-permuted name parses");
+        let from_lower = MeshServiceName::new(&full_lower).expect("lowercase name parses");
+
+        // Case-insensitive: any case permutation equals the all-lowercase form.
+        prop_assert_eq!(&from_permuted, &from_lower);
+
+        // Display emits the lowercase canonical regardless of input case.
+        prop_assert_eq!(from_permuted.as_str(), label.to_ascii_lowercase());
+        prop_assert_eq!(from_permuted.to_string(), full_lower);
+    }
 }

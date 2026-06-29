@@ -46,6 +46,50 @@ mod acceptance {
     // `TransitionReason` enum from `overdrive-core`. Compile-time
     // type-identity witness; the snapshot/streaming surfaces share the
     // SAME type so byte-equality is structural.
+    // dial-by-name-responder step 01-04 (ADR-0072 REV-2, GH #243) — the
+    // `dns_responder::frontend_addr_allocator` proptests. S-DBN-FRONTEND-01..04:
+    // membership in 10.98.0.0/16 + disjointness from the two other /16s,
+    // idempotency across an alloc cycle (SQ1-elimination), withhold-not-release
+    // (Finding-2), and collision-free distinct assignment + reclaim. Default
+    // unit lane (in-process, pure allocator — no kernel/netns/socket). RED
+    // scaffolds (production `todo!()` bodies land GREEN in the same slice).
+    mod dns_frontend_allocator;
+    // dial-by-name-responder step 01-03 (ADR-0072 REV-2, GH #243) — the pure
+    // `answer_for` projection (S-DBN-ANSWER-01..05) and the List-then-Watch
+    // `NameIndex` that maps each resolvable `<job>` to its stable frontend addr
+    // F (S-DBN-ANSWER-04 + S-DBN-IDX-01..04). Default unit lane (in-process;
+    // SimObservationStore + FrontendAddrAllocator — no kernel/netns/socket).
+    // `answer_for` is THE primary mutation-gate target (DDN-4).
+    mod dns_answer_for;
+    // dial-by-name-responder step 01-05 (ADR-0072 REV-3, GH #243) — the
+    // FrontendAddrAllocator WRITER seam. S-DBN-ASSIGN-01..04: assign-on-declare
+    // through the `submit_workload` driving port (Service-only guard),
+    // idempotent across resubmit + no-eviction-on-conflict, the empty-on-boot
+    // converge-on-boot rebuild from declared-Service intent, and the
+    // single-owner WRITER feeding the SAME instance the `name_index` reads.
+    // Default unit lane (in-process: LocalIntentStore + Sim* + the pure
+    // allocator — no kernel/netns/socket).
+    mod dns_frontend_assigner;
+    mod dns_name_index;
+    // dial-by-name-responder step 02-00 (ADR-0072 REV-2, GH #243) — the re-keyed
+    // `MtlsResolve`/`BackendIndex` proptests. S-DBN-REKEY-01..04: frontend ->
+    // first-by-Ord live-backend translation, frontend-hit-zero-healthy ->
+    // MeshUnreachable, the proto axis as a key field (Finding-1), and the
+    // backward-compatible additive by_addr EXTEND. S-DBN-FAILCLOSED-01: the
+    // three-way fail-closed-on-frontend-subnet-miss arm (the structural defense,
+    // Finding-3). S-DBN-EQUIV-01: DST equivalence over the same call sequence.
+    // Default unit lane (in-process; the BackendIndex/classify data structure —
+    // no kernel/netns/socket; the socket is irreducibly Tier-3, DDN-4). RED
+    // scaffolds (production `classify` `todo!()` on the new arms land GREEN in
+    // the same step).
+    mod mtls_resolve_rekey;
+    // dial-by-name-responder step 01-02 (ADR-0072, GH #243) — the
+    // `dns_responder::wire` codec proptests. S-DBN-WIRE-01..04: A-record
+    // round-trip through hickory, NODATA-SOA / NXDOMAIN-SOA with MINIMUM=1,
+    // and the deterministic-per-`Clock` SOA SERIAL. Default unit lane
+    // (in-process, no real I/O) — the irreducibly-Tier-1 half of the DNS
+    // surface (the socket loop is Tier-3, DDN-4). RED scaffolds.
+    mod dns_wire;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     #[cfg(feature = "integration-tests")]
@@ -131,6 +175,14 @@ mod acceptance {
     // reconciler emission in 03-01; end-to-end S-VIP-06 + S-VIP-07 in
     // 03-03).
     mod release_service_vip_dispatch;
+
+    // dial-by-name-responder step 02-02 review-resolution D1 — default-lane
+    // PBT pinning the `FinalizeFailed` `workload_addr` forward-carry branch
+    // (`Stable` keeps the prior row's per-instance addr; a genuine terminal
+    // drops it to `None`). Kills the four branch mutants the Tier-3-only
+    // S-DBN-WS could not reach in-lane (GH #248). Default-lane: real
+    // `action_shim::dispatch` + sim adapters, no root/Lima/integration-tests.
+    mod finalize_failed_forward_carries_workload_addr;
 
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`

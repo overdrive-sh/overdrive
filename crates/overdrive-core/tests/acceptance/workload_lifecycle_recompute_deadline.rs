@@ -202,7 +202,7 @@ fn recomputes_deadline_at_window_boundary() {
     let view = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at,
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
@@ -294,7 +294,7 @@ fn restart_survival_idempotence() {
     let view_a = WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at,
-        released_for_terminal: ::std::collections::BTreeSet::new(),
+        released_for_deletion: ::std::collections::BTreeSet::new(),
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
