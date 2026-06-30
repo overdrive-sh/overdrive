@@ -100,7 +100,11 @@ mod integration {
     // production-loop closer: `overdrive workload restart` driven as a
     // direct CLI handler-call against an in-process run_server through
     // the production POST /v1/jobs/:id/restart route.
-    //   * S-BIR-CLI-RESTART-SUCCESS — declared workload → RestartOutput.
+    //   * S-BIR-CLI-RESTART-SUCCESS — declared workload (absent /stop) →
+    //     RestartOutput with deterministic Restarted label.
+    //   * S-BIR-CLI-RESTART-RESUMED — declared workload stopped via the
+    //     production stop verb (present /stop) → RestartOutput with
+    //     deterministic Resumed label.
     //   * S-BIR-CLI-RESTART-UNKNOWN — undeclared workload → typed 404 →
     //     non-zero exit code.
     mod workload_restart;
