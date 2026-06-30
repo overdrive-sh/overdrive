@@ -144,7 +144,16 @@ impl IntentStore for CountingIntentStore {
         Ok(())
     }
 
-    async fn txn(&self, _ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+    async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+        // Pure write-counter: one recorded write per `txn` call, no backing
+        // store to mutate. The per-op match is exhaustive (no `_` catch-all)
+        // purely so a future `TxnOp` variant forces a decision here — this
+        // double counts writes, it does not apply them.
+        for op in ops {
+            match op {
+                TxnOp::Put { .. } | TxnOp::Delete { .. } | TxnOp::IncrementU64 { .. } => {}
+            }
+        }
         self.record_write();
         Ok(TxnOutcome::Committed)
     }
