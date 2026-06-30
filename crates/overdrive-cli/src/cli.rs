@@ -65,6 +65,10 @@ pub enum Command {
     #[command(subcommand)]
     Job(JobCommand),
 
+    /// Workload lifecycle — restart (and, per #220, describe).
+    #[command(subcommand)]
+    Workload(WorkloadCommand),
+
     /// Node inspection.
     #[command(subcommand)]
     Node(NodeCommand),
@@ -95,6 +99,12 @@ pub enum Command {
 pub enum JobCommand {
     List,
     Stop { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WorkloadCommand {
+    /// Replace a declared workload's backend instance with a fresh one.
+    Restart { id: String },
 }
 
 #[derive(Debug, Subcommand)]

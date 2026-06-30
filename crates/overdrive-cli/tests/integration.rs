@@ -95,4 +95,13 @@ mod integration {
     // `deploy_streaming_service` (the `ServiceSubmitEvent` consumer),
     // not fall through to the legacy `JobSpecInput` path.
     mod service_submit_streaming_cli_dispatch;
+
+    // backend-instance-replacement slice 01 step 01-04 — the e2e
+    // production-loop closer: `overdrive workload restart` driven as a
+    // direct CLI handler-call against an in-process run_server through
+    // the production POST /v1/jobs/:id/restart route.
+    //   * S-BIR-CLI-RESTART-SUCCESS — declared workload → RestartOutput.
+    //   * S-BIR-CLI-RESTART-UNKNOWN — undeclared workload → typed 404 →
+    //     non-zero exit code.
+    mod workload_restart;
 }
