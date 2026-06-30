@@ -15,11 +15,21 @@
 //!
 //! Acceptance coverage:
 //!   * S-BIR-CLI-RESTART-SUCCESS (US-BIR-1, the e2e production loop): a
-//!     declared workload `payments` is restarted via the handler; the
-//!     handler resolves the endpoint from the trust triple, POSTs
-//!     through the production route, and returns
-//!     `Ok(RestartOutput { workload_id: "payments", outcome })` with
-//!     `outcome ∈ { Restarted, Resumed }`.
+//!     declared workload `payments` with NO `/stop` sentinel is restarted
+//!     via the handler; per the 01-03 handler contract (absent `/stop` at
+//!     the check-exists read ⇒ `Restarted`) the outcome is DETERMINISTIC,
+//!     so the handler returns
+//!     `Ok(RestartOutput { workload_id: "payments", outcome: Restarted })`.
+//!     The deterministic `Restarted` assertion kills a mutation that
+//!     hardcodes `outcome: Resumed`.
+//!   * S-BIR-CLI-RESTART-RESUMED (US-BIR-1, the other outcome direction):
+//!     a declared workload `payments` is STOPPED through the production
+//!     stop verb (writing the `/stop` sentinel), then restarted; the
+//!     restart's check-exists read finds a PRESENT `/stop` ⇒ deterministic
+//!     `Resumed`. Together with the success scenario this pins BOTH
+//!     outcome directions, so neither hardcode (`Restarted` nor `Resumed`)
+//!     can survive — proving the CLI handler PRESERVES the server's label
+//!     (`outcome: resp.outcome`) rather than fabricating it.
 //!   * S-BIR-CLI-RESTART-UNKNOWN (US-BIR-1 AC5): restarting a workload
 //!     that was never declared returns
 //!     `Err(CliError::HttpStatus { status: 404, body.error == "not_found" })`
@@ -30,7 +40,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput};
+use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{RestartArgs, RestartOutput};
 use overdrive_cli::http_client::CliError;
@@ -126,10 +136,15 @@ async fn workload_restart_for_declared_workload_returns_restart_output() {
         output.workload_id, "payments",
         "RestartOutput.workload_id must echo the restarted workload id",
     );
-    assert!(
-        matches!(output.outcome, RestartOutcome::Restarted | RestartOutcome::Resumed),
-        "RestartOutput.outcome must be Restarted or Resumed; got {:?}",
+    // The fixture deploys `payments` with NO `/stop` sentinel, so per the
+    // 01-03 handler contract (absent `/stop` at the check-exists read ⇒
+    // `Restarted`) the outcome is DETERMINISTIC. Asserting the exact value
+    // — not `matches!(... | ...)` over the whole enum — kills a mutation
+    // that hardcodes `outcome: RestartOutcome::Resumed` in the handler.
+    assert_eq!(
         output.outcome,
+        RestartOutcome::Restarted,
+        "absent /stop sentinel ⇒ the CLI must preserve the server's Restarted label",
     );
     // The endpoint the POST was issued to must match the one the server
     // recorded in the trust triple — proving the handler read it from
@@ -138,6 +153,63 @@ async fn workload_restart_for_declared_workload_returns_restart_output() {
         output.endpoint,
         *handle.endpoint(),
         "RestartOutput.endpoint must echo the endpoint recorded in the operator config",
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// -------------------------------------------------------------------
+// S-BIR-CLI-RESTART-RESUMED — the OTHER outcome direction: deploy +
+// stop (writing the /stop sentinel) + restart, driven through the
+// production deploy/stop/restart routes into the real in-process
+// LocalIntentStore. A PRESENT /stop at the restart's check-exists read
+// ⇒ deterministic `Resumed`. Pins the hardcode-`Restarted` direction
+// that the success scenario alone cannot kill.
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn workload_restart_of_stopped_workload_returns_resumed() {
+    let (handle, tmp) = spawn_server().await;
+    let cfg = config_path(tmp.path());
+
+    // Declare the workload through the production deploy path.
+    let spec_path = write_valid_payments_toml(tmp.path());
+    let deployed: DeployOutput = overdrive_cli::commands::deploy::deploy(DeployArgs {
+        spec: spec_path,
+        config_path: cfg.clone(),
+    })
+    .await
+    .expect("deploy::deploy must declare `payments`");
+    assert_eq!(deployed.workload_id, "payments", "precondition: `payments` deployed");
+
+    // Stop it through the SHIPPED production stop verb — this POSTs the
+    // production POST /v1/jobs/payments/stop route, writing the `/stop`
+    // sentinel into the real LocalIntentStore.
+    let _stopped = overdrive_cli::commands::deploy::stop(StopArgs {
+        id: "payments".to_string(),
+        config_path: cfg.clone(),
+    })
+    .await
+    .expect("stop must suspend the declared workload");
+
+    // Restart it — the restart's check-exists read now finds a PRESENT
+    // `/stop` sentinel ⇒ deterministic `Resumed`. Asserting the exact
+    // value kills a mutation that hardcodes `outcome: Restarted`.
+    let output: RestartOutput = overdrive_cli::commands::workload::restart(RestartArgs {
+        id: "payments".to_string(),
+        config_path: cfg,
+    })
+    .await
+    .expect("restart of a stopped workload must succeed");
+
+    assert_eq!(
+        output.workload_id, "payments",
+        "RestartOutput.workload_id must echo the restarted workload id",
+    );
+    assert_eq!(
+        output.outcome,
+        RestartOutcome::Resumed,
+        "present /stop sentinel ⇒ the CLI must preserve the server's Resumed label",
     );
 
     handle.shutdown().await.expect("clean shutdown");
