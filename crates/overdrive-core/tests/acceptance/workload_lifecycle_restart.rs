@@ -284,9 +284,28 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
         next.observed_generation, 1,
         "the placement tick must stamp observed_generation = desired.generation (1)",
     );
+    // Intent-retained contract, pinned across EVERY withdrawal/teardown
+    // shape (review-01-02 nitpick): a stopped-origin restart places the
+    // fresh instance and withdraws NOTHING. The full action set for this
+    // R4 fixture is exactly one `StartAllocation` plus the three
+    // documented Service-kind dual-emit enqueues (backend-discovery-bridge
+    // + service-lifecycle + svid-lifecycle) — no StopAllocation (the prior
+    // instance is already Terminated), no ReleaseServiceVip (intent
+    // declared), no FinalizeFailed (this is a placement, not a give-up).
     assert!(
-        !actions.iter().any(|a| matches!(a, Action::ReleaseServiceVip { .. })),
-        "no Action withdraws intent — the workloads/payments intent is retained; got {actions:?}",
+        !actions.iter().any(|a| matches!(
+            a,
+            Action::StopAllocation { .. }
+                | Action::ReleaseServiceVip { .. }
+                | Action::FinalizeFailed { .. }
+        )),
+        "no Action withdraws or tears down intent — the workloads/payments intent is retained \
+         (no Stop / Release / Finalize); got {actions:?}",
+    );
+    assert_eq!(
+        stop_allocations(&actions).len(),
+        0,
+        "the Terminated prior instance is not re-stopped; got {actions:?}",
     );
 }
 
@@ -385,9 +404,10 @@ fn s_bir_stop_once_no_duplicate_stop_while_draining() {
     let (actions, next) = run(&desired, &actual, &view);
 
     assert!(
-        stop_allocations(&actions).is_empty(),
-        "R5: NO second StopAllocation for the draining alloc — the prior stop is in flight; \
-         got {actions:?}",
+        actions.is_empty(),
+        "R5: the draining old instance is left alone during the replacement — no second \
+         StopAllocation (the prior stop is in flight) AND no spurious RestartAllocation that \
+         fights the teardown; got {actions:?}",
     );
     assert_eq!(
         next.observed_generation, 0,

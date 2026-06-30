@@ -522,6 +522,26 @@ impl WorkloadLifecycle {
                     return (Vec::new(), view.clone());
                 }
 
+                // backend-instance-replacement step 01-02 / R5 (ADR-0073 § 5;
+                // review-01-02 BLOCKER-1). During a replacement (`restart_pending`), the
+                // current instance may be observably `Draining` — the transient teardown
+                // state — after the R2 StopAllocation landed on a prior tick but before it
+                // reaches Terminated. Leave it alone: emit nothing and do NOT stamp. The
+                // fresh placement (R3) happens on a later tick once the instance is
+                // terminal. Without this guard the crash-recovery `is_restartable` branch
+                // below matches the draining row (`is_restartable` includes `Draining`) and
+                // emits a spurious `RestartAllocation` that fights the teardown and corrupts
+                // the backoff bookkeeping. Scoped to the CURRENT instance
+                // (`current_alloc(&allocs_vec)`, the numeric-max suffix — same scope as the
+                // veto) and gated on `restart_pending` (the mirror of the `!restart_pending`
+                // veto): a draining superseded prior-generation row is never the current
+                // instance and never reaches here.
+                if restart_pending
+                    && current_alloc(&allocs_vec).is_some_and(|r| r.state == AllocState::Draining)
+                {
+                    return (Vec::new(), view.clone());
+                }
+
                 // Per `fix-exec-driver-exit-watcher` Step 01-02 RCA
                 // §Bug 3: an Operator-stopped Terminated alloc is a
                 // terminal intentional stop. The reconciler MUST NOT
@@ -1715,5 +1735,136 @@ mod service_vip_release_emission_tests {
             "re-tick with the digest already in released_for_deletion MUST NOT \
              re-emit ReleaseServiceVip; got {release:?}",
         );
+    }
+}
+
+#[cfg(test)]
+mod current_alloc_tests {
+    //! Pure-fn partition for [`current_alloc`] (backend-instance-replacement
+    //! step 01-02, ADR-0073 § 5 / DDD-13; review-01-02 non-blocking (a)).
+    //!
+    //! `current_alloc` is module-private — exposing it purely for an
+    //! acceptance test would invent surface the ADR did not name
+    //! (`Implement to the design — never invent API surface`). The
+    //! reconcile-driven `@property` test S-BIR-CURRENT-ALLOC in
+    //! `tests/acceptance/workload_lifecycle_restart.rs` proves the
+    //! numeric-vs-lexical selection at the driving-port boundary; THIS
+    //! module is its pure-fn complement — reachable here because private
+    //! items are visible to in-crate `#[cfg(test)]` siblings. It drives
+    //! `current_alloc` DIRECTLY over the richer histories the roadmap's
+    //! literal S-BIR-CURRENT-ALLOC wording intended (≥3 rows, both
+    //! double-digit suffixes, and the numeric-max == lexical-max
+    //! coincidence) — coverage the two-row reconcile-driven property
+    //! cannot reach.
+
+    use std::time::Duration;
+
+    use proptest::prelude::*;
+
+    use crate::id::{AllocationId, NodeId, WorkloadId};
+    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use crate::wall_clock::UnixInstant;
+
+    use super::{WorkloadKind, current_alloc};
+
+    /// Minimal Running alloc row at `alloc-payments-<suffix>`. Only the
+    /// fields [`current_alloc`] inspects (`alloc_id`) are load-bearing;
+    /// the rest are inert filler.
+    fn row(suffix: u32) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new(&format!("alloc-payments-{suffix}"))
+                .expect("valid AllocationId"),
+            workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
+            node_id: NodeId::new("local").expect("valid NodeId"),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp {
+                counter: u64::from(suffix),
+                writer: NodeId::new("local").expect("valid NodeId"),
+            },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+            workload_addr: None,
+        }
+    }
+
+    #[test]
+    fn empty_history_has_no_current_instance() {
+        let allocs: Vec<&AllocStatusRow> = Vec::new();
+        assert!(
+            current_alloc(&allocs).is_none(),
+            "current_alloc over an empty alloc set must be None",
+        );
+    }
+
+    #[test]
+    fn numeric_max_wins_over_lexical_max_across_three_rows() {
+        // Suffixes 2, 10, 11: lexical order on the raw AllocationId is
+        // `...-10 < ...-11 < ...-2` (the BTreeMap trap), so a lexical-max
+        // helper would pick `...-2`. The numeric max is 11.
+        let rows = [row(2), row(10), row(11)];
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+        let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+        assert_eq!(
+            current.alloc_id.as_str(),
+            "alloc-payments-11",
+            "current_alloc picks the NUMERIC-max suffix (11), not the lexical max (2)",
+        );
+    }
+
+    #[test]
+    fn both_double_digit_suffixes_pick_the_numeric_max() {
+        // Both double-digit (12, 20): lexical and numeric agree on 20
+        // here, but this pins the double-digit-vs-double-digit branch the
+        // two-row reconcile property never reaches.
+        let rows = [row(12), row(20)];
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+        let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+        assert_eq!(
+            current.alloc_id.as_str(),
+            "alloc-payments-20",
+            "current_alloc picks 20 over 12 (both double-digit)",
+        );
+    }
+
+    proptest! {
+        /// Over an arbitrary non-empty alloc history with DISTINCT attempt
+        /// suffixes — spanning single- and double-digit values, in
+        /// arbitrary insertion order — `current_alloc` returns the row
+        /// whose suffix is numerically maximal. This is the pure-fn form
+        /// of the numeric-current invariant the roadmap's S-BIR-CURRENT-
+        /// ALLOC wording pins; it covers the numeric-max == lexical-max
+        /// coincidence (e.g. a single-digit-only history) and the
+        /// lexical-trap divergence (a double-digit max below a single-
+        /// digit lexical max) in one property.
+        #[test]
+        fn current_alloc_returns_the_numeric_max_suffix(
+            suffixes in prop::collection::btree_set(0_u32..=99, 1..=8)
+        ) {
+            // Shuffle insertion order off the sorted BTreeSet so the
+            // result cannot accidentally depend on iteration position.
+            let mut ordered: Vec<u32> = suffixes.iter().copied().collect();
+            ordered.reverse();
+            let expected_max = *ordered.iter().max().expect("non-empty set");
+
+            let rows: Vec<AllocStatusRow> = ordered.iter().map(|s| row(*s)).collect();
+            let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+            let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+            prop_assert_eq!(
+                current.alloc_id.as_str(),
+                format!("alloc-payments-{expected_max}"),
+                "current_alloc must return the numeric-max-suffix row",
+            );
+        }
     }
 }
