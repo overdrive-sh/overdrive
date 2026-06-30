@@ -680,7 +680,26 @@ async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
     let status = resp.status();
     let body = resp.bytes().await.expect("read stop response body");
     if !status.is_success() {
-        eprintln!("[02-02] stop non-success: {status} {}", String::from_utf8_lossy(&body));
+        eprintln!("[02-01] stop non-success: {status} {}", String::from_utf8_lossy(&body));
+    }
+    status.is_success()
+}
+
+/// Restart a deployed workload through the real in-process restart driving port
+/// (`POST /v1/jobs/{id}/restart`, the `restart_workload` handler; ADR-0073), the
+/// SAME path `overdrive workload restart <id>` drives. The handler atomically
+/// bumps the desired-run generation AND clears the `/stop` sentinel in ONE
+/// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
+/// instance (new AllocationId) because `observed_generation < generation`.
+/// Empty request body; returns `true` on a 2xx accept.
+async fn run_server_restart(skeleton: &Skeleton, workload_id: &str) -> bool {
+    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/restart", skeleton.bound.port());
+    let resp =
+        skeleton.client.post(&url).send().await.expect("restart: POST /v1/jobs/{id}/restart");
+    let status = resp.status();
+    let body = resp.bytes().await.expect("read restart response body");
+    if !status.is_success() {
+        eprintln!("[02-01] restart non-success: {status} {}", String::from_utf8_lossy(&body));
     }
     status.is_success()
 }
@@ -1664,25 +1683,20 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// proven mTLS on the inter-agent leg-B ↔ leg-C wire via the `lo:SERVICE_PORT`
 /// 0x17 oracle.
 ///
-/// BLOCKED (02-02 — alloc-cycle restart semantics, a SEPARATE blocker from the
-/// plaintext-client model error). This AT's "WHEN: cycle the backend (stop the
-/// server → re-deploy the SAME `<job>` → a NEW alloc reaches Running)" is NOT
-/// achievable through the production driving ports as they stand. `POST
-/// /v1/jobs/{id}/stop` writes a STICKY, OVERRIDING operator-stop intent
-/// (`IntentKey::for_workload_stop`); the `WorkloadLifecycle` reconciler then
-/// DELIBERATELY refuses to schedule a replacement alloc for an operator-stopped
-/// workload (`workload_lifecycle.rs` — "an Operator-stopped Terminated alloc is a
-/// terminal intentional stop... MUST NOT schedule a fresh replacement... until
-/// the operator explicitly re-submits the job intent"; ADR-0037 Amendment /
-/// fix-exec-driver-exit-watcher §Bug 3). A same-spec `POST /v1/jobs` resubmit
-/// takes the `put_if_absent → KeyExists → Unchanged` path, which does NOT clear
-/// the operator-stop key — and there is NO production verb that does. So the
-/// re-deployed server (B2) never reaches Running and `deploy_and_wait_running`
-/// times out. The two NON-cycle ATs (S-DBN-WS, S-DBN-SINGLE-SRC) pass GREEN with
-/// the inter-agent mTLS proof; this AT's restart-after-stop dependency is a
-/// design/scope gap to resolve before un-ignoring. Sibling: S-DBN-CHURN (same
-/// dependency).
-#[ignore = "02-02 DEFERRED to overdrive-sh/overdrive#249 (backend instance replacement / restart-after-stop): cycling the backend to a NEW AllocationId/workload_addr while the job stays declared needs a replace/restart verb that does not exist — operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3), a same-spec re-deploy does not clear it, and crash-restart reuses the alloc_id/slot. Distinct from the (fixed) plaintext-client model error and from #211 (deletion). Un-ignore when #249 lands. See docstring."]
+/// The cycle is driven by the production `overdrive workload restart server`
+/// verb = `POST /v1/jobs/server/restart` (the `restart_workload` handler;
+/// ADR-0073, shipped in Phase 01). The restart handler atomically bumps the
+/// desired-run generation AND clears the `/stop` sentinel in ONE
+/// `IntentStore::txn([IncrementU64{generation}, Delete{stop}])`; the
+/// `WorkloadLifecycle` reconciler then places a FRESH instance (new
+/// AllocationId) because `observed_generation < generation`. This is the
+/// production restart-after-stop path the earlier "no verb exists" narrative
+/// (now false — the verb shipped in Phase 01) said was missing. A same-spec
+/// `POST /v1/jobs` re-deploy is NOT used here precisely because it takes the
+/// `put_if_absent → KeyExists → Unchanged` path and does NOT clear the
+/// sticky operator-stop key (`IntentKey::for_workload_stop`; ADR-0037
+/// Amendment / `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does.
+/// Sibling: S-DBN-CHURN exercises the same restart verb mid-connection (03-01).
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend() {
     if !is_root() {
@@ -1735,20 +1749,51 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
          mTLS round-trip)"
     );
 
-    // WHEN: cycle the server backend — stop it, then re-deploy the SAME <job>.
-    stop_and_converge(&skeleton, server_id).await;
-    // Re-deploy the SAME <job> "server" (a NEW AllocationId → NEW workload_addr
-    // B2; the <job> is still declared, so the allocator must retain F1).
-    let backend_b2 =
-        deploy_and_wait_running(&skeleton, server_service_spec(server_id), server_id).await;
-    let alloc_b2 = workload_running_alloc_id(&skeleton.obs(), server_id)
+    // WHEN: cycle the server backend through the PRODUCTION restart verb —
+    // `POST /v1/jobs/server/restart` (ADR-0073). The handler atomically bumps
+    // the desired-run generation AND clears the `/stop` sentinel; the
+    // `WorkloadLifecycle` reconciler then places a FRESH instance (a NEW
+    // AllocationId → NEW workload_addr B2) because `observed_generation <
+    // generation`. The <job> "server" stays DECLARED throughout, so the
+    // allocator must retain F1.
+    let restarted = run_server_restart(&skeleton, server_id).await;
+    assert!(restarted, "S-DBN-WS-STABLE: the production restart verb must accept the cycle");
+
+    // Wait for a NEW running alloc whose alloc_id != alloc_b1. The restart is a
+    // stop-then-place transition: the OLD alloc B1 may briefly still show
+    // Running until the reconciler drains it and places B2, so we must NOT
+    // capture *any* Running row (that could re-capture B1 and break the
+    // assert_ne! below) — we poll for the FRESH instance specifically. The
+    // restart→drain→replace cycle is slower than a fresh deploy; budget 30s.
+    let alloc_b1_for_wait = alloc_b1.clone();
+    let (backend_b2, alloc_b2) =
+        poll_until(Duration::from_secs(30), Duration::from_millis(200), || {
+            let obs = skeleton.obs();
+            let id = server_id.to_owned();
+            let exclude = alloc_b1_for_wait.clone();
+            async move {
+                let rows = obs.alloc_status_rows().await.ok()?;
+                rows.into_iter()
+                    .filter(|r| {
+                        r.workload_id.as_str() == id
+                            && r.state == AllocState::Running
+                            && r.alloc_id.to_string() != exclude
+                    })
+                    .find_map(|r| r.workload_addr.map(|addr| (addr, r.alloc_id.to_string())))
+            }
+        })
         .await
-        .expect("server must have a running AllocationId (B2) after the cycle");
+        .unwrap_or_else(|| {
+            panic!(
+                "S-DBN-WS-STABLE: the restart must place a FRESH server instance (new AllocationId \
+                 != B1={alloc_b1}) reaching Running with a workload_addr within 30s"
+            )
+        });
     assert_ne!(
         alloc_b1, alloc_b2,
         "S-DBN-WS-STABLE: the cycle must produce a NEW AllocationId (B1={alloc_b1}, B2={alloc_b2})",
     );
-    eprintln!("[02-02] post-cycle B2 = {backend_b2}, alloc B2 = {alloc_b2}");
+    eprintln!("[02-01] post-cycle B2 = {backend_b2}, alloc B2 = {alloc_b2}");
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // THEN: getent re-resolves to the SAME F1 byte-for-byte.

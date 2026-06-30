@@ -106,6 +106,69 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-30T14:13:46Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T15:42:36Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T15:46:56Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the two port-to-port acceptance scenarios (S-BIR-CLI-RESTART-SUCCESS / S-BIR-CLI-RESTART-UNKNOWN) fully drive GREEN through the production POST /v1/jobs/:id/restart route into the real in-process LocalIntentStore. The restart handler is a thin sibling of the existing stop handler (validate id -> POST -> typed Ok/Err) with no new pure-decision surface; cli_error_to_exit_code already exists and is independently tested. Same posture as step 01-03 RED_UNIT.",
+      "t": "2026-06-30T15:47:06Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T15:50:07Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T15:51:19Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T18:31:06Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T18:31:39Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: oracle un-ignore step (red-classification.md \u00a7 'oracle ATs are NOT MISSING_FUNCTIONALITY scaffolds'). The port-to-port Tier-3 AT drives GREEN through the production POST /v1/jobs/:id/restart verb into the real in-process composition root; no pure-decision/PBT unit surface is introduced. Mutation gate also skipped \u2014 no mutable production src is touched (only an existing integration test). Same posture as 01-03/01-04 RED_UNIT.",
+      "t": "2026-06-30T18:31:49Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T18:33:54Z"
     }
   ]
 }
