@@ -51,8 +51,10 @@ scenario fails as:
   asserting on a private View field instead of the returned `(Vec<Action>,
   NextView)` tuple) — a Universe-shape bug. The scenarios are written to assert
   only through port-exposed surfaces (the returned action set + NextView, the
-  `store.get` decode, the HTTP status/body, the subprocess exit/stdout, `getent`),
-  so this should not arise.
+  `store.get` decode, the HTTP status/body, the CLI handler's typed
+  `Result<RestartOutput, CliError>` + the `render::cli_error_to_exit_code` exit
+  code — a direct handler-call, NO subprocess per `crates/overdrive-cli/CLAUDE.md`,
+  the `getent` name-path signal at Tier-3), so this should not arise.
 
 ## Why the classification runs in DELIVER, not DISTILL
 
@@ -102,8 +104,8 @@ materialises each scaffold with the markers above and runs the gate.
 | S-BIR-HANDLER-TXN | 1/2 | `MISSING_FUNCTIONALITY` | handler txn assembly absent |
 | S-BIR-HANDLER-OUTCOME-RESUMED | 1/2 | `MISSING_FUNCTIONALITY` | `RestartOutcome` present⇒Resumed classification absent |
 | S-BIR-HANDLER-OUTCOME-RESTARTED | 1/2 | `MISSING_FUNCTIONALITY` | `RestartOutcome` absent⇒Restarted classification absent |
-| S-BIR-CLI-RESTART-SUCCESS | 3 | `MISSING_FUNCTIONALITY` | `WorkloadCommand::Restart` + `ApiClient::restart_workload` absent |
-| S-BIR-CLI-RESTART-UNKNOWN | 3 | `MISSING_FUNCTIONALITY` | the CLI 404→non-zero-exit mapping absent |
+| S-BIR-CLI-RESTART-SUCCESS | int (in-process) | `MISSING_FUNCTIONALITY` | `WorkloadCommand::Restart` + `commands::workload::restart` + `ApiClient::restart_workload` absent (direct handler-call, no subprocess) |
+| S-BIR-CLI-RESTART-UNKNOWN | int (in-process) | `MISSING_FUNCTIONALITY` | the CLI 404→`CliError`→non-zero-exit (`render::cli_error_to_exit_code`) mapping absent |
 | S-DBN-WS-STABLE | 3 | **un-ignore → GREEN** (NOT a `MISSING_FUNCTIONALITY` scaffold) | existing AT, `#[ignore]` removed + cycle swapped to the production verb (slice-04) |
 | S-DBN-CHURN | 3 | **un-ignore → GREEN** | same |
 | S-DBN-NXDOMAIN-02-RECOVERY | 3 | **un-ignore → GREEN** | same |

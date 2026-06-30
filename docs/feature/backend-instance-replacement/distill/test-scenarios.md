@@ -72,9 +72,12 @@ restart must NOT wedge on a superseded operator-stop row).
 - **Tier 1/2 — handler** (`overdrive-control-plane/tests/acceptance/`, mirrors
   `job_stop_*`): the 404 posture, the atomic bump+clear txn shape, the cosmetic
   outcome label (`S-BIR-HANDLER-*`).
-- **Tier 3 — CLI driving adapter** (`overdrive-cli/tests/integration/`, gated,
-  subprocess): `overdrive workload restart` exit/stdout (`S-BIR-CLI-RESTART-SUCCESS`)
-  + the unknown-id error (`S-BIR-CLI-RESTART-UNKNOWN`).
+- **Integration — CLI driving adapter** (`overdrive-cli/tests/integration/`, gated
+  `integration-tests`, **direct handler-call** against an in-process `run_server` —
+  NO subprocess, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no
+  subprocess"): `overdrive workload restart` typed `RestartOutput`
+  (`S-BIR-CLI-RESTART-SUCCESS`) + the unknown-id `CliError` mapped to a non-zero
+  exit (`S-BIR-CLI-RESTART-UNKNOWN`).
 - **Tier 3 — the oracle** (real-kernel Lima, gated, ALREADY AUTHORED, un-ignored
   by slice-04): `S-DBN-WS-STABLE`, `S-DBN-CHURN`, `S-DBN-NXDOMAIN-02-RECOVERY`.
 - **No Tier 2** — there is no kernel-side eBPF program new to this feature; the
@@ -106,7 +109,7 @@ the real (tier-based) environments are named:
 
 | Default-matrix env | Mapping / waiver | Rationale |
 |---|---|---|
-| `clean` | **mapped** → `S-BIR-CLI-RESTART-SUCCESS`/`-UNKNOWN` (fresh `tmp_path` subprocess), the three `S-DBN-*` oracle ATs (fresh netns + pinned-6.18 Lima) | the feature's real "clean" environment is a fresh tempdir / pinned-kernel Lima boot, not an installer clean-install |
+| `clean` | **mapped** → `S-BIR-CLI-RESTART-SUCCESS`/`-UNKNOWN` (fresh `tmp_path` trust triple + a fresh in-process `run_server` on an ephemeral port — direct handler-call, no subprocess), the three `S-DBN-*` oracle ATs (fresh netns + pinned-6.18 Lima) | the feature's real "clean" environment is a fresh tempdir + a freshly-booted in-process server / pinned-kernel Lima boot, not an installer clean-install |
 | `with-pre-commit` | **waived** | the feature touches no pre-commit hook / git-hook surface |
 | `with-stale-config` | **waived** | the feature has no config-migration or stale-config-upgrade surface (the generation key is greenfield; single-cut greenfield migration per project policy) |
 
@@ -116,7 +119,8 @@ Real (tier-based) environments the scenarios actually exercise:
 |---|---|---|
 | Tier-1 in-process (default lane) | `S-BIR-RESTART-*`, `S-BIR-STOP-ONCE`, `S-BIR-COALESCE-*`, `S-BIR-SEQUENTIAL`, `S-BIR-REGRESSION-*`, `S-BIR-BUG3-PRESERVED`, `S-BIR-CURRENT-ALLOC`, `S-BIR-HANDLER-*` | pure `reconcile()` / in-process axum handler; no real I/O |
 | Tier-1 store-acceptance (gated `integration-tests`, real redb) | `S-BIR-TXN-01..04` | `LocalIntentStore` over a `TempDir` |
-| Tier-3 real-kernel (gated, pinned-6.18 Lima as root — the MERGE GATE) | `S-BIR-CLI-RESTART-SUCCESS`/`-UNKNOWN`, `S-DBN-WS-STABLE`, `S-DBN-CHURN`, `S-DBN-NXDOMAIN-02-RECOVERY` | `cargo xtask lima run --` subprocess + real `run_server` + netns + `getent`/connect |
+| Integration — CLI handler (gated `integration-tests`, in-process) | `S-BIR-CLI-RESTART-SUCCESS`/`-UNKNOWN` | **direct handler-call** `commands::workload::restart(RestartArgs{ id, config_path })` against a fresh in-process `run_server` on an ephemeral port (trust triple written by `overdrive serve`); typed `RestartOutput` / `CliError` — NO subprocess, NO `CARGO_BIN_EXE_overdrive` (`crates/overdrive-cli/CLAUDE.md`) |
+| Tier-3 real-kernel (gated, pinned-6.18 Lima as root — the MERGE GATE) | `S-DBN-WS-STABLE`, `S-DBN-CHURN`, `S-DBN-NXDOMAIN-02-RECOVERY` | `cargo xtask lima run --` + real `run_server` + netns + `getent`/connect |
 
 ---
 
@@ -143,8 +147,8 @@ Real (tier-based) environments the scenarios actually exercise:
 | S-BIR-HANDLER-TXN | A restart commits one atomic bump+clear txn and retains the intent row | `@driving_adapter` | 1/2 | US-BIR-1 AC3/4 | yes (txn op set) |
 | S-BIR-HANDLER-OUTCOME-RESUMED | A restart on a stopped workload reports outcome `resumed` | `@driving_adapter` | 1/2 | DDD-11 | yes (label classification) |
 | S-BIR-HANDLER-OUTCOME-RESTARTED | A restart on a running workload reports outcome `restarted` | `@driving_adapter` | 1/2 | DDD-11 | yes (label classification) |
-| S-BIR-CLI-RESTART-SUCCESS | `overdrive workload restart <id>` returns the new instance | `@driving_adapter` `@real-io` | 3 | US-BIR-1 | yes (exit code / stdout) |
-| S-BIR-CLI-RESTART-UNKNOWN | `overdrive workload restart <unknown>` errors with not-found | `@driving_adapter` `@real-io` `@error_path` | 3 | US-BIR-1 AC5 (404) | yes (exit code / error) |
+| S-BIR-CLI-RESTART-SUCCESS | `overdrive workload restart <id>` returns the new instance | `@driving_adapter` `@real-io` | int (in-process) | US-BIR-1 | yes (RestartOutput / dispatch) |
+| S-BIR-CLI-RESTART-UNKNOWN | `overdrive workload restart <unknown>` errors with not-found | `@driving_adapter` `@real-io` `@error_path` | int (in-process) | US-BIR-1 AC5 (404) | yes (CliError → exit code) |
 | S-DBN-WS-STABLE | The name re-resolves the same `F` across the cycle and the next connect lands the new backend | `@real-io` `@frontend` `@churn` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-1/2 | (oracle — already authored) |
 | S-DBN-CHURN | An in-flight connection fails fast on backend churn; the next dial lands the new backend | `@real-io` `@churn` `@error_path` `@kpi` `@oracle` | 3 | US-BIR-2 / K-BIR-3 | (oracle — already authored) |
 | S-DBN-NXDOMAIN-02-RECOVERY | A recovered workload re-resolves the same stable `F` (withhold-not-release) | `@real-io` `@error_path` `@frontend` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-2 | (oracle — already authored) |
@@ -606,13 +610,28 @@ Scenario: A restart on a running workload reports restarted
 
 ---
 
-## Tier 3 — CLI driving adapter
+## Integration — CLI driving adapter (in-process; NO subprocess)
 
 > Home: `crates/overdrive-cli/tests/integration/workload_restart.rs` (NEW; gated
-> `integration-tests`; subprocess from `tmp_path`). Sibling precedent:
-> `deploy.rs`, the `job stop` integration coverage. Mandatory per
-> `nw-distill` § "Driving Adapter Verification" — a CLI entry point in DESIGN
-> needs ≥1 subprocess scenario exercising its real invocation path.
+> `integration-tests`; **direct handler-call**, NOT a subprocess). Sibling
+> precedent: `deploy.rs`, `endpoint_from_config.rs` (the canonical shape),
+> `alloc_status.rs` — all **direct-call** integration tests
+> (`overdrive_cli::commands::deploy::deploy(args).await`,
+> `commands::alloc::status(args).await`), NOT subprocesses. Per
+> `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (a
+> **firm rule** — "we have rejected the `Command::spawn` pattern for this crate"):
+> the test calls `commands::workload::restart(RestartArgs{ id, config_path })`
+> against a fresh in-process `run_server` on an ephemeral port (the trust triple
+> `overdrive serve` writes names the live endpoint), and asserts on the typed
+> `Result<RestartOutput, CliError>`. **NO `Command::spawn`, NO
+> `CARGO_BIN_EXE_overdrive`.** This still satisfies `nw-distill` § "Driving
+> Adapter Verification" — the CLI *driving adapter* (clap parse → handler →
+> `ApiClient::restart_workload` → `POST /v1/jobs/:id/restart`) is exercised
+> through its real handler entry point, which is how every other CLI verb in this
+> crate is driving-adapter-tested. The binary `main.rs` dispatch + exit-code
+> mapping is the thin reviewed `mutants::skip` dispatcher (same posture as
+> deploy/stop/alloc); the end-to-end production path for the verb is closed at the
+> HTTP route by the Tier-3 oracle ATs (which drive `POST /v1/jobs/:id/restart`).
 
 > **Success/unknown split (review-distill High / GWT one-action).** The CLI
 > proof has a happy path and an error path; split into one behaviour per
@@ -626,38 +645,57 @@ Scenario: A restart on a running workload reports restarted
 
 ```gherkin
 @driving_adapter @real-io
-Scenario: The restart verb parses, dispatches, and reports the outcome
-  Given a running control plane with a declared workload "payments"
-  When the operator runs `overdrive workload restart payments` as a subprocess
-  Then the process exits 0
-  And stdout reports the workload_id and an outcome ∈ { restarted, resumed }
+Scenario: The restart verb dispatches and reports the outcome
+  Given an in-process control plane (run_server on an ephemeral port) with a declared workload "payments"
+  And a trust triple on disk naming that endpoint (written by overdrive serve)
+  When the operator invokes the restart handler `commands::workload::restart(RestartArgs{ id: "payments", config_path })`
+  Then it returns Ok(RestartOutput { workload_id: "payments", outcome })
+  And the outcome ∈ { restarted, resumed }
 ```
 
-- **Universe** (user-visible): subprocess exit code (0); stdout (workload_id +
-  outcome).
-- Proves the CLI parses `workload restart`, resolves the endpoint, and POSTs
-  `/v1/jobs/:id/restart`. Pipeline-level handler tests do NOT replace this (RCA
-  `docs/analysis/rca-user-port-gap.md`).
-- **Mutation target**: a mutation in the CLI dispatch / output rendering.
-- **Expected RED**: `MISSING_FUNCTIONALITY` (`WorkloadCommand::Restart` + the
-  http-client method do not exist).
+- **Universe** (port-exposed): the typed `Result<RestartOutput, CliError>` — `Ok`
+  carrying `RestartOutput { workload_id, outcome }` (success).
+- **Mechanism**: a **direct handler-call** (NOT a subprocess), the
+  `endpoint_from_config.rs` / `deploy.rs` shape — start `run_server` on an
+  ephemeral port, write the trust triple, invoke
+  `overdrive_cli::commands::workload::restart(args).await`, assert on the typed
+  `RestartOutput`. **NO `Command::spawn`, NO `CARGO_BIN_EXE_overdrive`** (firm rule,
+  `crates/overdrive-cli/CLAUDE.md`).
+- Proves the CLI *driving adapter* (handler → `ApiClient::restart_workload` →
+  `POST /v1/jobs/:id/restart`) parses args, resolves the endpoint from the trust
+  triple, and POSTs the route. Pipeline-level handler-internal tests do NOT replace
+  this (RCA `docs/analysis/rca-user-port-gap.md`). The binary `main.rs` dispatch is
+  the thin reviewed `mutants::skip` dispatcher; the verb's end-to-end production
+  path is closed at the HTTP route by the Tier-3 oracle ATs.
+- **Mutation target**: a mutation in the CLI handler dispatch / `RestartOutput`
+  construction.
+- **Expected RED**: `MISSING_FUNCTIONALITY` (`WorkloadCommand::Restart`,
+  `commands::workload::restart`, and `ApiClient::restart_workload` do not exist).
 
 ### S-BIR-CLI-RESTART-UNKNOWN — `overdrive workload restart <unknown>` errors with not-found
 
 ```gherkin
 @driving_adapter @real-io @error_path
 Scenario: The restart verb maps an unknown id to an honest not-found error
-  Given a running control plane with no declared workload "nonexistent"
-  When the operator runs `overdrive workload restart nonexistent` as a subprocess
-  Then the process exits non-zero
-  And stderr / the error body reports a not-found error (body.error == "not_found")
+  Given an in-process control plane (run_server on an ephemeral port) with no declared workload "nonexistent"
+  And a trust triple on disk naming that endpoint
+  When the operator invokes `commands::workload::restart(RestartArgs{ id: "nonexistent", config_path })`
+  Then it returns Err(CliError::HttpStatus { status: 404, error: "not_found", .. })
+  And render::cli_error_to_exit_code maps that CliError to a non-zero exit code
 ```
 
-- **Universe** (user-visible): subprocess exit code (non-zero); the not-found
-  error surface (`body.error == "not_found"`).
-- Proves the CLI maps the handler 404 to a non-zero exit + an honest error,
+- **Universe** (port-exposed): the typed `Result<RestartOutput, CliError>` — `Err`
+  carrying the not-found `CliError` (`HttpStatus { status: 404, error: "not_found" }`);
+  the non-zero exit code `render::cli_error_to_exit_code(&err)` returns.
+- **Mechanism**: a **direct handler-call** (NOT a subprocess) — invoke
+  `commands::workload::restart(args).await`, assert on the typed `CliError` variant,
+  and assert `render::cli_error_to_exit_code(&err)` is non-zero. **NO
+  `Command::spawn`** (firm rule, `crates/overdrive-cli/CLAUDE.md`). The exit-code
+  mapping is asserted at the `render::cli_error_to_exit_code` seam the binary
+  `main.rs` uses, not via a real process exit.
+- Proves the CLI maps the handler 404 to an honest typed error → a non-zero exit,
   not a silent success.
-- **Mutation target**: a mutation that swallows the 404 / exits 0 on an unknown id.
+- **Mutation target**: a mutation that swallows the 404 / maps it to a zero exit code.
 - **Expected RED**: `MISSING_FUNCTIONALITY`.
 
 ---
@@ -747,9 +785,9 @@ scenario. **No empty rows.**
 | Adapter | `@real-io` scenario | Covered by |
 |---|---|---|
 | `IntentStore::txn` + NEW `TxnOp::IncrementU64` (`LocalIntentStore`, real redb) | YES | **`@real-io`**: S-BIR-TXN-01..04 (real `LocalIntentStore` over redb). In-process focused: S-BIR-HANDLER-TXN (the op-set assertion via a counting double). |
-| `IntentStore::get` / `delete` (check-exists 404 + label read) | YES | **`@real-io`**: S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (get/delete runs through the production route → real `LocalIntentStore` in `run_server` under Lima). In-process focused: S-BIR-HANDLER-404 / -OUTCOME-RESUMED / -OUTCOME-RESTARTED (`@driving_adapter`, counting/fault double — NOT `@real-io`). |
-| `restart_workload` HTTP handler + `POST /v1/jobs/:id/restart` route | YES | **`@real-io`**: S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (real subprocess through the production route). In-process focused: S-BIR-HANDLER-* (direct handler call). |
-| `overdrive workload restart` CLI verb + `ApiClient::restart_workload` | YES | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (real subprocess) |
+| `IntentStore::get` / `delete` (check-exists 404 + label read) | YES | **`@real-io`**: S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (get/delete runs through the production route → real `LocalIntentStore` in an in-process `run_server`, via a **direct CLI handler-call** — no subprocess). In-process focused: S-BIR-HANDLER-404 / -OUTCOME-RESUMED / -OUTCOME-RESTARTED (`@driving_adapter`, counting/fault double — NOT `@real-io`). |
+| `restart_workload` HTTP handler + `POST /v1/jobs/:id/restart` route | YES | **`@real-io`**: S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (direct CLI handler-call → `ApiClient::restart_workload` → the production route on an in-process `run_server`). In-process focused: S-BIR-HANDLER-* (direct handler call). End-to-end on the real-kernel path: the Tier-3 oracle ATs drive the route. |
+| `overdrive workload restart` CLI verb + `ApiClient::restart_workload` | YES | S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN (direct handler-call against in-process `run_server` — no subprocess) |
 | `WorkloadLifecycle` reconciler (generation gate, scoped veto, placement stamp) | YES (Tier-1 pure + Tier-3 oracle) | S-BIR-RESTART-*, S-BIR-COALESCE-*/SEQUENTIAL, S-BIR-REGRESSION-*, S-BIR-BUG3, S-DBN-WS-STABLE |
 | `FrontendAddrAllocator` idempotent `assign` (reused; must-not-regress guardrail) | YES (reused) | S-DBN-WS-STABLE, S-DBN-NXDOMAIN-02-RECOVERY |
 | re-keyed `MtlsResolve` (per-connect live-backend translation; reused) | YES (reused) | S-DBN-WS-STABLE, S-DBN-CHURN |
@@ -761,15 +799,18 @@ The `current_alloc` pure helper and the BE-u64 codec are NOT adapters (no port
 trait) — they are the Tier-1 proptest/unit seams (S-BIR-CURRENT-ALLOC,
 S-BIR-TXN-04).
 
-> **`@real-io` accounting (rev2, review-distill 2026-06-30 Finding-3).** The
-> `@real-io` proof for each `IntentStore` path is named explicitly above: the
-> `txn`/`IncrementU64` path is real-redb at Tier-1 store-acceptance
-> (S-BIR-TXN-*); the `get`/`delete`/route path is real-`LocalIntentStore` via the
-> production route at Tier-3 (the CLI subprocess S-BIR-CLI-RESTART-*). The
-> `@driving_adapter` handler scenarios (S-BIR-HANDLER-*) are **focused in-process
-> coverage** over a counting/fault `IntentStore` double, NOT `@real-io` — they are
-> not counted as the Mandate-6 real-I/O proof, the CLI subprocess + store-acceptance
-> rows are.
+> **`@real-io` accounting (rev2, review-distill 2026-06-30 Finding-3; rev4
+> mechanism correction 2026-06-30).** The `@real-io` proof for each `IntentStore`
+> path is named explicitly above: the `txn`/`IncrementU64` path is real-redb at
+> Tier-1 store-acceptance (S-BIR-TXN-*); the `get`/`delete`/route path is
+> real-`LocalIntentStore` via the production route, exercised by the CLI
+> **direct-handler-call** integration tests (S-BIR-CLI-RESTART-*) against an
+> in-process `run_server` — NOT a subprocess (`crates/overdrive-cli/CLAUDE.md` §
+> "Integration tests — no subprocess"). The `@driving_adapter` handler scenarios
+> (S-BIR-HANDLER-*) are **focused in-process coverage** over a counting/fault
+> `IntentStore` double, NOT `@real-io` — they are not counted as the Mandate-6
+> real-I/O proof; the CLI direct-call + store-acceptance rows are. The verb's
+> real-kernel end-to-end path is the Tier-3 oracle (driving the route).
 
 ---
 
@@ -779,15 +820,19 @@ DESIGN entry points → at least one scenario via the real protocol:
 
 | Driving entry point | Real-protocol scenario |
 |---|---|
-| `overdrive workload restart <id>` (CLI subprocess) | S-BIR-CLI-RESTART-SUCCESS (exit 0 + stdout); S-BIR-CLI-RESTART-UNKNOWN (not-found error) |
+| `overdrive workload restart <id>` (CLI handler — direct call, in-process `run_server`) | S-BIR-CLI-RESTART-SUCCESS (typed `RestartOutput`); S-BIR-CLI-RESTART-UNKNOWN (`CliError` not-found → non-zero exit) |
 | `POST /v1/jobs/:id/restart` (HTTP) | S-BIR-HANDLER-404 / S-BIR-HANDLER-TXN / S-BIR-HANDLER-OUTCOME-RESUMED/RESTARTED; S-BIR-CLI-RESTART-* end-to-end |
 | `overdrive serve` (`run_server`) | S-DBN-WS-STABLE / S-DBN-CHURN / S-DBN-NXDOMAIN-02-RECOVERY (the oracle drives `run_server_with_obs_and_driver`) |
 | `overdrive deploy` (`POST /v1/jobs`) | reused unchanged — the oracle ATs deploy through it |
 | `overdrive alloc status` (the new-AllocationId observable) | S-DBN-WS-STABLE (`alloc_b1 ≠ alloc_b2` via the alloc-status surface) |
 | `getaddrinfo`/`getent` (name path) | S-DBN-WS-STABLE / S-DBN-NXDOMAIN-02-RECOVERY |
 
-No uncovered DESIGN entry point. Pipeline/service-level handler tests do NOT
-substitute for the CLI subprocess scenarios (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN).
+No uncovered DESIGN entry point. The handler-internal in-process scenarios
+(S-BIR-HANDLER-*, counting/fault double) do NOT substitute for the CLI
+driving-adapter scenarios (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN), which exercise the
+real CLI handler → `ApiClient` → production route path via a direct handler-call
+against an in-process `run_server` (no subprocess, per
+`crates/overdrive-cli/CLAUDE.md`).
 
 ---
 

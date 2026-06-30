@@ -793,7 +793,7 @@ instance for the latest generation).
 
 | Origin | Commitment | DDD | Impact |
 |--------|------------|-----|--------|
-| DESIGN/DDD-1,2 | Verb `overdrive workload restart <id>` (new `workload` namespace), single verb with rollout-restart breadth (running → stop-then-start; stopped → start; absent → 404) | DDD-1, DDD-2 | S-BIR-CLI-RESTART-SUCCESS drives the verb as a real subprocess; S-BIR-RESTART-STOPPED + S-BIR-RESTART-RUNNING-STOP/-PLACE pin both origins of the rollout-restart breadth at the reconciler |
+| DESIGN/DDD-1,2 | Verb `overdrive workload restart <id>` (new `workload` namespace), single verb with rollout-restart breadth (running → stop-then-start; stopped → start; absent → 404) | DDD-1, DDD-2 | S-BIR-CLI-RESTART-SUCCESS drives the verb via a direct CLI handler-call against an in-process `run_server` (NO subprocess — `crates/overdrive-cli/CLAUDE.md`); S-BIR-RESTART-STOPPED + S-BIR-RESTART-RUNNING-STOP/-PLACE pin both origins of the rollout-restart breadth at the reconciler |
 | DESIGN/DDD-3,5 | Mechanism = a minimal desired-run `generation: u64` sibling key (`workloads/<id>/generation`, 8-byte BE); the reconciler places when `observed_generation < generation` | DDD-3, DDD-5 | S-BIR-RESTART-* + S-BIR-COALESCE-*/SEQUENTIAL make the generation gate the placement driver; S-BIR-TXN-04 pins the BE codec defensive decode |
 | DESIGN/DDD-9 | TOCTOU-safe: generation bump + sentinel delete in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` (read-modify-write inside the write txn) + `Delete`; NO `Conflict` retry | DDD-9 | S-BIR-TXN-01..04 (real redb) make the atomic monotonic bump a store-acceptance mutation target — N concurrent ⇒ final == N; S-BIR-HANDLER-TXN asserts the one-txn `[IncrementU64, Delete]` op set at the handler |
 | DESIGN/DDD-6,13 | Reconciler edit gates the line-520 veto on `restart_pending` AND scopes it to the **current instance** (`!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)` — NOT `any(...)`); stamps `observed = desired` on the placement tick only | DDD-6, DDD-13 | S-BIR-REGRESSION-STOPPED + S-BIR-REGRESSION-RUNNING (the R1-crash regression — a post-restart crash must NOT wedge on a superseded Operator row) + S-BIR-BUG3-PRESERVED (the scoped veto must STILL fire on a *current* Operator-stop) are the two halves; S-BIR-CURRENT-ALLOC pins the numeric-suffix helper. All mandatory mutation targets (`any(...) → current_alloc(...)`) |
@@ -808,7 +808,8 @@ instance for the latest generation).
 ## Wave: DISTILL / [REF] Scenario list with tags
 
 > **24 scenarios** (4 Tier-1 store / 11 Tier-1 reconciler / 4 Tier-1/2 handler /
-> 2 Tier-3 CLI / 3 Tier-3 oracle). Error-path coverage **14/24 ≈ 58 %** (≥40 %
+> 2 integration CLI (in-process direct handler-call, no subprocess) / 3 Tier-3
+> oracle). Error-path coverage **14/24 ≈ 58 %** (≥40 %
 > target met). Full GIVEN/WHEN/THEN + per-scenario Universe + mutation-target
 > notes in `distill/test-scenarios.md`. The three `@oracle` rows are
 > ALREADY-AUTHORED `#[ignore]`'d ATs (un-ignored by slice-04), not new scaffolds.
@@ -835,8 +836,8 @@ instance for the latest generation).
 | S-BIR-HANDLER-404 | `@driving_adapter` `@error_path` | 1/2 | US-BIR-1 AC5 (404) |
 | S-BIR-HANDLER-TXN | `@driving_adapter` | 1/2 | US-BIR-1 AC3/4 |
 | S-BIR-HANDLER-OUTCOME-RESUMED / -RESTARTED | `@driving_adapter` | 1/2 | DDD-11 |
-| S-BIR-CLI-RESTART-SUCCESS | `@driving_adapter` `@real-io` | 3 | US-BIR-1 |
-| S-BIR-CLI-RESTART-UNKNOWN | `@driving_adapter` `@real-io` `@error_path` | 3 | US-BIR-1 (404) |
+| S-BIR-CLI-RESTART-SUCCESS | `@driving_adapter` `@real-io` | int (in-process) | US-BIR-1 |
+| S-BIR-CLI-RESTART-UNKNOWN | `@driving_adapter` `@real-io` `@error_path` | int (in-process) | US-BIR-1 (404) |
 | S-DBN-WS-STABLE | `@real-io` `@frontend` `@churn` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-1/2 |
 | S-DBN-CHURN | `@real-io` `@churn` `@error_path` `@kpi` `@oracle` | 3 | US-BIR-2 / K-BIR-3 |
 | S-DBN-NXDOMAIN-02-RECOVERY | `@real-io` `@error_path` `@frontend` `@kpi` `@oracle` | 3 | US-BIR-1 + US-BIR-2 / K-BIR-2 |
@@ -854,11 +855,14 @@ carry `@driving_adapter @real-io` (no `@walking_skeleton` tag). Per the project
 Architecture of Reference (port class → treatment):
 
 - **Driving** (entry points) = real adapters: `overdrive workload restart`
-  (CLI subprocess + `POST /v1/jobs/:id/restart`), `overdrive serve`
-  (`run_server_with_obs_and_driver`), `overdrive deploy` (`POST /v1/jobs`),
-  `getaddrinfo`/`getent`. The CLI driving-adapter proofs
-  (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN) and the three reused Tier-3 oracle ATs
-  (the e2e walking skeleton) close the loop through these.
+  (CLI **direct handler-call** against an in-process `run_server` → `POST
+  /v1/jobs/:id/restart` — NO subprocess, per `crates/overdrive-cli/CLAUDE.md`),
+  `overdrive serve` (`run_server_with_obs_and_driver`), `overdrive deploy`
+  (`POST /v1/jobs`), `getaddrinfo`/`getent`. The CLI driving-adapter proofs
+  (S-BIR-CLI-RESTART-SUCCESS/-UNKNOWN) exercise the real CLI handler →
+  `ApiClient::restart_workload` → production route; the three reused Tier-3 oracle
+  ATs (the e2e walking skeleton + the verb's real-kernel end-to-end path) close the
+  loop on the real-kernel matrix.
 - **Driven internal** = real: `IntentStore`/`LocalIntentStore` over real redb
   (S-BIR-TXN-* + the handler txn); the `WorkloadLifecycle` reconciler is pure-sync
   (Tier-1, direct `reconcile()` invocation — no adapter, no Sim).
@@ -909,7 +913,7 @@ markers and runs the fail-for-right-reason gate (`distill/red-classification.md`
 | `crates/overdrive-control-plane/tests/acceptance/restart_workload_unknown.rs` (NEW) | 1/2 | S-BIR-HANDLER-404 |
 | `crates/overdrive-control-plane/tests/acceptance/restart_workload_intent_key.rs` (NEW) | 1/2 | S-BIR-HANDLER-TXN |
 | `crates/overdrive-control-plane/tests/acceptance/restart_workload_outcome.rs` (NEW) | 1/2 | S-BIR-HANDLER-OUTCOME-RESUMED, S-BIR-HANDLER-OUTCOME-RESTARTED |
-| `crates/overdrive-cli/tests/integration/workload_restart.rs` (NEW; gated, subprocess) | 3 | S-BIR-CLI-RESTART-SUCCESS, S-BIR-CLI-RESTART-UNKNOWN |
+| `crates/overdrive-cli/tests/integration/workload_restart.rs` (NEW; gated, **direct handler-call** against in-process `run_server` — NO subprocess, `crates/overdrive-cli/CLAUDE.md`) | int | S-BIR-CLI-RESTART-SUCCESS, S-BIR-CLI-RESTART-UNKNOWN |
 | `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs` (EXISTING — slice-04 un-ignores ×2) | 3 | S-DBN-WS-STABLE, S-DBN-CHURN |
 | `crates/overdrive-control-plane/tests/integration/dns_responder_nxdomain.rs` (EXISTING — slice-04 un-ignores ×1) | 3 | S-DBN-NXDOMAIN-02-RECOVERY |
 
@@ -927,15 +931,17 @@ and strips it once the last scaffold lands GREEN.
 | `TxnOp::IncrementU64` concurrency | `crates/overdrive-store-local/tests/acceptance/` | `put_if_absent.rs`, `local_store_basic_ops.rs` already test `LocalIntentStore` over real redb here (gated `integration-tests`) |
 | `WorkloadLifecycle` reconcile() decision logic | `crates/overdrive-core/tests/acceptance/` | `workload_lifecycle_reconcile_branches.rs`, `workload_lifecycle_terminal_decision.rs`, `workload_lifecycle_backoff.rs` are the direct siblings (pure-sync `reconcile()` over constructed `(desired, actual, view, tick)`) |
 | `restart_workload` handler | `crates/overdrive-control-plane/tests/acceptance/` | `job_stop_unknown.rs`, `job_stop_intent_key.rs`, `job_stop_idempotent.rs` are the 1:1 sibling pattern (the handler mirrors `stop_workload`) |
-| `overdrive workload restart` CLI | `crates/overdrive-cli/tests/integration/` (gated, subprocess) | `deploy.rs`, `alloc_status.rs` are the driving-adapter subprocess precedents |
+| `overdrive workload restart` CLI | `crates/overdrive-cli/tests/integration/` (gated, **direct handler-call** — NO subprocess) | `deploy.rs`, `endpoint_from_config.rs`, `alloc_status.rs` are the **direct-call** integration precedents (`commands::deploy::deploy(args).await` against an in-process `run_server`; NOT subprocesses — `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" firmly rejects `Command::spawn`) |
 | Tier-3 oracle (cycle / churn / recovery) | `crates/overdrive-control-plane/tests/integration/` (EXISTING files) | `dns_responder_walking_skeleton.rs` + `dns_responder_nxdomain.rs` already hold the ATs; slice-04 edits in place |
 
 ## Wave: DISTILL / [REF] Driving-adapter coverage
 
 User-facing driving surfaces, each with ≥1 real-protocol scenario:
-`overdrive workload restart` (S-BIR-CLI-RESTART-SUCCESS subprocess + the
-unknown-id error S-BIR-CLI-RESTART-UNKNOWN), `POST /v1/jobs/:id/restart`
-(S-BIR-HANDLER-* + S-BIR-CLI-RESTART-* end-to-end), `overdrive serve`/`run_server`
+`overdrive workload restart` (S-BIR-CLI-RESTART-SUCCESS direct handler-call against
+in-process `run_server` + the unknown-id error S-BIR-CLI-RESTART-UNKNOWN — NO
+subprocess, `crates/overdrive-cli/CLAUDE.md`), `POST /v1/jobs/:id/restart`
+(S-BIR-HANDLER-* + S-BIR-CLI-RESTART-* through the production route; real-kernel
+end-to-end via the Tier-3 oracle), `overdrive serve`/`run_server`
 (the three oracle ATs),
 `overdrive deploy` (reused — the oracle deploys through it), `overdrive alloc
 status` (S-DBN-WS-STABLE `alloc_b1 ≠ alloc_b2`), `getaddrinfo`/`getent`
@@ -951,9 +957,12 @@ pinned by ADR-0073, not open choices, so no soft-prompt was needed; the policy
 file is the test-mechanism SSOT and must not be left stale at handoff). This
 section is the pointer/audit summary; the file is authoritative:
 
-- **Driving** — `overdrive workload restart <id>` (CLI subprocess from
-  `tmp_path` under Lima) → `POST /v1/jobs/:id/restart`; the in-process axum
-  handler for the acceptance-layer handler tests.
+- **Driving** — `overdrive workload restart <id>` (CLI **direct handler-call**
+  `commands::workload::restart(RestartArgs{ id, config_path })` against an
+  in-process `run_server` on an ephemeral port — NO subprocess, per
+  `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess") → `POST
+  /v1/jobs/:id/restart`; the in-process axum handler for the acceptance-layer
+  handler tests.
 - **Driven internal (real)** — `IntentStore` via `LocalIntentStore` over real
   redb (`TempDir`), gated `integration-tests` — the `TxnOp::IncrementU64`
   atomic-monotonic acceptance test (N concurrent ⇒ final == N).
@@ -1007,10 +1016,12 @@ DISTILL does NOT mutate the registry this wave (the surfaces are not yet built).
   default environment matrix (`clean` / `with-pre-commit` / `with-stale-config`)
   is **mapped-or-waived** to the codebase tier model in `distill/test-scenarios.md`
   § "Environment mapping" (rev1, review-distill 2026-06-30 Finding-2): `clean` →
-  the fresh-`tmp_path` CLI subprocess + the fresh-netns/pinned-6.18 Lima oracle;
-  `with-pre-commit` and `with-stale-config` **waived** (the feature touches no
-  pre-commit hook and no config-migration surface). The real environments are the
-  tiers (Tier-1 pure / Tier-1 store-acceptance real-redb / Tier-3 pinned-6.18 Lima).
+  the fresh-`tmp_path` CLI direct-handler-call against an in-process `run_server`
+  (no subprocess) + the fresh-netns/pinned-6.18 Lima oracle; `with-pre-commit` and
+  `with-stale-config` **waived** (the feature touches no pre-commit hook and no
+  config-migration surface). The real environments are the tiers (Tier-1 pure /
+  Tier-1 store-acceptance real-redb / integration in-process CLI / Tier-3
+  pinned-6.18 Lima).
 
 ## Wave: DISTILL / [REF] Wave-decisions (DISTILL — folded, compact)
 
@@ -1023,7 +1034,9 @@ DISTILL does NOT mutate the registry this wave (the surfaces are not yet built).
    → default infra, WARN, not a blocker.
 2. **24 scenarios, 14/24 ≈ 58 % error/edge** (≥40 % met). 4 Tier-1 store (real
    redb) + 11 Tier-1 reconciler (pure `reconcile()`) + 4 Tier-1/2 handler + 2
-   Tier-3 CLI + 3 Tier-3 oracle (already authored, un-ignored by slice-04). No
+   integration CLI (in-process direct handler-call, NO subprocess — per
+   `crates/overdrive-cli/CLAUDE.md`) + 3 Tier-3 oracle (already authored,
+   un-ignored by slice-04). No
    Tier 2 (no new kernel-side program; the churn surface is the reused intercept
    worker). **(rev1+rev3):** four multi-`When`/hidden-trajectory scenarios split
    to one-driving-action-each per the GWT rule (`S-BIR-RESTART-RUNNING`,
@@ -1065,3 +1078,4 @@ DISTILL does NOT mutate the registry this wave (the surfaces are not yet built).
 | 2026-06-30 (DISTILL rev1, post-review) | Resolved the three `review-distill.md` findings (verdict was `rejected_pending_revisions`): **(High/GWT)** split three multi-`When` scenarios into one-behaviour-each (`S-BIR-RESTART-RUNNING` → `-STOP`/`-PLACE`, `S-BIR-HANDLER-OUTCOME` → `-RESUMED`/`-RESTARTED`, `S-BIR-CLI-RESTART` → `-SUCCESS`/`-UNKNOWN`) → **23 scenarios**, 13/23 ≈ 57 % error/edge. **(High/traceability)** added the § "Environment mapping" table to `test-scenarios.md` (default matrix mapped-or-waived to the tier model). **(Medium/WS wording)** reworded WS strategy to "No new Tier-3 product oracle; one new CLI driving-adapter proof" and dropped `@walking_skeleton` from the CLI scenarios. Updated `test-scenarios.md`, `red-classification.md`, and these DISTILL `[REF]` sections + Scaffold MANIFEST + scenario list consistently. No `crates/` files written. |
 | 2026-06-30 (DISTILL rev3, post-re-review) | Resolved the three NEW `review-distill.md` findings (rev3; rev2's three prior findings confirmed closed): **(High/GWT)** split `S-BIR-COALESCE` (which hid a second `reconcile()` tick in a `Then`) into `S-BIR-COALESCE-PLACE` (the single placement that stamps `observed = desired`) + `S-BIR-COALESCE-NO-REPLAY` (a follow-up reconcile emits no second instance) — one driving action each → **24 scenarios**, 14/24 ≈ 58 % error/edge. **(Medium/traceability)** relabelled design-contract scenarios off the not-found `US-BIR-1 AC5` to their true source — `S-BIR-TXN-01..04` → `US-BIR-1 AC4 / DDD-9 / K-BIR-1`, `S-BIR-COALESCE-*` + `S-BIR-SEQUENTIAL` → `DDD-10 / K-BIR-1`; `S-BIR-HANDLER-404` + `S-BIR-CLI-RESTART-UNKNOWN` kept on `US-BIR-1 AC5`. **(Low/consistency)** reworded the initial DISTILL changelog row so its scenario count is not stale. Updated `test-scenarios.md`, `red-classification.md`, and these DISTILL `[REF]` sections (scenario list, counts, Scaffold MANIFEST, wave-decisions). No `crates/` files written. |
 | 2026-06-30 (DISTILL rev2, post-re-review) | Resolved the three NEW `review-distill.md` findings (rev2; rev1's three prior findings confirmed closed): **(High/policy)** **appended the BIR port rows to the actual `docs/architecture/atdd-infrastructure-policy.md`** (Driving: `overdrive workload restart` CLI + `restart_workload` handler + `WorkloadLifecycle.reconcile`; Driven-internal: `IntentStore` real-redb; Driven-external: none new) — the mechanisms are ADR-0073-pinned, no soft-prompt needed; this feature-delta § is now the pointer/audit summary, the policy file is authoritative. **(High/GWT)** reframed `S-BIR-SEQUENTIAL`, `S-BIR-REGRESSION-STOPPED`, `S-BIR-REGRESSION-RUNNING` to a single driving action (`reconcile()`) — the second-restart / crash external state moved into `Given`. **(Medium/adapter `@real-io`)** corrected the adapter-coverage table to name the real-I/O proof per `IntentStore` path (CLI subprocess for `get`/`delete`/route; store-acceptance for `txn`) and marked the `@driving_adapter` handler scenarios as focused in-process coverage (counting/fault double), not the Mandate-6 real-I/O proof. Scenario count unchanged (23). No `crates/` files written. |
+| 2026-06-30 (DISTILL rev4, test-mechanism correction — operator-ratified) | **Corrected a test-mechanism contradiction** in `S-BIR-CLI-RESTART-SUCCESS` / `-UNKNOWN`. The rev1–rev3 spec designed the two CLI scenarios as **`overdrive` subprocess** tests (Tier-3, `cargo xtask lima run --`, Universe = subprocess exit code + stdout). That **directly contradicts `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess"**, a FIRM rule: *"Do not spawn `overdrive` as a subprocess in tests… we have rejected the `Command::spawn` pattern for this crate."* Every existing CLI integration test obeys (grep of `crates/overdrive-cli/tests/` confirms ~13 files explicitly stating "no subprocess" / "No `Command::spawn`" / "No `CARGO_BIN_EXE_overdrive`"), and the spec's cited "subprocess precedents" (`deploy.rs`, `alloc_status.rs`) are **factually direct handler-call** tests (`overdrive_cli::commands::deploy::deploy(args).await` against an in-process `run_server`). The rev1/rev2/rev3 Reconciliation HARD GATE reconciled DISCUSS↔DESIGN but missed this crate convention. **Decision (operator-ratified 2026-06-30): align to the crate convention — direct handler-call.** Both scenarios are now **integration handler tests** (in-process `run_server` on an ephemeral port, trust triple written by `overdrive serve`, `commands::workload::restart(RestartArgs{ id, config_path })`, NO `Command::spawn` / `CARGO_BIN_EXE_overdrive`): `-SUCCESS` Universe → the typed `RestartOutput { workload_id, outcome }`; `-UNKNOWN` Universe → the typed `CliError` (not-found) mapped to a non-zero exit via `render::cli_error_to_exit_code`. **Tier/lane reclassification:** the two scenarios move off the "Tier-3 … `cargo xtask lima run --` subprocess" lane into the integration/in-process lane in every table (scenario index, Tier env table, scenario list, count breakdown `2 Tier-3 CLI → 2 integration CLI`). The behavioral assertions (success → new instance + outcome; unknown → not-found → non-zero exit) and the scenario IDs are **unchanged**; only the test MECHANISM (subprocess → direct-call) and the lane classification change. **Propagated** (per CLAUDE.md § "Behavior change must mark stale adjacent docs") to: `distill/test-scenarios.md` (the two scenario bodies, the strategy CLI bullet, the Environment mapping `clean` row, the Tier env table, the scenario index Tier cells, the "Tier 3 — CLI driving adapter" section → "Integration — CLI driving adapter (in-process; NO subprocess)" + the corrected direct-call precedent note, the `@real-io` accounting + adapter-coverage table, the Driving-adapter verification table); this feature-delta (Scaffold MANIFEST test-scaffolds row, Test placement row + corrected precedent claim, WS strategy, Driving-adapter coverage, Project Infrastructure Policy rows, scenario list + count breakdown + Inherited-commitments DDD-1,2 row + DISTILL wave-decision item 2 + Pre-requisites environment-mapping line); `docs/architecture/atdd-infrastructure-policy.md` (the appended BIR Driving rows); and `distill/red-classification.md` (the Universe-shape note). **Note:** the verb's end-to-end production path is closed at the HTTP route by the Tier-3 oracle ATs (driving `POST /v1/jobs/:id/restart`); the CLI binary `main.rs` dispatch is the thin reviewed `mutants::skip` dispatcher (same posture as deploy/stop/alloc). Scenario count unchanged (24). No `crates/` files written. — Quinn. |

@@ -1,0 +1,139 @@
+review_id: roadmap_rev_20260630_backend_instance_replacement_iter2
+reviewer: codex_nw_review
+artifact: docs/feature/backend-instance-replacement/deliver/roadmap.json
+review_date: "2026-06-30"
+iteration: 2
+
+approval_status: approved_with_nits
+approval_recommendation: APPROVED_WITH_NITS
+blocker_issues_count: 0
+high_issues_count: 0
+medium_issues_count: 0
+low_issues_count: 2
+
+executive_summary: |
+  Approved for DELIVER. The revised roadmap now has a complete production
+  invocation path: store primitive, reconciler gate, HTTP route, CLI verb,
+  binary dispatch ownership, and the three Tier-3 oracle ATs that drive the
+  production restart route.
+
+  The iteration-1 rejection issues are either resolved or explicitly waived by
+  project policy. The CLI dispatch gap is fixed in step 01-04. The private
+  current_alloc helper concern is mitigated by S-BIR-REGRESSION-NUMERIC proving
+  the numeric-vs-lexical invariant through reconcile() at the driving port. The
+  roadmap remains long and prescriptive, but CLAUDE.md explicitly waives the
+  generic roadmap length warnings for Overdrive and requires exact public API
+  conformance to accepted designs.
+
+quantitative_checks:
+  total_steps: 7
+  total_criteria: 56
+  roadmap_step_and_criteria_word_count: 4274
+  generic_word_budget_for_4_to_8_steps: 1500
+  word_budget_status: waived_by_project_policy
+  max_criterion_words: 167
+  step_decomposition_ratio: "7 implementation steps / approximately 12 named production files = 0.58"
+
+mandatory_checks:
+  external_validity:
+    status: PASS
+    evidence: |
+      Step 01-03 owns POST /v1/jobs/:id/restart. Step 01-04 owns
+      overdrive workload restart, API client wiring, command module export,
+      binary dispatch, rendering, and a direct CLI handler-call against an
+      in-process run_server. Steps 02-01, 03-01, and 04-01 un-ignore the
+      existing Tier-3 oracle ATs and swap their cycle/recovery mechanism to
+      the production restart route.
+
+  ac_implementation_coupling:
+    status: PASS_WITH_PROJECT_SCOPE
+    evidence: |
+      The roadmap intentionally pins ADR-0073 public surfaces and mutation
+      targets. That would be over-coupled under the generic rubric, but this
+      repository's CLAUDE.md says crafters must match accepted design API
+      shape exactly and must not invent public surface. The current roadmap
+      points to ADR-0073 rather than leaving live design choices open.
+    residual_risk: |
+      Some criteria still name internal implementation sites. Treat those as
+      design-conformance guardrails, not permission to expand scope beyond
+      ADR-0073.
+
+  step_decomposition_ratio:
+    status: PASS
+    calculation: "7 steps / approximately 12 named production files = 0.58"
+    evidence: |
+      The roadmap decomposes by externally observable behavior: store atomic
+      bump, reconciler generation/veto behavior, HTTP handler, CLI verb, and
+      three Tier-3 oracle gates. There is no repeated substitution pattern
+      that should be batched.
+
+  implementation_code_in_roadmap:
+    status: PASS_WITH_PROJECT_SCOPE
+    evidence: |
+      The roadmap contains code-shaped names and exact API surfaces, but they
+      are design-pinned by ADR-0073 and used to prevent API drift. Repeated
+      mutation command lines were collapsed into validation.mutation_invocation,
+      reducing the second-SSOT problem from iteration 1.
+    residual_risk: |
+      DELIVER should still prefer the tests and ADR-0073 as the authority if
+      roadmap prose appears to over-specify a non-public implementation detail.
+
+  concision_and_precision:
+    status: PASS_WITH_WAIVER
+    evidence: |
+      The generic length gate is exceeded, but CLAUDE.md section "Roadmap
+      validator warnings" says STEP_NAME_TOO_LONG, CRITERIA_TOO_LONG, and
+      DESCRIPTION_TOO_LONG are cosmetic/non-blocking for Overdrive because
+      roadmap ACs deliberately carry scenario names, invariant names, proptest
+      targets, and kill-rate thresholds. The roadmap records the same waiver
+      under validation.concision_waiver.
+
+  unit_test_boundary_validation:
+    status: PASS_WITH_NIT
+    evidence: |
+      Most scenarios drive public ports: LocalIntentStore, reconcile(),
+      restart_workload, CLI command handler, and Tier-3 production route.
+      S-BIR-CURRENT-ALLOC still directly tests a helper, but the same invariant
+      is now also pinned at the reconcile boundary by S-BIR-REGRESSION-NUMERIC.
+    nit: |
+      Keep the helper proptest only as supplementary coverage. The
+      driving-port regression is the acceptance authority.
+
+issues:
+  low:
+    - id: des_roadmap_runner_unavailable
+      location: "local environment"
+      issue: |
+        `des-roadmap validate docs/feature/backend-instance-replacement/deliver/roadmap.json`
+        failed before validation with ModuleNotFoundError: No module named
+        'des'. jq/JSON parsing succeeded, but the project validator could not
+        be executed from this workspace environment.
+      recommendation: |
+        Fix the local des Python environment when convenient. This does not
+        block DELIVER because the same warnings are policy-waived and the
+        roadmap artifact is valid JSON.
+
+    - id: helper_boundary_supplementary_only
+      location: "docs/feature/backend-instance-replacement/deliver/roadmap.json:42"
+      issue: |
+        S-BIR-CURRENT-ALLOC directly names current_alloc(&rows). Direct helper
+        tests are normally brittle.
+      recommendation: |
+        Keep S-BIR-REGRESSION-NUMERIC as the authoritative driving-port proof
+        for numeric current-instance selection. If the helper shape changes
+        while preserving behavior, update or drop only the supplementary
+        helper proptest.
+
+non_blocking_strengths:
+  - "ADR-0073 is accepted and closes the DISCUSS hard gate."
+  - "The CLI no-subprocess rule is honored; step 01-04 owns the binary dispatch surface while testing the command handler directly."
+  - "The three #249-deferred Tier-3 oracle ATs are divided across 02-01, 03-01, and 04-01 with a terminal all-green gate."
+  - "Mutation gates name the load-bearing failure modes: lost increment, stale operator-stop veto, observed+1 stamp, lexical current allocation, bad 404 handling, and swallowed CLI errors."
+
+next_steps: |
+  Proceed to DELIVER. Do not trim the roadmap for generic concision. During
+  implementation, treat ADR-0073 plus the named scenarios as authoritative,
+  keep the helper-level proptest supplementary, and make the Tier-3 oracle run
+  on the pinned-6.18 Lima matrix before final acceptance.
+
+reviewer_confidence: high
