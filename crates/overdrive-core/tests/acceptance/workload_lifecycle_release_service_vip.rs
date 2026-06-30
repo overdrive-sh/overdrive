@@ -152,6 +152,7 @@ fn service_state_with_terminal_alloc(
         // A stop intent retains the spec key, so a declared-but-stopped
         // Service carries both desired_to_stop AND desired.job.is_some().
         desired_to_stop: declared,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
@@ -163,6 +164,7 @@ fn service_state_with_terminal_alloc(
         workload_id: jid(workload_id),
         job: Some(make_job(workload_id)),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Service,
@@ -264,6 +266,7 @@ fn withdrawn_service_release_action_idempotent_on_reemit() {
         restart_counts: BTreeMap::new(),
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: released,
+        observed_generation: 0,
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -301,6 +304,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         workload_id: jid("web-api"),
         job: None,
         desired_to_stop: true,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
@@ -312,6 +316,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         workload_id: jid("web-api"),
         job: None,
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Service,

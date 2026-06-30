@@ -917,6 +917,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(job.clone()),
         desired_to_stop: false,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -928,6 +929,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
@@ -959,6 +961,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
@@ -1152,6 +1155,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
@@ -1261,6 +1265,7 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
         restart_counts: counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
     state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 

@@ -151,6 +151,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -162,6 +163,7 @@ fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLif
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
@@ -203,6 +205,7 @@ fn recomputes_deadline_at_window_boundary() {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
@@ -295,6 +298,7 @@ fn restart_survival_idempotence() {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);

@@ -65,6 +65,7 @@ fn happy_path_state() -> WorkloadLifecycleState {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(payments_job()),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -79,6 +80,7 @@ const fn empty_view() -> WorkloadLifecycleView {
         restart_counts: BTreeMap::new(),
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     }
 }
 
@@ -92,6 +94,7 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
+        generation: 0,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -135,6 +138,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: desired_inner.job.clone(),
         desired_to_stop: false,
+        generation: 0,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
