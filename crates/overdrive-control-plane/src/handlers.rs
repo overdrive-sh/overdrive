@@ -18,6 +18,7 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use overdrive_core::aggregate::{
     AggregateError, IntentKey, Job, ServiceV1, WorkloadIntent, WorkloadKind,
 };
@@ -26,15 +27,15 @@ use overdrive_core::id::{SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
 };
-use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
+use overdrive_core::traits::intent_store::{IntentStore, PutOutcome, TxnOp};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::traits::observation_store::AllocStatusRow;
 use overdrive_core::transition_reason::TerminalCondition;
 use serde::Deserialize;
 
 use crate::api::{
-    AllocStateWire, RestartBudget, StopOutcome, StopWorkloadResponse, TransitionRecord,
-    TransitionSource,
+    AllocStateWire, RestartBudget, RestartOutcome, RestartWorkloadResponse, StopOutcome,
+    StopWorkloadResponse, TransitionRecord, TransitionSource,
 };
 
 use crate::AppState;
@@ -850,6 +851,99 @@ pub async fn stop_workload(
     enqueue_workload_lifecycle_eval(&state, &workload_id)?;
 
     Ok(axum::Json(StopWorkloadResponse { workload_id: workload_id.to_string(), outcome }))
+}
+
+/// `POST /v1/jobs/{id}/restart` — replace a declared workload's backend
+/// instance with a fresh one. Per ADR-0073.
+///
+/// Rollout-restart breadth: a running workload is stop-then-started; an
+/// operator-stopped workload is resumed; the intent stays declared
+/// throughout (distinct from #211 job removal). The verb bumps a
+/// monotonic desired-run generation; the `WorkloadLifecycle` reconciler
+/// places a fresh instance when `observed_generation < generation` (the
+/// placement decision lives in the reconciler, NOT this handler).
+///
+/// 404 contract: a restart against an `<id>` that was never deployed (no
+/// `IntentKey::for_workload(<id>)` row) returns HTTP 404 with the same
+/// `resource = workloads/<id>` shape as `stop_workload`. Restarting a
+/// non-existent workload is operator error, not a silent no-op.
+///
+/// Atomicity (`development.md` § "Check-and-act must be atomic"): the
+/// generation bump and the `/stop` sentinel clear are ONE `IntentStore::txn`
+/// carrying `[IncrementU64{generation}, Delete{stop}]`. The increment is
+/// read-modify-write *inside* the store's write transaction, so there is no
+/// call-site TOCTOU and no `Conflict` retry — the handler never reads the
+/// generation value.
+///
+/// Empty request body. The response body is `{ workload_id, outcome }`
+/// where `outcome ∈ { "restarted", "resumed" }` — a cosmetic label
+/// classified from the `/stop` presence at the check-exists read.
+#[utoipa::path(
+    post,
+    path = "/v1/jobs/{id}/restart",
+    params(
+        ("id" = String, Path, description = "Canonical WorkloadId"),
+    ),
+    responses(
+        (status = 200, description = "Workload restart recorded", body = RestartWorkloadResponse),
+        (status = 400, description = "Validation error", body = api::ErrorBody),
+        (status = 404, description = "Workload not found", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "jobs",
+)]
+pub async fn restart_workload(
+    State(state): State<AppState>,
+    Path(job_id_str): Path<String>,
+) -> Result<axum::Json<RestartWorkloadResponse>, ControlPlaneError> {
+    // 1. Parse the path parameter through the WorkloadId newtype — same
+    //    field-naming discipline as `stop_workload` (400 on a malformed id).
+    let workload_id = parse_workload_id_path(&job_id_str)?;
+
+    // 2. Check-exists → 404, AND classify the cosmetic outcome label, in a
+    //    single point-in-time window. The aggregate must be declared before
+    //    a restart can be recorded — restarting a never-deployed workload is
+    //    operator error, not a silent no-op (byte-identical 404 shape to
+    //    `stop_workload`: `resource = workloads/<id>`).
+    let job_key = IntentKey::for_workload(&workload_id);
+    if state.store.get(job_key.as_bytes()).await?.is_none() {
+        return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
+    }
+    // The `/stop` lookup classifies the RestartOutcome label ONLY (present
+    // ⇒ Resumed, absent ⇒ Restarted) — it does NOT gate placement, which is
+    // the reconciler's generation gate. The handler never reads the
+    // generation value (the increment is store-side; step 3).
+    let stop_key = IntentKey::for_workload_stop(&workload_id);
+    let outcome = if state.store.get(stop_key.as_bytes()).await?.is_some() {
+        RestartOutcome::Resumed
+    } else {
+        RestartOutcome::Restarted
+    };
+
+    // 3. Atomic bump + clear: ONE `IntentStore::txn` carrying the
+    //    read-modify-write generation increment AND the stop-sentinel
+    //    delete. The increment happens inside the store's write transaction
+    //    (ADR-0073 item 4 / `development.md` § "Check-and-act must be
+    //    atomic") — the handler never reads-then-writes the generation, so
+    //    there is no call-site TOCTOU and no `Conflict` retry. Commits
+    //    atomically (`TxnOutcome::Committed`; no `Conflict` path).
+    let gen_key = IntentKey::for_workload_generation(&workload_id);
+    state
+        .store
+        .txn(vec![
+            TxnOp::IncrementU64 { key: Bytes::copy_from_slice(gen_key.as_bytes()) },
+            TxnOp::Delete { key: Bytes::copy_from_slice(stop_key.as_bytes()) },
+        ])
+        .await?;
+
+    // 4. Edge-triggered ingress per whitepaper §18: enqueue an evaluation
+    //    for the job-lifecycle reconciler so the convergence loop places a
+    //    fresh instance on the generation advance — exactly as
+    //    `stop_workload` does.
+    enqueue_workload_lifecycle_eval(&state, &workload_id)?;
+
+    // 5. Respond 200 `{ workload_id, outcome }`.
+    Ok(axum::Json(RestartWorkloadResponse { workload_id: workload_id.to_string(), outcome }))
 }
 
 /// `GET /v1/cluster/info` — mode, region, reconciler registry, broker

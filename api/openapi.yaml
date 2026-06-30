@@ -198,6 +198,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /v1/jobs/{id}/restart:
+    post:
+      tags:
+      - jobs
+      summary: |-
+        `POST /v1/jobs/{id}/restart` — replace a declared workload's backend
+        instance with a fresh one. Per ADR-0073.
+      description: |-
+        Rollout-restart breadth: a running workload is stop-then-started; an
+        operator-stopped workload is resumed; the intent stays declared
+        throughout (distinct from #211 job removal). The verb bumps a
+        monotonic desired-run generation; the `WorkloadLifecycle` reconciler
+        places a fresh instance when `observed_generation < generation` (the
+        placement decision lives in the reconciler, NOT this handler).
+
+        404 contract: a restart against an `<id>` that was never deployed (no
+        `IntentKey::for_workload(<id>)` row) returns HTTP 404 with the same
+        `resource = workloads/<id>` shape as `stop_workload`. Restarting a
+        non-existent workload is operator error, not a silent no-op.
+
+        Atomicity (`development.md` § "Check-and-act must be atomic"): the
+        generation bump and the `/stop` sentinel clear are ONE `IntentStore::txn`
+        carrying `[IncrementU64{generation}, Delete{stop}]`. The increment is
+        read-modify-write *inside* the store's write transaction, so there is no
+        call-site TOCTOU and no `Conflict` retry — the handler never reads the
+        generation value.
+
+        Empty request body. The response body is `{ workload_id, outcome }`
+        where `outcome ∈ { "restarted", "resumed" }` — a cosmetic label
+        classified from the `/stop` presence at the check-exists read.
+      operationId: restart_workload
+      parameters:
+      - name: id
+        in: path
+        description: Canonical WorkloadId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Workload restart recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestartWorkloadResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          description: Workload not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /v1/jobs/{id}/stop:
     post:
       tags:
@@ -1176,6 +1239,37 @@ components:
           type: integer
           format: int32
           minimum: 0
+    RestartOutcome:
+      type: string
+      description: |-
+        Outcome of `POST /v1/jobs/{id}/restart` per ADR-0073 item 2.
+
+        The two-variant decision is PINNED. The variant is the rollout-restart
+        breadth observed at the handler's check-exists read; both correspond to
+        "the workload was (or is being) cycled toward the latest desired
+        generation" — the level-triggered coalescing contract.
+      enum:
+      - restarted
+      - resumed
+    RestartWorkloadResponse:
+      type: object
+      description: |-
+        Response for `POST /v1/jobs/{id}/restart`. Per ADR-0073 item 2 the
+        body shape is `{ workload_id, outcome }` where `outcome ∈
+        { "restarted", "resumed" }`. 404 on unknown workload (separate path).
+
+        `outcome` is a cosmetic, best-effort label classified from the
+        `/stop` presence at the handler's single check-exists read — the
+        *placement* decision is the reconciler's generation gate, never the
+        label (ADR-0073 item 1 race semantics).
+      required:
+      - workload_id
+      - outcome
+      properties:
+        outcome:
+          $ref: '#/components/schemas/RestartOutcome'
+        workload_id:
+          type: string
     ScheduleSpecInput:
       type: object
       description: |-

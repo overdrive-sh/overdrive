@@ -132,6 +132,21 @@ mod acceptance {
     mod submit_job_idempotency;
     mod trust_triple_getters;
 
+    // backend-instance-replacement slice-01 step 01-03 — `restart_workload`
+    // HTTP handler: the 404-no-mutation posture (S-BIR-HANDLER-404), the
+    // one-atomic-bump+clear txn + intent retention + one enqueue
+    // (S-BIR-HANDLER-TXN), and the cosmetic outcome-label classification
+    // from the `/stop` check-exists read (S-BIR-HANDLER-OUTCOME-RESUMED /
+    // -RESTARTED, DDD-11). Per ADR-0073 § "The six pinned signatures"
+    // items 2 + 4 + 6. Default-lane: the handler is invoked directly over a
+    // real `LocalIntentStore`-backed `AppState` (the
+    // `submit_job_handler_rejects_empty_exec_command_with_400.rs` pattern);
+    // observable outcomes are read back at the `IntentStore` boundary and
+    // the runtime broker counter.
+    mod restart_workload_intent_key;
+    mod restart_workload_outcome;
+    mod restart_workload_unknown;
+
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // `[exec]` block end-to-end. Per ADR-0031.
     mod action_shim_restart_uses_spec_from_action;
