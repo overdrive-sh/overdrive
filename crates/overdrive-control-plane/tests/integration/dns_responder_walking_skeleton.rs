@@ -1919,7 +1919,6 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// sticky operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
 /// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. Sibling:
 /// S-DBN-WS-STABLE exercises the same restart verb on the NEXT dial (02-01).
-#[ignore = "03-01 lands the A1 half-close forward (ADR-0070 amendment 2026-07-01, Root Cause A) + the T1/T2 test-model fix that make this AT go green; the FORMAL un-ignore is step 03-02. A local Lima run under 03-01 confirmed fail-fast in 886ms (well under CHURN_BOUND=30s) on a clean restart (A1 forwards the backend FIN to leg-F). Un-ignore in 03-02."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend() {
     if !is_root() {
