@@ -232,6 +232,23 @@ enum PumpExit {
 /// / leg-C) sends a bare TCP FIN without a TLS `close_notify` — accepted for v1 (the
 /// peer's kTLS-RX observes the transport FIN as a clean read-EOF, which is all the
 /// opposing pump needs; emitting `close_notify` is out of scope for the amendment).
+///
+/// Naming caveat (ADR-0070 amendment § "The teardown-vs-source-EOF distinction"):
+/// `PumpExit::Graceful` with `!state.stop` arrives on the decrypt pump from TWO
+/// shapes, and the amendment DELIBERATELY forwards on BOTH — the name says "source_eof"
+/// for the common case, but the contract is "any non-teardown `Graceful`":
+///   1. a genuine SOURCE clean EOF (`POLLHUP`-with-no-`POLLIN` / `n_in == 0`) — the
+///      peer FIN on the pump's source leg; the `SHUT_WR` mirrors it onto the opposing
+///      leg (the S-DBN-CHURN fix).
+///   2. the `splice_pipe_to_dst` `n_out == 0` DESTINATION clean EOF — the dst leg's own
+///      peer closed. Here the `shutdown(dst_fd, SHUT_WR)` targets an ALREADY-CLOSED dst
+///      write side: a **deliberate harmless no-op** (shutting the write half of a leg
+///      whose peer has already gone away has no observable effect and does not disturb
+///      the sibling direction). Grouping this as a forward case is the amendment's
+///      pinned decision — do not special-case it out.
+///
+/// A deliberate `teardown` (`stop == true`) is the ONLY `Graceful` shape that does NOT
+/// forward; the `!state.stop` guard is the sole discriminator, per the amendment.
 fn forward_half_close_if_source_eof(dst_fd: RawFd, exit: PumpExit, state: &PumpState) {
     // Forward ONLY on a genuine source clean-close: a `Graceful` exit that was NOT a
     // deliberate `teardown`. `stop == true` breaks `Graceful` at the top of the loop
@@ -730,6 +747,223 @@ mod tests {
             !peer_read_saw_eof(&peer),
             "a TransportDeath exit must NOT forward a half-close — the forward is Graceful-only \
              (transport death reclaims via (B) self-teardown, not a half-close forward)"
+        );
+    }
+
+    // ========================================================================
+    // A1 (ADR-0070 amendment) — CALL-SITE wiring proof (review-03-01 BLOCKER-2).
+    // The two tests above enter through the `forward_half_close_if_source_eof`
+    // helper directly, so deleting the CALL in `run_decrypt_pump` /
+    // `run_encrypt_pump` leaves them green. The two tests below enter through
+    // the REAL pump terminal path: they spawn the actual pump loop, drive a
+    // genuine SOURCE clean EOF (close the src peer), and assert the dst peer
+    // surfaces read-EOF — which happens ONLY if the pump invoked the forward on
+    // its terminal exit. Deleting either call site makes the dst peer never see
+    // EOF → the `read` blocks to the bounded timeout and the assertion fails.
+    // ========================================================================
+
+    /// A pair of connected `AF_UNIX` socketpairs modelling a pump's two legs. The
+    /// pump reads its SOURCE from `src_held` (the pump owns `src_held`'s raw fd) and
+    /// writes to `dst_held` (the pump owns `dst_held`'s raw fd). The test drives the
+    /// source through `src_peer` (write request bytes, then close to signal source
+    /// EOF) and observes the DESTINATION through `dst_peer` (read the forwarded bytes,
+    /// then read again to see the EOF the pump's `SHUT_WR` forward produces). All four
+    /// `UnixStream`s own their raw fds and stay alive for the pump's lifetime; the
+    /// pump borrows the two `*_held` fds without ownership (`from_raw_fd` + `forget`),
+    /// so it never closes them — the test's Drop does.
+    struct PumpLegs {
+        src_held: std::os::unix::net::UnixStream,
+        src_peer: std::os::unix::net::UnixStream,
+        dst_held: std::os::unix::net::UnixStream,
+        dst_peer: std::os::unix::net::UnixStream,
+    }
+
+    impl PumpLegs {
+        fn new() -> Self {
+            let (src_held, src_peer) =
+                std::os::unix::net::UnixStream::pair().expect("src AF_UNIX socketpair");
+            let (dst_held, dst_peer) =
+                std::os::unix::net::UnixStream::pair().expect("dst AF_UNIX socketpair");
+            Self { src_held, src_peer, dst_held, dst_peer }
+        }
+    }
+
+    /// Drive a spawned pump (`run_decrypt_pump` / `run_encrypt_pump`) through a genuine
+    /// SOURCE clean-close and assert the pump forwarded the FIN to its `dst` leg:
+    /// (1) the forwarded request bytes arrive on `dst_peer` (the pump moved data), then
+    /// (2) the NEXT `dst_peer` read returns `Ok(0)` — EOF — because the pump ran
+    /// `shutdown(dst, SHUT_WR)` on its terminal exit. If the call site were deleted, the
+    /// pump would exit without the forward, `dst_peer`'s write side would stay open, and
+    /// the EOF read would time out (WouldBlock/TimedOut) — the assertion catches that.
+    ///
+    /// `run_pump` is the real pump loop under test; it is spawned on a scoped thread so
+    /// it can borrow `&PumpState` and the raw fds. `REQUEST` is a byte-distinct litmus
+    /// so the "data moved" assertion proves the real source→dst pipe, not an echo.
+    fn assert_pump_forwards_half_close_on_source_eof(
+        run_pump: fn(RawFd, RawFd, &[u8], &PumpState),
+    ) {
+        const REQUEST: &[u8] = b"CHURN-REQ";
+        let legs = PumpLegs::new();
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        let src_fd = legs.src_held.as_raw_fd();
+        let dst_fd = legs.dst_held.as_raw_fd();
+
+        std::thread::scope(|scope| {
+            let pump = scope.spawn(|| run_pump(src_fd, dst_fd, &[], &state));
+
+            // Feed the source a byte-distinct request, then CLOSE the source peer's
+            // write side: a genuine directional clean EOF (a peer FIN) on the pump's
+            // source leg — NOT a deliberate teardown (`stop` stays false).
+            (&legs.src_peer).write_all(REQUEST).expect("write request to src peer");
+            (&legs.src_peer).flush().ok();
+            legs.src_peer
+                .shutdown(std::net::Shutdown::Write)
+                .expect("half-close src peer's write side ⇒ source EOF");
+
+            // Observe the DESTINATION: the pump must forward the request bytes, then
+            // (on its terminal exit) forward the source FIN as `SHUT_WR(dst)` so this
+            // peer's read surfaces EOF. A bounded read timeout turns a broken call site
+            // into an assertion failure, never a hang.
+            legs.dst_peer.set_read_timeout(Some(Duration::from_secs(2))).ok();
+            let mut got = Vec::new();
+            let mut buf = [0u8; 64];
+            let saw_eof = loop {
+                match (&legs.dst_peer).read(&mut buf) {
+                    Ok(0) => break true, // EOF — the pump forwarded SHUT_WR to dst
+                    Ok(n) => got.extend_from_slice(&buf[..n]),
+                    Err(_) => break false, // read timed out ⇒ no forward (broken wiring)
+                }
+            };
+
+            assert!(
+                saw_eof,
+                "the pump must forward the source clean-close as shutdown(SHUT_WR) to its dst \
+                 leg — the dst peer's read must surface EOF. It did not (read timed out), which \
+                 means the forward_half_close_if_source_eof(...) call site was not exercised on \
+                 the pump's terminal exit (the review-03-01 BLOCKER-2 wiring)."
+            );
+            assert_eq!(
+                got, REQUEST,
+                "the pump must move the source request bytes to the dst leg before forwarding \
+                 the half-close (proves the real source→dst pipe, not just a bare SHUT_WR)"
+            );
+
+            pump.join().expect("pump thread joins cleanly");
+        });
+
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a clean source half-close must NOT fire (B) self-teardown — no reclaim on Graceful \
+             (D-MTLS-16 half-close correctness), even driven through the real pump terminal path"
+        );
+        assert!(
+            !state.running.load(Ordering::SeqCst),
+            "the pump cleared running ⇒ liveness Gone after its terminal exit"
+        );
+    }
+
+    /// CALL-SITE PROOF (decrypt pump): the REAL `run_decrypt_pump` terminal path forwards
+    /// the source clean-close to its `dst` leg. Kills a deletion of the
+    /// `forward_half_close_if_source_eof(dst_fd, exit, state)` call at the end of
+    /// `run_decrypt_pump` (`splice.rs` ~431) — a deletion the helper-level tests above
+    /// cannot catch because they bypass the pump loop. This is the outbound-return /
+    /// inbound-deliver (`legB → legF` / `legC → legS`) S-DBN-CHURN path.
+    #[test]
+    fn decrypt_pump_forwards_half_close_on_source_eof() {
+        assert_pump_forwards_half_close_on_source_eof(run_decrypt_pump);
+    }
+
+    /// CALL-SITE PROOF (encrypt pump): the REAL `run_encrypt_pump` terminal path forwards
+    /// the source clean-close to its `dst` leg. Kills a deletion of the
+    /// `forward_half_close_if_source_eof(dst_fd, exit, state)` call at the end of
+    /// `run_encrypt_pump` (`splice.rs` ~521) — the call site the Tier-3 S-DBN-CHURN
+    /// oracle does NOT exercise (it drives the return-decrypt path). This is the
+    /// outbound-forward / inbound-response (`legF → legB` / `legS → legC`) path.
+    #[test]
+    fn encrypt_pump_forwards_half_close_on_source_eof() {
+        assert_pump_forwards_half_close_on_source_eof(run_encrypt_pump);
+    }
+
+    /// HIGH-1 (review-03-01) — the non-source `Graceful` path is a harmless no-op.
+    ///
+    /// The ADR-0070 amendment (§ "The teardown-vs-source-EOF distinction") DELIBERATELY
+    /// groups the decrypt pump's `splice_pipe_to_dst` `n_out == 0` DESTINATION clean-EOF
+    /// as a forward case: on it, `shutdown(dst_fd, SHUT_WR)` targets a dst leg whose peer
+    /// has ALREADY closed — a **deliberate harmless no-op** (the amendment's pinned
+    /// decision; this test does not change it). "Harmless" is the observable to pin, and
+    /// it is a property of the FORWARD against an already-closed dst leg — NOT of any one
+    /// splice-return code path. So this test drives the helper against a dst leg whose
+    /// peer is already closed (the exact end-state the `n_out == 0` dst-EOF forward
+    /// reaches) and proves the three harmlessness clauses:
+    ///   1. the forward on an already-closed dst does NOT panic / error (SIGPIPE is masked
+    ///      process-wide; `shutdown(SHUT_WR)` on a socket with a closed peer just returns);
+    ///   2. `mark_exited` still does NOT fire (B) self-teardown on `Graceful`;
+    ///   3. the forward touches ONLY the dst leg's write side — an INDEPENDENT sibling
+    ///      leg (a separate socketpair) is entirely undisturbed and still round-trips.
+    ///
+    /// Why NOT drive `n_out == 0` through the real pump: on a stream socket a
+    /// `splice(pipe → dst)` whose read-peer has fully closed returns `EPIPE` (classified
+    /// `TransportDeath`), not `0` — the `n_out == 0` Graceful shape is a narrow, hard-to-
+    /// synthesise socket condition. Pinning the FORWARD's harmlessness against an
+    /// already-closed dst is the honest, design-faithful proof of the same contract, and
+    /// it is exactly what the helper docstring documents.
+    #[test]
+    fn graceful_forward_on_dst_eof_is_harmless() {
+        const SIBLING_MSG: &[u8] = b"SIBLING-LIVE";
+        // The dst leg whose peer has ALREADY closed — the end-state the `n_out == 0`
+        // dst-EOF forward reaches. `SHUT_WR` on `dst_held` here is the "already-closed
+        // dst" no-op the ADR pins.
+        let (dst_held, dst_peer) = dst_socketpair();
+        dst_peer.shutdown(std::net::Shutdown::Both).expect(
+            "close the dst peer ⇒ dst_held's SHUT_WR forward targets an already-closed leg",
+        );
+        drop(dst_peer);
+
+        // An INDEPENDENT sibling socketpair — nothing to do with the dst leg. It proves
+        // the forward does not collaterally disturb any other direction.
+        let (sibling_a, sibling_b) = dst_socketpair();
+
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        // Drive the SOURCE-EOF forward against the already-closed dst leg: a genuine
+        // non-teardown `Graceful` (stop == false). The `shutdown(SHUT_WR)` onto
+        // `dst_held` — whose peer is already gone — must be a harmless no-op that neither
+        // panics nor errors (clause 1).
+        forward_half_close_if_source_eof(dst_held.as_raw_fd(), PumpExit::Graceful, &state);
+        mark_exited(&state, PumpExit::Graceful);
+
+        // Clause 2: no reclaim on Graceful, even when the forward hit an already-closed leg.
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a Graceful forward onto an already-closed dst must NOT fire (B) self-teardown — it is \
+             a deliberate harmless no-op, not a reclaim (ADR-0070 amendment, dst-EOF grouping)"
+        );
+        assert!(
+            !state.running.load(Ordering::SeqCst),
+            "running still cleared ⇒ liveness Gone after the harmless dst-EOF forward"
+        );
+
+        // Clause 3: the forward touched ONLY the dst leg — the independent sibling
+        // socketpair still round-trips a byte-distinct message end to end.
+        (&sibling_a).write_all(SIBLING_MSG).expect("sibling leg is fully live");
+        (&sibling_a).flush().ok();
+        sibling_b.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        let mut buf = [0u8; 32];
+        let n = (&sibling_b).read(&mut buf).expect("sibling leg still readable");
+        assert_eq!(
+            &buf[..n],
+            SIBLING_MSG,
+            "the dst-EOF half-close forward must be scoped to the dst leg's write side — an \
+             independent direction is entirely undisturbed"
         );
     }
 }
