@@ -4,6 +4,12 @@
 > session was pre-run by the orchestrator; this records the locked decision set
 > formalized into signatures + the reconciler edit + ADR-0073). Lean density.
 > Closes the DISCUSS `[D1]` hard gate. Full record: **ADR-0073**.
+>
+> **DDD-14 addendum (Morgan, 2026-07-01).** DDD-1..13 are the DESIGN-wave decision
+> set (ADR-0073). DDD-14 is a later DELIVER-surfaced pin: the error model for the
+> A1 pump half-close-forward's failed `shutdown(SHUT_WR)`, closing the gap the
+> A1 amendment left silent. Its full record is the **ADR-0070 A1 amendment
+> addendum (2026-07-01) § "The failed-`SHUT_WR` error model"**, NOT ADR-0073.
 
 - **`design/review-design-iteration-4.md` is the CURRENT DESIGN review handoff**
   (2026-06-30, verdict `conditionally_approved`). Its only finding is a High
@@ -46,6 +52,7 @@
 | DDD-10 | `restart` idempotency posture = **level-triggered coalescing**: generation advances monotonically per call (audited); the reconciler converges to **one** fresh instance for the latest generation. Sequential restarts each cycle the workload; concurrent / pre-placement restarts coalesce into one cycle. Only 404 refuses. | Correct rollout-restart posture — a "replace the instance" op is definitionally a *level*, not a command queue; coalescing is the architecturally correct contract (per-generation consumption would graft an edge-triggered replay queue onto the reconciler, the anti-pattern ADR-0064's two-primitive doctrine rejects). Differs from `stop`'s sticky-sentinel idempotency. | ADR-0073 item 1 / § "Idempotency posture: level-triggered coalescing"; **iteration-2 review Critical** |
 | DDD-11 | `RestartOutcome` PINNED (was open): two variants, classified from the check-exists read's `/stop` lookup (present ⇒ `Resumed`, absent ⇒ `Restarted`), before the bump; label cosmetic, placement is the reconciler's | Resolves review Finding 2 — no residual open question. | ADR-0073 item 1 |
 | DDD-12 | Running-origin sequencing PINNED as the R1–R5 state-transition table (stamp `observed_generation` on the placement tick, never the stop tick; exactly one `StopAllocation` across draining ticks) | Resolves review Finding 4 — the sequencing is load-bearing; DELIVER pins only the existing-branch wiring, not the machine. | ADR-0073 item 5 |
+| DDD-14 | **A1 failed-`SHUT_WR` error model = Option B (invariant tripwire).** The half-close forward's `libc::shutdown(dst_fd, SHUT_WR)` return is inspected, NOT discarded: silent on `{0, ENOTCONN}` (success + the documented harmless no-op), `tracing::error!(name: "mtls.pump.half_close_forward_failed", errno, …)` + `debug_assert!(false, …)` on any other errno (the `EBADF`/`ENOTSOCK` family — unreachable unless the join-before-close leg-ownership invariant is broken, i.e. a platform bug). Pure diagnostic, NO behavior change (the connection still reclaims via the sibling `TransportDeath` backstop + terminal-teardown). NO new API surface — a two-arm `match` mirroring `set_best_effort_tcp_opt` (`mod.rs:544-577`). Options A (`let _`) and C (escalate to `mark_exited(TransportDeath)`) rejected. | Closes the error-model gap the A1 amendment left silent (it pinned SUCCESS, not FAILURE) after a code review flagged the discarded `c_int`. `EBADF` is structurally unreachable-unless-invariant-violated (`reclaim_connection` joins every pump before `drop(state.legs)`), `ENOTCONN` is the documented no-op → a tripwire that surfaces a platform bug is right-sized; A over-absorbs (`development.md` § "Errors"), C over-engineers an unreachable-errno escalation redundant with the backstop. D-MTLS-16 is NOT violated by the error path (it governs the *clean* half-close, not a failed one). | **ADR-0070 A1 amendment addendum (2026-07-01) § "The failed-`SHUT_WR` error model"**; RCA Root Cause A; code review of `splice.rs:252-269` |
 
 ## Architecture Summary
 

@@ -263,8 +263,43 @@ fn forward_half_close_if_source_eof(dst_fd: RawFd, exit: PumpExit, state: &PumpS
     // adapter's per-connection table owns it) and does not touch the sibling
     // direction's read side — half-close correctness (D-MTLS-16) is preserved. Works
     // uniformly on AF_INET (production leg fds) and AF_UNIX (test socketpair).
-    unsafe {
-        libc::shutdown(dst_fd, libc::SHUT_WR);
+    let rc: libc::c_int = unsafe { libc::shutdown(dst_fd, libc::SHUT_WR) };
+    if rc == 0 {
+        return; // the forward succeeded
+    }
+    // Read errno IMMEDIATELY, before any other syscall could clobber it (Option B,
+    // ADR-0070 A1 amendment addendum "The failed-`SHUT_WR` error model — Option B
+    // invariant tripwire"). Mirrors the `set_best_effort_tcp_opt` errno-match idiom.
+    let errno = std::io::Error::last_os_error().raw_os_error();
+    match errno {
+        // The documented harmless no-op: the dst leg's peer is already gone / its
+        // write side is already shut (the `n_out == 0` DESTINATION-clean-EOF grouping,
+        // or a peer that FIN'd between the source EOF and this forward). No effect to
+        // mirror; return silently. No event, no assert.
+        Some(libc::ENOTCONN) => {}
+        // Any OTHER errno (incl. EBADF / ENOTSOCK, or a `None` non-errno) can ONLY mean
+        // the join-before-close leg-ownership invariant was violated: `reclaim_connection`
+        // (`mod.rs:242-256`) joins every pump before `drop(state.legs)`, so a LIVE pump's
+        // `dst_fd` can never be closed underneath it. In debug builds this faults; in
+        // release it logs-and-continues (reclaim still happens via the sibling
+        // `TransportDeath` backstop + terminal teardown — NO behavior change here).
+        other => {
+            let errno = other.unwrap_or(0);
+            tracing::error!(
+                name: "mtls.pump.half_close_forward_failed",
+                errno,
+                dst_fd,
+                "half-close forward shutdown(SHUT_WR) failed on a live dst_fd — the \
+                 reclaim_connection join-before-drop(legs) leg-ownership invariant was violated \
+                 (a live pump's dst_fd must never be closed underneath it)"
+            );
+            // Tripwire: debug builds fault; release builds log-and-continue (reclaim
+            // still happens via the sibling TransportDeath backstop + terminal teardown).
+            debug_assert!(
+                false,
+                "half-close forward on a live dst_fd must not fail (errno {errno}); join-before-close ownership invariant violated"
+            );
+        }
     }
 }
 
@@ -965,5 +1000,74 @@ mod tests {
             "the dst-EOF half-close forward must be scoped to the dst leg's write side — an \
              independent direction is entirely undisturbed"
         );
+    }
+
+    // ========================================================================
+    // A1 amendment addendum (ADR-0070, 2026-07-01) — the failed-`SHUT_WR` error
+    // model (Option B invariant tripwire). The pump's terminal-exit forward over
+    // (dst_fd, PumpExit, PumpState) is its own driving port (Mandate 2). The
+    // observable is real syscall behaviour: `shutdown(SHUT_WR)` returns 0 on a live
+    // connected leg (silent), ENOTCONN on an unconnected socket (silent — the
+    // documented harmless no-op), and EBADF on a closed/invalid fd (the tripwire —
+    // the join-before-close ownership invariant was violated).
+    //
+    // Case 1 (SUCCESS is silent) is already pinned by
+    // `source_clean_close_forwards_half_close_to_dst_and_does_not_reclaim` above (a
+    // LIVE connected dst returns 0, the peer surfaces EOF, no panic) — not duplicated
+    // here. The two tests below pin the ENOTCONN allow-list arm and the tripwire arm.
+    // ========================================================================
+
+    /// ENOTCONN-IS-SILENT: `shutdown(SHUT_WR)` on an UNCONNECTED socket returns
+    /// `ENOTCONN` — the documented harmless no-op (the dst leg's peer already gone /
+    /// write side already shut, the `n_out == 0` dst-EOF grouping). The forward must
+    /// return normally with NO panic. This is the mutation-killer for dropping
+    /// `ENOTCONN` from the silent allow-list: a mutation that routes `ENOTCONN` to the
+    /// tripwire arm would `debug_assert!(false)` and panic this test.
+    #[test]
+    fn graceful_forward_on_enotconn_is_silent() {
+        // A fresh unconnected AF_INET stream socket. `shutdown(SHUT_WR)` on it returns
+        // ENOTCONN (the socket was never connected), exercising the silent allow-list
+        // arm without a live peer.
+        // SAFETY: `socket(2)` with a valid domain/type/protocol triad; the returned fd
+        // is closed at the end of the test.
+        let raw_fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert!(raw_fd >= 0, "socket(AF_INET, SOCK_STREAM) must succeed");
+
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+
+        // A genuine non-teardown `Graceful` (stop == false). The forward must return
+        // normally — ENOTCONN is the harmless no-op, not the tripwire.
+        forward_half_close_if_source_eof(raw_fd, PumpExit::Graceful, &state);
+
+        // SAFETY: `raw_fd` was returned live by `socket(2)` above and not closed yet.
+        unsafe {
+            libc::close(raw_fd);
+        }
+    }
+
+    /// TRIPWIRE-FIRES-ON-INVALID-FD (RED→GREEN regression): `shutdown(SHUT_WR)` on a
+    /// deliberately-invalid fd returns `-1`/`EBADF`, which can ONLY mean the
+    /// join-before-close leg-ownership invariant was violated (a live pump's `dst_fd`
+    /// was closed underneath it). The Option B tripwire's `debug_assert!(false, ...)`
+    /// must panic. Against the pre-fix code (bare `libc::shutdown(...)` discard) this
+    /// test FAILS (no panic) — that RED proves the regression; after the fix it PASSES.
+    #[test]
+    #[should_panic(expected = "join-before-close")]
+    fn graceful_forward_on_invalid_fd_fires_tripwire() {
+        // Create a socketpair and close BOTH ends: `held`'s raw fd is now invalid, so
+        // `shutdown(SHUT_WR)` on it returns EBADF — modelling a `dst_fd` that was
+        // closed underneath a "live" pump (the ownership-invariant violation).
+        let (held, peer) = dst_socketpair();
+        let dead_fd = held.as_raw_fd();
+        drop(held);
+        drop(peer);
+
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+
+        // A genuine non-teardown `Graceful` (stop == false) against the now-invalid fd.
+        // The EBADF errno routes to the tripwire arm ⇒ debug_assert!(false, ...) panics.
+        forward_half_close_if_source_eof(dead_fd, PumpExit::Graceful, &state);
     }
 }

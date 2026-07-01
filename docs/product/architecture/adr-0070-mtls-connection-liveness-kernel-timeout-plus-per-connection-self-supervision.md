@@ -724,6 +724,114 @@ bare FIN by design. (If a future consumer needs the TLS-graceful close — an
 external non-Overdrive peer that strictly requires `close_notify` — that is a
 separate, later refinement, not a fail-fast blocker.)
 
+### The failed-`SHUT_WR` error model — Option B invariant tripwire (pins the `let _` gap)
+
+The A1 decision above (2026-07-01) pinned the **success** model of the
+half-close forward (`SHUT_WR` mirrors the FIN; do NOT reclaim on `Graceful`)
+but left the **failure** model of `libc::shutdown(dst_fd, SHUT_WR)` — what a
+`-1` return means and what to do about it — unpinned. The first implementation
+(`forward_half_close_if_source_eof`, `splice.rs:252-269`) discarded the `c_int`
+return with `unsafe { libc::shutdown(dst_fd, SHUT_WR); }`. Code review flagged
+the bare discard. This addendum pins that error model. **Accepted (2026-07-01),
+same amendment lineage.**
+
+**Fact base (verified against the code, not re-derived):**
+
+1. **`EBADF` / `ENOTSOCK` are structurally UNREACHABLE at this call unless a
+   platform ownership invariant is violated.** The only site that closes a leg
+   fd is `reclaim_connection` (`mod.rs:242-256`), which `stop_and_join()`s the
+   primary pump AND every aux pump BEFORE `drop(state.legs)`. A pump executing
+   `forward_half_close_if_source_eof` is by definition not-yet-joined, so
+   reclaim is blocked at the join and cannot have closed `dst_fd`; the pumps
+   `std::mem::forget(dst)` and never close leg fds themselves. `dst_fd` is
+   therefore provably live at the shutdown call. `EBADF`/`ENOTSOCK` can appear
+   ONLY if the join-before-close ownership invariant is broken — a **platform
+   logic error**, not a runtime race.
+2. **The only reachable non-zero return is `ENOTCONN`** — the "peer already
+   gone / dst write side already shut" case the A1 docstring already documents
+   as a **deliberate harmless no-op** (`splice.rs:243-248`, the
+   `splice_pipe_to_dst` `n_out == 0` destination-clean-EOF shape grouped into
+   the forward path on purpose). On Linux, `SHUT_WR` on a connected socket
+   whose peer has already FIN-closed still returns `0`; `ENOTCONN` is the
+   not-connected shape.
+3. **A genuinely-dead `dst_fd` is already backstopped** by the sibling pump:
+   the pump that also touches that leg hits a transport error →
+   `PumpExit::TransportDeath` → `mark_exited` fires the (B) self-teardown →
+   `reclaim_connection`. Even absent any change, a truly-dead leg is reclaimed
+   via the sibling, so the failure is not a silent eternal hang.
+
+**Decision — Option B (invariant tripwire; a pure diagnostic, no behavior
+change).** Inspect the `shutdown` return. Treat `{0, ENOTCONN}` as success and
+stay silent (both are the documented no-op / success shapes of a correct
+half-close). On **any other errno** — the `EBADF`/`ENOTSOCK` family that fact 1
+proves can only mean the join-before-close ownership invariant was violated —
+emit a structured `tracing::error!` naming the violated invariant, and do
+**nothing else**: the forward's job is done (the FIN either propagated or the
+leg was already gone), the connection still reclaims via the sibling backstop
+(fact 3) and the normal terminal-teardown path. The event is a **tripwire that
+surfaces a platform bug**, not a runtime condition the datapath defends against.
+
+- **Rejected — Option A (`let _ = shutdown(...)`).** Silently absorbing the
+  return violates `development.md` § "Errors" ("never silently absorb a
+  fallible boundary read into a default") and § "Check-and-act must be atomic"
+  (a discarded syscall verdict). The one non-success errno that is genuinely
+  benign (`ENOTCONN`) is *known and named*, so the honest shape allow-lists it
+  explicitly rather than blanket-discarding — the same discipline the sibling
+  `set_best_effort_tcp_opt` (`mod.rs:544-577`) already applies to
+  `setsockopt`'s `EOPNOTSUPP`/`ENOPROTOOPT`. A blanket `let _` would also
+  swallow the `EBADF` tripwire that is this addendum's whole point.
+- **Rejected — Option C (fail-closed: escalate an unexpected failure to
+  `mark_exited(TransportDeath)` / self-teardown).** Over-engineered for the
+  reachable fact base. The only errno Option C would escalate on is the
+  unreachable-unless-invariant-violated `EBADF`/`ENOTSOCK` family (fact 1);
+  `ENOTCONN` is the documented no-op and must NOT escalate. Escalating a
+  should-never-happen platform-logic error into a connection teardown adds a
+  reclaim path that the sibling backstop (fact 3) + terminal-teardown already
+  cover, buys no reliability the tripwire + backstop don't already give, and
+  couples the half-close forward to the teardown machinery it was deliberately
+  kept out of. (For the record — asked and answered so it is not re-litigated:
+  escalating on the *error* path would NOT violate D-MTLS-16. D-MTLS-16 governs
+  the *successful* clean half-close — "a clean `Graceful` close does not
+  reclaim a connection whose sibling may be live." A failed `SHUT_WR` is not a
+  clean half-close; it is a platform-invariant violation. So D-MTLS-16 does not
+  forbid Option C — Option C is rejected on the "unreachable errno / redundant
+  with the backstop / needless coupling" grounds above, not on a D-MTLS-16
+  conflict.)
+
+**The pinned error model (binding on the crafter — no new public API surface):**
+
+- **Errno allow-list (silent):** `0` (success) and `libc::ENOTCONN` (the
+  documented harmless no-op — peer already gone / write side already shut). No
+  event, no assert. These are the two shapes of a *correct* half-close forward.
+- **Errno tripwire (any other errno, e.g. `EBADF` / `ENOTSOCK`):** emit
+  `tracing::error!(name: "mtls.pump.half_close_forward_failed", errno = <raw>,
+  …)` — severity **`error`** (this is a should-never-happen ownership-invariant
+  violation, strictly more severe than the existing `warn`-level
+  `mtls.pump.stalled` / `mtls.transport_death.unsupported` events, per the
+  module's `mtls.pump.*` / `mtls.transport_death.*` naming idiom). The message
+  names the violated invariant: *the join-before-close leg-ownership guarantee
+  (`reclaim_connection` joins every pump before `drop(state.legs)`) — a live
+  pump's `dst_fd` must never be closed underneath it.* No behavior change: the
+  connection still reclaims via the sibling `TransportDeath` backstop + the
+  terminal-teardown path.
+- **`debug_assert!` — INCLUDED.** Add `debug_assert!(false, "…")` on the
+  tripwire branch (dev/test builds fault-inject-and-catch the invariant break;
+  release builds emit the structured `error` event and continue). This matches
+  `development.md` § "Logically unreachable … use `unreachable!()`" *intent*
+  (signal a logic error, don't silently absorb) while staying non-fatal in
+  production — a `SHUT_WR` failure is a diagnostic signal, not a reason to
+  panic a live node handling other connections. (`unreachable!()` /
+  `.expect()` are wrong here: both abort the process, and `.expect()` is banned
+  in production library code — the errno is *unreachable-unless-a-bug*, which is
+  exactly the `debug_assert!` + structured-error shape, not an unconditional
+  panic.)
+- **No new API surface.** No classifier enum, no new `PumpExit` variant, no new
+  error type — a two-arm `match` on `std::io::Error::last_os_error()
+  .raw_os_error()` at the existing call site, structurally identical to the
+  in-module `set_best_effort_tcp_opt` errno `match` (`mod.rs:564-577`). Adding a
+  type here would be the invented-surface anti-pattern CLAUDE.md § "Implement to
+  the design — never invent API surface" forbids.
+
 ### The `teardown`-vs-source-EOF distinction — do NOT forward on deliberate teardown
 
 `PumpExit::Graceful` is returned in **three** shapes in the pump loops, and only
@@ -790,6 +898,16 @@ retained for #232 and is untouched by this amendment.
   `graceful_eof_exit_does_not_fire_self_teardown` unit test — that test's
   invariant (no reclaim on `Graceful`) is **preserved**; the new test adds the
   *forward* on top of it.
+- **The failed-`SHUT_WR` tripwire is asserted by a Tier-2/unit test over the
+  errno branch, not by a live `EBADF` (which is unreachable).** A unit test
+  drives `forward_half_close_if_source_eof` against (a) a live `dst` → returns
+  `0`, silent; (b) an already-half-closed / peer-gone `dst` → `ENOTCONN`,
+  silent (no event, no assert — the documented no-op); (c) a deliberately
+  bad/closed fd → the tripwire branch fires (`mtls.pump.half_close_forward_failed`
+  in release; `debug_assert!` in dev). Case (c) is a *test-only* fault
+  injection of the ownership-invariant break; production never reaches it unless
+  a real join-before-close bug lands, which is precisely what the tripwire
+  exists to surface.
 - **`sock_destroy` remains excluded (#61).** A1 is a userspace-leg
   `shutdown(SHUT_WR)`; it needs no `sock_destroy`. The AC's "NO `sock_destroy`"
   constraint holds under A1.
@@ -811,9 +929,23 @@ retained for #232 and is untouched by this amendment.
 - **The pump surface this binds:**
   `crates/overdrive-dataplane/src/mtls/splice.rs` (`run_decrypt_pump` /
   `run_encrypt_pump` / `mark_exited` / the `PumpExit::Graceful` terminal
-  exits); `crates/overdrive-dataplane/src/mtls/mod.rs` (`reclaim_connection` /
-  the terminal-teardown path). Leg topology verified in
+  exits; `forward_half_close_if_source_eof` at 252-269 — the `SHUT_WR` call
+  the failed-forward addendum binds; the two call sites at 448 / 538);
+  `crates/overdrive-dataplane/src/mtls/mod.rs` (`reclaim_connection` at
+  242-256 — the join-before-close ownership invariant fact 1 rests on; the
+  terminal-teardown path). Leg topology verified in
   `crates/overdrive-dataplane/src/mtls/outbound.rs` / `inbound.rs`.
+- **Failed-`SHUT_WR` error-model addendum (2026-07-01):** motivated by a code
+  review of `forward_half_close_if_source_eof` (`splice.rs:252-269`) flagging
+  the discarded `libc::shutdown` `c_int` return (`unsafe { libc::shutdown(…); }`
+  with no inspection). The in-module errno-classification precedent the pinned
+  two-arm `match` mirrors is
+  `set_best_effort_tcp_opt` (`crates/overdrive-dataplane/src/mtls/mod.rs:544-577`,
+  allow-list `EOPNOTSUPP`/`ENOPROTOOPT` → warn-and-skip, propagate the rest);
+  the `mtls.pump.*` / `mtls.transport_death.*` event-name idiom
+  (`mod.rs:209/224/569`). Governing rules: `development.md` § "Errors" /
+  § "Logically unreachable … `unreachable!()`" / § "Check-and-act must be
+  atomic"; CLAUDE.md § "Implement to the design — never invent API surface".
 - **Driving gate:** the S-DBN-CHURN Tier-3 oracle AT
   (`in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend`,
   `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs`);
