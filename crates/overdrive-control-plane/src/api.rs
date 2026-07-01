@@ -122,6 +122,39 @@ pub enum StopOutcome {
     AlreadyStopped,
 }
 
+/// Response for `POST /v1/jobs/{id}/restart`. Per ADR-0073 item 2 the
+/// body shape is `{ workload_id, outcome }` where `outcome ∈
+/// { "restarted", "resumed" }`. 404 on unknown workload (separate path).
+///
+/// `outcome` is a cosmetic, best-effort label classified from the
+/// `/stop` presence at the handler's single check-exists read — the
+/// *placement* decision is the reconciler's generation gate, never the
+/// label (ADR-0073 item 1 race semantics).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RestartWorkloadResponse {
+    pub workload_id: String,
+    pub outcome: RestartOutcome,
+}
+
+/// Outcome of `POST /v1/jobs/{id}/restart` per ADR-0073 item 2.
+///
+/// The two-variant decision is PINNED. The variant is the rollout-restart
+/// breadth observed at the handler's check-exists read; both correspond to
+/// "the workload was (or is being) cycled toward the latest desired
+/// generation" — the level-triggered coalescing contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RestartOutcome {
+    /// The workload had no live stop intent at the check-exists read; its
+    /// instance was ended and a fresh one will be placed (generation
+    /// bumped + any stop sentinel cleared).
+    Restarted,
+    /// The workload was operator-stopped (a `/stop` sentinel was present at
+    /// the check-exists read) and the restart resumes it (generation
+    /// bumped + sentinel cleared).
+    Resumed,
+}
+
 /// Outcome of an idempotent `POST /v1/jobs` submission.
 ///
 /// Distinguishes "your spec landed fresh" from "your spec was already
@@ -387,6 +420,7 @@ pub struct ErrorBody {
         crate::handlers::submit_workload,
         crate::handlers::describe_workload,
         crate::handlers::stop_workload,
+        crate::handlers::restart_workload,
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
@@ -397,6 +431,8 @@ pub struct ErrorBody {
         IdempotencyOutcome,
         StopWorkloadResponse,
         StopOutcome,
+        RestartWorkloadResponse,
+        RestartOutcome,
         WorkloadDescription,
         // ADR-0064 describe-side wire shape — `DescribeSpecOutput` is the
         // kind-discriminated `oneOf` response now carried by

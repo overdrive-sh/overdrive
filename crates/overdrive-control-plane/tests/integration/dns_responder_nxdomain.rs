@@ -34,26 +34,26 @@
 //! and bypasses the per-netns resolv.conf bind-mount). The negative answer's 1s
 //! SOA TTL (DDN-8) lets a recovery re-query land promptly.
 //!
-//! ## NXDOMAIN-02 recovery leg is #249-BLOCKED (read before editing)
+//! ## NXDOMAIN-02 recovery leg — driven through the production restart verb
 //!
-//! S-DBN-NXDOMAIN-02's final leg ("re-deploy/recover the SAME `<job>` to
-//! Running-AND-HEALTHY after the stop, and prove getent resolves the SAME F")
-//! is the EXACT `stop_and_converge` + re-deploy-same-`<job>` shape the 02-02
-//! S-DBN-WS-STABLE / S-DBN-CHURN ATs proved is UNREACHABLE through the
-//! production driving ports: `POST /v1/jobs/{id}/stop` writes a STICKY,
-//! OVERRIDING operator-stop intent (`IntentKey::for_workload_stop`); the
-//! `WorkloadLifecycle` reconciler DELIBERATELY refuses to schedule a
-//! replacement alloc for an operator-stopped workload (ADR-0037 Amendment /
-//! §Bug 3), a same-spec `POST /v1/jobs` resubmit takes the `put_if_absent →
-//! KeyExists → Unchanged` path which does NOT clear the operator-stop key, and
-//! there is NO production verb that does. So the recovered server never reaches
-//! Running. That leg is `#[ignore]`'d here and deferred to
-//! overdrive-sh/overdrive#249 (backend instance replacement / restart-after-
-//! stop), mirroring the landed S-DBN-WS-STABLE / S-DBN-CHURN deferral verbatim.
-//! The withhold-not-release F-retention invariant is ALREADY Tier-1
-//! mutation-gated at 01-04 (S-DBN-FRONTEND-03 / S-DBN-IDX-02). The REACHABLE
-//! NXDOMAIN-02 legs (resolve-to-F → stop → re-query gets NXDOMAIN, NEVER a
-//! stale addr) ARE driven GREEN here.
+//! S-DBN-NXDOMAIN-02's final leg ("recover the SAME `<job>` to
+//! Running-AND-HEALTHY after the stop, and prove getent resolves the SAME F") is
+//! driven through the production `overdrive workload restart server` verb =
+//! `POST /v1/jobs/server/restart` (the `restart_workload` handler; ADR-0073,
+//! shipped in Phase 01). The restart handler atomically bumps the desired-run
+//! generation AND clears the `/stop` sentinel in ONE `IntentStore::txn`, so the
+//! `WorkloadLifecycle` reconciler places a FRESH instance (stopped-origin
+//! restart, R4). A same-spec `POST /v1/jobs` re-deploy is NOT used — it takes the
+//! `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
+//! operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
+//! `WorkloadLifecycle` §Bug 3); `restart` is the verb that does. The `<job>`
+//! stays DECLARED across the stop (the sentinel does NOT delete
+//! `workloads/server`), so the `FrontendAddrAllocator` RETAINS the SAME F —
+//! withhold-not-release, additionally Tier-1 mutation-gated at 01-04
+//! (S-DBN-FRONTEND-03 / S-DBN-IDX-02). The REACHABLE NXDOMAIN-02 legs
+//! (resolve-to-F → stop → re-query gets NXDOMAIN, NEVER a stale addr) and the
+//! restart-recovery leg (re-resolve the SAME F byte-for-byte) are ALL driven
+//! GREEN here.
 //!
 //! Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`. A non-root run SKIPs
 //! cleanly (the K1 root gate). `uname -r` is recorded. Run via `cargo xtask
@@ -601,6 +601,26 @@ async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
     status.is_success()
 }
 
+/// Restart a deployed workload through the real in-process restart driving port
+/// (`POST /v1/jobs/{id}/restart`, the `restart_workload` handler; ADR-0073), the
+/// SAME path `overdrive workload restart <id>` drives. The handler atomically
+/// bumps the desired-run generation AND clears the `/stop` sentinel in ONE
+/// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
+/// instance (new AllocationId) because `observed_generation < generation`.
+/// Empty request body; returns `true` on a 2xx accept. Mirrored from the
+/// `dns_responder_walking_skeleton.rs` (02-02) precedent.
+async fn run_server_restart(skeleton: &Skeleton, workload_id: &str) -> bool {
+    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/restart", skeleton.bound.port());
+    let resp =
+        skeleton.client.post(&url).send().await.expect("restart: POST /v1/jobs/{id}/restart");
+    let status = resp.status();
+    let body = resp.bytes().await.expect("read restart response body");
+    if !status.is_success() {
+        eprintln!("[04-01] restart non-success: {status} {}", String::from_utf8_lossy(&body));
+    }
+    status.is_success()
+}
+
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
     let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA PEM");
     reqwest::Client::builder()
@@ -906,7 +926,7 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 
 // ============================================================================
 // S-DBN-NXDOMAIN-02 — after the backend stops, the <job> is WITHHELD (NXDOMAIN);
-// the stable F is NOT released. (Recovery leg #249-BLOCKED — see below.)
+// the stable F is NOT released. (Recovery leg driven by the restart verb below.)
 // ============================================================================
 
 /// S-DBN-NXDOMAIN-02 (US-DBN-4 · K-DBN-2; withhold-not-release, Finding-2).
@@ -920,11 +940,12 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 /// the `name_index` WITHHELD the answer (zero running-and-healthy backends) —
 /// and NEVER the stale F's translated backend nor any stale addr.
 ///
-/// The withhold-not-release RECOVERY leg ("re-deploy/recover the SAME `<job>`
-/// to Running-AND-HEALTHY → getent resolves the SAME F") is asserted in the
-/// SEPARATE `#[ignore]`'d recovery test below — it needs a production
-/// restart-after-stop verb that does NOT exist (#249). This test proves the
-/// REACHABLE legs: resolve-to-F, then stop → re-query → NXDOMAIN, no stale addr.
+/// The withhold-not-release RECOVERY leg ("recover the SAME `<job>` to
+/// Running-AND-HEALTHY → getent resolves the SAME F") is asserted in the
+/// SEPARATE recovery test below, driven through the production restart verb
+/// (`POST /v1/jobs/server/restart`; ADR-0073, shipped in Phase 01). This test
+/// proves the REACHABLE legs: resolve-to-F, then stop → re-query → NXDOMAIN, no
+/// stale addr.
 ///
 /// PORT-TO-PORT litmus: regressing the WITHHOLD-on-zero-healthy seam (the index
 /// would keep answering the stale F after the backend stopped) takes this RED.
@@ -1038,8 +1059,8 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
     eprintln!(
         "[03-01] S-DBN-NXDOMAIN-02 VERDICT: WORKS — after the production stop the <job> is WITHHELD \
          (NXDOMAIN), no stale F ({f_before}) returned, on kernel {kr}. The withhold-not-release \
-         RECOVERY observable is the #249-blocked recovery test (allocator F-retention is Tier-1 \
-         mutation-gated at 01-04). (MERGE GATE: pinned-6.18 Tier-3 matrix, ADR-0068.)"
+         RECOVERY observable is driven by the restart-verb recovery test (allocator F-retention is \
+         Tier-1 mutation-gated at 01-04). (MERGE GATE: pinned-6.18 Tier-3 matrix, ADR-0068.)"
     );
 
     stop_and_converge(&skeleton, "client").await;
@@ -1049,23 +1070,35 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
 /// S-DBN-NXDOMAIN-02 RECOVERY leg (withhold-not-release, Finding-2) — the SAME
 /// `<job>` recovered to Running-AND-HEALTHY after a stop resolves to the SAME F.
 ///
-/// BLOCKED (#249 — backend instance replacement / restart-after-stop). This
-/// leg's "WHEN: re-deploy/recover the SAME `<job>` 'server' to
-/// Running-AND-HEALTHY after the stop" is the EXACT `stop_and_converge` +
-/// re-deploy-same-`<job>` shape the 02-02 S-DBN-WS-STABLE / S-DBN-CHURN ATs
-/// proved is UNREACHABLE through the production driving ports: `POST
-/// /v1/jobs/{id}/stop` writes a STICKY, OVERRIDING operator-stop intent
-/// (`IntentKey::for_workload_stop`); the `WorkloadLifecycle` reconciler
-/// DELIBERATELY refuses to schedule a replacement alloc for an operator-stopped
-/// workload (ADR-0037 Amendment / §Bug 3); a same-spec `POST /v1/jobs` resubmit
-/// takes the `put_if_absent → KeyExists → Unchanged` path which does NOT clear
-/// the operator-stop key; and there is NO production verb that does. So the
-/// recovered server never reaches Running and `deploy_and_wait_running` times
-/// out. The withhold-not-release F-retention invariant is ALREADY Tier-1
-/// mutation-gated at 01-04 (S-DBN-FRONTEND-03 / S-DBN-IDX-02); only its Tier-3
-/// `getent`-observable recovery is gated on #249. Distinct from #211 (deletion,
-/// which WOULD release F). Un-ignore when #249 lands.
-#[ignore = "03-01 DEFERRED to overdrive-sh/overdrive#249 (backend instance replacement / restart-after-stop): recovering the SAME <job> to Running-AND-HEALTHY after a POST /v1/jobs/{id}/stop needs a replace/restart verb that does not exist — operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3), a same-spec re-deploy does not clear it. The withhold-not-release F-retention invariant is Tier-1 mutation-gated at 01-04 (S-DBN-FRONTEND-03/IDX-02); only the Tier-3 getent recovery observable is #249-blocked. Same dependency as 02-02 S-DBN-WS-STABLE / S-DBN-CHURN. Un-ignore when #249 lands. See docstring."]
+/// The recovery is driven by the production `overdrive workload restart server`
+/// verb = `POST /v1/jobs/server/restart` (the `restart_workload` handler;
+/// ADR-0073, shipped in Phase 01). The `<job>` "server" is deployed
+/// Running-AND-HEALTHY (getent resolves the stable F), STOPPED through
+/// `POST /v1/jobs/server/stop` (its name resolves NXDOMAIN while stopped), then
+/// RECOVERED via the restart verb. The restart handler atomically bumps the
+/// desired-run generation AND clears the `/stop` sentinel in ONE
+/// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
+/// instance (new AllocationId, stopped-origin restart R4) because
+/// `observed_generation < generation`. This is the production
+/// restart-after-stop path the earlier "no verb exists" narrative (now false —
+/// the verb shipped in Phase 01) said was missing. A same-spec
+/// `POST /v1/jobs` re-deploy is NOT used here precisely because it takes the
+/// `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
+/// operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
+/// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. The `<job>`
+/// stays DECLARED across the stop (operator-stop writes a sentinel; it does NOT
+/// delete `workloads/server`), so the `FrontendAddrAllocator`'s idempotent
+/// `assign("server")` RETAINS the SAME F — the withhold-not-release F-retention
+/// invariant, additionally Tier-1 mutation-gated at 01-04 (S-DBN-FRONTEND-03 /
+/// S-DBN-IDX-02). Distinct from #211 (deletion, which WOULD release F).
+///
+/// PORT-TO-PORT litmus: regressing the allocator to release-on-terminal (F freed
+/// on the stop) would derive a DIFFERENT F on recovery and take the byte-for-byte
+/// re-resolve RED; a broken restart verb (the server never re-reaches Running)
+/// takes the recovery wait RED.
+///
+/// MERGE-BLOCKING on the pinned-6.18 Tier-3 matrix (ADR-0068). Sibling:
+/// S-DBN-WS-STABLE (02-01) proved F is byte-stable across the restart verb.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
     if !is_root() {
@@ -1098,12 +1131,35 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
     .expect("resolve task join")
     .unwrap_or_else(|| panic!("recovery: getent must resolve the stable F before the stop"));
 
-    // WHEN: stop the server, then RE-DEPLOY the SAME <job> "server" (#249: the
-    // operator-stop intent is sticky/overriding; this re-deploy does NOT reach
-    // Running, so deploy_and_wait_running times out — the #249 collision).
+    // WHEN: stop the server (name resolves NXDOMAIN while stopped), then RECOVER
+    // the SAME <job> "server" through the PRODUCTION restart verb — `POST
+    // /v1/jobs/server/restart` (ADR-0073). The restart handler atomically bumps
+    // the desired-run generation AND clears the `/stop` sentinel, so the
+    // `WorkloadLifecycle` reconciler places a FRESH instance (stopped-origin
+    // restart, R4). A same-spec `POST /v1/jobs` re-deploy is deliberately NOT
+    // used — it takes the `put_if_absent → KeyExists → Unchanged` path and does
+    // NOT clear the sticky operator-stop key.
     stop_and_converge(&skeleton, "server").await;
-    let _server_b2 =
-        deploy_and_wait_running(&skeleton, server_service_spec("server"), "server").await;
+    let restarted = run_server_restart(&skeleton, "server").await;
+    assert!(restarted, "recovery: the production restart verb must accept the recover-after-stop");
+    // The restart places a FRESH server instance; wait for it to reach Running
+    // before resolving (the <job> stayed DECLARED across the stop, so the
+    // allocator RETAINED F — withhold-not-release).
+    poll_until(Duration::from_secs(30), Duration::from_millis(200), || {
+        let obs = skeleton.obs();
+        async move {
+            let rows = obs.alloc_status_rows().await.ok()?;
+            rows.into_iter()
+                .find(|r| r.workload_id.as_str() == "server" && r.state == AllocState::Running)
+                .map(|_| ())
+        }
+    })
+    .await
+    .unwrap_or_else(|| {
+        panic!(
+            "recovery: the restart must place a FRESH server instance reaching Running within 30s"
+        )
+    });
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // THEN: getent re-resolves to the SAME F byte-for-byte (the allocator

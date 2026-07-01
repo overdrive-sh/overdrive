@@ -52,7 +52,7 @@ use overdrive_core::reconcilers::{
     WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{IntentStore, TxnOp};
 use overdrive_core::traits::observation_store::{
     ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
 };
@@ -1665,45 +1665,7 @@ async fn hydrate_desired(
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::WorkloadLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
-            let (job, intent_digest, probe_descriptors, service_ports) =
-                read_job(state, &workload_id).await?;
-            // ADR-0027: also read the stop intent. If present →
-            // desired_to_stop = true. The reconciler's Stop branch
-            // fires only when the spec is also Some (a stop intent
-            // for an absent job is a no-op).
-            let desired_to_stop = stop_intent_present(state, &workload_id).await?;
-
-            let nodes = baseline_nodes_phase1();
-            // `desired.allocations` is unused by the WorkloadLifecycle
-            // reconciler — it inspects `actual.allocations`.
-            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
-            // persisted workload-kind discriminator at
-            // `IntentKey::for_workload_kind` (written by `submit_workload` in
-            // slice 02-06). Absent / unparseable bytes default to
-            // `WorkloadKind::default()` (Service) per
-            // `from_discriminator_byte` forward-compat — preserves
-            // the kind-agnostic Service shape for legacy submits that
-            // predate the discriminator persistence.
-            let workload_kind = read_workload_kind(state, &workload_id).await?;
-            let service_spec_digest =
-                if workload_kind == WorkloadKind::Service { intent_digest } else { None };
-            let s = WorkloadLifecycleState {
-                workload_id: workload_id.clone(),
-                job,
-                desired_to_stop,
-                nodes,
-                allocations: BTreeMap::new(),
-                workload_kind,
-                service_spec_digest,
-                // GAP-8 close-out — Service-kind probes projected at the
-                // hydrate-desired boundary via `project_probe_descriptors`.
-                // Job-kind / Schedule / absent intent → empty vec.
-                probe_descriptors,
-                // canonical-workload-address-inbound-tproxy (D-A1, GH #241):
-                // declared Service listener ports projected at the same
-                // boundary via `project_service_listen_ports`.
-                service_ports,
-            };
+            let s = hydrate_workload_lifecycle_desired(state, &workload_id).await?;
             Ok(AnyState::WorkloadLifecycle(s))
         }
         // ADR-0064 §5 — the workflow-lifecycle reconciler's hydrate-desired.
@@ -2398,6 +2360,97 @@ async fn stop_intent_present(
     Ok(stop_bytes.is_some())
 }
 
+/// Build the `WorkloadLifecycle` reconciler's `desired` projection from
+/// the IntentStore. Extracted from the `hydrate_desired` match arm to
+/// keep it within `clippy::too_many_lines` (the same extraction shape
+/// the SvidLifecycle / ServiceMap arms use).
+async fn hydrate_workload_lifecycle_desired(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<WorkloadLifecycleState, ConvergenceError> {
+    let (job, intent_digest, probe_descriptors, service_ports) =
+        read_job(state, workload_id).await?;
+    // ADR-0027: also read the stop intent. If present →
+    // desired_to_stop = true. The reconciler's Stop branch fires only
+    // when the spec is also Some (a stop intent for an absent job is a
+    // no-op).
+    let desired_to_stop = stop_intent_present(state, workload_id).await?;
+    // backend-instance-replacement step 01-02 (ADR-0073 § 5): read the
+    // desired-run generation at `workloads/<id>/generation` — the
+    // sibling of the stop-intent read above. Bumped by
+    // `overdrive workload restart` (the atomic `TxnOp::IncrementU64`
+    // bump-and-clear). Absent ⇒ 0; a corrupt / short row decodes
+    // defensively to 0.
+    let generation = generation_value(state, workload_id).await?;
+
+    let nodes = baseline_nodes_phase1();
+    // `desired.allocations` is unused by the WorkloadLifecycle
+    // reconciler — it inspects `actual.allocations`. ADR-0037 Amendment
+    // 2026-05-10 / ADR-0047 §1: read the persisted workload-kind
+    // discriminator at `IntentKey::for_workload_kind` (written by
+    // `submit_workload`). Absent / unparseable bytes default to
+    // `WorkloadKind::default()` (Service) per `from_discriminator_byte`
+    // forward-compat — preserves the kind-agnostic Service shape for
+    // legacy submits that predate the discriminator persistence.
+    let workload_kind = read_workload_kind(state, workload_id).await?;
+    let service_spec_digest =
+        if workload_kind == WorkloadKind::Service { intent_digest } else { None };
+    Ok(WorkloadLifecycleState {
+        workload_id: workload_id.clone(),
+        job,
+        desired_to_stop,
+        generation,
+        nodes,
+        allocations: BTreeMap::new(),
+        workload_kind,
+        service_spec_digest,
+        // GAP-8 close-out — Service-kind probes projected at the
+        // hydrate-desired boundary via `project_probe_descriptors`.
+        // Job-kind / Schedule / absent intent → empty vec.
+        probe_descriptors,
+        // canonical-workload-address-inbound-tproxy (D-A1, GH #241):
+        // declared Service listener ports projected at the same boundary
+        // via `project_service_listen_ports`.
+        service_ports,
+    })
+}
+
+/// Read the desired-run generation at `workloads/<id>/generation`.
+///
+/// backend-instance-replacement step 01-02 (ADR-0073 § 5). The read
+/// sibling of [`stop_intent_present`] / [`read_workload_kind`] over the
+/// `workloads/<id>/...` key family, bumped by `overdrive workload
+/// restart`'s atomic `TxnOp::IncrementU64` (`handlers.rs`).
+///
+/// The key is derived through [`IntentKey::for_workload_generation`] —
+/// the single authority for the `workloads/<id>/generation` byte shape,
+/// the same constructor `overdrive workload restart` writes through
+/// (`handlers.rs`, ADR-0073 item 4). This read side delegates to it just
+/// like its siblings `read_workload_kind` / `stop_intent_present`
+/// delegate to `for_workload_kind` / `for_workload_stop`, so a future
+/// change to the key shape can only be made in one place and both sides
+/// follow.
+///
+/// The value is decoded through [`TxnOp::decode_counter`] — the read side
+/// of the `IncrementU64` contract (`intent_store.rs`) the writer commits
+/// through. Absent / corrupt / short (non-8-byte) rows decode to `0`
+/// rather than panicking (per `.claude/rules/development.md` § "Safe
+/// byte-slice access"); an exactly-8-byte row decodes big-endian. Routing
+/// the decode through the shared helper keeps every counter reader bound
+/// to the one contract instead of re-inlining the byte fiddling.
+async fn generation_value(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<u64, ConvergenceError> {
+    let gen_key = IntentKey::for_workload_generation(workload_id);
+    let gen_bytes = state
+        .store
+        .get(gen_key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    Ok(TxnOp::decode_counter(gen_bytes.as_deref()))
+}
+
 /// Read every persisted workflow-instance desired-intent from the
 /// `workflows/` prefix and project it into a per-instance state map keyed
 /// by [`CorrelationKey`] (ADR-0064 §5). Each row's value is the workflow
@@ -2730,6 +2783,7 @@ async fn hydrate_workload_lifecycle_actual(
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind,

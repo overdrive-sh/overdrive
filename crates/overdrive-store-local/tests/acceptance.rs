@@ -23,6 +23,10 @@ mod acceptance {
     mod put_if_absent;
     mod snapshot_roundtrip;
 
+    // backend-instance-replacement step 01-01 — `TxnOp::IncrementU64`
+    // atomic-monotonic bump-and-clear store primitive (ADR-0073 § item 4).
+    mod txn_increment_u64;
+
     // Phase-1-control-plane-core — step 03-06 `LocalObservationStore`.
     mod local_observation_store;
 

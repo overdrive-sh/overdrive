@@ -156,6 +156,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -167,6 +168,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
@@ -180,6 +182,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -221,6 +224,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -232,6 +236,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
@@ -272,6 +277,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -283,6 +289,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
@@ -329,6 +336,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
@@ -340,6 +348,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
+        generation: 0,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
@@ -354,6 +363,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
+        observed_generation: 0,
     };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -428,6 +438,7 @@ proptest! {
             workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop,
+            generation: 0,
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
                     workload_kind: WorkloadKind::default(),
@@ -439,6 +450,7 @@ proptest! {
             workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
+            generation: 0,
             nodes,
             allocations,
             workload_kind: WorkloadKind::default(),
@@ -453,7 +465,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new() };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new(), observed_generation: 0 };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the

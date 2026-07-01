@@ -168,6 +168,16 @@ mod acceptance {
     // `StopAllocation` / `FinalizeFailed`. Mirrors UI-05.
     mod workload_lifecycle_enqueues_bridge_on_alloc_transitions;
 
+    // backend-instance-replacement step 01-02 (ADR-0073 § 5) —
+    // `WorkloadLifecycle::reconcile` generation gate + current-instance-
+    // scoped veto + level-triggered coalescing + the R1-crash regression
+    // net (a fresh-alloc crash after restart must crash-restart, not wedge
+    // on a superseded operator-stop row). Drives the pure `reconcile()`
+    // driving port; asserts only on the returned `(Vec<Action>, NextView)`.
+    // S-BIR-RESTART-*, S-BIR-STOP-ONCE, S-BIR-COALESCE-*, S-BIR-SEQUENTIAL,
+    // S-BIR-REGRESSION-*, S-BIR-BUG3-PRESERVED, S-BIR-CURRENT-ALLOC.
+    mod workload_lifecycle_restart;
+
     // service-health-check-probes — Tier 1 acceptance for the
     // `[[health_check.*]]` TOML parser surface per ADR-0057 + ADR-
     // 0058 default-inference rule + the `ProbeResultRowEnvelope`

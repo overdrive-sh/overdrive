@@ -1119,3 +1119,119 @@ Eight properties the diagrams make explicit (rev 2):
    `UnknownWorkflow` every tick. Restart re-issue (`¬held → IssueSvid`) is RECOVERY,
    a *distinct* branch from this gated rotation. (ADR-0067 D8 / D1.)
 
+---
+
+## Backend instance replacement — `overdrive workload restart` + generation precursor (Mermaid)
+
+**Source:** `docs/feature/backend-instance-replacement/feature-delta.md` (DESIGN) + `design/wave-decisions.md`
+**ADR:** ADR-0073
+**Date:** 2026-06-29
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+  title System Context — Backend instance replacement (GH #249)
+
+  Person(ana, "Ana (platform engineer)", "Rolls a declared workload's instance; trusts `alloc status` as the source of truth")
+  Person(peer, "Mesh peer", "Dials `<job>.svc.overdrive.local`; must keep landing the live backend across a cycle")
+  System(overdrive, "Overdrive node", "Single binary — control plane + worker + dataplane. Adds `overdrive workload restart <id>`")
+  System_Ext(fs, "Local filesystem (redb)", "IntentStore (workloads/<id>, /stop, /generation) + ObservationStore (alloc_status)")
+  System_Ext(kernel, "Linux kernel", "netns/veth per /30 backend; dial-by-name responder + intercept (mesh reachability)")
+
+  Rel(ana, overdrive, "Runs `overdrive workload restart <id>` (NEW); confirms via `overdrive alloc status --job <id>`")
+  Rel(peer, overdrive, "Re-resolves the stable F; next connect lands the NEW backend")
+  Rel(overdrive, fs, "Atomically increments workloads/<id>/generation + clears /stop (one txn: IncrementU64 + Delete); reconciler reads + places")
+  Rel(overdrive, kernel, "Reconciler places a fresh instance (new AllocationId + new workload_addr); F-binding byte-stable")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+  title Container — `overdrive workload restart` cycle (single node, Phase 2)
+
+  Person(ana, "Ana (operator)")
+  Container(cli, "overdrive CLI", "Rust/clap", "NEW `workload restart <id>` → ApiClient::restart_workload → POST /v1/jobs/:id/restart")
+  Container(handler, "restart_workload handler", "Rust/axum", "NEW. Parse→404-check (+ /stop read for outcome label)→atomic bump+clear (txn: IncrementU64 + Delete)→enqueue eval→200 {workload_id, outcome}")
+  ContainerDb(intent, "IntentStore", "redb (LocalStore)", "workloads/<id> (aggregate) · /stop (sentinel) · /generation (NEW, u64 BE; bumped via NEW TxnOp::IncrementU64)")
+  Container(runtime, "Reconciler runtime + broker", "Rust", "hydrate_desired reads generation; drains eval → WorkloadLifecycle::reconcile")
+  Container(recon, "WorkloadLifecycle reconciler", "Rust (pure-sync)", "EXTEND. Gates line-520 veto on observed_generation < generation AND scopes it to the current instance (current_alloc, never any-row); places fresh instance; stamps observed_generation; a fresh-instance crash converges (not wedged on a superseded operator-stop row)")
+  Container(shim, "action-shim + worker", "Rust", "Executes StopAllocation / StartAllocation → Driver; mints payments-1 (new /30)")
+  ContainerDb(obs, "ObservationStore", "redb", "alloc_status rows (A1 Terminated/Operator → A2 Running)")
+
+  Rel(ana, cli, "workload restart <id>")
+  Rel(cli, handler, "POST /v1/jobs/:id/restart (empty body)")
+  Rel(handler, intent, "get workloads/<id> (404) + get /stop (label); txn[IncrementU64 /generation, Delete /stop]")
+  Rel(handler, runtime, "enqueue_workload_lifecycle_eval")
+  Rel(runtime, intent, "hydrate_desired: read job + /stop + /generation")
+  Rel(runtime, recon, "reconcile(desired{generation}, actual{allocs}, view{observed_generation}, tick)")
+  Rel(recon, shim, "Emits StopAllocation (running-origin) then StartAllocation (fresh placement)")
+  Rel(shim, obs, "Writes Terminated then new Running row")
+  Rel(runtime, obs, "hydrate_actual: read alloc_status")
+```
+
+### C4 Level 3 — Component (restart-handler ↔ IntentStore ↔ WorkloadLifecycle)
+
+```mermaid
+C4Component
+  title Component — generation-gated, current-instance-scoped placement (the line-520 edit)
+
+  Container_Boundary(cp, "overdrive-control-plane") {
+    Component(h, "restart_workload (NEW)", "handlers.rs", "parse_workload_id_path → get(for_workload) else NotFound{workloads/<id>} + get(for_workload_stop) for outcome label → txn[IncrementU64 for_workload_generation, Delete for_workload_stop] (Committed; no read-current-gen, no Conflict retry) → enqueue → 200")
+    Component(hy, "hydrate_desired arm (EXTEND)", "reconciler_runtime.rs:1659", "Adds read_workload_generation sibling to stop_intent_present; stamps desired.generation")
+  }
+  Container_Boundary(core, "overdrive-core") {
+    Component(ik, "IntentKey::for_workload_generation (EXTEND)", "aggregate/mod.rs:1181", "workloads/<id>/generation — sibling of /stop, /kind")
+    Component(st, "WorkloadLifecycleState.generation (EXTEND)", "workload_lifecycle.rs:1038", "u64 hydrated input")
+    Component(vw, "WorkloadLifecycleView.observed_generation (EXTEND)", "workload_lifecycle.rs:1179", "u64 #[serde(default)] persisted input")
+    Component(rc, "reconcile_inner Run branch (EXTEND)", "workload_lifecycle.rs:485,520,725", "restart_pending = view.observed_generation < desired.generation. veto = !restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped) — scoped to the CURRENT instance, NOT any(...) across history (superseded operator-stop rows never veto). Current operator-stop ⇒ veto stands (Bug 3). Current crash + stale superseded operator-stop row ⇒ NO veto ⇒ is_restartable crash-restart (R1-crash). restart_pending + Running ⇒ StopAllocation. restart_pending + no-Running ⇒ first_fit_place + stamp observed_generation = desired.generation")
+    Component(ca, "current_alloc (NEW, pure)", "workload_lifecycle.rs:863 (next to mint_alloc_id)", "latest-placed alloc = numeric max of mint_alloc_id suffix (NOT BTreeMap/.values() order, which is lexical). No new per-row state; no rkyv AllocStatusRow change")
+    Component(mint, "mint_alloc_id (REUSE)", "workload_lifecycle.rs:863", "attempt = allocs_vec.len() ⇒ payments-1 (A1≠A2, new /30) — the SystemGc-resubmit precedent; rows never deleted ⇒ suffix monotone")
+  }
+  ContainerDb(intent, "IntentStore (redb)", "LocalStore", "txn / get — NEW TxnOp::IncrementU64 variant (atomic monotonic bump, read-modify inside the write txn); carries trait contract + concurrency acceptance test")
+
+  Rel(h, ik, "Derives /generation key")
+  Rel(h, intent, "get(for_workload) [404] + get(for_workload_stop) [label]; txn[IncrementU64 gen, Delete stop]")
+  Rel(hy, ik, "Reads /generation → desired.generation")
+  Rel(hy, st, "Populates generation")
+  Rel(rc, st, "Reads desired.generation")
+  Rel(rc, vw, "Reads + stamps observed_generation")
+  Rel(rc, ca, "Scopes the veto to the current instance")
+  Rel(rc, mint, "Fresh placement mints payments-1")
+```
+
+Six properties the diagrams make explicit:
+
+1. **Clearing the sentinel alone is necessary-but-not-sufficient.** The observed
+   `payments-0` Terminated/Operator row persists and the line-520 veto keeps
+   firing after the sentinel clear — so the reconciler edit (the generation gate)
+   is mandatory, not optional. (ADR-0073 § Context.)
+2. **Placement is driven by intent generation, not by reading a past observation
+   as a standing veto.** `restart_pending = observed_generation < generation`
+   supersedes the stale operator-stop observation-veto. (DDD-3 / DDD-6.)
+3. **Bug 3 is preserved by construction.** Only `restart` bumps `/generation`;
+   `deploy` never does → after a same-spec deploy `observed == desired`, and the
+   workload's **current** instance is the operator-stopped row, so the
+   current-instance-scoped veto fires and the workload stays stopped. (DDD-7.)
+4. **TOCTOU-safe + monotonic (atomicity Critical resolved).** The bump + clear is
+   one `IntentStore::txn` commit carrying the NEW `TxnOp::IncrementU64`
+   (read-modify-write *inside* the write txn) + `Delete` — no `get`-then-`Put`
+   window, no reliance on an unproduced `Conflict`. redb serializes writers, so
+   concurrent restarts queue: two restarts advance `generation` by exactly 2,
+   never lose a bump, never step backwards. (DDD-9; ADR-0073 item 4.)
+5. **The seam is THIN and reused by #64/#253/#254.** Only `generation` /
+   `observed_generation`; no revision rows / RevisionId / retention (those stay
+   deferred to #180). The generation value is a standalone sibling key (8-byte
+   BE), so no ADR-0048 envelope bump. (DDD-4 / DDD-5.)
+6. **The veto is scoped to the CURRENT instance, never all history
+   (iteration-3 fix).** `veto = !restart_pending &&
+   current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`. A superseded
+   prior-generation `payments-0 / Operator` row that `mint_alloc_id` retains (to
+   achieve `A1 ≠ A2`) is NEVER the current instance, so it can never re-arm the
+   veto. A fresh instance's later crash therefore converges via the existing
+   `is_restartable` branch (R1-crash) instead of wedging — the post-iteration-2
+   blocking bug fixed. `current_alloc` uses the numeric `mint_alloc_id`-suffix max
+   (the `BTreeMap` order is lexical), needs no per-row `generation` field, and so
+   adds no rkyv `AllocStatusRow` change / no ADR-0048 envelope bump. (DDD-13;
+   ADR-0073 § 5 → "Why the veto must be scoped to the current instance".)

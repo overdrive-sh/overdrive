@@ -21,8 +21,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, StopWorkloadResponse,
-    SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
+    AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, RestartWorkloadResponse,
+    StopWorkloadResponse, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use reqwest::StatusCode;
@@ -274,6 +274,23 @@ impl ApiClient {
     /// See [`CliError`] variants.
     pub async fn stop_workload(&self, id: &str) -> Result<StopWorkloadResponse, CliError> {
         self.post_typed(&format!("v1/jobs/{id}/stop"), &serde_json::json!({})).await
+    }
+
+    /// `POST /v1/jobs/{id}/restart` — replace a declared workload's
+    /// instance. Per ADR-0073 item 3.
+    ///
+    /// Empty request body. Returns `RestartWorkloadResponse` on 200 OK
+    /// with `outcome ∈ { Restarted, Resumed }`. A 404 maps to
+    /// [`CliError::HttpStatus`] with `body.error == "not_found"` —
+    /// sibling of [`stop_workload`].
+    ///
+    /// [`stop_workload`]: ApiClient::stop_workload
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants.
+    pub async fn restart_workload(&self, id: &str) -> Result<RestartWorkloadResponse, CliError> {
+        self.post_typed(&format!("v1/jobs/{id}/restart"), &serde_json::json!({})).await
     }
 
     /// `GET /v1/jobs/{id}` — describe a previously-submitted job.

@@ -2330,6 +2330,7 @@ pub async fn run_server_with_obs_and_driver(
         .route("/v1/jobs", post(handlers::submit_workload))
         .route("/v1/jobs/:id", get(handlers::describe_workload))
         .route("/v1/jobs/:id/stop", post(handlers::stop_workload))
+        .route("/v1/jobs/:id/restart", post(handlers::restart_workload))
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(handlers::cluster_status))

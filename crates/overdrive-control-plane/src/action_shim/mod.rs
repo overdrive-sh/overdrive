@@ -1911,7 +1911,41 @@ mod tests {
             Ok(())
         }
 
-        async fn txn(&self, _ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+        async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+            // Faithful in-memory apply, mirroring the production
+            // `LocalIntentStore::txn` arm (`redb_backend.rs`). The match is
+            // exhaustive (no `_` catch-all) so a future `TxnOp` variant forces
+            // a compile decision here rather than being silently ignored. The
+            // poison-key fault is a `put`-level fault for the
+            // `persist_workflow_intents` tests and deliberately does NOT apply
+            // to the txn path — `txn` always commits, matching the production
+            // contract.
+            {
+                let mut stored = self.stored.lock();
+                for op in ops {
+                    match op {
+                        TxnOp::Put { key, value } => {
+                            stored.insert(key.to_vec(), value.to_vec());
+                        }
+                        TxnOp::Delete { key } => {
+                            stored.remove(key.as_ref());
+                        }
+                        TxnOp::IncrementU64 { key } => {
+                            // Length-guarded BE-u64 decode per development.md §
+                            // "Safe byte-slice access": absent or non-8-byte
+                            // row decodes as 0 (never `bytes[0..8]`, never a
+                            // panic); write `current + 1` saturating at
+                            // `u64::MAX`.
+                            let current = stored
+                                .get(key.as_ref())
+                                .and_then(|v| <[u8; 8]>::try_from(v.as_slice()).ok())
+                                .map_or(0u64, u64::from_be_bytes);
+                            let next = current.saturating_add(1);
+                            stored.insert(key.to_vec(), next.to_be_bytes().to_vec());
+                        }
+                    }
+                }
+            }
             Ok(TxnOutcome::Committed)
         }
 

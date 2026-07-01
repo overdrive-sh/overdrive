@@ -477,12 +477,68 @@ impl WorkloadLifecycle {
                 let active_allocs_vec: Vec<&AllocStatusRow> =
                     allocs_vec.iter().filter(|r| !is_intentionally_stopped(r)).copied().collect();
 
-                // Is any allocation already Running for this job? If so
-                // we are converged — emit nothing. Failed allocs flow
-                // into the restart-with-backoff branch below.
+                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
+                // `restart_pending` is the generation seam: a replace bumps
+                // `desired.generation`, and while the reconciler has not yet
+                // placed a fresh instance for it (`observed < desired`) the
+                // workload is mid-restart. Computed here so BOTH the
+                // running-origin R2 stop (below) and the scoped veto (after
+                // the running check) can read it. The `<` comparison — not
+                // `<=`/`==` — is load-bearing: a sequential restart that
+                // advances `desired` past a previously-stamped `observed`
+                // (S-BIR-SEQUENTIAL) re-arms `restart_pending` and re-enters
+                // the cycle.
+                let restart_pending = view.observed_generation < desired.generation;
+
+                // Is any allocation already Running for this job?
+                //
+                // R1 (`!restart_pending`): converged — emit nothing.
+                //
+                // R2 (`restart_pending`, ADR-0073 § 5): a running-origin
+                // restart must END the current Running instance before the
+                // fresh placement, so the new instance is a genuine
+                // REPLACEMENT (end-then-bring-up). Emit one
+                // `StopAllocation { terminal: Stopped { by: Operator } }`
+                // for the current Running instance. `observed_generation`
+                // is NOT stamped on this stop tick — stamping here would
+                // re-arm the veto before the fresh instance exists,
+                // stranding the workload Terminated (the load-bearing
+                // ordering). The placement + stamp happens on a later tick
+                // (R3) once the prior instance is Terminated. R5 (no
+                // duplicate stop while draining) falls out for free: once
+                // the prior instance leaves Running it is no longer matched
+                // here, and the broker's `(reconciler, target)` keying +
+                // in-flight-action collapse debounce a same-tick re-emit.
                 let running_alloc =
                     active_allocs_vec.iter().find(|r| r.state == AllocState::Running);
-                if running_alloc.is_some() {
+                if let Some(running) = running_alloc {
+                    if restart_pending {
+                        let action = Action::StopAllocation {
+                            alloc_id: running.alloc_id.clone(),
+                            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+                        };
+                        return (vec![action], view.clone());
+                    }
+                    return (Vec::new(), view.clone());
+                }
+
+                // backend-instance-replacement step 01-02 / R5 (ADR-0073 § 5;
+                // review-01-02 BLOCKER-1). During a replacement (`restart_pending`), the
+                // current instance may be observably `Draining` — the transient teardown
+                // state — after the R2 StopAllocation landed on a prior tick but before it
+                // reaches Terminated. Leave it alone: emit nothing and do NOT stamp. The
+                // fresh placement (R3) happens on a later tick once the instance is
+                // terminal. Without this guard the crash-recovery `is_restartable` branch
+                // below matches the draining row (`is_restartable` includes `Draining`) and
+                // emits a spurious `RestartAllocation` that fights the teardown and corrupts
+                // the backoff bookkeeping. Scoped to the CURRENT instance
+                // (`current_alloc(&allocs_vec)`, the numeric-max suffix — same scope as the
+                // veto) and gated on `restart_pending` (the mirror of the `!restart_pending`
+                // veto): a draining superseded prior-generation row is never the current
+                // instance and never reaches here.
+                if restart_pending
+                    && current_alloc(&allocs_vec).is_some_and(|r| r.state == AllocState::Draining)
+                {
                     return (Vec::new(), view.clone());
                 }
 
@@ -517,7 +573,32 @@ impl WorkloadLifecycle {
                 // a fresh submit IS the operator's overriding new
                 // intent and should land a fresh allocation —
                 // architecture.md § 5).
-                if allocs_vec.iter().any(|r| is_operator_stopped(r)) {
+                // backend-instance-replacement step 01-02 (ADR-0073 § 5).
+                // A replace bumps `desired.generation`. While the
+                // reconciler has not yet placed a fresh instance for this
+                // generation (`observed < desired` ⇒ `restart_pending`),
+                // the current instance's Operator-stop is OVERRIDABLE — the
+                // operator's restart intent (the generation advance)
+                // supersedes the prior stop. When generations are EQUAL
+                // (a same-spec deploy did NOT bump), the veto stands —
+                // Bug-3 preserved.
+                //
+                // CRITICAL: the veto keys off the workload's CURRENT
+                // instance only (`current_alloc(...)`, the numerically
+                // highest `mint_alloc_id` suffix), NOT
+                // `any(is_operator_stopped)` across all history.
+                // `mint_alloc_id` deliberately KEEPS the superseded
+                // `payments-0 / Terminated{Operator}` row (that retention
+                // is how `A1 ≠ A2` is achieved), but an Operator-stop from
+                // a SUPERSEDED generation is history, not current intent —
+                // it must not veto the current instance's lifecycle (incl.
+                // crash-restart of the fresh alloc). Keying off `any(...)`
+                // would let a stale superseded row re-arm the veto after
+                // the fresh instance is placed and later crashes, wedging
+                // the fresh instance forever (the post-iteration-2 bug
+                // this scoping fixes). `restart_pending` was computed above
+                // the running check (shared with the R2 stop).
+                if !restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped) {
                     return (Vec::new(), view.clone());
                 }
 
@@ -789,7 +870,27 @@ impl WorkloadLifecycle {
                             },
                             kind: desired.workload_kind,
                         };
-                        (vec![action], view.clone())
+                        // backend-instance-replacement step 01-02
+                        // (ADR-0073 § 5, R3/R4): the placement tick is the
+                        // ONLY tick that stamps. When `restart_pending`
+                        // (this fresh placement is satisfying a pending
+                        // generation), stamp `observed_generation =
+                        // desired.generation` — NOT `observed + 1`. The
+                        // `= desired` stamp is what makes N pre-placement
+                        // restarts coalesce into ONE placement
+                        // (S-BIR-COALESCE-PLACE): two bumps to
+                        // `desired = 2` over `observed = 0` place once and
+                        // stamp `observed = 2`, so the next tick sees
+                        // `observed == desired` and does not re-place
+                        // (S-BIR-COALESCE-NO-REPLAY). When NOT
+                        // `restart_pending` (an ordinary first placement /
+                        // resubmit-after-GC), `observed_generation` is left
+                        // unchanged.
+                        let mut next_view = view.clone();
+                        if restart_pending {
+                            next_view.observed_generation = desired.generation;
+                        }
+                        (vec![action], next_view)
                     },
                 )
             }
@@ -864,6 +965,51 @@ fn mint_alloc_id(workload_id: &WorkloadId, attempt: u32) -> AllocationId {
     let raw = format!("alloc-{}-{}", workload_id.as_str(), attempt);
     #[allow(clippy::expect_used)]
     AllocationId::new(&raw).expect("derived alloc id format is valid")
+}
+
+/// Parse the numeric attempt suffix `<N>` out of a minted alloc id of
+/// the form `alloc-<workload>-<N>` (the [`mint_alloc_id`] grammar). A
+/// suffix that fails to parse — a non-`mint_alloc_id`-shaped id, or one
+/// whose suffix is not a base-10 `u32` — yields `None`.
+///
+/// Co-located with [`mint_alloc_id`] so the parse and the mint stay in
+/// lockstep: the suffix grammar (`-<N>` at the tail) is
+/// `mint_alloc_id`-internal, and a future change to the mint format
+/// would break this parse loudly at the same site rather than silently
+/// elsewhere.
+fn alloc_attempt_index(alloc_id: &AllocationId) -> Option<u32> {
+    alloc_id.as_str().rsplit_once('-').and_then(|(_, suffix)| suffix.parse::<u32>().ok())
+}
+
+/// The workload's **current** instance — the row with the
+/// numerically-highest [`mint_alloc_id`] attempt suffix
+/// (`alloc-<workload>-<N>`). This is the most-recently-placed instance;
+/// every superseded prior generation has a strictly lower suffix.
+/// Returns `None` for an empty alloc set.
+///
+/// **Determination is the NUMERIC max of the parsed `<N>` suffix — NOT
+/// the `BTreeMap`/`.values()` iteration order, which is LEXICAL on the
+/// raw `AllocationId` string** (`alloc-payments-10` sorts BEFORE
+/// `alloc-payments-2`), so "last in iteration" is WRONG once the attempt
+/// index reaches double digits (backend-instance-replacement step 01-02,
+/// ADR-0073 § 5 / DDD-13). A row whose suffix fails to parse
+/// ([`alloc_attempt_index`] → `None`) sorts below any parseable suffix
+/// (a defensive floor — never the current instance when a parseable one
+/// exists).
+///
+/// Robust by construction: `mint_alloc_id` mints
+/// `attempt = allocs_vec.len()` and the feature relies on alloc rows
+/// being **never deleted** (the superseded `payments-0` row is
+/// intentionally retained), so the attempt indices are a
+/// strictly-increasing `0, 1, 2, …` series and the numeric max is
+/// unambiguously the latest placement. Needs no new per-row field (no
+/// `generation` on `AllocStatusRow` ⇒ no ADR-0048 envelope bump).
+fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow> {
+    // `max_by_key` over `(Option<u32>, …)` orders `None` below every
+    // `Some` (the defensive floor) and breaks ties on the later
+    // iteration position — irrelevant here since the never-delete
+    // invariant makes attempt indices unique, but deterministic.
+    allocs.iter().copied().max_by_key(|row| alloc_attempt_index(&row.alloc_id))
 }
 
 /// service-vip-allocator step 03-01 — pure helper for the Service-arm
@@ -1046,6 +1192,16 @@ pub struct WorkloadLifecycleState {
     pub job: Option<Job>,
     /// Whether a stop intent has been recorded for this job.
     pub desired_to_stop: bool,
+    /// Desired-run generation, hydrated from `workloads/<id>/generation`
+    /// (absent ⇒ 0). Bumped by `overdrive workload restart` (the
+    /// atomic `TxnOp::IncrementU64` bump-and-clear). Per ADR-0073
+    /// § "The six pinned signatures" item 5: the reconciler places a
+    /// fresh instance when `view.observed_generation < desired.generation`
+    /// (`restart_pending`) and, on the placement tick, stamps
+    /// `observed_generation = desired.generation` so subsequent ticks
+    /// see `observed == desired` and the current-instance-scoped veto
+    /// re-arms for the fresh instance.
+    pub generation: u64,
     /// Registered nodes with their declared capacity.
     pub nodes: BTreeMap<NodeId, Node>,
     /// Current allocations belonging to this job, keyed by alloc id.
@@ -1199,6 +1355,18 @@ pub struct WorkloadLifecycleView {
     /// evolution"); the semantics are unchanged.
     #[serde(default, alias = "released_for_terminal")]
     pub released_for_deletion: BTreeSet<crate::id::ContentHash>,
+    /// The generation this reconciler has already placed a fresh
+    /// instance for. Persisted *input* per `.claude/rules/development.md`
+    /// § "Persist inputs, not derived state": the reconciler places when
+    /// `observed_generation < desired.generation` and stamps
+    /// `observed_generation = desired.generation` once it does (on the
+    /// placement tick only — never the stop tick). The `= desired` stamp
+    /// (NOT `observed + 1`) is what makes N pre-placement restarts
+    /// coalesce into ONE placement by construction (ADR-0073 § 5).
+    /// Additive `#[serde(default)]` CBOR field — no rkyv envelope bump
+    /// (per § "Reconciler I/O → Schema evolution").
+    #[serde(default)]
+    pub observed_generation: u64,
 }
 
 #[cfg(test)]
@@ -1424,6 +1592,7 @@ mod service_vip_release_emission_tests {
             // `desired_to_stop == true` AND `desired.job.is_some()`.
             // The new gate MUST ignore `desired_to_stop`.
             desired_to_stop: declared,
+            generation: 0,
             nodes: BTreeMap::new(),
             allocations: BTreeMap::new(),
             workload_kind: WorkloadKind::Service,
@@ -1521,6 +1690,7 @@ mod service_vip_release_emission_tests {
             workload_id: wid("payments"),
             job: None,
             desired_to_stop: false,
+            generation: 0,
             nodes: BTreeMap::new(),
             allocations: BTreeMap::new(),
             workload_kind: WorkloadKind::Service,
@@ -1555,6 +1725,7 @@ mod service_vip_release_emission_tests {
             restart_counts: BTreeMap::new(),
             last_failure_seen_at: BTreeMap::new(),
             released_for_deletion: released,
+            observed_generation: 0,
         };
 
         let release = service_vip_release_emission(&desired, &view);
@@ -1564,5 +1735,136 @@ mod service_vip_release_emission_tests {
             "re-tick with the digest already in released_for_deletion MUST NOT \
              re-emit ReleaseServiceVip; got {release:?}",
         );
+    }
+}
+
+#[cfg(test)]
+mod current_alloc_tests {
+    //! Pure-fn partition for [`current_alloc`] (backend-instance-replacement
+    //! step 01-02, ADR-0073 § 5 / DDD-13; review-01-02 non-blocking (a)).
+    //!
+    //! `current_alloc` is module-private — exposing it purely for an
+    //! acceptance test would invent surface the ADR did not name
+    //! (`Implement to the design — never invent API surface`). The
+    //! reconcile-driven `@property` test S-BIR-CURRENT-ALLOC in
+    //! `tests/acceptance/workload_lifecycle_restart.rs` proves the
+    //! numeric-vs-lexical selection at the driving-port boundary; THIS
+    //! module is its pure-fn complement — reachable here because private
+    //! items are visible to in-crate `#[cfg(test)]` siblings. It drives
+    //! `current_alloc` DIRECTLY over the richer histories the roadmap's
+    //! literal S-BIR-CURRENT-ALLOC wording intended (≥3 rows, both
+    //! double-digit suffixes, and the numeric-max == lexical-max
+    //! coincidence) — coverage the two-row reconcile-driven property
+    //! cannot reach.
+
+    use std::time::Duration;
+
+    use proptest::prelude::*;
+
+    use crate::id::{AllocationId, NodeId, WorkloadId};
+    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use crate::wall_clock::UnixInstant;
+
+    use super::{WorkloadKind, current_alloc};
+
+    /// Minimal Running alloc row at `alloc-payments-<suffix>`. Only the
+    /// fields [`current_alloc`] inspects (`alloc_id`) are load-bearing;
+    /// the rest are inert filler.
+    fn row(suffix: u32) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new(&format!("alloc-payments-{suffix}"))
+                .expect("valid AllocationId"),
+            workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
+            node_id: NodeId::new("local").expect("valid NodeId"),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp {
+                counter: u64::from(suffix),
+                writer: NodeId::new("local").expect("valid NodeId"),
+            },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+            workload_addr: None,
+        }
+    }
+
+    #[test]
+    fn empty_history_has_no_current_instance() {
+        let allocs: Vec<&AllocStatusRow> = Vec::new();
+        assert!(
+            current_alloc(&allocs).is_none(),
+            "current_alloc over an empty alloc set must be None",
+        );
+    }
+
+    #[test]
+    fn numeric_max_wins_over_lexical_max_across_three_rows() {
+        // Suffixes 2, 10, 11: lexical order on the raw AllocationId is
+        // `...-10 < ...-11 < ...-2` (the BTreeMap trap), so a lexical-max
+        // helper would pick `...-2`. The numeric max is 11.
+        let rows = [row(2), row(10), row(11)];
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+        let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+        assert_eq!(
+            current.alloc_id.as_str(),
+            "alloc-payments-11",
+            "current_alloc picks the NUMERIC-max suffix (11), not the lexical max (2)",
+        );
+    }
+
+    #[test]
+    fn both_double_digit_suffixes_pick_the_numeric_max() {
+        // Both double-digit (12, 20): lexical and numeric agree on 20
+        // here, but this pins the double-digit-vs-double-digit branch the
+        // two-row reconcile property never reaches.
+        let rows = [row(12), row(20)];
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+        let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+        assert_eq!(
+            current.alloc_id.as_str(),
+            "alloc-payments-20",
+            "current_alloc picks 20 over 12 (both double-digit)",
+        );
+    }
+
+    proptest! {
+        /// Over an arbitrary non-empty alloc history with DISTINCT attempt
+        /// suffixes — spanning single- and double-digit values, in
+        /// arbitrary insertion order — `current_alloc` returns the row
+        /// whose suffix is numerically maximal. This is the pure-fn form
+        /// of the numeric-current invariant the roadmap's S-BIR-CURRENT-
+        /// ALLOC wording pins; it covers the numeric-max == lexical-max
+        /// coincidence (e.g. a single-digit-only history) and the
+        /// lexical-trap divergence (a double-digit max below a single-
+        /// digit lexical max) in one property.
+        #[test]
+        fn current_alloc_returns_the_numeric_max_suffix(
+            suffixes in prop::collection::btree_set(0_u32..=99, 1..=8)
+        ) {
+            // Shuffle insertion order off the sorted BTreeSet so the
+            // result cannot accidentally depend on iteration position.
+            let mut ordered: Vec<u32> = suffixes.iter().copied().collect();
+            ordered.reverse();
+            let expected_max = *ordered.iter().max().expect("non-empty set");
+
+            let rows: Vec<AllocStatusRow> = ordered.iter().map(|s| row(*s)).collect();
+            let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+
+            let current = current_alloc(&refs).expect("non-empty history has a current instance");
+
+            prop_assert_eq!(
+                current.alloc_id.as_str(),
+                format!("alloc-payments-{expected_max}"),
+                "current_alloc must return the numeric-max-suffix row",
+            );
+        }
     }
 }

@@ -50,7 +50,9 @@ fn main() -> Result<()> {
 // mutants::skip — thin binary dispatcher; tested via library-level acceptance tests per CLAUDE.md (no subprocess)
 #[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
-    use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
+    use overdrive_cli::cli::{
+        AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand, WorkloadCommand,
+    };
 
     match cli.command {
         Command::Cluster(ClusterCommand::Status) => {
@@ -147,6 +149,21 @@ async fn run(cli: Cli) -> Result<()> {
                 Err(err) => {
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
                     Err(color_eyre::eyre::eyre!("workload stop failed"))
+                }
+            }
+        }
+        Command::Workload(WorkloadCommand::Restart { id }) => {
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::workload::RestartArgs { id, config_path };
+            match overdrive_cli::commands::workload::restart(args).await {
+                Ok(out) => {
+                    print!("{}", overdrive_cli::render::workload_restart_accepted(&out));
+                    Ok(())
+                }
+                Err(err) => {
+                    eprint!("{}", overdrive_cli::render::cli_error(&err));
+                    let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                    std::process::exit(code);
                 }
             }
         }

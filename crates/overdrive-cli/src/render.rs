@@ -12,7 +12,8 @@
 //! 100ms target on localhost per US-05 AC.
 
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, IssuedCertSummary, StopOutcome,
+    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, IssuedCertSummary, RestartOutcome,
+    StopOutcome,
 };
 
 // workload-kind-discriminator slice 05 — Schedule submit/alloc-status
@@ -36,6 +37,7 @@ use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::deploy::{DeployOutput, StopOutput};
 use crate::commands::node::NodeListOutput;
+use crate::commands::workload::RestartOutput;
 use crate::http_client::CliError;
 
 /// Render a `ClusterStatusOutput` as a multi-line operator-facing
@@ -151,6 +153,32 @@ pub fn workload_stop_accepted(out: &StopOutput) -> String {
         }
         StopOutcome::AlreadyStopped => {
             let _ = writeln!(s, "Workload '{}' was already stopped (no-op).", out.workload_id);
+        }
+    }
+    let _ = writeln!(s, "Endpoint: {}", out.endpoint);
+    s
+}
+
+/// Render the result of `overdrive workload restart` per ADR-0073.
+///
+/// On `Restarted`, the line names the fresh-instance placement; on
+/// `Resumed` it names the resumed-from-stopped path so the operator
+/// knows a stop sentinel was cleared. Sibling of
+/// [`workload_stop_accepted`].
+#[must_use]
+pub fn workload_restart_accepted(out: &RestartOutput) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    match out.outcome {
+        RestartOutcome::Restarted => {
+            let _ = writeln!(s, "Restarted workload '{}' with a fresh instance.", out.workload_id);
+        }
+        RestartOutcome::Resumed => {
+            let _ = writeln!(
+                s,
+                "Resumed workload '{}' (cleared the stop intent and placed a fresh instance).",
+                out.workload_id,
+            );
         }
     }
     let _ = writeln!(s, "Endpoint: {}", out.endpoint);

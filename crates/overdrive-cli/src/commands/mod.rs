@@ -11,3 +11,4 @@ pub mod cluster;
 pub mod deploy;
 pub mod node;
 pub mod serve;
+pub mod workload;

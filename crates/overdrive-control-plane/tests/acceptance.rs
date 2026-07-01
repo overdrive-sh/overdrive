@@ -132,6 +132,35 @@ mod acceptance {
     mod submit_job_idempotency;
     mod trust_triple_getters;
 
+    // backend-instance-replacement slice-01 step 01-03 — `restart_workload`
+    // HTTP handler: the 404-no-mutation posture (S-BIR-HANDLER-404), the
+    // one-atomic-bump+clear txn + intent retention + one enqueue
+    // (S-BIR-HANDLER-TXN), and the cosmetic outcome-label classification
+    // from the `/stop` check-exists read (S-BIR-HANDLER-OUTCOME-RESUMED /
+    // -RESTARTED, DDD-11). Per ADR-0073 § "The six pinned signatures"
+    // items 2 + 4 + 6. Default-lane: the handler is invoked directly over a
+    // real `LocalIntentStore`-backed `AppState` (the
+    // `submit_job_handler_rejects_empty_exec_command_with_400.rs` pattern);
+    // observable outcomes are read back at the `IntentStore` boundary and
+    // the runtime broker counter.
+    mod restart_workload_intent_key;
+    mod restart_workload_outcome;
+    mod restart_workload_unknown;
+
+    // backend-instance-replacement — read-side generation coupling. Closes
+    // the untested seam between the writer (`restart_workload_intent_key`,
+    // raw store) and the generation DECISION logic
+    // (`runtime_convergence_loop`, hand-built state literals): drives the
+    // reconciler's REAL read of `workloads/<id>/generation` through
+    // `run_convergence_tick` and asserts `observed_generation` stamps to the
+    // bumped value — locking `generation_value` to the writer's key
+    // (`IntentKey::for_workload_generation`) and the `IncrementU64` decode
+    // (`TxnOp::decode_counter`). Gated behind `integration-tests` for the
+    // `run_convergence_tick` + `loaded_workload_lifecycle_views_for_test`
+    // visibility reason (see `runtime_convergence_loop` above).
+    #[cfg(feature = "integration-tests")]
+    mod generation_read_coupling;
+
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // `[exec]` block end-to-end. Per ADR-0031.
     mod action_shim_restart_uses_spec_from_action;

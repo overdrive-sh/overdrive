@@ -307,37 +307,73 @@ impl IntentStore for LocalIntentStore {
         }
 
         let inner = Arc::clone(&self.inner);
-        let ops_for_commit = ops.clone();
 
-        // For each op, record whether it had observable effect: every
-        // `Put` always does; a `Delete` only when `redb::Table::remove`
-        // returned `Some(_)`. The post-commit emit loop reads this
-        // mask so phantom delete events for absent keys never reach
+        // For each op, record the `(key, value)` to emit on the
+        // post-commit watch path — or `None` when the op had no
+        // observable effect. A `Put` always emits its value; a `Delete`
+        // emits an empty value only when `redb::Table::remove` returned
+        // `Some(_)` (phantom delete events for absent keys never reach
         // `watch(prefix)` subscribers — the same gate as the standalone
-        // `delete` path, applied per-op inside the transaction.
-        let effective = tokio::task::spawn_blocking(move || {
+        // `delete` path); an `IncrementU64` emits the *new* BE-u64 bytes
+        // that actually landed. Carrying the emit payload out of the
+        // transaction keeps the post-commit loop a clean iteration with
+        // no second match over `TxnOp`.
+        let emits = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            let mut effective = Vec::with_capacity(ops_for_commit.len());
+            let mut emits: Vec<Option<(Bytes, Bytes)>> = Vec::with_capacity(ops.len());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-                for op in &ops_for_commit {
+                for op in &ops {
                     match op {
                         TxnOp::Put { key, value } => {
                             table
                                 .insert(key.as_ref(), value.as_ref())
                                 .map_err(map_storage_error)?;
-                            effective.push(true);
+                            emits.push(Some((key.clone(), value.clone())));
                         }
                         TxnOp::Delete { key } => {
                             let removed =
                                 table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
-                            effective.push(removed);
+                            emits.push(removed.then(|| (key.clone(), Bytes::new())));
+                        }
+                        TxnOp::IncrementU64 { key } => {
+                            // Read-modify-write of the big-endian u64 at
+                            // `key` inside THIS same begin_write/commit
+                            // span. redb holds the exclusive write lock
+                            // for the whole transaction, so a concurrent
+                            // `txn` cannot interleave between this read
+                            // and the insert — that serialisation is what
+                            // makes concurrent bumps monotonic with no
+                            // lost increment (ADR-0073 § item 4).
+                            //
+                            // The read is corruption-tolerant per
+                            // development.md § "Safe byte-slice access":
+                            // an absent row or a row whose length is not
+                            // exactly 8 decodes as 0 (length-checked
+                            // `<[u8; 8]>::try_from`, never `bytes[0..8]`
+                            // indexing, never a panic). The write path
+                            // always emits canonical 8-byte BE, so a
+                            // corrupt row is healed on the next bump.
+                            let current = table
+                                .get(key.as_ref())
+                                .map_err(map_storage_error)?
+                                .and_then(|v| <[u8; 8]>::try_from(v.value()).ok())
+                                .map_or(0u64, u64::from_be_bytes);
+                            let next = current.saturating_add(1);
+                            let next_bytes = next.to_be_bytes();
+                            table
+                                .insert(key.as_ref(), next_bytes.as_slice())
+                                .map_err(map_storage_error)?;
+                            emits.push(Some((
+                                key.clone(),
+                                Bytes::copy_from_slice(next_bytes.as_slice()),
+                            )));
                         }
                     }
                 }
             }
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(effective)
+            Ok::<_, IntentStoreError>(emits)
         })
         .await
         .map_err(map_join_error)??;
@@ -345,14 +381,8 @@ impl IntentStore for LocalIntentStore {
         // Emit per-op events *after* the commit succeeds so subscribers
         // never see a phantom write — and only for ops that actually
         // changed state.
-        for (op, effective) in ops.into_iter().zip(effective) {
-            if !effective {
-                continue;
-            }
-            match op {
-                TxnOp::Put { key, value } => self.emit(key, value),
-                TxnOp::Delete { key } => self.emit(key, Bytes::new()),
-            }
+        for emit in emits.into_iter().flatten() {
+            self.emit(emit.0, emit.1);
         }
 
         Ok(TxnOutcome::Committed)

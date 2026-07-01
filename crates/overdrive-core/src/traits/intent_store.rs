@@ -61,8 +61,98 @@ pub enum IntentStoreError {
 
 #[derive(Debug, Clone)]
 pub enum TxnOp {
-    Put { key: Bytes, value: Bytes },
-    Delete { key: Bytes },
+    Put {
+        key: Bytes,
+        value: Bytes,
+    },
+    Delete {
+        key: Bytes,
+    },
+    /// Read the big-endian `u64` at `key` (absent ⇒ `0`), write
+    /// `current + 1` (saturating at `u64::MAX`). The read and the write
+    /// happen inside the SAME store write transaction as every other op
+    /// in the [`txn`](IntentStore::txn) batch — see the [`txn`] method
+    /// contract for the full preconditions / postconditions / edge
+    /// cases / observable invariant.
+    ///
+    /// This is the atomic-monotonic-increment primitive. It cannot be
+    /// expressed by [`Put`](TxnOp::Put) (a blind write that loses
+    /// concurrent bumps and can drive the value backwards on a stale
+    /// read) or by [`put_if_absent`](IntentStore::put_if_absent)
+    /// (insert-if-absent, no increment). The read-modify-write inside
+    /// the store's exclusive write transaction is what makes concurrent
+    /// bumps serialise with no lost increment.
+    ///
+    /// # Preconditions
+    ///
+    /// `key` may name an absent row (treated as the `u64` `0`) or a row
+    /// holding exactly 8 big-endian bytes. A row at `key` whose length
+    /// is not 8 is decoded as `0` per `development.md` § "Safe
+    /// byte-slice access" (length-guarded decode) — never a panic.
+    ///
+    /// # Postconditions
+    ///
+    /// After a [`txn`] containing `IncrementU64 { key }` returns
+    /// `Ok(TxnOutcome::Committed)`, a subsequent [`get`](IntentStore::get)
+    /// of `key` returns the 8-byte BE encoding of `prev + 1` (saturating
+    /// at `u64::MAX`), where `prev` is the value visible at the instant
+    /// the batch's write transaction began. The increment and every
+    /// sibling op in the same batch commit atomically — there is no
+    /// observable state in which the increment landed but a sibling
+    /// [`Delete`](TxnOp::Delete) did not, or vice versa.
+    ///
+    /// # Edge cases
+    ///
+    /// * Absent key ⇒ post-state is `1`.
+    /// * Row of `< 8` or `> 8` bytes ⇒ decoded as `0`, post-state `1`
+    ///   (the read path is corruption-tolerant; the write path always
+    ///   emits canonical 8-byte BE).
+    /// * `u64::MAX` ⇒ saturates, stays `u64::MAX` (the monotonic-advance
+    ///   contract degrades to "no further advance" at the ceiling, never
+    ///   wraps to a lower value that would wedge a reconciler comparing
+    ///   `observed < desired`).
+    ///
+    /// # Observable invariant
+    ///
+    /// Across any number of concurrent [`txn`]s each carrying one
+    /// `IncrementU64 { key }`, the final value equals the count of those
+    /// `txn`s that committed (modulo the `u64::MAX` saturation ceiling).
+    /// The sequence of values a serial reader would observe is strictly
+    /// non-decreasing. No committed increment is lost; the value never
+    /// goes backwards.
+    ///
+    /// [`txn`]: IntentStore::txn
+    IncrementU64 {
+        key: Bytes,
+    },
+}
+
+impl TxnOp {
+    /// Decode a value written by [`TxnOp::IncrementU64`] back into its
+    /// `u64` — the read side of that op's documented contract.
+    ///
+    /// This is the single decode authority for an `IncrementU64` counter.
+    /// A consumer that reads a counter row (e.g. a reconciler hydrating a
+    /// desired-run generation) calls this rather than re-inlining the byte
+    /// decode, so no reader can drift from the corruption-tolerant read
+    /// contract: never `bytes[0..8]` indexing (which panics on a short
+    /// row per `development.md` § "Safe byte-slice access"), never a
+    /// missing zero-fallback. It mirrors the `IncrementU64`
+    /// precondition/edge-cases exactly:
+    ///
+    /// * `None` (absent row) ⇒ `0`.
+    /// * A row whose length is not exactly 8 ⇒ `0` (length-guarded,
+    ///   never a panic).
+    /// * An exactly-8-byte row ⇒ decoded as big-endian `u64`.
+    ///
+    /// This is the read counterpart to the write side implemented by
+    /// each [`IntentStore`] adapter's [`txn`](IntentStore::txn); the
+    /// store adapters keep their own RMW (production `redb` + the sim
+    /// fake) — this helper is for *consumers* of the persisted value.
+    #[must_use]
+    pub fn decode_counter(row: Option<&[u8]>) -> u64 {
+        row.and_then(|bytes| <[u8; 8]>::try_from(bytes).ok()).map_or(0, u64::from_be_bytes)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -192,6 +282,37 @@ pub trait IntentStore: Send + Sync + 'static {
 
     async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError>;
 
+    /// Apply a batch of [`TxnOp`]s atomically inside a single store write
+    /// transaction. Either every op in `ops` commits or none does; a
+    /// concurrent reader observes the pre-batch state or the fully-applied
+    /// post-batch state, never an intermediate view.
+    ///
+    /// The supported ops are [`Put`](TxnOp::Put) (blind write),
+    /// [`Delete`](TxnOp::Delete) (idempotent remove — deleting an absent
+    /// key is a no-op, not an error), and [`IncrementU64`](TxnOp::IncrementU64)
+    /// (atomic-monotonic read-modify-write of a big-endian `u64`).
+    ///
+    /// # `IncrementU64` contract
+    ///
+    /// * **Preconditions.** A targeted `key` may name an absent row
+    ///   (treated as the `u64` `0`) or a row holding exactly 8 big-endian
+    ///   bytes. A row whose length is not 8 is decoded as `0` per
+    ///   `development.md` § "Safe byte-slice access" — never a panic.
+    /// * **Postconditions.** After this method returns
+    ///   `Ok(TxnOutcome::Committed)`, a subsequent [`get`](Self::get) of
+    ///   the incremented `key` returns the 8-byte BE encoding of
+    ///   `prev + 1` (saturating at `u64::MAX`), where `prev` is the value
+    ///   visible at the instant the batch's write transaction began. The
+    ///   increment and every sibling op commit atomically — no observable
+    ///   state in which the increment landed but a sibling delete did not.
+    /// * **Edge cases.** Absent key ⇒ post-state `1`. Row of `< 8` or
+    ///   `> 8` bytes ⇒ decoded `0`, post-state `1`. `u64::MAX` ⇒
+    ///   saturates, never wraps to a lower value.
+    /// * **Observable invariant.** Across any number of concurrent `txn`s
+    ///   each carrying one `IncrementU64 { key }`, the final value equals
+    ///   the count of committed `txn`s (modulo the `u64::MAX` ceiling); a
+    ///   serial reader observes a strictly non-decreasing sequence. No
+    ///   committed increment is lost; the value never goes backwards.
     async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError>;
 
     /// Watch for changes under a key prefix. Each item is `(key, value)`;
@@ -299,5 +420,47 @@ mod state_snapshot_tests {
         let snap = StateSnapshot::from_parts(1, Vec::new(), vec![0xAA]);
         assert!(!snap.bytes().is_empty(), "bytes() must reflect the non-empty input");
         assert_eq!(snap.bytes().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod decode_counter_tests {
+    //! Unit witnesses for [`TxnOp::decode_counter`] — the read side of
+    //! the `IncrementU64` contract. A same-crate mutation seam: each edge
+    //! arm (absent / short / long / exactly-8) is pinned so a mutation
+    //! collapsing the length guard or the zero-fallback is `CAUGHT`.
+    use super::*;
+
+    #[test]
+    fn absent_row_decodes_to_zero() {
+        assert_eq!(TxnOp::decode_counter(None), 0, "absent row is the u64 0");
+    }
+
+    #[test]
+    fn short_row_decodes_to_zero_never_panics() {
+        // < 8 bytes: the length-guarded decode returns 0, never a
+        // `bytes[0..8]` panic.
+        assert_eq!(TxnOp::decode_counter(Some(&[])), 0, "empty row ⇒ 0");
+        assert_eq!(TxnOp::decode_counter(Some(&[0xFF; 7])), 0, "7-byte row ⇒ 0");
+    }
+
+    #[test]
+    fn long_row_decodes_to_zero() {
+        // > 8 bytes: not an exact 8-byte array ⇒ 0 (corruption-tolerant).
+        assert_eq!(TxnOp::decode_counter(Some(&[0xFF; 9])), 0, "9-byte row ⇒ 0");
+    }
+
+    #[test]
+    fn exactly_eight_bytes_decodes_big_endian() {
+        // Exactly 8 bytes ⇒ big-endian u64 (matches the write side's
+        // `next.to_be_bytes()`). A distinct value proves it is not a
+        // constant.
+        assert_eq!(TxnOp::decode_counter(Some(&1_u64.to_be_bytes())), 1);
+        assert_eq!(TxnOp::decode_counter(Some(&u64::MAX.to_be_bytes())), u64::MAX);
+        assert_eq!(
+            TxnOp::decode_counter(Some(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00])),
+            256,
+            "big-endian, not little-endian (LE would read 0x0001_0000_0000_0000)",
+        );
     }
 }

@@ -1192,6 +1192,25 @@ impl IntentKey {
         Self(format!("workloads/{id}/stop").into_bytes())
     }
 
+    /// Derive the intent key for a workload's desired-run generation —
+    /// `workloads/<id>/generation`.
+    ///
+    /// A monotonic `u64` bumped by `overdrive workload restart` (ADR-0073
+    /// item 4); the `WorkloadLifecycle` reconciler places a fresh instance
+    /// when its View's `observed_generation < generation`. The value is
+    /// 8-byte big-endian; an absent key decodes as generation `0`. Stored
+    /// as a separate intent record (sibling-key precedent:
+    /// `workloads/<id>/stop` is an empty-byte sentinel, `workloads/<id>/kind`
+    /// is a single ASCII discriminator — neither is rkyv-envelope-wrapped,
+    /// and neither is this).
+    ///
+    /// Aligns with #180's `workloads/<id>/current` pointer vocabulary;
+    /// folds into that pointer row when #180's revision lineage lands (a
+    /// single-cut migration already anticipated in ADR-0050 § Consequences).
+    pub fn for_workload_generation(id: &WorkloadId) -> Self {
+        Self(format!("workloads/{id}/generation").into_bytes())
+    }
+
     /// Derive the intent key for a workload's kind discriminator —
     /// `workloads/<id>/kind`.
     ///
