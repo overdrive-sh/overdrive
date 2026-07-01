@@ -147,6 +147,20 @@ mod acceptance {
     mod restart_workload_outcome;
     mod restart_workload_unknown;
 
+    // backend-instance-replacement — read-side generation coupling. Closes
+    // the untested seam between the writer (`restart_workload_intent_key`,
+    // raw store) and the generation DECISION logic
+    // (`runtime_convergence_loop`, hand-built state literals): drives the
+    // reconciler's REAL read of `workloads/<id>/generation` through
+    // `run_convergence_tick` and asserts `observed_generation` stamps to the
+    // bumped value — locking `generation_value` to the writer's key
+    // (`IntentKey::for_workload_generation`) and the `IncrementU64` decode
+    // (`TxnOp::decode_counter`). Gated behind `integration-tests` for the
+    // `run_convergence_tick` + `loaded_workload_lifecycle_views_for_test`
+    // visibility reason (see `runtime_convergence_loop` above).
+    #[cfg(feature = "integration-tests")]
+    mod generation_read_coupling;
+
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // `[exec]` block end-to-end. Per ADR-0031.
     mod action_shim_restart_uses_spec_from_action;

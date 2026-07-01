@@ -52,7 +52,7 @@ use overdrive_core::reconcilers::{
     WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::service_lifecycle::{ServiceLifecycleState, ServiceLifecycleView};
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{IntentStore, TxnOp};
 use overdrive_core::traits::observation_store::{
     ConflictRoute, LogicalTimestamp, ObservationRow, ReconcileConflictRow,
 };
@@ -2417,32 +2417,38 @@ async fn hydrate_workload_lifecycle_desired(
 
 /// Read the desired-run generation at `workloads/<id>/generation`.
 ///
-/// backend-instance-replacement step 01-02 (ADR-0073 § 5). The sibling
-/// of [`stop_intent_present`]: same `workloads/<id>/...` sibling-key
-/// shape (`for_workload_stop` reads `workloads/<id>/stop`; this reads
-/// `workloads/<id>/generation`). The value is a big-endian `u64`
-/// written by `overdrive workload restart`'s atomic `TxnOp::IncrementU64`
-/// bump-and-clear (slice 01-03 wires the handler).
+/// backend-instance-replacement step 01-02 (ADR-0073 § 5). The read
+/// sibling of [`stop_intent_present`] / [`read_workload_kind`] over the
+/// `workloads/<id>/...` key family, bumped by `overdrive workload
+/// restart`'s atomic `TxnOp::IncrementU64` (`handlers.rs`).
 ///
-/// Decode is defensive (per `.claude/rules/development.md` § "Safe
-/// byte-slice access" + the 01-01 store-side precedent): an absent key
-/// reads as `0`; a corrupt / short (non-8-byte) row decodes to `0`
-/// rather than panicking — `<[u8; 8]>::try_from(..).map(u64::from_be_bytes)`
-/// with a `0` fallback, never `bytes[0..8]` indexing.
+/// The key is derived through [`IntentKey::for_workload_generation`] —
+/// the single authority for the `workloads/<id>/generation` byte shape,
+/// the same constructor `overdrive workload restart` writes through
+/// (`handlers.rs`, ADR-0073 item 4). This read side delegates to it just
+/// like its siblings `read_workload_kind` / `stop_intent_present`
+/// delegate to `for_workload_kind` / `for_workload_stop`, so a future
+/// change to the key shape can only be made in one place and both sides
+/// follow.
 ///
-/// The key is constructed inline (`workloads/<id>/generation`) rather
-/// than via an `IntentKey::for_workload_generation` constructor: that
-/// constructor is the handler-side surface (ADR-0073 item 4, slice
-/// 01-03 in `aggregate/mod.rs`), out of this step's scope. The inline
-/// form mirrors `IntentKey::for_workload_stop`'s exact byte shape.
+/// The value is decoded through [`TxnOp::decode_counter`] — the read side
+/// of the `IncrementU64` contract (`intent_store.rs`) the writer commits
+/// through. Absent / corrupt / short (non-8-byte) rows decode to `0`
+/// rather than panicking (per `.claude/rules/development.md` § "Safe
+/// byte-slice access"); an exactly-8-byte row decodes big-endian. Routing
+/// the decode through the shared helper keeps every counter reader bound
+/// to the one contract instead of re-inlining the byte fiddling.
 async fn generation_value(
     state: &AppState,
     workload_id: &WorkloadId,
 ) -> Result<u64, ConvergenceError> {
-    let gen_key = format!("workloads/{workload_id}/generation").into_bytes();
-    let gen_bytes =
-        state.store.get(&gen_key).await.map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    Ok(gen_bytes.as_deref().and_then(|b| <[u8; 8]>::try_from(b).ok()).map_or(0, u64::from_be_bytes))
+    let gen_key = IntentKey::for_workload_generation(workload_id);
+    let gen_bytes = state
+        .store
+        .get(gen_key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    Ok(TxnOp::decode_counter(gen_bytes.as_deref()))
 }
 
 /// Read every persisted workflow-instance desired-intent from the

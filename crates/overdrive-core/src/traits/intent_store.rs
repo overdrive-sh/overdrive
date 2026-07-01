@@ -127,6 +127,34 @@ pub enum TxnOp {
     },
 }
 
+impl TxnOp {
+    /// Decode a value written by [`TxnOp::IncrementU64`] back into its
+    /// `u64` — the read side of that op's documented contract.
+    ///
+    /// This is the single decode authority for an `IncrementU64` counter.
+    /// A consumer that reads a counter row (e.g. a reconciler hydrating a
+    /// desired-run generation) calls this rather than re-inlining the byte
+    /// decode, so no reader can drift from the corruption-tolerant read
+    /// contract: never `bytes[0..8]` indexing (which panics on a short
+    /// row per `development.md` § "Safe byte-slice access"), never a
+    /// missing zero-fallback. It mirrors the `IncrementU64`
+    /// precondition/edge-cases exactly:
+    ///
+    /// * `None` (absent row) ⇒ `0`.
+    /// * A row whose length is not exactly 8 ⇒ `0` (length-guarded,
+    ///   never a panic).
+    /// * An exactly-8-byte row ⇒ decoded as big-endian `u64`.
+    ///
+    /// This is the read counterpart to the write side implemented by
+    /// each [`IntentStore`] adapter's [`txn`](IntentStore::txn); the
+    /// store adapters keep their own RMW (production `redb` + the sim
+    /// fake) — this helper is for *consumers* of the persisted value.
+    #[must_use]
+    pub fn decode_counter(row: Option<&[u8]>) -> u64 {
+        row.and_then(|bytes| <[u8; 8]>::try_from(bytes).ok()).map_or(0, u64::from_be_bytes)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TxnOutcome {
     Committed,
@@ -392,5 +420,47 @@ mod state_snapshot_tests {
         let snap = StateSnapshot::from_parts(1, Vec::new(), vec![0xAA]);
         assert!(!snap.bytes().is_empty(), "bytes() must reflect the non-empty input");
         assert_eq!(snap.bytes().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod decode_counter_tests {
+    //! Unit witnesses for [`TxnOp::decode_counter`] — the read side of
+    //! the `IncrementU64` contract. A same-crate mutation seam: each edge
+    //! arm (absent / short / long / exactly-8) is pinned so a mutation
+    //! collapsing the length guard or the zero-fallback is `CAUGHT`.
+    use super::*;
+
+    #[test]
+    fn absent_row_decodes_to_zero() {
+        assert_eq!(TxnOp::decode_counter(None), 0, "absent row is the u64 0");
+    }
+
+    #[test]
+    fn short_row_decodes_to_zero_never_panics() {
+        // < 8 bytes: the length-guarded decode returns 0, never a
+        // `bytes[0..8]` panic.
+        assert_eq!(TxnOp::decode_counter(Some(&[])), 0, "empty row ⇒ 0");
+        assert_eq!(TxnOp::decode_counter(Some(&[0xFF; 7])), 0, "7-byte row ⇒ 0");
+    }
+
+    #[test]
+    fn long_row_decodes_to_zero() {
+        // > 8 bytes: not an exact 8-byte array ⇒ 0 (corruption-tolerant).
+        assert_eq!(TxnOp::decode_counter(Some(&[0xFF; 9])), 0, "9-byte row ⇒ 0");
+    }
+
+    #[test]
+    fn exactly_eight_bytes_decodes_big_endian() {
+        // Exactly 8 bytes ⇒ big-endian u64 (matches the write side's
+        // `next.to_be_bytes()`). A distinct value proves it is not a
+        // constant.
+        assert_eq!(TxnOp::decode_counter(Some(&1_u64.to_be_bytes())), 1);
+        assert_eq!(TxnOp::decode_counter(Some(&u64::MAX.to_be_bytes())), u64::MAX);
+        assert_eq!(
+            TxnOp::decode_counter(Some(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00])),
+            256,
+            "big-endian, not little-endian (LE would read 0x0001_0000_0000_0000)",
+        );
     }
 }

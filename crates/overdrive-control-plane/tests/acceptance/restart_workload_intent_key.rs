@@ -35,7 +35,6 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::api::RestartWorkloadResponse;
 use overdrive_control_plane::handlers::restart_workload;
@@ -45,7 +44,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{IntentStore, TxnOp};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -105,12 +104,6 @@ async fn seed_declared_payments(state: &AppState) -> Vec<u8> {
     archived.as_ref().to_vec()
 }
 
-/// Decode a port-observed value as a big-endian `u64` (absent / non-8
-/// reads as `0`) per development.md § "Safe byte-slice access".
-fn decode_be_u64(value: Option<Bytes>) -> u64 {
-    value.and_then(|bytes| <[u8; 8]>::try_from(bytes.as_ref()).ok()).map_or(0, u64::from_be_bytes)
-}
-
 #[tokio::test]
 async fn restart_commits_one_bump_clear_txn_retains_intent_and_enqueues_one_eval() {
     let tmp = TempDir::new().expect("tmpdir");
@@ -143,7 +136,9 @@ async fn restart_commits_one_bump_clear_txn_retains_intent_and_enqueues_one_eval
 
     // And: the generation bumped from absent (0) to EXACTLY 1 — the
     // `IncrementU64` arm committed once.
-    let generation = decode_be_u64(state.store.get(gen_key.as_bytes()).await.expect("get gen"));
+    let generation = TxnOp::decode_counter(
+        state.store.get(gen_key.as_bytes()).await.expect("get gen").as_deref(),
+    );
     assert_eq!(
         generation, 1,
         "the restart must bump `workloads/payments/generation` from absent (0) to exactly 1 \
