@@ -107,8 +107,8 @@ materialises each scaffold with the markers above and runs the gate.
 | S-BIR-CLI-RESTART-SUCCESS | int (in-process) | `MISSING_FUNCTIONALITY` | `WorkloadCommand::Restart` + `commands::workload::restart` + `ApiClient::restart_workload` absent (direct handler-call, no subprocess) |
 | S-BIR-CLI-RESTART-UNKNOWN | int (in-process) | `MISSING_FUNCTIONALITY` | the CLI 404→`CliError`→non-zero-exit (`render::cli_error_to_exit_code`) mapping absent |
 | S-DBN-WS-STABLE | 3 | **un-ignore → GREEN** (NOT a `MISSING_FUNCTIONALITY` scaffold) | existing AT, `#[ignore]` removed + cycle swapped to the production verb (slice-04) |
-| S-DBN-CHURN | 3 | **un-ignore → GREEN** | same |
-| S-DBN-NXDOMAIN-02-RECOVERY | 3 | **un-ignore → GREEN** | same |
+| S-DBN-CHURN | 3 | **un-ignore → GREEN, AFTER a preceding production step** (see note ‡) | existing AT is still an oracle (not a `MISSING_FUNCTIONALITY` todo-scaffold), BUT the un-ignore (roadmap 03-02) is now gated on the **A1 production pump half-close-forward + T1/T2 test-model fix (roadmap 03-01)** — a clean backend FIN was invisible to v1's (B)+(C) supervision (RCA `root-cause-analysis-in-flight-churn-fail-fast-gap.md`; ADR-0070 amendment 2026-07-01). |
+| S-DBN-NXDOMAIN-02-RECOVERY | 3 | **un-ignore → GREEN** | same as S-DBN-WS-STABLE |
 
 ## The oracle ATs are NOT `MISSING_FUNCTIONALITY` scaffolds
 
@@ -122,3 +122,21 @@ pinned-6.18 appliance-kernel Tier-3 matrix** (the merge gate; dev-Lima is
 necessary-but-not-sufficient — ADR-0068). No AT installs/clears a rule/key, binds
 a socket, or supplies an address production does not itself install/clear/bind/supply
 (CLAUDE.md vertical-slice rule).
+
+**‡ S-DBN-CHURN exception (post-hoc, 2026-07-01).** S-DBN-CHURN is still a
+genuine oracle un-ignore — it is NOT a `MISSING_FUNCTIONALITY` todo-scaffold — but
+DELIVER discovered (RCA `docs/analysis/root-cause-analysis-in-flight-churn-fail-fast-gap.md`)
+that it could NOT go green by un-ignore alone: a graceful `overdrive workload
+restart` stops the backend with SIGTERM → the backend's socket FINs cleanly, and a
+clean directional FIN was invisible to BOTH v1 liveness mechanisms ((B) self-teardown
+fires only on `TransportDeath`; (C) `TCP_USER_TIMEOUT` reaps only *unacked* death).
+The datapath absorbed the FIN (`PumpExit::Graceful` non-reclaim) without propagating
+it to the client-facing leg-F, so the in-flight client hung to `CHURN_BOUND`. The fix
+(ADR-0070 amendment 2026-07-01 — the **A1 pump half-close-forward**: on a source clean
+close, `shutdown(dst, SHUT_WR)` forwards the FIN to the opposing leg) plus the
+**T1/T2 test-model fix** (a long-lived full-duplex backend + a live-first-round-trip
+assertion) is a **new production step (roadmap 03-01)** that precedes the un-ignore
+(roadmap 03-02). This does NOT change S-DBN-CHURN's own nature (an oracle AT, not a
+scaffold); it changes the *phase sizing* — the prior "un-ignore, test-only, no
+production src" framing was mis-sized. The other two oracle ATs (S-DBN-WS-STABLE,
+S-DBN-NXDOMAIN-02-RECOVERY) remain pure un-ignore→GREEN.

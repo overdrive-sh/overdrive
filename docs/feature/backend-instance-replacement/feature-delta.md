@@ -24,6 +24,28 @@
 > the record; DELIVER implements per ADR-0073 and the `## Wave: DESIGN` section,
 > NOT per any "open" wording below.
 
+> **⚠ AMENDMENT (2026-07-01) — S-DBN-CHURN is NOT a bare un-ignore. READ THIS.**
+> Every claim below that S-DBN-CHURN / slice-03 / slice-04 lands "test-only, no
+> new production src" (the DISCUSS `[REF]` sizing, the risk table, the "SHIPPED …
+> intercept-worker TCP_USER_TIMEOUT legs" line) is **superseded** for the churn
+> case. DELIVER's RCA
+> (`docs/analysis/root-cause-analysis-in-flight-churn-fail-fast-gap.md`) found a
+> **pre-existing datapath gap**: a graceful `overdrive workload restart` SIGTERMs
+> the backend → its socket **FINs cleanly**, and a clean directional FIN was
+> invisible to BOTH v1 liveness mechanisms (**(B)** self-teardown fires only on
+> `TransportDeath`; **(C)** `TCP_USER_TIMEOUT` reaps only *unacked* death) — the
+> datapath absorbed the FIN (`PumpExit::Graceful` non-reclaim) without propagating
+> it to the client-facing leg-F, so the in-flight client hung. The fix is the
+> **A1 pump half-close-forward** (`shutdown(dst, SHUT_WR)` on a source clean close
+> — **ADR-0070 amendment 2026-07-01**) plus a **T1/T2 test-model fix** (long-lived
+> full-duplex backend + live-first-round-trip assertion), landed as a NEW
+> production step (roadmap **03-01**) BEFORE the churn un-ignore (roadmap
+> **03-02**). The `TCP_USER_TIMEOUT` bound stays valid as an **upper** bound (a
+> clean close now fails fast near-instantly; transport-death is
+> `TCP_USER_TIMEOUT`-bounded). `sock_destroy` remains excluded (#61). S-DBN-WS-STABLE
+> and S-DBN-NXDOMAIN-02-RECOVERY are unaffected (still pure un-ignore→GREEN). The
+> DISCUSS narrative below is preserved verbatim; this banner is the correction.
+
 ## Reading checklist
 
 - ✓ `docs/product/jobs.yaml` — J-OPS-003 (the closest validated lifecycle job: schedule, supervise, converge to declared replica count, restart-on-crash, stop-cleanly); J-OPS-002 / J-OPS-004 (sibling control-surface jobs); J-MESH-001 (the dial-by-name arc whose three deferred ATs — 02-02 ×2 + 03-01 ×1 — this feature unblocks); header precedent ("JTBD distilled from whitepaper/issue, not interviews")

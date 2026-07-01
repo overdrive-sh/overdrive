@@ -745,14 +745,36 @@ Scenario: byte-stable-across-cycle oracle passes un-ignored
 ```gherkin
 @real-io @churn @error_path @kpi @oracle
 Scenario: backend-churn fail-fast oracle passes un-ignored
-  Given a client holds an open in-flight connection through F1 to backend B1
-  When the operator runs `overdrive workload restart server` mid-connection
-  Then the in-flight connection fails fast (reset/error/EOF) within CHURN_BOUND (TCP_USER_TIMEOUT), never an indefinite hang
+  Given a client holds a genuinely-live, full-duplex in-flight connection through F1 to backend B1 (first round-trip byte-exact BEFORE the hold)
+  When the operator runs `overdrive workload restart server` mid-connection (B1 stopped cleanly → a normal FIN on the backend leg)
+  Then the in-flight connection fails fast (reset/error/EOF) — a clean backend close is forwarded as a leg-F half-close (`shutdown(SHUT_WR)`, near-instant), bounded ABOVE by CHURN_BOUND (TCP_USER_TIMEOUT for the transport-death case), never an indefinite hang
   And a subsequent fresh connect to F1 lands the new live backend B2 (byte-exact)
-  And no sock_destroy is used (#61 scope) — the terminating-proxy fail-fast posture only
+  And no sock_destroy is used (#61 scope) — the terminating-proxy fail-fast posture only (the pump-task half-close forward for a clean close + TCP_USER_TIMEOUT/keepalive for transport death)
 ```
 
-- **Expected RED in DELIVER**: un-ignore → GREEN on the Tier-3 matrix.
+- **A1 mechanism dependency (ADR-0070 amendment 2026-07-01).** This oracle is
+  NOT a bare un-ignore. A graceful `overdrive workload restart` stops B1 with
+  SIGTERM → B1 exits normally → the kernel FINs its socket → the datapath sees a
+  **clean directional close** (`PumpExit::Graceful`), which v1's (B) self-teardown
+  and (C) `TCP_USER_TIMEOUT` do **not** surface (RCA
+  `root-cause-analysis-in-flight-churn-fail-fast-gap.md`, Root Cause A). Going
+  green requires the **A1 production fix** (the OUTBOUND return decrypt pump
+  forwards the backend FIN to leg-F as `shutdown(SHUT_WR)` — ADR-0070 amendment)
+  **plus** the **test-model fix** (T1: a long-lived full-duplex backend that does
+  NOT close after one response; T2: assert the first full round-trip byte-exact
+  BEFORE holding — the `Given` clause above). Without A1 the AT hangs to CHURN_BOUND
+  even with a live backend; without T1 the AT hangs identically with NO churn
+  (single-shot server, RCA Root Cause C).
+- **The AC bound is honest as an UPPER bound.** A clean backend close now fails
+  fast near-instantly (a forwarded FIN, well under `TCP_USER_TIMEOUT`); a
+  *transport-death* churn (RST / vanish) is still `TCP_USER_TIMEOUT`-bounded.
+  CHURN_BOUND (30 s) is the falsify-an-indefinite-hang ceiling, not the expected
+  latency; the assertion is "returned within CHURN_BOUND", which A1 satisfies with
+  large margin.
+- **Expected RED in DELIVER**: RED because A1 is not yet built (and the test model
+  is single-shot). GREEN once A1 + T1/T2 land and the AT is un-ignored on the
+  pinned-6.18 Tier-3 matrix. This is NO LONGER a pure "un-ignore → GREEN" — see the
+  roadmap reconciliation (a production step for A1 precedes the un-ignore).
 
 ### S-DBN-NXDOMAIN-02-RECOVERY — A recovered workload re-resolves the same stable `F` (withhold-not-release)
 

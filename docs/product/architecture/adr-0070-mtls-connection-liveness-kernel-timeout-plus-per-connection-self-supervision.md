@@ -598,3 +598,227 @@ work):
   [#82](https://github.com/overdrive-sh/overdrive/issues/82) (gossip-propagated
   revocation); the authorization boundary out of #26 scope (#27 BPF-LSM
   `socket_connect`; #178 expected-peer SAN-match).
+
+---
+
+## Amendment (2026-07-01) — the directional clean-close class: forward the FIN as a half-close (backend-instance-replacement / #249)
+
+### Status of this amendment
+
+**Accepted (2026-07-01).** This amendment **adds a third stall/close class**
+to the two-class table in § Context ("Two stall classes — and which mechanism
+owns each") and pins the mechanism that owns it. It **does not touch** the (C)
+kernel-timeout + (B) self-teardown decision, the retirement of the central
+`MtlsSupervisor`, the 4-method contract, or any locked ADR-0069 core. The one
+thing it changes: on a **clean directional close** (a peer FIN, classified
+`PumpExit::Graceful` on a *source* leg), the pump now **forwards the FIN to the
+opposing leg as a half-close (`shutdown(dst, SHUT_WR)`)** instead of leaving
+the opposing leg open with no path to EOF. The `Graceful`-non-reclaim gate
+(D-MTLS-16 half-close correctness) is **retained unchanged** — a clean close is
+still not a connection reclaim; it is now *propagated* rather than *dropped*.
+
+### Context — the gap this closes (RCA-sourced)
+
+`docs/analysis/root-cause-analysis-in-flight-churn-fail-fast-gap.md` (Rex,
+2026-07-01, source-read evidence) found that the S-DBN-CHURN Tier-3 oracle AT
+cannot go green because a backend that closes its connection **cleanly** (a
+normal FIN — exactly what a graceful `overdrive workload restart` stop of the
+backend, or any well-behaved one-response-then-close server, produces) is
+**invisible to BOTH v1 liveness mechanisms**:
+
+- **(B) self-teardown fires ONLY on `PumpExit::TransportDeath`** (a leg error /
+  the (C) kernel-reaped `ETIMEDOUT`). A clean FIN is classified
+  `PumpExit::Graceful` and `mark_exited` deliberately does NOT fire the
+  self-teardown for `Graceful` — the D-MTLS-16 gate that stops a one-directional
+  half-close from nuking a connection whose sibling direction is still live.
+  (Evidence: `crates/overdrive-dataplane/src/mtls/splice.rs` —
+  `run_decrypt_pump` breaks `Graceful` on `POLLHUP`-with-no-`POLLIN` / `n_in
+  == 0`; `mark_exited` gates the fire on `TransportDeath` only.)
+- **(C) `TCP_USER_TIMEOUT` reaps only *unacked* transport death.** A socket the
+  peer FIN-closed *cleanly* has nothing unacked outstanding, so
+  `TCP_USER_TIMEOUT` has nothing to time against and never fires. (Evidence:
+  `arm_transport_death_timeouts` rustdoc — it reaps a peer that *vanished*
+  without a FIN/RST, not one that *closed*.)
+
+The two-class table pinned **transport-dead** (kernel (C) reaps) and
+**progress-stuck / kernel-invisible** (deferred watchdog, #232). **A clean
+directional FIN is neither.** It is a legitimate, benign, common close — but
+today the pump absorbs it (`Graceful` non-reclaim) and **never propagates it to
+the opposing leg**, so a client holding an in-flight connection through the
+mesh hangs on a blocking read of the workload-facing leg (leg-F) until the
+30 s test bound, because leg-F's write side is never shut down and its read
+never surfaces EOF. The consequence is exactly the "in-flight churn never fails
+fast" symptom the S-DBN-CHURN AC forbids.
+
+### The third class (table addendum to § Context "Two stall classes")
+
+| Close/stall class | Cause | Owner in v1 | Mechanism |
+|---|---|---|---|
+| **Transport-dead** | peer gone, unacked past deadline, half-open | kernel (C) | `TCP_USER_TIMEOUT` + keepalive → `ETIMEDOUT`/RST; pump observes error → (B) self-teardown |
+| **Directional clean-close** *(this amendment)* | a leg's peer FIN-closed cleanly (graceful exit, SIGTERM'd process, one-response-then-close) | **the pump task (B)** | on `PumpExit::Graceful` from a *source* EOF, forward the FIN to the opposing leg as `shutdown(dst, SHUT_WR)` — the peer's FIN mirrors to the other side; **no full reclaim** (sibling direction may still be live); the connection reclaims naturally once *both* directions have closed |
+| **Progress-stuck (kernel-invisible)** | sockets TCP-healthy but the splice/kTLS pump not advancing | **deferred (#232)** | per-connection progress watchdog on the retained `Stalled` predicate — undocumented kTLS-splice progress signal, Tier-3 spike |
+
+### Decision
+
+**On a `PumpExit::Graceful` that is a genuine *source* directional EOF (a peer
+FIN observed on the pump's source leg — NOT a deliberate `teardown`), the pump
+forwards the close to its opposing leg by `shutdown(dst_fd, SHUT_WR)` before
+`mark_exited`, then exits `Graceful` (still non-reclaiming).** This is standard
+transparent-proxy **half-close forwarding**. It is NOT `sock_destroy` (#61
+scope, excluded), NOT a full connection reclaim, and NOT "fire self-teardown on
+`Graceful`" (which would break half-close correctness — a backend that finished
+reading but is still writing would be wrongly nuked).
+
+Concretely, mapping to the pinned leg topology (ADR-0069; verified in
+`outbound.rs` / `inbound.rs`), **every pump's own `dst_fd` IS the opposing leg
+the FIN must reach** — no new plumbing, no new pump parameter:
+
+| Direction | Pump | src → dst | On a source clean-close, half-close forward |
+|---|---|---|---|
+| OUTBOUND | forward (encrypt) | leg-F → leg-B | client(leg-F) FIN → `SHUT_WR` leg-B |
+| OUTBOUND | return (decrypt) | leg-B → leg-F | **backend(leg-B) FIN → `SHUT_WR` leg-F — the S-DBN-CHURN fix** |
+| INBOUND | deliver (decrypt) | leg-C → leg-S | client(leg-C) FIN → `SHUT_WR` leg-S |
+| INBOUND | response (encrypt) | leg-S → leg-C | server(leg-S) FIN → `SHUT_WR` leg-C |
+
+### Half-close correctness is PRESERVED — the load-bearing invariant
+
+The `Graceful` gate exists so a clean EOF on one direction does not tear down a
+connection whose **sibling direction is still live** (D-MTLS-16). The
+half-close forward **preserves** this exactly:
+
+- **`SHUT_WR` half-closes only the write side of the opposing leg.** The peer on
+  that leg sees EOF on its read but its own write direction stays open — if it
+  is still sending (a legitimate `shutdown(SHUT_WR)`-then-keep-reading peer, or a
+  backend that finished reading the request but is still streaming its
+  response), the sibling pump keeps moving those bytes. Nothing is nuked.
+- **No full reclaim on `Graceful`.** `mark_exited` still does NOT fire the (B)
+  self-teardown for `Graceful` — the connection's `ConnState` (both legs, kTLS
+  state) survives until the *sibling* direction also reaches its terminal.
+- **The connection reclaims cleanly once BOTH directions have closed.** When the
+  sibling pump then observes *its* source EOF (or the now-half-closed leg's
+  peer completes its own close), it forwards its own `SHUT_WR`; with both write
+  sides shut, both legs reach full EOF and the pumps exit. A fully-closed
+  connection is then reclaimed via the **shutdown/terminal-teardown path**
+  (`on_alloc_terminal` → `teardown` → `reclaim_connection`), draining the
+  `ConnState` entry. (See "The `ConnState`-linger residual" below — the A1 fix
+  also removes the observed 120 s process-linger.)
+
+### The kTLS-TX-dst subtlety — pinned (encrypt-pump direction)
+
+The two *decrypt* pumps (OUTBOUND return, INBOUND deliver) forward into a
+**plaintext** `dst` (leg-F / leg-S), where `shutdown(SHUT_WR)` sends an ordinary
+TCP FIN — this is the S-DBN-CHURN fix and is unambiguously correct. The two
+*encrypt* pumps (OUTBOUND forward, INBOUND response) forward into a **kTLS-TX**
+`dst` (leg-B / leg-C). `shutdown(SHUT_WR)` on a kTLS-TX socket sends a bare TCP
+FIN **without** a TLS `close_notify` alert. **This is accepted for v1:** the
+peer's kTLS-RX observes the transport FIN as a clean read-EOF (which is what the
+opposing pump needs to surface its own close), and Overdrive's own leg on the
+other side of that FIN is a pump that treats EOF as `Graceful` — it does not
+require a `close_notify` to make progress. Emitting a TLS `close_notify` on
+kTLS-TX before the FIN (the fully-graceful TLS shutdown) is **out of scope for
+this amendment** — it is a mechanism nicety, not a correctness requirement for
+the fail-fast contract, and no v1 consumer distinguishes "FIN" from
+"close_notify then FIN". The uniform `shutdown(dst, SHUT_WR)`-on-`Graceful`
+rule therefore applies to **all four** pumps; the encrypt-pump direction sends a
+bare FIN by design. (If a future consumer needs the TLS-graceful close — an
+external non-Overdrive peer that strictly requires `close_notify` — that is a
+separate, later refinement, not a fail-fast blocker.)
+
+### The `teardown`-vs-source-EOF distinction — do NOT forward on deliberate teardown
+
+`PumpExit::Graceful` is returned in **three** shapes in the pump loops, and only
+the *source-EOF* shapes forward:
+
+1. **Deliberate `teardown` set `stop == true`** (`run_decrypt_pump` /
+   `run_encrypt_pump` top-of-loop `if state.stop { break Graceful }`) — the
+   connection is **already being reclaimed** by `teardown` /
+   `reclaim_connection`; forwarding a `SHUT_WR` here is redundant at best and a
+   double-op at worst. **Do NOT forward on this shape.**
+2. **Source clean EOF** (`POLLHUP`-with-no-`POLLIN`, `n_in == 0`, or the
+   `splice_pipe_to_dst` `n_out == 0` dst-EOF) — a genuine peer FIN. **Forward.**
+
+The implementation MUST distinguish these. The pinned shape (binding on the
+crafter, no invented surface): the half-close forward is gated on **`!state.stop
+&& exit == Graceful`** — the SAME `stop`-guard `fire_self_teardown_if_unexpected`
+already uses to distinguish a deliberate teardown from an unexpected exit. Reuse
+that guard; do not add a new `PumpExit` variant unless the crafter finds the
+existing `Graceful` + `stop`-guard genuinely cannot express the distinction (in
+which case: STOP and surface the gap, per CLAUDE.md "Implement to the design").
+The likely-cleanest expression is a small helper `forward_half_close_if_source_eof(dst_fd, exit, state)`
+called from the single terminal-exit site alongside `mark_exited` — but the
+crafter owns the internal factoring (GREEN/REFACTOR); the design pins only the
+observable: *a source directional clean-close forwards `SHUT_WR` to the opposing
+leg; a deliberate teardown does not.*
+
+### The `ConnState`-linger residual — same root, resolved by A1
+
+The RCA's secondary finding (the 120 s process-linger after the panic, to
+nextest's SIGKILL) is the **same** `Graceful`-non-reclaim: on `skeleton.shutdown()`,
+a connection whose pumps exited `Graceful` without reclaim leaves a `ConnState`
+entry the shutdown path does not force-close synchronously. Under A1, a clean
+backend close now forwards `SHUT_WR` to leg-F → the client's leg-F read surfaces
+EOF → the client closes → the sibling (forward) pump observes *its* source EOF →
+forwards its own `SHUT_WR` → both legs fully close → the pumps exit → the
+terminal-teardown path reclaims the `ConnState`. **A1 resolves the linger as a
+consequence** — it is not a separate fix. (If a residual linger survives A1 —
+e.g. a connection where the client never closes its half after the backend FIN
+— the `on_alloc_terminal` → `teardown` path is the backstop, and `shutdown()`'s
+existing per-alloc teardown drains the set; the crafter confirms no `ConnState`
+survives `skeleton.shutdown()` in the S-DBN-CHURN AT as the linger-gone proof.)
+
+### Relationship to the deferred #232 progress-stall watchdog — ORTHOGONAL
+
+This amendment is **not** the #232 watchdog and does not close it. #232 covers
+the **kernel-invisible progress-stall** — a pump *stuck* while both legs are
+TCP-healthy and a record is pending (no FIN, no error, just no advance). A1
+covers a **clean directional close** — a peer that *did* FIN. They are different
+classes with different signals (a FIN the `poll`/`splice` sees vs. a
+frozen-progress deadline the retained `Stalled` predicate would evaluate). A1
+ships in v1; #232 stays deferred. The `PumpLiveness::Stalled` predicate is still
+retained for #232 and is untouched by this amendment.
+
+### Enforcement (addendum to § Enforcement)
+
+- **The half-close forward is asserted by its observable, not its `setsockopt`
+  args.** The Tier-3 S-DBN-CHURN AT asserts a client holding an in-flight mesh
+  connection through leg-F receives a prompt read-EOF/reset when the backend
+  closes (bounded well under `TCP_USER_TIMEOUT`), and a subsequent fresh connect
+  lands the new backend. A Tier-2/unit test over the pump's terminal-exit
+  decision pins: a source clean EOF forwards `SHUT_WR` to `dst`; a deliberate
+  `teardown` (`stop == true`) does NOT; `mark_exited` still does NOT reclaim on
+  `Graceful` (half-close correctness). This sits alongside the existing
+  `graceful_eof_exit_does_not_fire_self_teardown` unit test — that test's
+  invariant (no reclaim on `Graceful`) is **preserved**; the new test adds the
+  *forward* on top of it.
+- **`sock_destroy` remains excluded (#61).** A1 is a userspace-leg
+  `shutdown(SHUT_WR)`; it needs no `sock_destroy`. The AC's "NO `sock_destroy`"
+  constraint holds under A1.
+- **`TCP_USER_TIMEOUT` remains the upper bound for the *transport-death* class.**
+  A1 makes a *clean* close propagate near-instantly (a forwarded FIN, well under
+  `TCP_USER_TIMEOUT`); the *transport-death* class (RST / vanish) still uses (C)
+  `TCP_USER_TIMEOUT`. The S-DBN-CHURN AC's "bounded by `TCP_USER_TIMEOUT`, never
+  an indefinite hang" text stays accurate as the **upper** bound (clean close is
+  faster; transport death is `TCP_USER_TIMEOUT`-bounded) — see the S-DBN-CHURN
+  scenario note.
+
+### References (addendum)
+
+- **RCA (the evidence base):**
+  `docs/analysis/root-cause-analysis-in-flight-churn-fail-fast-gap.md` (Rex,
+  2026-07-01) — Root Cause A (design/AC gap: clean-close invisible to (B)+(C))
+  and Root Cause C (test-model error: single-shot server). This amendment
+  resolves Root Cause A (A1); the test-model fix (T1/T2) lands with it.
+- **The pump surface this binds:**
+  `crates/overdrive-dataplane/src/mtls/splice.rs` (`run_decrypt_pump` /
+  `run_encrypt_pump` / `mark_exited` / the `PumpExit::Graceful` terminal
+  exits); `crates/overdrive-dataplane/src/mtls/mod.rs` (`reclaim_connection` /
+  the terminal-teardown path). Leg topology verified in
+  `crates/overdrive-dataplane/src/mtls/outbound.rs` / `inbound.rs`.
+- **Driving gate:** the S-DBN-CHURN Tier-3 oracle AT
+  (`in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend`,
+  `crates/overdrive-control-plane/tests/integration/dns_responder_walking_skeleton.rs`);
+  the backend-instance-replacement roadmap step that lands A1 + the test-model
+  fix before the un-ignore can go green.
+- ADR-0069 (leg vocabulary: F/B outbound, C/S inbound; the bidirectional model);
+  #26/#236 (kernel-mediated / transparent mTLS); #232 (the orthogonal deferred
+  progress-stall watchdog); #61 (`sock_destroy`, excluded).
