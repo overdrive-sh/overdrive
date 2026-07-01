@@ -743,25 +743,44 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 /// the request bytes then WRITES the DISTINCT `RESPONSE` constant (NOT an echo)
 /// — so the dialer's `got == RESPONSE` assertion can only pass if S authored
 /// and sent RESPONSE over the real S→C reply pipe.
+///
+/// T1 (RCA `root-cause-analysis-in-flight-churn-fail-fast-gap.md`, Root Cause C):
+/// the per-accept handler is LONG-LIVED and FULL-DUPLEX — it does NOT `c.close()`
+/// after one response. It answers the first request, then keeps the connection
+/// OPEN (looping reads: it answers each further request, and blocks on an empty
+/// read without closing). Only then is "the in-flight connection is still open when
+/// B1 is cycled" true, so S-DBN-CHURN can distinguish a churn-fail-fast defect from
+/// a benign single-shot close (the RCA proved the single-shot server hangs the churn
+/// AT identically with NO churn — the backend leg was already half-closed before the
+/// churn window opened). Each accepted connection is served on its own daemon thread
+/// so the accept loop keeps taking new connections concurrently. SHARED with
+/// S-DBN-WS-STABLE (02-01): a server that stays open is strictly more permissive than
+/// the prior single-shot server for that AT's single round-trip-then-cycle, so it does
+/// not regress it.
 fn server_service_spec(workload_id: &str) -> ServiceSpecInput {
     let response_py = String::from_utf8(RESPONSE.to_vec())
         .expect("RESPONSE is ASCII — renders as a Python bytes literal");
     let server_script = format!(
         r"
-import socket
+import socket, threading
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(('0.0.0.0', {SERVICE_PORT}))
 s.listen(8)
-while True:
-    c, _ = s.accept()
+def serve(c):
     try:
-        _ = c.recv(4096)
-        c.sendall(b'{response_py}')
+        while True:
+            data = c.recv(4096)
+            if not data:
+                break
+            c.sendall(b'{response_py}')
     except Exception:
         pass
     finally:
         c.close()
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=serve, args=(c,), daemon=True).start()
 ",
     );
     ServiceSpecInput {
@@ -1885,19 +1904,22 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// leg-C). This AT proves the fail-fast + next-dial-live behaviour; the
 /// inter-agent encryption proof lives in the sibling round-trip ATs.
 ///
-/// BLOCKED (02-02 — alloc-cycle restart semantics; SAME blocker as
-/// `answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_new_backend`,
-/// see its docstring). The "AND a subsequent fresh connect to F lands the NEW
-/// live backend B2" step re-deploys the SAME `<job>` "server" after a
-/// `stop_and_converge`, but the production operator-stop intent
-/// (`IntentKey::for_workload_stop`) is sticky/overriding by design (ADR-0037
-/// Amendment / `WorkloadLifecycle` §Bug 3) and a same-spec resubmit does not
-/// clear it — so B2 never reaches Running and `deploy_and_wait_running` times
-/// out. The fail-fast-on-churn HALF is independently meaningful, but the AC's
-/// "next connect lands B2" half needs a production restart-after-stop path that
-/// does not exist. A design/scope gap to resolve before un-ignoring, distinct
-/// from the (fixed) plaintext-client model error.
-#[ignore = "02-02 DEFERRED to overdrive-sh/overdrive#249 (backend instance replacement / restart-after-stop): cycling the backend to a NEW AllocationId/workload_addr while the job stays declared needs a replace/restart verb that does not exist — operator-stop is sticky/overriding by design (ADR-0037 Amdt / WorkloadLifecycle §Bug 3), a same-spec re-deploy does not clear it, and crash-restart reuses the alloc_id/slot. Distinct from the (fixed) plaintext-client model error and from #211 (deletion). Un-ignore when #249 lands. See docstring."]
+/// The mid-connection CHURN is driven by the production `overdrive workload
+/// restart server` verb = `POST /v1/jobs/server/restart` (the `restart_workload`
+/// handler; ADR-0073, shipped in Phase 01), fired while the in-flight connection
+/// is open. The restart handler atomically bumps the desired-run generation AND
+/// clears the `/stop` sentinel in ONE `IntentStore::txn([IncrementU64{generation},
+/// Delete{stop}])`; the `WorkloadLifecycle` reconciler then STOPS the current
+/// instance B1 (→ the in-flight connection fails fast) AND places a FRESH
+/// instance B2 (new AllocationId) because `observed_generation < generation`.
+/// This is the production restart-after-stop path the earlier "no verb exists"
+/// narrative (now false — the verb shipped in Phase 01) said was missing. A
+/// same-spec `POST /v1/jobs` re-deploy is NOT used here precisely because it
+/// takes the `put_if_absent → KeyExists → Unchanged` path and does NOT clear the
+/// sticky operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
+/// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. Sibling:
+/// S-DBN-WS-STABLE exercises the same restart verb on the NEXT dial (02-01).
+#[ignore = "03-01 lands the A1 half-close forward (ADR-0070 amendment 2026-07-01, Root Cause A) + the T1/T2 test-model fix that make this AT go green; the FORMAL un-ignore is step 03-02. A local Lima run under 03-01 confirmed fail-fast in 886ms (well under CHURN_BOUND=30s) on a clean restart (A1 forwards the backend FIN to leg-F). Un-ignore in 03-02."]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lands_new_backend() {
     if !is_root() {
@@ -1919,6 +1941,9 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
     let server_id = "server";
     let client_id = "client";
     let _b1 = deploy_and_wait_running(&skeleton, server_service_spec(server_id), server_id).await;
+    let alloc_b1 = workload_running_alloc_id(&skeleton.obs(), server_id)
+        .await
+        .expect("server must have a running AllocationId (B1)");
     let client_addr =
         deploy_and_wait_running(&skeleton, client_service_spec(client_id), client_id).await;
     let client_netns = netns_name_for_workload_addr(client_addr);
@@ -1930,7 +1955,7 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
             .await
             .expect("resolve task join")
             .unwrap_or_else(|| panic!("S-DBN-CHURN: getent must resolve the stable frontend F"));
-    eprintln!("[02-02] S-DBN-CHURN: resolved F = {frontend}");
+    eprintln!("[03-01] S-DBN-CHURN: resolved F = {frontend}, alloc B1 = {alloc_b1}");
 
     // GIVEN an OPEN in-flight connection through the intercept to B1. Open the
     // connection on a dedicated thread inside the client netns, complete the
@@ -1945,8 +1970,18 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
     // Let the in-flight connection establish + flow before cycling B1.
     tokio::time::sleep(Duration::from_millis(800)).await;
 
-    // WHEN B1 is CYCLED mid-connection (stopped while the connection is open).
-    stop_and_converge(&skeleton, server_id).await;
+    // WHEN B1 is CYCLED mid-connection through the PRODUCTION restart verb —
+    // `POST /v1/jobs/server/restart` (ADR-0073) — fired while the in-flight
+    // connection is still open. The restart handler atomically bumps the
+    // desired-run generation AND clears the `/stop` sentinel; the
+    // `WorkloadLifecycle` reconciler then STOPS the current instance B1 (→ the
+    // in-flight connection fails fast) AND places a FRESH instance B2 (new
+    // AllocationId) because `observed_generation < generation`.
+    let restarted = run_server_restart(&skeleton, server_id).await;
+    assert!(
+        restarted,
+        "S-DBN-CHURN: the production restart verb must accept the mid-connection cycle"
+    );
 
     // THEN the in-flight read returns PROMPTLY (bounded) — NOT an indefinite
     // hang. The churn thread measures the elapsed time from "B1 may now be
@@ -1963,14 +1998,44 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
         in_flight.elapsed, CHURN_BOUND,
     );
     eprintln!(
-        "[02-02] S-DBN-CHURN: in-flight connection failed fast in {:?} (≤ {:?}) on backend churn",
+        "[03-01] S-DBN-CHURN: in-flight connection failed fast in {:?} (≤ {:?}) on backend churn",
         in_flight.elapsed, CHURN_BOUND,
     );
 
-    // AND a SUBSEQUENT fresh connect to F lands the new live backend B2.
-    let backend_b2 =
-        deploy_and_wait_running(&skeleton, server_service_spec(server_id), server_id).await;
-    eprintln!("[02-02] S-DBN-CHURN: re-deployed server, B2 = {backend_b2}");
+    // AND a SUBSEQUENT fresh connect to F lands the new live backend B2. The
+    // restart placed B2 BY the reconciler (not a re-deploy); wait for a FRESH
+    // Running alloc whose alloc_id != alloc_b1 BEFORE dialing F, so B2 is Running
+    // when the subsequent connect lands. The restart→drain→replace cycle is
+    // slower than a fresh deploy; budget 30s.
+    let alloc_b1_for_wait = alloc_b1.clone();
+    let (backend_b2, alloc_b2) =
+        poll_until(Duration::from_secs(30), Duration::from_millis(200), || {
+            let obs = skeleton.obs();
+            let id = server_id.to_owned();
+            let exclude = alloc_b1_for_wait.clone();
+            async move {
+                let rows = obs.alloc_status_rows().await.ok()?;
+                rows.into_iter()
+                    .filter(|r| {
+                        r.workload_id.as_str() == id
+                            && r.state == AllocState::Running
+                            && r.alloc_id.to_string() != exclude
+                    })
+                    .find_map(|r| r.workload_addr.map(|addr| (addr, r.alloc_id.to_string())))
+            }
+        })
+        .await
+        .unwrap_or_else(|| {
+            panic!(
+                "S-DBN-CHURN: the restart must place a FRESH server instance (new AllocationId \
+                 != B1={alloc_b1}) reaching Running with a workload_addr within 30s"
+            )
+        });
+    assert_ne!(
+        alloc_b1, alloc_b2,
+        "S-DBN-CHURN: the churn must produce a NEW AllocationId (B1={alloc_b1}, B2={alloc_b2})",
+    );
+    eprintln!("[03-01] S-DBN-CHURN: restart placed B2 = {backend_b2}, alloc B2 = {alloc_b2}");
     tokio::time::sleep(Duration::from_millis(500)).await;
     let dial_pki = TestPkiHandle::from(&pki);
     let netns = client_netns.clone();
@@ -1983,7 +2048,7 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
         "S-DBN-CHURN: a SUBSEQUENT fresh connect to F must land the new live backend B2 (byte-exact \
          mTLS round-trip) — proving the next dial is live after the in-flight one failed fast"
     );
-    eprintln!("[02-02] S-DBN-CHURN: subsequent fresh connect landed the new backend B2");
+    eprintln!("[03-01] S-DBN-CHURN: subsequent fresh connect landed the new backend B2");
 
     stop_and_converge(&skeleton, server_id).await;
     stop_and_converge(&skeleton, client_id).await;
@@ -1991,8 +2056,11 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
 }
 
 /// The fail-fast bound for the in-flight churn read. The worker proxy legs tune
-/// `TCP_USER_TIMEOUT` (mtls_intercept_worker.rs) to a sane value; the in-flight
-/// read must return within this bound (reset/error/EOF), NOT hang indefinitely.
+/// `TCP_USER_TIMEOUT` (`mtls/mod.rs::arm_transport_death_timeouts`) to a sane value;
+/// the in-flight read must return within this bound (reset/error/EOF), NOT hang
+/// indefinitely. Under the A1 half-close forward (ADR-0070 amendment) a CLEAN backend
+/// close now propagates near-instantly (a forwarded FIN, well under this bound); the
+/// bound remains the UPPER limit for the transport-death class (RST / vanish).
 /// Generous enough to absorb the stop convergence + the user-timeout window,
 /// tight enough to falsify an indefinite hang (a hang would block to nextest's
 /// ~120s slow-test reap).
@@ -2040,11 +2108,32 @@ fn churn_in_flight_read(netns: &str, _pki: TestPkiHandle, frontend: Ipv4Addr) ->
         return timeout;
     }
     let mut buf = vec![0u8; 4096];
+    // T2 (RCA Root Cause C): assert the first FULL round-trip completed BYTE-EXACT
+    // before holding — the same `got == RESPONSE` gate the working `dial()` helper
+    // uses. This proves the in-flight connection was genuinely live THROUGH B1 (the
+    // agent captured the plaintext REQUEST on leg-F, re-encrypted to leg-B, and B1's
+    // distinct RESPONSE flowed back over the real reply pipe). A future regression
+    // where the hold socket was never plumbed through B1 (H3-shaped) is then CAUGHT
+    // here rather than masked by a discarded first read.
     {
-        // Read the first response so the connection is genuinely established +
-        // flowing before the churn. A WouldBlock here is fine (the bytes may
-        // still be in flight); we proceed to hold the connection open.
-        let _ = tcp.read(&mut buf);
+        let mut got = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while got.len() < RESPONSE.len() && Instant::now() < deadline {
+            match tcp.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => got.extend_from_slice(&buf[..n]),
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(_) => break,
+            }
+        }
+        assert_eq!(
+            got, RESPONSE,
+            "S-DBN-CHURN: the in-flight connection's FIRST round-trip must complete byte-exact \
+             through B1 before the hold — a hold socket never plumbed through B1 (H3-shaped) is a \
+             test-model defect, not a fail-fast success"
+        );
     }
 
     // Now HOLD the connection open and block on reads until the backend death

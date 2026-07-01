@@ -208,6 +208,49 @@ enum PumpExit {
     TransportDeath,
 }
 
+/// A1 (ADR-0070 amendment 2026-07-01, Root Cause A): forward a source directional
+/// clean-close to the OPPOSING leg as a half-close. On a [`PumpExit::Graceful`] that
+/// is a genuine *source* EOF (a peer FIN observed on the pump's source leg —
+/// `POLLHUP`-with-no-`POLLIN`, `n_in == 0`, or the `splice_pipe_to_dst` dst-EOF —
+/// NOT a deliberate `teardown`), `shutdown(dst_fd, SHUT_WR)` mirrors the peer's FIN
+/// onto the opposing leg's write side so the peer on that leg surfaces read-EOF. This
+/// is the S-DBN-CHURN fix: a backend that closes cleanly on the return-decrypt pump's
+/// source (leg-B) forwards the FIN to leg-F, so a client holding an in-flight read
+/// fails fast instead of hanging until `TCP_USER_TIMEOUT`.
+///
+/// Half-close correctness is PRESERVED (D-MTLS-16): `SHUT_WR` closes ONLY the write
+/// side of the opposing leg — the sibling direction stays live if the peer is still
+/// sending, and this does NOT reclaim the connection (`mark_exited` still does not
+/// fire the (B) self-teardown for `Graceful`). The connection reclaims naturally once
+/// BOTH directions have forwarded their close and both legs reach full EOF.
+///
+/// Gated on `exit == Graceful && !state.stop`: a DELIBERATE `teardown` set `stop`
+/// (and also breaks `Graceful` at the top of the loop), and the reclaim path owns the
+/// close on that shape — a redundant `SHUT_WR` there is wrong. This reuses the SAME
+/// `stop`-guard `fire_self_teardown_if_unexpected` uses to distinguish a deliberate
+/// teardown from a source EOF. `SHUT_WR` on a kTLS-TX `dst` (the encrypt pumps' leg-B
+/// / leg-C) sends a bare TCP FIN without a TLS `close_notify` — accepted for v1 (the
+/// peer's kTLS-RX observes the transport FIN as a clean read-EOF, which is all the
+/// opposing pump needs; emitting `close_notify` is out of scope for the amendment).
+fn forward_half_close_if_source_eof(dst_fd: RawFd, exit: PumpExit, state: &PumpState) {
+    // Forward ONLY on a genuine source clean-close: a `Graceful` exit that was NOT a
+    // deliberate `teardown`. `stop == true` breaks `Graceful` at the top of the loop
+    // and means the reclaim path already owns the close — reuse the SAME stop-guard
+    // `fire_self_teardown_if_unexpected` uses. A `TransportDeath` exit reclaims via
+    // (B) self-teardown, not a half-close forward.
+    if exit != PumpExit::Graceful || state.stop.load(Ordering::SeqCst) {
+        return;
+    }
+    // SAFETY: `shutdown(SHUT_WR)` closes only the WRITE side of the opposing leg,
+    // mirroring the source peer's FIN onto `dst`. It does not close the fd (the
+    // adapter's per-connection table owns it) and does not touch the sibling
+    // direction's read side — half-close correctness (D-MTLS-16) is preserved. Works
+    // uniformly on AF_INET (production leg fds) and AF_UNIX (test socketpair).
+    unsafe {
+        libc::shutdown(dst_fd, libc::SHUT_WR);
+    }
+}
+
 /// (B) D-MTLS-16 / ADR-0070: a pump thread's single terminal exit point — mark the
 /// pump exited (`running = false`, the `liveness` `Gone` observable) and, on a
 /// [`PumpExit::TransportDeath`] (NOT a graceful close), fire the connection's
@@ -380,6 +423,12 @@ fn run_decrypt_pump(src_fd: RawFd, dst_fd: RawFd, early: &[u8], state: &PumpStat
         libc::close(pipe_w);
     }
     state.record_pending.store(false, Ordering::SeqCst);
+    // A1 (ADR-0070 amendment): a source clean-close forwards a half-close to the
+    // opposing leg (`dst_fd`) BEFORE `mark_exited`, so the peer on that leg surfaces
+    // read-EOF. For the return-decrypt pump (`legB → legF`), this is the S-DBN-CHURN
+    // fix: a backend FIN on leg-B mirrors to leg-F. A deliberate teardown does not
+    // forward (the reclaim path owns the close).
+    forward_half_close_if_source_eof(dst_fd, exit, state);
     mark_exited(state, exit);
 }
 
@@ -464,10 +513,20 @@ fn run_encrypt_pump(src_fd: RawFd, dst_fd: RawFd, prelude: &[u8], state: &PumpSt
     std::mem::forget(src);
     std::mem::forget(dst);
     state.record_pending.store(false, Ordering::SeqCst);
+    // A1 (ADR-0070 amendment): a source clean-close forwards a half-close to the
+    // opposing leg (`dst_fd`) BEFORE `mark_exited`. For the encrypt pumps the `dst`
+    // is a kTLS-TX leg (leg-B / leg-C), so `SHUT_WR` sends a bare TCP FIN without a
+    // TLS `close_notify` — accepted for v1 (the peer's kTLS-RX sees a clean read-EOF,
+    // which is all the opposing pump needs). A deliberate teardown does not forward.
+    forward_half_close_if_source_eof(dst_fd, exit, state);
     mark_exited(state, exit);
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "standard test idiom: expect-with-message is the right failure for a test precondition (matches the mod.rs test-module allow)"
+)]
 mod tests {
     //! Boundary unit tests for the (B) D-MTLS-16 self-teardown gate (`mark_exited` →
     //! `fire_self_teardown_if_unexpected`) — its own driving port (a decision over the
@@ -478,6 +537,7 @@ mod tests {
     //! `Gone` on EVERY exit; and the trigger fires at most once across both pumps.
 
     use super::*;
+    use std::os::fd::AsRawFd;
     use std::sync::atomic::AtomicU32;
 
     fn fire_counter() -> (Arc<AtomicU32>, SelfTeardown) {
@@ -568,5 +628,108 @@ mod tests {
         // No `install_self_teardown` — the trigger is absent.
         mark_exited(&state, PumpExit::TransportDeath);
         assert!(!state.running.load(Ordering::SeqCst), "running cleared even with no trigger");
+    }
+
+    // ========================================================================
+    // A1 (ADR-0070 amendment) — the directional clean-close half-close forward.
+    // The pump's terminal-exit DECISION over (dst_fd, PumpExit, PumpState) is its
+    // own driving port (Mandate 2). The observable is real: a socketpair peer on
+    // the dst leg's READ side surfaces EOF (read returns 0) iff `SHUT_WR` was
+    // forwarded onto the dst leg's write side.
+    // ========================================================================
+
+    /// A real connected `AF_UNIX` socketpair. `held` is the leg the pump would own
+    /// (`dst_fd` — passed to the forward), `peer` is the OPPOSING end the test reads
+    /// to observe whether the pump forwarded a `SHUT_WR` (a `read` on `peer` returns
+    /// `Ok(0)` — EOF — iff the pump shut down `held`'s write side). Both raw fds are
+    /// kept live by the returned `UnixStream`s (dropped at test end).
+    fn dst_socketpair() -> (std::os::unix::net::UnixStream, std::os::unix::net::UnixStream) {
+        std::os::unix::net::UnixStream::pair().expect("AF_UNIX socketpair")
+    }
+
+    /// `true` iff a blocking `read` on `peer` observes EOF (`Ok(0)`) within a short
+    /// bound — i.e. the pump forwarded `shutdown(SHUT_WR)` onto the socketpair's other
+    /// end. A short read timeout guards against the negative case hanging the test.
+    fn peer_read_saw_eof(peer: &std::os::unix::net::UnixStream) -> bool {
+        peer.set_read_timeout(Some(Duration::from_millis(500))).ok();
+        let mut buf = [0u8; 8];
+        // After a `SHUT_WR` on the held end, the peer's read returns Ok(0) (EOF). With
+        // no shutdown, the socket stays open and the read blocks to the timeout
+        // (WouldBlock/TimedOut), which is NOT EOF.
+        matches!((&*peer).read(&mut buf), Ok(0))
+    }
+
+    /// S-CHURN-HALFCLOSE-FORWARD: a SOURCE clean-close (`Graceful` with `stop == false`)
+    /// forwards `shutdown(SHUT_WR)` to the `dst` leg — the socketpair peer on the dst
+    /// leg's READ side surfaces EOF after the forward — AND `mark_exited` still does
+    /// NOT fire self-teardown on `Graceful` (half-close correctness preserved). This is
+    /// the A1 mutation-killing proof: deleting the `shutdown(SHUT_WR)` forward makes the
+    /// dst peer never see EOF.
+    #[test]
+    fn source_clean_close_forwards_half_close_to_dst_and_does_not_reclaim() {
+        let (held, peer) = dst_socketpair();
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        let (fired, trigger) = fire_counter();
+        state.install_self_teardown(trigger);
+
+        // A genuine SOURCE clean EOF: Graceful with stop == false (the pump broke on
+        // POLLHUP-with-no-POLLIN / n_in == 0 / dst-EOF, NOT a deliberate teardown).
+        forward_half_close_if_source_eof(held.as_raw_fd(), PumpExit::Graceful, &state);
+        mark_exited(&state, PumpExit::Graceful);
+
+        assert!(
+            peer_read_saw_eof(&peer),
+            "a source clean-close (Graceful, stop==false) must forward shutdown(SHUT_WR) to the \
+             dst leg — the opposing peer's read must surface EOF (the S-DBN-CHURN half-close forward)"
+        );
+        assert_eq!(
+            fired.load(Ordering::SeqCst),
+            0,
+            "a clean half-close forward must NOT fire (B) self-teardown — no reclaim on Graceful \
+             (D-MTLS-16 half-close correctness: the sibling direction may still be live)"
+        );
+        assert!(!state.running.load(Ordering::SeqCst), "running still cleared ⇒ liveness Gone");
+    }
+
+    /// S-CHURN-TEARDOWN-NO-FORWARD: a DELIBERATE teardown (`stop == true`, which also
+    /// breaks `Graceful` at the top of the loop) does NOT forward a half-close — the
+    /// reclaim path owns the close and a redundant `SHUT_WR` here is wrong. The dst leg
+    /// is NOT shut down by the pump. Pins the `!state.stop` guard on the forward (the
+    /// SAME stop-guard `fire_self_teardown_if_unexpected` uses).
+    #[test]
+    fn deliberate_teardown_does_not_forward_half_close() {
+        let (held, peer) = dst_socketpair();
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+        state.stop.store(true, Ordering::SeqCst); // a deliberate teardown set this
+
+        forward_half_close_if_source_eof(held.as_raw_fd(), PumpExit::Graceful, &state);
+
+        assert!(
+            !peer_read_saw_eof(&peer),
+            "a deliberate teardown (stop == true) must NOT forward shutdown(SHUT_WR) — the reclaim \
+             path owns the close; the dst peer must NOT surface EOF from a pump-side half-close"
+        );
+    }
+
+    /// A `TransportDeath` exit does NOT forward a half-close — the forward is scoped to
+    /// the CLEAN-close (`Graceful`) class; a transport death reclaims via (B)
+    /// self-teardown, not a half-close forward. Pins the `exit == Graceful` guard on
+    /// the forward (a mutation flipping the arm to fire on `TransportDeath` would shut
+    /// the dst write side down twice — once here, once via the reclaim path).
+    #[test]
+    fn transport_death_does_not_forward_half_close() {
+        let (held, peer) = dst_socketpair();
+        let state = PumpState::default();
+        state.running.store(true, Ordering::SeqCst);
+
+        forward_half_close_if_source_eof(held.as_raw_fd(), PumpExit::TransportDeath, &state);
+
+        assert!(
+            !peer_read_saw_eof(&peer),
+            "a TransportDeath exit must NOT forward a half-close — the forward is Graceful-only \
+             (transport death reclaims via (B) self-teardown, not a half-close forward)"
+        );
     }
 }

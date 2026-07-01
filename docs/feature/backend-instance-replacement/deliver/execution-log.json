@@ -169,6 +169,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-06-30T18:33:54Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-06-30T18:35:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-07-01T05:17:46Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-07-01T05:19:25Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: oracle un-ignore step (red-classification.md \u00a7 'oracle ATs are NOT MISSING_FUNCTIONALITY scaffolds'). The port-to-port Tier-3 AT drives GREEN through the production POST /v1/jobs/:id/restart verb into the real in-process composition root; no pure-decision/PBT unit surface is introduced. Mutation gate also skipped \u2014 no mutable production src is touched (only an existing integration test). Same posture as 02-01 RED_UNIT.",
+      "t": "2026-07-01T05:19:33Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: S-DBN-CHURN Tier-3 AT RAN (not --no-run) but FAILED the byte-identical in-flight fail-fast assertion on 2 clean-VM runs. Observed elapsed 30.708s (run1) / 30.686s (run2) vs CHURN_BOUND=30s \u2014 the in-flight death never surfaces on the open connection within bound. uname -r=7.0.0-22-generic. Restart verb itself is sound (02-01 GREEN uses same run_server_restart). RCA: stop_and_converge (what the AT was authored against) tears down B1 legs synchronously; run_server_restart returns async on 2xx, so B1's StopAllocation+drain+on_alloc_terminal leg-teardown+TCP_USER_TIMEOUT surfacing lands AFTER the 30s churn window. Every GREEN lever (bump CHURN_BOUND, tune worker TCP_USER_TIMEOUT/pump, synchronous old-gen teardown) is forbidden by the step's byte-identical-assertions + test-only-edit + no-invent-surface boundaries. BLOCKER surfaced to orchestrator: needs decision (1) production teardown-latency fix in-scope, (2) re-tune CHURN_BOUND with approval, or (3) step mis-sized/defer. NOT forced green per Test Integrity Iron Rule + step RETURN clause.",
+      "t": "2026-07-01T05:28:46Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: COMMIT withheld \u2014 GREEN did not pass (S-DBN-CHURN Tier-3 AT reproduced FAIL, 30.7s vs CHURN_BOUND=30s on 2 clean-VM runs). There is no green code to commit and no lever inside the step's boundaries (byte-identical assertions, test-only edit, no invented surface) resolves it. Per Test Integrity Iron Rule (never weaken a failing test) + step RETURN clause (STOP + return blocker if AT not green; do not force green, do not record GREEN-as-PASS) + CLAUDE.md 'no partial COMMIT against an incomplete deliverable'. Orchestrator decision required before COMMIT: (1) production teardown-latency fix in-scope for 03-01 (touches crates/overdrive-worker/src/mtls_intercept_worker.rs and/or reconciler/action-shim \u2014 needs exact surface pinned), (2) re-tune CHURN_BOUND with explicit approval, or (3) step mis-sized \u2192 reduce/defer. Test-only edit (un-ignore + docstring + cycle swap) is applied and clean in the working tree; sibling NXDOMAIN oracle remains ignored for 04-01; zero production src changed.",
+      "t": "2026-07-01T05:29:02Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-07-01T07:17:07Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: A1 has no new AT-level acceptance test \u2014 the driving Tier-3 churn AT (S-DBN-CHURN) stays #[ignore]'d until 03-02; the A1 driving surface is the Tier-2 unit AT (S-CHURN-HALFCLOSE-FORWARD + S-CHURN-TEARDOWN-NO-FORWARD) exercised in RED_UNIT.",
+      "t": "2026-07-01T07:17:19Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-07-01T07:20:16Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-07-01T07:27:40Z"
     }
   ]
 }
