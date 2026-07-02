@@ -43,7 +43,7 @@ use overdrive_cli::http_client::CliError;
 const MALFORMED_JOB_ID: &str = "";
 
 #[test]
-fn post_http_invalid_job_id_maps_to_body_decode_not_invalid_spec() {
+fn post_http_invalid_workload_id_maps_to_body_decode_not_invalid_spec() {
     let err = parse_response_job_id(MALFORMED_JOB_ID)
         .expect_err("empty workload_id must fail WorkloadId::new validation");
 

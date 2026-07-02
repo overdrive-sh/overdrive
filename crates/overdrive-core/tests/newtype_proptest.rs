@@ -99,7 +99,7 @@ proptest! {
     ///
     /// Covers §2.1 scenario 1 under the property budget.
     #[test]
-    fn job_id_display_from_str_round_trip(raw in valid_label()) {
+    fn workload_id_display_from_str_round_trip(raw in valid_label()) {
         let original = WorkloadId::new(&raw).expect("generator yields valid input");
         let rendered = original.to_string();
         let reparsed = WorkloadId::from_str(&rendered).expect("canonical form re-parses");
@@ -133,7 +133,7 @@ proptest! {
     ///
     /// Covers §2.1 scenario 4 (the JSON-byte-equivalence leg).
     #[test]
-    fn job_id_serde_matches_display_quoted(raw in valid_label()) {
+    fn workload_id_serde_matches_display_quoted(raw in valid_label()) {
         let id = WorkloadId::new(&raw).expect("generator yields valid input");
         let json = serde_json::to_string(&id).expect("serialises");
         let expected = format!("\"{id}\"");
@@ -212,7 +212,7 @@ proptest! {
 }
 
 #[test]
-fn job_id_rejects_empty_input_with_structured_error() {
+fn workload_id_rejects_empty_input_with_structured_error() {
     // Empty is a single case, not a property.
     let err = WorkloadId::from_str("").expect_err("empty must reject");
     assert!(matches!(err, IdParseError::Empty { .. }));

@@ -584,7 +584,7 @@ pub enum JobSubmitEvent {
         /// Canonical 64-char lowercase-hex SHA-256 of the rkyv-archived
         /// `WorkloadSpec::Job` bytes (ADR-0002).
         spec_digest: String,
-        /// Canonical `jobs/<id>` IntentKey string form.
+        /// Canonical `workloads/<id>` IntentKey string form.
         intent_key: String,
         /// Idempotency verdict.
         outcome: crate::api::IdempotencyOutcome,

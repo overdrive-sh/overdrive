@@ -94,11 +94,11 @@ pub enum FrontendRebuildError {
 /// (skip — they declare no resolvable `<job>`).
 ///
 /// The `<job>` key is derived `MeshServiceName::new(format!("{id}.{SUFFIX}"))`
-/// — byte-identical to the `name_index` reader's `job_of` derivation (OQ-1), so
+/// — byte-identical to the `name_index` reader's `workload_of` derivation (OQ-1), so
 /// the rebuilt binding is the SAME key the reader looks up. A Service whose
 /// `id` is not a valid v1 single-label mesh name (dotted, out-of-class, over
 /// 63 octets) is not mesh-dialable by name and is skipped, exactly as in the
-/// reader (`name_index::job_of` returns `None`).
+/// reader (`name_index::workload_of` returns `None`).
 ///
 /// **Idempotent.** Re-running over an already-rebuilt allocator re-assigns
 /// every `<job>` to its EXISTING `F` (FRONTEND-02), so the pass is safe to run
@@ -152,7 +152,7 @@ pub async fn rebuild_frontend_addrs_from_intent(
         let WorkloadIntent::Service(service_v1) = &intent else { continue };
 
         // OQ-1: derive the `<job>` key byte-identically to the `name_index`
-        // reader (`name_index::job_of`) — `MeshServiceName::new("<id>.<SUFFIX>")`.
+        // reader (`name_index::workload_of`) — `MeshServiceName::new("<id>.<SUFFIX>")`.
         // A Service whose id is not a valid v1 single-label mesh name is not
         // mesh-dialable by name in v1 and is skipped (the reader skips it too).
         let Ok(job) = MeshServiceName::new(&format!(

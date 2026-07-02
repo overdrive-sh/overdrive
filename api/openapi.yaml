@@ -85,7 +85,7 @@ paths:
   /v1/jobs:
     post:
       tags:
-      - jobs
+      - workloads
       summary: |-
         `POST /v1/jobs` — validate, archive via rkyv, commit through the
         intent store, return `{workload_id, spec_digest, outcome}`.
@@ -150,7 +150,7 @@ paths:
   /v1/jobs/{id}:
     get:
       tags:
-      - jobs
+      - workloads
       summary: |-
         `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
         bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
@@ -201,7 +201,7 @@ paths:
   /v1/jobs/{id}/restart:
     post:
       tags:
-      - jobs
+      - workloads
       summary: |-
         `POST /v1/jobs/{id}/restart` — replace a declared workload's backend
         instance with a fresh one. Per ADR-0073.
@@ -264,7 +264,7 @@ paths:
   /v1/jobs/{id}/stop:
     post:
       tags:
-      - jobs
+      - workloads
       summary: |-
         `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-
         submitted job. Per ADR-0027.
@@ -1418,7 +1418,7 @@ components:
           Liveness probe consecutive-failure count reached its
           threshold AND restart-budget reached
           `RESTART_BACKOFF_CEILING`. Composes with the existing
-          `BackoffExhausted` JobLifecycle pathway for Service-kind
+          `BackoffExhausted` WorkloadLifecycle pathway for Service-kind
           liveness-driven restart attempts.
         required:
         - data
@@ -1430,7 +1430,7 @@ components:
               Liveness probe consecutive-failure count reached its
               threshold AND restart-budget reached
               `RESTART_BACKOFF_CEILING`. Composes with the existing
-              `BackoffExhausted` JobLifecycle pathway for Service-kind
+              `BackoffExhausted` WorkloadLifecycle pathway for Service-kind
               liveness-driven restart attempts.
             required:
             - probe_idx
@@ -2743,8 +2743,8 @@ components:
       - Job
       - Schedule
 tags:
-- name: jobs
-  description: Job lifecycle endpoints
+- name: workloads
+  description: Workload lifecycle endpoints
 - name: cluster
   description: Cluster status endpoints
 - name: observation

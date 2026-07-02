@@ -99,8 +99,8 @@ async fn seed_declared_payments(state: &AppState) -> Vec<u8> {
     let workload_id = WorkloadId::new("payments").expect("parse id");
     let job = Job::from_submit(payments_spec()).expect("Job::from_submit");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("archive");
-    let job_key = IntentKey::for_workload(&workload_id);
-    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("seed aggregate");
+    let workload_key = IntentKey::for_workload(&workload_id);
+    state.store.put(workload_key.as_bytes(), archived.as_ref()).await.expect("seed aggregate");
     archived.as_ref().to_vec()
 }
 
@@ -112,7 +112,7 @@ async fn restart_commits_one_bump_clear_txn_retains_intent_and_enqueues_one_eval
     let workload_id = WorkloadId::new("payments").expect("parse id");
     let gen_key = IntentKey::for_workload_generation(&workload_id);
     let stop_key = IntentKey::for_workload_stop(&workload_id);
-    let job_key = IntentKey::for_workload(&workload_id);
+    let workload_key = IntentKey::for_workload(&workload_id);
 
     // Given: a declared aggregate and a present `/stop` sentinel (the
     // stopped-origin restart shape; the bump+clear must remove it).
@@ -155,7 +155,7 @@ async fn restart_commits_one_bump_clear_txn_retains_intent_and_enqueues_one_eval
     // #211 job removal — restart keeps the workload declared).
     let retained = state
         .store
-        .get(job_key.as_bytes())
+        .get(workload_key.as_bytes())
         .await
         .expect("get aggregate")
         .expect("aggregate intent must be retained after restart");

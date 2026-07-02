@@ -541,7 +541,7 @@ pub enum ServiceFailureReason {
     /// Liveness probe consecutive-failure count reached its
     /// threshold AND restart-budget reached
     /// `RESTART_BACKOFF_CEILING`. Composes with the existing
-    /// `BackoffExhausted` JobLifecycle pathway for Service-kind
+    /// `BackoffExhausted` WorkloadLifecycle pathway for Service-kind
     /// liveness-driven restart attempts.
     LivenessProbeFailed { probe_idx: u32, attempts: u32 },
     /// Service-kind workload exhausted the general restart-attempt

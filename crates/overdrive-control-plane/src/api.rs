@@ -492,7 +492,7 @@ pub struct ErrorBody {
         overdrive_core::aggregate::ServiceVip,
     )),
     tags(
-        (name = "jobs", description = "Job lifecycle endpoints"),
+        (name = "workloads", description = "Workload lifecycle endpoints"),
         (name = "cluster", description = "Cluster status endpoints"),
         (name = "observation", description = "Observation-store read endpoints"),
     ),

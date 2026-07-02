@@ -30,7 +30,7 @@ mod integration {
     mod deploy;
     mod deploy_udp_walking_skeleton;
     mod http_client;
-    mod post_http_invalid_job_id;
+    mod post_http_invalid_workload_id;
     mod walking_skeleton;
 
     // Slice 02 step 02-04 — Tier 3 streaming submit:

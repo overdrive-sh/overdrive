@@ -77,7 +77,7 @@ fn backends_row(service_id: u64, backends: Vec<Backend>, counter: u64) -> Servic
 
 /// The `<job>` mesh name a `Backend`'s `alloc` SVID
 /// (`spiffe://overdrive.local/job/<job>/alloc/...`) dials as — mirrors the
-/// production `name_index::job_of` extraction so the fixture can model the
+/// production `name_index::workload_of` extraction so the fixture can model the
 /// 01-05 deploy-time assigner binding `<job> → F` on declaration.
 fn job_of_backend(backend: &Backend) -> MeshServiceName {
     let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
@@ -1054,9 +1054,9 @@ proptest! {
         labels in prop::collection::vec(arb_job_label(), 1..=4),
     ) {
         // De-duplicate the generated <job> labels (a batch binds each <job> once).
-        let mut jobs: Vec<String> = labels;
-        jobs.sort();
-        jobs.dedup();
+        let mut workloads: Vec<String> = labels;
+        workloads.sort();
+        workloads.dedup();
 
         tokio::runtime::Runtime::new().expect("rt").block_on(async {
             let store = fresh_store();
@@ -1070,7 +1070,7 @@ proptest! {
 
             // Seed the store + NameIndex with the batch's running-and-healthy rows
             // so each <job> is resolvable; the allocator binds each <job> -> F.
-            let rows: Vec<ServiceBackendRow> = jobs
+            let rows: Vec<ServiceBackendRow> = workloads
                 .iter()
                 .enumerate()
                 .map(|(i, job)| {
@@ -1089,8 +1089,8 @@ proptest! {
             // one, so the last <job> models the no-temporal-ordering case:
             // name_index exposes its F (List-at-probe folded its row) while
             // by_frontend has NOT yet bound its key (Property 2's input).
-            let bind_upto = jobs.len().saturating_sub(1);
-            for (i, job) in jobs.iter().enumerate() {
+            let bind_upto = workloads.len().saturating_sub(1);
+            for (i, job) in workloads.iter().enumerate() {
                 let instance = u8::try_from(i).expect("≤4 jobs") + 1;
                 let mesh = mesh_name(job);
                 // F from the ONE allocator (idempotent) — the SAME F name_index

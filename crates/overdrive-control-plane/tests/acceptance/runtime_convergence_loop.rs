@@ -512,8 +512,8 @@ async fn stop_after_failed_alloc_drains_broker() {
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()
         .expect("rkyv archive");
-    let job_key = IntentKey::for_workload(&job.id);
-    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
+    let workload_key = IntentKey::for_workload(&job.id);
+    state.store.put(workload_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // NOTE: this test deliberately does NOT persist a workload-kind
     // discriminator. `read_workload_kind` therefore defaults to
@@ -801,8 +801,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let archived = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
         .archive_for_store()
         .expect("rkyv archive");
-    let job_key = IntentKey::for_workload(&job.id);
-    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
+    let workload_key = IntentKey::for_workload(&job.id);
+    state.store.put(workload_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // NOTE: no workload-kind discriminator persisted — the kind defaults
     // to Service (see the note in `stop_after_failed_alloc_drains_broker`

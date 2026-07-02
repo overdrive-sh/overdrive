@@ -91,7 +91,7 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
 
 /// The `<job>` mesh name a `Backend`'s `alloc` SVID
 /// (`spiffe://overdrive.local/job/<job>/alloc/...`) dials as — mirrors the
-/// production `name_index::job_of` extraction so the fixture can model the
+/// production `name_index::workload_of` extraction so the fixture can model the
 /// 01-05 deploy-time assigner binding `<job> → F` on declaration.
 fn job_of_backend(backend: &Backend) -> MeshServiceName {
     let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());

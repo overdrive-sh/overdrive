@@ -91,8 +91,8 @@ async fn seed_declared(state: &AppState, id: &str) {
     let workload_id = WorkloadId::new(id).expect("parse id");
     let job = Job::from_submit(spec_for(id)).expect("Job::from_submit");
     let archived = WorkloadIntent::Job(job).archive_for_store().expect("archive");
-    let job_key = IntentKey::for_workload(&workload_id);
-    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("seed aggregate");
+    let workload_key = IntentKey::for_workload(&workload_id);
+    state.store.put(workload_key.as_bytes(), archived.as_ref()).await.expect("seed aggregate");
 }
 
 async fn restart_outcome(state: &AppState, id: &str) -> RestartOutcome {

@@ -205,7 +205,7 @@ use overdrive_core::traits::dataplane::Backend;
 use crate::dns_responder::frontend_addr_allocator::{
     FrontendAddrAllocator, WORKLOAD_FRONTEND_BASE,
 };
-use crate::dns_responder::name_index::job_of;
+use crate::dns_responder::name_index::workload_of;
 use overdrive_core::traits::mtls_resolve::{
     MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend, Result,
 };
@@ -417,23 +417,23 @@ impl BackendIndex {
     /// the SHARED [`FrontendAddrAllocator`] snapshot, WITHOUT mutating the
     /// allocator.
     ///
-    /// This mirrors the `name_index` drain's row→`<job>`→snapshot pattern
+    /// This mirrors the `name_index` drain's row→`<workload>`→snapshot pattern
     /// ([`crate::dns_responder::name_index`] `replace_from_snapshot`): for each
-    /// row, each running backend's `alloc` SpiffeId yields a `<job>`
-    /// ([`job_of`]); the SHARED allocator's snapshot supplies its stable
-    /// frontend `F` (a read-only `snapshot.get(<job>)` — NEVER `assign`, the
+    /// row, each running backend's `alloc` SpiffeId yields a `<workload>`
+    /// ([`workload_of`]); the SHARED allocator's snapshot supplies its stable
+    /// frontend `F` (a read-only `snapshot.get(<workload>)` — NEVER `assign`, the
     /// REV-3 pure-reader invariant), and the backend's own listener port +
     /// `Proto::Tcp` (the v1 capture proto the [`Self::classify`] lookup keys —
     /// `mtls_intercept_worker.rs:792-794`) complete the [`FrontendKey`]. A
-    /// `<job>` the allocator does NOT yet bind is WITHHELD (no entry) — NEVER
+    /// `<workload>` the allocator does NOT yet bind is WITHHELD (no entry) — NEVER
     /// fabricated; a dial to its `F` then fails closed via [`Self::classify`]
     /// arm 2 (the FAILCLOSED-01 security half; convergence is the availability
-    /// nicety). The `<job> → F` binding has exactly ONE source — the shared
+    /// nicety). The `<workload> → F` binding has exactly ONE source — the shared
     /// allocator the DNS `name_index` answers from — so the `F` keyed here is
     /// byte-identical to the `F` DNS answers (DDN-2 single-owner invariant).
     ///
     /// The full `by_frontend` is REPLACED from the rows + snapshot (not merged):
-    /// a `<job>` whose Service was removed (absent from `rows`) or whose `F` was
+    /// a `<workload>` whose Service was removed (absent from `rows`) or whose `F` was
     /// released (absent from the snapshot) drops its `by_frontend` entry,
     /// matching the full-row-replace contract of [`Self::replace_from_snapshot`].
     fn project_by_frontend(
@@ -451,7 +451,7 @@ impl BackendIndex {
     /// per-row companion to [`Self::project_by_frontend`], used by the watch
     /// drain). First evicts the row's service's prior `by_frontend` entries
     /// (full-row replace — a shrunk backend set or a released `F` drops stale
-    /// keys), then inserts the current `<job> → F` keys read from the shared
+    /// keys), then inserts the current `<workload> → F` keys read from the shared
     /// allocator snapshot (the REV-3 pure read — NEVER `assign`).
     fn project_row_by_frontend(
         &mut self,
@@ -463,12 +463,12 @@ impl BackendIndex {
         self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
         for backend in &row.backends {
             // A backend whose SpiffeId is not the `/job/<job>/alloc/<alloc>`
-            // shape (or whose `<job>` is not a v1 mesh name) contributes no
+            // shape (or whose `<workload>` is not a v1 mesh name) contributes no
             // frontend key — it is not mesh-dialable by name.
-            let Some(job) = job_of(&backend.alloc) else { continue };
+            let Some(workload) = workload_of(&backend.alloc) else { continue };
             // READ the shared allocator's EXISTING binding (REV-3 pure reader).
-            // WITHHOLD a `<job>` the allocator does not yet bind.
-            let Some(&frontend_ip) = frontend_snapshot.get(&job) else { continue };
+            // WITHHOLD a `<workload>` the allocator does not yet bind.
+            let Some(&frontend_ip) = frontend_snapshot.get(&workload) else { continue };
             // The frontend endpoint re-uses the backend's listener port
             // verbatim; only the IP changes (workload_addr → F). The v1 capture
             // is TCP, so the key carries `Proto::Tcp` — the same proto
@@ -1320,7 +1320,7 @@ mod tests {
         let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
 
         // A backend whose alloc SpiffeId is the `/job/<job>/alloc/<alloc>` shape
-        // the projection parses (`job_of`). The backend's listener port is the
+        // the projection parses (`workload_of`). The backend's listener port is the
         // port the frontend key re-uses verbatim.
         let backend_port = 8080;
         let backend_addr = v4(10, 99, 0, 6, backend_port);

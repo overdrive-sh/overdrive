@@ -120,7 +120,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     // input — the original handler stores rkyv archive of `Job::from_submit`,
     // which is byte-deterministic.
     let workload_id = WorkloadId::new("payments").expect("parse job id");
-    let job_key = IntentKey::for_workload(&workload_id);
+    let workload_key = IntentKey::for_workload(&workload_id);
     let job =
         overdrive_core::aggregate::Job::from_submit(payments_spec()).expect("Job::from_submit");
     let expected_spec_bytes = overdrive_core::aggregate::WorkloadIntent::Job(job.clone())
@@ -147,7 +147,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
 
     // Original job spec must be preserved byte-for-byte.
     let post_stop_spec_bytes = store
-        .get(job_key.as_bytes())
+        .get(workload_key.as_bytes())
         .await
         .expect("read job key post-stop")
         .expect("job key still populated after stop");

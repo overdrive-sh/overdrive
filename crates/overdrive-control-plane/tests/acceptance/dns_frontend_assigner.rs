@@ -198,7 +198,7 @@ async fn seed_service_payload_at_sub_key(
 }
 
 /// A running-AND-healthy `Backend` for `<job>=id`, whose `alloc` SVID carries
-/// `/job/<id>/alloc/...` — the shape `name_index::job_of` extracts the `<job>`
+/// `/job/<id>/alloc/...` — the shape `name_index::workload_of` extracts the `<job>`
 /// from. Mirrors `dns_answer_for.rs::backend_for` (the 01-03 fixture). The
 /// per-instance backend addr sits in `10.99.0.0/16`, DELIBERATELY a different
 /// block from the frontend `F` the answer must return.

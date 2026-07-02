@@ -8,7 +8,7 @@
 //! Step 01-01 (delivered) lands the `Job` / `Node` / `Allocation`
 //! validating constructors and the `Resources`-deduplication invariant.
 //! Step 01-03 (delivered) lands the canonical `IntentKey` derivation —
-//! `jobs/<id>` / `nodes/<id>` / `allocations/<id>`.
+//! `workloads/<id>` / `nodes/<id>` / `allocations/<id>`.
 //!
 //! Still scaffolded (RED — owned by later steps): rkyv/serde derives on
 //! the aggregate structs (Phase 2+), and behavioural expansion of
@@ -1163,7 +1163,7 @@ pub struct Investigation {
 /// Every caller (CLI, handler, describe) routes through these functions —
 /// any drift-prone second copy in production code violates US-01's
 /// shared-artifacts-registry entry for `intent_key`. The string form is
-/// `jobs/<WorkloadId::display>`, `nodes/<NodeId::display>`, or
+/// `workloads/<WorkloadId::display>`, `nodes/<NodeId::display>`, or
 /// `allocations/<AllocationId::display>` per ADR-0011.
 ///
 /// The wrapped bytes are always valid UTF-8 by construction — the `<id>`
@@ -1235,7 +1235,7 @@ impl IntentKey {
 
     /// Derive the intent key for a Schedule. Stable for any valid
     /// `WorkloadId` per the same ASCII-only invariants that govern
-    /// [`Self::for_job`]. The string form is `schedules/<WorkloadId::Display>`.
+    /// [`Self::for_workload`]. The string form is `schedules/<WorkloadId::Display>`.
     ///
     /// Per ADR-0047 §1 / slice 05 of `workload-kind-discriminator`,
     /// Schedule is a third workload kind alongside Service and Job;
@@ -1291,7 +1291,7 @@ impl IntentKey {
         &self.0
     }
 
-    /// Canonical string form — `jobs/<WorkloadId>`, `nodes/<NodeId>`, or
+    /// Canonical string form — `workloads/<WorkloadId>`, `nodes/<NodeId>`, or
     /// `allocations/<AllocationId>`. Always succeeds: the byte buffer is
     /// UTF-8 by construction (see the struct-level docs).
     ///

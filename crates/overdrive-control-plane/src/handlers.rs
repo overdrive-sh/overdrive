@@ -206,7 +206,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
         (status = 409, description = "Conflict at existing key", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
-    tag = "jobs",
+    tag = "workloads",
 )]
 // The handler body grew past the 100-line clippy default with the
 // ADR-0051 `SubmitSpecInput` dispatch added at the top — splitting
@@ -332,7 +332,7 @@ pub async fn submit_workload(
     //
     //     OQ-1: the `<job>` key is derived
     //     `MeshServiceName::new("<id>.<SUFFIX>")` — byte-identical to the
-    //     `name_index` reader's `job_of` derivation, so the WRITER's key is the
+    //     `name_index` reader's `workload_of` derivation, so the WRITER's key is the
     //     SAME key the READER looks up (DDN-2 single-owner). An exhausted
     //     frontend block fails the submit CLOSED via the typed
     //     `ControlPlaneError::FrontendRebuild` (HTTP 503; never a silent
@@ -655,7 +655,7 @@ fn wants_ndjson(headers: &HeaderMap) -> bool {
         (status = 404, description = "Workload not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
-    tag = "jobs",
+    tag = "workloads",
 )]
 pub async fn describe_workload(
     State(state): State<AppState>,
@@ -791,7 +791,7 @@ pub async fn describe_workload(
         (status = 404, description = "Workload not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
-    tag = "jobs",
+    tag = "workloads",
 )]
 pub async fn stop_workload(
     State(state): State<AppState>,
@@ -801,15 +801,15 @@ pub async fn stop_workload(
     //    field-naming discipline as `describe_workload` — see `parse_workload_id_path`.
     let workload_id = parse_workload_id_path(&job_id_str)?;
 
-    // 2. The job must exist before a stop can be recorded. Reading
-    //    the canonical job key is the cheapest 404 check — if the
+    // 2. The workload must exist before a stop can be recorded. Reading
+    //    the canonical workload key is the cheapest 404 check — if the
     //    row is absent we have no stop target, so 404 surfaces with
-    //    the same `resource = jobs/<id>` shape as describe_workload's
+    //    the same `resource = workloads/<id>` shape as describe_workload's
     //    NotFound path.
-    let job_key = IntentKey::for_workload(&workload_id);
-    let job_exists = state.store.get(job_key.as_bytes()).await?.is_some();
-    if !job_exists {
-        return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
+    let workload_key = IntentKey::for_workload(&workload_id);
+    let workload_exists = state.store.get(workload_key.as_bytes()).await?.is_some();
+    if !workload_exists {
+        return Err(ControlPlaneError::NotFound { resource: workload_key.as_str().to_owned() });
     }
 
     // 3. Atomic put_if_absent on the stop key. The empty value is
@@ -890,7 +890,7 @@ pub async fn stop_workload(
         (status = 404, description = "Workload not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
-    tag = "jobs",
+    tag = "workloads",
 )]
 pub async fn restart_workload(
     State(state): State<AppState>,
@@ -905,9 +905,9 @@ pub async fn restart_workload(
     //    a restart can be recorded — restarting a never-deployed workload is
     //    operator error, not a silent no-op (byte-identical 404 shape to
     //    `stop_workload`: `resource = workloads/<id>`).
-    let job_key = IntentKey::for_workload(&workload_id);
-    if state.store.get(job_key.as_bytes()).await?.is_none() {
-        return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
+    let workload_key = IntentKey::for_workload(&workload_id);
+    if state.store.get(workload_key.as_bytes()).await?.is_none() {
+        return Err(ControlPlaneError::NotFound { resource: workload_key.as_str().to_owned() });
     }
     // The `/stop` lookup classifies the RestartOutcome label ONLY (present
     // ⇒ Resumed, absent ⇒ Restarted) — it does NOT gate placement, which is

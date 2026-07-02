@@ -96,9 +96,9 @@ pub const LABEL_MAX: usize = 253;
 ///
 /// This is a real protocol constant — the `hickory-proto` codec enforces it on
 /// the wire — mirroring the codebase's existing `RECONCILER_NAME_MAX` /
-/// `WORKFLOW_NAME_MAX` (both 63). It bounds a [`MeshServiceName`]'s `<job>`,
+/// `WORKFLOW_NAME_MAX` (both 63). It bounds a [`MeshServiceName`]'s `<workload>`,
 /// which is a single DNS label (the first label of
-/// `<job>.svc.overdrive.local`); a `<job>` longer than 63 octets would make
+/// `<workload>.svc.overdrive.local`); a `<workload>` longer than 63 octets would make
 /// `hickory_proto::rr::Name::from_str` reject the rendered name and panic the
 /// responder's wire encoder. NOT a "bespoke smaller ceiling" of [`LABEL_MAX`]
 /// (`development.md` § "One shared length ceiling for label-shaped ids") — that
@@ -795,17 +795,17 @@ impl From<CorrelationKey> for String {
 use std::fmt::Write as _;
 
 // -----------------------------------------------------------------------------
-// MeshServiceName — `<job>.svc.overdrive.local` mesh-DNS grammar.
+// MeshServiceName — `<workload>.svc.overdrive.local` mesh-DNS grammar.
 // -----------------------------------------------------------------------------
 
-/// Mesh service name — the `<job>.svc.overdrive.local` grammar a workload
+/// Mesh service name — the `<workload>.svc.overdrive.local` grammar a workload
 /// dials to reach another workload by name (dial-by-name-responder,
 /// ADR-0072 / US-DBN-2).
 ///
-/// The newtype carries a validated `<job>` label; the fixed
+/// The newtype carries a validated `<workload>` label; the fixed
 /// [`SUFFIX`](Self::SUFFIX) is grammar, not stored state. [`as_str`](Self::as_str)
-/// returns the canonical lowercase `<job>` label; [`Display`] renders the
-/// full `<job>.svc.overdrive.local` name.
+/// returns the canonical lowercase `<workload>` label; [`Display`] renders the
+/// full `<workload>.svc.overdrive.local` name.
 ///
 /// # Grammar
 ///
@@ -814,7 +814,7 @@ use std::fmt::Write as _;
 /// be `region.eu-west-1`), which means it would accept any dotted string —
 /// it cannot reject the wrong suffix. `MeshServiceName::new` therefore
 /// case-folds, strips the terminal `.svc.overdrive.local`, and validates
-/// the remaining `<job>` label through `validate_label` (reusing the shared
+/// the remaining `<workload>` label through `validate_label` (reusing the shared
 /// DNS-1123 character-class + [`LABEL_MAX`] ceiling — no bespoke smaller
 /// magic number, per `.claude/rules/development.md` § "One shared length
 /// ceiling for label-shaped ids").
@@ -842,17 +842,17 @@ pub struct MeshServiceName(String);
 
 impl MeshServiceName {
     /// The fixed mesh-DNS suffix — note NO leading dot; the separator is the
-    /// `.` between the `<job>` label and this suffix.
+    /// `.` between the `<workload>` label and this suffix.
     pub const SUFFIX: &'static str = "svc.overdrive.local";
 
-    /// Construct from a full `<job>.svc.overdrive.local` name, validating the
-    /// suffix grammar and canonicalising the `<job>` label to lowercase.
+    /// Construct from a full `<workload>.svc.overdrive.local` name, validating the
+    /// suffix grammar and canonicalising the `<workload>` label to lowercase.
     ///
     /// Case-folds, strips the terminal `.svc.overdrive.local` (the wrong /
     /// missing / non-terminal suffix all surface as an
-    /// [`IdParseError::InvalidFormat`]), caps the `<job>` at the DNS
+    /// [`IdParseError::InvalidFormat`]), caps the `<workload>` at the DNS
     /// single-label octet limit [`DNS_LABEL_OCTET_MAX`] (63 octets — RFC 1035
-    /// §2.3.4; corrected ADR-0072 DDN-7), then validates the remaining `<job>`
+    /// §2.3.4; corrected ADR-0072 DDN-7), then validates the remaining `<workload>`
     /// label through the shared [`validate_label`] — reusing the DNS-1123
     /// character class and the start/end-alphanumeric rule. An empty,
     /// over-63-octet, or out-of-class label maps to the existing `Empty` /
@@ -860,19 +860,19 @@ impl MeshServiceName {
     ///
     /// The 63-octet cap is the DNS-*label* maximum, NOT [`LABEL_MAX`] (253, the
     /// DNS-*name* max) — a single label is hard-capped at 63 on the wire, so a
-    /// longer `<job>` would make `hickory_proto::rr::Name::from_str` reject the
+    /// longer `<workload>` would make `hickory_proto::rr::Name::from_str` reject the
     /// rendered name and panic the responder's encoder. This is a real protocol
     /// constant (mirroring `RECONCILER_NAME_MAX` / `WORKFLOW_NAME_MAX` = 63),
     /// not a bespoke-smaller ceiling of [`LABEL_MAX`] (`development.md` § "One
     /// shared length ceiling for label-shaped ids" governs *derived* ids sized
     /// off the DNS-name max; a DNS label uses its own RFC-1035 limit).
     ///
-    /// **v1 single-label contract (ADR-0072:279):** the `<job>` is a *single*
+    /// **v1 single-label contract (ADR-0072:279):** the `<workload>` is a *single*
     /// label — single-node, NO namespace segment. The shared [`validate_label`]
     /// PERMITS `.` (id.rs:102) because other label newtypes (`WorkloadId` /
     /// `NodeId`) legitimately carry dotted forms (`region.eu-west-1`); so this
     /// constructor adds a single-label guard ON TOP of `validate_label` — a
-    /// dotted `<job>` (e.g. `foo.bar.svc.overdrive.local` → `<job>` =
+    /// dotted `<workload>` (e.g. `foo.bar.svc.overdrive.local` → `<workload>` =
     /// `"foo.bar"`) is rejected as [`IdParseError::InvalidChar`] at the
     /// offending `.`. A dotted deploy-spec service id is therefore simply not
     /// mesh-dialable by name in v1, which is exactly the design's intended
@@ -881,41 +881,45 @@ impl MeshServiceName {
         const KIND: &str = "MeshServiceName";
         let lowered = raw.to_ascii_lowercase();
         // The separator-plus-suffix that a valid name must end with:
-        // ".svc.overdrive.local". Stripping it leaves the `<job>` label.
-        let job = lowered.strip_suffix(Self::SUFFIX).and_then(|s| s.strip_suffix('.')).ok_or(
-            IdParseError::InvalidFormat { kind: KIND, expected: "<job>.svc.overdrive.local" },
-        )?;
-        // Single-label guard: the v1 `<job>` is ONE label with no namespace
+        // ".svc.overdrive.local". Stripping it leaves the `<workload>` label.
+        let workload_label = lowered
+            .strip_suffix(Self::SUFFIX)
+            .and_then(|s| s.strip_suffix('.'))
+            .ok_or(IdParseError::InvalidFormat {
+            kind: KIND,
+            expected: "<workload>.svc.overdrive.local",
+        })?;
+        // Single-label guard: the v1 `<workload>` is ONE label with no namespace
         // segment. `validate_label` would accept an interior `.`, so reject a
-        // dotted `<job>` here (at the offending `.`'s position within the
-        // `<job>` part) BEFORE delegating the remaining (now dot-free) rules.
-        if let Some(index) = job.find('.') {
+        // dotted `<workload>` here (at the offending `.`'s position within the
+        // `<workload>` part) BEFORE delegating the remaining (now dot-free) rules.
+        if let Some(index) = workload_label.find('.') {
             return Err(IdParseError::InvalidChar { kind: KIND, ch: '.', index });
         }
-        // DNS single-label octet cap: the `<job>` is one DNS LABEL (the first
-        // label of `<job>.svc.overdrive.local`), hard-capped at
+        // DNS single-label octet cap: the `<workload>` is one DNS LABEL (the first
+        // label of `<workload>.svc.overdrive.local`), hard-capped at
         // `DNS_LABEL_OCTET_MAX` = 63 octets (RFC 1035 §2.3.4; corrected
         // ADR-0072 DDN-7, 2026-06-25). This is a real protocol constant, NOT a
-        // bespoke-smaller ceiling of `LABEL_MAX` — a `<job>` longer than 63
+        // bespoke-smaller ceiling of `LABEL_MAX` — a `<workload>` longer than 63
         // octets would make `hickory_proto::rr::Name::from_str` reject the
         // rendered name and panic the responder's wire encoder. The check fires
         // UNIFORMLY ahead of `validate_label`'s 253 ceiling, so EVERY over-63
         // label (64, 100, 300, …) reports `TooLong { max: 63 }` — never
         // `max: 253` for the 254+ range.
-        if job.len() > DNS_LABEL_OCTET_MAX {
+        if workload_label.len() > DNS_LABEL_OCTET_MAX {
             return Err(IdParseError::TooLong { kind: KIND, max: DNS_LABEL_OCTET_MAX });
         }
         // `validate_label` re-lowercases (a no-op here) and enforces the
         // DNS-1123 label rules (empty / character-class / start-end-alphanumeric)
-        // on the now-dot-free, ≤ 63-octet `<job>` part. The reported `kind` is
+        // on the now-dot-free, ≤ 63-octet `<workload>` part. The reported `kind` is
         // "MeshServiceName" so the error names the rejecting newtype, not the
         // inner helper. (`validate_label`'s own `LABEL_MAX` = 253 check is
         // structurally unreachable here — the 63-octet guard above already
         // rejected anything longer.)
-        validate_label(KIND, job).map(Self)
+        validate_label(KIND, workload_label).map(Self)
     }
 
-    /// Borrow the canonical lowercase `<job>` label.
+    /// Borrow the canonical lowercase `<workload>` label.
     #[inline]
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -1421,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn serde_round_trips_job_id() {
+    fn serde_round_trips_workload_id() {
         let id = WorkloadId::new("payments").unwrap();
         let json = serde_json::to_string(&id).unwrap();
         assert_eq!(json, "\"payments\"");

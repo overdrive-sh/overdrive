@@ -1,5 +1,5 @@
 //! `name_index` — the List-then-Watch `NameIndex` that maps each RESOLVABLE
-//! `<job>` to its **stable frontend address `F`** (dial-by-name-responder,
+//! `<workload>` to its **stable frontend address `F`** (dial-by-name-responder,
 //! ADR-0072 REV-2 "stable-frontend"; GH #243; roadmap 01-03 / DDN-2 / OQ-1).
 //!
 //! # What it is
@@ -7,25 +7,25 @@
 //! `NameIndex` is the name-keyed sibling reader over the `service_backends`
 //! observation surface — the FOURTH reader after outbound resolve, inbound
 //! install, and the `ServiceBackendsResolve` mTLS index. It decides, per
-//! logical `<job>`, whether the name is RESOLVABLE (has ≥1 running-AND-healthy
+//! logical `<workload>`, whether the name is RESOLVABLE (has ≥1 running-AND-healthy
 //! backend) and, when it is, exposes the stable frontend `F` the
-//! [`FrontendAddrAllocator`] binds for that `<job>`. [`answer_for`] projects
+//! [`FrontendAddrAllocator`] binds for that `<workload>`. [`answer_for`] projects
 //! that into a [`NameAnswer`].
 //!
 //! # Single source of frontend truth (DDN-2 single-owner invariant)
 //!
 //! The answered `F` is ALWAYS the [`FrontendAddrAllocator`]'s binding — the
 //! SAME `Arc`-shared instance the 02-00 `by_frontend` re-key reads. `NameIndex`
-//! introduces NO second `<job> → F` source: it does not fabricate an addr and
+//! introduces NO second `<workload> → F` source: it does not fabricate an addr and
 //! does not cache an `F` that could outlive the allocator's state. This is what
 //! makes "an answered `F` always HITs `by_frontend`."
 //!
 //! # Healthy gate = WITHHOLD seam (Finding-2)
 //!
 //! The `Backend.healthy == true` filter governs *resolvability* (whether to
-//! answer at all), NOT *which addr*. A `<job>` with zero running-AND-healthy
+//! answer at all), NOT *which addr*. A `<workload>` with zero running-AND-healthy
 //! backends is WITHHELD ([`frontend_for`](NameIndex::frontend_for) returns
-//! `None` → `answer_for → NxDomain`) — but the allocator RETAINS `<job> → F`
+//! `None` → `answer_for → NxDomain`) — but the allocator RETAINS `<workload> → F`
 //! (`release` is logical-workload-DELETION only, NEVER a transient zero-healthy
 //! window). When a running-AND-healthy backend returns, the name resolves to
 //! the SAME `F` (no addr churn — withhold-not-release).
@@ -46,22 +46,22 @@
 //!   the drain re-Lists the authoritative snapshot and rebuilds the index, so a
 //!   dropped `service_backends` update is RECOVERED (never silently lost).
 //!
-//! # OQ-1 — `<job>` extraction (DECISION: local parse helper, ADR-0072)
+//! # OQ-1 — `<workload>` extraction (DECISION: local parse helper, ADR-0072)
 //!
 //! Each `Backend.alloc` is a [`SpiffeId`] of the shape
 //! `spiffe://overdrive.local/job/<job>/alloc/<alloc>` (the
 //! [`SpiffeId::for_allocation`] derivation). The OQ-1 primitive — extract the
-//! `<job>` label from a `SpiffeId`'s path so the rows can be grouped by `<job>`
+//! `<workload>` label from a `SpiffeId`'s path so the rows can be grouped by `<workload>`
 //! and looked up against the [`FrontendAddrAllocator`] (keyed by
-//! [`MeshServiceName`]) — is implemented as the LOCAL [`job_of`] parse helper
+//! [`MeshServiceName`]) — is implemented as the LOCAL [`workload_of`] parse helper
 //! here, NOT a new `SpiffeId::job_segment()` accessor on the
 //! `overdrive-core::id` newtype. Rationale: the extraction is a `dns_responder`
 //! consumer concern (one call site), it stays inside this slice's module
 //! boundary (no `overdrive-core/src/id.rs` edit), and the inverse direction
-//! (`<job>` string → [`MeshServiceName`]) already exists via
-//! [`MeshServiceName::new`]. A SpiffeId whose `<job>` segment is not a valid v1
+//! (`<workload>` string → [`MeshServiceName`]) already exists via
+//! [`MeshServiceName::new`]. A SpiffeId whose `<workload>` segment is not a valid v1
 //! single-label mesh name (dotted, `_`-bearing, over 63 octets) is simply not
-//! mesh-dialable by name — its backend does not contribute a resolvable `<job>`,
+//! mesh-dialable by name — its backend does not contribute a resolvable `<workload>`,
 //! which is the design's intended scope, not a regression.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -107,13 +107,13 @@ pub enum NameIndexError {
     },
 }
 
-/// Extract the `<job>` label from a workload [`SpiffeId`]'s path and reconstruct
+/// Extract the `<workload>` label from a workload [`SpiffeId`]'s path and reconstruct
 /// the [`MeshServiceName`] it dials as.
 ///
 /// The path is `/job/<job>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
 /// shape). This pulls the segment immediately after `/job/` and validates it
 /// as a v1 single-label mesh name via [`MeshServiceName::new`]. Returns `None`
-/// when the path is not the `job/.../alloc/...` shape OR the `<job>` segment is
+/// when the path is not the `job/.../alloc/...` shape OR the `<workload>` segment is
 /// not a valid v1 single-label mesh name (dotted, out-of-class, over 63
 /// octets) — such a backend is not mesh-dialable by name in v1.
 ///
@@ -121,18 +121,18 @@ pub enum NameIndexError {
 /// rationale (local helper, NOT a new `SpiffeId` accessor).
 ///
 /// `pub(crate)` (02-01): the re-keyed `MtlsResolve`'s `by_frontend` drain
-/// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<job>` from
+/// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<workload>` from
 /// the SAME `service_backends` rows to key `by_frontend` from the shared
 /// allocator — reusing this one parse helper rather than re-deriving the
 /// `/job/<job>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
 /// never invent API surface"; the design pins "mirror the `name_index` drain's
-/// row→`<job>`→snapshot pattern").
-pub(crate) fn job_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
+/// row→`<workload>`→snapshot pattern").
+pub(crate) fn workload_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
     // The path is `/job/<job>/alloc/<alloc>` — split on `/`, find the segment
     // immediately after the `job` marker. A path that does not carry a `job`
-    // segment (or has nothing after it) yields no `<job>`.
+    // segment (or has nothing after it) yields no `<workload>`.
     let mut segments = alloc.path().split('/').filter(|segment| !segment.is_empty());
-    let job_label = loop {
+    let workload_label = loop {
         match segments.next() {
             Some("job") => break segments.next()?,
             Some(_) => {}
@@ -140,109 +140,110 @@ pub(crate) fn job_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
         }
     };
     // Reconstruct the full mesh name and validate it as a v1 single-label name.
-    // An out-of-class / dotted / over-63-octet `<job>` is not mesh-dialable in
+    // An out-of-class / dotted / over-63-octet `<workload>` is not mesh-dialable in
     // v1 and contributes no resolvable name.
-    MeshServiceName::new(&format!("{job_label}.{}", MeshServiceName::SUFFIX)).ok()
+    MeshServiceName::new(&format!("{workload_label}.{}", MeshServiceName::SUFFIX)).ok()
 }
 
-/// The in-RAM resolvability set: the `<job>`s with ≥1 running-AND-healthy
+/// The in-RAM resolvability set: the `<workload>`s with ≥1 running-AND-healthy
 /// backend. A `BTreeMap` (not `HashMap`) per `.claude/rules/development.md`
 /// § "Ordered-collection choice" — the index is observed by proptests, so its
 /// iteration order must be deterministic across seeds. The value is the count
-/// of distinct healthy-backend addrs contributing to the `<job>`, kept so a
-/// row that drops a `<job>` to zero healthy backends WITHHOLDS it.
+/// of distinct healthy-backend addrs contributing to the `<workload>`, kept so a
+/// row that drops a `<workload>` to zero healthy backends WITHHOLDS it.
 #[derive(Default)]
 struct ResolvableIndex {
-    /// `<job> → the addrs of its currently running-AND-healthy backends`. A
-    /// `<job>` key is present iff at least one healthy backend contributes; the
-    /// `frontend_for` query treats a present (non-empty) `<job>` as resolvable.
-    /// `service_id`-granularity is NOT tracked because a `<job>`'s healthy set is
+    /// `<workload> → the addrs of its currently running-AND-healthy backends`. A
+    /// `<workload>` key is present iff at least one healthy backend contributes; the
+    /// `frontend_for` query treats a present (non-empty) `<workload>` as resolvable.
+    /// `service_id`-granularity is NOT tracked because a `<workload>`'s healthy set is
     /// derived from a FULL-ROW-replace per writing row (§4 full-row contract):
     /// each row carries one service's entire current backend set, and a row
-    /// folds via `apply_row`, which keys the per-`<job>` addr set off the
+    /// folds via `apply_row`, which keys the per-`<workload>` addr set off the
     /// service_id that produced it.
     by_name: BTreeMap<MeshServiceName, BTreeSet<SocketAddr>>,
-    /// `<job> → the addr set the LAST row for a given service contributed`,
-    /// keyed per (`<job>`, `service_id`) so a row that drops a `<job>`'s healthy
+    /// `<workload> → the addr set the LAST row for a given service contributed`,
+    /// keyed per (`<workload>`, `service_id`) so a row that drops a `<workload>`'s healthy
     /// backends to zero WITHHOLDS the name without stranding another service's
-    /// contribution to the same `<job>`. Mirrors the
+    /// contribution to the same `<workload>`. Mirrors the
     /// `ServiceBackendsResolve::addrs_by_service` per-service scoping (F-A).
-    addrs_by_job_service:
+    addrs_by_workload_service:
         BTreeMap<(MeshServiceName, overdrive_core::id::ServiceId), BTreeSet<SocketAddr>>,
 }
 
 impl ResolvableIndex {
     /// Apply one full `service_backends` row: drop ONLY this service's prior
-    /// healthy contribution to each `<job>` it touched, then insert its current
-    /// running-AND-healthy backends grouped by `<job>`. Full-row replacement
+    /// healthy contribution to each `<workload>` it touched, then insert its current
+    /// running-AND-healthy backends grouped by `<workload>`. Full-row replacement
     /// mirrors the `service_backends` §4 full-row contract (the row carries the
-    /// service's entire current backend set), so a row that drops a `<job>` to
+    /// service's entire current backend set), so a row that drops a `<workload>` to
     /// zero healthy backends WITHHOLDS it (the healthy-gate seam).
     fn apply_row(&mut self, service_id: overdrive_core::id::ServiceId, backends: &[Backend]) {
-        // Evict this service's prior contribution from every `<job>` it touched,
+        // Evict this service's prior contribution from every `<workload>` it touched,
         // scoped to `service_id` so a different service's healthy backend at the
-        // same `<job>` is never evicted.
+        // same `<workload>` is never evicted.
         //
-        // INVARIANT (one-service-per-job): each logical `<job>` is contributed
-        // by exactly ONE `service_id` (a `<job>` is the single-label mesh name a
+        // INVARIANT (one-service-per-workload): each logical `<workload>` is contributed
+        // by exactly ONE `service_id` (a `<workload>` is the single-label mesh name a
         // Service declares, and a Service maps 1:1 to a `ServiceId`). Under that
         // posture the per-service eviction below can only ever remove the addrs
         // THIS service contributed, so it never drops a `SocketAddr` another
-        // service still claims for the same `<job>`. The risk the eviction would
+        // service still claims for the same `<workload>`. The risk the eviction would
         // pose absent the invariant — two distinct `service_id`s sharing one
-        // `SocketAddr` under one `<job>`, where evicting one service's stale set
-        // (`addrs.remove(addr)`) could wrongly empty `by_name[job]` while the
-        // other is still healthy — cannot arise: the `addrs_by_job_service` key
-        // is `(job, service_id)`, so two services contributing the same `<job>`
+        // `SocketAddr` under one `<workload>`, where evicting one service's stale set
+        // (`addrs.remove(addr)`) could wrongly empty `by_name[workload]` while the
+        // other is still healthy — cannot arise: the `addrs_by_workload_service` key
+        // is `(workload, service_id)`, so two services contributing the same `<workload>`
         // would each hold their OWN keyed addr set, and the union in `by_name`
         // would only empty when BOTH evict. The invariant is asserted at Tier 1
         // by `apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_service`.
         let prior: Vec<MeshServiceName> = self
-            .addrs_by_job_service
+            .addrs_by_workload_service
             .keys()
             .filter(|(_, sid)| *sid == service_id)
-            .map(|(job, _)| job.clone())
+            .map(|(workload, _)| workload.clone())
             .collect();
-        for job in prior {
-            if let Some(stale) = self.addrs_by_job_service.remove(&(job.clone(), service_id))
-                && let Some(addrs) = self.by_name.get_mut(&job)
+        for workload in prior {
+            if let Some(stale) =
+                self.addrs_by_workload_service.remove(&(workload.clone(), service_id))
+                && let Some(addrs) = self.by_name.get_mut(&workload)
             {
                 for addr in &stale {
                     addrs.remove(addr);
                 }
                 if addrs.is_empty() {
-                    self.by_name.remove(&job);
+                    self.by_name.remove(&workload);
                 }
             }
         }
-        // Insert the current running-AND-healthy backends, grouped by `<job>`.
+        // Insert the current running-AND-healthy backends, grouped by `<workload>`.
         // The `healthy == true` filter IS the WITHHOLD seam (resolvability).
         let mut contributed: BTreeMap<MeshServiceName, BTreeSet<SocketAddr>> = BTreeMap::new();
         for backend in backends.iter().filter(|backend| backend.healthy) {
-            if let Some(job) = job_of(&backend.alloc) {
-                contributed.entry(job).or_default().insert(backend.addr);
+            if let Some(workload) = workload_of(&backend.alloc) {
+                contributed.entry(workload).or_default().insert(backend.addr);
             }
         }
-        for (job, addrs) in contributed {
-            self.by_name.entry(job.clone()).or_default().extend(addrs.iter().copied());
-            self.addrs_by_job_service.insert((job, service_id), addrs);
+        for (workload, addrs) in contributed {
+            self.by_name.entry(workload.clone()).or_default().extend(addrs.iter().copied());
+            self.addrs_by_workload_service.insert((workload, service_id), addrs);
         }
     }
 
     /// Rebuild the WHOLE resolvability set from an authoritative snapshot (the
-    /// List leg + the relist recovery). Every `<job>` with a running-AND-healthy
-    /// backend in `rows` is present; every other `<job>` is absent.
+    /// List leg + the relist recovery). Every `<workload>` with a running-AND-healthy
+    /// backend in `rows` is present; every other `<workload>` is absent.
     fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
         self.by_name.clear();
-        self.addrs_by_job_service.clear();
+        self.addrs_by_workload_service.clear();
         for row in rows {
             self.apply_row(row.service_id, &row.backends);
         }
     }
 
-    /// Whether `name`'s `<job>` is currently resolvable (≥1 running-AND-healthy
+    /// Whether `name`'s `<workload>` is currently resolvable (≥1 running-AND-healthy
     /// backend). The healthy-gate WITHHOLD seam in query form: a present key is
-    /// always non-empty (`apply_row` drops a `<job>` key the moment its addr set
+    /// always non-empty (`apply_row` drops a `<workload>` key the moment its addr set
     /// empties), so presence IS resolvability.
     fn is_resolvable(&self, name: &MeshServiceName) -> bool {
         self.by_name.contains_key(name)
@@ -250,7 +251,7 @@ impl ResolvableIndex {
 }
 
 /// The name-keyed List-then-Watch index over `service_backends` (ADR-0072
-/// REV-2). Maps each resolvable `<job>` to its stable frontend address `F`,
+/// REV-2). Maps each resolvable `<workload>` to its stable frontend address `F`,
 /// where `F` is the [`FrontendAddrAllocator`]'s binding — NOT a second source
 /// of frontend truth. See the module rustdoc for the full contract.
 pub struct NameIndex {
@@ -263,13 +264,13 @@ pub struct NameIndex {
     store: Arc<dyn ObservationStore>,
     /// The SINGLE source of frontend truth (DDN-2): the SAME `Arc`-shared
     /// allocator instance the 02-00 `by_frontend` re-key reads. `frontend_for`
-    /// READS the allocator's EXISTING `<job> → F` binding (a read-only
-    /// `snapshot().get(<job>)` lookup); the index NEVER writes the allocator,
+    /// READS the allocator's EXISTING `<workload> → F` binding (a read-only
+    /// `snapshot().get(<workload>)` lookup); the index NEVER writes the allocator,
     /// fabricates an `F`, or caches one. The binding is WRITTEN by the 01-05
     /// deploy-time assigner — never by this reader (REV-3 single-source /
     /// pure-reader invariant; CLAUDE.md § "Implement to the design").
     allocator: FrontendAddrAllocator,
-    /// The in-RAM `<job>` resolvability set, behind a synchronous
+    /// The in-RAM `<workload>` resolvability set, behind a synchronous
     /// [`parking_lot::RwLock`] and `Arc`-shared with the single-owner drain
     /// task. The lock is never held across an `.await`.
     resolvable: Arc<RwLock<ResolvableIndex>>,
@@ -312,15 +313,15 @@ impl NameIndex {
 
     /// The stable frontend address `F` for `name`, IFF the name is currently
     /// resolvable (≥1 running-AND-healthy backend) AND the allocator ALREADY
-    /// binds the `<job>` (the 01-05 deploy-time assigner has run for it).
+    /// binds the `<workload>` (the 01-05 deploy-time assigner has run for it).
     /// `None` when WITHHELD/absent — the healthy-gate WITHHOLD seam projected to
     /// the query the [`answer_for`](super::answer::answer_for) consumes.
     ///
     /// This is a **PURE READER** (REV-3 root-cause fix): it READS the
-    /// [`FrontendAddrAllocator`]'s EXISTING `<job> → F` binding via the
+    /// [`FrontendAddrAllocator`]'s EXISTING `<workload> → F` binding via the
     /// read-only [`snapshot`](FrontendAddrAllocator::snapshot) — it does NOT
     /// call `assign` and performs NO mutation. A DNS query for a resolvable
-    /// `<job>` the allocator does NOT yet bind is WITHHELD (`None` → `NxDomain`),
+    /// `<workload>` the allocator does NOT yet bind is WITHHELD (`None` → `NxDomain`),
     /// NEVER assigned-on-read; the binding is the allocator's, written only by
     /// the 01-05 deploy-time assigner, NEVER by this index (CLAUDE.md
     /// § "Implement to the design — never invent API surface").
@@ -342,7 +343,7 @@ impl NameIndex {
             return None;
         }
         // Resolvable ⇒ READ the allocator's EXISTING binding (the SINGLE source
-        // of frontend truth, written by the 01-05 assigner). A `<job>` the
+        // of frontend truth, written by the 01-05 assigner). A `<workload>` the
         // allocator does not yet bind is WITHHELD (`None`) — NEVER assigned on
         // this read path, NEVER a fabricated addr.
         self.allocator.snapshot().get(name).copied()

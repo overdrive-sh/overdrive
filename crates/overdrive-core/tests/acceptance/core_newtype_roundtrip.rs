@@ -22,7 +22,7 @@ use proptest::prelude::*;
 // -----------------------------------------------------------------------------
 
 #[test]
-fn job_id_round_trips_through_display_and_from_str() {
+fn workload_id_round_trips_through_display_and_from_str() {
     // Given any valid WorkloadId value produced by the newtype generator.
     // For the acceptance path we use a small representative table of
     // values that exercise the DNS-1123-like character class (lowercase
@@ -79,7 +79,7 @@ fn allocation_id_round_trips_through_display_and_from_str() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn serde_json_output_equals_display_quoted_for_job_id() {
+fn serde_json_output_equals_display_quoted_for_workload_id() {
     let id = WorkloadId::new("payments-api-v2").expect("valid input");
 
     // When Ana serialises it via serde_json.
@@ -121,7 +121,7 @@ fn serde_json_output_equals_display_quoted_for_allocation_id() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn job_id_parses_from_realistic_config_value() {
+fn workload_id_parses_from_realistic_config_value() {
     // Given the input "payments-api-v2" read from a TOML configuration file.
     let input = "payments-api-v2";
 

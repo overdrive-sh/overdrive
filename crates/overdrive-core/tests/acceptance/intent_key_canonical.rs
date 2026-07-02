@@ -32,7 +32,7 @@ use proptest::prelude::*;
 // ---------------------------------------------------------------------------
 
 #[test]
-fn for_job_returns_jobs_slash_id_as_byte_sequence() {
+fn for_workload_returns_workloads_slash_id_as_byte_sequence() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let key = IntentKey::for_workload(&id);
 
@@ -44,7 +44,7 @@ fn for_job_returns_jobs_slash_id_as_byte_sequence() {
 }
 
 #[test]
-fn for_job_returns_jobs_slash_id_as_str() {
+fn for_workload_returns_workloads_slash_id_as_str() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let key = IntentKey::for_workload(&id);
 
@@ -75,7 +75,7 @@ fn for_allocation_returns_allocations_slash_id() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn two_calls_produce_byte_identical_output_for_job() {
+fn two_calls_produce_byte_identical_output_for_workload() {
     let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let first = IntentKey::for_workload(&id);
     let second = IntentKey::for_workload(&id);
@@ -83,7 +83,7 @@ fn two_calls_produce_byte_identical_output_for_job() {
     assert_eq!(
         first.as_bytes(),
         second.as_bytes(),
-        "IntentKey::for_job must be byte-stable across invocations"
+        "IntentKey::for_workload must be byte-stable across invocations"
     );
     assert_eq!(first.as_str(), second.as_str());
 }
@@ -163,7 +163,7 @@ proptest! {
     /// `format!("workloads/{}", id).as_bytes()` AND is stable across two
     /// invocations.
     #[test]
-    fn for_job_is_stable_and_matches_format(raw in valid_label()) {
+    fn for_workload_is_stable_and_matches_format(raw in valid_label()) {
         let id = WorkloadId::new(&raw).expect("generator yields valid WorkloadId");
         let expected = format!("workloads/{id}");
 
