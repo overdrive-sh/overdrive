@@ -14,7 +14,7 @@
 //!
 //! # Determinism contract
 //!
-//! For any fixed `(nodes, job, current_allocs)` input, two successive
+//! For any fixed `(nodes, workload, current_allocs)` input, two successive
 //! calls return equal `Result<NodeId, PlacementError>`. The proptest
 //! in `tests/acceptance/determinism.rs` defends the contract.
 //!
@@ -30,7 +30,7 @@
 //! (REUSE AS-IS per `docs/feature/phase-1-first-workload/design/wave-
 //! decisions.md`). The Phase-1 first-fit scheduler therefore treats
 //! each `Running` allocation targeting a node as reserving the
-//! resource envelope of the *new job being placed*. This is adequate
+//! resource envelope of the *new workload being placed*. This is adequate
 //! for Phase 1's homogeneous-workload scope; Phase 2+ will add a
 //! `resources` field to [`AllocStatusRow`] and switch the scheduler to
 //! per-allocation accounting (heterogeneous shape).
@@ -50,7 +50,7 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 /// Walks the input `nodes` map in `BTreeMap` order, computes each
 /// node's [`free_capacity`] (capacity minus the resources reserved by
 /// `Running` allocations targeting it), and returns the [`NodeId`] of
-/// the first node whose free capacity meets the job's resource
+/// the first node whose free capacity meets the workload's resource
 /// envelope.
 ///
 /// The `BTreeMap` parameter type pins iteration order at the type
@@ -60,8 +60,8 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 /// # Errors
 ///
 /// Returns [`PlacementError::NoCapacity`] when no input node has
-/// sufficient free capacity for the job's resource envelope; the error
-/// carries `needed` (the job's requested envelope) and `max_free`
+/// sufficient free capacity for the workload's resource envelope; the error
+/// carries `needed` (the workload's requested envelope) and `max_free`
 /// (the largest free envelope across the input nodes after subtracting
 /// running allocations) for actionable diagnostics.
 ///
@@ -70,7 +70,7 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 #[must_use = "scheduler placement decisions must be acted on"]
 pub fn schedule(
     nodes: &BTreeMap<NodeId, Node>,
-    job: &Job,
+    workload: &Job,
     current_allocs: &[AllocStatusRow],
 ) -> Result<NodeId, PlacementError> {
     // Empty-set guard. Phase-1 single-node never produces this branch
@@ -89,14 +89,14 @@ pub fn schedule(
     let mut max_free = Resources { cpu_milli: 0, memory_bytes: 0 };
 
     // First-fit: walk in BTreeMap order. The first node whose free
-    // capacity covers the job's requested envelope wins. The
+    // capacity covers the workload's requested envelope wins. The
     // `for (node_id, node) in nodes` form drives BTreeMap's in-order
     // iterator — Ord on NodeId, deterministic across any insertion
     // permutation that yields the same set.
     for (node_id, node) in nodes {
-        let free = free_capacity(node, current_allocs, &job.resources);
+        let free = free_capacity(node, current_allocs, &workload.resources);
 
-        if covers(&free, &job.resources) {
+        if covers(&free, &workload.resources) {
             return Ok(node_id.clone());
         }
 
@@ -115,7 +115,7 @@ pub fn schedule(
         }
     }
 
-    Err(PlacementError::NoCapacity { needed: job.resources, max_free })
+    Err(PlacementError::NoCapacity { needed: workload.resources, max_free })
 }
 
 /// Helper: free capacity of `node` after subtracting the resource
@@ -123,7 +123,7 @@ pub fn schedule(
 ///
 /// Per the Phase-1 capacity model documented at the crate root, each
 /// `Running` allocation targeting `node.id` reserves `per_alloc`
-/// (the resource envelope of the new job being placed). Subtraction
+/// (the resource envelope of the new workload being placed). Subtraction
 /// uses [`u32::saturating_sub`] / [`u64::saturating_sub`] to handle
 /// the zero-capacity edge without numeric underflow per US-01 AC.
 ///
@@ -177,12 +177,12 @@ const fn covers(available: &Resources, needed: &Resources) -> bool {
 /// describe-job acceptance test).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlacementError {
-    /// No node has sufficient free capacity for the job's resource
+    /// No node has sufficient free capacity for the workload's resource
     /// requirements. Carries both the requested envelope and the
     /// largest free envelope across the input nodes for diagnostics.
     #[error("no node has capacity: needed {needed:?}, max free {max_free:?}")]
     NoCapacity {
-        /// Resources the job declared.
+        /// Resources the workload declared.
         needed: Resources,
         /// Largest free envelope across the input nodes after
         /// subtracting running allocations. Reported actionably in
