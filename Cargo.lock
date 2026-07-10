@@ -2146,15 +2146,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "overdrive-scheduler"
-version = "0.0.0"
-dependencies = [
- "overdrive-core",
- "proptest",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [

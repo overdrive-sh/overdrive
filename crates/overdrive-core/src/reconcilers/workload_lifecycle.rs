@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::SpiffeId;
 use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::driver::{AllocationSpec, Resources};
+use crate::traits::driver::AllocationSpec;
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
 use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
@@ -68,8 +68,8 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
 ///
 /// The reconciler reads `desired.job` (the target job) and
 /// `actual.allocations` (running set), calls
-/// `overdrive_scheduler::schedule(...)` on `desired.nodes` +
-/// `desired.job`, and emits `Action::StartAllocation` /
+/// `crate::scheduler::schedule(...)` on `desired.nodes` +
+/// `desired.job`'s resource envelope, and emits `Action::StartAllocation` /
 /// `Action::StopAllocation` to converge. Restart counts are tracked
 /// in `view.restart_counts`; backoff is gated by recomputing the
 /// deadline as `view.last_failure_seen_at + backoff_for_attempt(...)`
@@ -456,11 +456,10 @@ impl WorkloadLifecycle {
             }
             // Run: a job is desired.
             Some(job) => {
-                // Pure first-fit placement (inlined from
-                // overdrive-scheduler::schedule). Pulled inline rather
-                // than calling the scheduler crate because
-                // overdrive-core cannot depend on overdrive-scheduler
-                // (would invert the dependency direction).
+                // Pure first-fit placement via the single SSOT
+                // `crate::scheduler::schedule` (ADR-0074). The scheduler
+                // module lives in-crate, so the reconciler calls it
+                // directly — no dependency-cycle workaround needed.
                 let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
 
                 // Per workload-gc-absent-stale-allocs step 01-04: derive
@@ -802,14 +801,30 @@ impl WorkloadLifecycle {
                 }
 
                 // No Running, no failed-needs-restart → schedule a
-                // fresh allocation. Inline first-fit over BTreeMap.
-                let placement = first_fit_place(&desired.nodes, job, &allocs_vec);
+                // fresh allocation via the SSOT scheduler (ADR-0074).
+                // `schedule` takes an owned `&[AllocStatusRow]`; the
+                // reconciler holds `allocs_vec: Vec<&AllocStatusRow>`, so
+                // materialise a small owned slice (Phase-1 clone; the
+                // running-alloc count is ≤1). The kind-agnostic `needed`
+                // envelope is projected from the workload as
+                // `&job.resources`.
+                let owned_allocs: Vec<AllocStatusRow> =
+                    allocs_vec.iter().map(|r| (*r).clone()).collect();
+                let placement =
+                    crate::scheduler::schedule(&desired.nodes, &job.resources, &owned_allocs);
                 placement.map_or_else(
-                    || {
-                        // NoCapacity — emit no action. The Pending row
-                        // remains in obs (the renderer surfaces the
-                        // reason at render time). Backoff is irrelevant
-                        // here (nothing to back off from).
+                    |_placement_error| {
+                        // Placement miss — behaviour-preserving per
+                        // ADR-0074 §3: both `PlacementError::NoCapacity`
+                        // and `NoHealthyNode` map to the prior
+                        // no-action-on-miss branch. Emit no action; the
+                        // Pending row remains in obs (the renderer
+                        // surfaces the reason at render time). Backoff is
+                        // irrelevant here (nothing to back off from). The
+                        // richer `NoCapacity{needed, max_free}`
+                        // diagnostics are available at the SSOT but are
+                        // deliberately NOT surfaced into the reconciler's
+                        // action output by this ADR (out of scope).
                         (Vec::new(), view.clone())
                     },
                     |node_id| {
@@ -895,53 +910,6 @@ impl WorkloadLifecycle {
                 )
             }
         }
-    }
-}
-
-/// Pure first-fit placement helper. Inlined here because
-/// `overdrive-core` cannot depend on `overdrive-scheduler` (would
-/// invert the dependency direction; the scheduler is a `core`-class
-/// crate that depends on `overdrive-core`). The algorithm is the same
-/// as `overdrive_scheduler::schedule`'s happy path: walk `nodes` in
-/// `BTreeMap` order, return the first `NodeId` whose free capacity
-/// covers the job's resource envelope.
-pub(crate) fn first_fit_place(
-    nodes: &BTreeMap<NodeId, Node>,
-    job: &Job,
-    current_allocs: &[&AllocStatusRow],
-) -> Option<NodeId> {
-    for (node_id, node) in nodes {
-        let free = node_free_capacity(node, current_allocs, &job.resources);
-        if free.cpu_milli >= job.resources.cpu_milli
-            && free.memory_bytes >= job.resources.memory_bytes
-        {
-            return Some(node_id.clone());
-        }
-    }
-    None
-}
-
-/// Free capacity of `node` after subtracting reserved envelope of
-/// Running allocations targeting it. Inline counterpart to
-/// `overdrive_scheduler::free_capacity`.
-fn node_free_capacity(
-    node: &Node,
-    current_allocs: &[&AllocStatusRow],
-    per_alloc: &Resources,
-) -> Resources {
-    let running_on_node: u64 = u64::try_from(
-        current_allocs
-            .iter()
-            .filter(|alloc| alloc.node_id == node.id && alloc.state == AllocState::Running)
-            .count(),
-    )
-    .unwrap_or(u64::MAX);
-    let total_cpu_reserved = u64::from(per_alloc.cpu_milli).saturating_mul(running_on_node);
-    let total_mem_reserved = per_alloc.memory_bytes.saturating_mul(running_on_node);
-    let cpu_after = u64::from(node.capacity.cpu_milli).saturating_sub(total_cpu_reserved);
-    Resources {
-        cpu_milli: u32::try_from(cpu_after).unwrap_or(u32::MAX),
-        memory_bytes: node.capacity.memory_bytes.saturating_sub(total_mem_reserved),
     }
 }
 

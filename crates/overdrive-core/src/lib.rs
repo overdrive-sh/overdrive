@@ -93,6 +93,12 @@ pub mod observation;
 /// be atomic (no TOCTOU)".
 pub mod race_once_cell;
 pub mod reconcilers;
+/// Pure-function placement scheduler (first-fit, Phase 1). Consolidated
+/// into `overdrive-core` per ADR-0074 (superseding ADR-0024's dedicated
+/// `overdrive-scheduler` crate); consumed by the `WorkloadLifecycle`
+/// reconciler. dst-lint scans this module as part of the `core`-class
+/// crate.
+pub mod scheduler;
 // SCAFFOLD: true — service-health-check-probes feature.
 // `ServiceFailureReason`, `ProbeWitness`, `ServiceLifecycleState`,
 // `ServiceLifecycleView` per ADR-0055. Lands GREEN across slices

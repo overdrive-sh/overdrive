@@ -1,6 +1,7 @@
-//! Shared fixtures and proptest strategies for `overdrive-scheduler`
-//! acceptance tests.
+//! Shared fixtures and proptest strategies for the
+//! `overdrive_core::scheduler` acceptance tests.
 //!
+//! Migrated from the deleted `overdrive-scheduler` crate per ADR-0074.
 //! Mirrors `crates/overdrive-core/tests/acceptance/aggregate_roundtrip.rs`
 //! generator shape — DNS-1123-style labels for ID newtypes, bounded
 //! resource ranges that exercise both fits-everywhere and exhausted
@@ -9,13 +10,14 @@
 //! # Phase-1 capacity model
 //!
 //! `AllocStatusRow` carries no per-alloc `Resources` field today (see
-//! `overdrive-core::traits::observation_store::AllocStatusRow`; pinned
+//! `overdrive_core::traits::observation_store::AllocStatusRow`; pinned
 //! REUSE AS-IS by `docs/feature/phase-1-first-workload/design/wave-
 //! decisions.md`). The scheduler therefore treats each `Running`
 //! allocation targeting a node as reserving the resource envelope of
-//! the *new* job being placed — adequate for Phase 1's homogeneous-
-//! workload first-fit semantics. Phase 2+ will add a `resources` field
-//! to `AllocStatusRow` and switch the scheduler to per-alloc accounting.
+//! the *new* workload being placed — adequate for Phase 1's
+//! homogeneous-workload first-fit semantics. Phase 2+ will add a
+//! `resources` field to `AllocStatusRow` and switch the scheduler to
+//! per-alloc accounting.
 
 #![allow(dead_code)] // helpers are referenced from sibling modules; nextest
 // sees each module file independently.

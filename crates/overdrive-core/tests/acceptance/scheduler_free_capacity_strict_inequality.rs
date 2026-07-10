@@ -1,11 +1,15 @@
-//! Branch-coverage tests for `overdrive_scheduler::schedule` /
+//! Branch-coverage tests for `overdrive_core::scheduler::schedule` /
 //! `free_capacity`. Pins boundary inequalities and the
 //! cpu-AND-memory predicate against mutations that would otherwise
 //! pass silently.
 //!
+//! Migrated from the deleted `overdrive-scheduler` crate per ADR-0074;
+//! adapted to the kind-agnostic `schedule` `&Resources` signature (each
+//! call passes `&job.resources`).
+//!
 //! Mutations covered:
 //!
-//!   - `lib.rs:110` `free.cpu_milli > max_free.cpu_milli` (`>` →
+//!   - `scheduler.rs` `free.cpu_milli > max_free.cpu_milli` (`>` →
 //!     `>=`) — this drives the `max_free` running maximum across
 //!     nodes, surfaced in `PlacementError::NoCapacity { max_free }`.
 //!     Under `>=`, the comparison is non-strict and the running
@@ -17,8 +21,9 @@
 //!     because `max_free` settles to the same number. The mutant is
 //!     in fact equivalent at the value level — caught at the
 //!     `>` vs `>=` semantic level only when combined with side
-//!     effects. We rely on the existing `determinism` proptest
-//!     (which iterates many seeds) as the falsification surface.
+//!     effects. We rely on the existing `scheduler_determinism`
+//!     proptest (which iterates many seeds) as the falsification
+//!     surface.
 //!
 //!     Practically, the line that *can* be flipped observably is
 //!     when the `max_free` starts at zero and one node has free.cpu
@@ -28,9 +33,9 @@
 //!     scheduler-side notes; it is NOT killable through schedule's
 //!     observable surface.
 //!
-//!   - `lib.rs:113` (memory analogue) — same reasoning.
+//!   - the memory analogue — same reasoning.
 //!
-//!   - `lib.rs:143` `alloc.node_id == node.id && alloc.state ==
+//!   - `free_capacity`'s `alloc.node_id == node.id && alloc.state ==
 //!     AllocState::Running` (`&&` → `||`) — this IS killable
 //!     because the count of "matching allocs" feeds reservation
 //!     subtraction, which is observable through whether placement
@@ -43,14 +48,14 @@
 
 use std::collections::BTreeMap;
 
+use overdrive_core::scheduler::{PlacementError, schedule};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::AllocState;
-use overdrive_scheduler::{PlacementError, schedule};
 
-use super::common::{make_alloc_running, make_job, make_node, nid, res};
+use super::scheduler_common::{make_alloc_running, make_job, make_node, nid, res};
 
 // ---------------------------------------------------------------------------
-// L143 — `&&` -> `||` in free_capacity
+// `&&` -> `||` in free_capacity
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -97,7 +102,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         workload_addr: None,
     }];
 
-    let result = schedule(&nodes, &job, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs);
 
     assert_eq!(
         result,
@@ -110,7 +115,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
 fn free_capacity_includes_running_allocs_on_same_node() {
     // Confirm the production `&&` actually subtracts when both
     // clauses are true. Tightens the falsifiability surface for
-    // L143's `&&` → `||` — paired with the previous test, the
+    // the `&&` → `||` mutant — paired with the previous test, the
     // surviving production semantic is exactly the `&&` shape.
     let local = make_node("local", res(1_500, 2 * 1024 * 1024 * 1024));
     let mut nodes = BTreeMap::new();
@@ -118,7 +123,7 @@ fn free_capacity_includes_running_allocs_on_same_node() {
     let job = make_job("payments", res(1_000, 1024 * 1024 * 1024));
     let allocs = vec![make_alloc_running("alloc-running-0", "other", "local")];
 
-    let result = schedule(&nodes, &job, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs);
 
     let Err(PlacementError::NoCapacity { max_free, .. }) = result else {
         panic!("expected NoCapacity, got {result:?}");
@@ -130,7 +135,7 @@ fn free_capacity_includes_running_allocs_on_same_node() {
 }
 
 // ---------------------------------------------------------------------------
-// L110 / L113 — strict inequality on per-component max_free
+// strict inequality on per-component max_free
 // ---------------------------------------------------------------------------
 //
 // Two nodes with distinct capacities — production tracks the
@@ -161,7 +166,7 @@ fn no_capacity_max_free_reflects_largest_per_component_across_nodes() {
     nodes.insert(c.id.clone(), c);
 
     let job = make_job("memhog", res(5_000, 10 * 1024 * 1024 * 1024));
-    let result = schedule(&nodes, &job, &[]);
+    let result = schedule(&nodes, &job.resources, &[]);
 
     let Err(PlacementError::NoCapacity { max_free, needed }) = result else {
         panic!("expected NoCapacity, got {result:?}");

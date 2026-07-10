@@ -1,7 +1,7 @@
 //! US-01 Scenarios 1.2, 1.3 — Scheduler determinism + BTreeMap-order invariance.
 //!
 //! Determinism is the **K1** KPI for slice 1: `schedule(...)` must be a
-//! pure function over its inputs — same `(nodes, job, current_allocs)`
+//! pure function over its inputs — same `(nodes, needed, current_allocs)`
 //! input MUST produce identical `Result<NodeId, PlacementError>`.
 //!
 //! 1.2 covers raw input-equality determinism: build one input, call
@@ -13,15 +13,21 @@
 //! the §18 reconciler-runtime contract that hot-path iteration is
 //! through `BTreeMap` (no `RandomState` smuggling per
 //! `.claude/rules/development.md` § Ordered-collection choice).
+//!
+//! Migrated from the deleted `overdrive-scheduler` crate per ADR-0074;
+//! adapted to the kind-agnostic `overdrive_core::scheduler::schedule`
+//! `&Resources` signature (the proptest projects `&job.resources`). The
+//! `.proptest-regressions` seed file migrated alongside as
+//! `scheduler_determinism.proptest-regressions`.
 
 use std::collections::BTreeMap;
 
 use proptest::prelude::*;
 
 use overdrive_core::id::NodeId;
-use overdrive_scheduler::schedule;
+use overdrive_core::scheduler::schedule;
 
-use super::common::{arb_allocs_for_nodes, arb_job, arb_node_map};
+use super::scheduler_common::{arb_allocs_for_nodes, arb_job, arb_node_map};
 
 proptest! {
     /// Scenario 1.2 — calling `schedule` twice on the same input
@@ -34,8 +40,8 @@ proptest! {
             (Just(nodes), arb_job(), allocs)
         })
     ) {
-        let first = schedule(&nodes, &job, &allocs);
-        let second = schedule(&nodes, &job, &allocs);
+        let first = schedule(&nodes, &job.resources, &allocs);
+        let second = schedule(&nodes, &job.resources, &allocs);
         prop_assert_eq!(
             first,
             second,
@@ -67,8 +73,8 @@ proptest! {
             nodes_reversed.insert(k, v);
         }
 
-        let r_orig = schedule(&nodes_orig, &job, &allocs);
-        let r_rev = schedule(&nodes_reversed, &job, &allocs);
+        let r_orig = schedule(&nodes_orig, &job.resources, &allocs);
+        let r_rev = schedule(&nodes_reversed, &job.resources, &allocs);
         prop_assert_eq!(
             r_orig,
             r_rev,

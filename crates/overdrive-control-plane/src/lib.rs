@@ -2574,8 +2574,8 @@ pub fn noop_heartbeat() -> overdrive_core::reconcilers::AnyReconciler {
 ///
 /// The first real (non-proof-of-life) reconciler. Converges declared
 /// replica count for a `Job` against the running `AllocStatusRow`
-/// set, calling inline first-fit placement equivalent to
-/// `overdrive_scheduler::schedule`.
+/// set, calling first-fit placement via
+/// `overdrive_core::scheduler::schedule`.
 ///
 /// Per US-03 (Slice 3 of phase-1-first-workload), this is registered
 /// at boot alongside `noop-heartbeat`.

@@ -1,22 +1,26 @@
 //! Pure-function placement scheduler for Overdrive Phase 1.
 //!
-//! Per ADR-0024 (D4 OVERRIDE), the scheduler lives in its own
-//! `core`-class crate so that `dst-lint` mechanically enforces the
-//! BTreeMap-only iteration discipline + banned-API contract. The
-//! discipline that this file implements:
+//! Per ADR-0074 the scheduler lives as a module inside `overdrive-core`
+//! (superseding ADR-0024's dedicated `overdrive-scheduler` crate). It is
+//! a pure `core`-class helper consumed by the `core`-class
+//! `WorkloadLifecycle` reconciler that already lives in this crate.
+//! `overdrive-core` is already `crate_class = "core"` (ADR-0003), so
+//! `dst-lint` mechanically enforces the same BTreeMap-only iteration
+//! discipline + banned-API contract on this module that the separate
+//! crate secured. The discipline this file implements:
 //!
 //! - [`schedule`] is a pure synchronous function. No `.await`.
 //! - All iteration runs through `BTreeMap` per
 //!   `.claude/rules/development.md` § Ordered-collection choice.
 //! - No `Instant::now`, `SystemTime::now`, `rand::*`, or
-//!   `tokio::time::sleep` appears in this crate. dst-lint catches
+//!   `tokio::time::sleep` appears in this module. dst-lint catches
 //!   violations at PR time.
 //!
 //! # Determinism contract
 //!
-//! For any fixed `(nodes, workload, current_allocs)` input, two successive
+//! For any fixed `(nodes, needed, current_allocs)` input, two successive
 //! calls return equal `Result<NodeId, PlacementError>`. The proptest
-//! in `tests/acceptance/determinism.rs` defends the contract.
+//! in `tests/acceptance/scheduler_determinism.rs` defends the contract.
 //!
 //! Iteration of `nodes` is by `BTreeMap`'s `Ord` on `NodeId` —
 //! deterministic across `BTreeMap` insertion permutations and across
@@ -35,14 +39,12 @@
 //! `resources` field to [`AllocStatusRow`] and switch the scheduler to
 //! per-allocation accounting (heterogeneous shape).
 
-#![forbid(unsafe_code)]
-
 use std::collections::BTreeMap;
 
-use overdrive_core::aggregate::{Job, Node};
-use overdrive_core::id::NodeId;
-use overdrive_core::traits::driver::Resources;
-use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::aggregate::Node;
+use crate::id::NodeId;
+use crate::traits::driver::Resources;
+use crate::traits::observation_store::{AllocState, AllocStatusRow};
 
 /// First-fit placement decision. Pure synchronous function over
 /// deterministic inputs.
@@ -50,18 +52,24 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 /// Walks the input `nodes` map in `BTreeMap` order, computes each
 /// node's [`free_capacity`] (capacity minus the resources reserved by
 /// `Running` allocations targeting it), and returns the [`NodeId`] of
-/// the first node whose free capacity meets the workload's resource
+/// the first node whose free capacity meets the `needed` resource
 /// envelope.
 ///
+/// The `needed` parameter is a bare [`Resources`] envelope — the
+/// scheduler is kind-agnostic (per ADR-0074): every workload kind
+/// (`JobV1` / `ServiceV1` / `ScheduleV1`) carries a `.resources`
+/// field, and the reconciler funnels all of them through this one
+/// placer via its kind-agnostic projection.
+///
 /// The `BTreeMap` parameter type pins iteration order at the type
-/// level — `dst-lint` enforces no `HashMap` appears in this crate's
+/// level — `dst-lint` enforces no `HashMap` appears in this module's
 /// source.
 ///
 /// # Errors
 ///
 /// Returns [`PlacementError::NoCapacity`] when no input node has
-/// sufficient free capacity for the workload's resource envelope; the error
-/// carries `needed` (the workload's requested envelope) and `max_free`
+/// sufficient free capacity for the `needed` resource envelope; the error
+/// carries `needed` (the requested envelope) and `max_free`
 /// (the largest free envelope across the input nodes after subtracting
 /// running allocations) for actionable diagnostics.
 ///
@@ -70,7 +78,7 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 #[must_use = "scheduler placement decisions must be acted on"]
 pub fn schedule(
     nodes: &BTreeMap<NodeId, Node>,
-    workload: &Job,
+    needed: &Resources,
     current_allocs: &[AllocStatusRow],
 ) -> Result<NodeId, PlacementError> {
     // Empty-set guard. Phase-1 single-node never produces this branch
@@ -89,14 +97,14 @@ pub fn schedule(
     let mut max_free = Resources { cpu_milli: 0, memory_bytes: 0 };
 
     // First-fit: walk in BTreeMap order. The first node whose free
-    // capacity covers the workload's requested envelope wins. The
+    // capacity covers the `needed` requested envelope wins. The
     // `for (node_id, node) in nodes` form drives BTreeMap's in-order
     // iterator — Ord on NodeId, deterministic across any insertion
     // permutation that yields the same set.
     for (node_id, node) in nodes {
-        let free = free_capacity(node, current_allocs, &workload.resources);
+        let free = free_capacity(node, current_allocs, needed);
 
-        if covers(&free, &workload.resources) {
+        if covers(&free, needed) {
             return Ok(node_id.clone());
         }
 
@@ -115,13 +123,13 @@ pub fn schedule(
         }
     }
 
-    Err(PlacementError::NoCapacity { needed: workload.resources, max_free })
+    Err(PlacementError::NoCapacity { needed: *needed, max_free })
 }
 
 /// Helper: free capacity of `node` after subtracting the resource
 /// envelope reserved by `Running` allocations targeting it.
 ///
-/// Per the Phase-1 capacity model documented at the crate root, each
+/// Per the Phase-1 capacity model documented at the module root, each
 /// `Running` allocation targeting `node.id` reserves `per_alloc`
 /// (the resource envelope of the new workload being placed). Subtraction
 /// uses [`u32::saturating_sub`] / [`u64::saturating_sub`] to handle

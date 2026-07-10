@@ -1,5 +1,9 @@
 //! US-01 Scenarios 1.4, 1.5, 1.7 — capacity accounting + zero-capacity edge.
 //!
+//! Migrated from the deleted `overdrive-scheduler` crate per ADR-0074;
+//! adapted to the kind-agnostic `overdrive_core::scheduler::schedule`
+//! `&Resources` signature — every `schedule` call passes `&job.resources`.
+//!
 //! # Phase-1 capacity model
 //!
 //! `AllocStatusRow` carries no per-alloc `Resources` field today
@@ -21,10 +25,10 @@
 
 use std::collections::BTreeMap;
 
+use overdrive_core::scheduler::{PlacementError, schedule};
 use overdrive_core::traits::driver::Resources;
-use overdrive_scheduler::{PlacementError, schedule};
 
-use super::common::{make_alloc_running, make_job, make_node, res};
+use super::scheduler_common::{make_alloc_running, make_job, make_node, res};
 
 #[test]
 fn scheduler_subtracts_running_allocs_from_capacity() {
@@ -41,7 +45,7 @@ fn scheduler_subtracts_running_allocs_from_capacity() {
     let job = make_job("payments", res(4000, 4 * 1024 * 1024 * 1024));
 
     // When schedule is called
-    let result = schedule(&nodes, &job, &allocs);
+    let result = schedule(&nodes, &job.resources, &allocs);
 
     // Then the result is Err(NoCapacity) because the running alloc
     // consumed 4000 mCPU; only 2000 mCPU remain, but 4000 are needed.
@@ -71,7 +75,7 @@ fn scheduler_reports_needed_and_max_free_on_memory_exhaustion() {
     let job = make_job("memhog", res(1000, 8 * 1024 * 1024 * 1024));
 
     // When schedule is called
-    let result = schedule(&nodes, &job, &[]);
+    let result = schedule(&nodes, &job.resources, &[]);
 
     // Then the result is Err(NoCapacity) and both fields are populated
     let Err(PlacementError::NoCapacity { needed, max_free }) = result else {
@@ -95,7 +99,7 @@ fn scheduler_handles_zero_capacity_without_underflow() {
     let job = make_job("normal", res(1000, 1024 * 1024 * 1024));
 
     // When schedule is called — must NOT panic from arithmetic underflow
-    let result = schedule(&nodes, &job, &[]);
+    let result = schedule(&nodes, &job.resources, &[]);
 
     // Then the result is Err(NoCapacity { ... })
     assert!(

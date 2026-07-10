@@ -2,6 +2,21 @@
 
 ## Status
 
+**Superseded by ADR-0074** (2026-07-11). The dedicated
+`overdrive-scheduler` crate this ADR created was **never wired to its
+intended consumer and shipped orphaned**: the `JobLifecycle`/`Workload
+Lifecycle` reconciler landed inside `overdrive-core` (not
+`overdrive-control-plane` as §4 assumed), so `overdrive-core` could not
+depend on the scheduler crate (cycle) and the reconciler hand-inlined
+the placement instead. ADR-0074 consolidates the pure placement surface
+into `overdrive-core` as `crate::scheduler`, retypes `schedule` to the
+kind-agnostic resource envelope (`&Resources`, not `&Job`), makes the
+reconciler the sole caller of that one function, and deletes this
+crate single-cut. The dst-lint enforcement this ADR §5 secured is
+**preserved** — `overdrive-core` is already `crate_class = "core"` and
+dst-lint-scanned, so a separate crate was never required for it. See
+ADR-0074 for the full record and the implementation contract.
+
 Accepted. 2026-04-27. Decision-makers: Morgan (proposing the
 in-`overdrive-control-plane` module placement); user
 **OVERRIDE**: dedicated `overdrive-scheduler` crate. Tags:

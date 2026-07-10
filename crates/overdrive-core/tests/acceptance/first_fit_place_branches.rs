@@ -1,36 +1,35 @@
-//! Branch-coverage tests for the `first_fit_place` and
-//! `node_free_capacity` helpers in `overdrive-core::reconciler`.
+//! Reconciler-adoption branch-coverage for `WorkloadLifecycle::reconcile`'s
+//! placement path.
 //!
-//! These helpers are private; we drive them through their only
-//! public caller: `WorkloadLifecycle::reconcile`'s Run branch (placement
-//! emits `Action::StartAllocation` with the chosen `node_id`, or
-//! emits nothing when no node fits). The decisions covered:
+//! Per ADR-0074 the reconciler no longer inlines placement — its Run
+//! branch calls the single SSOT `overdrive_core::scheduler::schedule`
+//! and maps `Ok(node_id)` → `Action::StartAllocation` /
+//! `Err(PlacementError::{NoCapacity, NoHealthyNode})` → no-action
+//! (behaviour-preserving adoption). These tests drive that adoption
+//! through the reconciler's public `reconcile` driving port; they pin
+//! that the reconciler translates a placement decision into the right
+//! action shape.
 //!
-//!   - L1204 `first_fit_place -> Option<NodeId>` body→`None` —
-//!     a happy-path placement test where production returns
-//!     `Some(local)` would emit `StartAllocation { node_id }`.
-//!     Under `body→None` reconcile emits no action. Asserting on
-//!     `Action::StartAllocation` presence and the `node_id` value
-//!     kills the mutant.
+//! The pure-function boundary contract of `schedule` / `free_capacity`
+//! itself (exact-fit inequalities, `NoCapacity{needed, max_free}`
+//! fields, empty-set `NoHealthyNode`, determinism, per-component
+//! `max_free`, the `&&`→`||` running-alloc filter) is covered directly
+//! at the pure-function port by the migrated scheduler suite
+//! (`scheduler_first_fit_happy_path`, `scheduler_capacity_accounting`,
+//! `scheduler_empty_node_set`, `scheduler_determinism`,
+//! `scheduler_free_capacity_strict_inequality`). To avoid shipping two
+//! copies of the same boundary tests (ADR-0074 §5 dedup), the pure
+//! exact-cpu / exact-memory fit boundaries formerly re-proven here at
+//! the reconciler port are folded out — the scheduler suite owns them.
+//! What remains here is the reconciler-specific translation the
+//! scheduler port cannot observe:
 //!
-//!   - L1206 `free.cpu_milli >= job.resources.cpu_milli` (`>=` →
-//!     `<`) — boundary at exact-fit on cpu. Under `>=`: matches,
-//!     placement succeeds. Under `<`: no match, returns None.
-//!
-//!   - L1207 `free.memory_bytes >= job.resources.memory_bytes`
-//!     (`>=` → `<`) — same boundary on memory.
-//!
-//!   - L1207 `&& -> ||` — two-node case where ONE node fits cpu,
-//!     OTHER fits memory; production returns None, mutant returns
-//!     the first node.
-//!
-//!   - L1226 `alloc.node_id == node.id && alloc.state ==
-//!     AllocState::Running` (`&&` → `||`, `==` → `!=` ×2) — drives
-//!     the running-on-this-node count in `node_free_capacity`. We
-//!     stage allocs whose join under production produces exactly
-//!     N=1 reservation, but under any of the three mutations
-//!     differs, so the resulting `free` capacity differs and the
-//!     placement decision flips.
+//!   - a fitting placement → `Action::StartAllocation { node_id }`;
+//!   - a placement miss → no action emitted;
+//!   - a Pending alloc on the target node does not reserve capacity,
+//!     so the reconciler still passes the alloc set through and places
+//!     (integration of the reconciler's alloc-set projection with the
+//!     scheduler's `Running`-only reservation filter).
 
 #![allow(clippy::expect_used)]
 
@@ -117,7 +116,7 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 /// Drive the reconciler's placement path with the given `nodes`,
 /// `job`, and `current_allocs`, returning the emitted actions. The
 /// reconciler enters its Run branch (no Running alloc for this job
-/// → `first_fit_place` runs).
+/// → `crate::scheduler::schedule` runs).
 fn placement_actions(
     nodes: BTreeMap<NodeId, Node>,
     job: Job,
@@ -157,16 +156,15 @@ fn placement_actions(
 }
 
 // -------------------------------------------------------------------
-// L1204 — `first_fit_place -> Option<NodeId>` body→None
+// fitting placement → StartAllocation with the chosen node_id
 // -------------------------------------------------------------------
 
 #[test]
 fn placement_returns_node_when_capacity_fits() {
     // Single node with abundant capacity, modest job. Production:
-    // `first_fit_place` returns `Some(local)` → reconciler emits
-    // `StartAllocation { node_id: local, … }`. Mutant (`body→None`):
-    // emits no action. Asserting on the action's `node_id` kills the
-    // mutant.
+    // `crate::scheduler::schedule` returns `Ok(local)` → reconciler
+    // emits `StartAllocation { node_id: local, … }`. Asserting on the
+    // action's `node_id` proves the Ok→StartAllocation adoption.
     let mut nodes = BTreeMap::new();
     let local =
         make_node("local", Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 });
@@ -194,71 +192,7 @@ fn placement_returns_node_when_capacity_fits() {
 }
 
 // -------------------------------------------------------------------
-// L1206 — `free.cpu_milli >= job.resources.cpu_milli` (`>=` → `<`)
-// -------------------------------------------------------------------
-
-#[test]
-fn placement_succeeds_at_exact_cpu_fit_with_memory_excess() {
-    // free.cpu == needed.cpu; free.mem > needed.mem.
-    // Under `>=`: 1000 >= 1000 → true; 4 GiB >= 1 GiB → true →
-    // Some(local). Under `<`: 1000 < 1000 → false → None.
-    let mut nodes = BTreeMap::new();
-    nodes.insert(
-        nid("local"),
-        make_node("local", Resources { cpu_milli: 1_000, memory_bytes: 4 * 1024 * 1024 * 1024 }),
-    );
-    let job = make_job_with_resources(
-        "payments",
-        Resources { cpu_milli: 1_000, memory_bytes: 1024 * 1024 * 1024 },
-    );
-
-    let actions = placement_actions(nodes, job, BTreeMap::new());
-
-    assert_eq!(
-        actions.len(),
-        4,
-        "exact-fit on cpu must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
-    );
-    assert!(matches!(
-        actions[0],
-        Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
-    ));
-}
-
-// -------------------------------------------------------------------
-// L1207 — `free.memory_bytes >= job.resources.memory_bytes` (`>=` → `<`)
-// -------------------------------------------------------------------
-
-#[test]
-fn placement_succeeds_at_exact_memory_fit_with_cpu_excess() {
-    // free.mem == needed.mem; free.cpu > needed.cpu.
-    // Under `>=`: 1 GiB >= 1 GiB → true → Some(local). Under `<`:
-    // 1 GiB < 1 GiB → false → None.
-    let mut nodes = BTreeMap::new();
-    nodes.insert(
-        nid("local"),
-        make_node("local", Resources { cpu_milli: 4_000, memory_bytes: 1024 * 1024 * 1024 }),
-    );
-    let job = make_job_with_resources(
-        "payments",
-        Resources { cpu_milli: 500, memory_bytes: 1024 * 1024 * 1024 },
-    );
-
-    let actions = placement_actions(nodes, job, BTreeMap::new());
-
-    assert_eq!(
-        actions.len(),
-        4,
-        "exact-fit on memory must place (StartAllocation + EnqueueEvaluation(bridge) per UI-06 + EnqueueEvaluation(service-lifecycle) per GAP-9 + EnqueueEvaluation(svid-lifecycle) per ADR-0067 D5b); got {actions:?}",
-    );
-    assert!(matches!(
-        actions[0],
-        Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
-    ));
-}
-
-// -------------------------------------------------------------------
-// L1207 — `&&` -> `||` between cpu and memory checks
+// reconciler miss → no action (cpu fits, memory exhausted)
 // -------------------------------------------------------------------
 
 #[test]
@@ -287,38 +221,32 @@ fn placement_returns_none_when_one_resource_fits_other_does_not() {
 }
 
 // -------------------------------------------------------------------
-// L1226 — `alloc.node_id == node.id && alloc.state == AllocState::Running`
+// reconciler + scheduler integration — Running-only reservation filter
 // -------------------------------------------------------------------
 //
-// Three mutations on this single line:
-//
-//   - L1226:43 `alloc.node_id == node.id` -> `!=`
-//   - L1226:54 `&&` -> `||`
-//   - L1226:69 `alloc.state == AllocState::Running` -> `!=`
-//
-// All three drive the count of "running-on-this-node" in
-// `node_free_capacity`, which then subtracts from the node's
-// declared capacity to produce `free`. We construct fixtures whose
-// resulting `free` capacity flips the placement decision under each
-// mutation.
+// `scheduler::free_capacity`'s `alloc.node_id == node.id && alloc.state
+// == AllocState::Running` filter drives the count of
+// "running-on-this-node", which subtracts from the node's declared
+// capacity to produce `free`. This test proves the reconciler correctly
+// passes its alloc-set projection through to the scheduler so that a
+// non-`Running` (Pending) alloc on the target node does NOT reserve
+// capacity and placement still succeeds.
 
-// Note on `node_free_capacity` mutations (L1226:43 `==` → `!=` on
-// node_id; L1226:69 `==` → `!=` on state) — these are NOT killable
-// from the reconciler-level driving port at Phase 1. The reconciler
-// short-circuits to "already converged" the moment ANY alloc is in
-// state Running (line 1120 check), so `first_fit_place` /
-// `node_free_capacity` are never reached when there is a Running
-// alloc anywhere. The closest sibling helper that IS reachable —
-// `overdrive_scheduler::free_capacity` — exposes the same logic
-// publicly; its acceptance tests in
-// `overdrive-scheduler/tests/acceptance/free_capacity_strict_inequality.rs`
-// pin the same boundary conditions for the public API. Phase 2+ will
-// add multi-replica scheduling, at which point `node_free_capacity`
-// becomes reachable from the reconciler with Running allocs in the
-// input — at that point these mutants become killable here too.
+// Note on the `free_capacity` filter's node_id / state `==` → `!=`
+// mutations — these are NOT killable from the reconciler-level driving
+// port at Phase 1. The reconciler short-circuits to "already converged"
+// the moment ANY alloc is in state Running, so the placement path is
+// never reached when there is a Running alloc anywhere. The closest
+// port that IS reachable — `overdrive_core::scheduler::{schedule,
+// free_capacity}` — exposes the same logic publicly; its acceptance
+// tests in `tests/acceptance/scheduler_free_capacity_strict_inequality.rs`
+// pin the same boundary conditions at the pure-function port. Phase 2+
+// will add multi-replica scheduling, at which point the reservation
+// filter becomes reachable from the reconciler with Running allocs in
+// the input — at that point these mutants become killable here too.
 
 #[test]
-fn node_free_capacity_excludes_non_running_allocs_on_same_node() {
+fn placement_excludes_non_running_allocs_on_same_node() {
     // Setup distinguishes `&&` vs `||`:
     //   - one node "local" with capacity (1500 mCPU, 2 GiB).
     //   - job needing (1000 mCPU, 1 GiB).
@@ -328,7 +256,8 @@ fn node_free_capacity_excludes_non_running_allocs_on_same_node() {
     // matches Terminated/Draining as "failed_alloc" (restart
     // branch); Running short-circuits "already converged"; Pending
     // and Suspended fall through to placement, hitting
-    // `node_free_capacity` — exactly the helper under test.
+    // `crate::scheduler::free_capacity` — the reservation filter
+    // under test (driven through the reconciler port).
     //
     // Production (`&&`): node_id == local AND state == Running →
     // local matches but state is Pending → 0 matches → free =

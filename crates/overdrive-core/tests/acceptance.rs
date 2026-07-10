@@ -46,6 +46,22 @@ mod acceptance {
     mod first_fit_place_branches;
     mod workload_lifecycle_reconcile_branches;
 
+    // ADR-0074 — the pure placement scheduler consolidated into
+    // `overdrive_core::scheduler` (superseding the deleted
+    // `overdrive-scheduler` crate). Direct-port acceptance suite for
+    // `schedule` / `free_capacity` / `PlacementError`, migrated from the
+    // deleted crate and adapted to the kind-agnostic `&Resources`
+    // signature. `scheduler_common` holds the shared fixtures /
+    // proptest strategies; `scheduler_determinism` carries its migrated
+    // `.proptest-regressions` seed file.
+    mod scheduler_common;
+
+    mod scheduler_capacity_accounting;
+    mod scheduler_determinism;
+    mod scheduler_empty_node_set;
+    mod scheduler_first_fit_happy_path;
+    mod scheduler_free_capacity_strict_inequality;
+
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // explicit `[exec]` block (command + args) and the projection
     // flows end-to-end through Job::from_submit → Action::Start/Restart.
