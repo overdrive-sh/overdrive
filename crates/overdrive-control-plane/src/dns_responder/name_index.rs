@@ -49,7 +49,7 @@
 //! # OQ-1 — `<workload>` extraction (DECISION: local parse helper, ADR-0072)
 //!
 //! Each `Backend.alloc` is a [`SpiffeId`] of the shape
-//! `spiffe://overdrive.local/workload/<job>/alloc/<alloc>` (the
+//! `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` (the
 //! [`SpiffeId::for_allocation`] derivation). The OQ-1 primitive — extract the
 //! `<workload>` label from a `SpiffeId`'s path so the rows can be grouped by `<workload>`
 //! and looked up against the [`FrontendAddrAllocator`] (keyed by
@@ -110,7 +110,7 @@ pub enum NameIndexError {
 /// Extract the `<workload>` label from a workload [`SpiffeId`]'s path and reconstruct
 /// the [`MeshServiceName`] it dials as.
 ///
-/// The path is `/workload/<job>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
+/// The path is `/workload/<workload>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
 /// shape). This pulls the segment immediately after `/workload/` and validates it
 /// as a v1 single-label mesh name via [`MeshServiceName::new`]. Returns `None`
 /// when the path is not the `workload/.../alloc/...` shape OR the `<workload>` segment is
@@ -124,7 +124,7 @@ pub enum NameIndexError {
 /// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<workload>` from
 /// the SAME `service_backends` rows to key `by_frontend` from the shared
 /// allocator — reusing this one parse helper rather than re-deriving the
-/// `/workload/<job>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
+/// `/workload/<workload>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
 /// never invent API surface"; the design pins "mirror the `name_index` drain's
 /// row→`<workload>`→snapshot pattern").
 pub(crate) fn workload_of(alloc: &SpiffeId) -> Option<MeshServiceName> {

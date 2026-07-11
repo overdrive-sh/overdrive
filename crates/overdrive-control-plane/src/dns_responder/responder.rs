@@ -4,7 +4,7 @@
 //! # What it is
 //!
 //! The `DnsResponder` is the socket-loop host adapter that answers
-//! `<job>.svc.overdrive.local` queries on UDP `:53`. It is the bind +
+//! `<workload>.svc.overdrive.local` queries on UDP `:53`. It is the bind +
 //! `recvmsg`/`sendmsg` `IP_PKTINFO` loop around the pure decision substrate the
 //! prior slices landed GREEN:
 //!
@@ -178,7 +178,7 @@ pub type Result<T, E = DnsResponderError> = std::result::Result<T, E>;
 /// The node-local dial-by-name DNS host adapter (ADR-0072 REV-2). Binds UDP
 /// `:53` (wildcard-first, per-gateway-addr fallback), List-seeds the internal
 /// [`NameIndex`](super::name_index::NameIndex), and answers
-/// `<job>.svc.overdrive.local` with the stable frontend `F` the ONE shared
+/// `<workload>.svc.overdrive.local` with the stable frontend `F` the ONE shared
 /// [`FrontendAddrAllocator`] binds. See the module rustdoc for the full
 /// contract.
 pub struct DnsResponder {

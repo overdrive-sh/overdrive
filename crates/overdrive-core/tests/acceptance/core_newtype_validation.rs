@@ -169,20 +169,20 @@ fn leading_hyphen_is_rejected_with_invalid_format_naming_the_rule() {
 }
 
 // -----------------------------------------------------------------------------
-// S-DBN-NAME-03 — Suffix grammar accepts `<job>.svc.overdrive.local`, rejects
+// S-DBN-NAME-03 — Suffix grammar accepts `<workload>.svc.overdrive.local`, rejects
 // wrong / missing suffix.
 //
 // The bespoke FromStr the design notes `validate_label` alone cannot provide
 // (validate_label permits `.`, id.rs:102) — it accepts the canonical mesh-DNS
 // name and rejects every malformation of the `.svc.overdrive.local` suffix.
 // Which IdParseError variant each rejection maps to is a DELIVER detail; the
-// scenario asserts is_err() for rejections and pins the accepted-case <job>
+// scenario asserts is_err() for rejections and pins the accepted-case <workload>
 // extraction via as_str(). (ADR-0072 / US-DBN-2.)
 // -----------------------------------------------------------------------------
 
 #[test]
 fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
-    // Accepted: canonical names yield Ok with as_str() == the expected <job>.
+    // Accepted: canonical names yield Ok with as_str() == the expected <workload>.
     let accepted: &[(&str, &str)] = &[
         ("server.svc.overdrive.local", "server"),
         ("payments-api.svc.overdrive.local", "payments-api"),
@@ -193,7 +193,7 @@ fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
         assert_eq!(
             name.as_str(),
             *expected_job,
-            "as_str() must extract the <job> label for {input:?}"
+            "as_str() must extract the <workload> label for {input:?}"
         );
         // Display reconstructs the canonical full name.
         assert_eq!(name.to_string(), *input);
@@ -207,7 +207,7 @@ fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
         ("server.svc.overdrive.local.evil", "suffix not terminal"),
         ("server", "missing suffix"),
         ("server.overdrive.local", "missing .svc segment"),
-        (".svc.overdrive.local", "empty <job> label"),
+        (".svc.overdrive.local", "empty <workload> label"),
     ];
     for (input, why) in rejected {
         let outcome = MeshServiceName::new(input);
@@ -216,13 +216,13 @@ fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
 }
 
 // -----------------------------------------------------------------------------
-// S-DBN-NAME-04 — Over-long label and empty / malformed `<job>` are rejected
+// S-DBN-NAME-04 — Over-long label and empty / malformed `<workload>` are rejected
 // with a typed IdParseError.
 //
-// PROPERTY: for every <job> label L that violates the DNS-1123-label rules
+// PROPERTY: for every <workload> label L that violates the DNS-1123-label rules
 // (empty, > DNS_LABEL_OCTET_MAX, leading/trailing non-alphanumeric,
 // out-of-class char), "<L>.svc.overdrive.local" returns Err(IdParseError::
-// <variant>) — never panics, never silently truncates. The `<job>` is a single
+// <variant>) — never panics, never silently truncates. The `<workload>` is a single
 // DNS LABEL, capped at DNS_LABEL_OCTET_MAX (63 octets — RFC 1035 §2.3.4;
 // corrected ADR-0072 DDN-7), the DNS-*label* max, NOT the 253 DNS-*name* max
 // (`LABEL_MAX`). Hebert ch.6 negative testing: relax the happy-path
@@ -230,7 +230,7 @@ fn mesh_service_name_suffix_grammar_accepts_canonical_and_rejects_malformed() {
 // -----------------------------------------------------------------------------
 
 proptest! {
-    /// S-DBN-NAME-04: malformed `<job>` labels are rejected with a typed
+    /// S-DBN-NAME-04: malformed `<workload>` labels are rejected with a typed
     /// IdParseError, never accepted, never panic.
     #[test]
     fn mesh_service_name_rejects_malformed_job_labels(
@@ -240,12 +240,12 @@ proptest! {
         let outcome = MeshServiceName::new(&full);
         prop_assert!(
             outcome.is_err(),
-            "malformed <job> label {malformed:?} must be rejected; got {outcome:?}"
+            "malformed <workload> label {malformed:?} must be rejected; got {outcome:?}"
         );
     }
 }
 
-/// A `<job>` label that violates at least one DNS-1123-label rule:
+/// A `<workload>` label that violates at least one DNS-1123-label rule:
 /// empty, over-long (> `DNS_LABEL_OCTET_MAX`), leading/trailing non-alphanumeric,
 /// or containing an out-of-class character. Each arm targets a distinct
 /// `MeshServiceName::new` / `validate_label` reject branch.
@@ -271,31 +271,31 @@ fn malformed_job_label() -> impl Strategy<Value = String> {
 }
 
 // -----------------------------------------------------------------------------
-// S-DBN-NAME-03 (design-fidelity refinement) — a multi-label `<job>` prefix is
-// rejected: the v1 contract is a SINGLE `<job>` label, NO namespace segment.
+// S-DBN-NAME-03 (design-fidelity refinement) — a multi-label `<workload>` prefix is
+// rejected: the v1 contract is a SINGLE `<workload>` label, NO namespace segment.
 //
-// ADR-0072:279 pins the newtype as "a single `<job>` label in v1 (single-node,
+// ADR-0072:279 pins the newtype as "a single `<workload>` label in v1 (single-node,
 // NO namespace segment)". `validate_label` PERMITS `.` (id.rs:102) because
 // other label newtypes (`WorkloadId`/`NodeId`) legitimately carry dotted
-// forms (`region.eu-west-1`), so delegating the post-suffix `<job>` straight
+// forms (`region.eu-west-1`), so delegating the post-suffix `<workload>` straight
 // to `validate_label` would wrongly accept a two-label prefix. The single-
 // label guard lives in `MeshServiceName::new`, NOT in `validate_label`. A
-// dotted `<job>` maps to `IdParseError::InvalidChar { kind: "MeshServiceName",
-// ch: '.', index }` — the `.`'s position within the `<job>` part.
+// dotted `<workload>` maps to `IdParseError::InvalidChar { kind: "MeshServiceName",
+// ch: '.', index }` — the `.`'s position within the `<workload>` part.
 // -----------------------------------------------------------------------------
 
 #[test]
 fn mesh_service_name_rejects_multi_label_job_prefix() {
-    // "foo.bar.svc.overdrive.local" strips to <job> = "foo.bar" — a two-label
+    // "foo.bar.svc.overdrive.local" strips to <workload> = "foo.bar" — a two-label
     // prefix the v1 contract forbids. It must be rejected, NOT accepted with
-    // <job> = "foo.bar".
+    // <workload> = "foo.bar".
     let outcome = MeshServiceName::new("foo.bar.svc.overdrive.local");
     assert!(
         matches!(
             outcome,
             Err(IdParseError::InvalidChar { kind: "MeshServiceName", ch: '.', index: 3 })
         ),
-        "multi-label <job> 'foo.bar' must be rejected as InvalidChar at the '.'; got {outcome:?}"
+        "multi-label <workload> 'foo.bar' must be rejected as InvalidChar at the '.'; got {outcome:?}"
     );
 
     // A deeper prefix is rejected the same way (the first '.' is the offender).
@@ -305,7 +305,7 @@ fn mesh_service_name_rejects_multi_label_job_prefix() {
             deeper,
             Err(IdParseError::InvalidChar { kind: "MeshServiceName", ch: '.', index: 1 })
         ),
-        "multi-label <job> 'a.b.c' must be rejected as InvalidChar at the first '.'; got {deeper:?}"
+        "multi-label <workload> 'a.b.c' must be rejected as InvalidChar at the first '.'; got {deeper:?}"
     );
 }
 
@@ -314,13 +314,13 @@ fn mesh_service_name_rejects_multi_label_job_prefix() {
 // for `MeshServiceName` specifically is pinned on BOTH sides.
 //
 // S-DBN-NAME-04's proptest exercises the over-long REJECT side via the generic
-// generator, but never pins the max-VALID `<job>` ACCEPT side for
+// generator, but never pins the max-VALID `<workload>` ACCEPT side for
 // `MeshServiceName` — a regression that wrongly rejected a long-but-valid name
-// would pass the suite. The `<job>` is a single DNS LABEL (the first label of
-// `<job>.svc.overdrive.local`), hard-capped at `DNS_LABEL_OCTET_MAX` (63
+// would pass the suite. The `<workload>` is a single DNS LABEL (the first label of
+// `<workload>.svc.overdrive.local`), hard-capped at `DNS_LABEL_OCTET_MAX` (63
 // octets — RFC 1035 §2.3.4, enforced by `hickory-proto`), NOT the DNS-*name*
 // max `LABEL_MAX` (253). The corrected ADR-0072 DDN-7 (2026-06-25) pins 63: a
-// 64..=253-char `<job>` that the old 253 ceiling accepted would make
+// 64..=253-char `<workload>` that the old 253 ceiling accepted would make
 // `Name::from_str` reject and panic the responder's `unreachable!` at the DNS
 // boundary. This pins both sides of the inequality the way the existing
 // accepted/rejected `WorkloadId` pair does, derived from the named const (no
@@ -329,7 +329,7 @@ fn mesh_service_name_rejects_multi_label_job_prefix() {
 
 #[test]
 fn mesh_service_name_label_length_boundary_is_dns_label_octet_max() {
-    // Max-valid: a single-label all-alphanumeric <job> at exactly
+    // Max-valid: a single-label all-alphanumeric <workload> at exactly
     // DNS_LABEL_OCTET_MAX (63) chars is ACCEPTED. The boundary is derived from
     // the shared `overdrive_core::id::DNS_LABEL_OCTET_MAX` const (no bespoke
     // literal) — the RFC 1035 §2.3.4 single-label octet limit.
@@ -338,10 +338,10 @@ fn mesh_service_name_label_length_boundary_is_dns_label_octet_max() {
     let accepted = MeshServiceName::new(&full_max);
     assert!(
         matches!(&accepted, Ok(name) if name.as_str().len() == DNS_LABEL_OCTET_MAX),
-        "a {DNS_LABEL_OCTET_MAX}-char single-label <job> must be accepted at the DNS label-octet boundary; got {accepted:?}"
+        "a {DNS_LABEL_OCTET_MAX}-char single-label <workload> must be accepted at the DNS label-octet boundary; got {accepted:?}"
     );
 
-    // Max+1: a (DNS_LABEL_OCTET_MAX + 1)-char <job> is REJECTED with TooLong
+    // Max+1: a (DNS_LABEL_OCTET_MAX + 1)-char <workload> is REJECTED with TooLong
     // (the 63-octet ceiling, not a silent truncation, and not the 253 name
     // ceiling). The `max` field is bound and compared against
     // DNS_LABEL_OCTET_MAX in the guard — a bare const in the pattern position
@@ -351,10 +351,10 @@ fn mesh_service_name_label_length_boundary_is_dns_label_octet_max() {
     let rejected = MeshServiceName::new(&full_over);
     assert!(
         matches!(&rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == DNS_LABEL_OCTET_MAX),
-        "a (DNS_LABEL_OCTET_MAX + 1)-char <job> must be rejected as TooLong at the 63-octet boundary; got {rejected:?}"
+        "a (DNS_LABEL_OCTET_MAX + 1)-char <workload> must be rejected as TooLong at the 63-octet boundary; got {rejected:?}"
     );
 
-    // A well over-long <job> (past even the 253 DNS-name ceiling) ALSO surfaces
+    // A well over-long <workload> (past even the 253 DNS-name ceiling) ALSO surfaces
     // TooLong { max: 63 } — the 63 label check fires UNIFORMLY, ahead of the
     // shared `validate_label` 253 check, so every over-63 label reports the
     // label ceiling, never `max: 253`.
@@ -363,6 +363,6 @@ fn mesh_service_name_label_length_boundary_is_dns_label_octet_max() {
     let way_rejected = MeshServiceName::new(&full_way_over);
     assert!(
         matches!(&way_rejected, Err(IdParseError::TooLong { kind: "MeshServiceName", max }) if *max == DNS_LABEL_OCTET_MAX),
-        "an over-253 <job> must STILL report TooLong {{ max: 63 }} (the label ceiling fires first); got {way_rejected:?}"
+        "an over-253 <workload> must STILL report TooLong {{ max: 63 }} (the label ceiling fires first); got {way_rejected:?}"
     );
 }

@@ -76,7 +76,7 @@ pub struct DecodedQuery {
 }
 
 /// Typed decode errors. A malformed datagram, a question whose name is not a
-/// valid `<job>.svc.overdrive.local`, or an empty question section each map to
+/// valid `<workload>.svc.overdrive.local`, or an empty question section each map to
 /// a distinct variant (never a catch-all `Internal(String)`).
 #[derive(Debug, Error)]
 pub enum WireError {
@@ -89,7 +89,7 @@ pub enum WireError {
     /// The message carried no question section.
     #[error("DNS query carried no question")]
     NoQuestion,
-    /// The question name is not a valid `<job>.svc.overdrive.local`.
+    /// The question name is not a valid `<workload>.svc.overdrive.local`.
     #[error("query name is not a valid mesh service name: {name}")]
     NotMeshName {
         /// The offending name as decoded from the wire.
@@ -101,7 +101,7 @@ pub enum WireError {
 /// RecordType)` question.
 ///
 /// Reads the FIRST question of the message: its name (which must parse as a
-/// `<job>.svc.overdrive.local` via [`MeshServiceName::new`]) and its record
+/// `<workload>.svc.overdrive.local` via [`MeshServiceName::new`]) and its record
 /// type. An empty question section, an unparseable datagram, or a non-mesh
 /// name each return the matching [`WireError`] variant.
 pub fn decode(datagram: &[u8]) -> Result<DecodedQuery, WireError> {
@@ -146,7 +146,7 @@ pub fn encode(
     answer: &NameAnswer,
     serial_reading: Duration,
 ) -> Vec<u8> {
-    // The query's FQDN owner name (`<job>.svc.overdrive.local`). `Display` on
+    // The query's FQDN owner name (`<workload>.svc.overdrive.local`). `Display` on
     // `MeshServiceName` renders the full grammar; hickory's `Name` parser
     // accepts it (it appends the implicit root label).
     let owner = parse_name(&name.to_string());

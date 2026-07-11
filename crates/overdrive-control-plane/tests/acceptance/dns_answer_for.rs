@@ -9,10 +9,10 @@
 //! arm (empty / extra / wrong-block addr, or a fabricated v6 addr) flips the
 //! single-stable-F equality RED.
 //!
-//! The stable frontend `F` answered for a resolvable `<job>` is the
+//! The stable frontend `F` answered for a resolvable `<workload>` is the
 //! `FrontendAddrAllocator`'s binding (the SINGLE source of frontend truth) —
 //! the tests assert `Records == vec![SocketAddrV4::new(F, 0)]` where `F` is read
-//! back from `allocator.assign(<job>)` (idempotent), NEVER a per-instance
+//! back from `allocator.assign(<workload>)` (idempotent), NEVER a per-instance
 //! backend addr in `10.99.0.0/16`.
 
 #![allow(clippy::expect_used)]
@@ -39,7 +39,7 @@ use proptest::prelude::*;
 // Strategies + fixtures.
 // ---------------------------------------------------------------------------
 
-/// A valid `<job>` label: DNS-1123, starts + ends alphanumeric, single label,
+/// A valid `<workload>` label: DNS-1123, starts + ends alphanumeric, single label,
 /// short to keep generation cheap (the boundary is covered by the
 /// `MeshServiceName` validation suite, not here).
 fn arb_job_label() -> impl Strategy<Value = String> {
@@ -47,7 +47,7 @@ fn arb_job_label() -> impl Strategy<Value = String> {
         .prop_filter("no trailing/leading hyphen", |s| !s.starts_with('-') && !s.ends_with('-'))
 }
 
-/// A DISTINCT set of `<job>` labels of size `1..=n_max` (canonical-string
+/// A DISTINCT set of `<workload>` labels of size `1..=n_max` (canonical-string
 /// distinctness keeps the set genuinely n-element).
 fn arb_distinct_jobs(n_max: usize) -> impl Strategy<Value = Vec<String>> {
     proptest::collection::hash_set(arb_job_label(), 1..=n_max)
@@ -63,7 +63,7 @@ fn fresh_store() -> Arc<SimObservationStore> {
     Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("valid node id"), 0))
 }
 
-/// A `Backend` whose `alloc` SVID carries `/workload/<job>/alloc/...`, at a
+/// A `Backend` whose `alloc` SVID carries `/workload/<workload>/alloc/...`, at a
 /// per-instance backend addr in `10.99.0.0/16` (deliberately a DIFFERENT block
 /// from the frontend `F` the answer must return).
 fn backend_for(job: &str, instance: u8, healthy: bool) -> Backend {
@@ -90,10 +90,10 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
     }
 }
 
-/// The `<job>` mesh name a `Backend`'s `alloc` SVID
-/// (`spiffe://overdrive.local/workload/<job>/alloc/...`) dials as — mirrors the
+/// The `<workload>` mesh name a `Backend`'s `alloc` SVID
+/// (`spiffe://overdrive.local/workload/<workload>/alloc/...`) dials as — mirrors the
 /// production `name_index::workload_of` extraction so the fixture can model the
-/// 01-05 deploy-time assigner binding `<job> → F` on declaration.
+/// 01-05 deploy-time assigner binding `<workload> → F` on declaration.
 fn workload_of_backend(backend: &Backend) -> MeshServiceName {
     let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
     let label = loop {
@@ -108,10 +108,10 @@ fn workload_of_backend(backend: &Backend) -> MeshServiceName {
 
 /// Build a `NameIndex` over a store seeded with `rows`, sharing `allocator`.
 /// Writes the rows FIRST then probes, so List-at-probe seeds them. Pre-`assign`s
-/// every `<job>` the rows declare into the SHARED allocator — modeling the 01-05
-/// deploy-time assigner having bound `<job> → F` BEFORE the backend appeared
+/// every `<workload>` the rows declare into the SHARED allocator — modeling the 01-05
+/// deploy-time assigner having bound `<workload> → F` BEFORE the backend appeared
 /// (REV-3: `frontend_for` is a PURE READER, so a resolvable-but-unassigned
-/// `<job>` would be WITHHELD; the assigner-runs-first is the production
+/// `<workload>` would be WITHHELD; the assigner-runs-first is the production
 /// precondition these tests stand in for).
 async fn index_listing(
     store: &Arc<SimObservationStore>,
@@ -120,7 +120,7 @@ async fn index_listing(
 ) -> NameIndex {
     for row in &rows {
         for backend in &row.backends {
-            // Idempotent per <job>; mirrors the deploy-time assign-on-declare.
+            // Idempotent per <workload>; mirrors the deploy-time assign-on-declare.
             allocator.assign(&workload_of_backend(backend)).expect("allocator has free addresses");
         }
     }
@@ -132,7 +132,7 @@ async fn index_listing(
     index
 }
 
-/// The expected `Records` answer for a resolvable `<job>`: exactly the single
+/// The expected `Records` answer for a resolvable `<workload>`: exactly the single
 /// stable frontend `F` the allocator binds, wrapped as `SocketAddrV4::new(F, 0)`.
 fn expected_records(allocator: &FrontendAddrAllocator, name: &MeshServiceName) -> NameAnswer {
     let f = allocator.assign(name).expect("allocator has free addresses");

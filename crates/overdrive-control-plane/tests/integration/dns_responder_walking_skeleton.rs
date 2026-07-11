@@ -167,14 +167,14 @@ const RESPONSE: &[u8] =
 /// dialed leg-B, so it never needed this SAN).
 const MESH_PEER_SNI: &str = "peer.overdrive.local";
 
-/// The mesh name a client resolves to reach the "server" Service — `<job>` =
+/// The mesh name a client resolves to reach the "server" Service — `<workload>` =
 /// `server`. Equal to `format!("server.{}", MeshServiceName::SUFFIX)`; pinned
 /// as a literal here so the on-wire name a real stub resolver would query is
 /// visible at the call site.
 const SERVER_MESH_NAME: &str = "server.svc.overdrive.local";
 
 /// The production per-host stable-frontend block (`10.98.0.0/16`,
-/// `WORKLOAD_FRONTEND_BASE`). `F` answered for `<job>` is a member; a
+/// `WORKLOAD_FRONTEND_BASE`). `F` answered for `<workload>` is a member; a
 /// per-instance backend addr lives in `10.99.0.0/16` and is NEVER the answer.
 const FRONTEND_FIRST_OCTET: u8 = 10;
 const FRONTEND_SECOND_OCTET: u8 = 98;
@@ -329,7 +329,7 @@ fn resolve_frontend_in_netns(netns: &str) -> Option<Ipv4Addr> {
 
 /// Poll `resolve_frontend_in_netns` until it answers a stable `F` within
 /// `budget` (the K2 5s resolution budget) — re-querying because the responder's
-/// `name_index` exposes `<job>` only after the backend reaches
+/// `name_index` exposes `<workload>` only after the backend reaches
 /// running-AND-healthy (the bridge writes the `service_backends` row).
 fn poll_resolve_frontend(netns: &str, budget: Duration) -> Option<Ipv4Addr> {
     let deadline = Instant::now() + budget;
@@ -1229,7 +1229,7 @@ fn assert_inter_agent_hop_is_mtls(scan: &WireScan, scenario: &str) {
 /// Read the deployed workload's Running-row `workload_addr` (the per-instance
 /// backend addr ∈ 10.99.0.0/16). `Some(addr)` ⇔ the workload reached Running
 /// with its canonical address materialised (so the bridge wrote a healthy
-/// `service_backends` row → the responder's `name_index` exposes the `<job>`).
+/// `service_backends` row → the responder's `name_index` exposes the `<workload>`).
 async fn workload_running_addr(
     obs: &Arc<dyn ObservationStore>,
     workload_id: &str,
@@ -1311,7 +1311,7 @@ async fn deploy_and_wait_running(
 ///
 /// Boots the production composition root in-process; deploys a "server"
 /// (Running-AND-HEALTHY → bridge writes a healthy `service_backends` row → the
-/// responder's `name_index` exposes the `<job>` bound a stable `F ∈
+/// responder's `name_index` exposes the `<workload>` bound a stable `F ∈
 /// 10.98.0.0/16`) and a long-lived "client" (so the test has a
 /// production-provisioned netns to dial from). From inside the client's
 /// PRODUCTION netns: `getaddrinfo("server.svc.overdrive.local")` resolves to
@@ -1370,7 +1370,7 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
 
     // Deploy a single "server" mesh workload. It reaches Running with a stable
     // per-instance workload_addr; the bridge writes a healthy service_backends
-    // row; the responder's name_index exposes <job> "server" bound a stable F.
+    // row; the responder's name_index exposes <workload> "server" bound a stable F.
     let server_id = "server";
     let server_backend = deploy_and_wait_stable_backend(&skeleton, server_id).await;
     let server_netns = netns_name_for_workload_addr(server_backend);
@@ -1410,7 +1410,7 @@ async fn deployed_workload_resolves_peer_stable_frontend_and_hop_is_mtls() {
         panic!(
             "S-DBN-WS: getaddrinfo({SERVER_MESH_NAME}) from inside the client netns must resolve \
              to the STABLE frontend F ∈ 10.98.0.0/16 within 5s (the production responder bound :53, \
-             source-pinned the reply via ipi_spec_dst, and the name_index exposed the <job> after \
+             source-pinned the reply via ipi_spec_dst, and the name_index exposed the <workload> after \
              running-and-healthy). A timeout means EITHER the source-pin is missing OR the \
              healthy-gate regressed (K2 two culprits)."
         )
@@ -1510,10 +1510,10 @@ async fn deploy_and_wait_stable_backend(skeleton: &Skeleton, server_id: &str) ->
     })
 }
 
-/// `Some(addr)` ⇔ the `<job>`'s `service_backends` row currently advertises a
+/// `Some(addr)` ⇔ the `<workload>`'s `service_backends` row currently advertises a
 /// HEALTHY backend whose addr is a per-instance mesh workload_addr ∈
 /// `10.99.0.0/16` (NOT the `host_ipv4` fallback). Reads through the
-/// `<job>`-tagged backend SpiffeId.
+/// `<workload>`-tagged backend SpiffeId.
 async fn stable_mesh_backend_addr(obs: &Arc<dyn ObservationStore>, job: &str) -> Option<Ipv4Addr> {
     let rows = obs.all_service_backends_rows().await.ok()?;
     let needle = format!("/workload/{job}/");
@@ -1555,7 +1555,7 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// production re-keyed `MtlsResolve` recognizes and translates to a `Mesh`
 /// backend (US-DBN-2 · K-DBN-4).
 ///
-/// The `<job> → F` binding has exactly ONE source — the SINGLE shared
+/// The `<workload> → F` binding has exactly ONE source — the SINGLE shared
 /// `FrontendAddrAllocator` constructed once in `run_server` and cloned into
 /// BOTH the DNS `name_index` (which ANSWERS `F`) AND the re-keyed `MtlsResolve`
 /// (`by_frontend`, which RECOGNIZES `F`) (lib.rs ~2019 + ~2228; DDN-2). The
@@ -1659,7 +1659,7 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
          by_frontend HIT classified Mesh translating to the live backend — observed as a byte-exact \
          round-trip THROUGH the answered F (the workload speaks plaintext to leg-F; the agent \
          originates mTLS on leg-B → leg-C). The name answer and the resolve translation read the \
-         SAME <job> → F binding from the SAME FrontendAddrAllocator (DDN-2 single source)."
+         SAME <workload> → F binding from the SAME FrontendAddrAllocator (DDN-2 single source)."
     );
     // The hop through the answered F is genuinely mTLS'd on the inter-agent leg.
     eprintln!("[02-02] S-DBN-SINGLE-SRC inter-agent leg-B↔leg-C wire scan = {scan:?}");
@@ -1686,7 +1686,7 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// `getent` resolves to stable `F1`; one connect lands backend B1. The server
 /// backend is CYCLED (stopped → its AllocationId ends → its per-instance
 /// `workload_addr` freed → a NEW instance with a NEW AllocationId → a NEW
-/// `workload_addr` B2, the `<job>` still declared). After it reaches
+/// `workload_addr` B2, the `<workload>` still declared). After it reaches
 /// Running-AND-HEALTHY, `getent` re-resolves to the SAME `F1` byte-for-byte
 /// (the FrontendAddrAllocator's idempotent `assign("server")` retained `F1`),
 /// the next connect lands the NEW backend B2, mTLS terminates, and at NO point
@@ -1775,7 +1775,7 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
     // the desired-run generation AND clears the `/stop` sentinel; the
     // `WorkloadLifecycle` reconciler then places a FRESH instance (a NEW
     // AllocationId → NEW workload_addr B2) because `observed_generation <
-    // generation`. The <job> "server" stays DECLARED throughout, so the
+    // generation`. The <workload> "server" stays DECLARED throughout, so the
     // allocator must retain F1.
     let restarted = run_server_restart(&skeleton, server_id).await;
     assert!(restarted, "S-DBN-WS-STABLE: the production restart verb must accept the cycle");

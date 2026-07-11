@@ -1,10 +1,10 @@
-//! `FrontendAddrAllocator` — the per-host source of the **stable per-`<job>`
+//! `FrontendAddrAllocator` — the per-host source of the **stable per-`<workload>`
 //! frontend address** the dial-by-name responder answers with (ADR-0072 REV-2
 //! "stable-frontend", GH #243; roadmap 01-04 / REV-2 design unit 1a-A).
 //!
 //! # Why a stable frontend address
 //!
-//! The responder answers `<job>.svc.overdrive.local` with a STABLE per-`<job>`
+//! The responder answers `<workload>.svc.overdrive.local` with a STABLE per-`<workload>`
 //! frontend address `F` drawn from [`WORKLOAD_FRONTEND_BASE`]
 //! (`10.98.0.0/16`), NOT the live backend address. `F` is stable across alloc
 //! cycles; the dataplane (02-00 re-keyed `MtlsResolve`) translates `F → the
@@ -13,10 +13,10 @@
 //! is never wrong.
 //!
 //! This allocator is the SSOT for that stable `F`. It is a per-host,
-//! in-memory `<job> → Ipv4Addr` map — empty on boot, rebuilt by re-`assign`ing
-//! every still-declared `<job>` (the [`NetSlotAllocator`] restart precedent).
+//! in-memory `<workload> → Ipv4Addr` map — empty on boot, rebuilt by re-`assign`ing
+//! every still-declared `<workload>` (the [`NetSlotAllocator`] restart precedent).
 //!
-//! # Keyed by the logical `<job>`, released only on logical deletion
+//! # Keyed by the logical `<workload>`, released only on logical deletion
 //!
 //! [`crate::veth_provisioner::NetSlotAllocator`] is the structural precedent
 //! — a pure smallest-free scan separated from an atomic held-map wrapper — but
@@ -24,8 +24,8 @@
 //!
 //! - `NetSlotAllocator` keys on `AllocationId` and releases on alloc terminal
 //!   (each alloc cycle ⇒ a new slot).
-//! - `FrontendAddrAllocator` keys on the **logical `<job>`**
-//!   ([`MeshServiceName`] — the `<job>` label in `<job>.svc.overdrive.local`)
+//! - `FrontendAddrAllocator` keys on the **logical `<workload>`**
+//!   ([`MeshServiceName`] — the `<workload>` label in `<workload>.svc.overdrive.local`)
 //!   and releases **ONLY on logical-workload deletion** — NEVER on an alloc
 //!   cycle, NEVER on a transient zero-healthy window. `F` MUST survive a
 //!   stop→restart→new-`AllocationId` cycle and a zero-healthy window, or SQ1
@@ -50,7 +50,7 @@ use ipnet::Ipv4Net;
 use overdrive_core::id::MeshServiceName;
 use parking_lot::Mutex;
 
-/// Per-host base block every stable per-`<job>` frontend address is drawn from
+/// Per-host base block every stable per-`<workload>` frontend address is drawn from
 /// (`10.98.0.0/16`).
 ///
 /// Lexically distinct from the `ServiceFrontend` VIP type in
@@ -69,12 +69,12 @@ use parking_lot::Mutex;
 pub const WORKLOAD_FRONTEND_BASE: Ipv4Net = Ipv4Net::new_assert(Ipv4Addr::new(10, 98, 0, 0), 16);
 
 /// The error returned when every address in [`WORKLOAD_FRONTEND_BASE`] is
-/// already held, so a NEW `<job>` cannot be assigned a stable frontend address.
+/// already held, so a NEW `<workload>` cannot be assigned a stable frontend address.
 ///
 /// Exhaustion REFUSES the assignment — it is NEVER a panic and NEVER a silent
 /// reuse of a held address. A reused address would collide two distinct
-/// `<job>`s onto one frontend `F`, defeating the per-`<job>` stability the
-/// allocator exists to provide. An already-held `<job>` re-assigns
+/// `<workload>`s onto one frontend `F`, defeating the per-`<workload>` stability the
+/// allocator exists to provide. An already-held `<workload>` re-assigns
 /// successfully even at full capacity (re-entry is never starved by
 /// exhaustion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -139,15 +139,15 @@ fn frontend_block_capacity() -> u64 {
     last - first - 1
 }
 
-/// Per-host stable per-`<job>` frontend-address allocator (ADR-0072 REV-2).
+/// Per-host stable per-`<workload>` frontend-address allocator (ADR-0072 REV-2).
 ///
 /// Hands out the stable frontend address `F` the dial-by-name responder
-/// answers `<job>.svc.overdrive.local` with. The held `MeshServiceName →
+/// answers `<workload>.svc.overdrive.local` with. The held `MeshServiceName →
 /// Ipv4Addr` map is the allocator's state.
 ///
 /// Held-state shape mirrors [`crate::veth_provisioner::NetSlotAllocator`]:
 /// ephemeral runtime state, NEVER persisted, rebuilt on restart by
-/// re-`assign`ing every still-declared `<job>` (single-node Phase 1; no
+/// re-`assign`ing every still-declared `<workload>` (single-node Phase 1; no
 /// cross-restart persistence). `BTreeMap` (not `HashMap`) for deterministic
 /// iteration order (`.claude/rules/development.md` § "Ordered-collection
 /// choice" — [`snapshot`](Self::snapshot) is cloned and observed);
@@ -163,7 +163,7 @@ fn frontend_block_capacity() -> u64 {
 /// (`.claude/rules/development.md` § "Check-and-act must be atomic").
 #[derive(Clone, Debug, Default)]
 pub struct FrontendAddrAllocator {
-    /// `MeshServiceName → Ipv4Addr` binding for every currently-held `<job>`.
+    /// `MeshServiceName → Ipv4Addr` binding for every currently-held `<workload>`.
     /// `Arc<Mutex<…>>` so a clone shares the same held map (the allocator is
     /// composed once at boot and shared across readers).
     held: Arc<Mutex<BTreeMap<MeshServiceName, Ipv4Addr>>>,
@@ -171,7 +171,7 @@ pub struct FrontendAddrAllocator {
 
 impl FrontendAddrAllocator {
     /// Construct an empty allocator. On a fresh process boot nothing is held —
-    /// every still-declared `<job>` is re-assigned on its next `assign`.
+    /// every still-declared `<workload>` is re-assigned on its next `assign`.
     #[must_use]
     pub fn new() -> Self {
         Self { held: Arc::new(Mutex::new(BTreeMap::new())) }
@@ -180,10 +180,10 @@ impl FrontendAddrAllocator {
     /// Assign the smallest-free stable frontend address to `job`, recording the
     /// `job → F` binding, and return it.
     ///
-    /// **Idempotent per `<job>`:** if `job` is ALREADY held its EXISTING
+    /// **Idempotent per `<workload>`:** if `job` is ALREADY held its EXISTING
     /// address is returned unchanged and no new address is consumed — a second
     /// `assign(J)` (the alloc-cycle case: stop → new `AllocationId` → new
-    /// backend addr but the SAME logical `<job>`) returns the SAME `F`. The
+    /// backend addr but the SAME logical `<workload>`) returns the SAME `F`. The
     /// held check, the smallest-free scan, and the insert are ONE locked
     /// critical section — no contains-then-insert TOCTOU.
     ///
@@ -191,7 +191,7 @@ impl FrontendAddrAllocator {
     ///
     /// Returns [`FrontendAddrExhausted`] when `job` is NOT already held and
     /// every address in [`WORKLOAD_FRONTEND_BASE`] is taken — refusing the
-    /// assignment rather than reusing a held address. An already-held `<job>`
+    /// assignment rather than reusing a held address. An already-held `<workload>`
     /// re-assigns successfully even at full capacity.
     ///
     /// # Atomicity
@@ -206,7 +206,7 @@ impl FrontendAddrAllocator {
         // (clippy::significant_drop_tightening) while still spanning the whole
         // check-and-act.
         let mut held = self.held.lock();
-        // Idempotent per `<job>`: an already-held `<job>` returns its existing
+        // Idempotent per `<workload>`: an already-held `<workload>` returns its existing
         // F unchanged, consuming no new address — there is no window for a racer
         // between "is job held?" and "claim an address for job".
         if let Some(existing) = held.get(job) {
@@ -224,23 +224,23 @@ impl FrontendAddrAllocator {
     /// Release `job`'s held frontend address — **logical-workload-DELETION
     /// ONLY**.
     ///
-    /// Called when the logical `<job>` is undeployed/deleted, NOT on an alloc
+    /// Called when the logical `<workload>` is undeployed/deleted, NOT on an alloc
     /// cycle and NOT on a transient zero-healthy window (releasing on
     /// zero-healthy would reintroduce the rejected SQ1 stale-`F` failure). The
     /// released address becomes the smallest-free candidate again iff it is the
     /// lowest free value.
     ///
-    /// **Idempotent:** releasing a `<job>` that is not held is a benign no-op
+    /// **Idempotent:** releasing a `<workload>` that is not held is a benign no-op
     /// (`BTreeMap::remove` of an absent key), so a double-release does not
     /// panic and does not disturb the held set.
     pub fn release(&self, job: &MeshServiceName) {
         // Lock → remove → drop the guard within the call. `remove` returning
-        // `None` (the `<job>` was not held) is the idempotent no-op — exactly
+        // `None` (the `<workload>` was not held) is the idempotent no-op — exactly
         // the double-release / release-of-never-assigned case.
         self.held.lock().remove(job);
     }
 
-    /// Snapshot the currently-held `<job> → F` bindings.
+    /// Snapshot the currently-held `<workload> → F` bindings.
     ///
     /// A point-in-time clone for read-only observers (e.g. a restart rebuild or
     /// the responder's name index), decoupled from the live map. Iteration

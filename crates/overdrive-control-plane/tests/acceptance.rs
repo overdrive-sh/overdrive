@@ -56,7 +56,7 @@ mod acceptance {
     mod dns_frontend_allocator;
     // dial-by-name-responder step 01-03 (ADR-0072 REV-2, GH #243) — the pure
     // `answer_for` projection (S-DBN-ANSWER-01..05) and the List-then-Watch
-    // `NameIndex` that maps each resolvable `<job>` to its stable frontend addr
+    // `NameIndex` that maps each resolvable `<workload>` to its stable frontend addr
     // F (S-DBN-ANSWER-04 + S-DBN-IDX-01..04). Default unit lane (in-process;
     // SimObservationStore + FrontendAddrAllocator — no kernel/netns/socket).
     // `answer_for` is THE primary mutation-gate target (DDN-4).

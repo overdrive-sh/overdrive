@@ -2,7 +2,7 @@
 //!
 //! The responder is the **third reader** of the `ObservationStore`
 //! `service_backends` surface (outbound resolve · inbound install · name
-//! answers, D-TME-11) — it answers `<job>.svc.overdrive.local` queries with a
+//! answers, D-TME-11) — it answers `<workload>.svc.overdrive.local` queries with a
 //! running-AND-healthy IPv4 backend addr, NODATA for AAAA-on-live, and
 //! NXDOMAIN when no running-and-healthy backend exists.
 //!
@@ -26,7 +26,7 @@
 //! `assign`/`release`/`snapshot` bodies are fully implemented, so the module
 //! carries no `clippy::todo` scaffold expectation. Step 01-03 lands `answer`
 //! (the pure `answer_for`) and `name_index` (the List-then-Watch `NameIndex`
-//! that maps each resolvable `<job>` to its stable frontend addr `F`); both
+//! that maps each resolvable `<workload>` to its stable frontend addr `F`); both
 //! are fully implemented GREEN in the same slice. Step 01-05 lands
 //! `boot_rebuild` — the empty-on-boot converge-on-boot rebuild that
 //! re-populates the [`frontend_addr_allocator::FrontendAddrAllocator`] from

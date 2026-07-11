@@ -4,16 +4,16 @@
 //!
 //! # The REV-2 answer contract
 //!
-//! Under ADR-0072 REV-2 the responder answers `<job>.svc.overdrive.local` with
+//! Under ADR-0072 REV-2 the responder answers `<workload>.svc.overdrive.local` with
 //! the workload's **stable frontend address `F`** (a member of
 //! [`WORKLOAD_FRONTEND_BASE`](super::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE),
 //! `10.98.0.0/16`) — NOT a per-instance backend address in `10.99.0.0/16`. `F`
 //! is the [`FrontendAddrAllocator`](super::frontend_addr_allocator::FrontendAddrAllocator)
-//! binding the [`NameIndex`] exposes for the name's `<job>`; the dataplane
+//! binding the [`NameIndex`] exposes for the name's `<workload>`; the dataplane
 //! (02-00 re-keyed `MtlsResolve`) later translates `F → a live backend`.
 //!
 //! `answer_for` is a pure function of `(name, qtype, &index)` — a deterministic
-//! read of the allocator's CURRENT `<job> → F` binding through `&index` (it
+//! read of the allocator's CURRENT `<workload> → F` binding through `&index` (it
 //! performs NO I/O and NO clock read, and writes nothing), so it is trivially
 //! deterministic and DST-replayable. "Pure" here is read-only-over-current-state,
 //! not state-independent: the answer reflects whatever binding the allocator
@@ -41,9 +41,9 @@
 //! `answer_for`'s signature IS the driving port (a pure domain function — per
 //! the methodology, calling it directly IS port-to-port at domain scope). It
 //! reads the [`NameIndex`] ONLY through its public `frontend_for` query — never
-//! the index's internal `by_name` map. The `<job>`-grouping / healthy-gate /
+//! the index's internal `by_name` map. The `<workload>`-grouping / healthy-gate /
 //! List-then-Watch machinery lives in [`name_index`](super::name_index); this
-//! module is the pure answer projection over the index's exposed `<job> → F`
+//! module is the pure answer projection over the index's exposed `<workload> → F`
 //! resolvability.
 
 use std::net::SocketAddrV4;
@@ -56,9 +56,9 @@ use super::name_index::NameIndex;
 /// Compute the pure DNS answer for a dial-by-name query.
 ///
 /// See the module rustdoc for the full REV-2 answer contract. `name` is the
-/// dialed [`MeshServiceName`] (`<job>.svc.overdrive.local`); `qtype` is the
+/// dialed [`MeshServiceName`] (`<workload>.svc.overdrive.local`); `qtype` is the
 /// queried [`RecordType`] (`A` / `AAAA` in v1); `index` is the
-/// List-then-Watch [`NameIndex`] mapping each resolvable `<job>` to its stable
+/// List-then-Watch [`NameIndex`] mapping each resolvable `<workload>` to its stable
 /// frontend address `F`.
 ///
 /// Returns:

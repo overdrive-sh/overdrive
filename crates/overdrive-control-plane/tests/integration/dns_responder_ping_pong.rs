@@ -216,7 +216,7 @@ const REQUEST_B_TO_A: &[u8] =
 const MESH_PEER_SNI: &str = "peer.overdrive.local";
 
 /// The production per-host stable-frontend block (`10.98.0.0/16`,
-/// `WORKLOAD_FRONTEND_BASE`). `F` answered for a `<job>` is a member; a
+/// `WORKLOAD_FRONTEND_BASE`). `F` answered for a `<workload>` is a member; a
 /// per-instance backend addr lives in `10.99.0.0/16` and is NEVER the answer.
 const FRONTEND_FIRST_OCTET: u8 = 10;
 const FRONTEND_SECOND_OCTET: u8 = 98;
@@ -337,7 +337,7 @@ fn resolve_frontend_in_netns(netns: &str, mesh_name: &str) -> Option<Ipv4Addr> {
 
 /// Poll `resolve_frontend_in_netns` until it answers a stable `F` within
 /// `budget` — re-querying because the responder's `name_index` exposes the
-/// `<job>` only after the backend reaches running-AND-healthy (the bridge writes
+/// `<workload>` only after the backend reaches running-AND-healthy (the bridge writes
 /// the `service_backends` row).
 fn poll_resolve_frontend(netns: &str, mesh_name: &str, budget: Duration) -> Option<Ipv4Addr> {
     let deadline = Instant::now() + budget;
@@ -625,7 +625,7 @@ struct HeldMeshIdentities {
 
 impl IdentityRead for HeldMeshIdentities {
     fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial> {
-        // The alloc id contains its `<job>` id ("a" / "b"). Match on the `/a/`
+        // The alloc id contains its `<workload>` id ("a" / "b"). Match on the `/a/`
         // / `/b/` job segment to route the right dual-role leaf. (The bare
         // single-char match would over-match; the alloc id embeds `/workload/<id>/`.)
         let id = alloc.as_str();
@@ -1168,7 +1168,7 @@ fn assert_inter_agent_hop_is_mtls(scan: &WireScan, scenario: &str, wire_port: u1
 // back-door observation reads (no production path exercised by these helpers)
 // ============================================================================
 
-/// `Some(addr)` ⇔ the `<job>`'s `service_backends` row currently advertises a
+/// `Some(addr)` ⇔ the `<workload>`'s `service_backends` row currently advertises a
 /// HEALTHY backend whose addr is a per-instance mesh workload_addr ∈
 /// `10.99.0.0/16` (NOT the `host_ipv4` fallback). This is the precondition for
 /// the dial-by-name loop: the re-keyed `MtlsResolve` translates `F` → this
@@ -1274,7 +1274,7 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// Service whose Python server bumps an inbound counter + replies `PONG
 /// count=<n>`) via the production deploy port (`POST /v1/workloads`, two deploys);
 /// each reaches Running-AND-HEALTHY → the bridge writes a healthy
-/// `service_backends` row → the responder's `name_index` exposes the `<job>`
+/// `service_backends` row → the responder's `name_index` exposes the `<workload>`
 /// bound a stable `F ∈ 10.98.0.0/16`. Then, deterministically (the 02-02 model):
 ///
 /// - from `a`'s PRODUCTION netns: `getent b.svc.overdrive.local` → `F_b ∈
@@ -1325,7 +1325,7 @@ async fn two_services_dial_each_other_by_name_counters_advance_each_hop_mtls() {
     // inbound leg-C rules) AND a dial source (its netns carries the egress
     // rule). Each reaches Running with a per-instance backend addr ∈ 10.99/16;
     // the bridge writes a healthy service_backends row; the responder's
-    // name_index exposes each <job> bound a stable F.
+    // name_index exposes each <workload> bound a stable F.
     let a_backend = deploy_and_wait_stable_backend(&skeleton, SERVICE_A_ID, SERVICE_A_PORT).await;
     let b_backend = deploy_and_wait_stable_backend(&skeleton, SERVICE_B_ID, SERVICE_B_PORT).await;
     let a_netns = netns_name_for_workload_addr(a_backend);

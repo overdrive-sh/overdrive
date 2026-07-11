@@ -29,7 +29,7 @@ use proptest::prelude::*;
 // Strategies — domain-specific generators for the WIRE input space.
 // ---------------------------------------------------------------------------
 
-/// A valid `<job>` label: DNS-1123, starts + ends alphanumeric, single label
+/// A valid `<workload>` label: DNS-1123, starts + ends alphanumeric, single label
 /// (no interior `.` — the v1 single-label contract), within `LABEL_MAX`.
 /// Kept short (≤ 16) to keep generation cheap; the boundary is covered by the
 /// `MeshServiceName` validation suite, not here.
@@ -38,7 +38,7 @@ fn arb_job_label() -> impl Strategy<Value = String> {
         .prop_filter("no trailing/leading hyphen", |s| !s.starts_with('-') && !s.ends_with('-'))
 }
 
-/// A valid `MeshServiceName` from a generated `<job>` label.
+/// A valid `MeshServiceName` from a generated `<workload>` label.
 fn arb_mesh_name() -> impl Strategy<Value = MeshServiceName> {
     arb_job_label().prop_map(|label| {
         let full = format!("{label}.{}", MeshServiceName::SUFFIX);
@@ -115,12 +115,12 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// S-DBN-WIRE-06 — The max-valid `<job>` label (63 octets, the DNS single-label
+// S-DBN-WIRE-06 — The max-valid `<workload>` label (63 octets, the DNS single-label
 // limit per RFC 1035 §2.3.4) encodes without panicking. `MeshServiceName::new`
-// caps `<job>` at 63 octets, which guarantees `Name::from_str` in `wire.rs`
+// caps `<workload>` at 63 octets, which guarantees `Name::from_str` in `wire.rs`
 // always succeeds (63 + ".svc.overdrive.local" = 83 chars, every label ≤ 63) —
 // so the `parse_name` `unreachable!` at the DNS boundary is genuinely
-// unreachable. A 64+ `<job>` could not reach the encoder (rejected at
+// unreachable. A 64+ `<workload>` could not reach the encoder (rejected at
 // construction), so this is the encoder's worst case.
 // ---------------------------------------------------------------------------
 
@@ -128,7 +128,8 @@ proptest! {
 fn wire_06_max_valid_label_encodes_without_panic() {
     let max_label = "a".repeat(63);
     let full = format!("{max_label}.{}", MeshServiceName::SUFFIX);
-    let name = MeshServiceName::new(&full).expect("a 63-octet <job> is a valid mesh service name");
+    let name =
+        MeshServiceName::new(&full).expect("a 63-octet <workload> is a valid mesh service name");
 
     // Encoding the worst-case-length name must produce bytes (no panic via the
     // `unreachable!`), and the bytes must re-parse as a DNS Message.

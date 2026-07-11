@@ -137,11 +137,11 @@
 //!    but has no live backend: fail-closed, NO cleartext). `F` is the SAME
 //!    stable frontend the
 //!    [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
-//!    binds and the DNS `name_index` answers — there is NO second `<job> → F`
+//!    binds and the DNS `name_index` answers — there is NO second `<workload> → F`
 //!    source (DDN-2).
 //! 2. **`by_frontend` MISS, `orig_dst.ip() ∈ 10.98.0.0/16`** —
 //!    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is early
-//!    (race) OR to a withdrawn `<job>` → [`MeshUnreachable`] (refuse, NO
+//!    (race) OR to a withdrawn `<workload>` → [`MeshUnreachable`] (refuse, NO
 //!    cleartext). The membership test is a `contains` against the ONE pinned
 //!    [`WORKLOAD_FRONTEND_BASE`] const — never a broader "any reserved subnet"
 //!    helper.
@@ -296,7 +296,7 @@ pub struct BackendIndex {
     /// existing content-addressed `service_id` ([`ServiceBackendRow::service_id`]),
     /// NOT a re-derivation. The `F` keyed here is the SAME stable frontend the
     /// `FrontendAddrAllocator` binds and the DNS `name_index` answers — there is
-    /// NO second `<job> → F` source (DDN-2 single-owner invariant). A `BTreeMap`
+    /// NO second `<workload> → F` source (DDN-2 single-owner invariant). A `BTreeMap`
     /// (not `HashMap`) — observed under proptest/DST, deterministic iteration
     /// (§ "Ordered-collection choice").
     by_frontend: BTreeMap<FrontendKey, ServiceId>,
@@ -345,7 +345,7 @@ impl BackendIndex {
     ///
     /// `by_frontend` is INTENTIONALLY left untouched: the `service_backends`
     /// liveness snapshot carries NO frontend-binding information — the
-    /// `<job> → F` bindings are owned by the
+    /// `<workload> → F` bindings are owned by the
     /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
     /// (DDN-2) and projected into `by_frontend` by [`Self::bind_frontend`], not by
     /// a liveness relist. Wiping `by_frontend` on a liveness `Lagged` relist would
@@ -371,12 +371,12 @@ impl BackendIndex {
     ///
     /// `F` is the SAME stable frontend the
     /// [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
-    /// binds — the caller derives `F` for `<job>` from the ONE allocator
-    /// instance, the SAME instance the DNS `name_index` answers `<job>` from.
-    /// There is NO second `<job> → F` source: the `F` keyed here is
+    /// binds — the caller derives `F` for `<workload>` from the ONE allocator
+    /// instance, the SAME instance the DNS `name_index` answers `<workload>` from.
+    /// There is NO second `<workload> → F` source: the `F` keyed here is
     /// byte-identical to the `F` DNS answers (the DDN-2 single-owner invariant,
     /// enforced by the COHERENCE-01 byte-identity property in
-    /// `dns_name_index.rs`). A second `<job> → F` source (a divergent allocator,
+    /// `dns_name_index.rs`). A second `<workload> → F` source (a divergent allocator,
     /// a re-derivation, a stale cache) would make the two projections key/answer
     /// DIFFERENT `F`s — exactly what byte-identity forbids.
     ///
@@ -388,7 +388,7 @@ impl BackendIndex {
     /// ordered drain and NO temporal guarantee that `by_frontend` is bound before
     /// `name_index` exposes `F` (or vice versa). The two drains have no inter-drain
     /// ordering. Security does NOT rest on that ordering: even if `name_index`
-    /// exposes `F` for a `<job>` whose `(F, listener.port, proto)` key is not yet
+    /// exposes `F` for a `<workload>` whose `(F, listener.port, proto)` key is not yet
     /// bound here, a dial to that `F` MISSES `by_frontend`, falls into
     /// [`classify`](Self::classify) arm 2 (`F ∈ 10.98.0.0/16` →
     /// [`MeshUnreachable`](MtlsResolution::MeshUnreachable)) and fails closed — NEVER
@@ -462,7 +462,7 @@ impl BackendIndex {
         // `service_id`): a different service's frontend key is never touched.
         self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
         for backend in &row.backends {
-            // A backend whose SpiffeId is not the `/workload/<job>/alloc/<alloc>`
+            // A backend whose SpiffeId is not the `/workload/<workload>/alloc/<alloc>`
             // shape (or whose `<workload>` is not a v1 mesh name) contributes no
             // frontend key — it is not mesh-dialable by name.
             let Some(workload) = workload_of(&backend.alloc) else { continue };
@@ -512,7 +512,7 @@ impl BackendIndex {
     ///    (fail-closed: the service is KNOWN but has no live backend).
     /// 2. **`by_frontend` MISS, but `orig_dst.ip() ∈ 10.98.0.0/16`** —
     ///    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is
-    ///    early (race) OR to a withdrawn `<job>`. → `MeshUnreachable` (refuse,
+    ///    early (race) OR to a withdrawn `<workload>`. → `MeshUnreachable` (refuse,
     ///    NO cleartext). The membership test is `WORKLOAD_FRONTEND_BASE.contains`
     ///    against the ONE pinned const — NEVER a broader "any reserved subnet"
     ///    helper.
@@ -541,7 +541,7 @@ impl BackendIndex {
         }
         // Arm 2 — `by_frontend` MISS but `orig_dst.ip() ∈ 10.98.0.0/16` →
         // MeshUnreachable (fail-closed-on-frontend-subnet-miss, NO cleartext — a
-        // mesh dial that is early (race) OR to a withdrawn <job>). The membership
+        // mesh dial that is early (race) OR to a withdrawn <workload>). The membership
         // test is `WORKLOAD_FRONTEND_BASE.contains` against the ONE pinned const,
         // NEVER a broader "any reserved subnet" helper.
         if WORKLOAD_FRONTEND_BASE.contains(orig_dst.ip()) {
@@ -592,13 +592,13 @@ pub struct ServiceBackendsResolve {
     /// the Watch leg reads
     /// [`subscribe_all_events`](ObservationStore::subscribe_all_events).
     store: Arc<dyn ObservationStore>,
-    /// The SHARED [`FrontendAddrAllocator`] — the single `<job> → F` owner
+    /// The SHARED [`FrontendAddrAllocator`] — the single `<workload> → F` owner
     /// (DDN-2; 02-01). The `by_frontend` projection READS this allocator's
     /// snapshot (a pure read — NEVER `assign`, the REV-3 pure-reader invariant)
     /// to key `(F, listener.port, proto) → ServiceId`. It is the SAME
     /// `Arc`-shared instance the DNS `name_index` answers `F` from, so the `F`
     /// keyed in `by_frontend` is byte-identical to the `F` DNS answers. The
-    /// `<job> → F` binding is WRITTEN only by the 01-05 deploy-time assigner —
+    /// `<workload> → F` binding is WRITTEN only by the 01-05 deploy-time assigner —
     /// NEVER by this drain.
     frontend: FrontendAddrAllocator,
     /// The C4 in-RAM ownership-aware `addr → {service → Backend}` reverse index
@@ -1291,19 +1291,19 @@ mod tests {
     // ---- 02-01: by_frontend pure-reader drain projection -------------------
 
     /// 02-01 — the `by_frontend` projection is a PURE READER of the SHARED
-    /// `FrontendAddrAllocator`: a dial to a `<job>`'s stable frontend `F`
-    /// translates to that `<job>`'s service's healthy backend, where `F` comes
+    /// `FrontendAddrAllocator`: a dial to a `<workload>`'s stable frontend `F`
+    /// translates to that `<workload>`'s service's healthy backend, where `F` comes
     /// from the allocator (NOT a re-derivation), and the projection NEVER
-    /// `assign`s (a `<job>` the allocator does not yet bind is WITHHELD).
+    /// `assign`s (a `<workload>` the allocator does not yet bind is WITHHELD).
     ///
     /// Port-to-port through `MtlsResolve` (`probe` projects `by_frontend` from
     /// the allocator's snapshot at the List leg; `resolve` translates `F:port`).
     /// Falsifiable: delete the `project_by_frontend` call in `relist_into` and
     /// the dial to `F` MISSES `by_frontend`, falls into the `∈ 10.98.0.0/16`
     /// fail-closed arm → `MeshUnreachable` (the test's `Mesh` assertion goes
-    /// RED). Two cases in one walkthrough: (A) allocator binds the `<job>` → `F`
+    /// RED). Two cases in one walkthrough: (A) allocator binds the `<workload>` → `F`
     /// translates to the backend (`Mesh`); (B) the allocator does NOT bind a
-    /// second `<job>` → its `F` is WITHHELD (no `by_frontend` entry → the
+    /// second `<workload>` → its `F` is WITHHELD (no `by_frontend` entry → the
     /// frontend-subnet-miss fail-closed arm → `MeshUnreachable`, NEVER `Mesh`).
     #[tokio::test]
     async fn by_frontend_projection_reads_the_shared_allocator_and_never_assigns() {
@@ -1312,14 +1312,14 @@ mod tests {
         let store = fresh_store();
         let frontend = FrontendAddrAllocator::new();
 
-        // The allocator is the SINGLE source of `F`: pre-bind `<job> = bound`
-        // (the 01-05 deploy-time assigner's job) and LEAVE `<job> = withheld`
+        // The allocator is the SINGLE source of `F`: pre-bind `<workload> = bound`
+        // (the 01-05 deploy-time assigner's job) and LEAVE `<workload> = withheld`
         // unbound (the race / not-yet-assigned case — its row exists but the
         // allocator does not bind its `F`, so the projection WITHHOLDS it).
         let bound_job = MeshServiceName::new("bound.svc.overdrive.local").expect("valid mesh name");
         let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
 
-        // A backend whose alloc SpiffeId is the `/workload/<job>/alloc/<alloc>` shape
+        // A backend whose alloc SpiffeId is the `/workload/<workload>/alloc/<alloc>` shape
         // the projection parses (`workload_of`). The backend's listener port is the
         // port the frontend key re-uses verbatim.
         let backend_port = 8080;

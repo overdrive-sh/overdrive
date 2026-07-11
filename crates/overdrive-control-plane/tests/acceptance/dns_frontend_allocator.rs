@@ -3,7 +3,7 @@
 //! GH #243; roadmap 01-04 / REV-2 design unit 1a-A).
 //!
 //! These are the mandatory PBT coverage of the `FrontendAddrAllocator` seam —
-//! the per-host source of the STABLE per-`<job>` frontend address `F` the
+//! the per-host source of the STABLE per-`<workload>` frontend address `F` the
 //! dial-by-name responder answers with. Every property asserts THROUGH the
 //! pinned public surface (`assign` / `release` / `snapshot` /
 //! `WORKLOAD_FRONTEND_BASE`) and the two REAL named disjointness consts
@@ -13,7 +13,7 @@
 //! pairwise-distinctness assertion RED (the port-to-port / no-testing-theatre
 //! defence).
 //!
-//! Port-to-port discipline: the per-`<job>` stability, idempotency,
+//! Port-to-port discipline: the per-`<workload>` stability, idempotency,
 //! withhold-not-release, and collision-free/reclaim properties are exercised
 //! through the public `assign`/`release`/`snapshot` surface here. The pure
 //! scan's EXHAUSTION and CAPACITY paths — which a port-level test cannot reach
@@ -37,10 +37,10 @@ use overdrive_dataplane::allocators::VipRange;
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Strategies — domain-specific generators for the `<job>` key space.
+// Strategies — domain-specific generators for the `<workload>` key space.
 // ---------------------------------------------------------------------------
 
-/// A valid `<job>` label: DNS-1123, starts + ends alphanumeric, single label
+/// A valid `<workload>` label: DNS-1123, starts + ends alphanumeric, single label
 /// (no interior `.` — the v1 single-label contract), within `LABEL_MAX`. Kept
 /// short (≤ 16) to keep generation cheap; the boundary is covered by the
 /// `MeshServiceName` validation suite, not here.
@@ -49,7 +49,7 @@ fn arb_job_label() -> impl Strategy<Value = String> {
         .prop_filter("no trailing/leading hyphen", |s| !s.starts_with('-') && !s.ends_with('-'))
 }
 
-/// A valid `MeshServiceName` (the logical `<job>` key) from a generated label.
+/// A valid `MeshServiceName` (the logical `<workload>` key) from a generated label.
 fn arb_mesh_name() -> impl Strategy<Value = MeshServiceName> {
     arb_job_label().prop_map(|label| {
         let full = format!("{label}.{}", MeshServiceName::SUFFIX);
@@ -57,8 +57,8 @@ fn arb_mesh_name() -> impl Strategy<Value = MeshServiceName> {
     })
 }
 
-/// A set of DISTINCT `<job>` labels of size `1..=n_max`. Distinctness via the
-/// canonical `<job>` string keeps the {J1..Jn} set genuinely n-element.
+/// A set of DISTINCT `<workload>` labels of size `1..=n_max`. Distinctness via the
+/// canonical `<workload>` string keeps the {J1..Jn} set genuinely n-element.
 fn arb_distinct_jobs(n_max: usize) -> impl Strategy<Value = Vec<MeshServiceName>> {
     proptest::collection::hash_set(arb_job_label(), 1..=n_max).prop_map(|labels| {
         labels
@@ -131,8 +131,8 @@ proptest! {
 // S-DBN-FRONTEND-02 — retained across an alloc cycle (SQ1-elimination).
 //
 // Once assign(J) returned F, a second assign(J) returns the SAME F, unchanged
-// regardless of intervening assigns/releases of OTHER <job>s (the alloc-cycle
-// case: stop → new AllocationId → new backend addr but the SAME logical <job>).
+// regardless of intervening assigns/releases of OTHER <workload>s (the alloc-cycle
+// case: stop → new AllocationId → new backend addr but the SAME logical <workload>).
 // ---------------------------------------------------------------------------
 
 proptest! {
@@ -144,7 +144,7 @@ proptest! {
         let allocator = FrontendAddrAllocator::new();
         let first = allocator.assign(&job).expect("first assign of J succeeds");
 
-        // Intervening churn of OTHER <job>s: assign each, then release the ones
+        // Intervening churn of OTHER <workload>s: assign each, then release the ones
         // distinct from J (J itself is never released here — that is the whole
         // point of the alloc-cycle case).
         for other in &others {
@@ -156,13 +156,13 @@ proptest! {
             }
         }
 
-        // The second assign of the SAME logical <job> returns the SAME F.
+        // The second assign of the SAME logical <workload> returns the SAME F.
         let second = allocator.assign(&job).expect("second assign of J succeeds");
         prop_assert_eq!(
             first,
             second,
-            "assign(J) must be idempotent: the same <job> keeps the same frontend F \
-             across an alloc cycle and intervening churn of other <job>s",
+            "assign(J) must be idempotent: the same <workload> keeps the same frontend F \
+             across an alloc cycle and intervening churn of other <workload>s",
         );
 
         // And the snapshot still maps J → F (the binding survived).
@@ -183,7 +183,7 @@ proptest! {
 // contains J → F (the allocator carries NO health state).
 //
 // PROPERTY 2 (the genuine end): when release(J) IS called (logical deletion),
-// snapshot no longer contains J AND a later assign of a DIFFERENT <job> MAY
+// snapshot no longer contains J AND a later assign of a DIFFERENT <workload> MAY
 // draw F.
 // ---------------------------------------------------------------------------
 
@@ -226,7 +226,7 @@ proptest! {
         prop_assert_eq!(
             reused,
             f,
-            "after J is released, the reclaimed lowest-free F is available to a different <job>",
+            "after J is released, the reclaimed lowest-free F is available to a different <workload>",
         );
     }
 }
@@ -234,9 +234,9 @@ proptest! {
 // ---------------------------------------------------------------------------
 // S-DBN-FRONTEND-04 — collision-free distinct assignment + reclaim.
 //
-// For every set of distinct <job> labels {J1..Jn}, each assign()ed yields
+// For every set of distinct <workload> labels {J1..Jn}, each assign()ed yields
 // pairwise-distinct {F1..Fn}, each Fi ∈ 10.98.0.0/16; AND after release(Jk) a
-// fresh assign of a NEW <job> MAY reuse Fk (the block is reclaimed).
+// fresh assign of a NEW <workload> MAY reuse Fk (the block is reclaimed).
 // ---------------------------------------------------------------------------
 
 proptest! {
@@ -249,7 +249,7 @@ proptest! {
 
         let allocator = FrontendAddrAllocator::new();
 
-        // Each distinct <job> gets a distinct frontend F, all in the block.
+        // Each distinct <workload> gets a distinct frontend F, all in the block.
         let mut assigned: BTreeSet<Ipv4Addr> = BTreeSet::new();
         for job in &jobs {
             let f = allocator.assign(job).expect("assign within block capacity succeeds");
@@ -259,16 +259,16 @@ proptest! {
             );
             prop_assert!(
                 assigned.insert(f),
-                "distinct <job>s must get pairwise-distinct frontend addresses (no collision)",
+                "distinct <workload>s must get pairwise-distinct frontend addresses (no collision)",
             );
         }
         prop_assert_eq!(
             assigned.len(),
             jobs.len(),
-            "n distinct <job>s yield exactly n distinct frontend addresses",
+            "n distinct <workload>s yield exactly n distinct frontend addresses",
         );
 
-        // Reclaim: release one job, then a NEW <job> draws the reclaimed lowest
+        // Reclaim: release one job, then a NEW <workload> draws the reclaimed lowest
         // free address — concretely the smallest currently-free address in the
         // block. We assert the new draw is distinct from every STILL-held addr
         // and back inside the block (the free address re-enters the pool).
@@ -292,7 +292,7 @@ proptest! {
             prop_assert_ne!(
                 snap.get(job).copied(),
                 Some(drawn),
-                "the reclaimed draw must not collide with a still-held <job>'s address",
+                "the reclaimed draw must not collide with a still-held <workload>'s address",
             );
         }
         // And the freed address is back in the pool: it is now held by exactly

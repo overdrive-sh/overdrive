@@ -8,7 +8,7 @@
 //! healthy gate is exercised as a WITHHOLD seam (resolvability), the
 //! single-source-of-frontend-truth as the allocator's binding, and the
 //! withhold-not-release as `answer_for → NxDomain` WHILE `snapshot()` retains
-//! `<job> → F`.
+//! `<workload> → F`.
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
@@ -76,10 +76,10 @@ fn backends_row(service_id: u64, backends: Vec<Backend>, counter: u64) -> Servic
     }
 }
 
-/// The `<job>` mesh name a `Backend`'s `alloc` SVID
-/// (`spiffe://overdrive.local/workload/<job>/alloc/...`) dials as — mirrors the
+/// The `<workload>` mesh name a `Backend`'s `alloc` SVID
+/// (`spiffe://overdrive.local/workload/<workload>/alloc/...`) dials as — mirrors the
 /// production `name_index::workload_of` extraction so the fixture can model the
-/// 01-05 deploy-time assigner binding `<job> → F` on declaration.
+/// 01-05 deploy-time assigner binding `<workload> → F` on declaration.
 fn workload_of_backend(backend: &Backend) -> MeshServiceName {
     let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
     let label = loop {
@@ -93,10 +93,10 @@ fn workload_of_backend(backend: &Backend) -> MeshServiceName {
 }
 
 /// Build a `NameIndex` over a store seeded with `rows`, sharing `allocator`.
-/// Pre-`assign`s every `<job>` the rows declare into the SHARED allocator —
-/// modeling the 01-05 deploy-time assigner having bound `<job> → F` BEFORE the
+/// Pre-`assign`s every `<workload>` the rows declare into the SHARED allocator —
+/// modeling the 01-05 deploy-time assigner having bound `<workload> → F` BEFORE the
 /// backend appeared (REV-3: `frontend_for` is a PURE READER, so a
-/// resolvable-but-unassigned `<job>` would be WITHHELD; the assigner-runs-first
+/// resolvable-but-unassigned `<workload>` would be WITHHELD; the assigner-runs-first
 /// is the production precondition these tests stand in for).
 async fn index_listing(
     store: &Arc<SimObservationStore>,
@@ -105,7 +105,7 @@ async fn index_listing(
 ) -> NameIndex {
     for row in &rows {
         for backend in &row.backends {
-            // Idempotent per <job>; mirrors the deploy-time assign-on-declare.
+            // Idempotent per <workload>; mirrors the deploy-time assign-on-declare.
             allocator.assign(&workload_of_backend(backend)).expect("allocator has free addresses");
         }
     }
@@ -162,13 +162,13 @@ proptest! {
             prop_assert_eq!(
                 answer_for(&mesh_name(&unhealthy), RecordType::A, &index),
                 NameAnswer::NxDomain,
-                "unhealthy-only <job> must be withheld (NxDomain)",
+                "unhealthy-only <workload> must be withheld (NxDomain)",
             );
             // The co-resident healthy name resolves to its stable F.
             prop_assert_eq!(
                 answer_for(&mesh_name(&healthy), RecordType::A, &index),
                 records_of(&allocator, &mesh_name(&healthy)),
-                "co-resident healthy <job> resolves to its stable F",
+                "co-resident healthy <workload> resolves to its stable F",
             );
             Ok(())
         })?;
@@ -268,11 +268,11 @@ async fn idx_02_zero_healthy_withholds_but_retains_the_same_frontend() {
         NameAnswer::NxDomain,
         "a fresh zero-healthy row WITHHOLDS the name",
     );
-    // ... but the allocator STILL binds <job> → the SAME F (withhold-not-release).
+    // ... but the allocator STILL binds <workload> → the SAME F (withhold-not-release).
     assert_eq!(
         allocator.snapshot().get(&name).copied(),
         Some(f),
-        "the allocator retains <job> → the SAME F across the zero-healthy window",
+        "the allocator retains <workload> → the SAME F across the zero-healthy window",
     );
 
     // A running-AND-healthy row returns → resolves to the SAME F (no churn).
@@ -480,7 +480,7 @@ async fn idx_03_relist_on_lagged_reflects_store_state() {
     assert_eq!(
         answer_for(&absent_name, RecordType::A, &index),
         NameAnswer::NxDomain,
-        "after relist-on-Lagged, a <job> absent from S does not resolve",
+        "after relist-on-Lagged, a <workload> absent from S does not resolve",
     );
 }
 
@@ -693,7 +693,7 @@ async fn idx_04_answered_f_is_the_allocators_binding_no_second_source() {
     .await;
     let name = mesh_name("svc");
 
-    // The answered F IS the allocator's binding for the <job> (idempotent).
+    // The answered F IS the allocator's binding for the <workload> (idempotent).
     let f = allocator.assign(&name).expect("allocator has free addresses");
     assert_eq!(
         answer_for(&name, RecordType::A, &index),
@@ -701,8 +701,8 @@ async fn idx_04_answered_f_is_the_allocators_binding_no_second_source() {
         "the answered F is byte-identical to the allocator's binding",
     );
 
-    // Remove all rows for the <job> (empty backend set) and re-derive: the index
-    // WITHHOLDS (no stale retention) WHILE the allocator still binds <job> → F
+    // Remove all rows for the <workload> (empty backend set) and re-derive: the index
+    // WITHHOLDS (no stale retention) WHILE the allocator still binds <workload> → F
     // (the binding is the allocator's, not the index's).
     store
         .write(ObservationRow::ServiceBackend(backends_row(1, vec![], 2)))
@@ -716,16 +716,16 @@ async fn idx_04_answered_f_is_the_allocators_binding_no_second_source() {
     assert_eq!(
         allocator.snapshot().get(&name).copied(),
         Some(f),
-        "the allocator still binds <job> → F (the single source of frontend truth)",
+        "the allocator still binds <workload> → F (the single source of frontend truth)",
     );
 }
 
 // ---------------------------------------------------------------------------
 // S-DBN-IDX-04 (REV-3 root-cause fix) — frontend_for is a PURE READER: a DNS
-// query for a resolvable <job> the allocator does NOT yet bind is WITHHELD
+// query for a resolvable <workload> the allocator does NOT yet bind is WITHHELD
 // (NxDomain) and leaves the allocator's snapshot BYTE-UNCHANGED (no
 // assign-on-read). This is the falsifier the prior suite could not express
-// (every prior pre-assert pre-`assign`ed the <job>, so assign-on-read and
+// (every prior pre-assert pre-`assign`ed the <workload>, so assign-on-read and
 // read-the-binding were indistinguishable). A mutant restoring
 // `self.allocator.assign(name)` on the read path adds a binding AND flips the
 // answer from NxDomain to Records — both halves go RED.
@@ -735,10 +735,10 @@ async fn idx_04_answered_f_is_the_allocators_binding_no_second_source() {
 async fn idx_04_query_for_unassigned_job_is_withheld_and_does_not_mutate_the_allocator() {
     let store = fresh_store();
     let allocator = FrontendAddrAllocator::new();
-    // The <job> is running-AND-healthy (so the resolvability gate is OPEN), but
+    // The <workload> is running-AND-healthy (so the resolvability gate is OPEN), but
     // the allocator does NOT bind it — the 01-05 deploy-time assigner has not
     // run for it. Built WITHOUT `index_listing` deliberately: that helper
-    // pre-`assign`s every row's <job> (modeling the assigner), which is exactly
+    // pre-`assign`s every row's <workload> (modeling the assigner), which is exactly
     // the precondition this test must NOT have. The index must READ the (absent)
     // binding, never WRITE one.
     store
@@ -756,12 +756,12 @@ async fn idx_04_query_for_unassigned_job_is_withheld_and_does_not_mutate_the_all
     // Snapshot the allocator BEFORE the query.
     let before = allocator.snapshot();
 
-    // A query for a resolvable-but-unassigned <job> is WITHHELD (NxDomain) —
+    // A query for a resolvable-but-unassigned <workload> is WITHHELD (NxDomain) —
     // NOT assigned-on-read.
     assert_eq!(
         answer_for(&name, RecordType::A, &index),
         NameAnswer::NxDomain,
-        "a resolvable <job> the allocator does not yet bind is WITHHELD, never assigned-on-read",
+        "a resolvable <workload> the allocator does not yet bind is WITHHELD, never assigned-on-read",
     );
 
     // The query left the allocator BYTE-UNCHANGED — no binding appeared as a
@@ -773,7 +773,7 @@ async fn idx_04_query_for_unassigned_job_is_withheld_and_does_not_mutate_the_all
     );
     assert!(
         !after.contains_key(&name),
-        "no <job> → F binding was created on the read path (no assign-on-read)",
+        "no <workload> → F binding was created on the read path (no assign-on-read)",
     );
 }
 
@@ -784,7 +784,7 @@ async fn idx_04_query_for_unassigned_job_is_withheld_and_does_not_mutate_the_all
 // `ServiceBackendsResolve`'s `watch_healthy` faulted posture.
 //
 // The `EndingStore` hands the drain a subscription that immediately ends
-// (stream-end) AFTER the List leg seeded a resolvable, assigned <job>. The
+// (stream-end) AFTER the List leg seeded a resolvable, assigned <workload>. The
 // drain sets `watch_healthy = false` on stream-end; `frontend_for` then
 // withholds. A mutant that drops the stream-end fault keeps answering Records
 // forever — the test goes RED.
@@ -917,7 +917,7 @@ async fn faulted_watch_withholds_a_previously_resolvable_name_fail_closed() {
     .expect("seed resolvable row");
     let allocator = FrontendAddrAllocator::new();
     let name = mesh_name("svc");
-    // The 01-05 assigner already bound <job> → F (the writer ran on deploy).
+    // The 01-05 assigner already bound <workload> → F (the writer ran on deploy).
     let f = allocator.assign(&name).expect("allocator has free addresses");
 
     let store: Arc<dyn ObservationStore> = Arc::new(EndingStore { inner: Arc::clone(&sim) });
@@ -946,9 +946,9 @@ async fn faulted_watch_withholds_a_previously_resolvable_name_fail_closed() {
 // ---------------------------------------------------------------------------
 // One-service-per-job invariant (non-blocking, apply_row eviction safety) —
 // asserted through the driving port. Two DISTINCT services each contribute a
-// running-AND-healthy backend to the SAME <job>; when one service's row goes
-// zero-healthy, the <job> STILL resolves (the other service's healthy backend
-// is not stranded). Pins that the per-(<job>, service_id)-scoped eviction never
+// running-AND-healthy backend to the SAME <workload>; when one service's row goes
+// zero-healthy, the <workload> STILL resolves (the other service's healthy backend
+// is not stranded). Pins that the per-(<workload>, service_id)-scoped eviction never
 // drops a co-resident service's contribution — the property the eviction-site
 // invariant comment documents.
 // ---------------------------------------------------------------------------
@@ -959,7 +959,7 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
     let allocator = FrontendAddrAllocator::new();
     let name = mesh_name("svc");
     // Two DISTINCT services (service_id 1 and 2) each contribute a healthy
-    // backend to the SAME <job> `svc`, at DISTINCT addrs.
+    // backend to the SAME <workload> `svc`, at DISTINCT addrs.
     let index = index_listing(
         &store,
         allocator.clone(),
@@ -969,7 +969,7 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
         ],
     )
     .await;
-    // The 01-05 assigner bound <job> → F.
+    // The 01-05 assigner bound <workload> → F.
     let f = allocator.assign(&name).expect("allocator has free addresses");
     let want = NameAnswer::Records(vec![SocketAddrV4::new(f, 0)]);
 
@@ -977,7 +977,7 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
     assert_eq!(answer_for(&name, RecordType::A, &index), want.clone());
 
     // Service 1's backend goes zero-healthy (a fresh full-row replace). The
-    // per-(<job>, service_id) eviction drops ONLY service 1's contribution —
+    // per-(<workload>, service_id) eviction drops ONLY service 1's contribution —
     // service 2's healthy backend keeps `svc` resolvable.
     store
         .write(ObservationRow::ServiceBackend(backends_row(
@@ -995,7 +995,7 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
         assert_eq!(
             answer_for(&name, RecordType::A, &index),
             want.clone(),
-            "a co-resident healthy service keeps <job> resolvable when another service evicts",
+            "a co-resident healthy service keeps <workload> resolvable when another service evicts",
         );
     }
 }
@@ -1004,25 +1004,25 @@ async fn apply_row_one_service_per_job_eviction_does_not_strand_a_coresident_ser
 // S-DBN-COHERENCE-01 — byte-identity / single-source-of-F invariant (DDN-2),
 // plus timing-independent fail-closed (FAILCLOSED-01's availability companion).
 //
-// DDN-2 enforces that there is exactly ONE `<job> -> F` source: the shared
+// DDN-2 enforces that there is exactly ONE `<workload> -> F` source: the shared
 // `FrontendAddrAllocator`. The re-keyed `MtlsResolve` (`by_frontend`) and the
 // DNS `name_index` are fed by TWO INDEPENDENT single-owner drains
 // (`mtls_resolve_adapter.rs:55-57` and `name_index.rs:41-43`), each reading the
 // SAME allocator — there is NO single ordered drain and NO temporal write-order
 // guarantee between the two projections.
 //
-// PROPERTY 1 (byte-identity via the ONE allocator): for every batch of `<job>`s
+// PROPERTY 1 (byte-identity via the ONE allocator): for every batch of `<workload>`s
 // `assign()`ed into ONE allocator and driven into BOTH a re-keyed `BackendIndex`'s
 // `by_frontend` (keyed on the allocator-assigned `F`) AND the DNS `name_index`
 // (answering the allocator-assigned `F`), the `F` `name_index` answers for a
-// `<job>` is BYTE-IDENTICAL to the `F` `by_frontend` is keyed on — because there
-// is exactly ONE `<job> -> F` source. A SECOND source (a divergent allocator, a
+// `<workload>` is BYTE-IDENTICAL to the `F` `by_frontend` is keyed on — because there
+// is exactly ONE `<workload> -> F` source. A SECOND source (a divergent allocator, a
 // re-derivation, a stale cache) makes the two projections key/answer DIFFERENT
 // `F`s and flips Property 1.
 //
 // PROPERTY 2 (fail-closed REGARDLESS of inter-drain timing): a frontend-subnet
 // dial that MISSES `by_frontend` classifies `MeshUnreachable` — so EVEN IF
-// `name_index` exposes `F` for a `<job>` whose `by_frontend` key is not yet bound
+// `name_index` exposes `F` for a `<workload>` whose `by_frontend` key is not yet bound
 // (the two drains are INDEPENDENT, with NO temporal ordering), the dial hits
 // classify arm-2 (`F ∈ 10.98.0.0/16`) -> fail-closed, NEVER cleartext. The
 // drain-ordering barrier is SUPERSEDED (an availability nicety, not security —
@@ -1039,14 +1039,14 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(48))]
 
     /// S-DBN-COHERENCE-01 (US-DBN-2 / DDN-2) — byte-identity + timing-independent
-    /// fail-closed. Both projections derive `F` for each `<job>` from the ONE
+    /// fail-closed. Both projections derive `F` for each `<workload>` from the ONE
     /// shared `FrontendAddrAllocator`; the test asserts:
     ///
-    /// PROPERTY 1 — for EVERY `<job>` in the batch, the `F` `name_index` answers
+    /// PROPERTY 1 — for EVERY `<workload>` in the batch, the `F` `name_index` answers
     /// is byte-identical to the `F` `by_frontend` is keyed on (single source). A
-    /// second `<job> -> F` source would diverge them.
+    /// second `<workload> -> F` source would diverge them.
     ///
-    /// PROPERTY 2 — a frontend-subnet dial that MISSES `by_frontend` (a `<job>`
+    /// PROPERTY 2 — a frontend-subnet dial that MISSES `by_frontend` (a `<workload>`
     /// whose key has NOT been bound — modelling the no-temporal-ordering case)
     /// classifies `MeshUnreachable`, never cleartext (fail-closed regardless of
     /// inter-drain timing).
@@ -1054,7 +1054,7 @@ proptest! {
     fn coherence_01_single_source_f_byte_identity_and_timing_independent_fail_closed(
         labels in prop::collection::vec(arb_job_label(), 1..=4),
     ) {
-        // De-duplicate the generated <job> labels (a batch binds each <job> once).
+        // De-duplicate the generated <workload> labels (a batch binds each <workload> once).
         let mut workloads: Vec<String> = labels;
         workloads.sort();
         workloads.dedup();
@@ -1063,14 +1063,14 @@ proptest! {
             let store = fresh_store();
             // ONE shared allocator — the single source of frontend truth (DDN-2).
             // BOTH projections (by_frontend keys, name_index answers) read THIS
-            // instance; there is no second <job> -> F source.
+            // instance; there is no second <workload> -> F source.
             let allocator = FrontendAddrAllocator::new();
 
             // The re-keyed resolve projection (by_frontend lives on BackendIndex).
             let mut by_frontend = BackendIndex::default();
 
             // Seed the store + NameIndex with the batch's running-and-healthy rows
-            // so each <job> is resolvable; the allocator binds each <job> -> F.
+            // so each <workload> is resolvable; the allocator binds each <workload> -> F.
             let rows: Vec<ServiceBackendRow> = workloads
                 .iter()
                 .enumerate()
@@ -1084,10 +1084,10 @@ proptest! {
                 .collect();
             let name_index = index_listing(&store, allocator.clone(), rows).await;
 
-            // Drive each <job> into by_frontend, keyed on the SAME allocator F.
+            // Drive each <workload> into by_frontend, keyed on the SAME allocator F.
             // The two drains are INDEPENDENT — there is no ordering between this
-            // bind and name_index's exposure. We bind every <job> EXCEPT the last
-            // one, so the last <job> models the no-temporal-ordering case:
+            // bind and name_index's exposure. We bind every <workload> EXCEPT the last
+            // one, so the last <workload> models the no-temporal-ordering case:
             // name_index exposes its F (List-at-probe folded its row) while
             // by_frontend has NOT yet bound its key (Property 2's input).
             let bind_upto = workloads.len().saturating_sub(1);
@@ -1101,32 +1101,32 @@ proptest! {
                 let service_id =
                     ServiceId::new(u64::try_from(i).expect("≤4 jobs") + 1).expect("valid service id");
 
-                // PROPERTY 1 — byte-identity: the F name_index answers for <job>
+                // PROPERTY 1 — byte-identity: the F name_index answers for <workload>
                 // is byte-identical to the F by_frontend is keyed on. Both come
-                // from the ONE allocator; a second <job> -> F source diverges them.
+                // from the ONE allocator; a second <workload> -> F source diverges them.
                 // `records_of(&allocator, &mesh)` is name_index's answer expressed
-                // as "the allocator's F for <job>" — `answer_for` MUST equal it.
+                // as "the allocator's F for <workload>" — `answer_for` MUST equal it.
                 prop_assert_eq!(
                     answer_for(&mesh, RecordType::A, &name_index),
                     records_of(&allocator, &mesh),
-                    "name_index answers <job> with the SAME allocator F by_frontend keys on \
-                     (single <job> -> F source; a second source would diverge them)",
+                    "name_index answers <workload> with the SAME allocator F by_frontend keys on \
+                     (single <workload> -> F source; a second source would diverge them)",
                 );
 
                 if i < bind_upto {
                     by_frontend.apply_row(service_id, &[backend_for(job, instance, true)]);
                     by_frontend.bind_frontend(FrontendKey::new(f_endpoint, Proto::Tcp), service_id);
-                    // The bound <job> resolves Mesh on the byte-identical F.
+                    // The bound <workload> resolves Mesh on the byte-identical F.
                     prop_assert!(
                         matches!(
                             by_frontend.classify(f_endpoint, Proto::Tcp),
                             MtlsResolution::Mesh(_)
                         ),
-                        "a bound <job> resolves its allocator-assigned F (Mesh)",
+                        "a bound <workload> resolves its allocator-assigned F (Mesh)",
                     );
                 } else {
                     // PROPERTY 2 — timing-independent fail-closed: name_index has
-                    // already exposed this <job>'s F (asserted byte-identical
+                    // already exposed this <workload>'s F (asserted byte-identical
                     // above), but by_frontend has NOT bound its key. A dial to that
                     // F MISSES by_frontend and MUST classify MeshUnreachable
                     // (arm-2 fail-closed), NEVER NonMesh/cleartext — the two

@@ -8,7 +8,7 @@
 //! root.
 //!
 //! - **S-DBN-BIND-01** — `probe` binds the wildcard `0.0.0.0:53`
-//!   (`SO_REUSEADDR` + `IP_PKTINFO`); a query for a resolvable `<job>` answers
+//!   (`SO_REUSEADDR` + `IP_PKTINFO`); a query for a resolvable `<workload>` answers
 //!   its stable frontend `F`, and the reply is source-pinned to the queried
 //!   destination via `ipi_spec_dst` (the spike litmus: a missing source-pin is
 //!   what `getent` rejects). We assert the reply arrives FROM the queried dst
@@ -104,7 +104,7 @@ fn fresh_store() -> Arc<SimObservationStore> {
 }
 
 /// A `service_backends` row for `service_id` carrying one healthy backend whose
-/// alloc SpiffeId is the `/workload/<job>/alloc/<alloc>` shape `workload_of` parses.
+/// alloc SpiffeId is the `/workload/<workload>/alloc/<alloc>` shape `workload_of` parses.
 fn job_backend_row(service_id: u64, job: &str, addr: SocketAddrV4) -> ServiceBackendRow {
     let backend = Backend {
         alloc: SpiffeId::for_allocation(
@@ -126,7 +126,7 @@ fn job_backend_row(service_id: u64, job: &str, addr: SocketAddrV4) -> ServiceBac
     }
 }
 
-/// Encode an `A` query for `<job>.svc.overdrive.local` (the on-wire form a stub
+/// Encode an `A` query for `<workload>.svc.overdrive.local` (the on-wire form a stub
 /// resolver sends).
 fn encode_a_query(job: &str) -> Vec<u8> {
     let name = Name::from_ascii(format!("{job}.svc.overdrive.local.")).expect("valid FQDN");
@@ -149,7 +149,7 @@ fn responder(
 // ---------------------------------------------------------------------------
 
 /// S-DBN-BIND-01 — `probe` binds the wildcard `0.0.0.0:53` (`SO_REUSEADDR` +
-/// `IP_PKTINFO`); a query for a resolvable `<job>` answers its stable frontend
+/// `IP_PKTINFO`); a query for a resolvable `<workload>` answers its stable frontend
 /// `F`, and the reply is SOURCE-PINNED to the queried dst via `ipi_spec_dst`.
 ///
 /// The source-pin is the litmus: a client that addressed `127.0.0.2:53` must
@@ -163,7 +163,7 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
     }
     record_kernel();
 
-    // GIVEN a resolvable `<job>` whose stable F the allocator binds + whose
+    // GIVEN a resolvable `<workload>` whose stable F the allocator binds + whose
     // healthy backend row is in the store.
     let store = fresh_store();
     let frontend = FrontendAddrAllocator::new();

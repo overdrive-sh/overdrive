@@ -304,8 +304,8 @@ pub async fn submit_workload(
 
     // 4a. Service-arm frontend-address assignment (dial-by-name-responder
     //     step 01-05; ADR-0072 REV-3, GH #243). This is the WRITER seam: the
-    //     deploy-time `assign(<job>)` at Service declaration that binds the
-    //     stable per-`<job>` frontend address `F` the `name_index` (01-03)
+    //     deploy-time `assign(<workload>)` at Service declaration that binds the
+    //     stable per-`<workload>` frontend address `F` the `name_index` (01-03)
     //     reader answers with. Service-only, mirroring the `service_vip`
     //     allocate's `matches!(intent, WorkloadIntent::Service(_))` guard — a
     //     Job / Schedule submit assigns NO frontend addr (frontends are a
@@ -318,19 +318,19 @@ pub async fn submit_workload(
     //     exhaustion early-return precedes any DURABLE VIP commit — so it can
     //     never leak a fsync'd VIP that has no `WorkloadIntent` (and thus no
     //     `Action::ReleaseServiceVip`) to release it. A later VIP-allocate
-    //     failure leaves only a benign in-memory `<job> → F` frontend binding
+    //     failure leaves only a benign in-memory `<workload> → F` frontend binding
     //     with no persisted intent: empty-on-boot, idempotent on retry, unread
-    //     by any reader for a `<job>` that has no declared Service.
+    //     by any reader for a `<workload>` that has no declared Service.
     //
-    //     IDEMPOTENT per `<job>` at the allocator layer (FRONTEND-02): an
-    //     already-held `<job>` (a byte-identical resubmit reaching the
+    //     IDEMPOTENT per `<workload>` at the allocator layer (FRONTEND-02): an
+    //     already-held `<workload>` (a byte-identical resubmit reaching the
     //     KeyExists path, OR the boot rebuild having already assigned it)
     //     returns its EXISTING `F` unchanged, consuming no new address. So the
     //     handler adds NO idempotency logic here — calling `assign` on every
     //     Service submit is correct, and a resubmit never consumes a second
     //     address nor changes the binding.
     //
-    //     OQ-1: the `<job>` key is derived
+    //     OQ-1: the `<workload>` key is derived
     //     `MeshServiceName::new("<id>.<SUFFIX>")` — byte-identical to the
     //     `name_index` reader's `workload_of` derivation, so the WRITER's key is the
     //     SAME key the READER looks up (DDN-2 single-owner). An exhausted
@@ -534,16 +534,16 @@ pub async fn submit_workload(
                 // reason than the VIP's allocate-then-release. The VIP is keyed
                 // by `spec_digest`, so a conflicting (different-spec) resubmit
                 // allocates a SECOND, distinct VIP that leaks unless released.
-                // The frontend allocator is keyed by the logical `<job>` (the
+                // The frontend allocator is keyed by the logical `<workload>` (the
                 // workload id), which is IDENTICAL on a conflicting resubmit, so
-                // the step-4a `assign(<job>)` above was an idempotent no-op that
+                // the step-4a `assign(<workload>)` above was an idempotent no-op that
                 // returned the EXISTING `F` — it consumed no new address and
                 // left the binding unchanged. There is nothing to release.
-                // Calling `release(<job>)` here would EVICT the live workload's
+                // Calling `release(<workload>)` here would EVICT the live workload's
                 // frontend `F` on a rejected resubmit — the exact
                 // stale-`F`/eviction corruption ASSIGN-02 + U6 forbid. The
                 // binding survives the conflict untouched precisely BECAUSE the
-                // allocator is `<job>`-keyed and idempotent.
+                // allocator is `<workload>`-keyed and idempotent.
                 return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 });

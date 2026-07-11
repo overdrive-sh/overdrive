@@ -8,14 +8,14 @@
 //! The [`FrontendAddrAllocator`] is the EPHEMERAL
 //! [`crate::veth_provisioner::NetSlotAllocator`] model — empty on every fresh
 //! process boot, carrying NO cross-restart persistence. On a `serve` restart
-//! the in-RAM `<job> → F` map is reconstructed EMPTY, but the declared-Service
+//! the in-RAM `<workload> → F` map is reconstructed EMPTY, but the declared-Service
 //! intent rows SURVIVE in the [`IntentStore`] (a prior boot's
 //! `submit_workload` wrote them). The DECLARED-SERVICE INTENT IS THE SSOT the
 //! rebuild re-derives `F` from (`.claude/rules/development.md` § "Persist
 //! inputs, not derived state": desired is the declared intent, NEVER inferred
 //! from a prior allocator dump). Without this pass the allocator would stay
 //! empty after a restart and the `name_index` (01-03) pure-reader would
-//! WITHHOLD every declared `<job>` until its first new submit — reintroducing
+//! WITHHOLD every declared `<workload>` until its first new submit — reintroducing
 //! the stale-answer hazard the stable-`F` design fights.
 //!
 //! # Bar-1 converge-on-boot (NOT a `Reconciler` trait impl)
@@ -25,17 +25,17 @@
 //! shape of [`crate::veth_provisioner::adopt_on_restart_recovery`] (the netns
 //! restart precedent) and [`crate::listener_facts::ListenerFactStore::
 //! rebuild_from_intent`] (the same `workloads/` intent scan): observe the
-//! declared-Service set, idempotently `assign` each `<job>`. It runs ONCE at
+//! declared-Service set, idempotently `assign` each `<workload>`. It runs ONCE at
 //! boot — there is no continuous tick — so it is not promoted to a full
 //! `Reconciler` trait impl.
 //!
 //! # Idempotent re-assign
 //!
-//! Each [`FrontendAddrAllocator::assign`] is idempotent per `<job>` (an
-//! already-held `<job>` returns its EXISTING `F` unchanged, consuming no new
+//! Each [`FrontendAddrAllocator::assign`] is idempotent per `<workload>` (an
+//! already-held `<workload>` returns its EXISTING `F` unchanged, consuming no new
 //! address — FRONTEND-02 at the allocator layer). The rebuild therefore needs
 //! NO idempotency logic of its own: re-running the pass over an already-rebuilt
-//! allocator re-assigns every `<job>` to the SAME `F` with no churn (S-DBN-
+//! allocator re-assigns every `<workload>` to the SAME `F` with no churn (S-DBN-
 //! ASSIGN-03 idempotency). The pass is the writer's boot half; the
 //! assign-on-declare half lives in the Service arm of `submit_workload`.
 
@@ -67,13 +67,13 @@ pub enum FrontendRebuildError {
     #[error("declared-workload intent scan failed during frontend rebuild: {0}")]
     IntentScan(#[from] overdrive_core::traits::intent_store::IntentStoreError),
 
-    /// A declared `<job>` could not be assigned a stable frontend address
+    /// A declared `<workload>` could not be assigned a stable frontend address
     /// because [`super::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE`] is
     /// exhausted. Refusing the boot is the fail-closed posture: a declared
     /// Service with no resolvable `F` would be silently undialable.
     #[error("frontend address exhausted rebuilding {job}: {source}")]
     Exhausted {
-        /// The declared `<job>` whose assignment was refused.
+        /// The declared `<workload>` whose assignment was refused.
         job: MeshServiceName,
         /// The underlying allocator exhaustion cause.
         #[source]
@@ -88,12 +88,12 @@ pub enum FrontendRebuildError {
 /// [`crate::listener_facts::ListenerFactStore::rebuild_from_intent`]), decodes
 /// each canonical `workloads/<id>` record, and for every
 /// [`WorkloadIntent::Service`] idempotently
-/// [`assign`](FrontendAddrAllocator::assign)s the `<job>`'s stable frontend
+/// [`assign`](FrontendAddrAllocator::assign)s the `<workload>`'s stable frontend
 /// address. Non-Service intents, the `workloads/<id>/stop` and
 /// `workloads/<id>/kind` sub-keys, and undecodable payloads contribute nothing
-/// (skip — they declare no resolvable `<job>`).
+/// (skip — they declare no resolvable `<workload>`).
 ///
-/// The `<job>` key is derived `MeshServiceName::new(format!("{id}.{SUFFIX}"))`
+/// The `<workload>` key is derived `MeshServiceName::new(format!("{id}.{SUFFIX}"))`
 /// — byte-identical to the `name_index` reader's `workload_of` derivation (OQ-1), so
 /// the rebuilt binding is the SAME key the reader looks up. A Service whose
 /// `id` is not a valid v1 single-label mesh name (dotted, out-of-class, over
@@ -101,7 +101,7 @@ pub enum FrontendRebuildError {
 /// reader (`name_index::workload_of` returns `None`).
 ///
 /// **Idempotent.** Re-running over an already-rebuilt allocator re-assigns
-/// every `<job>` to its EXISTING `F` (FRONTEND-02), so the pass is safe to run
+/// every `<workload>` to its EXISTING `F` (FRONTEND-02), so the pass is safe to run
 /// on every boot and a double-invocation produces no churn.
 ///
 /// **Driven from `run_server` GATED on `mtls_worker.is_some()`** — the SAME
@@ -118,7 +118,7 @@ pub enum FrontendRebuildError {
 ///
 /// Returns [`FrontendRebuildError::IntentScan`] when the `workloads/` prefix
 /// scan fails (the SSOT is unreadable — refuse to boot), or
-/// [`FrontendRebuildError::Exhausted`] when a declared `<job>` cannot be
+/// [`FrontendRebuildError::Exhausted`] when a declared `<workload>` cannot be
 /// assigned because the frontend block is full.
 pub async fn rebuild_frontend_addrs_from_intent(
     store: &Arc<LocalIntentStore>,
@@ -140,7 +140,7 @@ pub async fn rebuild_frontend_addrs_from_intent(
         }
 
         // A non-intent payload under the prefix (or a decode failure) declares
-        // no `<job>` — skip it.
+        // no `<workload>` — skip it.
         let Ok(intent) =
             WorkloadIntent::from_store_bytes(value_bytes.as_ref(), intent_redb_path, Some(key_str))
         else {
@@ -148,10 +148,10 @@ pub async fn rebuild_frontend_addrs_from_intent(
         };
         // Frontends are a Service-name concern (mirrors the VIP allocate's
         // Service-only guard): a Job / Schedule intent declares no resolvable
-        // `<job>` and assigns no frontend addr.
+        // `<workload>` and assigns no frontend addr.
         let WorkloadIntent::Service(service_v1) = &intent else { continue };
 
-        // OQ-1: derive the `<job>` key byte-identically to the `name_index`
+        // OQ-1: derive the `<workload>` key byte-identically to the `name_index`
         // reader (`name_index::workload_of`) — `MeshServiceName::new("<id>.<SUFFIX>")`.
         // A Service whose id is not a valid v1 single-label mesh name is not
         // mesh-dialable by name in v1 and is skipped (the reader skips it too).
@@ -163,7 +163,7 @@ pub async fn rebuild_frontend_addrs_from_intent(
             continue;
         };
 
-        // Idempotent re-assign — an already-held `<job>` returns its existing F
+        // Idempotent re-assign — an already-held `<workload>` returns its existing F
         // (FRONTEND-02), so a re-run produces no churn. Fail the boot closed on
         // exhaustion rather than leave a declared Service silently undialable.
         allocator

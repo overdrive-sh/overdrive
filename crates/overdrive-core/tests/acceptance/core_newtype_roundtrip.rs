@@ -141,9 +141,9 @@ fn workload_id_parses_from_realistic_config_value() {
 // -----------------------------------------------------------------------------
 // S-DBN-NAME-01 — Mesh service name round-trips through Display / FromStr / serde
 //
-// PROPERTY: for every valid <job> label L, a MeshServiceName built from
+// PROPERTY: for every valid <workload> label L, a MeshServiceName built from
 // "<L>.svc.overdrive.local" survives Display -> FromStr (re-parse equals
-// original), as_str() yields the canonical lowercase <job> label, and serde
+// original), as_str() yields the canonical lowercase <workload> label, and serde
 // round-trips to the quoted Display form (serde matches Display/FromStr
 // exactly — the mandatory newtype rule). Mesh-DNS grammar for
 // dial-by-name-responder (ADR-0072 / US-DBN-2). The newtype's own public
@@ -152,12 +152,12 @@ fn workload_id_parses_from_realistic_config_value() {
 // Pinned domain-readable canonical case: "server".
 // -----------------------------------------------------------------------------
 
-/// A valid v1 `<job>` label: lowercase ascii alphanumerics with `-`/`_` in the
+/// A valid v1 `<workload>` label: lowercase ascii alphanumerics with `-`/`_` in the
 /// interior (NOT `.` — the v1 contract is a SINGLE label, NO namespace
 /// segment, ADR-0072:279; `validate_label` permits `.` for OTHER newtypes, but
 /// `MeshServiceName::new` adds a single-label guard on top). Must start AND end
-/// with an alphanumeric. Sized to reach the `<job>` ≤ `DNS_LABEL_OCTET_MAX`
-/// (63) ceiling — the `<job>` is a single DNS LABEL, hard-capped at 63 octets
+/// with an alphanumeric. Sized to reach the `<workload>` ≤ `DNS_LABEL_OCTET_MAX`
+/// (63) ceiling — the `<workload>` is a single DNS LABEL, hard-capped at 63 octets
 /// (RFC 1035 §2.3.4; corrected ADR-0072 DDN-7), NOT the 253 DNS-name max.
 /// Interior `{0,61}` so the longest generated single label is `1 + 61 + 1 = 63`
 /// chars, pinning the positive length boundary for `MeshServiceName`.
@@ -174,7 +174,7 @@ fn valid_job_label() -> impl Strategy<Value = String> {
 
 proptest! {
     /// S-DBN-NAME-01: Display -> FromStr -> serde round-trip, and as_str()
-    /// yields the canonical lowercase <job> label.
+    /// yields the canonical lowercase <workload> label.
     #[test]
     fn mesh_service_name_round_trips_through_display_from_str_and_serde(
         label in valid_job_label(),
@@ -182,7 +182,7 @@ proptest! {
         let full = format!("{label}.{}", MeshServiceName::SUFFIX);
         let name = MeshServiceName::new(&full).expect("valid mesh service name");
 
-        // as_str() is the canonical lowercase <job> label (the generator
+        // as_str() is the canonical lowercase <workload> label (the generator
         // already produces lowercase, so this is identity here; the case-fold
         // invariant is exercised by S-DBN-NAME-02).
         prop_assert_eq!(name.as_str(), label.as_str());
@@ -217,11 +217,11 @@ fn mesh_service_name_canonical_example_round_trips() {
 // S-DBN-NAME-02 — Mesh service name parse is case-insensitive, canonical form
 // is lowercase
 //
-// PROPERTY: for every valid <job> label L and every case-permutation P of
+// PROPERTY: for every valid <workload> label L and every case-permutation P of
 // "<L>.svc.overdrive.local" (mixed case in BOTH the label AND the suffix),
 // MeshServiceName::new(P) succeeds and equals new() of the all-lowercase form,
 // and Display emits the lowercase canonical. Workloads type the name as it
-// appears in their config; the suffix grammar and the <job> label both fold
+// appears in their config; the suffix grammar and the <workload> label both fold
 // case (the validate_label precedent, id.rs:99).
 // -----------------------------------------------------------------------------
 

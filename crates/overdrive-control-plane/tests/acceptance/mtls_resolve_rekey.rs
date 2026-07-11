@@ -294,7 +294,7 @@ proptest! {
     /// PROPERTY 1: for every `orig_dst` whose ip ∈ `10.98.0.0/16` that MISSES
     /// `by_frontend` AND MISSES `by_addr`, `classify` returns `MeshUnreachable`
     /// (refuse, NO cleartext — a mesh dial that arrived before the index was
-    /// ready (race) OR to a withdrawn `<job>`) and is NEVER `NonMesh` (the
+    /// ready (race) OR to a withdrawn `<workload>`) and is NEVER `NonMesh` (the
     /// fail-OPEN regression the subnet-scoped arm exists to prevent).
     ///
     /// PROPERTY 2: for every `orig_dst` whose ip is NOT ∈ `10.98.0.0/16` that

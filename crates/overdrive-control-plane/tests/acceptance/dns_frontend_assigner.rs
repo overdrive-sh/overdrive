@@ -1,22 +1,22 @@
 //! Acceptance tests for the `FrontendAddrAllocator` WRITER seam —
-//! deploy-time `assign(<job>)` at Service declaration + the empty-on-boot
+//! deploy-time `assign(<workload>)` at Service declaration + the empty-on-boot
 //! converge-on-boot rebuild from declared-Service intent
 //! (dial-by-name-responder step 01-05; ADR-0072 REV-3, GH #243).
 //!
 //! 01-04 built the `FrontendAddrAllocator` (`assign`/`release`/`snapshot`).
-//! 01-03 built the `name_index` that READS the `<job> → F` binding. This step
+//! 01-03 built the `name_index` that READS the `<workload> → F` binding. This step
 //! adds the two production CALL SITES that WRITE the binding by invoking the
 //! EXISTING `FrontendAddrAllocator::assign`:
 //!
 //!   * S-DBN-ASSIGN-01 — assign-on-declare: a Service submit through the
-//!     `submit_workload` driving port binds `<job> → F` in the shared
+//!     `submit_workload` driving port binds `<workload> → F` in the shared
 //!     allocator; a Job-kind submit assigns NO frontend addr (Service-only
 //!     guard, mirroring the VIP allocate).
 //!   * S-DBN-ASSIGN-02 — idempotent across resubmit: a byte-identical
 //!     resubmit does not consume a second addr nor change the binding; a
 //!     CONFLICTING resubmit (different spec at the same key, 409) does NOT
-//!     evict the existing `<job> → F` binding (release-on-conflict-ONLY
-//!     discipline — and the frontend allocator is `<job>`-keyed + idempotent,
+//!     evict the existing `<workload> → F` binding (release-on-conflict-ONLY
+//!     discipline — and the frontend allocator is `<workload>`-keyed + idempotent,
 //!     so there is nothing to release).
 //!   * S-DBN-ASSIGN-03 — converge-on-boot rebuild: the boot pass re-populates
 //!     an EMPTY allocator from the currently-declared Service set (the
@@ -148,7 +148,7 @@ async fn submit_json(
     Ok(serde_json::from_slice(&bytes).expect("JSON SubmitWorkloadResponse"))
 }
 
-/// The canonical `<job>` key the WRITER and READER share (OQ-1).
+/// The canonical `<workload>` key the WRITER and READER share (OQ-1).
 fn job_name(id: &str) -> MeshServiceName {
     MeshServiceName::new(&format!("{id}.{}", MeshServiceName::SUFFIX))
         .expect("test ids are valid single-label mesh names")
@@ -197,8 +197,8 @@ async fn seed_service_payload_at_sub_key(
         .expect("seed Service payload at sub-key path");
 }
 
-/// A running-AND-healthy `Backend` for `<job>=id`, whose `alloc` SVID carries
-/// `/workload/<id>/alloc/...` — the shape `name_index::workload_of` extracts the `<job>`
+/// A running-AND-healthy `Backend` for `<workload>=id`, whose `alloc` SVID carries
+/// `/workload/<id>/alloc/...` — the shape `name_index::workload_of` extracts the `<workload>`
 /// from. Mirrors `dns_answer_for.rs::backend_for` (the 01-03 fixture). The
 /// per-instance backend addr sits in `10.99.0.0/16`, DELIBERATELY a different
 /// block from the frontend `F` the answer must return.
@@ -214,7 +214,7 @@ fn running_healthy_backend(id: &str) -> Backend {
 }
 
 /// A `service_backends` observation row carrying one running-AND-healthy backend
-/// for `<job>=id`. Mirrors `dns_answer_for.rs::backends_row`.
+/// for `<workload>=id`. Mirrors `dns_answer_for.rs::backends_row`.
 fn running_healthy_row(id: &str) -> ServiceBackendRow {
     ServiceBackendRow {
         service_id: ServiceId::new(1).expect("valid service id"),
@@ -259,7 +259,7 @@ async fn service_submit_assigns_frontend_addr_in_shared_allocator() {
     let binding = allocator.snapshot();
     let f = *binding
         .get(&job_name("server"))
-        .expect("assign-on-declare must bind <job>=server -> F in the shared allocator");
+        .expect("assign-on-declare must bind <workload>=server -> F in the shared allocator");
     assert!(
         WORKLOAD_FRONTEND_BASE.contains(&f),
         "assigned frontend addr {f} must be within {WORKLOAD_FRONTEND_BASE}",
@@ -329,7 +329,7 @@ async fn byte_identical_resubmit_does_not_change_binding() {
     assert_eq!(
         *after.get(&job_name("idem")).expect("binding survives resubmit"),
         f_first,
-        "byte-identical resubmit leaves <job> -> F unchanged (idempotent per <job>)",
+        "byte-identical resubmit leaves <workload> -> F unchanged (idempotent per <workload>)",
     );
 }
 
@@ -376,7 +376,7 @@ async fn conflicting_resubmit_does_not_evict_existing_binding() {
     assert_eq!(
         *after.get(&job_name("clash")).expect("existing binding survives the conflict"),
         f_original,
-        "a rejected conflicting resubmit must NOT evict the existing <job> -> F binding",
+        "a rejected conflicting resubmit must NOT evict the existing <workload> -> F binding",
     );
 }
 
@@ -402,8 +402,8 @@ async fn boot_rebuild_repopulates_empty_allocator_from_declared_services() {
         .await
         .expect("boot rebuild must succeed");
 
-    // THEN the allocator binds a stable F for every declared <job>. This flips
-    // RED if the rebuild skips a declared <job> (or never enumerates them).
+    // THEN the allocator binds a stable F for every declared <workload>. This flips
+    // RED if the rebuild skips a declared <workload> (or never enumerates them).
     let after = allocator.snapshot();
     assert_eq!(after.len(), 3, "rebuild must bind every declared Service");
     for id in ["alpha", "bravo", "charlie"] {
@@ -416,14 +416,14 @@ async fn boot_rebuild_repopulates_empty_allocator_from_declared_services() {
         );
     }
 
-    // AND re-running the rebuild is idempotent — same F per <job>, no churn.
+    // AND re-running the rebuild is idempotent — same F per <workload>, no churn.
     rebuild_frontend_addrs_from_intent(&store, &path, &allocator)
         .await
         .expect("second rebuild must succeed");
     assert_eq!(
         allocator.snapshot(),
         after,
-        "re-running the rebuild re-assigns each <job> to the SAME F (no churn)",
+        "re-running the rebuild re-assigns each <workload> to the SAME F (no churn)",
     );
 }
 
@@ -447,7 +447,7 @@ async fn boot_rebuild_ignores_service_payload_under_a_sub_key_path() {
         .await
         .expect("boot rebuild must succeed");
 
-    // THEN ONLY the canonical record's `<job>=realsvc` is bound — the sub-key
+    // THEN ONLY the canonical record's `<workload>=realsvc` is bound — the sub-key
     // Service payload is a NON-record (not a `workloads/<id>` declaration) and
     // contributes no binding. Under the `||`→`&&` mutant the line-138 `if` never
     // fires (empty-AND-contains-'/' is impossible), so the sub-key is decoded,
@@ -457,7 +457,7 @@ async fn boot_rebuild_ignores_service_payload_under_a_sub_key_path() {
     assert_eq!(
         after.len(),
         1,
-        "only the canonical workloads/<id> record declares a <job>; the \
+        "only the canonical workloads/<id> record declares a <workload>; the \
          workloads/<id>/bogus sub-key Service payload must be SKIPPED before decode",
     );
     assert!(
@@ -508,7 +508,7 @@ async fn writer_feeds_the_same_allocator_instance_the_name_index_reads() {
 
     // (2) READER: build a NameIndex over the SAME allocator instance and an
     //     ObservationStore seeded with a running-AND-healthy backend for
-    //     <job>=api (so `api` is RESOLVABLE). `probe()` Lists the seeded row.
+    //     <workload>=api (so `api` is RESOLVABLE). `probe()` Lists the seeded row.
     let obs: Arc<SimObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("reader").expect("NodeId"), 0));
     obs.write(ObservationRow::ServiceBackend(running_healthy_row("api")))
@@ -521,7 +521,7 @@ async fn writer_feeds_the_same_allocator_instance_the_name_index_reads() {
     // (3) THEN: resolving `api.svc.overdrive.local` over the reader's index
     //     answers EXACTLY the writer's assigned F, byte-identical — the
     //     single source of frontend truth (DDN-2). There is NO second
-    //     <job> -> F source.
+    //     <workload> -> F source.
     //
     //     NON-VACUITY LITMUS: this assertion drives the READER path
     //     (`answer_for` -> `frontend_for` -> the SHARED allocator). Stubbing

@@ -25,7 +25,7 @@
 //!
 //! ## How NXDOMAIN is observed through `getent` (K2)
 //!
-//! A WITHHELD `<job>` projects to `answer_for → NameAnswer::NxDomain` (an empty
+//! A WITHHELD `<workload>` projects to `answer_for → NameAnswer::NxDomain` (an empty
 //! candidate set ⇒ NXDOMAIN; NODATA is reserved for AAAA on a RESOLVABLE name).
 //! On the wire that is an `RCODE=3 (NXDOMAIN)` response with NO answer records.
 //! `getent ahostsv4 <name>` (a real `getaddrinfo` stub-resolver call) then
@@ -36,7 +36,7 @@
 //!
 //! ## NXDOMAIN-02 recovery leg — driven through the production restart verb
 //!
-//! S-DBN-NXDOMAIN-02's final leg ("recover the SAME `<job>` to
+//! S-DBN-NXDOMAIN-02's final leg ("recover the SAME `<workload>` to
 //! Running-AND-HEALTHY after the stop, and prove getent resolves the SAME F") is
 //! driven through the production `overdrive workload restart server` verb =
 //! `POST /v1/workloads/server/restart` (the `restart_workload` handler; ADR-0073,
@@ -46,7 +46,7 @@
 //! restart, R4). A same-spec `POST /v1/workloads` re-deploy is NOT used — it takes the
 //! `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
 //! operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
-//! `WorkloadLifecycle` §Bug 3); `restart` is the verb that does. The `<job>`
+//! `WorkloadLifecycle` §Bug 3); `restart` is the verb that does. The `<workload>`
 //! stays DECLARED across the stop (the sentinel does NOT delete
 //! `workloads/server`), so the `FrontendAddrAllocator` RETAINS the SAME F —
 //! withhold-not-release, additionally Tier-1 mutation-gated at 01-04
@@ -146,17 +146,17 @@ const RESPONSE: &[u8] =
 /// intra-mesh leg-B peer dial (`overdrive-dataplane::mtls::outbound`).
 const MESH_PEER_SNI: &str = "peer.overdrive.local";
 
-/// The mesh name a client resolves to reach the "server" Service — `<job>` =
+/// The mesh name a client resolves to reach the "server" Service — `<workload>` =
 /// `server`. Equal to `format!("server.{}", MeshServiceName::SUFFIX)`.
 const SERVER_MESH_NAME: &str = "server.svc.overdrive.local";
 
-/// An UNKNOWN mesh name (no `<job>` of this label is ever deployed) — the
+/// An UNKNOWN mesh name (no `<workload>` of this label is ever deployed) — the
 /// S-DBN-NXDOMAIN-03 lookup-miss probe. Same `.svc.overdrive.local` SUFFIX so
 /// it routes to the production responder, but no backend ever contributes it.
 const UNKNOWN_MESH_NAME: &str = "nonexistent.svc.overdrive.local";
 
 /// The production per-host stable-frontend block (`10.98.0.0/16`,
-/// `WORKLOAD_FRONTEND_BASE`). `F` answered for `<job>` is a member; a
+/// `WORKLOAD_FRONTEND_BASE`). `F` answered for `<workload>` is a member; a
 /// per-instance backend addr lives in `10.99.0.0/16` and is NEVER the answer.
 const FRONTEND_FIRST_OCTET: u8 = 10;
 const FRONTEND_SECOND_OCTET: u8 = 98;
@@ -280,7 +280,7 @@ fn getent_in_netns(netns: &str, name: &str) -> GetentOutcome {
 
 /// Poll `getent_in_netns(name)` until it answers a stable `F ∈ 10.98.0.0/16`
 /// within `budget` (the K2 5s resolution budget) — re-querying because the
-/// responder's `name_index` exposes `<job>` only after the backend reaches
+/// responder's `name_index` exposes `<workload>` only after the backend reaches
 /// running-AND-healthy.
 fn poll_resolve_frontend(netns: &str, name: &str, budget: Duration) -> Option<Ipv4Addr> {
     let deadline = Instant::now() + budget;
@@ -297,7 +297,7 @@ fn poll_resolve_frontend(netns: &str, name: &str, budget: Duration) -> Option<Ip
 
 /// Poll `getent_in_netns(name)` until it reports a clean NXDOMAIN (no V4 addr,
 /// non-zero exit) within `budget`. Used after a stop converges — the WITHHOLD
-/// seam empties the `<job>`'s healthy set, the watch folds the dropped row, and
+/// seam empties the `<workload>`'s healthy set, the watch folds the dropped row, and
 /// the responder begins answering NXDOMAIN. The negative answer's 1s SOA TTL
 /// (DDN-8) lets the transition land within budget.
 fn poll_nxdomain(netns: &str, name: &str, budget: Duration) -> bool {
@@ -810,7 +810,7 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// running-and-healthy backend) and `getent("server.svc.overdrive.local")`
 /// reports NXDOMAIN (no V4 addr, non-zero exit), NEVER a stale / cached /
 /// guessed / frontend addr. Once the server reaches Running-AND-HEALTHY (the
-/// bridge writes a healthy `service_backends` row → the index exposes `<job>`
+/// bridge writes a healthy `service_backends` row → the index exposes `<workload>`
 /// bound a stable `F`), a re-query resolves to `F ∈ 10.98.0.0/16` (the negative
 /// answer's 1s SOA TTL lets the retry land promptly — DDN-8).
 ///
@@ -879,7 +879,7 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
     // (2) RECOVERY — once the server reaches Running-AND-HEALTHY, a re-query
     //     resolves to the STABLE frontend F ∈ 10.98.0.0/16. Wait for the server
     //     to reach Running (the bridge then writes a healthy service_backends
-    //     row and the index exposes <job> bound F). The 1s SOA negative-TTL lets
+    //     row and the index exposes <workload> bound F). The 1s SOA negative-TTL lets
     //     the retry land within the 5s budget.
     let _server_backend = poll_until(Duration::from_secs(30), Duration::from_millis(250), || {
         let obs = skeleton.obs();
@@ -927,7 +927,7 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 }
 
 // ============================================================================
-// S-DBN-NXDOMAIN-02 — after the backend stops, the <job> is WITHHELD (NXDOMAIN);
+// S-DBN-NXDOMAIN-02 — after the backend stops, the <workload> is WITHHELD (NXDOMAIN);
 // the stable F is NOT released. (Recovery leg driven by the restart verb below.)
 // ============================================================================
 
@@ -937,12 +937,12 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 /// `server.svc.overdrive.local` to its stable frontend addr `F` (getent
 /// confirms `F ∈ 10.98.0.0/16`). The server is then STOPPED through the
 /// production stop path (`POST /v1/workloads/server/stop`) and converges to
-/// Terminated, leaving the `<job>` "server" zero-healthy but STILL DECLARED
+/// Terminated, leaving the `<workload>` "server" zero-healthy but STILL DECLARED
 /// (not deleted). A deployed client re-querying the name then gets NXDOMAIN —
 /// the `name_index` WITHHELD the answer (zero running-and-healthy backends) —
 /// and NEVER the stale F's translated backend nor any stale addr.
 ///
-/// The withhold-not-release RECOVERY leg ("recover the SAME `<job>` to
+/// The withhold-not-release RECOVERY leg ("recover the SAME `<workload>` to
 /// Running-AND-HEALTHY → getent resolves the SAME F") is asserted in the
 /// SEPARATE recovery test below, driven through the production restart verb
 /// (`POST /v1/workloads/server/restart`; ADR-0073, shipped in Phase 01). This test
@@ -1024,12 +1024,12 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
     eprintln!("[03-01] S-DBN-NXDOMAIN-02: pre-stop F = {f_before}");
 
     // WHEN the server is stopped through the production stop path and converges
-    // to Terminated, leaving <job> "server" zero-healthy but STILL DECLARED.
+    // to Terminated, leaving <workload> "server" zero-healthy but STILL DECLARED.
     stop_and_converge(&skeleton, "server").await;
 
     // THEN a re-query gets NXDOMAIN — the name_index WITHHELD the answer (the
     // bridge dropped the healthy service_backends row → apply_row emptied the
-    // <job>'s healthy set → WITHHOLD). It NEVER returns the stale F's translated
+    // <workload>'s healthy set → WITHHOLD). It NEVER returns the stale F's translated
     // backend, nor any stale addr (no second source of liveness truth). The 1s
     // SOA negative-TTL + the watch fold land the transition within budget.
     let ns = client_netns.clone();
@@ -1059,7 +1059,7 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
         post.v4_addrs,
     );
     eprintln!(
-        "[03-01] S-DBN-NXDOMAIN-02 VERDICT: WORKS — after the production stop the <job> is WITHHELD \
+        "[03-01] S-DBN-NXDOMAIN-02 VERDICT: WORKS — after the production stop the <workload> is WITHHELD \
          (NXDOMAIN), no stale F ({f_before}) returned, on kernel {kr}. The withhold-not-release \
          RECOVERY observable is driven by the restart-verb recovery test (allocator F-retention is \
          Tier-1 mutation-gated at 01-04). (MERGE GATE: pinned-6.18 Tier-3 matrix, ADR-0068.)"
@@ -1070,11 +1070,11 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
 }
 
 /// S-DBN-NXDOMAIN-02 RECOVERY leg (withhold-not-release, Finding-2) — the SAME
-/// `<job>` recovered to Running-AND-HEALTHY after a stop resolves to the SAME F.
+/// `<workload>` recovered to Running-AND-HEALTHY after a stop resolves to the SAME F.
 ///
 /// The recovery is driven by the production `overdrive workload restart server`
 /// verb = `POST /v1/workloads/server/restart` (the `restart_workload` handler;
-/// ADR-0073, shipped in Phase 01). The `<job>` "server" is deployed
+/// ADR-0073, shipped in Phase 01). The `<workload>` "server" is deployed
 /// Running-AND-HEALTHY (getent resolves the stable F), STOPPED through
 /// `POST /v1/workloads/server/stop` (its name resolves NXDOMAIN while stopped), then
 /// RECOVERED via the restart verb. The restart handler atomically bumps the
@@ -1087,7 +1087,7 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
 /// `POST /v1/workloads` re-deploy is NOT used here precisely because it takes the
 /// `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
 /// operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
-/// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. The `<job>`
+/// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. The `<workload>`
 /// stays DECLARED across the stop (operator-stop writes a sentinel; it does NOT
 /// delete `workloads/server`), so the `FrontendAddrAllocator`'s idempotent
 /// `assign("server")` RETAINS the SAME F — the withhold-not-release F-retention
@@ -1134,7 +1134,7 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
     .unwrap_or_else(|| panic!("recovery: getent must resolve the stable F before the stop"));
 
     // WHEN: stop the server (name resolves NXDOMAIN while stopped), then RECOVER
-    // the SAME <job> "server" through the PRODUCTION restart verb — `POST
+    // the SAME <workload> "server" through the PRODUCTION restart verb — `POST
     // /v1/workloads/server/restart` (ADR-0073). The restart handler atomically bumps
     // the desired-run generation AND clears the `/stop` sentinel, so the
     // `WorkloadLifecycle` reconciler places a FRESH instance (stopped-origin
@@ -1145,7 +1145,7 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
     let restarted = run_server_restart(&skeleton, "server").await;
     assert!(restarted, "recovery: the production restart verb must accept the recover-after-stop");
     // The restart places a FRESH server instance; wait for it to reach Running
-    // before resolving (the <job> stayed DECLARED across the stop, so the
+    // before resolving (the <workload> stayed DECLARED across the stop, so the
     // allocator RETAINED F — withhold-not-release).
     poll_until(Duration::from_secs(30), Duration::from_millis(200), || {
         let obs = skeleton.obs();
@@ -1176,7 +1176,7 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
     assert_eq!(
         f_after, f_before,
         "S-DBN-NXDOMAIN-02 (recovery): getent must re-resolve to the SAME F byte-for-byte after \
-         the <job> recovers to Running-AND-HEALTHY (the FrontendAddrAllocator RETAINED F across \
+         the <workload> recovers to Running-AND-HEALTHY (the FrontendAddrAllocator RETAINED F across \
          the zero-healthy window — withhold-not-release; F is per-logical-workload). got {f_after}, \
          expected {f_before}",
     );
@@ -1196,7 +1196,7 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
 /// With at least one unrelated "server" deployed and Running-AND-HEALTHY (so
 /// the hit path is live), a deployed client querying `nonexistent.svc.\
 /// overdrive.local` gets NXDOMAIN (the `answer_for` lookup-miss arm: the index
-/// has no `<job>` of that label → WITHHOLD → NXDOMAIN). The unrelated server's
+/// has no `<workload>` of that label → WITHHOLD → NXDOMAIN). The unrelated server's
 /// name STILL resolves on the same real socket — proving the miss does not
 /// break the hit path.
 ///
@@ -1244,14 +1244,14 @@ async fn unknown_name_is_nxdomain_and_the_known_name_still_resolves() {
     eprintln!("[03-01] S-DBN-NXDOMAIN-03: known name resolved to F = {known}");
 
     // The UNKNOWN name yields NXDOMAIN on the SAME real socket — the answer_for
-    // lookup-miss arm WITHHOLDS (no <job> of that label in the index).
+    // lookup-miss arm WITHHOLDS (no <workload> of that label in the index).
     let ns = client_netns.clone();
     let unknown = tokio::task::spawn_blocking(move || getent_in_netns(&ns, UNKNOWN_MESH_NAME))
         .await
         .expect("unknown getent task join");
     assert!(
         unknown.v4_addrs.is_empty(),
-        "S-DBN-NXDOMAIN-03: getent({UNKNOWN_MESH_NAME}) must return NO address — no <job> of that \
+        "S-DBN-NXDOMAIN-03: getent({UNKNOWN_MESH_NAME}) must return NO address — no <workload> of that \
          label is deployed, so the index WITHHOLDS (the answer_for lookup-miss arm). NEVER a \
          fabricated/guessed addr. got {:?}",
         unknown.v4_addrs,

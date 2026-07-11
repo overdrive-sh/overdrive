@@ -62,7 +62,7 @@ pub mod cgroup_preflight;
 pub mod dataplane_config;
 // dial-by-name-responder (ADR-0072, GH #243) — the in-agent name layer:
 // the third reader of the `ObservationStore` `service_backends` surface,
-// answering `<job>.svc.overdrive.local` queries. Step 01-02 lands only the
+// answering `<workload>.svc.overdrive.local` queries. Step 01-02 lands only the
 // `wire` codec (DNS decode/encode behind the DDN-4/D-DBN-5 ACL boundary);
 // `answer.rs` / `name_index.rs` / `responder.rs` are later slices.
 pub mod dns_responder;
@@ -346,13 +346,13 @@ pub struct AppState {
     /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
     /// on a fresh process boot nothing is held (criterion 6).
     pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
-    /// Per-host stable per-`<job>` frontend-address allocator
+    /// Per-host stable per-`<workload>` frontend-address allocator
     /// (dial-by-name-responder step 01-05; ADR-0072 REV-2/REV-3, GH #243).
     /// The SINGLE source of frontend truth (DDN-2): the ONE `Arc`-shared
     /// instance the deploy-time WRITER (the `submit_workload` Service arm +
     /// the boot rebuild) populates AND the `name_index` (01-03) / `by_frontend`
     /// (02-00) READERS observe. The 01-05 assign-on-declare writes the
-    /// `<job> → F` binding; 02-01 LATER injects the SAME cloned instance into
+    /// `<workload> → F` binding; 02-01 LATER injects the SAME cloned instance into
     /// the `DnsResponder` + re-keyed `MtlsResolve` readers.
     ///
     /// Plain `Clone` value field (mirrors `net_slot_allocator`), NOT an outer
@@ -2172,7 +2172,7 @@ pub async fn run_server_with_obs_and_driver(
         // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
         // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
         // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
-        // pass re-derives every `<job> → F` binding from the declared-Service intent
+        // pass re-derives every `<workload> → F` binding from the declared-Service intent
         // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
         // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
         // the netns adopt + nft sweep above (preserving the PINNED boot order
