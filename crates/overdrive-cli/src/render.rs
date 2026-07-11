@@ -71,7 +71,8 @@ pub fn cluster_status(out: &ClusterStatusOutput) -> String {
 ///
 /// The empty-state message is wired through
 /// `NodeListOutput::empty_state_message` so operators always see an
-/// explicit pointer to the `phase-1-first-workload` onboarding step.
+/// explicit diagnostic of the no-nodes state (nodes self-register on
+/// `overdrive serve` boot).
 #[must_use]
 pub fn node_list(out: &NodeListOutput) -> String {
     use std::fmt::Write as _;

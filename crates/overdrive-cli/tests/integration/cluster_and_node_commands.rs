@@ -13,9 +13,9 @@
 //!       registry (includes `noop-heartbeat`), and typed broker
 //!       counters (per ADR-0020 the four-field shape; the
 //!       `commit_index` field is dropped).
-//!   (b) `node::list` against in-process server returns an honest empty
-//!       rows vector + an empty-state message naming
-//!       `phase-1-first-workload`.
+//!   (b) `node::list` against in-process server returns the boot-time
+//!       row + an empty-state message carrying the no-nodes diagnostic
+//!       (no `phase-1-first-workload` forward-pointer, #219).
 //!   (c) `cluster::status` with no server returns `CliError::Transport`
 //!       whose Display names the endpoint so the operator can act on it.
 
@@ -97,7 +97,7 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
 
 // -------------------------------------------------------------------
 // (b) node::list returns the boot-time row and carries the
-//     phase-1-first-workload empty-state message
+//     no-nodes-diagnostic empty-state message
 // -------------------------------------------------------------------
 //
 // Post-`fix-orphaned-node-health-writer` (step 01-02 of that
@@ -110,7 +110,7 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
 // AND the message-field plumbing is still wired.
 
 #[tokio::test]
-async fn node_list_against_in_process_server_returns_boot_time_row_with_phase_1_first_workload_message()
+async fn node_list_against_in_process_server_returns_boot_time_row_with_no_nodes_diagnostic_message()
  {
     let (handle, tmp) = spawn_server().await;
     let cfg = config_path(tmp.path());
@@ -127,9 +127,10 @@ async fn node_list_against_in_process_server_returns_boot_time_row_with_phase_1_
         output.rows.len(),
     );
     assert!(
-        output.empty_state_message.contains("phase-1-first-workload"),
-        "empty-state message field must reference `phase-1-first-workload` \
-         (renderer chooses whether to display based on rows emptiness); got: {}",
+        output.empty_state_message.contains("self-register")
+            && !output.empty_state_message.contains("phase-1-first-workload"),
+        "empty-state message field must carry the no-nodes diagnostic and NOT the \
+         stale `phase-1-first-workload` forward-pointer (#219); got: {}",
         output.empty_state_message,
     );
 

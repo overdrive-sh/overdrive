@@ -13,9 +13,9 @@
 //!       and the corresponding values — four fields, NOT five. The
 //!       `Commit index:` line was dropped per ADR-0020 §Decision §4.
 //!   (e) `render::node_list` on an empty result emits a string
-//!       containing a zero-node marker AND the
-//!       `phase-1-first-workload` reference from the empty-state
-//!       message.
+//!       containing a zero-node marker AND the no-nodes diagnostic
+//!       from the empty-state message (no `phase-1-first-workload`
+//!       forward-pointer, #219).
 //!   (f) `render::node_list` with rows emits one line per node.
 //!
 //! The walking-skeleton scenario WS-2 (`distill/test-scenarios.md`
@@ -88,8 +88,8 @@ fn cluster_status_renders_four_fields_no_commit_index_line() {
 fn render_node_list_empty_state_uses_explicit_message() {
     let out = NodeListOutput {
         rows: vec![],
-        empty_state_message: "no nodes yet — run `phase-1-first-workload` to register one"
-            .to_string(),
+        empty_state_message:
+            "no nodes registered yet — nodes self-register when `overdrive serve` boots".to_string(),
     };
     let rendered = overdrive_cli::render::node_list(&out);
 
@@ -98,8 +98,9 @@ fn render_node_list_empty_state_uses_explicit_message() {
         "rendered empty node-list must carry a zero-node marker; got:\n{rendered}",
     );
     assert!(
-        rendered.contains("phase-1-first-workload"),
-        "rendered empty node-list must carry the phase-1-first-workload reference; got:\n{rendered}",
+        rendered.contains("self-register") && !rendered.contains("phase-1-first-workload"),
+        "rendered empty node-list must carry the no-nodes diagnostic and NOT the \
+         stale `phase-1-first-workload` forward-pointer (#219); got:\n{rendered}",
     );
 }
 

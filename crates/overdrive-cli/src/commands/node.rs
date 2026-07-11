@@ -2,8 +2,8 @@
 //!
 //! Reads the observation-store `node_health` rows from the control
 //! plane and returns a typed `NodeListOutput` carrying the rows plus an
-//! explicit empty-state message referencing the
-//! `phase-1-first-workload` onboarding step.
+//! explicit empty-state message diagnosing the no-nodes state (nodes
+//! self-register on `overdrive serve` boot).
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` the handler is a plain
 //! `async fn` that integration tests call directly — no subprocess, no
@@ -34,16 +34,17 @@ pub struct NodeListOutput {
     /// Raw rows from `GET /v1/nodes`, re-exported unchanged per
     /// ADR-0014 (no shadow types).
     pub rows: Vec<NodeRowBody>,
-    /// Operator-facing empty-state message pointing at the
-    /// `phase-1-first-workload` onboarding step. Rendered verbatim
-    /// when `rows` is empty; ignored otherwise.
+    /// Operator-facing empty-state message diagnosing the no-nodes
+    /// state (nodes self-register on `overdrive serve` boot). Rendered
+    /// verbatim when `rows` is empty; ignored otherwise.
     pub empty_state_message: String,
 }
 
 /// Default empty-state message for `node list`. Referenced by the
 /// render layer when `rows.is_empty()`.
-const EMPTY_STATE_MESSAGE: &str =
-    "no nodes registered — see `phase-1-first-workload` to register the first node";
+const EMPTY_STATE_MESSAGE: &str = "no nodes registered yet — nodes self-register \
+     when `overdrive serve` boots and writes a health row; if this stays empty, \
+     check that the control plane is running";
 
 /// List node-health rows from the observation store.
 ///
