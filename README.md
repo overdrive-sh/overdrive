@@ -12,8 +12,8 @@ instead of a stack you assemble and babysit.
 > pre-production. This README marks what runs now and what is intended;
 > nothing here is presented as shipped that isn't, and there are no benchmark
 > numbers because there is nothing at fleet scale to measure yet. The full
-> design — most of which is still ahead of the implementation — lives in the
-> [whitepaper](docs/whitepaper.md).
+> design — most of which is still ahead of the implementation — is tracked in
+> the roadmap below.
 
 ## What runs today
 
@@ -137,7 +137,6 @@ The full tracker — 146 open issues across these milestones — lives at
   end-to-end path that runs today.
 - [How it compares](https://overdrive.sh/docs/comparisons) — Overdrive versus
   Kubernetes, Nomad, and Fly.io, with the counter-case stated plainly.
-- [Whitepaper](docs/whitepaper.md) — the full platform design.
 
 ## License
 

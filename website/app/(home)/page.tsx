@@ -20,7 +20,7 @@ import {
 // SPIRE), no implementation primitives (reconcilers, Raft, XDP, kTLS, SPIFFE
 // in prose), no unmeasured performance numbers. Every line says what the
 // reader GETS. Claims are grounded in real or explicitly-designed behaviour
-// from docs/product and the whitepaper (C-6: real content only, no invented
+// from docs/product and the roadmap (C-6: real content only, no invented
 // features, nothing presented as measured that hasn't been). Anything not yet
 // shipped lives in a visually distinct, explicitly-labelled "on the roadmap"
 // block.
@@ -170,7 +170,7 @@ const roadmap = [
 	},
 ] as const;
 
-// Self-healing, the whitepaper §12 way: tiered remediation ending in an LLM SRE
+// Self-healing, the designed way: tiered remediation ending in an LLM SRE
 // agent. Intended, not shipped — rendered in the marked "on the roadmap" block.
 const selfHealingTiers = [
 	{

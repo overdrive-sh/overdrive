@@ -47,7 +47,7 @@ instead of leaving voice/structure to whoever happens to be editing.
 ### Content constraints that still hold (C-6)
 
 Document **only real, implemented behaviour** — never describe features as
-shipped that do not exist. Source from the whitepaper / `docs/product/` /
+shipped that do not exist. Source from `docs/product/` (ADRs) /
 verified runtime behaviour. The technical-writer skill produces the writing;
 this accuracy constraint is non-negotiable on top of it.
 

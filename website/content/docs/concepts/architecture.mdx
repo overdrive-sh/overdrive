@@ -3,7 +3,7 @@ title: Architecture overview
 description: How the parts of Overdrive fit together as it ships today — one binary, a reconciling control plane over redb, an eBPF dataplane, and process workloads under cgroups, all on a single node.
 ---
 
-This page describes Overdrive as it runs today, not as the whitepaper imagines
+This page describes Overdrive as it runs today, not as the roadmap imagines
 it finished. The shipped system is smaller and sharper than the full design: one
 binary, one node, a control plane that reconciles declared intent into running
 processes, a real eBPF dataplane in the packet path, and mutual TLS between the
@@ -269,7 +269,7 @@ rather than against a live cluster.
 
 ## What is not here yet
 
-The whitepaper describes a larger system. The following are design-stage — there
+The full design describes a larger system. The following are design-stage — there
 is no wired, functional code for them in what ships today, and these docs will
 not describe them as present until there is:
 
