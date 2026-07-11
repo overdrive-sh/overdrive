@@ -4,6 +4,14 @@
 
 Accepted. 2026-04-23.
 
+**Amended by ADR-0075 (2026-07-11)** — the `/v1/jobs*` route family is
+renamed to `/v1/workloads*` (path noun only; semantics unchanged). The
+client-method prose below that names `POST /v1/jobs` etc. is now
+historical for that spelling; the core decision (hand-rolled `reqwest`
+client, shared Rust request/response types, single in-tree consumer) is
+unchanged — and is the reason the rename is a clean single cut (one
+client, moved in lockstep). See ADR-0075 *Cross-links → C1*.
+
 ## Context
 
 DISCUSS Key Decision 7 + wave-decisions.md "What DESIGN wave should

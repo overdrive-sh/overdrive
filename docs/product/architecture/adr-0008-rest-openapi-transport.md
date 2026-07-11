@@ -35,6 +35,13 @@ cluster-status shape that drops the counter — see Amendment 2026-04-26
 > conflict-row shape (see ADR-0015 *Amendment 2026-04-26 (ADR-0020)*).
 > Source: `docs/product/architecture/adr-0020-drop-commit-index-phase-1.md`.
 
+**Amended by ADR-0075 (2026-07-11)** — the `/v1/jobs*` route family is
+renamed to `/v1/workloads*` (path noun only; semantics unchanged). The
+endpoint table in *Decision* below is now historical for the `/v1/jobs*`
+spelling; the transport (axum/hyper/rustls), HTTP-version posture, `/v1`
+prefix, and the ADR-0020 response-shape amendments above are all
+unchanged. See ADR-0075 *Cross-links → C1*.
+
 ## Context
 
 Phase 1 control-plane-core ships the first operator-observable surface on top

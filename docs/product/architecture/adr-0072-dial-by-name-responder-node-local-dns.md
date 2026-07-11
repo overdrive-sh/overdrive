@@ -274,6 +274,15 @@ is sanctioned. **Merge-gate caveat:** the spike is on dev-Lima 7.x; the
 output-hook + `type route` + policy-routing surface MUST be re-confirmed on the
 pinned-6.18 appliance kernel at Tier-3/DEVOPS (ADR-0068).
 
+**See ADR-0075 (2026-07-11)** — the SPIFFE `/job/` alloc-path segment is
+renamed to `/workload/` (`spiffe://overdrive.local/job/<WorkloadId>/alloc/<id>`
+→ `.../workload/<WorkloadId>/alloc/<id>`), so DDN-2's SVID-path illustrations
+are now historical for that spelling. The `<job>` label DDN-2 groups by is
+derived through the shared `workload_of` parser, which moves with the rename;
+the emitted DNS name (`<name>.svc.overdrive.local`) never carried a literal
+"job", so dial-by-name is unaffected on the wire. Not superseded — see
+ADR-0075 *Cross-links → C2*.
+
 ## Changed Assumptions (REV-2, 2026-06-25)
 
 ### What changed and why

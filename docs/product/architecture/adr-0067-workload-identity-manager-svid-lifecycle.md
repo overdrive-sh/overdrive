@@ -65,6 +65,17 @@ allocations, holds it where the dataplane can read it, and drops it on stop
 (GH #35, roadmap step 2.13). Supersedes nothing — ADR-0063 mints; this ADR
 holds, reads, and drops what ADR-0063 mints.
 
+**See ADR-0075 (2026-07-11)** — the SPIFFE `/job/` path segment is renamed
+to `/workload/` (`spiffe://overdrive.local/job/{workload}/alloc/{alloc}` →
+`.../workload/{workload}/alloc/{alloc}`); this ADR's D5 `for_allocation`
+constructor emits the new segment and its `/job/` illustrations are now
+historical. **Correction to D5:** `for_allocation` was NOT the sole
+producer of the `/job/` SVID string — a second live emitter existed on the
+convergence path in `reconciler_runtime.rs` (backend-identity derivation),
+renamed in lockstep under ADR-0075. The D5-intended single-producer
+consolidation (folding that duplicate into `for_allocation`) is the
+optional follow-up. Not superseded — see ADR-0075 *Cross-links → C2*.
+
 ## Context
 
 ADR-0063 shipped the `Ca` port and `ca_issuance::issue_and_audit` — the
