@@ -1,7 +1,7 @@
 //! backend-instance-replacement slice-01 step 01-03 / S-BIR-HANDLER-TXN
 //! (US-BIR-1 AC3/4) — `restart_workload` on a declared workload commits
 //! exactly ONE atomic bump+clear txn, retains the intent row, and
-//! enqueues one job-lifecycle evaluation.
+//! enqueues one workload-lifecycle evaluation.
 //!
 //! Given a declared `workloads/payments` aggregate (and an optional
 //! `/stop` sentinel), `restart_workload`:
@@ -13,7 +13,7 @@
 //!     atomically;
 //!   * RETAINS `for_workload(payments)` (`Some` after — the intent stays
 //!     declared, distinct from job-removal #211);
-//!   * enqueues exactly ONE job-lifecycle evaluation (broker pending == 1);
+//!   * enqueues exactly ONE workload-lifecycle evaluation (broker pending == 1);
 //!   * returns 200 with `{ workload_id: "payments", outcome }`.
 //!
 //! # Port-to-port
@@ -165,12 +165,12 @@ async fn restart_commits_one_bump_clear_txn_retains_intent_and_enqueues_one_eval
         "restart must NOT delete or rewrite `workloads/payments` — the intent stays declared",
     );
 
-    // And: exactly ONE job-lifecycle evaluation was enqueued.
+    // And: exactly ONE workload-lifecycle evaluation was enqueued.
     let pending_after = state.runtime.broker().counters().queued;
     assert_eq!(
         pending_after,
         pending_before + 1,
-        "restart must enqueue exactly one job-lifecycle evaluation; broker pending went from \
+        "restart must enqueue exactly one workload-lifecycle evaluation; broker pending went from \
          {pending_before} to {pending_after}",
     );
 }

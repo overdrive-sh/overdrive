@@ -4315,8 +4315,8 @@ mod tests {
     // -----------------------------------------------------------------
 
     fn dispatch_jl_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
-        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-            .expect("job-lifecycle is a valid ReconcilerName")
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle is a valid ReconcilerName")
     }
 
     fn dispatch_noop_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
@@ -4705,7 +4705,7 @@ mod tests {
     #[tokio::test]
     async fn bulk_load_is_deterministic_passes_on_seeded_corpus() {
         // The evaluator pre-populates ≥3 entries spanning the
-        // job-lifecycle reconciler and asserts two reads produce
+        // workload-lifecycle reconciler and asserts two reads produce
         // PartialEq-equal maps. On the BTreeMap-backed SimViewStore
         // this is structurally true — the test catches a regression
         // that would swap BTreeMap for HashMap or otherwise

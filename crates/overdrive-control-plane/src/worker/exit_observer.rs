@@ -126,7 +126,7 @@ pub fn spawn(
 ///
 /// Same as [`spawn`] but additionally takes the [`ReconcilerRuntime`]
 /// so the observer can re-enqueue an `Evaluation` on the broker after
-/// each obs write. Phase 1 single-mode uses a job-lifecycle reconciler
+/// each obs write. Phase 1 single-mode uses a workload-lifecycle reconciler
 /// that picks up the new row on the next tick; the re-enqueue
 /// collapses the latency between exit classification and
 /// reconciler-driven recovery from "wait for the next periodic tick"
@@ -650,7 +650,7 @@ fn workload_lifecycle_name() -> ReconcilerName {
     // the single compile-time anchor for the kebab-case literal, so
     // there is exactly one place to change if the canonical name ever
     // moves. The `expect` is by-construction-safe — the validator's
-    // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"job-lifecycle"` and
+    // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"workload-lifecycle"` and
     // the per-call `ReconcilerName::new` invocation is the same shape
     // `WorkloadLifecycle::canonical()` itself uses.
     #[allow(clippy::expect_used)]

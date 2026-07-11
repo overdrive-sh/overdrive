@@ -903,7 +903,7 @@ impl ReconcilerRuntime {
         self.persist_view(name, target, AnyReconcilerView::WorkloadLifecycle(next)).await
     }
 
-    /// Seed the in-memory view for `(job-lifecycle, target)` directly,
+    /// Seed the in-memory view for `(workload-lifecycle, target)` directly,
     /// bypassing the `ViewStore`. Used by acceptance tests that need
     /// to bootstrap a specific `WorkloadLifecycleView` shape (e.g.
     /// Failed-mid-backoff) without driving the full reconcile cycle to
@@ -928,7 +928,7 @@ impl ReconcilerRuntime {
         }
     }
 
-    /// Drop the in-memory view for `(job-lifecycle, target)` directly.
+    /// Drop the in-memory view for `(workload-lifecycle, target)` directly.
     /// Pairs with [`Self::seed_workload_lifecycle_view_for_test`] for the
     /// "simulate process restart" test pattern in
     /// `runtime_convergence_loop.rs`. **Test-only.**
@@ -1178,7 +1178,7 @@ impl ReconcilerRuntime {
 /// The const is the single compile-time anchor for the name string —
 /// see the `refactor-reconciler-static-name` RCA. `ReconcilerName::new`
 /// validates against `^[a-z][a-z0-9-]{0,62}$`; the literal
-/// `"job-lifecycle"` declared on `<WorkloadLifecycle as Reconciler>::NAME`
+/// `"workload-lifecycle"` declared on `<WorkloadLifecycle as Reconciler>::NAME`
 /// is verified-valid at construction time by every `WorkloadLifecycle::canonical()`
 /// call site (`unwrap` or `expect` would be equivalent at runtime —
 /// the literal cannot fail validation as long as the trait const and

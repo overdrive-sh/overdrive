@@ -76,7 +76,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -147,8 +147,9 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) {
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
     let mut reached_running = false;
@@ -206,8 +207,9 @@ async fn transient_obs_write_recovers_on_retry() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut saw_failed_event = false;
     'outer: for tick_n in 30_u64..80 {
@@ -281,8 +283,9 @@ async fn terminal_obs_write_escalates_via_lifecycle_event() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_degraded_event = None;
     'outer: for tick_n in 30_u64..80 {

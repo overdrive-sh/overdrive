@@ -91,7 +91,7 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
@@ -160,8 +160,9 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     let target_resource =
         overdrive_core::reconcilers::TargetResource::new(&format!("workload/{target}"))
             .expect("valid target");
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
     for tick_n in 0..20_u64 {

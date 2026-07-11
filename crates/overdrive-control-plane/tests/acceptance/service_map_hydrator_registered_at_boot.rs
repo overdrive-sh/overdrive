@@ -44,7 +44,7 @@ async fn production_boot_registers_both_bridge_and_hydrator() {
     // `run_server_with_obs_and_driver` — noop, workload-lifecycle,
     // backend-discovery-bridge, service-map-hydrator.
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let host_ipv4 = Ipv4Addr::LOCALHOST;
     let node_id = NodeId::new("local").expect("valid NodeId");
     runtime

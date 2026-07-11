@@ -307,7 +307,7 @@ mod tests {
     /// Reconciler name as `&'static str` literal — the byte-level
     /// `ViewStore` surface requires `&'static` per the
     /// `refactor-reconciler-static-name` RCA.
-    const N: &str = "job-lifecycle";
+    const N: &str = "workload-lifecycle";
     const N_OTHER: &str = "node-drainer";
 
     fn target(s: &str) -> TargetResource {

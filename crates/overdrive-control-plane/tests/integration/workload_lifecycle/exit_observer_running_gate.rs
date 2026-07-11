@@ -113,7 +113,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -240,8 +240,9 @@ async fn watcher_cannot_emit_exit_before_running_row_committed() {
     // the exit observer reads the present prior row and writes
     // Failed.
     let start = Instant::now();
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
 
     let mut found_terminal_event: Option<AllocStateWire> = None;
@@ -349,8 +350,9 @@ async fn degraded_escalation_still_fires_running_gate() {
     let start = Instant::now();
 
     let mut events = h.state.lifecycle_events.subscribe();
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
 
     // Drive to Running first — the action shim's StartAllocation

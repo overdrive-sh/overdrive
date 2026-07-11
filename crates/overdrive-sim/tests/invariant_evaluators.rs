@@ -280,8 +280,8 @@ fn entropy_determinism_fails_when_two_sim_entropies_disagree() {
 // ---------------------------------------------------------------------------
 
 fn jl_reconciler() -> overdrive_core::reconcilers::ReconcilerName {
-    overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle is a valid ReconcilerName")
+    overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+        .expect("workload-lifecycle is a valid ReconcilerName")
 }
 
 fn target(raw: &str) -> overdrive_core::reconcilers::TargetResource {
@@ -313,9 +313,9 @@ fn dispatch_routing_passes_when_each_eval_dispatches_named_reconciler_only() {
 
 /// Negative case — the regression-test proof for this delivery.
 ///
-/// Mocked fan-out: a SINGLE drained eval names `job-lifecycle` against
+/// Mocked fan-out: a SINGLE drained eval names `workload-lifecycle` against
 /// `workload/payments`, but the dispatch record contains TWO entries — one
-/// correct (`job-lifecycle`, `workload/payments`) and one wrong (`noop-
+/// correct (`workload-lifecycle`, `workload/payments`) and one wrong (`noop-
 /// heartbeat`, `workload/payments`). This is exactly the shape the precursor
 /// fix at commit `e6f5e5e` eliminated in production: a registry-wide
 /// loop dispatching every reconciler against a single drained eval.

@@ -336,9 +336,9 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         .expect("Service with terminal alloc must emit ReleaseServiceVip");
 
     let expected_correlation =
-        CorrelationKey::derive("job-lifecycle/web-api", &digest, "release-service-vip");
+        CorrelationKey::derive("workload-lifecycle/web-api", &digest, "release-service-vip");
     let wrong_correlation =
-        CorrelationKey::derive("job-lifecycle/unknown", &digest, "release-service-vip");
+        CorrelationKey::derive("workload-lifecycle/unknown", &digest, "release-service-vip");
 
     match release {
         Action::ReleaseServiceVip { correlation, .. } => {

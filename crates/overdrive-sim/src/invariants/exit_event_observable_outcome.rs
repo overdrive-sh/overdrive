@@ -188,7 +188,7 @@ async fn drive(scenario: Scenario, label: &str) -> Result<(), String> {
     let tmp = TempDir::new().map_err(|e| format!("scenario `{label}`: tempdir: {e}"))?;
     let h = build_harness(&tmp).await.map_err(|e| format!("scenario `{label}`: {e}"))?;
 
-    let workload_lifecycle_name = ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = ReconcilerName::new("workload-lifecycle")
         .map_err(|e| format!("scenario `{label}`: reconciler name: {e}"))?;
     let mut events = h.state.lifecycle_events.subscribe();
     let start = Instant::now();
@@ -457,7 +457,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     runtime
         .register(workload_lifecycle())
         .await
-        .map_err(|e| format!("register job-lifecycle: {e:?}"))?;
+        .map_err(|e| format!("register workload-lifecycle: {e:?}"))?;
 
     let store = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb"))

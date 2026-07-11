@@ -245,7 +245,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     runtime.register(workflow_lifecycle()).await.expect("register workflow-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");

@@ -1,5 +1,5 @@
 //! Step 02-02 / Slice 3A.2 scenario 3.14 — `cluster status` enumerates
-//! both `noop-heartbeat` AND `job-lifecycle` reconcilers from the
+//! both `noop-heartbeat` AND `workload-lifecycle` reconcilers from the
 //! runtime registry.
 //!
 //! Default-lane (in-process server fixture). The test enters via the
@@ -35,7 +35,7 @@ async fn build_app_state(tmp: &TempDir) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -65,18 +65,18 @@ async fn build_app_state(tmp: &TempDir) -> AppState {
 }
 
 #[tokio::test]
-async fn cluster_status_renders_job_lifecycle_alongside_noop_heartbeat() {
+async fn cluster_status_renders_workload_lifecycle_alongside_noop_heartbeat() {
     let tmp = TempDir::new().expect("tmpdir");
     let state = build_app_state(&tmp).await;
 
     let Json(body): Json<ClusterStatus> =
         cluster_status(State(state)).await.expect("cluster_status handler ok");
 
-    // BTreeMap iteration → canonical Ord order — `job-lifecycle` < `noop-heartbeat`
+    // BTreeMap iteration → canonical Ord order — `noop-heartbeat` < `workload-lifecycle`
     // alphabetically.
     assert_eq!(
         body.reconcilers,
-        vec!["job-lifecycle".to_string(), "noop-heartbeat".to_string()],
+        vec!["noop-heartbeat".to_string(), "workload-lifecycle".to_string()],
         "cluster status must enumerate both registered reconcilers in canonical order"
     );
 }

@@ -78,7 +78,7 @@ fn dispatch_routes_noop_heartbeat_unit_triple_to_noop_action() {
 // -------------------------------------------------------------------
 
 #[test]
-fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
+fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
     // Construct the canonical `WorkloadLifecycle`, wrap it in
     // `AnyReconciler::WorkloadLifecycle`, and dispatch with the
     // WorkloadLifecycle triple. Production: routes to

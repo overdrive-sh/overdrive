@@ -53,7 +53,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let runtime = Arc::new(runtime);
 
     let local_node = NodeId::new("local").expect("node id");

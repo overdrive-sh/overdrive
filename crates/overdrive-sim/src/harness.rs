@@ -827,7 +827,7 @@ fn drive_broker_collapse_multi_key()
 /// Mirrors `lib.rs:465-481`'s post-fix shape (`drain_pending` → for eval
 /// in pending → `run_convergence_tick`) without depending on
 /// `overdrive-control-plane` (per ADR-0004 sim/host split). Submits a
-/// fixed set of evals naming `job-lifecycle` against distinct targets,
+/// fixed set of evals naming `workload-lifecycle` against distinct targets,
 /// drains, and records each dispatch as a `(reconciler, target)` tuple.
 /// The recorded dispatcher honours the §8 contract: each drained eval
 /// dispatches exactly one (R, T) where R is the eval's named reconciler.
@@ -845,8 +845,8 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
     use overdrive_core::eval_broker::Evaluation;
     use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 
-    let r_jl =
-        ReconcilerName::new("job-lifecycle").expect("job-lifecycle is a valid ReconcilerName");
+    let r_jl = ReconcilerName::new("workload-lifecycle")
+        .expect("workload-lifecycle is a valid ReconcilerName");
     let t_a = TargetResource::new("workload/payments")
         .expect("workload/payments is a valid TargetResource");
     let t_b = TargetResource::new("workload/frontend")

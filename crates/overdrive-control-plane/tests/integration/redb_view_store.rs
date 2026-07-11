@@ -24,7 +24,7 @@ struct DemoView {
 /// Reconciler names as `&'static str` literals — the `ViewStore` byte
 /// surface requires `&'static` per the
 /// `refactor-reconciler-static-name` RCA.
-const N_JOB: &str = "job-lifecycle";
+const N_JOB: &str = "workload-lifecycle";
 const N_NODE: &str = "node-drainer";
 
 fn target(s: &str) -> TargetResource {

@@ -94,7 +94,7 @@ async fn runtime_bulk_loads_views_at_register() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
 
-    let n = name("job-lifecycle");
+    let n = name("workload-lifecycle");
     let target_a = target("workload/payments");
     let target_b = target("workload/frontend");
 
@@ -119,12 +119,12 @@ async fn runtime_bulk_loads_views_at_register() {
     runtime
         .register(AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical()))
         .await
-        .expect("register job-lifecycle");
+        .expect("register workload-lifecycle");
 
     // Inspect the runtime's in-memory map via the test-only accessor.
     let loaded = runtime
         .loaded_workload_lifecycle_views_for_test(&n)
-        .expect("job-lifecycle map must exist after register");
+        .expect("workload-lifecycle map must exist after register");
     assert_eq!(loaded.get(&target_a), Some(&view_a), "view_a must be bulk-loaded");
     assert_eq!(loaded.get(&target_b), Some(&view_b), "view_b must be bulk-loaded");
 }
@@ -138,7 +138,7 @@ async fn runtime_bulk_loads_views_at_register() {
 async fn runtime_writes_through_before_in_memory_update() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
-    let n = name("job-lifecycle");
+    let n = name("workload-lifecycle");
     let t = target("workload/payments");
 
     let mut original = WorkloadLifecycleView::default();
@@ -209,7 +209,7 @@ async fn runtime_writes_through_before_in_memory_update() {
 async fn runtime_skips_write_through_when_next_view_equals_in_memory() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
-    let n = name("job-lifecycle");
+    let n = name("workload-lifecycle");
     let t = target("workload/payments");
 
     let mut runtime =
@@ -261,7 +261,7 @@ async fn runtime_skips_write_through_when_next_view_equals_in_memory() {
     // taking the lock).
     let after = runtime
         .loaded_workload_lifecycle_views_for_test(&n)
-        .expect("job-lifecycle map must exist after register");
+        .expect("workload-lifecycle map must exist after register");
     assert_eq!(
         after.get(&t),
         Some(&seeded),

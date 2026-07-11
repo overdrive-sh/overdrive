@@ -81,7 +81,7 @@ pub struct WorkloadLifecycle {
 }
 
 impl WorkloadLifecycle {
-    /// Construct the canonical `job-lifecycle` instance.
+    /// Construct the canonical `workload-lifecycle` instance.
     ///
     /// # Panics
     ///
@@ -91,14 +91,14 @@ impl WorkloadLifecycle {
     pub fn canonical() -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(<Self as Reconciler>::NAME)
-            .expect("'job-lifecycle' is a valid ReconcilerName by construction");
+            .expect("'workload-lifecycle' is a valid ReconcilerName by construction");
         Self { name }
     }
 }
 
 impl Reconciler for WorkloadLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
-    const NAME: &'static str = "job-lifecycle";
+    const NAME: &'static str = "workload-lifecycle";
 
     type State = WorkloadLifecycleState;
     type View = WorkloadLifecycleView;
@@ -1041,7 +1041,7 @@ fn service_vip_release_emission(
     if desired.job.is_some() {
         return None;
     }
-    let target = format!("job-lifecycle/{}", desired.workload_id.as_str());
+    let target = format!("workload-lifecycle/{}", desired.workload_id.as_str());
     let correlation = CorrelationKey::derive(&target, &digest, "release-service-vip");
     Some((Action::ReleaseServiceVip { spec_digest: digest, correlation }, digest))
 }

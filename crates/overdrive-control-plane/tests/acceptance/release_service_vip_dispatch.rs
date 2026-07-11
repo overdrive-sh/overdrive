@@ -113,11 +113,11 @@ async fn release_action_dispatch_invokes_allocator_release() {
     // ---- Construct the Action::ReleaseServiceVip from the same digest.
     // The CorrelationKey shape mirrors the reconciler-emission site in
     // overdrive-core::reconcilers::release_service_vip — derived from
-    // (target = "job-lifecycle/<workload>", spec_hash = digest,
+    // (target = "workload-lifecycle/<workload>", spec_hash = digest,
     // purpose = "release-service-vip") so an end-to-end test in 03-03
     // sees the same correlation derivation.
     let correlation =
-        CorrelationKey::derive("job-lifecycle/test-workload", &digest, "release-service-vip");
+        CorrelationKey::derive("workload-lifecycle/test-workload", &digest, "release-service-vip");
     let action = Action::ReleaseServiceVip { spec_digest: digest, correlation };
 
     // ---- Wire the remaining ports. ObservationStore + Dataplane +

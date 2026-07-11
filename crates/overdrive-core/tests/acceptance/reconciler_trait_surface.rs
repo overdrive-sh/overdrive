@@ -578,12 +578,12 @@ fn reconciler_name_const_for_noop_heartbeat_is_canonical_kebab_case() {
 }
 
 #[test]
-fn reconciler_name_const_for_job_lifecycle_is_canonical_kebab_case() {
-    assert_eq!(<WorkloadLifecycle as Reconciler>::NAME, "job-lifecycle");
+fn reconciler_name_const_for_workload_lifecycle_is_canonical_kebab_case() {
+    assert_eq!(<WorkloadLifecycle as Reconciler>::NAME, "workload-lifecycle");
 
     let parsed = ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
         .expect("WorkloadLifecycle::NAME must satisfy ReconcilerName::new");
-    assert_eq!(parsed.as_str(), "job-lifecycle");
+    assert_eq!(parsed.as_str(), "workload-lifecycle");
 }
 
 #[test]
@@ -598,7 +598,7 @@ fn reconciler_name_const_matches_runtime_name_for_noop_heartbeat() {
 }
 
 #[test]
-fn reconciler_name_const_matches_runtime_name_for_job_lifecycle() {
+fn reconciler_name_const_matches_runtime_name_for_workload_lifecycle() {
     let r = WorkloadLifecycle::canonical();
     assert_eq!(r.name().as_str(), <WorkloadLifecycle as Reconciler>::NAME);
 }
@@ -617,8 +617,8 @@ fn any_reconciler_static_name_dispatches_to_inner_const_for_noop_heartbeat() {
 }
 
 #[test]
-fn any_reconciler_static_name_dispatches_to_inner_const_for_job_lifecycle() {
+fn any_reconciler_static_name_dispatches_to_inner_const_for_workload_lifecycle() {
     let any = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     assert_eq!(any.static_name(), <WorkloadLifecycle as Reconciler>::NAME);
-    assert_eq!(any.static_name(), "job-lifecycle");
+    assert_eq!(any.static_name(), "workload-lifecycle");
 }

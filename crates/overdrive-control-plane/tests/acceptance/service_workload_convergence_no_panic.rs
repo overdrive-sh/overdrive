@@ -36,7 +36,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -99,7 +99,7 @@ async fn service_workload_convergence_tick_does_not_panic() {
 
     let target = TargetResource::new("workload/web-frontend").expect("valid target");
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 

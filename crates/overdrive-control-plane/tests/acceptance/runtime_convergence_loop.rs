@@ -51,14 +51,14 @@ use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 /// Build an `AppState` whose runtime carries both production reconcilers
-/// (`noop-heartbeat` and `job-lifecycle`) — matching the `run_server`
+/// (`noop-heartbeat` and `workload-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can
 /// advance logical time between ticks.
 async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -153,7 +153,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     //     `(reconciler, target)` key, per whitepaper §18 / ADR-0013 §8.
     let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 
@@ -204,7 +204,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 // reconciler against the target — not fan out across every registered
 // reconciler. The current production loop (`for name in &registered`)
 // ignores `eval.reconciler` entirely, so a single eval submitted at
-// `(job-lifecycle, workload/payments)` causes BOTH `WorkloadLifecycle::hydrate_desired`
+// `(workload-lifecycle, workload/payments)` causes BOTH `WorkloadLifecycle::hydrate_desired`
 // AND `NoopHeartbeat::hydrate_desired` to read from the IntentStore — see
 // `docs/feature/fix-eval-reconciler-discarded/deliver/bugfix-rca.md` §Defect.
 //
@@ -223,7 +223,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 // ---------------------------------------------------------------------------
 
 /// RED — drives the runtime convergence loop with a single
-/// `Evaluation { reconciler: job-lifecycle, target: workload/payments }` and
+/// `Evaluation { reconciler: workload-lifecycle, target: workload/payments }` and
 /// asserts that ONLY `WorkloadLifecycle` is dispatched against the target.
 ///
 /// Counting strategy: the broker's `dispatched` counter is bumped
@@ -255,7 +255,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
@@ -325,10 +325,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         .await
         .expect("seed Running alloc row");
 
-    // --- Submit ONE evaluation naming `job-lifecycle` only.
+    // --- Submit ONE evaluation naming `workload-lifecycle` only.
     let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 
@@ -350,7 +350,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
             .await;
     }
 
-    // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
+    // --- Assertion (kills the bugged behaviour): only `workload-lifecycle`
     //     ran against `workload/payments`. The broker's `dispatched`
     //     counter is bumped once per `run_convergence_tick`: pre-fix
     //     the dispatch loop runs every registered reconciler against
@@ -367,11 +367,11 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     //     because a converged-Running target yields
     //     `next_view == default()` and the runtime elides the
     //     in-memory insert.
-    let workload_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("name");
+    let workload_lifecycle_name = ReconcilerName::new("workload-lifecycle").expect("name");
     let _jl_views = state
         .runtime
         .loaded_workload_lifecycle_views_for_test(&workload_lifecycle_name)
-        .expect("job-lifecycle map present after register");
+        .expect("workload-lifecycle map present after register");
     // Broker dispatched counter: pre-fix would be ≥ 2 (both reconcilers
     // ran); post-fix is exactly 1 (the named reconciler only).
     assert_eq!(
@@ -435,7 +435,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      `start()` with `DriverError::StartRejected` so the alloc
 ///      transitions to `AllocState::Failed` on the first tick.
 ///   2. Submit the job intent and one `Evaluation { reconciler:
-///      "job-lifecycle", target: "workload/payments" }`.
+///      "workload-lifecycle", target: "workload/payments" }`.
 ///   3. Drive ticks until the cached view records the alloc's
 ///      `last_failure_seen_at` observation and `restart_counts == 1` —
 ///      proof that the reconciler emitted exactly one Restart action and
@@ -466,7 +466,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -529,7 +529,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 
@@ -604,7 +604,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     target with the new stop signal in scope. This mirrors what
     //     the production handler does on a stop submission.
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 
@@ -677,7 +677,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     assert!(
         dispatched_during_stop <= 4,
         "post-stop dispatch traffic must be bounded; expected <= 4 \
-         dispatches between stop submit and broker drain (≤2 job-lifecycle \
+         dispatches between stop submit and broker drain (≤2 workload-lifecycle \
          + ≤1 bounded GAP-9 service-lifecycle drain + ≤1 bounded ADR-0067 \
          D5b svid-lifecycle drain), got {dispatched_during_stop} (pre-fix \
          value: ≥5 — the broker self-re-enqueues until restart_counts \
@@ -756,7 +756,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -812,7 +812,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
 
@@ -1054,7 +1054,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -1163,7 +1163,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // broker is empty going into the tick. After the tick, queued
     // reflects ONLY whether `has_work` re-enqueued.
     state.runtime.broker().submit(Evaluation {
-        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
     });
     let now = sim_clock.now();
@@ -1246,7 +1246,7 @@ async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
 /// `view_for_workload_lifecycle` would still return the previously-seeded
 /// non-default view and the assertion below would fail.
 #[tokio::test]
-async fn drop_job_lifecycle_view_removes_seeded_view() {
+async fn drop_workload_lifecycle_view_removes_seeded_view() {
     use overdrive_core::reconcilers::{TargetResource, WorkloadLifecycleView};
     use std::collections::BTreeMap;
 

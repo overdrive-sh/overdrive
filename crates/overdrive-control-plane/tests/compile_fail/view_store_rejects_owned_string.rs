@@ -30,7 +30,7 @@ async fn main() {
     // from it. The borrow's lifetime is bounded by `runtime`'s scope —
     // shorter than `'static`. The `write_through_bytes` signature
     // requires `&'static str`, so this MUST fail to compile.
-    let runtime: String = "job-lifecycle".to_string();
+    let runtime: String = "workload-lifecycle".to_string();
     let runtime_ref: &str = runtime.as_str();
 
     // The line below is the assertion. The borrow is non-`'static`

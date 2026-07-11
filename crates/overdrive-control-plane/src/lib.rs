@@ -1504,7 +1504,7 @@ pub async fn run_server_with_obs_and_driver(
     // `RedbViewStore` (ADR-0035 §4 — one redb file per node at
     // `<data_dir>/reconcilers/memory.redb`) and register both Phase 1
     // reconcilers at boot: `noop-heartbeat` (proof-of-life,
-    // ADR-0013 §9) and `job-lifecycle` (the first real reconciler,
+    // ADR-0013 §9) and `workload-lifecycle` (the first real reconciler,
     // US-03).
     //
     // Per ADR-0035 §5 each `register` call probes the view store
@@ -2270,7 +2270,7 @@ pub async fn run_server_with_obs_and_driver(
     // channel when the first action-shim write happens. The observer
     // shares `state.obs` (so its writes appear in the same row stream
     // every reader consumes) and shares `state.runtime` (so the
-    // observer can re-enqueue the job-lifecycle reconciler after
+    // observer can re-enqueue the workload-lifecycle reconciler after
     // each obs write — closes the latency between exit classification
     // and reconciler-driven recovery). Per
     // `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved fix
@@ -2570,7 +2570,7 @@ pub fn noop_heartbeat() -> overdrive_core::reconcilers::AnyReconciler {
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
 
-/// Construct the `job-lifecycle` reconciler.
+/// Construct the `workload-lifecycle` reconciler.
 ///
 /// The first real (non-proof-of-life) reconciler. Converges declared
 /// replica count for a `Job` against the running `AllocStatusRow`

@@ -87,7 +87,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -174,8 +174,9 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
     let mut running: Option<AllocStatusRow> = None;
@@ -198,8 +199,9 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
 }
 
 async fn drive_ticks(h: &Harness, start: Instant, range: std::ops::Range<u64>) {
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     for tick_n in range {
         run_convergence_tick(
@@ -259,8 +261,9 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
     // `LifecycleEvent { to: Failed }` after the obs write. The test
     // breaks as soon as that event arrives, BEFORE the next tick's
     // reconciler emits `RestartAllocation`.
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_failed_at: Option<String> = None;
     'outer: for tick_n in 30_u64..50 {
@@ -365,8 +368,9 @@ async fn crashed_alloc_eventually_reaches_non_running() {
     // greater than prior_counter that resolves to Failed or fresh
     // Running is acceptable — what is forbidden is staying stuck at
     // the original Running row's counter.
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut left_running = false;
     for tick_n in 30_u64..90 {
@@ -457,8 +461,8 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         );
 
         let workload_lifecycle_name =
-            overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-                .expect("job-lifecycle reconciler name");
+            overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+                .expect("workload-lifecycle reconciler name");
         let deadline = start + Duration::from_secs(120);
         let mut saw_failed = false;
         'outer: for tick_n in 30_u64..50 {
@@ -529,8 +533,9 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_ev = None;
     'outer: for tick_n in 30_u64..50 {
@@ -591,7 +596,7 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let runtime = Arc::new(runtime);
 
     let store_path = tmp.path().join("intent.redb");
@@ -653,8 +658,9 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
 
     let target = TargetResource::new("workload/exitobs").expect("valid target");
     let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
 
     // Background ticker so any `SimClock::sleep` parked inside
     // `inject_exit_after` wakes promptly.

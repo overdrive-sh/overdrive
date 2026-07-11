@@ -52,7 +52,7 @@ async fn bootstrap_async(
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -156,7 +156,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 
     let target = TargetResource::new("workload/backoff-exhaust").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
 
@@ -251,7 +251,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 
     let target = TargetResource::new("workload/term-stop").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
 
@@ -367,7 +367,7 @@ async fn non_terminal_transitions_emit_none() {
 
     let target = TargetResource::new("workload/non-term").expect("valid target");
     let workload_lifecycle_name =
-        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 

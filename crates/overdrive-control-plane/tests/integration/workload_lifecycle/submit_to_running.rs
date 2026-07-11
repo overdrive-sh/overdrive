@@ -32,7 +32,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -94,8 +94,9 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("workload/payments").expect("valid target");
-    let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle reconciler name");
+    let workload_lifecycle_name =
+        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+            .expect("workload-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 

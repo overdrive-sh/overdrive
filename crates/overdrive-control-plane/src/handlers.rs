@@ -43,7 +43,7 @@ use crate::api;
 use crate::error::ControlPlaneError;
 use overdrive_core::eval_broker::Evaluation;
 
-/// Enqueue a `(job-lifecycle, workload/<id>)` evaluation onto the runtime
+/// Enqueue a `(workload-lifecycle, workload/<id>)` evaluation onto the runtime
 /// broker. Called from `submit_workload` and `stop_workload` after the
 /// `IntentStore` write commits — the edge-triggered ingress half of
 /// whitepaper §18 *Triggering Model — Hybrid by Design*. The
@@ -463,7 +463,7 @@ pub async fn submit_workload(
                 drop(facts_guard);
             }
             // Edge-triggered ingress per whitepaper §18: enqueue an
-            // evaluation for the job-lifecycle reconciler so the
+            // evaluation for the workload-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
             // Per `fix-convergence-loop-not-spawned` Step 01-02.
             enqueue_workload_lifecycle_eval(&state, &workload_id)?;
@@ -842,7 +842,7 @@ pub async fn stop_workload(
     }
 
     // Edge-triggered ingress per whitepaper §18: enqueue an
-    // evaluation for the job-lifecycle reconciler so the
+    // evaluation for the workload-lifecycle reconciler so the
     // convergence-loop spawn drives the running allocations to
     // Terminated. Both Stopped and AlreadyStopped enqueue: a redundant
     // stop arriving while the prior stop has not yet converged is
@@ -937,7 +937,7 @@ pub async fn restart_workload(
         .await?;
 
     // 4. Edge-triggered ingress per whitepaper §18: enqueue an evaluation
-    //    for the job-lifecycle reconciler so the convergence loop places a
+    //    for the workload-lifecycle reconciler so the convergence loop places a
     //    fresh instance on the generation advance — exactly as
     //    `stop_workload` does.
     enqueue_workload_lifecycle_eval(&state, &workload_id)?;

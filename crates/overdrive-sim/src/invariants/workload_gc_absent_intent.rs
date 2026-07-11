@@ -129,7 +129,7 @@ const MAX_TICKS_RESUBMIT: u64 = 5;
 const MAX_TICKS_TO_RUNNING: u64 = 30;
 
 const WORKLOAD_NAME: &str = "workload-gc-absent-intent";
-const RECONCILER_NAME: &str = "job-lifecycle";
+const RECONCILER_NAME: &str = "workload-lifecycle";
 
 /// Drive scenario 1 and return an `InvariantResult` pinned to the
 /// canonical kebab-case name.

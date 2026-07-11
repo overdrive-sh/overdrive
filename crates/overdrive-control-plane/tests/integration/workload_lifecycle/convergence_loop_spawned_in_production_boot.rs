@@ -280,7 +280,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
 
     // Assertion 2 — kills Roots A + B together. Under the fix the
     // submit enqueues an evaluation, the spawned loop drains it, the
-    // job-lifecycle reconciler runs, and the SimDriver advances the
+    // workload-lifecycle reconciler runs, and the SimDriver advances the
     // alloc to Running. Under current main the alloc is never created.
     // `AllocState::Display` renders the canonical lowercase form
     // (`"running"`) — see

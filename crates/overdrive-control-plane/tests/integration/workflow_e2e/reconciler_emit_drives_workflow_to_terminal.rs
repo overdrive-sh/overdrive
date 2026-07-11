@@ -151,7 +151,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     runtime.register(workflow_lifecycle()).await.expect("register workflow-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");

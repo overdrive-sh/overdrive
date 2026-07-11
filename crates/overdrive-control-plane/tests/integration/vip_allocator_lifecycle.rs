@@ -232,7 +232,7 @@ async fn dispatch_release(
     digest_bytes: [u8; 32],
 ) {
     let digest = overdrive_core::id::ContentHash::from_bytes(digest_bytes);
-    let target = format!("job-lifecycle/{workload_id}");
+    let target = format!("workload-lifecycle/{workload_id}");
     let correlation = CorrelationKey::derive(&target, &digest, "release-service-vip");
     let action = Action::ReleaseServiceVip { spec_digest: digest, correlation };
 
@@ -572,7 +572,7 @@ async fn build_state_with_range_and_reconciler(
     runtime
         .register(overdrive_control_plane::workload_lifecycle())
         .await
-        .expect("register job-lifecycle");
+        .expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -640,12 +640,12 @@ async fn write_terminal_alloc_row(state: &AppState, workload_id: &str, alloc_id:
         .expect("write terminal observation row");
 }
 
-/// Drive N convergence ticks of the `job-lifecycle` reconciler for the
+/// Drive N convergence ticks of the `workload-lifecycle` reconciler for the
 /// given workload through the production `run_convergence_tick`.
 async fn drive_convergence_ticks(state: &AppState, workload_id: &str, ticks: u64) {
     use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
-    let reconciler_name =
-        overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("reconciler name");
+    let reconciler_name = overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle")
+        .expect("reconciler name");
     let target_resource =
         overdrive_core::reconcilers::TargetResource::new(&format!("workload/{workload_id}"))
             .expect("valid target");

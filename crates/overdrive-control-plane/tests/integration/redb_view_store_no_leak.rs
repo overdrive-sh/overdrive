@@ -53,7 +53,7 @@ fn reconciler_name_const_is_pointer_identical_across_reads() {
         first.as_ptr(),
         second.as_ptr(),
     );
-    assert_eq!(first, "job-lifecycle", "canonical name must be the kebab-case literal");
+    assert_eq!(first, "workload-lifecycle", "canonical name must be the kebab-case literal");
 }
 
 /// Assertion 2: repeated `write_through_bytes` calls against the

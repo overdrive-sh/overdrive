@@ -70,13 +70,13 @@ use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 /// Build an `AppState` whose runtime carries both production reconcilers
-/// (`noop-heartbeat` + `job-lifecycle`) — the `run_server` boot shape.
+/// (`noop-heartbeat` + `workload-lifecycle`) — the `run_server` boot shape.
 /// The `SimClock` is held by the caller to source the tick's `now`.
 async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -107,7 +107,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// to 1 through the PRODUCTION write contract (`TxnOp::IncrementU64` at
 /// `IntentKey::for_workload_generation` — the exact op `overdrive workload
 /// restart` commits) —
-/// WHEN one `run_convergence_tick` fires for `job-lifecycle` against it —
+/// WHEN one `run_convergence_tick` fires for `workload-lifecycle` against it —
 /// THEN the persisted `WorkloadLifecycleView.observed_generation` is `1`.
 ///
 /// See the module docstring for why `observed_generation == 1` is a true
@@ -156,8 +156,8 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
         "the IncrementU64 generation bump must commit; got {outcome:?}"
     );
 
-    // WHEN one convergence tick fires for job-lifecycle against the workload.
-    let name = ReconcilerName::new("job-lifecycle").expect("valid reconciler name");
+    // WHEN one convergence tick fires for workload-lifecycle against the workload.
+    let name = ReconcilerName::new("workload-lifecycle").expect("valid reconciler name");
     let target = TargetResource::new("workload/payments").expect("valid target");
     let now = clock.now();
     let deadline = now + Duration::from_millis(100);
@@ -173,7 +173,7 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
     let views = state
         .runtime
         .loaded_workload_lifecycle_views_for_test(&name)
-        .expect("job-lifecycle view map present after register");
+        .expect("workload-lifecycle view map present after register");
     let view = views.get(&target).expect(
         "a WorkloadLifecycleView must be persisted for the restart-pending fresh placement — \
          its absence means desired.generation read 0 (read-side drift), so restart_pending was \

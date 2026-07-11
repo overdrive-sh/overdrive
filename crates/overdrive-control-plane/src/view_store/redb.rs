@@ -316,7 +316,7 @@ mod tests {
     /// The `ViewStore` byte-level surface requires `&'static str` per the
     /// `refactor-reconciler-static-name` RCA; tests use the literal
     /// directly rather than constructing a `ReconcilerName` wrapper.
-    const N: &str = "job-lifecycle";
+    const N: &str = "workload-lifecycle";
 
     fn target(s: &str) -> TargetResource {
         TargetResource::new(s).expect("valid target resource")

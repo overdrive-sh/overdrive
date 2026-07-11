@@ -6,7 +6,7 @@
 //! returns `Err(ControlPlaneError::NotFound { resource: "workloads/<id>" })`
 //! AND commits NO `IntentStore` txn (no generation bump, no sentinel
 //! delete — observed at the store boundary as the generation key staying
-//! absent) AND enqueues NO job-lifecycle evaluation (the broker's pending
+//! absent) AND enqueues NO workload-lifecycle evaluation (the broker's pending
 //! queue stays empty). Same 404 posture as `stop_workload`.
 //!
 //! # Port-to-port
@@ -125,7 +125,7 @@ async fn restart_on_unknown_id_is_404_with_no_mutation_and_no_enqueue() {
         "no stop-sentinel write/delete may occur on an absent aggregate",
     );
 
-    // And: NO job-lifecycle evaluation was enqueued.
+    // And: NO workload-lifecycle evaluation was enqueued.
     let pending_after = state.runtime.broker().counters().queued;
     assert_eq!(
         pending_after, pending_before,
