@@ -100,10 +100,12 @@ fn fixture_response(
 fn render_live(response: AllocStatusResponse) -> String {
     let allocations_total = response.rows.len();
     let empty_state_message = if allocations_total == 0 {
-        let job = response.workload_id.as_deref().unwrap_or("(unknown)");
+        let id = response.workload_id.as_deref().unwrap_or("(unknown)");
         format!(
-            "0 allocations for job {job} — the scheduler + driver land in \
-             phase-1-first-workload"
+            "0 allocations for workload {id} — the spec is committed, but no \
+             allocation has converged to a Running instance yet. If it stays at \
+             0, check that a node is eligible to place it and the control \
+             plane's convergence loop is running."
         )
     } else {
         String::new()

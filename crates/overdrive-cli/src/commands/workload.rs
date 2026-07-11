@@ -92,8 +92,10 @@ pub async fn restart(args: RestartArgs) -> Result<RestartOutput, CliError> {
 // Reads the canonical `spec_digest` from the control plane's
 // `WorkloadDescription`, counts the allocations reported by
 // `GET /v1/allocs`, and returns a typed [`WorkloadDescribeOutput`] with an
-// explicit empty-state message pointing at the `phase-1-first-workload`
-// onboarding step.
+// explicit empty-state message that diagnoses the zero-allocation state —
+// the spec is committed but no allocation has converged to a Running
+// instance yet — and points the operator at the eligibility / convergence
+// checks to make when the count stays at zero.
 //
 // Per ADR-0020 (drop `commit_index` from Phase 1) the wire shape of
 // `WorkloadDescription` is `{spec, spec_digest}` — the Raft commit-index
@@ -145,9 +147,11 @@ pub struct WorkloadDescribeOutput {
     /// `workload_id` matches [`Self::workload_id`].
     pub allocations_total: usize,
     /// Operator-facing empty-state message rendered when
-    /// `allocations_total == 0`. Carries a `phase-1-first-workload`
-    /// reference so the operator has a pointer to the onboarding step
-    /// without consulting docs. Empty string when allocations exist.
+    /// `allocations_total == 0`. Diagnoses the real zero-allocation state
+    /// — the spec is committed but no allocation has converged to a
+    /// Running instance yet — and names the eligibility / convergence-loop
+    /// checks to make if the count stays at zero. Empty string when
+    /// allocations exist.
     pub empty_state_message: String,
     /// Full envelope from the server — lets the renderer surface restart
     /// budget, last transition, cause-class reason text per ADR-0033 §4.
@@ -182,9 +186,11 @@ pub async fn describe(args: DescribeArgs) -> Result<WorkloadDescribeOutput, CliE
     let allocations_total = snapshot.rows.len();
     let empty_state_message = if allocations_total == 0 {
         format!(
-            "0 allocations for job {job} — the scheduler + driver land in \
-             phase-1-first-workload",
-            job = args.id,
+            "0 allocations for workload {id} — the spec is committed, but no \
+             allocation has converged to a Running instance yet. If it stays at \
+             0, check that a node is eligible to place it and the control \
+             plane's convergence loop is running.",
+            id = args.id,
         )
     } else {
         String::new()

@@ -198,11 +198,17 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     assert_eq!(status_output.workload_id, "payments", "describe output must echo workload id");
     assert_eq!(
         status_output.allocations_total, 0,
-        "phase-1 allocations_total must be 0 (scheduler ships in phase-1-first-workload)",
+        "phase-1 allocations_total must be 0 (the workload is committed but has not \
+         yet converged to a Running allocation)",
     );
     assert!(
-        status_output.empty_state_message.contains("phase-1-first-workload"),
-        "empty_state_message must reference phase-1-first-workload; got: {}",
+        status_output.empty_state_message.contains("0 allocations for workload"),
+        "empty_state_message must diagnose the zero-allocation state; got: {}",
+        status_output.empty_state_message,
+    );
+    assert!(
+        status_output.empty_state_message.contains("converged"),
+        "empty_state_message must explain the workload has not yet converged; got: {}",
         status_output.empty_state_message,
     );
 

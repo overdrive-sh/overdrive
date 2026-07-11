@@ -142,8 +142,8 @@ ADR-0047 §4): it branches on `out.snapshot.kind`
 
 — plus, after the kind body, the shared presence-guarded
 `render_vip_section` / `render_listeners_section` /
-`render_issued_certificates_section`, and an empty-state onboarding
-signpost (`phase-1-first-workload`, DWD-05) rendered first when
+`render_issued_certificates_section`, and an empty-state diagnostic
+(submitted-but-not-yet-converged; GH #219) rendered first when
 `out.allocations_total == 0`.
 
 ### History — why this was a trap, and how it was closed

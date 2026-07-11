@@ -14,12 +14,12 @@
 //! Rendering is a pure string-builder — no I/O, no server dependency —
 //! so it belongs in the default acceptance lane rather than the
 //! `integration-tests`-gated slow lane. This is also the load-bearing
-//! place the `phase-1-first-workload` reference must appear on an empty
+//! place the empty-state diagnostic must appear on an empty
 //! allocation-status read per DWD-05 §6.2 / §6.7.
 //!
 //! Acceptance coverage:
-//!   (d) empty-state rendering contains the `phase-1-first-workload`
-//!       reference (walking-skeleton gate for the onboarding signpost).
+//!   (d) empty-state rendering diagnoses the unconverged workload
+//!       (spec committed, no allocation converged to Running yet).
 //!   (e) non-empty Service rendering shows the kind-aware header +
 //!       `Replicas (desired/running)` + `Spec digest` (per ADR-0020 the
 //!       `commit_index` field is dropped — the digest is the per-write
@@ -56,8 +56,9 @@ fn fixture_empty_state() -> WorkloadDescribeOutput {
         workload_id: "payments".to_string(),
         spec_digest: EMPTY_STATE_DIGEST.to_string(),
         allocations_total: 0,
-        empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
-             phase-1-first-workload"
+        empty_state_message: "0 allocations for workload payments — the spec is committed, but \
+             no allocation has converged to a Running instance yet. If it stays at 0, check that \
+             a node is eligible to place it and the control plane's convergence loop is running."
             .to_string(),
         snapshot,
     }
@@ -90,26 +91,41 @@ fn fixture_with_allocations() -> WorkloadDescribeOutput {
 }
 
 // -------------------------------------------------------------------
-// (d) empty-state rendering contains phase-1-first-workload
+// (d) empty-state rendering diagnoses the unconverged workload
 // -------------------------------------------------------------------
 
 #[test]
-fn render_workload_describe_empty_state_contains_phase_1_first_workload() {
+fn render_workload_describe_empty_state_diagnoses_unconverged_workload() {
     let out = fixture_empty_state();
     let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
-        rendered.contains("phase-1-first-workload"),
-        "rendered alloc-status empty-state must reference phase-1-first-workload; \
-         got:\n{rendered}",
+        rendered.contains("0 allocations for workload"),
+        "rendered workload-describe empty-state must diagnose the zero-allocation state as \
+         '0 allocations for workload'; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("converged"),
+        "rendered workload-describe empty-state must explain the workload has not yet \
+         converged to a Running instance; got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("phase-1-first-workload"),
+        "rendered workload-describe empty-state must NOT carry the stale \
+         `phase-1-first-workload` forward-pointer (#219); got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("for job"),
+        "rendered workload-describe empty-state must use workload-generic language, \
+         not `for job` (#219); got:\n{rendered}",
     );
     assert!(
         rendered.contains("payments"),
-        "rendered alloc-status must name the job id; got:\n{rendered}",
+        "rendered workload-describe must name the workload id; got:\n{rendered}",
     );
     assert!(
         rendered.contains(&out.spec_digest),
-        "rendered alloc-status must carry the spec_digest; got:\n{rendered}",
+        "rendered workload-describe must carry the spec_digest; got:\n{rendered}",
     );
 }
 
@@ -137,8 +153,9 @@ fn render_workload_describe_with_allocations_shows_total_and_digest() {
     // On non-empty results we SHOULD NOT print the empty-state hint
     // (would confuse the operator).
     assert!(
-        !rendered.contains("phase-1-first-workload"),
-        "rendered alloc-status with allocations must NOT print the empty-state hint; got:\n{rendered}",
+        !rendered.contains("0 allocations for workload"),
+        "rendered workload-describe with allocations must NOT print the empty-state hint; \
+         got:\n{rendered}",
     );
 }
 
@@ -175,15 +192,16 @@ fn render_workload_describe_suppresses_hint_when_allocations_exist_even_with_mes
         workload_id: "payments".to_string(),
         spec_digest: "deadbeef".repeat(8),
         allocations_total: 5,
-        empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
-             phase-1-first-workload"
+        empty_state_message: "0 allocations for workload payments — the spec is committed, but \
+             no allocation has converged to a Running instance yet. If it stays at 0, check that \
+             a node is eligible to place it and the control plane's convergence loop is running."
             .to_string(),
         snapshot,
     };
     let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
-        !rendered.contains("phase-1-first-workload"),
+        !rendered.contains("0 allocations for workload"),
         "when allocations_total > 0 the empty-state hint MUST NOT appear, \
          even if the producer left an empty_state_message populated — the \
          `allocations_total == 0 && !msg.is_empty()` gate is asymmetric; \
@@ -232,7 +250,7 @@ fn render_workload_describe_suppresses_hint_when_message_is_empty_even_with_zero
          kind-aware header. got:\n{rendered}",
     );
     assert!(
-        !rendered.contains("phase-1-first-workload"),
+        !rendered.contains("0 allocations for workload"),
         "with both predicates false (msg empty), the hint must not appear; \
          got:\n{rendered}",
     );
@@ -269,8 +287,10 @@ fn render_workload_describe_renders_listener_protocol_at_zero_allocations() {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 0,
-        empty_state_message: "0 allocations for job dns-resolver — the scheduler + driver land \
-             in phase-1-first-workload"
+        empty_state_message: "0 allocations for workload dns-resolver — the spec is committed, \
+             but no allocation has converged to a Running instance yet. If it stays at 0, check \
+             that a node is eligible to place it and the control plane's convergence loop is \
+             running."
             .to_string(),
         snapshot,
     };
@@ -656,8 +676,9 @@ fn wrap_live(snapshot: AllocStatusResponse) -> WorkloadDescribeOutput {
     let workload_id = snapshot.workload_id.clone().unwrap_or_default();
     let empty_state_message = if allocations_total == 0 {
         format!(
-            "0 allocations for job {workload_id} — the scheduler + driver land in \
-             phase-1-first-workload"
+            "0 allocations for workload {workload_id} — the spec is committed, but no \
+             allocation has converged to a Running instance yet. If it stays at 0, check that \
+             a node is eligible to place it and the control plane's convergence loop is running."
         )
     } else {
         String::new()

@@ -209,13 +209,13 @@ pub fn workload_restart_accepted(out: &RestartOutput) -> String {
 ///   tracking URL.
 ///
 /// On empty-state (`allocations_total == 0`) the output is prefixed with
-/// the `phase-1-first-workload` reference carried in
-/// `empty_state_message` — the load-bearing onboarding signpost
-/// (DWD-05) for an operator who has submitted a workload but sees no
-/// allocations yet. This wrapper concern is preserved across the
-/// kind-aware body (which has no access to the wrapper-level
-/// `empty_state_message`); the signpost reads first so it is the
-/// operator's primary signal before the (empty) kind-specific body.
+/// the diagnostic message carried in `empty_state_message` — the
+/// load-bearing signpost (DWD-05) for an operator whose spec is committed
+/// but whose workload has not yet converged to a Running allocation. This
+/// wrapper concern is preserved across the kind-aware body (which has no
+/// access to the wrapper-level `empty_state_message`); the message reads
+/// first so it is the operator's primary signal before the (empty)
+/// kind-specific body.
 ///
 /// After the kind-specific body, the shared VIP / Listeners /
 /// Issued-certificates sections render (presence-guarded + additive):
@@ -230,13 +230,14 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
 
-    // Empty-state onboarding signpost (DWD-05) — a wrapper concern, not
-    // a kind-aware-body concern: the kind-aware body sees only
+    // Empty-state signpost (DWD-05) — a wrapper concern, not a
+    // kind-aware-body concern: the kind-aware body sees only
     // `out.snapshot` and has no access to the wrapper-level
     // `empty_state_message`. Rendered FIRST so an operator who submitted
-    // a workload but sees no allocations yet reads the `phase-1-first-
-    // workload` pointer before the (necessarily empty) kind-specific
-    // body. Gated on BOTH `allocations_total == 0` AND a non-empty
+    // a workload but sees no allocations yet reads the
+    // spec-committed-but-not-yet-converged diagnostic before the
+    // (necessarily empty) kind-specific body. Gated on BOTH
+    // `allocations_total == 0` AND a non-empty
     // message (asymmetric `&&` — a flip to `||` would either leak the
     // hint when allocations exist or fire a blank `writeln!`).
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
