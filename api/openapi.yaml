@@ -41,7 +41,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '404':
-          description: Job not found
+          description: Workload not found
           content:
             application/json:
               schema:
@@ -144,7 +144,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Job accepted (Accept negotiates one-shot vs streaming)
+          description: Workload accepted (Accept negotiates one-shot vs streaming)
           content:
             application/json:
               schema:

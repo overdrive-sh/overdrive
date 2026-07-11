@@ -2932,15 +2932,13 @@ async fn hydrate_service_alloc_facts(
             .map(|p| p.status.clone());
 
         // Backend identity for the dataplane backend set this alloc
-        // contributes to. SPIFFE shape matches the project-wide
-        // `mint_alloc_identity` used by the BackendDiscoveryBridge; the
-        // addr is `(host_ipv4, listener_port)` per the bridge precedent.
-        let backend_spiffe = overdrive_core::SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/{}/alloc/{}",
-            workload_id.as_str(),
-            row.alloc_id.as_str()
-        ))
-        .map_err(|e| ConvergenceError::TargetShape(e.to_string()))?;
+        // contributes to. Delegates to `SpiffeId::for_allocation` — the
+        // single canonical producer of the alloc-SVID string (ADR-0067 D5,
+        // ADR-0075 consolidation) — so this convergence path no longer
+        // hand-rolls the `spiffe://overdrive.local/workload/.../alloc/...`
+        // shape. The addr is `(host_ipv4, listener_port)` per the
+        // BackendDiscoveryBridge precedent.
+        let backend_spiffe = overdrive_core::SpiffeId::for_allocation(workload_id, &row.alloc_id);
         let backend_addr =
             std::net::SocketAddr::new(std::net::IpAddr::V4(state.host_ipv4), backend_port);
 

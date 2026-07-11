@@ -196,7 +196,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
     path = "/v1/workloads",
     request_body = api::SubmitWorkloadRequest,
     responses(
-        (status = 200, description = "Job accepted (Accept negotiates one-shot vs streaming)",
+        (status = 200, description = "Workload accepted (Accept negotiates one-shot vs streaming)",
             content(
                 (api::SubmitWorkloadResponse = "application/json"),
                 (crate::streaming::ServiceSubmitEvent       = "application/x-ndjson"),
@@ -424,7 +424,7 @@ pub async fn submit_workload(
         PutOutcome::Inserted => {
             // Persist the kind discriminator alongside the job.
             // Use `put` (overwrite-OK) rather than `put_if_absent` —
-            // a Job at the same key cannot have a different kind by
+            // a workload at the same key cannot have a different kind by
             // construction (idempotency check on the spec above
             // requires byte-identical re-submission), so writing the
             // discriminator unconditionally is safe and survives a
@@ -1011,7 +1011,7 @@ pub async fn cluster_status(
     responses(
         (status = 200, description = "Allocation snapshot for the named job", body = api::AllocStatusResponse),
         (status = 400, description = "Validation error (missing or malformed job query)", body = api::ErrorBody),
-        (status = 404, description = "Job not found", body = api::ErrorBody),
+        (status = 404, description = "Workload not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
     tag = "observation",
