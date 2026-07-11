@@ -16,7 +16,7 @@ schema_version: 1
 # FOUNDATION feature: its own HONEST observables are TEST-tier — the
 # issued_certificates row WRITTEN per issuance (read back via the
 # ObservationStore) and `openssl verify` on the minted leaf chain. The
-# OPERATOR-visible surfaces — `overdrive alloc status --job <id>` rendering
+# OPERATOR-visible surfaces — `overdrive workload describe <id>` rendering
 # the issued_certificates row, and the deployed-SVID operator-verify flow —
 # are #215's (O05/E03), BLOCKED ON #35 (the current AllocStatusResponse has
 # no issued-cert field; no SVID consumer #26 exists yet).
@@ -105,7 +105,7 @@ steps:
 
   - id: 4
     name: "Identity availability is a converged invariant, audited, and survives restart"
-    command: "openssl verify (minted leaf chain, TEST tier) + issued_certificates row via ObservationStore. (#35 is a FOUNDATION feature: the operator `alloc status` render of the row is #215's O05/E03, blocked on #35.)"
+    command: "openssl verify (minted leaf chain, TEST tier) + issued_certificates row via ObservationStore. (#35 is a FOUNDATION feature: the operator `workload describe` render of the row is #215's O05/E03, blocked on #35.)"
     summary: >
       A DST assert_eventually!("running allocs hold a valid SVID") invariant
       walks the held BTreeMap against the running set and holds at every

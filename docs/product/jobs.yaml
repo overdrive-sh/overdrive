@@ -132,7 +132,7 @@ jobs:
       I want to submit the spec through `overdrive job submit`, watch
       the control plane commit it through the real IntentStore, observe
       the reconciler primitive alive, and read the spec back via
-      `overdrive alloc status` with a byte-identical spec digest,
+      `overdrive workload describe` with a byte-identical spec digest,
     outcome: >
       so the walking-skeleton guarantees from phase-1-foundation (typed
       identifiers, bit-identical snapshot round-trip, reconciler purity)
@@ -166,8 +166,8 @@ jobs:
       readiness probes can flip Backend.healthy continuously to remove
       unhealthy backends from the dataplane fingerprint, liveness
       probes can trigger restart of wedged backends, and the operator
-      can inspect current probe state via `overdrive alloc status
-      --job <id>`. Extends J-OPS-003 to the Service workload kind
+      can inspect current probe state via `overdrive workload describe
+      <id>`. Extends J-OPS-003 to the Service workload kind
       with operator-declared liveness contracts.
     source: GH #170; RCA-A; ADR-0047 (workload kind discriminator); ADR-0037 (typed TerminalCondition); ADR-0032 (NDJSON streaming, per-kind enums); ADR-0033 (alloc_status enrichment); GH #200 / unconnected-udp-sendmsg4 (spans unconnected-UDP same-host wire-path reachability — a same-host UDP service must be reachable from the canonical unconnected `sendto` client, with the reply sourced from the VIP)
     served_by_phase: 1
@@ -192,7 +192,7 @@ jobs:
       so the §18 reconciler primitive moves from "registered and idle"
       to "actively converging declared intent into running workloads",
       the workload-versus-control-plane cgroup split protects platform
-      responsiveness under workload pressure, and `alloc status` honestly
+      responsiveness under workload pressure, and `workload describe` honestly
       reflects whether each allocation is Pending (with a reason),
       Running, Draining, Terminated, or Failed (with backoff state) — and
       so an operator can ROLL one instance of a still-declared workload

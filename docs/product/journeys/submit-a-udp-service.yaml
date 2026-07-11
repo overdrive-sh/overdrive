@@ -41,7 +41,7 @@ journey:
     first class"). Has been bitten before by silent dataplane
     asymmetry where the forward path works and the reverse path
     fails invisibly — the hardest class of bug to diagnose because
-    `overdrive deploy` succeeds and `alloc status` shows Running.
+    `overdrive deploy` succeeds and `workload describe` shows Running.
     Secondary: Omar, future operator using the same CLI once auth lands.
   job_id: [J-OPS-004, J-PLAT-004]
 

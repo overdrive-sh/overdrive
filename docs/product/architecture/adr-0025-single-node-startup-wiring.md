@@ -485,3 +485,13 @@ fail-fast intent.
 See ADR-0029 for the extraction rationale and the binary-composition
 pattern.
 
+## Amendment 2026-07-11 — Operator verb rename (`alloc status` → `workload describe`, #220)
+
+The Context above references the operator inspection command as
+`overdrive alloc status`. That verb was renamed single-cut to
+`overdrive workload describe <id>` (positional id, not a `--job`
+flag) per GH #220. The backing endpoint (`GET /v1/allocs`) and the
+rendered output are unchanged; only the CLI verb changed. The
+`alloc_status` observation-row/field name (and the dependency on a
+real `NodeId` being present for the render) is unchanged.
+

@@ -526,6 +526,23 @@ the structured `TransitionReason::NoCapacity` plus the diagnostic
 
 See ADR-0047 for the full ADR.
 
+## Amendment 2026-07-11 — Operator verb rename (`alloc status` → `workload describe`, #220)
+
+The operator inspection command this ADR enriches — named
+`overdrive alloc status --job <id>` throughout the title, Context,
+Consequences, Migration, and the 2026-05-10 amendment above — was
+renamed single-cut to `overdrive workload describe <id>` (positional
+id, not a `--job` flag) per GH #220. The backing endpoint
+(`GET /v1/allocs`) and the enriched rendered output (spec digest,
+per-alloc rows, last-transition reason, restart budget, exit code,
+per-kind sections) are **byte-identical and unchanged** — this ADR's
+snapshot-enrichment decision stands in full. Only the CLI verb
+changed. The immutable ADR title and its inline `alloc status`
+references (decision context) are preserved; this note is the single
+current-surface pointer. The `alloc_status` / `AllocStatusRow` /
+`AllocStatusResponse` type and field names are unrelated identifiers
+and are unchanged.
+
 ## Changelog
 
 | Date | Change |
@@ -533,3 +550,4 @@ See ADR-0047 for the full ADR.
 | 2026-04-30 | Initial ADR. Decision D2 / D7 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 01 back-prop completed. Echo peer review pending. |
 | 2026-05-10 | **Amendment** — `AllocStatusRow.kind` denormalised; `listeners: Vec<ListenerRow>` embedded for Service kind; per-kind render branches; Job kind `verdict` + `attempts` + `stderr_tail` fields; Schedule kind `cron` + `deferral_url` fields. See `Amendment 2026-05-10` section above and ADR-0047. |
 | 2026-04-30 | **Amendment** — `TransitionReason` cross-references updated in lockstep with ADR-0032 amendment of the same date. §2 field-source-map row clarifies that `reason` now carries a cause-class typed payload, not just an opaque enum + free-form `detail`. §4 CLI render contract mapping table replaced with the full Phase 1 cause-class variant set; `detail: Option<String>` demoted to "verbatim text not captured by the typed payload." §5 single-source-of-truth text tightened to call out byte-equality across the typed payload, not just the variant tag. Slice 01 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues consequent updates needed in DISCUSS / DISTILL / roadmap. |
+| 2026-07-11 | **Amendment (#220)** — operator verb renamed `overdrive alloc status --job <id>` → `overdrive workload describe <id>` (positional id). Endpoint (`GET /v1/allocs`) + rendered output byte-identical; pure rename. See `Amendment 2026-07-11` section above. Inline `alloc status` references (title, decision context) preserved per ADR immutability. |

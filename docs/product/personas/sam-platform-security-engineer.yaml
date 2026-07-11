@@ -87,7 +87,7 @@ persona:
       - "Can the dataplane (sockops/kTLS mTLS, gateway, telemetry) read the current SVID + trust bundle the INSTANT it must present identity — in-process, no re-issue per read?"
       - "Is identity availability CHECKED by a convergence invariant, or merely asserted? Does it survive a control-plane restart without redundant re-issue?"
     success_signals:
-      - "A running allocation demonstrably holds a chain-verifiable SVID (the issued_certificates row is written and openssl verify of the leaf chain exits 0 at the test tier; the operator alloc status render of that row is #215's, blocked on #35), and a stopped allocation holds none."
+      - "A running allocation demonstrably holds a chain-verifiable SVID (the issued_certificates row is written and openssl verify of the leaf chain exits 0 at the test tier; the operator workload describe render of that row is #215's, blocked on #35), and a stopped allocation holds none."
       - "A DST assert_eventually!(\"running allocs hold a valid SVID\") invariant fails the build if a Running allocation lacks a held SVID — availability is mechanically checked, not asserted."
       - "Every issuance leaves an observable audit row; an unauditable issuance is refused (no silent issuance)."
       - "Identity survives a control-plane restart, recomputed from persisted issuance INPUTS, with no redundant re-issue."

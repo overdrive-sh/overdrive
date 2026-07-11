@@ -548,3 +548,12 @@ who opted out of probes shouldn't see "we waited for nothing."
 
 - 2026-05-26 — Initial accepted version. Resolves Q1–Q6 surfaced
   by the dispatch-wiring blocker following commit 2ec1eb7f.
+- 2026-07-11 — **Amendment (#220)** — the operator inspection command
+  referenced throughout (operators read the `AllocStatusRow` /
+  opt-out witness / full opaque payload via it — Decision §,
+  Considered alternatives §, Consequences §) was renamed single-cut
+  from `overdrive alloc status --job <id>` to
+  `overdrive workload describe <id>` (positional id). The
+  `GET /v1/allocs` endpoint and the rendered output are unchanged;
+  only the CLI verb changed. The `alloc_status` / `AllocStatusRow`
+  identifiers are unrelated and unchanged.

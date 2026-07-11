@@ -848,6 +848,16 @@ for DISTILL.
 
 ## Changelog
 
+- 2026-07-11 — **Operator verb rename (`alloc status` → `workload
+  describe`, #220). No decision changed.** D6 above notes the
+  `issued_certificates` audit row is "readable via the existing
+  `alloc status` observation path"; that operator command was renamed
+  single-cut to `overdrive workload describe <id>` (positional id,
+  not a `--job` flag). The backing endpoint (`GET /v1/allocs`) and
+  the rendered output are unchanged; only the CLI verb changed. The
+  `issued_certificates` / `IssuedCertificateRow` /
+  `AllocStatusRow` identifiers are unrelated and unchanged; the D6
+  observation-row decision stands in full. — Morgan.
 - 2026-06-10 — **Decrypt-failure cause taxonomy correction (no decision
   reversed; the refuse-to-start / never-silently-re-mint decision is intact).**
   A code review of DELIVER step 02-03 (`serve` persistent-CA boot integration)

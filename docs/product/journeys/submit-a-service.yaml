@@ -85,10 +85,10 @@ steps:
       exit: "Trusting (happy) OR Relieved (sad) — both honest."
 
   - id: 4
-    name: "Operator inspects probe state via `alloc status`"
-    command: "overdrive alloc status --job <service-id>"
+    name: "Operator inspects probe state via `workload describe`"
+    command: "overdrive workload describe <service-id>"
     summary: >
-      CLI renders Service-kind alloc status with a Probes section
+      CLI renders Service-kind workload describe with a Probes section
       (ADR-0033 enrichment) listing each declared/inferred probe with
       role, probe_idx, mechanic, last status, last_observed_at,
       optional last_fail_reason. Probes section ABSENT for Job and
@@ -102,7 +102,7 @@ integration_validation:
     - >
       probe_idx — assigned at parse time (TOML array position OR 0 for
       inferred default). Single integer across ProbeResultRow PK,
-      streaming progress line, alloc status render, and Failed reason
+      streaming progress line, workload describe render, and Failed reason
       payloads. Must match byte-for-byte or operator loses trail.
     - >
       settled_in — Duration computed by Service reconciler at deciding

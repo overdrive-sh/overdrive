@@ -355,3 +355,12 @@ streaming submit signal.
 
 - 2026-05-24 — Initial accepted version. Resolves P1-Q3 (in part),
   P2-Q5 (deferred-non-decision), P2-Q6.
+- 2026-07-11 — **Amendment (#220)** — the operator inspection command
+  referenced in the Decision (post-cap inspection, §5) and the
+  JSON-mode Probes section (§6, Consequences) was renamed single-cut
+  from `overdrive alloc status --job <id>` to
+  `overdrive workload describe <id>` (positional id). The
+  `GET /v1/allocs` endpoint, the rendered Probes section, and the
+  `--json` Probes schema are unchanged; only the CLI verb changed.
+  The `alloc_status` / `AllocStatusRow` identifiers are unrelated and
+  unchanged.

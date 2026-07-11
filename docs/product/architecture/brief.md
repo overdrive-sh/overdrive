@@ -2668,7 +2668,7 @@ Per ADR-0047 §5/§6, the CLI render layer branches on
   `format_schedule_alloc_status`. Both read the deferral URL from
   a single CLI constant `SCHEDULE_EXECUTION_TRACKING_URL`
   (`https://github.com/overdrive-sh/overdrive/issues/166`); KPI K5
-  asserts byte-equality across submit echo and `alloc status`.
+  asserts byte-equality across submit echo and `workload describe`.
 
 A second constant `SERVICE_VIP_ALLOCATOR_TRACKING_URL`
 (`https://github.com/overdrive-sh/overdrive/issues/167`) is the SSOT
@@ -2718,9 +2718,9 @@ without re-deriving.
 |---|---|---|---|
 | ASR-WKD-01 | Reliability — Job-kind verdict honesty | `examples/coinflip.toml` submitted 100× via `overdrive job submit`; bash workload exits 0 or 1 randomly. CLI process exit code observed. | ≥ 99 / 100 trials produce CLI exit code matching workload exit code (KPI K1; baseline 0/100 today) |
 | ASR-WKD-02 | Maintainability — kind-mix rejection latency | Parser ingest of mixed-kind / missing-section / malformed specs. | p95 < 50 ms per parse-and-reject (KPI K2) |
-| ASR-WKD-03 | Functional correctness — Listener round-trip | 100 Service spec submits with pinned VIPs; submit echo Listeners section vs `alloc status` Listeners section. | 100 / 100 byte-identical (KPI K6) |
+| ASR-WKD-03 | Functional correctness — Listener round-trip | 100 Service spec submits with pinned VIPs; submit echo Listeners section vs `workload describe` Listeners section. | 100 / 100 byte-identical (KPI K6) |
 | ASR-WKD-04 | Maintainability — anti-pattern grep gate | `xtask dst-lint` scan after every PR. | 0 occurrences of `"live"` literal in render-path source |
-| ASR-WKD-05 | Operator usability — Failed-Job exit-code comprehension | Usability check against rendered fixture; 5–10 operators read a `Failed (backoff exhausted)` `alloc status` and state the exit code. | ≥ 95 % correct (KPI K3; pre-release manual gate; see § "K3 measurement cadence" in feature wave-decisions) |
+| ASR-WKD-05 | Operator usability — Failed-Job exit-code comprehension | Usability check against rendered fixture; 5–10 operators read a `Failed (backoff exhausted)` `workload describe` and state the exit code. | ≥ 95 % correct (KPI K3; pre-release manual gate; see § "K3 measurement cadence" in feature wave-decisions) |
 
 ### 61. C4 — see `docs/feature/workload-kind-discriminator/design/c4-diagrams.md`
 
@@ -3402,7 +3402,7 @@ platform allocates Service VIPs automatically").
 2. **Listener uniqueness rule simplifies** — `(port, protocol)`-only;
    the prior `(vip, port, protocol)` + the "both None" branch are
    deleted.
-3. **Submit-echo + `alloc status` render shape changes** — listener
+3. **Submit-echo + `workload describe` render shape changes** — listener
    lines become `<port>/<protocol>`; the assigned VIP renders at the
    Service level via `ServiceVipAllocator::get(&spec_digest)`. See
    §67a for the placement decision.
@@ -3445,7 +3445,7 @@ Three options were considered (full table in
   `allocator_entries` row IS the source of truth. `Job`/`ServiceSpec`
   stays purely operator-input — the aggregate cannot represent or
   reference the assigned VIP at all (type-driven-design discipline
-  preserved). Submit-echo and `alloc status` consult
+  preserved). Submit-echo and `workload describe` consult
   `ServiceVipAllocator::get(&spec_digest)` at render time. Restart
   hydration is already covered by `IntentBackedAllocator::bulk_load`
   + probe (§71).
@@ -3848,7 +3848,7 @@ default is unchanged. Slow-warming Services (>60s startup budget)
 receive `ServiceSubmitEvent::Running` until cap; cap elapses;
 client exits with existing Timeout. Reconciler continues driving
 probes after disconnect; `Stable` eventually lands on
-`AllocStatusRow`; operator inspects via `alloc status` (Probes
+`AllocStatusRow`; operator inspects via `workload describe` (Probes
 section per US-06 / §82 below).
 
 No new operator knob in Phase 1. If operator feedback demands
@@ -3964,7 +3964,7 @@ probe rendered with `(inferred)` marker. JSON-mode shape per ADR-0056
 | ASR-SHCP-01 | Reliability — Service-submit honesty (K1) | `coinflip-as-service.toml` submitted 100×; exits 1 within 50ms | ≥ 99 / 100 emit `ServiceSubmitEvent::Failed { reason: EarlyExit { ... } }`, zero emit `Stable` |
 | ASR-SHCP-02 | Reliability — Dataplane health convergence (K2) | 3-backend Service; backend 2 readiness HTTP probe returns 503 | Within 1 reconciler tick, `Backend{2}.healthy = false`; fingerprint changes |
 | ASR-SHCP-03 | Reliability — Liveness restart effectiveness (K3) | Service alloc with `failure_threshold = 3`; liveness HTTP probe returns 503 | Within 3×interval + 1 tick, `Action::RestartAllocation { reason: LivenessExhausted { .. } }` emitted; `restart_count` increments |
-| ASR-SHCP-04 | Usability — Probes section visibility (K4) | Stable Service with 3 probes; `alloc status --job <id>` | 100% of probes rendered in Probes section; Job/Schedule kinds show 0% Probes section |
+| ASR-SHCP-04 | Usability — Probes section visibility (K4) | Stable Service with 3 probes; `workload describe <id>` | 100% of probes rendered in Probes section; Job/Schedule kinds show 0% Probes section |
 | ASR-SHCP-05 | Functional correctness — kind rejection (K5) | TOML with `[job]` + `[[health_check.startup]]` | 100% rejected at parse time with `ParseError::ProbesNotAllowedOnKind` |
 | ASR-SHCP-06 | Performance — runner CPU guardrail | 1 Service alloc with 3 probes ticking at 2s/2s/10s | CPU consumption per alloc-with-3-probes ≤ 0.5% sustained |
 | ASR-SHCP-07 | Reliability — fault isolation per probe | Two probes on one alloc; one probe hangs 5s timeout, the other completes 100ms | Fast probe completes within 100ms ± scheduling jitter; slow probe times out at 5s; no cross-probe head-of-line |
@@ -4638,7 +4638,7 @@ this section is deferred-that-shipped. Evolution record:
 The built-in CA composed into the operator binary: persistent KEK-sealed
 workload-identity root booted in `overdrive serve`, near-expiry SVID rotation
 as a reconciler action (#40), and the current issued-cert summary surfaced via
-`overdrive alloc status` (#215). DELIVER complete (8 steps 01-01…03-03 all
+`overdrive workload describe` (#215). DELIVER complete (8 steps 01-01…03-03 all
 COMMIT/PASS); closes the D-CA-4 "CA not wired into serve" deferral and folds
 GH #40 + #215. Evolution record:
 `docs/evolution/2026-06-11-built-in-ca-operator-composition.md`.
@@ -4932,7 +4932,7 @@ identities; it does not perform handshakes or rotation.
 (generate-or-load); node bootstrap → `issue_intermediate(node)`;
 workload-start (existing allocation lifecycle) → `issue_svid(req)`. **No
 operator CLI verb** — by design (D-CA-4); the only operator-observable read
-surface is the `issued_certificates` row via the existing `alloc status` path.
+surface is the `issued_certificates` row via the existing `workload describe` path.
 Internal SVID near-expiry reissue is **not** a driving caller of a workflow —
 it is a live `Action::IssueSvid` (rev 6, `"rotate-svid"` correlation) driven
 through the existing action-shim executor. The only future *workflow*-shaped
@@ -5157,7 +5157,7 @@ state without re-issue" is impossible; the honest model has no secret at rest.
 
 This is a **FOUNDATION feature (F2)**: it builds the lifecycle, the held store,
 the read port, WRITES the `issued_certificates` rows, and proves convergence —
-but its **operator surface** (the `alloc status` render of `issued_certificates`
+but its **operator surface** (the `workload describe` render of `issued_certificates`
 + the deployed-SVID operator-verify flow) is **#215's** — *(rev 6, 2026-06-09:
 #215 is CLOSED by `built-in-ca-operator-composition`, no longer blocked on #35;
 the "blocked on #35" phrasing is rev-2-era historical)* — and the **consumer** is
@@ -5193,7 +5193,7 @@ TargetResource)` collapses duplicates. (Full design: § "Enqueue/handoff trigger
 below; ADR-0067 D5b.) The **dataplane consumers** (sockops #26 / gateway /
 telemetry — themselves out of scope) read via the `IdentityRead` port. **No
 operator CLI verb** — by design (System Constraints); #35's observables are
-TEST-tier; the operator-visible `alloc status` render is **#215's** (blocked on
+TEST-tier; the operator-visible `workload describe` render is **#215's** (blocked on
 #35). Per CLAUDE.md the workload verb is `overdrive deploy <SPEC>`, never `job
 submit`.
 
@@ -5546,7 +5546,7 @@ EXTENDs are purely additive (new enum variants, a new impl method, two new
 |---|---|
 | Certificate **rotation lifecycle** (near-expiry → mint-fresh → swap → retire) | **CURRENT (rev 6 — `built-in-ca-operator-composition`, 2026-06-09):** internal SVID near-expiry reissue is a **live reconciler action** — `SvidLifecycle::reconcile` emits `Action::IssueSvid` (`"rotate-svid"` correlation) **unconditionally**; the `ROTATION_ENABLED` gate, the `CERT_ROTATION_WORKFLOW` name, and `StartWorkflow`/`WorkflowName` are DELETED. It is **NOT a workflow and does NOT need #39** — a single internal mint+swap coordinates no external steps and has no external-wait terminal. The held cert's real `not_after` (from `actual`) keys the near-expiry comparison; the threshold is ½ × `WORKLOAD_SVID_TTL` (1800s). **A DELIVER agent must NOT preserve `ROTATION_ENABLED` or `StartWorkflow(cert_rotation)`.** Restart re-issue (`¬held → IssueSvid`) is RECOVERY, a *distinct* branch. **Only external-ACME / public-trust gateway rotation remains workflow-shaped and future-owned** (see ACME row below). **Historical (ADR-0067 rev 2, superseded):** #40 was framed as a `cert_rotation` workflow needing #39; that framing was external-ACME, never internal SVID reissue (the leaf key never enters the gossiped ObservationStore — `CaKeyPem` no `Serialize`, ADR-0063 D9; rotation status/audit lands as observation, material swapped IN-PROCESS into `IdentityMgr`). |
 | The dataplane **consumers** that present identity (sockops/kTLS mTLS, L7 gateway, telemetry sink) | **#26** (sockops/kTLS) + gateway/telemetry features. This feature ships the `IdentityRead` *read port + sim double + a test consumer*, not the production consumers. |
-| The operator `alloc status` render of `issued_certificates` + the deployed-SVID operator-verify flow | **CLOSED by `built-in-ca-operator-composition` (rev 6, 2026-06-09) — folds #215.** Its Slice ②/③ land the boot-side (persistent CA wired into `serve`) + consumer-side (`AllocStatusResponse.issued_certificates` summary + CLI render) surfaces; no longer blocked on #35. **Surface split (load-bearing for DELIVER):** O05 is the `issued_certificates` summary render (operator-legible metadata, NO cert bytes/key); E03 (full chain verifies) is proven SEPARATELY by an exported-PEM `openssl verify` capture (test-only env-gated export from `rcgen_ca_chain_verify.rs`), NOT by the summary render. **Boundary (carried forward):** re-issue-on-restart + rotation ⇒ **many `issued_certificates` rows per alloc** (append-only audit) — the surface renders the **current** cert (the **max-`issuance_ordinal`** row matching `SpiffeId::for_allocation(...)` — the strictly-ordered selection key; `issued_at` is retained as an audit fact, NOT the selection key), NOT one-per-alloc; a post-restart serial change reads as *legible* recovery, NOT anomalous. O05 "no silent issuance" is reinforced (every re-issue leaves a row). **Historical (ADR-0067 rev 2, superseded):** #215 was "blocked on #35; this ADR does not build it." |
+| The operator `workload describe` render of `issued_certificates` + the deployed-SVID operator-verify flow | **CLOSED by `built-in-ca-operator-composition` (rev 6, 2026-06-09) — folds #215.** Its Slice ②/③ land the boot-side (persistent CA wired into `serve`) + consumer-side (`AllocStatusResponse.issued_certificates` summary + CLI render) surfaces; no longer blocked on #35. **Surface split (load-bearing for DELIVER):** O05 is the `issued_certificates` summary render (operator-legible metadata, NO cert bytes/key); E03 (full chain verifies) is proven SEPARATELY by an exported-PEM `openssl verify` capture (test-only env-gated export from `rcgen_ca_chain_verify.rs`), NOT by the summary render. **Boundary (carried forward):** re-issue-on-restart + rotation ⇒ **many `issued_certificates` rows per alloc** (append-only audit) — the surface renders the **current** cert (the **max-`issuance_ordinal`** row matching `SpiffeId::for_allocation(...)` — the strictly-ordered selection key; `issued_at` is retained as an audit fact, NOT the selection key), NOT one-per-alloc; a post-restart serial change reads as *legible* recovery, NOT anomalous. O05 "no silent issuance" is reinforced (every re-issue leaves a row). **Historical (ADR-0067 rev 2, superseded):** #215 was "blocked on #35; this ADR does not build it." |
 | **Multi-node** held sets, gossiped audit rows across nodes, per-node identity, node attestation | **#36 [2.14]** (`Depends on #28`). Single-node Phase 2: one node's running set. |
 | **ACME / public-trust gateway certs** unified into `IdentityMgr` | **Roadmap step 4.7** (whitepaper §11). `IdentityMgr` is shaped to admit them later, not to hold them now. |
 | The `watch`/`broadcast` **push** read surface (consumers notified on change) | **Future (DIVERGE Option 3)** — a non-breaking change behind the `IdentityRead` port; a future external/root-rotation path pushes a rotated bundle down the same `set_bundle` seam (NOT internal SVID near-expiry reissue, which is a live `Action::IssueSvid`). No new issue. |
@@ -5619,7 +5619,7 @@ already-implemented, already-probing persistent boot path:
 
 #### Operator-visible current SVID (folds #215 consumer-side)
 
-The `alloc status` read aggregates the append-only `issued_certificates` audit
+The `workload describe` read aggregates the append-only `issued_certificates` audit
 and surfaces the **current** cert per running alloc:
 
 - `AllocStatusResponse` gains an additive `issued_certificates:
@@ -6359,7 +6359,7 @@ generation"), written only via the typed `IntentStore::txn` boundary; the
 a derived deadline — `development.md` § "Persist inputs, not derived state"). No
 observation row is mutated by the restart path (Alt-B in ADR-0073 rejected
 precisely because relabelling an observed Operator-stop row would cross the
-intent/observation boundary and corrupt `alloc status` honesty).
+intent/observation boundary and corrupt `workload describe` honesty).
 
 ### 5. External integrations — none
 

@@ -228,3 +228,12 @@ the trustworthy path the default.
 
 - 2026-05-24 — Initial accepted version. Closes RCA-A for default
   operator workflow. Sets "honest by default" as Overdrive convention.
+- 2026-07-11 — **Amendment (#220)** — the operator inspection command
+  whose Probes section renders the `(inferred)` marker (Decision §,
+  Consequences §) was renamed single-cut from
+  `overdrive alloc status --job <id>` to
+  `overdrive workload describe <id>` (positional id). The
+  `GET /v1/allocs` endpoint and the rendered Probes section
+  (including the `(inferred)` marker) are unchanged; only the CLI
+  verb changed. The `alloc_status` / `ProbeResultRow` identifiers are
+  unrelated and unchanged.

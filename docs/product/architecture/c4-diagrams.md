@@ -344,7 +344,7 @@ under the `reconcilers/` module).
 C4Container
   title Container Diagram annotation — Phase 1 Service Health-Check Probes
 
-  Person(operator, "Platform Engineer (Ana)", "Submits Service specs with [[health_check.*]] sections via `overdrive job submit`; inspects probe status via `overdrive alloc status --job <id>`")
+  Person(operator, "Platform Engineer (Ana)", "Submits Service specs with [[health_check.*]] sections via `overdrive job submit`; inspects probe status via `overdrive workload describe <id>`")
 
   Container(cli, "overdrive-cli", "Rust binary", "Parses [[health_check.*]] TOML; submits ServiceSpec with probes to control plane via NDJSON; renders Probes section for Service kind")
   Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — ServiceLifecycleReconciler (new sibling to WorkloadLifecycle); ServiceSubmitEvent V2 wire shape (Stable, Failed); action shim maps TerminalCondition to wire variant")
@@ -949,7 +949,7 @@ the credential's lifecycle is driven from the allocation lifecycle the control
 plane already owns. #35 is a FOUNDATION feature: its observable proof is
 TEST-tier (`openssl verify` the held chain + ObservationStore readback of the
 `issued_certificates` row + the DST `assert_eventually!` convergence
-invariant). The **operator** `alloc status` render is **#215's** (blocked on
+invariant). The **operator** `workload describe` render is **#215's** (blocked on
 #35); the dataplane **consumer** is **#26's** (sockops/kTLS).
 
 ```mermaid
@@ -1133,13 +1133,13 @@ Eight properties the diagrams make explicit (rev 2):
 C4Context
   title System Context — Backend instance replacement (GH #249)
 
-  Person(ana, "Ana (platform engineer)", "Rolls a declared workload's instance; trusts `alloc status` as the source of truth")
+  Person(ana, "Ana (platform engineer)", "Rolls a declared workload's instance; trusts `workload describe` as the source of truth")
   Person(peer, "Mesh peer", "Dials `<job>.svc.overdrive.local`; must keep landing the live backend across a cycle")
   System(overdrive, "Overdrive node", "Single binary — control plane + worker + dataplane. Adds `overdrive workload restart <id>`")
   System_Ext(fs, "Local filesystem (redb)", "IntentStore (workloads/<id>, /stop, /generation) + ObservationStore (alloc_status)")
   System_Ext(kernel, "Linux kernel", "netns/veth per /30 backend; dial-by-name responder + intercept (mesh reachability)")
 
-  Rel(ana, overdrive, "Runs `overdrive workload restart <id>` (NEW); confirms via `overdrive alloc status --job <id>`")
+  Rel(ana, overdrive, "Runs `overdrive workload restart <id>` (NEW); confirms via `overdrive workload describe <id>`")
   Rel(peer, overdrive, "Re-resolves the stable F; next connect lands the NEW backend")
   Rel(overdrive, fs, "Atomically increments workloads/<id>/generation + clears /stop (one txn: IncrementU64 + Delete); reconciler reads + places")
   Rel(overdrive, kernel, "Reconciler places a fresh instance (new AllocationId + new workload_addr); F-binding byte-stable")

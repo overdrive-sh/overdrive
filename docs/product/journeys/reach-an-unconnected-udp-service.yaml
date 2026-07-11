@@ -54,7 +54,7 @@ journey:
     rewrite to call connect() first. She has been bitten by silent
     dataplane asymmetry where the forward path works and the reverse path
     fails invisibly, which is the hardest class of bug to diagnose because
-    `overdrive deploy` succeeds and `alloc status` shows Running.
+    `overdrive deploy` succeeds and `workload describe` shows Running.
     Secondary: the dataplane author (rides J-PLAT-004) who needs Sim and
     the real kernel path provably equivalent on the reply-path source
     identity, so a forward-only / asymmetric fix cannot reach production

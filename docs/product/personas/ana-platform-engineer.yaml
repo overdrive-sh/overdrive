@@ -45,7 +45,7 @@ persona:
     - "Declares a service on a stable VIP and trusts the dataplane to converge delivery to it"
     - "Has been bitten by silent dataplane asymmetry — forward path works, reverse path fails invisibly"
     - "Reaches for `dig @<vip>`, `tcpdump`, and `bpftool map dump` to diagnose reachability"
-    - "Treats `overdrive deploy` success + `alloc status: Running` as a PROMISE the service answers — not just that a process started"
+    - "Treats `overdrive deploy` success + `workload describe: Running` as a PROMISE the service answers — not just that a process started"
     - "Does NOT own the client: the canonical UDP client (a DNS resolver) calls sendto(VIP) per query, never connect()"
 
   context:
@@ -53,10 +53,10 @@ persona:
     entry_points:
       - "Writes a UDP service spec (e.g. dns-resolver.toml with a `[[listener]]` protocol = \"udp\") and runs `overdrive deploy <spec>`"
       - "Points a real client at the VIP — `dig @<vip>`, or resolv.conf `nameserver <vip>` then `getaddrinfo`"
-      - "Lifecycle (GH #249): replaces a declared workload's instance via the explicit lifecycle verb `overdrive workload restart <id>` (decided per ADR-0073; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive alloc status --job <id>`"
+      - "Lifecycle (GH #249): replaces a declared workload's instance via the explicit lifecycle verb `overdrive workload restart <id>` (decided per ADR-0073; NOT `overdrive deploy`, which stays pure-declare) and confirms the fresh instance in `overdrive workload describe <id>`"
     triggers:
       - "Ana deploys a same-host DNS resolver service and runs `dig @<vip> example.com` to confirm it answers"
-      - "Ana sees `alloc status: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
+      - "Ana sees `workload describe: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
       - "Lifecycle (GH #249): Ana stops a declared workload to roll it (new build, wedged instance, fresh `workload_addr`), re-runs `overdrive deploy <spec>`, and NOTHING comes back up — the operator-stop sentinel is sticky/overriding and the same-spec resubmit is a no-op — so she needs an explicit way to bring up a fresh instance without deleting/redeclaring the workload"
 
   motivations:
@@ -72,7 +72,7 @@ persona:
       name keeps resolving the SAME frontend F.
     emotional: >
       Relief from the anxiety of the half-working service — the class of
-      defect where deploy succeeds, alloc status shows Running, a
+      defect where deploy succeeds, workload describe shows Running, a
       connected-UDP test even passes, and yet `dig @<vip>` hangs because
       the resolver never called connect().
     social: >
@@ -111,6 +111,6 @@ persona:
     - "`dig @<vip> example.com` against a same-host resolver service returns a correct answer on the first try"
     - "A Tier-3 wire capture shows every reply sourced from the VIP (never the backend IP)"
     - "The Sim≡kernel reply-path equivalence invariant is present and green, so the asymmetry cannot regress silently"
-    - "Lifecycle (GH #249): after the replace action, `overdrive alloc status --job <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
+    - "Lifecycle (GH #249): after the replace action, `overdrive workload describe <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
 
   related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]

@@ -559,3 +559,17 @@ the wire-vs-intent boundary explicitly via `WorkloadSpec` ↔
   artifacts
 - `docs/research/platform/workload-type-taxonomy-research.md` —
   industry validation (13/15 vendor primaries)
+
+## Amendment 2026-07-11 — Operator verb rename (`alloc status` → `workload describe`, #220)
+
+The Context and Decision above describe the operator inspection
+command as `overdrive alloc status --job <id>` (e.g. the kind-aware
+render dispatch and the `JobId`-reuse rationale in §Decision). That
+verb was renamed single-cut to `overdrive workload describe <id>`
+(positional id, not a `--job` flag) per GH #220. The backing
+endpoint (`GET /v1/allocs`) and the per-kind rendered output are
+unchanged; the kind-discriminator decision, the render-dispatch
+shape, and the `JobId` reuse all stand — only the CLI verb changed.
+Inline `alloc status` references (decision context, slice history)
+are preserved per ADR immutability; the `alloc_status` /
+`AllocStatusRow` identifiers are unrelated and unchanged.

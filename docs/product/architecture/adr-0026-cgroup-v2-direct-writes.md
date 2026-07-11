@@ -492,3 +492,14 @@ See ADR-0029's amendment 2026-04-28 for the type-rename surface
 (`ProcessDriver` → `ExecDriver`) inside the worker crate; this
 ADR amendment is the cgroup-side narrative.
 
+## Amendment 2026-07-11 — Operator verb rename (`alloc status` → `workload describe`, #220)
+
+§4 and the Negative consequences above reference the operator
+inspection command as `overdrive alloc status`. That verb was
+renamed single-cut to `overdrive workload describe <id>` (positional
+id, not a `--job` flag) per GH #220. The backing endpoint
+(`GET /v1/allocs`) and the rendered output (including the `Running`
+line and any future under-limit surfacing) are unchanged; only the
+CLI verb changed. The `alloc_status` observation-row/field name is
+unchanged.
+

@@ -80,7 +80,7 @@ steps:
 
   - id: 4
     name: "The chain verifies and issuance is auditable"
-    command: "overdrive alloc status --job <id>  (SVID metadata)  +  openssl verify (chain)"
+    command: "overdrive workload describe <id>  (SVID metadata)  +  openssl verify (chain)"
     summary: >
       The trust bundle composes {root [+ intermediate as needed]} so that an
       SVID validates back to the root with a standard tool. Each issuance

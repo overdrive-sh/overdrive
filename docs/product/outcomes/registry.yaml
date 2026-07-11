@@ -170,10 +170,10 @@ outcomes:
 - id: OUT-CA-ISSUED-CERTS-READ
   kind: operation
   summary: Operator reads the current issued-certificate summary per running alloc
-    via alloc status (EDD O05)
+    via workload describe (EDD O05)
   feature: built-in-ca-operator-composition
   inputs:
-  - shape: overdrive alloc status --job <WorkloadId> (reads issued_certificate_rows())
+  - shape: overdrive workload describe <WorkloadId> (reads issued_certificate_rows())
   output:
     shape: 'AllocStatusResponse.issued_certificates: Vec<IssuedCertSummary{serial,spiffe_id,issuer_serial,not_after}>,
       current = max issuance_ordinal per alloc (issued_at retained as audit fact,

@@ -574,3 +574,11 @@ table for forensic audit; out of scope here.
 
 - 2026-05-24 — Initial accepted version. Resolves P1-Q1 from
   `docs/feature/service-health-check-probes/feature-delta.md`.
+- 2026-07-11 — **Amendment (#220)** — the operator inspection command
+  whose Probes-section render walks the `BTreeMap` (Decision §, the
+  ordered-collection rationale) was renamed single-cut from
+  `overdrive alloc status --job <id>` to
+  `overdrive workload describe <id>` (positional id). The
+  `GET /v1/allocs` endpoint and the Probes-section rendered output
+  are unchanged; only the CLI verb changed. The `alloc_status` /
+  `ProbeResultRow` identifiers are unrelated and unchanged.

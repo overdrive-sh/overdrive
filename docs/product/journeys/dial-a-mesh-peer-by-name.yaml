@@ -90,7 +90,7 @@ journey:
     start: "Skeptical — 'the wire is enforceable, but can an unmodified workload even FIND its peer by name in a deploy, and will the platform ever hand it a dead address?'"
     middle: "Reassured — the walking skeleton resolves one name to one running-and-healthy backend through serve+deploy and the hop goes TLS 1.3; the ping-pong demo advances counters he watches himself."
     end: "Confident — 'an ordinary workload dials by name and lands at a LIVE peer the mesh then mTLS's, and a no-backend query returns NOTHING, never a stale addr. I ran the proof myself with two overdrive deploys.'"
-    step_4_ana: "ANA's lifecycle micro-arc (step 4 only — distinct actor/lens from Sam's reachability arc above). Anxious → Confident: 'I stopped a declared workload to roll it and NOTHING came back up — stop is sticky/overriding and a same-spec re-deploy is a no-op, so the instance was stuck with no path forward and no error saying why. Now I roll it with one explicit lifecycle action, a NEW instance comes up (new AllocationId, new workload_addr) while the job stays declared, and the name keeps resolving the SAME F — I confirm it myself in overdrive alloc status.'"
+    step_4_ana: "ANA's lifecycle micro-arc (step 4 only — distinct actor/lens from Sam's reachability arc above). Anxious → Confident: 'I stopped a declared workload to roll it and NOTHING came back up — stop is sticky/overriding and a same-spec re-deploy is a no-op, so the instance was stuck with no path forward and no error saying why. Now I roll it with one explicit lifecycle action, a NEW instance comes up (new AllocationId, new workload_addr) while the job stays declared, and the name keeps resolving the SAME F — I confirm it myself in overdrive workload describe.'"
 
 steps:
   - id: 1
@@ -142,7 +142,7 @@ steps:
       observable (the three #249-deferred ATs: 02-02 S-DBN-WS-STABLE + S-DBN-CHURN, and
       the 03-01 S-DBN-NXDOMAIN-02 RECOVERY leg — a stopped <job> re-resolving the SAME F
       once it recovers) operable through a production verb. Operator-observable via a NEW AllocationId
-      in `overdrive alloc status`. Feature: backend-instance-replacement (GH #249);
+      in `overdrive workload describe`. Feature: backend-instance-replacement (GH #249);
       the mechanism is DECIDED — an explicit lifecycle verb, NOT overloaded `deploy`
       (which stays pure-declare); the verb's name + semantics is decided in DESIGN per
       ADR-0073 — `overdrive workload restart <id>`.

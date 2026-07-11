@@ -19,7 +19,7 @@ journey:
     against a local single-mode control plane, sees the spec committed
     through a real IntentStore, observes the reconciler primitive alive
     via `overdrive cluster status`, and reads the spec back byte-
-    identical via `overdrive alloc status`.
+    identical via `overdrive workload describe`.
   persona: >
     Ana, Overdrive platform engineer (same persona as trust-the-sim).
     Secondary: Omar, operator who will use the same CLI once auth lands
@@ -71,7 +71,7 @@ steps:
 
   - id: 4
     name: "Inspect allocations via CLI"
-    command: "overdrive alloc status --job payments"
+    command: "overdrive workload describe payments"
     summary: >
       CLI calls DescribeJob + AllocStatus. Spec digest (ContentHash of
       rkyv-archived bytes) echoes back byte-identical to what the
