@@ -104,7 +104,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let state = build_converged_state(&tmp, clock.clone()).await;
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
-    //     desired state for `WorkloadLifecycle` against `job/payments`).
+    //     desired state for `WorkloadLifecycle` against `workload/payments`).
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
@@ -151,7 +151,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     //     reconciler named in `eval.reconciler` against the eval's
     //     target — N entries collapse to N dispatches per distinct
     //     `(reconciler, target)` key, per whitepaper §18 / ADR-0013 §8.
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
@@ -204,7 +204,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 // reconciler against the target — not fan out across every registered
 // reconciler. The current production loop (`for name in &registered`)
 // ignores `eval.reconciler` entirely, so a single eval submitted at
-// `(job-lifecycle, job/payments)` causes BOTH `WorkloadLifecycle::hydrate_desired`
+// `(job-lifecycle, workload/payments)` causes BOTH `WorkloadLifecycle::hydrate_desired`
 // AND `NoopHeartbeat::hydrate_desired` to read from the IntentStore — see
 // `docs/feature/fix-eval-reconciler-discarded/deliver/bugfix-rca.md` §Defect.
 //
@@ -223,7 +223,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 // ---------------------------------------------------------------------------
 
 /// RED — drives the runtime convergence loop with a single
-/// `Evaluation { reconciler: job-lifecycle, target: job/payments }` and
+/// `Evaluation { reconciler: job-lifecycle, target: workload/payments }` and
 /// asserts that ONLY `WorkloadLifecycle` is dispatched against the target.
 ///
 /// Counting strategy: the broker's `dispatched` counter is bumped
@@ -326,7 +326,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         .expect("seed Running alloc row");
 
     // --- Submit ONE evaluation naming `job-lifecycle` only.
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
@@ -351,7 +351,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     }
 
     // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
-    //     ran against `job/payments`. The broker's `dispatched`
+    //     ran against `workload/payments`. The broker's `dispatched`
     //     counter is bumped once per `run_convergence_tick`: pre-fix
     //     the dispatch loop runs every registered reconciler against
     //     the target, so for one submitted eval the counter would be
@@ -435,7 +435,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      `start()` with `DriverError::StartRejected` so the alloc
 ///      transitions to `AllocState::Failed` on the first tick.
 ///   2. Submit the job intent and one `Evaluation { reconciler:
-///      "job-lifecycle", target: "job/payments" }`.
+///      "job-lifecycle", target: "workload/payments" }`.
 ///   3. Drive ticks until the cached view records the alloc's
 ///      `last_failure_seen_at` observation and `restart_counts == 1` —
 ///      proof that the reconciler emitted exactly one Restart action and
@@ -527,7 +527,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     // 2 below accounts for that bounded extra dispatch.
 
     // --- Submit the seed evaluation.
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
@@ -810,7 +810,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     // warm-up depends on.
 
     // --- Submit the seed evaluation.
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
         target: target.clone(),
@@ -1146,7 +1146,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // Seed cached view with the supplied restart_counts and
     // last_failure_seen_at = now_unix (zero — the backoff window has
     // NOT elapsed for any non-trivial RESTART_BACKOFF_DURATION).
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
@@ -1254,7 +1254,7 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
     let clock = Arc::new(SimClock::new());
     let state = build_converged_state(&tmp, clock).await;
 
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     let alloc_id =
         overdrive_core::id::AllocationId::new("alloc-payments-0").expect("valid alloc id");
 

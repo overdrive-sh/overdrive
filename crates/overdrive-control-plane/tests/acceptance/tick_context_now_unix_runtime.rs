@@ -161,7 +161,7 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     // Submit one Evaluation and drive ONE tick — this exercises the
     // production construction site at line 248-256 of
     // `reconciler_runtime.rs`.
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
         target: target.clone(),

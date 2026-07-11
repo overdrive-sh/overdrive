@@ -228,7 +228,8 @@ pub fn spawn_with_runtime(
                     // write-retry.md` (or `docs/feature/fix-exit-observer-write-retry/
                     // deliver/rca.md` pre-archive).
                     if let Some(runtime) = runtime.as_ref()
-                        && let Ok(target) = TargetResource::new(&format!("job/{}", row.workload_id))
+                        && let Ok(target) =
+                            TargetResource::new(&format!("workload/{}", row.workload_id))
                     {
                         runtime.broker().submit(Evaluation {
                             reconciler: workload_lifecycle_name(),

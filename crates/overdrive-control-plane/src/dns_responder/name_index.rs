@@ -113,7 +113,7 @@ pub enum NameIndexError {
 /// The path is `/workload/<job>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
 /// shape). This pulls the segment immediately after `/workload/` and validates it
 /// as a v1 single-label mesh name via [`MeshServiceName::new`]. Returns `None`
-/// when the path is not the `job/.../alloc/...` shape OR the `<workload>` segment is
+/// when the path is not the `workload/.../alloc/...` shape OR the `<workload>` segment is
 /// not a valid v1 single-label mesh name (dotted, out-of-class, over 63
 /// octets) — such a backend is not mesh-dialable by name in v1.
 ///

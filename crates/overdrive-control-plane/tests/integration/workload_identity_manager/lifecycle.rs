@@ -79,7 +79,7 @@ fn trust_domain_subject() -> SpiffeId {
 /// # Port-to-port
 ///
 /// The driving port is `run_convergence_tick` for the `svid-lifecycle`
-/// reconciler against the `job/<workload>` target — the SAME convergence loop
+/// reconciler against the `workload/<workload>` target — the SAME convergence loop
 /// the production boot path runs. The observable outcomes are asserted at the
 /// `IdentityMgr::held_snapshot`, `ObservationStore::issued_certificate_rows`,
 /// and `openssl verify` exit-code boundaries. No executor / reconciler
@@ -621,7 +621,7 @@ async fn build_harness_with_ca_and_clock(
         std::net::Ipv4Addr::LOCALHOST,
     );
 
-    let target = TargetResource::new(&format!("job/{WORKLOAD_NAME}")).expect("valid target");
+    let target = TargetResource::new(&format!("workload/{WORKLOAD_NAME}")).expect("valid target");
     let reconciler_name = ReconcilerName::new(
         <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as Reconciler>::NAME,
     )

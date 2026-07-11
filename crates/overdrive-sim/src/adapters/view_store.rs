@@ -324,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn write_through_then_bulk_load_returns_value() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 42, label: "x".into() };
 
         store.write_through(N, &t, &v).await.expect("write ok");
@@ -336,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn bulk_load_filters_by_reconciler_name() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
 
         store.write_through(N, &t, &Counter { n: 1, label: "a".into() }).await.expect("write a");
         store
@@ -355,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_from_subsequent_bulk_load() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter::default();
 
         store.write_through(N, &t, &v).await.expect("write ok");
@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn delete_is_idempotent() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
 
         // Delete on a never-written key succeeds.
         store.delete(N, &t).await.expect("idempotent delete ok");
@@ -397,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn inject_fsync_failure_makes_next_write_through_fail() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 99, label: "should not persist".into() };
 
         store.inject_fsync_failure();
@@ -430,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn clear_fsync_failure_restores_default_behaviour() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 1, label: "ok".into() };
 
         store.inject_fsync_failure();
@@ -458,7 +458,7 @@ mod tests {
         let store = SimViewStore::new();
         assert_eq!(store.write_through_count(), 0, "fresh store must report zero writes");
 
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 1, label: "first".into() };
 
         store.write_through(N, &t, &v).await.expect("write 1");
@@ -481,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn write_through_count_unchanged_when_fsync_failure_injected() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 1, label: "x".into() };
 
         store.inject_fsync_failure();
@@ -501,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn reset_write_through_count_zeroes_and_subsequent_writes_increment_from_zero() {
         let store = SimViewStore::new();
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 1, label: "x".into() };
 
         store.write_through(N, &t, &v).await.expect("write 1");

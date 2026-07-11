@@ -158,7 +158,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     // the ceiling; the assertion later pins the exact upper bound.
     let target = WorkloadId::new("payments").expect("valid job id");
     let target_resource =
-        overdrive_core::reconcilers::TargetResource::new(&format!("job/{target}"))
+        overdrive_core::reconcilers::TargetResource::new(&format!("workload/{target}"))
             .expect("valid target");
     let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");

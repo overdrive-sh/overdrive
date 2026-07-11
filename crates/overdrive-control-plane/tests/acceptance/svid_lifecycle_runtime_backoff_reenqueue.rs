@@ -70,7 +70,7 @@ fn wid(s: &str) -> WorkloadId {
     WorkloadId::new(s).expect("valid WorkloadId")
 }
 fn svid_target(w: &WorkloadId) -> TargetResource {
-    TargetResource::new(&format!("job/{w}")).expect("valid target")
+    TargetResource::new(&format!("workload/{w}")).expect("valid target")
 }
 fn svid_reconciler_name() -> ReconcilerName {
     ReconcilerName::new(<SvidLifecycle as Reconciler>::NAME).expect("valid reconciler name")

@@ -845,7 +845,7 @@ fn wl_tick() -> TickContext {
 }
 
 /// Assert `actions` contains exactly one `Action::EnqueueEvaluation` routed at
-/// `svid-lifecycle` for `job/<workload_id>`. The SvidLifecycle enqueue is
+/// `svid-lifecycle` for `workload/<workload_id>`. The SvidLifecycle enqueue is
 /// UNGATED by workload kind — identity is needed by every running alloc.
 fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let mut count = 0;
@@ -866,13 +866,13 @@ fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let target = found_target.expect("count==1 checked above");
     assert_eq!(
         target.as_str(),
-        &format!("job/{workload_id}"),
-        "S-WIM-10: svid-lifecycle enqueue target MUST be 'job/<workload_id>' (workload grain)"
+        &format!("workload/{workload_id}"),
+        "S-WIM-10: svid-lifecycle enqueue target MUST be 'workload/<workload_id>' (workload grain)"
     );
 }
 
 /// `@in-memory` `@S-WIM-10` -- `WorkloadLifecycle::reconcile` enqueues
-/// `SvidLifecycle` evaluation for `job/<workload_id>` on a RUNNING-transition
+/// `SvidLifecycle` evaluation for `workload/<workload_id>` on a RUNNING-transition
 /// class (`StartAllocation`). ADR-0067 D5b producer 1. Without this, the pure
 /// reconciler can be correct but unreachable.
 #[test]
@@ -917,7 +917,7 @@ fn start_allocation_transition_enqueues_svid_lifecycle() {
 }
 
 /// `@in-memory` `@S-WIM-10` -- a STOPPED-transition class (`StopAllocation`)
-/// also enqueues `SvidLifecycle` for `job/<workload_id>` so the
+/// also enqueues `SvidLifecycle` for `workload/<workload_id>` so the
 /// `¬running ∧ held → DropSvid` branch fires (ADR-0067 O2). Producer 1.
 #[test]
 fn stop_allocation_transition_enqueues_svid_lifecycle() {

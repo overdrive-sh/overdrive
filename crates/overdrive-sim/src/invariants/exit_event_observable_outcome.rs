@@ -518,7 +518,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         .await
         .map_err(|e| format!("put job: {e:?}"))?;
 
-    let target = TargetResource::new("job/exit-event-observable-outcome")
+    let target = TargetResource::new("workload/exit-event-observable-outcome")
         .map_err(|e| format!("valid target: {e:?}"))?;
     let alloc_id = AllocationId::new("alloc-exit-event-observable-outcome-0")
         .map_err(|e| format!("alloc id: {e:?}"))?;

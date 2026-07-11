@@ -127,7 +127,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/recovery").expect("valid target");
+    let target = TargetResource::new("workload/recovery").expect("valid target");
     let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let start = Instant::now();

@@ -54,7 +54,7 @@ fn new_broker_has_zero_counters_and_empty_pending() {
 #[test]
 fn single_submit_increments_queued_and_populates_pending() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     let counters = broker.counters();
     assert_eq!(counters.queued, 1, "after 1 submit queued must be 1");
     assert_eq!(counters.cancelled, 0, "no duplicate yet -> cancelled stays 0");
@@ -69,8 +69,8 @@ fn single_submit_increments_queued_and_populates_pending() {
 #[test]
 fn duplicate_submit_at_same_key_collapses_to_one_pending_with_one_cancelled() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     let counters = broker.counters();
     assert_eq!(counters.queued, 1, "still exactly one pending at the key");
     assert_eq!(counters.cancelled, 1, "prior moved to cancelable");
@@ -85,7 +85,7 @@ fn duplicate_submit_at_same_key_collapses_to_one_pending_with_one_cancelled() {
 fn triple_submit_at_same_key_yields_two_cancelled() {
     let mut broker = EvaluationBroker::new();
     for _ in 0..3 {
-        broker.submit(eval_for("noop-heartbeat", "job/payments"));
+        broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     }
     let counters = broker.counters();
     assert_eq!(counters.queued, 1);
@@ -100,8 +100,8 @@ fn triple_submit_at_same_key_yields_two_cancelled() {
 #[test]
 fn submits_at_distinct_keys_dont_collapse() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
-    broker.submit(eval_for("noop-heartbeat", "job/frontend"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/frontend"));
     let counters = broker.counters();
     assert_eq!(counters.queued, 2, "two distinct targets -> two pending");
     assert_eq!(counters.cancelled, 0, "no duplicate key -> cancelled stays 0");
@@ -110,8 +110,8 @@ fn submits_at_distinct_keys_dont_collapse() {
 #[test]
 fn submits_with_same_target_different_reconciler_dont_collapse() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
-    broker.submit(eval_for("cert-rotator", "job/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
+    broker.submit(eval_for("cert-rotator", "workload/payments"));
     let counters = broker.counters();
     assert_eq!(counters.queued, 2, "distinct reconciler dimension -> two pending");
     assert_eq!(counters.cancelled, 0);
@@ -125,8 +125,8 @@ fn submits_with_same_target_different_reconciler_dont_collapse() {
 #[test]
 fn drain_pending_returns_surviving_evaluations_and_empties_pending() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     let drained = broker.drain_pending();
     assert_eq!(drained.len(), 1, "one surviving evaluation after collapse");
     let counters = broker.counters();
@@ -150,8 +150,8 @@ fn drain_on_empty_broker_returns_empty_vec() {
 #[test]
 fn reap_cancelable_returns_reclaimed_count_and_empties_cancelable() {
     let mut broker = EvaluationBroker::new();
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
-    broker.submit(eval_for("noop-heartbeat", "job/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
+    broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     let reaped = broker.reap_cancelable();
     assert_eq!(reaped, 1, "exactly one evaluation was cancelled -> one reaped");
     // Reaping again yields zero; the vec has been emptied.
@@ -174,12 +174,12 @@ fn cancelable_growth_matches_duplicate_submits_since_last_reap() {
     let mut broker = EvaluationBroker::new();
     // Five submits at one key => four cancelled (first still pending).
     for _ in 0..5 {
-        broker.submit(eval_for("noop-heartbeat", "job/payments"));
+        broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     }
     assert_eq!(broker.reap_cancelable(), 4);
     // Three more at the same key; one still pending, so two more cancelled.
     for _ in 0..3 {
-        broker.submit(eval_for("noop-heartbeat", "job/payments"));
+        broker.submit(eval_for("noop-heartbeat", "workload/payments"));
     }
     // Only the THREE new submits contribute; the previous pending
     // evaluation (still in pending from the first batch) is the one
@@ -221,9 +221,9 @@ proptest! {
 
         // Fixed five-key table -- the proptest index picks one.
         let keys: [(&str, &str); 5] = [
-            ("noop-heartbeat", "job/payments"),
-            ("noop-heartbeat", "job/frontend"),
-            ("cert-rotator",   "job/payments"),
+            ("noop-heartbeat", "workload/payments"),
+            ("noop-heartbeat", "workload/frontend"),
+            ("cert-rotator",   "workload/payments"),
             ("scheduler",      "node/n-001"),
             ("right-sizer",    "alloc/a-42"),
         ];
@@ -271,9 +271,9 @@ proptest! {
         indices in proptest::collection::vec(arb_key_index(), 1..=50),
     ) {
         let keys: [(&str, &str); 5] = [
-            ("noop-heartbeat", "job/payments"),
-            ("noop-heartbeat", "job/frontend"),
-            ("cert-rotator",   "job/payments"),
+            ("noop-heartbeat", "workload/payments"),
+            ("noop-heartbeat", "workload/frontend"),
+            ("cert-rotator",   "workload/payments"),
             ("scheduler",      "node/n-001"),
             ("right-sizer",    "alloc/a-42"),
         ];
@@ -327,9 +327,9 @@ fn drain_pending_is_deterministic_across_two_brokers() {
     // `arbitrary_interleave_satisfies_invariants` above. Each key is
     // submitted exactly once, in a fixed order, into both brokers.
     let keys: [(&str, &str); 5] = [
-        ("noop-heartbeat", "job/payments"),
-        ("noop-heartbeat", "job/frontend"),
-        ("cert-rotator", "job/payments"),
+        ("noop-heartbeat", "workload/payments"),
+        ("noop-heartbeat", "workload/frontend"),
+        ("cert-rotator", "workload/payments"),
         ("scheduler", "node/n-001"),
         ("right-sizer", "alloc/a-42"),
     ];

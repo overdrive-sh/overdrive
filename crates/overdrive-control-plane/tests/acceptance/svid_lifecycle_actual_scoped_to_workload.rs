@@ -3,7 +3,7 @@
 //! never drops a DIFFERENT workload's still-live SVID.
 //!
 //! Root cause (pre-fix): `svid-lifecycle` is enqueued with a workload-scoped
-//! target `job/<workload_id>` (ADR-0067 D5b). The DESIRED side hydrates only that
+//! target `workload/<workload_id>` (ADR-0067 D5b). The DESIRED side hydrates only that
 //! workload's Running allocs, but the ACTUAL (held) side read the GLOBAL
 //! `IdentityMgr::held_snapshot()` unfiltered. The reconciler's `¬running ∧ held →
 //! DropSvid` loop then dropped every held alloc absent from that ONE workload's
@@ -17,7 +17,7 @@
 //! desired side.
 //!
 //! Port-to-port: the driving port is `run_convergence_tick` for `svid-lifecycle`;
-//! the observable outcome is the `IdentityMgr` held set after a `job/payments`
+//! the observable outcome is the `IdentityMgr` held set after a `workload/payments`
 //! tick (asserted at the held-snapshot boundary). Pre-fix `inventory`'s alloc is
 //! dropped from the held set; post-fix it survives.
 
@@ -61,7 +61,7 @@ fn wid(s: &str) -> WorkloadId {
     WorkloadId::new(s).expect("valid WorkloadId")
 }
 fn svid_target(w: &WorkloadId) -> TargetResource {
-    TargetResource::new(&format!("job/{w}")).expect("valid target")
+    TargetResource::new(&format!("workload/{w}")).expect("valid target")
 }
 fn svid_reconciler_name() -> ReconcilerName {
     ReconcilerName::new(<SvidLifecycle as Reconciler>::NAME).expect("valid reconciler name")
@@ -153,7 +153,7 @@ async fn tick_svid(state: &AppState, target: &TargetResource, now: std::time::In
     }
 }
 
-/// BUG-1 — a convergence tick for `job/payments` must NOT drop `inventory`'s
+/// BUG-1 — a convergence tick for `workload/payments` must NOT drop `inventory`'s
 /// still-live SVID. Both workloads each hold an SVID; re-ticking `payments`
 /// (both still Running) leaves `inventory`'s held entry intact.
 #[tokio::test]
@@ -197,7 +197,7 @@ async fn payments_tick_does_not_drop_inventory_held_svid() {
         "inventory alloc must hold an SVID after its issuance tick"
     );
 
-    // Re-run a svid-lifecycle tick for `job/payments` ONLY. Both allocs are
+    // Re-run a svid-lifecycle tick for `workload/payments` ONLY. Both allocs are
     // STILL Running, so nothing should be dropped. Pre-fix: the actual side read
     // the global held set, saw `inventory-0` absent from `payments`'s desired set,
     // and emitted DropSvid for it.

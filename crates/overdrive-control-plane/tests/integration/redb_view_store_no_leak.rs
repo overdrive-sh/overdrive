@@ -69,7 +69,7 @@ fn reconciler_name_const_is_pointer_identical_across_reads() {
 async fn write_through_bytes_accepts_reconciler_name_const_directly() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let store = RedbViewStore::open(tmp.path()).expect("open store");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     // CBOR-encoded `()` — minimal valid blob the redb layer will
     // happily round-trip. The point of this test is the lifetime

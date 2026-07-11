@@ -2188,7 +2188,7 @@ fn svid_desired_state(
 
 /// `actual` is scoped to the TARGET workload's held entries — symmetry with the
 /// desired side (`hydrate_svid_desired_running`), which already filters by the
-/// workload-scoped target `job/<workload_id>` (ADR-0067 D5b). The held snapshot
+/// workload-scoped target `workload/<workload_id>` (ADR-0067 D5b). The held snapshot
 /// is GLOBAL (one `IdentityMgr` for the node holds every workload's SVIDs), so
 /// hydrating it unfiltered would feed the reconciler's `¬running ∧ held →
 /// DropSvid` loop every OTHER workload's still-live entries — a `payments` tick
@@ -2872,11 +2872,11 @@ async fn hydrate_service_alloc_facts(
     let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
     let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
     // Slice 05 — the `service-lifecycle` target the runtime keys the
-    // shared WorkloadLifecycle restart-count view by is `job/<id>`
+    // shared WorkloadLifecycle restart-count view by is `workload/<id>`
     // (mirrors `service_event_from_terminal`'s target shape). Used per
     // alloc below to read `restart_count` — the input the liveness
     // branch composes with the shared `RESTART_BACKOFF_CEILING` budget.
-    let restart_target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     // Slice 05 — the live driver command/args the liveness restart
     // replays. Same projection the WorkloadLifecycle Run branch uses
     // (`workload_lifecycle.rs`): single Phase-1 Exec variant.
@@ -3058,11 +3058,12 @@ fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
     nodes
 }
 
-/// Extract a `WorkloadId` from a `TargetResource` of shape `job/<id>`.
+/// Extract a `WorkloadId` from a `TargetResource` of shape `workload/<id>`.
 fn workload_id_from_target(target: &TargetResource) -> Result<WorkloadId, ConvergenceError> {
     let raw = target.as_str();
-    let id_part =
-        raw.strip_prefix("job/").ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
+    let id_part = raw
+        .strip_prefix("workload/")
+        .ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
     WorkloadId::new(id_part).map_err(|e| ConvergenceError::TargetShape(e.to_string()))
 }
 
@@ -3096,7 +3097,7 @@ pub enum ConvergenceError {
     /// non-zero exit (ADR-0065 §5).
     #[error("workflow-instance intent decode failed: {0}")]
     IntentDecode(String),
-    /// Target resource did not match the expected `job/<id>` shape.
+    /// Target resource did not match the expected `workload/<id>` shape.
     #[error("invalid target resource: {0}")]
     TargetShape(String),
     /// Action shim returned an error.
@@ -3159,7 +3160,7 @@ mod tests {
             ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
         runtime.register(crate::workload_lifecycle()).await.expect("register");
 
-        let target = TargetResource::new("job/payments").expect("target");
+        let target = TargetResource::new("workload/payments").expect("target");
         let alloc = AllocationId::new("payments-0").expect("alloc id");
 
         // attempts = CEILING - 2 → attempt_index = CEILING - 1 → below ceiling → will_restart
@@ -3236,7 +3237,7 @@ mod tests {
         }
 
         fn target() -> TargetResource {
-            TargetResource::new(&format!("job/{WORKLOAD}")).expect("valid target")
+            TargetResource::new(&format!("workload/{WORKLOAD}")).expect("valid target")
         }
 
         fn writer_node() -> NodeId {

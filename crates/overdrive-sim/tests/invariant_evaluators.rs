@@ -127,8 +127,8 @@ async fn snapshot_roundtrip_passes_on_any_real_localstore() {
     let intent = overdrive_store_local::LocalIntentStore::open(&store_path).expect("open");
 
     // Some entries to exercise framing, sorted vs insertion-order.
-    intent.put(b"job/frontend", b"{}").await.expect("put");
-    intent.put(b"job/payments", b"{}").await.expect("put");
+    intent.put(b"workload/frontend", b"{}").await.expect("put");
+    intent.put(b"workload/payments", b"{}").await.expect("put");
     intent.put(b"policy/default", b"{}").await.expect("put");
 
     let result = evaluators::evaluate_snapshot_roundtrip(&intent).await;
@@ -293,8 +293,8 @@ fn target(raw: &str) -> overdrive_core::reconcilers::TargetResource {
 #[test]
 fn dispatch_routing_passes_when_each_eval_dispatches_named_reconciler_only() {
     let r = jl_reconciler();
-    let t_a = target("job/payments");
-    let t_b = target("job/frontend");
+    let t_a = target("workload/payments");
+    let t_b = target("workload/frontend");
 
     let submitted = vec![
         evaluators::Evaluation { reconciler: r.clone(), target: t_a.clone() },
@@ -314,9 +314,9 @@ fn dispatch_routing_passes_when_each_eval_dispatches_named_reconciler_only() {
 /// Negative case — the regression-test proof for this delivery.
 ///
 /// Mocked fan-out: a SINGLE drained eval names `job-lifecycle` against
-/// `job/payments`, but the dispatch record contains TWO entries — one
-/// correct (`job-lifecycle`, `job/payments`) and one wrong (`noop-
-/// heartbeat`, `job/payments`). This is exactly the shape the precursor
+/// `workload/payments`, but the dispatch record contains TWO entries — one
+/// correct (`job-lifecycle`, `workload/payments`) and one wrong (`noop-
+/// heartbeat`, `workload/payments`). This is exactly the shape the precursor
 /// fix at commit `e6f5e5e` eliminated in production: a registry-wide
 /// loop dispatching every reconciler against a single drained eval.
 ///
@@ -327,7 +327,7 @@ fn dispatch_routing_fails_on_mocked_fanout_regression() {
     let jl = jl_reconciler();
     let noop = overdrive_core::reconcilers::ReconcilerName::new("noop-heartbeat")
         .expect("noop-heartbeat is a valid ReconcilerName");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let submitted = vec![evaluators::Evaluation { reconciler: jl.clone(), target: t.clone() }];
     let record = evaluators::DispatchRecord { dispatched: vec![(jl, t.clone()), (noop, t)] };
@@ -359,7 +359,7 @@ fn dispatch_routing_fails_when_only_unsubmitted_reconciler_was_dispatched() {
     let jl = jl_reconciler();
     let noop = overdrive_core::reconcilers::ReconcilerName::new("noop-heartbeat")
         .expect("noop-heartbeat is a valid ReconcilerName");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let submitted = vec![evaluators::Evaluation { reconciler: jl, target: t.clone() }];
     let record = evaluators::DispatchRecord { dispatched: vec![(noop, t)] };

@@ -525,7 +525,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         .await
         .map_err(|e| format!("put job: {e:?}"))?;
 
-    let target_str = format!("job/{WORKLOAD_NAME}");
+    let target_str = format!("workload/{WORKLOAD_NAME}");
     let target = TargetResource::new(&target_str).map_err(|e| format!("valid target: {e:?}"))?;
     let reconciler_name =
         ReconcilerName::new(RECONCILER_NAME).map_err(|e| format!("reconciler name: {e:?}"))?;

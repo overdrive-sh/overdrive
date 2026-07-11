@@ -132,7 +132,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/obswrite").expect("valid target");
+    let target = TargetResource::new("workload/obswrite").expect("valid target");
     let alloc_id = AllocationId::new("alloc-obswrite-0").expect("alloc id");
 
     let ticker_clock = sim_clock.clone();

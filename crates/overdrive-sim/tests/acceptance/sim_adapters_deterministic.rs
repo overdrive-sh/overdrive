@@ -256,7 +256,7 @@ proptest::proptest! {
 async fn sim_dataplane_stores_policy_and_service_state() {
     let dataplane = SimDataplane::new();
 
-    let key = PolicyKey { src: spiffe("job/payments"), dst: spiffe("job/database") };
+    let key = PolicyKey { src: spiffe("workload/payments"), dst: spiffe("workload/database") };
     dataplane.update_policy(key.clone(), Verdict::Allow).await.expect("update_policy succeeds");
 
     assert_eq!(
@@ -273,7 +273,7 @@ async fn sim_dataplane_stores_policy_and_service_state() {
     )
     .expect("IPv4 ServiceFrontend constructs");
     let backend = Backend {
-        alloc: spiffe("job/payments/alloc/a1b2c3"),
+        alloc: spiffe("workload/payments/alloc/a1b2c3"),
         addr: "127.0.0.1:8080".parse().expect("valid addr"),
         weight: 100,
         healthy: true,
@@ -291,8 +291,8 @@ async fn sim_dataplane_stores_policy_and_service_state() {
 async fn sim_dataplane_drain_flow_events_returns_seeded_events() {
     let dataplane = SimDataplane::new();
     let event = FlowEvent {
-        src: spiffe("job/a"),
-        dst: spiffe("job/b"),
+        src: spiffe("workload/a"),
+        dst: spiffe("workload/b"),
         verdict: Verdict::Allow,
         bytes_up: 128,
         bytes_down: 256,
@@ -314,7 +314,7 @@ async fn sim_dataplane_drain_flow_events_returns_seeded_events() {
 fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
-        identity: spiffe("job/payments/alloc/a1b2c3"),
+        identity: spiffe("workload/payments/alloc/a1b2c3"),
         command: "registry/payments:1.0".to_owned(),
         args: vec![],
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },

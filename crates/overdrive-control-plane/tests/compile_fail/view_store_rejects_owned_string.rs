@@ -24,7 +24,7 @@ use overdrive_core::reconcilers::TargetResource;
 async fn main() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let store = RedbViewStore::open(tmp.path()).expect("open");
-    let target = TargetResource::new("job/payments").expect("valid");
+    let target = TargetResource::new("workload/payments").expect("valid");
 
     // Construct an owned `String` at runtime and try to borrow `&str`
     // from it. The borrow's lifetime is bounded by `runtime`'s scope —

@@ -69,7 +69,7 @@ async fn attempt_failed_first_attempt_will_restart() {
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
     let alloc_id = AllocationId::from_str("alloc-pay-0").expect("alloc id");
     let wl_id = WorkloadId::from_str("payments").expect("wl id");
-    let target = TargetResource::new("job/payments").expect("target");
+    let target = TargetResource::new("workload/payments").expect("target");
 
     let view = WorkloadLifecycleView {
         restart_counts: BTreeMap::from([(alloc_id.clone(), 0)]),
@@ -109,7 +109,7 @@ async fn attempt_failed_mid_budget_reports_correct_index() {
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
     let alloc_id = AllocationId::from_str("alloc-pay-0").expect("alloc id");
     let wl_id = WorkloadId::from_str("payments").expect("wl id");
-    let target = TargetResource::new("job/payments").expect("target");
+    let target = TargetResource::new("workload/payments").expect("target");
 
     let view = WorkloadLifecycleView {
         restart_counts: BTreeMap::from([(alloc_id.clone(), 3)]),
@@ -145,7 +145,7 @@ async fn attempt_failed_at_ceiling_will_not_restart() {
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
     let alloc_id = AllocationId::from_str("alloc-pay-0").expect("alloc id");
     let wl_id = WorkloadId::from_str("payments").expect("wl id");
-    let target = TargetResource::new("job/payments").expect("target");
+    let target = TargetResource::new("workload/payments").expect("target");
 
     let view = WorkloadLifecycleView {
         restart_counts: BTreeMap::from([(alloc_id.clone(), RESTART_BACKOFF_CEILING)]),
@@ -185,7 +185,7 @@ async fn attempt_failed_empty_view_defaults_conservative() {
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
     let alloc_id = AllocationId::from_str("alloc-pay-0").expect("alloc id");
     let wl_id = WorkloadId::from_str("payments").expect("wl id");
-    let target = TargetResource::new("job/payments").expect("target");
+    let target = TargetResource::new("workload/payments").expect("target");
 
     let rt = runtime_with_view(&tmp, &target, None).await;
 

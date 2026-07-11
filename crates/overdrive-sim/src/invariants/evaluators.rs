@@ -3647,7 +3647,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 
         // Roundtrip WorkloadLifecycleView through a fresh SimViewStore.
         let store = SimViewStore::new();
-        let target_raw = format!("job/case-{case_idx}");
+        let target_raw = format!("workload/case-{case_idx}");
         let target = match TargetResource::new(&target_raw) {
             Ok(t) => t,
             Err(err) => {
@@ -3711,7 +3711,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
     // Unit-View roundtrip — `()` is the View shape `NoopHeartbeat`
     // uses. Encode/decode of unit must succeed with byte-equal payload.
     let store = SimViewStore::new();
-    let target_unit = match TargetResource::new("job/unit-case") {
+    let target_unit = match TargetResource::new("workload/unit-case") {
         Ok(t) => t,
         Err(err) => {
             return result(
@@ -3801,7 +3801,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     // reads) rather than ORDERING (a specific order). Both calls must
     // produce identical output.
     let targets_with_views: Vec<(&str, WorkloadLifecycleView)> = vec![
-        ("job/payments", {
+        ("workload/payments", {
             let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-payments-0") {
                 Ok(a) => a,
@@ -3817,7 +3817,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             v.restart_counts.insert(id, 5);
             v
         }),
-        ("job/frontend", {
+        ("workload/frontend", {
             let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-frontend-0") {
                 Ok(a) => a,
@@ -3833,7 +3833,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             v.restart_counts.insert(id, 2);
             v
         }),
-        ("job/scheduler", {
+        ("workload/scheduler", {
             let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-scheduler-0") {
                 Ok(a) => a,
@@ -3980,7 +3980,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
     // `<WorkloadLifecycle as Reconciler>::NAME` directly per the
     // `refactor-reconciler-static-name` RCA — no `ReconcilerName::new`
     // wrapping needed.
-    let target = match TargetResource::new("job/payments") {
+    let target = match TargetResource::new("workload/payments") {
         Ok(t) => t,
         Err(err) => {
             return result(
@@ -4269,10 +4269,10 @@ mod tests {
         use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
         let r = ReconcilerName::new("noop-heartbeat")
             .expect("noop-heartbeat is a valid ReconcilerName");
-        let t_a =
-            TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
-        let t_b =
-            TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+        let t_a = TargetResource::new("workload/payments")
+            .expect("workload/payments is a valid TargetResource");
+        let t_b = TargetResource::new("workload/frontend")
+            .expect("workload/frontend is a valid TargetResource");
         vec![(r.clone(), t_a), (r, t_b)]
     }
 
@@ -4332,7 +4332,7 @@ mod tests {
     #[test]
     fn dispatch_routing_passes_on_clean_single_eval() {
         let r = dispatch_jl_reconciler();
-        let t = dispatch_target("job/payments");
+        let t = dispatch_target("workload/payments");
         let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
         let record = DispatchRecord { dispatched: vec![(r, t)] };
         let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
@@ -4344,8 +4344,8 @@ mod tests {
     #[test]
     fn dispatch_routing_passes_on_clean_multi_eval_distinct_targets() {
         let r = dispatch_jl_reconciler();
-        let t_a = dispatch_target("job/payments");
-        let t_b = dispatch_target("job/frontend");
+        let t_a = dispatch_target("workload/payments");
+        let t_b = dispatch_target("workload/frontend");
         let submitted = vec![
             Evaluation { reconciler: r.clone(), target: t_a.clone() },
             Evaluation { reconciler: r.clone(), target: t_b.clone() },
@@ -4370,7 +4370,7 @@ mod tests {
     fn dispatch_routing_fails_on_cardinality_mismatch_extra() {
         let r = dispatch_jl_reconciler();
         let noop = dispatch_noop_reconciler();
-        let t = dispatch_target("job/payments");
+        let t = dispatch_target("workload/payments");
         let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
         // Two dispatch entries for one drained eval — fan-out shape.
         let record = DispatchRecord { dispatched: vec![(r, t.clone()), (noop, t)] };
@@ -4391,8 +4391,8 @@ mod tests {
     #[test]
     fn dispatch_routing_fails_on_cardinality_mismatch_missing() {
         let r = dispatch_jl_reconciler();
-        let t_a = dispatch_target("job/payments");
-        let t_b = dispatch_target("job/frontend");
+        let t_a = dispatch_target("workload/payments");
+        let t_b = dispatch_target("workload/frontend");
         let submitted = vec![
             Evaluation { reconciler: r.clone(), target: t_a.clone() },
             Evaluation { reconciler: r.clone(), target: t_b },
@@ -4422,8 +4422,8 @@ mod tests {
     fn dispatch_routing_fails_on_smoking_gun_unsubmitted_reconciler() {
         let jl = dispatch_jl_reconciler();
         let noop = dispatch_noop_reconciler();
-        let t_a = dispatch_target("job/payments");
-        let t_b = dispatch_target("job/frontend");
+        let t_a = dispatch_target("workload/payments");
+        let t_b = dispatch_target("workload/frontend");
         // Two submitted evals naming `jl`. Dispatched has matching
         // cardinality (2) but the SECOND entry names `noop` — an
         // unsubmitted reconciler. Per-eval routing fails on the second
@@ -4452,7 +4452,7 @@ mod tests {
     fn dispatch_routing_fails_when_named_reconciler_not_dispatched() {
         let jl = dispatch_jl_reconciler();
         let noop = dispatch_noop_reconciler();
-        let t = dispatch_target("job/payments");
+        let t = dispatch_target("workload/payments");
         let submitted = vec![Evaluation { reconciler: jl, target: t.clone() }];
         // Cardinality matches (1 == 1) but the dispatched reconciler
         // is wrong. Per-eval routing finds zero matches for `(jl, t)`.
@@ -4473,8 +4473,8 @@ mod tests {
     fn dispatch_routing_fails_when_extra_entry_names_unsubmitted_reconciler() {
         let jl = dispatch_jl_reconciler();
         let noop = dispatch_noop_reconciler();
-        let t_a = dispatch_target("job/payments");
-        let t_b = dispatch_target("job/frontend");
+        let t_a = dispatch_target("workload/payments");
+        let t_b = dispatch_target("workload/frontend");
         let submitted = vec![Evaluation { reconciler: jl.clone(), target: t_a.clone() }];
         // One submitted eval, two dispatched entries — the extra one
         // names `noop`, an unsubmitted reconciler.

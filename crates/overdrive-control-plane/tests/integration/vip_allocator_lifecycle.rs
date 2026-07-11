@@ -647,7 +647,7 @@ async fn drive_convergence_ticks(state: &AppState, workload_id: &str, ticks: u64
     let reconciler_name =
         overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("reconciler name");
     let target_resource =
-        overdrive_core::reconcilers::TargetResource::new(&format!("job/{workload_id}"))
+        overdrive_core::reconcilers::TargetResource::new(&format!("workload/{workload_id}"))
             .expect("valid target");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);

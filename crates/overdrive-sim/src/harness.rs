@@ -756,8 +756,8 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 
     let reconciler =
         ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
-    let target =
-        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+    let target = TargetResource::new("workload/payments")
+        .expect("workload/payments is a valid TargetResource");
 
     let mut broker = EvaluationBroker::new();
     for _ in 0..N {
@@ -780,8 +780,8 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 ///
 /// ## Submit pattern
 ///
-/// Two keys (`K1 = ("noop-heartbeat", "job/payments")` and
-/// `K2 = ("noop-heartbeat", "job/frontend")`), `N = 3` submits per key,
+/// Two keys (`K1 = ("noop-heartbeat", "workload/payments")` and
+/// `K2 = ("noop-heartbeat", "workload/frontend")`), `N = 3` submits per key,
 /// strictly interleaved as `[K1, K2, K1, K2, K1, K2]`. After all six
 /// submits land, drain once.
 ///
@@ -804,10 +804,10 @@ fn drive_broker_collapse_multi_key()
 
     let reconciler =
         ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
-    let target_a =
-        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
-    let target_b =
-        TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+    let target_a = TargetResource::new("workload/payments")
+        .expect("workload/payments is a valid TargetResource");
+    let target_b = TargetResource::new("workload/frontend")
+        .expect("workload/frontend is a valid TargetResource");
 
     let mut broker = EvaluationBroker::new();
     for _ in 0..N {
@@ -847,8 +847,10 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
 
     let r_jl =
         ReconcilerName::new("job-lifecycle").expect("job-lifecycle is a valid ReconcilerName");
-    let t_a = TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
-    let t_b = TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+    let t_a = TargetResource::new("workload/payments")
+        .expect("workload/payments is a valid TargetResource");
+    let t_b = TargetResource::new("workload/frontend")
+        .expect("workload/frontend is a valid TargetResource");
 
     let submitted = vec![
         Evaluation { reconciler: r_jl.clone(), target: t_a },

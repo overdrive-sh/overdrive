@@ -51,7 +51,7 @@
 //! so driving the production action-shim + reconciler-runtime wiring against
 //! `Sim*` adapters is structurally supported here — no new dep. The driving
 //! port is `run_convergence_tick` for the `svid-lifecycle` reconciler against
-//! a `job/<workload>` target; the observable assertions land at the
+//! a `workload/<workload>` target; the observable assertions land at the
 //! `IdentityMgr::held_snapshot` + `ObservationStore::issued_certificate_rows`
 //! + `ObservationStore::alloc_status_rows` driven-port boundaries. No
 //! reconciler / executor internals are exercised directly.
@@ -91,7 +91,7 @@ use overdrive_store_local::LocalIntentStore;
 const CONVERGENCE_TICK_BUDGET: u64 = 8;
 
 /// The workload every alloc in the churn scenario belongs to. The
-/// svid-lifecycle reconciler ticks against `job/<WORKLOAD_NAME>` (the
+/// svid-lifecycle reconciler ticks against `workload/<WORKLOAD_NAME>` (the
 /// `workload_id_from_target` shape the runtime's `hydrate_svid_desired`
 /// arm requires).
 const WORKLOAD_NAME: &str = "workload-identity-capstone";
@@ -464,10 +464,10 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         std::net::Ipv4Addr::LOCALHOST,
     );
 
-    // The svid-lifecycle reconciler ticks against a `job/<workload>` target —
+    // The svid-lifecycle reconciler ticks against a `workload/<workload>` target —
     // the `workload_id_from_target` shape its `hydrate_svid_desired` arm
     // requires (the reconciler is keyed by name, the target is the workload).
-    let target_str = format!("job/{WORKLOAD_NAME}");
+    let target_str = format!("workload/{WORKLOAD_NAME}");
     let target = TargetResource::new(&target_str).map_err(|e| format!("valid target: {e:?}"))?;
     let reconciler_name = ReconcilerName::new(
         <overdrive_core::reconcilers::svid_lifecycle::SvidLifecycle as overdrive_core::reconcilers::Reconciler>::NAME,

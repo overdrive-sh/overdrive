@@ -62,7 +62,7 @@ prop_compose! {
 
 prop_compose! {
     fn arb_target()(s in "[a-zA-Z0-9_-]{1,16}") -> TargetResource {
-        TargetResource::new(&format!("job/{s}")).expect("valid by construction")
+        TargetResource::new(&format!("workload/{s}")).expect("valid by construction")
     }
 }
 

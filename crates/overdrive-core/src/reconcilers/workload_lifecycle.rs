@@ -175,7 +175,7 @@ impl Reconciler for WorkloadLifecycle {
         // whitepaper §18, so duplicate enqueues collapse to one
         // dispatch per drain cycle. Emitting once keeps the action
         // vector compact and reflects the broker's actual dispatch
-        // shape. The target is `job/<workload_id>` — same scope the
+        // shape. The target is `workload/<workload_id>` — same scope the
         // exit observer's bridge enqueue uses (`exit_observer.rs:231`),
         // so post-UI-06 BOTH enqueue sites address the same broker key.
         if actions.iter().any(is_alloc_mutating_action) {
@@ -183,9 +183,9 @@ impl Reconciler for WorkloadLifecycle {
             {
                 let bridge_name = ReconcilerName::new(BACKEND_DISCOVERY_BRIDGE_NAME)
                     .expect("'backend-discovery-bridge' is a valid ReconcilerName by construction");
-                let bridge_target = TargetResource::new(&format!("job/{}", desired.workload_id))
-                    .expect(
-                        "'job/<workload_id>' is a valid TargetResource by construction \
+                let bridge_target =
+                    TargetResource::new(&format!("workload/{}", desired.workload_id)).expect(
+                        "'workload/<workload_id>' is a valid TargetResource by construction \
                          (WorkloadId is constructor-validated, prefix is canonical)",
                     );
                 actions.push(Action::EnqueueEvaluation {
@@ -222,7 +222,7 @@ impl Reconciler for WorkloadLifecycle {
             // StartAllocation from spuriously enqueueing it (which would
             // hydrate an empty Service state → 0 actions → broker churn).
             //
-            // Same `job/<workload_id>` target keying as the bridge
+            // Same `workload/<workload_id>` target keying as the bridge
             // dual-emit, same single-emission-per-tick discipline (the
             // broker is LWW at `(ReconcilerName, TargetResource)`),
             // reuses the existing `Action::EnqueueEvaluation` variant.
@@ -234,8 +234,8 @@ impl Reconciler for WorkloadLifecycle {
                     let service_name = ReconcilerName::new(SERVICE_LIFECYCLE_NAME)
                         .expect("'service-lifecycle' is a valid ReconcilerName by construction");
                     let service_target =
-                        TargetResource::new(&format!("job/{}", desired.workload_id)).expect(
-                            "'job/<workload_id>' is a valid TargetResource by construction \
+                        TargetResource::new(&format!("workload/{}", desired.workload_id)).expect(
+                            "'workload/<workload_id>' is a valid TargetResource by construction \
                          (WorkloadId is constructor-validated, prefix is canonical)",
                         );
                     actions.push(Action::EnqueueEvaluation {
@@ -257,15 +257,15 @@ impl Reconciler for WorkloadLifecycle {
             //
             // Single emission per tick (not per action): the broker is LWW at
             // `(ReconcilerName, TargetResource)`, so a duplicate enqueue across
-            // this site and the exit observer's `job/<workload_id>` submit
+            // this site and the exit observer's `workload/<workload_id>` submit
             // collapses to one dispatch per drain cycle.
             #[allow(clippy::expect_used)]
             {
                 let svid_name = ReconcilerName::new(SVID_LIFECYCLE_NAME)
                     .expect("'svid-lifecycle' is a valid ReconcilerName by construction");
-                let svid_target = TargetResource::new(&format!("job/{}", desired.workload_id))
+                let svid_target = TargetResource::new(&format!("workload/{}", desired.workload_id))
                     .expect(
-                        "'job/<workload_id>' is a valid TargetResource by construction \
+                        "'workload/<workload_id>' is a valid TargetResource by construction \
                          (WorkloadId is constructor-validated, prefix is canonical)",
                     );
                 actions

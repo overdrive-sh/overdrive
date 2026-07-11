@@ -729,7 +729,8 @@ pub enum ReconcilerNameError {
 /// hydrate scans the `workflows/` intent prefix), so the conventional
 /// target is `workflow/all`; the `/all` id-part is non-empty and so
 /// satisfies the shape rule.
-const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/", "workflow/"];
+const CANONICAL_TARGET_PREFIXES: &[&str] =
+    &["workload/", "node/", "alloc/", "service/", "workflow/"];
 
 /// Target-resource component of the evaluation broker's key.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

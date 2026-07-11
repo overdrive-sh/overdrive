@@ -95,8 +95,8 @@ async fn runtime_bulk_loads_views_at_register() {
     let sim = Arc::new(SimViewStore::new());
 
     let n = name("job-lifecycle");
-    let target_a = target("job/payments");
-    let target_b = target("job/frontend");
+    let target_a = target("workload/payments");
+    let target_b = target("workload/frontend");
 
     let mut view_a = WorkloadLifecycleView::default();
     view_a.restart_counts.insert(alloc("alloc-payments-0"), 3);
@@ -139,7 +139,7 @@ async fn runtime_writes_through_before_in_memory_update() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
     let n = name("job-lifecycle");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let mut original = WorkloadLifecycleView::default();
     original.restart_counts.insert(alloc("alloc-payments-0"), 7);
@@ -210,7 +210,7 @@ async fn runtime_skips_write_through_when_next_view_equals_in_memory() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
     let n = name("job-lifecycle");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let mut runtime =
         ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
@@ -393,7 +393,7 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
     let n = name("backend-discovery-bridge");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let host_ipv4 = std::net::Ipv4Addr::new(10, 0, 0, 5);
     let writer_node = NodeId::new("writer-1").expect("valid NodeId");
@@ -567,7 +567,7 @@ async fn runtime_skips_write_through_when_svid_lifecycle_view_equals_in_memory()
     let tmp = tempfile::tempdir().expect("tempdir");
     let sim = Arc::new(SimViewStore::new());
     let n = name("svid-lifecycle");
-    let t = target("job/payments");
+    let t = target("workload/payments");
 
     let mut runtime =
         ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");

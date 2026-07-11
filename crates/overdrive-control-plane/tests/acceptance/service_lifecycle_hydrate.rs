@@ -87,7 +87,7 @@ fn service_lifecycle_reconciler() -> AnyReconciler {
 }
 
 fn target_for(wid: &WorkloadId) -> TargetResource {
-    TargetResource::new(&format!("job/{wid}")).expect("valid target")
+    TargetResource::new(&format!("workload/{wid}")).expect("valid target")
 }
 
 async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {

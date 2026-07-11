@@ -392,7 +392,7 @@ pub async fn workload_event_from_lifecycle(
                 }
                 _ => 1,
             };
-            let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+            let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
             let (attempt_index, will_restart) = target
                 .as_ref()
                 .map_or((1, true), |t| runtime.restart_status_for_alloc(t, &event.alloc_id));
@@ -433,7 +433,7 @@ async fn workload_event_from_terminal(
 ) -> JobSubmitEvent {
     let row = obs.alloc_status_row(&event.alloc_id).await.ok().flatten();
     let stderr_tail = row.as_ref().and_then(|r| r.stderr_tail.clone());
-    let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     let attempt_index =
         target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &event.alloc_id).0);
     match cond {
@@ -487,7 +487,7 @@ async fn workload_terminal_from_snapshot(
     let cond = latest.terminal.as_ref()?;
     let duration = format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str());
     let stderr_tail = latest.stderr_tail.clone();
-    let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     let attempt_index =
         target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &latest.alloc_id).0);
     Some(match cond {
@@ -540,7 +540,7 @@ async fn best_effort_attempt_count(
         .filter(|r| r.workload_id == *workload_id)
         .max_by_key(|r| r.updated_at.counter);
     latest.map_or(1, |row| {
-        let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+        let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
         target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &row.alloc_id).0)
     })
 }
@@ -1131,7 +1131,7 @@ mod tests {
         let mut runtime = make_runtime(tmp);
         runtime.register(crate::workload_lifecycle()).await.expect("register");
         let target =
-            overdrive_core::reconcilers::TargetResource::new(&format!("job/{workload_id}"))
+            overdrive_core::reconcilers::TargetResource::new(&format!("workload/{workload_id}"))
                 .expect("target");
         let view = WorkloadLifecycleView {
             restart_counts: BTreeMap::from([(alloc_id.clone(), restart_count)]),

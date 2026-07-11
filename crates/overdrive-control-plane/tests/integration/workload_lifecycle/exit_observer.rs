@@ -154,7 +154,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/exitobs").expect("valid target");
+    let target = TargetResource::new("workload/exitobs").expect("valid target");
     // Phase 1 alloc id derivation per ADR-0023 — `alloc-{workload_id}-0`.
     let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
 
@@ -566,7 +566,7 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
 
 // -----------------------------------------------------------------------
 // S-WIM-10 / ADR-0067 D5b producer 2 — the exit observer submits a
-// `SvidLifecycle` evaluation for `job/<workload_id>` to the broker on an
+// `SvidLifecycle` evaluation for `workload/<workload_id>` to the broker on an
 // observed alloc-exit, WITH NO manual broker poke. This is the sibling of
 // the existing `workload_lifecycle` / `backend_discovery_bridge` /
 // `service_lifecycle` exit-observer submits (`exit_observer.rs:233-296`):
@@ -651,7 +651,7 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/exitobs").expect("valid target");
+    let target = TargetResource::new("workload/exitobs").expect("valid target");
     let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
     let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
@@ -698,7 +698,7 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
 
     // Inject a crash — the observer classifies it as Failed and submits
     // the re-enqueues (workload_lifecycle + bridge + service_lifecycle +
-    // svid_lifecycle) for `job/exitobs`.
+    // svid_lifecycle) for `workload/exitobs`.
     sim_driver.inject_exit_after(
         &alloc_id,
         Duration::from_millis(500),
@@ -740,6 +740,6 @@ async fn exit_observer_submits_svid_lifecycle_evaluation_on_observed_exit() {
     assert!(
         svid_submitted,
         "ADR-0067 D5b producer 2: the exit observer MUST submit a 'svid-lifecycle' \
-         Evaluation for 'job/exitobs' on an observed alloc-exit, with no manual broker poke"
+         Evaluation for 'workload/exitobs' on an observed alloc-exit, with no manual broker poke"
     );
 }

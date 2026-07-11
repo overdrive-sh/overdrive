@@ -37,7 +37,7 @@ fn target(s: &str) -> TargetResource {
 #[tokio::test]
 async fn redb_view_store_roundtrips_views_across_reopens_with_durable_fsync() {
     let tmp = tempfile::tempdir().expect("create tempdir");
-    let t = target("job/payments");
+    let t = target("workload/payments");
     let v = DemoView { counter: 7, label: "first".into() };
 
     {
@@ -78,7 +78,7 @@ async fn redb_view_store_per_reconciler_table_isolation() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let store = RedbViewStore::open(tmp.path()).expect("open");
 
-    let t = target("job/payments");
+    let t = target("workload/payments");
     let v_a = DemoView { counter: 1, label: "a".into() };
 
     store.write_through(N_JOB, &t, &v_a).await.expect("write a");

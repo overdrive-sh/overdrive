@@ -154,7 +154,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/backoff-exhaust").expect("valid target");
+    let target = TargetResource::new("workload/backoff-exhaust").expect("valid target");
     let workload_lifecycle_name =
         overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
@@ -249,7 +249,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/term-stop").expect("valid target");
+    let target = TargetResource::new("workload/term-stop").expect("valid target");
     let workload_lifecycle_name =
         overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
@@ -365,7 +365,7 @@ async fn non_terminal_transitions_emit_none() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/non-term").expect("valid target");
+    let target = TargetResource::new("workload/non-term").expect("valid target");
     let workload_lifecycle_name =
         overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();

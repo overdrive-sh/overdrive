@@ -158,7 +158,7 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
 
     // WHEN one convergence tick fires for job-lifecycle against the workload.
     let name = ReconcilerName::new("job-lifecycle").expect("valid reconciler name");
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     let now = clock.now();
     let deadline = now + Duration::from_millis(100);
     run_convergence_tick(&state, &name, &target, now, 0, deadline)

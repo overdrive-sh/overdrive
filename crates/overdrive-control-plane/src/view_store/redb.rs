@@ -354,7 +354,7 @@ mod tests {
     async fn write_through_creates_table_lazily() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let t = target("job/payments");
+        let t = target("workload/payments");
         let v = Counter { n: 1 };
 
         // Before write_through, bulk_load returns empty (table absent).
@@ -374,7 +374,7 @@ mod tests {
 
         // Insert in a deliberately non-sorted order to prove
         // BTreeMap-driven iteration.
-        let order = ["job/zeta", "job/alpha", "job/middle"];
+        let order = ["workload/zeta", "workload/alpha", "workload/middle"];
         for (idx, k) in order.iter().enumerate() {
             store.write_through(N, &target(k), &Counter { n: idx as u64 }).await.expect("write");
         }
@@ -383,14 +383,14 @@ mod tests {
         let keys: Vec<_> = loaded.keys().map(|t| t.as_str().to_string()).collect();
         // BTreeMap<TargetResource, _> iterates in TargetResource::Ord
         // order — String lexicographic given the inner type.
-        assert_eq!(keys, vec!["job/alpha", "job/middle", "job/zeta"]);
+        assert_eq!(keys, vec!["workload/alpha", "workload/middle", "workload/zeta"]);
     }
 
     #[tokio::test]
     async fn delete_removes_row_and_is_idempotent() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let t = target("job/payments");
+        let t = target("workload/payments");
 
         // Idempotent on a never-written key (table doesn't exist yet).
         store.delete(N, &t).await.expect("idempotent delete on missing table");

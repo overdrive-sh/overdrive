@@ -297,7 +297,7 @@ mod acceptance {
     #[cfg(feature = "integration-tests")]
     mod svid_lifecycle_runtime_backoff_reenqueue;
     // BUG-1 regression — the svid-lifecycle actual (held) side is scoped to the
-    // TARGET workload, so a `job/payments` convergence tick never drops a
+    // TARGET workload, so a `workload/payments` convergence tick never drops a
     // DIFFERENT workload's still-live SVID (ADR-0067 D5b; the global actual fed
     // the reconciler's ¬running ∧ held → DropSvid loop every other workload's
     // held entry). Same `run_convergence_tick` integration-tests gate as its

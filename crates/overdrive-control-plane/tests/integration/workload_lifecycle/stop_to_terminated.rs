@@ -105,7 +105,7 @@ async fn job_stop_drives_running_to_terminated() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/stopper").expect("valid target");
+    let target = TargetResource::new("workload/stopper").expect("valid target");
     let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let now = Instant::now();

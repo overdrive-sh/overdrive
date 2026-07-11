@@ -1,6 +1,6 @@
 //! UI-06 acceptance — `WorkloadLifecycle::reconcile` dual-emits
 //! `Action::EnqueueEvaluation { reconciler: "backend-discovery-bridge",
-//! target: "job/<workload_id>" }` alongside every alloc-mutating
+//! target: "workload/<workload_id>" }` alongside every alloc-mutating
 //! action (`StartAllocation` / `RestartAllocation` / `StopAllocation`
 //! / `FinalizeFailed`) so the `BackendDiscoveryBridge` re-ticks
 //! against the new alloc state on the next convergence cycle.
@@ -140,15 +140,15 @@ fn assert_single_bridge_enqueue<'a>(
     let (reconciler, target) = found.expect("count==1 checked above");
     assert_eq!(
         target.as_str(),
-        &format!("job/{workload_id}"),
-        "UI-06: bridge enqueue target MUST be 'job/<workload_id>' (mirrors exit_observer)"
+        &format!("workload/{workload_id}"),
+        "UI-06: bridge enqueue target MUST be 'workload/<workload_id>' (mirrors exit_observer)"
     );
     (reconciler, target)
 }
 
 /// GAP-9 helper — assert that `actions` contains exactly one
 /// `Action::EnqueueEvaluation` routed at `service-lifecycle` for the
-/// given workload, keyed `job/<workload_id>`. Pins the Shape C dual-emit.
+/// given workload, keyed `workload/<workload_id>`. Pins the Shape C dual-emit.
 fn assert_single_service_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let mut count = 0;
     let mut found_target: Option<&TargetResource> = None;
@@ -168,14 +168,14 @@ fn assert_single_service_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let target = found_target.expect("count==1 checked above");
     assert_eq!(
         target.as_str(),
-        &format!("job/{workload_id}"),
-        "GAP-9: service-lifecycle enqueue target MUST be 'job/<workload_id>'"
+        &format!("workload/{workload_id}"),
+        "GAP-9: service-lifecycle enqueue target MUST be 'workload/<workload_id>'"
     );
 }
 
 /// ADR-0067 D5b helper — assert that `actions` contains exactly one
 /// `Action::EnqueueEvaluation` routed at `svid-lifecycle` for the given
-/// workload, keyed `job/<workload_id>`. The svid-lifecycle enqueue is
+/// workload, keyed `workload/<workload_id>`. The svid-lifecycle enqueue is
 /// UNGATED by workload kind (identity is needed by every running alloc).
 fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let mut count = 0;
@@ -196,8 +196,8 @@ fn assert_single_svid_enqueue(actions: &[Action], workload_id: &WorkloadId) {
     let target = found_target.expect("count==1 checked above");
     assert_eq!(
         target.as_str(),
-        &format!("job/{workload_id}"),
-        "ADR-0067 D5b: svid-lifecycle enqueue target MUST be 'job/<workload_id>'"
+        &format!("workload/{workload_id}"),
+        "ADR-0067 D5b: svid-lifecycle enqueue target MUST be 'workload/<workload_id>'"
     );
 }
 

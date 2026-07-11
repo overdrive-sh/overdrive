@@ -62,7 +62,7 @@ fn wid(s: &str) -> WorkloadId {
     WorkloadId::new(s).expect("valid WorkloadId")
 }
 fn service_target(w: &WorkloadId) -> TargetResource {
-    TargetResource::new(&format!("job/{w}")).expect("valid target")
+    TargetResource::new(&format!("workload/{w}")).expect("valid target")
 }
 fn service_reconciler_name() -> ReconcilerName {
     ReconcilerName::new(SERVICE_LIFECYCLE).expect("valid reconciler name")

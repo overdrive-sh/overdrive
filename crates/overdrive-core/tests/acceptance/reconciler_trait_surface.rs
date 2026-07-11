@@ -271,10 +271,10 @@ proptest! {
 
 #[test]
 fn target_resource_new_accepts_job_shape() {
-    let outcome = TargetResource::new("job/payments");
+    let outcome = TargetResource::new("workload/payments");
 
-    let target = outcome.expect("canonical job/<id> must be accepted");
-    assert_eq!(target.as_str(), "job/payments");
+    let target = outcome.expect("canonical workload/<id> must be accepted");
+    assert_eq!(target.as_str(), "workload/payments");
 }
 
 #[test]
@@ -319,29 +319,29 @@ fn target_resource_new_rejects_unknown_shape() {
 
 #[test]
 fn target_resource_new_rejects_shape_missing_id() {
-    let outcome = TargetResource::new("job/");
+    let outcome = TargetResource::new("workload/");
 
     match outcome {
         Err(TargetResourceError::UnknownShape { .. }) => {}
         Err(other) => panic!("expected TargetResourceError::UnknownShape, got {other:?}"),
-        Ok(value) => panic!("'job/' with empty id must not construct; got {value:?}"),
+        Ok(value) => panic!("'workload/' with empty id must not construct; got {value:?}"),
     }
 }
 
 #[test]
 fn target_resource_from_str_forwards_to_new() {
-    let via_new = TargetResource::new("job/payments").expect("valid");
-    let via_from_str = TargetResource::from_str("job/payments").expect("valid");
+    let via_new = TargetResource::new("workload/payments").expect("valid");
+    let via_from_str = TargetResource::from_str("workload/payments").expect("valid");
 
     assert_eq!(via_new, via_from_str);
 }
 
 #[test]
 fn target_resource_display_renders_canonical_string() {
-    let target = TargetResource::new("job/payments").expect("valid");
+    let target = TargetResource::new("workload/payments").expect("valid");
 
-    assert_eq!(target.to_string(), "job/payments");
-    assert_eq!(format!("{target}"), "job/payments");
+    assert_eq!(target.to_string(), "workload/payments");
+    assert_eq!(format!("{target}"), "workload/payments");
 }
 
 // ---------------------------------------------------------------------------
@@ -350,8 +350,11 @@ fn target_resource_display_renders_canonical_string() {
 
 #[test]
 fn action_http_call_constructable_with_get_method_and_idempotency_key() {
-    let correlation =
-        CorrelationKey::derive("job/payments", &ContentHash::from_bytes([0u8; 32]), "register");
+    let correlation = CorrelationKey::derive(
+        "workload/payments",
+        &ContentHash::from_bytes([0u8; 32]),
+        "register",
+    );
 
     let action = Action::HttpCall {
         correlation: correlation.clone(),

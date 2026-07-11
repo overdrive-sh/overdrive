@@ -93,7 +93,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("workload/payments").expect("valid target");
     let workload_lifecycle_name = overdrive_core::reconcilers::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let now = Instant::now();

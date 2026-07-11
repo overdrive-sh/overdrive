@@ -168,7 +168,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let key = IntentKey::for_workload(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/running-gate").expect("valid target");
+    let target = TargetResource::new("workload/running-gate").expect("valid target");
     // Phase 1 alloc id derivation per ADR-0023 — `alloc-{workload_id}-0`.
     let alloc_id = AllocationId::new("alloc-running-gate-0").expect("alloc id");
 
