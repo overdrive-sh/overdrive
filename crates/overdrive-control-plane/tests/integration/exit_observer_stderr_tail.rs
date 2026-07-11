@@ -139,7 +139,7 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
     // lines (ERR 3..ERR 7) MUST appear in `row.stderr_tail`.
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/stderr-tail-test/alloc/0")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/stderr-tail-test/alloc/0")
             .expect("valid spiffe id"),
         command: "/bin/sh".to_owned(),
         args: vec![

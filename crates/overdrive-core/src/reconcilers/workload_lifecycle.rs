@@ -1036,7 +1036,7 @@ fn service_vip_release_emission(
     // MUST NOT key on `desired_to_stop`, `is_operator_stopped`,
     // `row.terminal`, or the GC terminal stamp — those all fire on
     // stop-while-declared, the exact case that must now retain the VIP.
-    // A stop intent (`POST /v1/jobs/{id}/stop`) retains the spec key, so
+    // A stop intent (`POST /v1/workloads/{id}/stop`) retains the spec key, so
     // under a stop `desired.job` stays `Some(_)`.
     if desired.job.is_some() {
         return None;
@@ -1501,7 +1501,7 @@ mod service_vip_release_emission_tests {
     //! (`reconciler_runtime::read_job`) returns `Some(job)` for a
     //! declared Service (the kind-agnostic projection) and `None` only
     //! when the spec intent is absent (withdrawn). A stop intent
-    //! (`POST /v1/jobs/{id}/stop`) retains the spec key, so under a stop
+    //! (`POST /v1/workloads/{id}/stop`) retains the spec key, so under a stop
     //! `desired.job` stays `Some(_)` — the case that must now RETAIN the
     //! VIP. The gate keys on `desired.job.is_none()` alone, never on
     //! `desired_to_stop`, `is_operator_stopped`, or `row.terminal`.

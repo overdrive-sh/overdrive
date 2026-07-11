@@ -182,7 +182,7 @@ pub fn build_inbound_spec(
 ) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/sa/alloc/01")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("valid spiffe id"),
         command: "/bin/true".to_owned(),
         args: vec![],

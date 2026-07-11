@@ -50,7 +50,7 @@ fn aid(s: &str) -> AllocationId {
 fn restart_spec() -> overdrive_core::traits::driver::AllocationSpec {
     overdrive_core::traits::driver::AllocationSpec {
         alloc: aid("alloc-x"),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
             .expect("valid spiffe"),
         command: "/bin/svc".to_string(),
         args: vec![],
@@ -87,8 +87,10 @@ fn liveness_fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe,
         has_liveness_probe: true,

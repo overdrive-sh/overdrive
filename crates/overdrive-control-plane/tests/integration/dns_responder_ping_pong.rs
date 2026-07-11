@@ -6,7 +6,7 @@
 //! simultaneously a mesh SERVICE (inbound leg-C + frontend `F`) AND an egress
 //! DIALER (leg-B)** — `a` and `b`, ×2 on ONE `serve`. It drives ONLY the
 //! production entry points — `run_server_with_obs_and_driver` (boot) + `POST
-//! /v1/jobs` (deploy, the in-process `overdrive deploy` driving port) +
+//! /v1/workloads` (deploy, the in-process `overdrive deploy` driving port) +
 //! `ip netns exec <ns> getent ahostsv4` (resolve, NOT `dig` — K2) from inside
 //! each deployed workload's PRODUCTION-provisioned netns + a PLAINTEXT
 //! `TcpStream` dial from the SAME netns (capture / translate / mTLS).
@@ -627,7 +627,7 @@ impl IdentityRead for HeldMeshIdentities {
     fn svid_for(&self, alloc: &AllocationId) -> Option<SvidMaterial> {
         // The alloc id contains its `<job>` id ("a" / "b"). Match on the `/a/`
         // / `/b/` job segment to route the right dual-role leaf. (The bare
-        // single-char match would over-match; the alloc id embeds `/job/<id>/`.)
+        // single-char match would over-match; the alloc id embeds `/workload/<id>/`.)
         let id = alloc.as_str();
         if id.contains("/a/") || id.contains("-a-") {
             Some(self.a_svid.clone())
@@ -751,18 +751,18 @@ impl Drop for Skeleton {
 }
 
 /// Deploy a Service spec through the real in-process deploy submit handler
-/// (`POST /v1/jobs` over the production HTTPS driving port). Returns `true` on a
+/// (`POST /v1/workloads` over the production HTTPS driving port). Returns `true` on a
 /// 2xx accept.
 async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool {
     use overdrive_control_plane::api::SubmitWorkloadRequest;
-    let url = format!("https://localhost:{}/v1/jobs", skeleton.bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", skeleton.bound.port());
     let resp = skeleton
         .client
         .post(&url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
         .send()
         .await
-        .expect("deploy: POST /v1/jobs");
+        .expect("deploy: POST /v1/workloads");
     let status = resp.status();
     let body = resp.bytes().await.expect("read response body");
     if !status.is_success() {
@@ -772,12 +772,13 @@ async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool 
 }
 
 /// Stop a deployed workload through the real in-process stop driving port
-/// (`POST /v1/jobs/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`
+/// (`POST /v1/workloads/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`
 /// (which stops the per-alloc accept loops), the SAME path `overdrive job stop`
 /// drives. Returns `true` on a 2xx accept.
 async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/stop", skeleton.bound.port());
-    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/jobs/{id}/stop");
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/stop", skeleton.bound.port());
+    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/workloads/{id}/stop");
     let status = resp.status();
     let body = resp.bytes().await.expect("read stop response body");
     if !status.is_success() {
@@ -1174,7 +1175,7 @@ fn assert_inter_agent_hop_is_mtls(scan: &WireScan, scenario: &str, wire_port: u1
 /// backend, so it must be the routable per-instance addr.
 async fn stable_mesh_backend_addr(obs: &Arc<dyn ObservationStore>, job: &str) -> Option<Ipv4Addr> {
     let rows = obs.all_service_backends_rows().await.ok()?;
-    let needle = format!("/job/{job}/");
+    let needle = format!("/workload/{job}/");
     rows.into_iter()
         .flat_map(|r| r.backends)
         .filter(|b| b.healthy && b.alloc.as_str().contains(&needle))
@@ -1271,7 +1272,7 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 ///
 /// ONE `run_server_with_obs_and_driver` boot; deploys `a` and `b` (each a
 /// Service whose Python server bumps an inbound counter + replies `PONG
-/// count=<n>`) via the production deploy port (`POST /v1/jobs`, two deploys);
+/// count=<n>`) via the production deploy port (`POST /v1/workloads`, two deploys);
 /// each reaches Running-AND-HEALTHY → the bridge writes a healthy
 /// `service_backends` row → the responder's `name_index` exposes the `<job>`
 /// bound a stable `F ∈ 10.98.0.0/16`. Then, deterministically (the 02-02 model):

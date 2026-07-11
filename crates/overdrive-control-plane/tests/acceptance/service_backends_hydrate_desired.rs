@@ -78,14 +78,14 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
 fn sample_backends() -> Vec<Backend> {
     vec![
         Backend {
-            alloc: SpiffeId::from_str("spiffe://overdrive.local/job/payments/alloc/a1")
+            alloc: SpiffeId::from_str("spiffe://overdrive.local/workload/payments/alloc/a1")
                 .expect("spiffe"),
             addr: SocketAddr::from_str("10.0.0.1:8080").expect("addr"),
             weight: 100,
             healthy: true,
         },
         Backend {
-            alloc: SpiffeId::from_str("spiffe://overdrive.local/job/payments/alloc/a2")
+            alloc: SpiffeId::from_str("spiffe://overdrive.local/workload/payments/alloc/a2")
                 .expect("spiffe"),
             addr: SocketAddr::from_str("10.0.0.2:8080").expect("addr"),
             weight: 100,
@@ -261,13 +261,15 @@ async fn service_backends_lww_newer_wins() {
     let sid = service_id(7);
 
     let older_backends = vec![Backend {
-        alloc: SpiffeId::from_str("spiffe://overdrive.local/job/old/alloc/a1").expect("spiffe"),
+        alloc: SpiffeId::from_str("spiffe://overdrive.local/workload/old/alloc/a1")
+            .expect("spiffe"),
         addr: SocketAddr::from_str("10.0.0.1:8080").expect("addr"),
         weight: 50,
         healthy: true,
     }];
     let newer_backends = vec![Backend {
-        alloc: SpiffeId::from_str("spiffe://overdrive.local/job/new/alloc/a1").expect("spiffe"),
+        alloc: SpiffeId::from_str("spiffe://overdrive.local/workload/new/alloc/a1")
+            .expect("spiffe"),
         addr: SocketAddr::from_str("10.0.0.2:9090").expect("addr"),
         weight: 200,
         healthy: false,

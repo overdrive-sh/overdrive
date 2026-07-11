@@ -1,4 +1,4 @@
-//! Integration test for `POST /v1/jobs` under concurrent submission —
+//! Integration test for `POST /v1/workloads` under concurrent submission —
 //! the TOCTOU race pinned shut by `IntentStore::put_if_absent`.
 //!
 //! Prior to step 03-01's hardening, `submit_workload` used a naive `get`
@@ -173,7 +173,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
 
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let specs: Vec<JobSpecInput> = (1..=CONCURRENCY).map(spec_with_replicas).collect();
 
@@ -315,7 +315,7 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
 
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = spec_with_replicas(3);
 
@@ -343,10 +343,7 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
         });
     }
 
-    let mut responses: Vec<SubmitWorkloadResponse> = Vec::with_capacity(CONCURRENCY);
-    while let Some(res) = set.join_next().await {
-        responses.push(res.expect("join concurrent identical submit task"));
-    }
+    let responses: Vec<SubmitWorkloadResponse> = set.join_all().await;
 
     // All N responses must carry the same `spec_digest` — the one the
     // first writer produced (per ADR-0020 the spec digest is the
@@ -396,10 +393,13 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     // concurrent submitter saw. Per ADR-0020 the digest is the
     // round-trip witness that submit and describe agree on the same
     // canonical bytes.
-    let job_id_str = responses.first().expect("at least one response").workload_id.clone();
-    let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), job_id_str);
-    let describe_resp =
-        client.get(&describe_url).send().await.expect("GET /v1/jobs/{id} after concurrent burst");
+    let job_id_str = &responses.first().expect("at least one response").workload_id;
+    let describe_url = format!("https://localhost:{}/v1/workloads/{job_id_str}", bound.port());
+    let describe_resp = client
+        .get(&describe_url)
+        .send()
+        .await
+        .expect("GET /v1/workloads/{id} after concurrent burst");
     assert_eq!(
         describe_resp.status(),
         reqwest::StatusCode::OK,

@@ -293,7 +293,7 @@ mod tests {
     fn arb_ipv4_backend() -> impl Strategy<Value = Backend> {
         (any::<u32>(), any::<u16>(), any::<u16>(), any::<bool>()).prop_map(
             |(ip, port, weight, healthy)| Backend {
-                alloc: SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/test")
+                alloc: SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/test")
                     .expect("sentinel SVID parses"),
                 addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(ip), port)),
                 weight,
@@ -425,7 +425,7 @@ mod tests {
         let v6_vip = ServiceVip::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST))
             .expect("ServiceVip::new accepts IPv6 at the type level");
         let backend = Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/test").unwrap(),
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/test").unwrap(),
             addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 1), 80)),
             weight: 1,
             healthy: true,

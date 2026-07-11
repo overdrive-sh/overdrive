@@ -144,7 +144,8 @@ fn sim_identity_read_matches_identity_mgr_contract() {
             let mut held: BTreeMap<AllocationId, SvidMaterial> = BTreeMap::new();
             for (idx, spiffe_seed, not_after) in raw_held {
                 let a = alloc(&format!("alloc-held{idx:03}-0"));
-                let spiffe = format!("spiffe://overdrive.local/job/j{spiffe_seed}/alloc/held{idx}");
+                let spiffe =
+                    format!("spiffe://overdrive.local/workload/j{spiffe_seed}/alloc/held{idx}");
                 held.insert(a, svid(&spiffe, not_after));
             }
             let absent: Vec<AllocationId> = raw_absent

@@ -82,12 +82,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-  /v1/jobs:
+  /v1/nodes:
+    get:
+      tags:
+      - observation
+      summary: '`GET /v1/nodes` — observation read on `node_health`.'
+      description: |-
+        Symmetric to `alloc_status` — reads through
+        `ObservationStore::node_health_rows`. Fresh store → HTTP 200 with
+        explicit `{"rows": []}`.
+      operationId: node_list
+      responses:
+        '200':
+          description: Node rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeList'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/workloads:
     post:
       tags:
       - workloads
       summary: |-
-        `POST /v1/jobs` — validate, archive via rkyv, commit through the
+        `POST /v1/workloads` — validate, archive via rkyv, commit through the
         intent store, return `{workload_id, spec_digest, outcome}`.
       description: |-
         Idempotency contract (ADR-0015 §4 amended by ADR-0020):
@@ -147,12 +170,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-  /v1/jobs/{id}:
+  /v1/workloads/{id}:
     get:
       tags:
       - workloads
       summary: |-
-        `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
+        `GET /v1/workloads/{id}` — read via `IntentStore::get`, rkyv-access the
         bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
       description: |-
         Canonical-hashing contract (ADR-0002 + development.md §Hashing):
@@ -198,12 +221,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-  /v1/jobs/{id}/restart:
+  /v1/workloads/{id}/restart:
     post:
       tags:
       - workloads
       summary: |-
-        `POST /v1/jobs/{id}/restart` — replace a declared workload's backend
+        `POST /v1/workloads/{id}/restart` — replace a declared workload's backend
         instance with a fresh one. Per ADR-0073.
       description: |-
         Rollout-restart breadth: a running workload is stop-then-started; an
@@ -261,19 +284,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-  /v1/jobs/{id}/stop:
+  /v1/workloads/{id}/stop:
     post:
       tags:
       - workloads
       summary: |-
-        `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-
-        submitted job. Per ADR-0027.
+        `POST /v1/workloads/{id}/stop` — record a stop intent for a previously-
+        submitted workload. Per ADR-0027.
       description: |-
-        AIP-136 prescribes `POST /v1/jobs/{id}:stop`. axum 0.7 cannot
+        AIP-136 prescribes `POST /v1/workloads/{id}:stop`. axum 0.7 cannot
         route the `:stop` verb suffix as a single path segment because its
         matcher (matchit) treats `:` as the path-parameter prefix —
-        `/v1/jobs/:id:stop` is rejected. We use the path-subsegment form
-        `/v1/jobs/{id}/stop` which is industry-standard, semantically
+        `/v1/workloads/:id:stop` is rejected. We use the path-subsegment form
+        `/v1/workloads/{id}/stop` which is industry-standard, semantically
         equivalent, and free of framework conflict. ADR-0027's guidance
         stands; only the URL form differs.
 
@@ -285,7 +308,7 @@ paths:
         404 contract: a stop call against an `<id>` that was never
         submitted (no `IntentKey::for_workload(<id>)` row) returns HTTP 404.
         The original spec key MUST exist before a stop intent can be
-        recorded — stopping a non-existent job is operator error, not an
+        recorded — stopping a non-existent workload is operator error, not an
         idempotent no-op.
 
         Empty request body. The response body is `{ workload_id, outcome }`.
@@ -316,29 +339,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
-        '500':
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorBody'
-  /v1/nodes:
-    get:
-      tags:
-      - observation
-      summary: '`GET /v1/nodes` — observation read on `node_health`.'
-      description: |-
-        Symmetric to `alloc_status` — reads through
-        `ObservationStore::node_health_rows`. Fresh store → HTTP 200 with
-        explicit `{"rows": []}`.
-      operationId: node_list
-      responses:
-        '200':
-          description: Node rows
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NodeList'
         '500':
           description: Internal error
           content:
@@ -674,7 +674,7 @@ components:
               - schedule
         description: Cron-scheduled `Job` — see [`ScheduleSpecOutput`].
       description: |-
-        HTTP/JSON wire-shape for the `GET /v1/jobs/{id}` describe RESPONSE.
+        HTTP/JSON wire-shape for the `GET /v1/workloads/{id}` describe RESPONSE.
 
         Per ADR-0064 this is the describe-side member of the type-family
         universe — the read-only output projection distinct from the
@@ -774,7 +774,7 @@ components:
     IdempotencyOutcome:
       type: string
       description: |-
-        Outcome of an idempotent `POST /v1/jobs` submission.
+        Outcome of an idempotent `POST /v1/workloads` submission.
 
         Distinguishes "your spec landed fresh" from "your spec was already
         there." Conflict (different spec at same key) is an HTTP-status
@@ -840,7 +840,7 @@ components:
 
         Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
         reuse this type verbatim as the body / field shape for
-        `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
+        `POST /v1/workloads` and `GET /v1/workloads/{id}` (ADR-0014 §Shared types).
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
@@ -1242,7 +1242,7 @@ components:
     RestartOutcome:
       type: string
       description: |-
-        Outcome of `POST /v1/jobs/{id}/restart` per ADR-0073 item 2.
+        Outcome of `POST /v1/workloads/{id}/restart` per ADR-0073 item 2.
 
         The two-variant decision is PINNED. The variant is the rollout-restart
         breadth observed at the handler's check-exists read; both correspond to
@@ -1254,7 +1254,7 @@ components:
     RestartWorkloadResponse:
       type: object
       description: |-
-        Response for `POST /v1/jobs/{id}/restart`. Per ADR-0073 item 2 the
+        Response for `POST /v1/workloads/{id}/restart`. Per ADR-0073 item 2 the
         body shape is `{ workload_id, outcome }` where `outcome ∈
         { "restarted", "resumed" }`. 404 on unknown workload (separate path).
 
@@ -1905,14 +1905,14 @@ components:
       example: 10.0.0.1
     StopOutcome:
       type: string
-      description: Outcome of `POST /v1/jobs/{id}/stop` per ADR-0027.
+      description: Outcome of `POST /v1/workloads/{id}/stop` per ADR-0027.
       enum:
       - stopped
       - already_stopped
     StopWorkloadResponse:
       type: object
       description: |-
-        Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
+        Response for `POST /v1/workloads/{id}/stop`. Per ADR-0027 the body shape
         is `{ workload_id, outcome }` where `outcome ∈ { "stopped",
         "already_stopped" }`. 404 on unknown job (separate path).
 
@@ -2000,7 +2000,7 @@ components:
     SubmitWorkloadRequest:
       type: object
       description: |-
-        Body of `POST /v1/jobs`. Carries the operator-submitted workload
+        Body of `POST /v1/workloads`. Carries the operator-submitted workload
         spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
         dispatches on the [`SubmitSpecInput`] variant and routes each
         arm through the per-kind validating constructor
@@ -2022,7 +2022,7 @@ components:
     SubmitWorkloadResponse:
       type: object
       description: |-
-        Response for `POST /v1/jobs`. Carries `workload_id`, the canonical
+        Response for `POST /v1/workloads`. Carries `workload_id`, the canonical
         `spec_digest`, and the idempotency `outcome` per ADR-0008 and
         ADR-0020.
 
@@ -2705,7 +2705,7 @@ components:
     WorkloadDescription:
       type: object
       description: |-
-        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+        Response for `GET /v1/workloads/{id}`. Carries the re-hydrated spec and
         the canonical spec digest per ADR-0014 and US-03 AC (amended by
         ADR-0020).
 
@@ -2718,7 +2718,7 @@ components:
         structurally forbids), and `Schedule` carries `ScheduleSpecOutput`.
         `spec_digest` equals the lowercase-hex SHA-256 of the rkyv-archived
         bytes pulled out of the `IntentStore` — i.e. the same value the original
-        `POST /v1/jobs` returned for this `workload_id`.
+        `POST /v1/workloads` returned for this `workload_id`.
       required:
       - spec
       - spec_digest

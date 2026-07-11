@@ -2936,7 +2936,7 @@ async fn hydrate_service_alloc_facts(
         // `mint_alloc_identity` used by the BackendDiscoveryBridge; the
         // addr is `(host_ipv4, listener_port)` per the bridge precedent.
         let backend_spiffe = overdrive_core::SpiffeId::new(&format!(
-            "spiffe://overdrive.local/job/{}/alloc/{}",
+            "spiffe://overdrive.local/workload/{}/alloc/{}",
             workload_id.as_str(),
             row.alloc_id.as_str()
         ))

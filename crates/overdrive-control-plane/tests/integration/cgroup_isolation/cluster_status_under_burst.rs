@@ -78,7 +78,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     // SIGKILL (test fakes) reaches the entire group at teardown.
     let alloc_id = AllocationId::new("alloc-burner-0").expect("valid alloc id");
     let workload_id = WorkloadId::new("burner").expect("valid job id");
-    let identity = SpiffeId::new("spiffe://overdrive.local/job/burner/alloc/alloc-burner-0")
+    let identity = SpiffeId::new("spiffe://overdrive.local/workload/burner/alloc/alloc-burner-0")
         .expect("valid identity");
     let spec = AllocationSpec {
         alloc: alloc_id.clone(),

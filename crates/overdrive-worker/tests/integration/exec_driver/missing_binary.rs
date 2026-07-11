@@ -40,7 +40,7 @@ async fn missing_binary_does_not_create_cgroup_scope() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/mb")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/mb")
             .expect("valid spiffe id"),
         command: "/this/binary/does/not/exist/anywhere".to_owned(),
         args: vec![],

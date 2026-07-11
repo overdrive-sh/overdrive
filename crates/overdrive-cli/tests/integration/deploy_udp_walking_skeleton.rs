@@ -20,7 +20,7 @@
 //! WorkloadSpecInput::Service          (parser-side ServiceSpec — Listener carries Proto::Udp)
 //!     │ project → ServiceSpecInput → SubmitSpecInput::Service
 //!     ▼
-//! POST /v1/jobs (real reqwest + rustls, JSON-ack lane)
+//! POST /v1/workloads (real reqwest + rustls, JSON-ack lane)
 //!     │
 //!     ▼
 //! handlers::submit_workload                (ServiceV1::from_submit)

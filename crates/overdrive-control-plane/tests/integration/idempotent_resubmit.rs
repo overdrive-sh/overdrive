@@ -1,4 +1,4 @@
-//! Integration tests for `POST /v1/jobs` idempotency + conflict contract
+//! Integration tests for `POST /v1/workloads` idempotency + conflict contract
 //! — step 03-04.
 //!
 //! Tightens the contract pinned in `submit_round_trip.rs` beyond what
@@ -9,7 +9,7 @@
 //!    drift the stored bytes.
 //! 2. **§4.10** "`IntentStore` still carries the original spec under that
 //!    intent key" after a 409 — verified through the live HTTP surface
-//!    via `GET /v1/jobs/{id}` rather than a back-door redb read, so the
+//!    via `GET /v1/workloads/{id}` rather than a back-door redb read, so the
 //!    invariant is phrased in terms an operator can observe.
 //! 3. Triple byte-identical re-submit is stable — N submissions of the
 //!    same spec return the same `spec_digest` and `outcome ==
@@ -186,7 +186,7 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
 async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = payments_spec();
 
@@ -272,7 +272,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
 async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     // Prime the store with the canonical payments spec.
     let primed = client
@@ -318,8 +318,8 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
-    let describe_url = format!("https://localhost:{}/v1/jobs/payments", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
+    let describe_url = format!("https://localhost:{}/v1/workloads/payments", bound.port());
 
     // Prime with replicas = 3 (canonical).
     let primed = client
@@ -348,7 +348,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
 
     // Describe the key — must still carry the ORIGINAL spec, not the
     // rejected alternate. This is the operator-visible §4.10 invariant.
-    let described = client.get(&describe_url).send().await.expect("GET /v1/jobs/payments");
+    let described = client.get(&describe_url).send().await.expect("GET /v1/workloads/payments");
     assert_eq!(
         described.status(),
         reqwest::StatusCode::OK,
@@ -387,7 +387,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
 async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_outcome() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = payments_spec();
 
@@ -453,7 +453,7 @@ async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_ou
 async fn conflict_message_names_intent_key_path() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     // Prime, then conflict.
     let primed = client

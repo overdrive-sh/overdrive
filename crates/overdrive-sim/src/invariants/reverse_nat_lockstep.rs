@@ -297,7 +297,7 @@ fn check_lockstep(
 fn backend(service_idx: u32, backend_idx: u32, ip: Ipv4Addr, port: u16) -> Backend {
     Backend {
         alloc: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/job/svc-{service_idx}/alloc/b-{backend_idx}"
+            "spiffe://overdrive.local/workload/svc-{service_idx}/alloc/b-{backend_idx}"
         ))
         .expect("valid SPIFFE ID"),
         addr: std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port),

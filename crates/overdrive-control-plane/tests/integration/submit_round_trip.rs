@@ -1,4 +1,4 @@
-//! Integration tests for `POST /v1/jobs` — step 03-01.
+//! Integration tests for `POST /v1/workloads` — step 03-01.
 //!
 //! Proves the Phase 1 `submit_workload` handler round-trip:
 //!
@@ -176,7 +176,7 @@ fn payments_spec_alt() -> JobSpecInput {
 }
 
 // -----------------------------------------------------------------------
-// AC — happy-path round trip: POST /v1/jobs returns 200 + Inserted +
+// AC — happy-path round trip: POST /v1/workloads returns 200 + Inserted +
 // non-empty spec_digest. Per ADR-0020 the per-write witness is
 // `outcome` + `spec_digest`, not `commit_index`.
 // -----------------------------------------------------------------------
@@ -185,7 +185,7 @@ fn payments_spec_alt() -> JobSpecInput {
 async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = payments_spec();
 
@@ -194,7 +194,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
 
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "expected 200 OK");
     let body: SubmitWorkloadResponse = resp.json().await.expect("decode SubmitWorkloadResponse");
@@ -234,7 +234,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
 async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = payments_spec();
     let resp = client
@@ -242,7 +242,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     // Shut the server down first so the redb file's write handle is
@@ -280,7 +280,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
 async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     // `replicas = 0` fails `Job::from_submit` at the `NonZeroU32` gate with
     // `AggregateError::Validation { field: "replicas", .. }`.
@@ -296,7 +296,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(bad) })
         .send()
         .await
-        .expect("POST /v1/jobs with bad spec");
+        .expect("POST /v1/workloads with bad spec");
 
     assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST, "bad spec must be HTTP 400");
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
@@ -319,7 +319,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     let spec = payments_spec();
 
@@ -378,7 +378,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
 
     // First submit: canonical spec.
     let first = client

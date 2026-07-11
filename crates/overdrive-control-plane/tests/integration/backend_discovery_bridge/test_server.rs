@@ -156,18 +156,18 @@ impl TestServer {
         Self { handle: Some(handle), bound, client, dataplane, obs, _tmp: tmp, data_dir }
     }
 
-    /// Issue `POST /v1/jobs` through the real HTTPS driving port.
+    /// Issue `POST /v1/workloads` through the real HTTPS driving port.
     /// Returns the decoded `SubmitWorkloadResponse` carrying the
     /// allocator-issued VIP (for Service kinds).
     pub async fn submit_workload(&self, spec: SubmitSpecInput) -> SubmitWorkloadResponse {
-        let url = format!("https://localhost:{}/v1/jobs", self.bound.port());
+        let url = format!("https://localhost:{}/v1/workloads", self.bound.port());
         let resp = self
             .client
             .post(&url)
             .json(&SubmitWorkloadRequest { spec })
             .send()
             .await
-            .expect("submit_workload: POST /v1/jobs");
+            .expect("submit_workload: POST /v1/workloads");
         let status = resp.status();
         let body_bytes = resp.bytes().await.expect("read response body");
         assert!(
@@ -176,7 +176,7 @@ impl TestServer {
             String::from_utf8_lossy(&body_bytes),
         );
         serde_json::from_slice::<SubmitWorkloadResponse>(&body_bytes)
-            .expect("decode SubmitWorkloadResponse from /v1/jobs body")
+            .expect("decode SubmitWorkloadResponse from /v1/workloads body")
     }
 
     /// The production observation-store handle the server is using.

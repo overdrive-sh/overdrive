@@ -188,7 +188,8 @@ pub async fn evaluate_sanity_checks_fire_before_service_map() -> InvariantResult
     let dataplane = Arc::new(SimDataplane::new());
     let vip = Ipv4Addr::new(10, 0, 0, 1);
     let backends = vec![Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/b1").expect("valid SPIFFE ID"),
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/b1")
+            .expect("valid SPIFFE ID"),
         addr: "10.1.0.5:8080".parse().expect("valid SocketAddr"),
         weight: 1,
         healthy: true,

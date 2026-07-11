@@ -36,7 +36,7 @@ fn tcp_frontend(vip: Ipv4Addr) -> ServiceFrontend {
 
 fn backend(ip: &str, port: u16) -> Backend {
     Backend {
-        alloc: spiffe(&format!("/job/svc/alloc/{ip}-{port}")),
+        alloc: spiffe(&format!("/workload/svc/alloc/{ip}-{port}")),
         addr: format!("{ip}:{port}").parse().expect("valid socket"),
         weight: 100,
         healthy: true,

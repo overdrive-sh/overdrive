@@ -1,4 +1,4 @@
-//! Streaming submit loop for `POST /v1/jobs` with `Accept: application/x-ndjson`.
+//! Streaming submit loop for `POST /v1/workloads` with `Accept: application/x-ndjson`.
 //!
 //! Per architecture.md §3 (happy path), §4 (broken-binary path), §5
 //! (timeout path), and §10 (broadcast wiring). Slice 02 step 02-03.

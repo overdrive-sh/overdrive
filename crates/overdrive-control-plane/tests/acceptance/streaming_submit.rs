@@ -103,10 +103,10 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
 }
 
 fn build_router(state: AppState) -> Router {
-    Router::new().route("/v1/jobs", post(submit_workload)).with_state(state)
+    Router::new().route("/v1/workloads", post(submit_workload)).with_state(state)
 }
 
-/// Build a `POST /v1/jobs` request with the given Accept header.
+/// Build a `POST /v1/workloads` request with the given Accept header.
 ///
 /// Per ADR-0051 the wire-side workload kind is the inner `kind` tag on
 /// `SubmitSpecInput`; the outer `workload_kind` field has been deleted.
@@ -117,7 +117,7 @@ fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
             .expect("serialize");
     Request::builder()
         .method(Method::POST)
-        .uri("/v1/jobs")
+        .uri("/v1/workloads")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCEPT, accept)
         .body(Body::from(body))
@@ -272,7 +272,7 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
             .expect("serialize");
     let request = Request::builder()
         .method(Method::POST)
-        .uri("/v1/jobs")
+        .uri("/v1/workloads")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .expect("build request");
@@ -1411,7 +1411,7 @@ async fn foreign_service_terminal_does_not_leak_into_service_stream() {
                     .expect("serialize");
             let request = Request::builder()
                 .method(Method::POST)
-                .uri("/v1/jobs")
+                .uri("/v1/workloads")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::ACCEPT, "application/x-ndjson")
                 .body(Body::from(body))

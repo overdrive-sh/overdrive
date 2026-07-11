@@ -125,7 +125,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.
     let identity = SpiffeId::new(&format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
+        "spiffe://overdrive.local/workload/{}/alloc/{}",
         workload_id.as_str(),
         alloc_id.as_str(),
     ))

@@ -19,7 +19,7 @@ async fn default_lane_does_not_spawn_real_processes() {
 
     let spec = AllocationSpec {
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec![],

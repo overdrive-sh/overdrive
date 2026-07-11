@@ -2,7 +2,7 @@
 //! per ADR-0064.
 //!
 //! `DescribeSpecOutput` is the JSON body shape for the
-//! `GET /v1/jobs/{id}` describe **response** — the read-only output
+//! `GET /v1/workloads/{id}` describe **response** — the read-only output
 //! projection of the persisted [`crate::aggregate::WorkloadIntent`]
 //! plus the platform-issued Service VIP. It is the describe-side member
 //! of the four-layer Rust type universe — the inverse-direction sibling
@@ -26,7 +26,7 @@ use crate::api::submit::ListenerInput;
 use crate::id::ServiceVip;
 use serde::{Deserialize, Serialize};
 
-/// HTTP/JSON wire-shape for the `GET /v1/jobs/{id}` describe RESPONSE.
+/// HTTP/JSON wire-shape for the `GET /v1/workloads/{id}` describe RESPONSE.
 ///
 /// Per ADR-0064 this is the describe-side member of the type-family
 /// universe — the read-only output projection distinct from the

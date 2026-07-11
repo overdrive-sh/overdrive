@@ -16,7 +16,7 @@
 //!     │ Job::from_submit
 //!     ▼
 //! Job aggregate                      (carries command + args)
-//!     │ POST /v1/jobs (real reqwest + rustls)
+//!     │ POST /v1/workloads (real reqwest + rustls)
 //!     ▼
 //! handlers::submit_workload               (server-side defence-in-depth)
 //!     │ rkyv::to_bytes

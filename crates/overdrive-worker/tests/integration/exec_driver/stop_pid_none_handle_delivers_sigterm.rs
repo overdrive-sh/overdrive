@@ -53,7 +53,7 @@ async fn stop_with_pid_none_handle_still_delivers_sigterm() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/pn")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/pn")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

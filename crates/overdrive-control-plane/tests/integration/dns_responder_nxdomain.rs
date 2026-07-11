@@ -6,8 +6,8 @@
 //! the answer (returns NXDOMAIN) whenever a name has no running-AND-healthy
 //! backend, and resolves to the STABLE frontend `F ∈ 10.98.0.0/16` once (and
 //! only once) a backend is running-and-healthy. They drive ONLY the production
-//! entry points — `run_server_with_obs_and_driver` (boot) + `POST /v1/jobs`
-//! (deploy) + `POST /v1/jobs/{id}/stop` (stop) + `ip netns exec <client-ns>
+//! entry points — `run_server_with_obs_and_driver` (boot) + `POST /v1/workloads`
+//! (deploy) + `POST /v1/workloads/{id}/stop` (stop) + `ip netns exec <client-ns>
 //! getent ahostsv4 <name>` (resolve, NOT `dig` — K2) from inside a deployed
 //! client's PRODUCTION-provisioned netns.
 //!
@@ -39,11 +39,11 @@
 //! S-DBN-NXDOMAIN-02's final leg ("recover the SAME `<job>` to
 //! Running-AND-HEALTHY after the stop, and prove getent resolves the SAME F") is
 //! driven through the production `overdrive workload restart server` verb =
-//! `POST /v1/jobs/server/restart` (the `restart_workload` handler; ADR-0073,
+//! `POST /v1/workloads/server/restart` (the `restart_workload` handler; ADR-0073,
 //! shipped in Phase 01). The restart handler atomically bumps the desired-run
 //! generation AND clears the `/stop` sentinel in ONE `IntentStore::txn`, so the
 //! `WorkloadLifecycle` reconciler places a FRESH instance (stopped-origin
-//! restart, R4). A same-spec `POST /v1/jobs` re-deploy is NOT used — it takes the
+//! restart, R4). A same-spec `POST /v1/workloads` re-deploy is NOT used — it takes the
 //! `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
 //! operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
 //! `WorkloadLifecycle` §Bug 3); `restart` is the verb that does. The `<job>`
@@ -567,18 +567,18 @@ impl Drop for Skeleton {
 }
 
 /// Deploy a Service spec through the real in-process deploy submit handler
-/// (`POST /v1/jobs` over the production HTTPS driving port). Returns `true` on
+/// (`POST /v1/workloads` over the production HTTPS driving port). Returns `true` on
 /// a 2xx accept.
 async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool {
     use overdrive_control_plane::api::SubmitWorkloadRequest;
-    let url = format!("https://localhost:{}/v1/jobs", skeleton.bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", skeleton.bound.port());
     let resp = skeleton
         .client
         .post(&url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
         .send()
         .await
-        .expect("deploy: POST /v1/jobs");
+        .expect("deploy: POST /v1/workloads");
     let status = resp.status();
     let body = resp.bytes().await.expect("read response body");
     if !status.is_success() {
@@ -588,11 +588,12 @@ async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool 
 }
 
 /// Stop a deployed workload through the real in-process stop driving port
-/// (`POST /v1/jobs/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`,
+/// (`POST /v1/workloads/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`,
 /// the SAME path `overdrive job stop` drives (the keystone:677 precedent).
 async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/stop", skeleton.bound.port());
-    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/jobs/{id}/stop");
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/stop", skeleton.bound.port());
+    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/workloads/{id}/stop");
     let status = resp.status();
     let body = resp.bytes().await.expect("read stop response body");
     if !status.is_success() {
@@ -602,7 +603,7 @@ async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
 }
 
 /// Restart a deployed workload through the real in-process restart driving port
-/// (`POST /v1/jobs/{id}/restart`, the `restart_workload` handler; ADR-0073), the
+/// (`POST /v1/workloads/{id}/restart`, the `restart_workload` handler; ADR-0073), the
 /// SAME path `overdrive workload restart <id>` drives. The handler atomically
 /// bumps the desired-run generation AND clears the `/stop` sentinel in ONE
 /// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
@@ -610,9 +611,10 @@ async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
 /// Empty request body; returns `true` on a 2xx accept. Mirrored from the
 /// `dns_responder_walking_skeleton.rs` (02-02) precedent.
 async fn run_server_restart(skeleton: &Skeleton, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/restart", skeleton.bound.port());
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/restart", skeleton.bound.port());
     let resp =
-        skeleton.client.post(&url).send().await.expect("restart: POST /v1/jobs/{id}/restart");
+        skeleton.client.post(&url).send().await.expect("restart: POST /v1/workloads/{id}/restart");
     let status = resp.status();
     let body = resp.bytes().await.expect("read restart response body");
     if !status.is_success() {
@@ -802,7 +804,7 @@ async fn stop_and_converge(skeleton: &Skeleton, workload_id: &str) {
 /// S-DBN-NXDOMAIN-01 (US-DBN-4 · K-DBN-2; withhold then resolve-to-stable-F).
 ///
 /// Boots the production composition root in-process; deploys a "server" Service
-/// through `POST /v1/jobs` AND a long-lived "client" (the dial SOURCE). The
+/// through `POST /v1/workloads` AND a long-lived "client" (the dial SOURCE). The
 /// SERVER may still be Pending / not-yet-running-and-healthy when the client
 /// first queries — at which point the `name_index` WITHHOLDS the answer (no
 /// running-and-healthy backend) and `getent("server.svc.overdrive.local")`
@@ -934,7 +936,7 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 /// A "server" Service is deployed and Running-AND-HEALTHY, resolving
 /// `server.svc.overdrive.local` to its stable frontend addr `F` (getent
 /// confirms `F ∈ 10.98.0.0/16`). The server is then STOPPED through the
-/// production stop path (`POST /v1/jobs/server/stop`) and converges to
+/// production stop path (`POST /v1/workloads/server/stop`) and converges to
 /// Terminated, leaving the `<job>` "server" zero-healthy but STILL DECLARED
 /// (not deleted). A deployed client re-querying the name then gets NXDOMAIN —
 /// the `name_index` WITHHELD the answer (zero running-and-healthy backends) —
@@ -943,7 +945,7 @@ async fn query_before_running_and_healthy_is_nxdomain_then_resolves_to_stable_fr
 /// The withhold-not-release RECOVERY leg ("recover the SAME `<job>` to
 /// Running-AND-HEALTHY → getent resolves the SAME F") is asserted in the
 /// SEPARATE recovery test below, driven through the production restart verb
-/// (`POST /v1/jobs/server/restart`; ADR-0073, shipped in Phase 01). This test
+/// (`POST /v1/workloads/server/restart`; ADR-0073, shipped in Phase 01). This test
 /// proves the REACHABLE legs: resolve-to-F, then stop → re-query → NXDOMAIN, no
 /// stale addr.
 ///
@@ -1071,10 +1073,10 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
 /// `<job>` recovered to Running-AND-HEALTHY after a stop resolves to the SAME F.
 ///
 /// The recovery is driven by the production `overdrive workload restart server`
-/// verb = `POST /v1/jobs/server/restart` (the `restart_workload` handler;
+/// verb = `POST /v1/workloads/server/restart` (the `restart_workload` handler;
 /// ADR-0073, shipped in Phase 01). The `<job>` "server" is deployed
 /// Running-AND-HEALTHY (getent resolves the stable F), STOPPED through
-/// `POST /v1/jobs/server/stop` (its name resolves NXDOMAIN while stopped), then
+/// `POST /v1/workloads/server/stop` (its name resolves NXDOMAIN while stopped), then
 /// RECOVERED via the restart verb. The restart handler atomically bumps the
 /// desired-run generation AND clears the `/stop` sentinel in ONE
 /// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
@@ -1082,7 +1084,7 @@ async fn after_backend_stops_the_job_is_withheld_nxdomain_never_a_stale_addr() {
 /// `observed_generation < generation`. This is the production
 /// restart-after-stop path the earlier "no verb exists" narrative (now false —
 /// the verb shipped in Phase 01) said was missing. A same-spec
-/// `POST /v1/jobs` re-deploy is NOT used here precisely because it takes the
+/// `POST /v1/workloads` re-deploy is NOT used here precisely because it takes the
 /// `put_if_absent → KeyExists → Unchanged` path and does NOT clear the sticky
 /// operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
 /// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. The `<job>`
@@ -1133,10 +1135,10 @@ async fn recovered_job_after_stop_resolves_to_the_same_stable_frontend() {
 
     // WHEN: stop the server (name resolves NXDOMAIN while stopped), then RECOVER
     // the SAME <job> "server" through the PRODUCTION restart verb — `POST
-    // /v1/jobs/server/restart` (ADR-0073). The restart handler atomically bumps
+    // /v1/workloads/server/restart` (ADR-0073). The restart handler atomically bumps
     // the desired-run generation AND clears the `/stop` sentinel, so the
     // `WorkloadLifecycle` reconciler places a FRESH instance (stopped-origin
-    // restart, R4). A same-spec `POST /v1/jobs` re-deploy is deliberately NOT
+    // restart, R4). A same-spec `POST /v1/workloads` re-deploy is deliberately NOT
     // used — it takes the `put_if_absent → KeyExists → Unchanged` path and does
     // NOT clear the sticky operator-stop key.
     stop_and_converge(&skeleton, "server").await;

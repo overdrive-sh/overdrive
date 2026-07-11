@@ -142,8 +142,10 @@ async fn persist_and_allocate(
 
 fn one_backend(workload: &str) -> Backend {
     Backend {
-        alloc: SpiffeId::from_str(&format!("spiffe://overdrive.local/job/{workload}/alloc/a1"))
-            .expect("spiffe"),
+        alloc: SpiffeId::from_str(&format!(
+            "spiffe://overdrive.local/workload/{workload}/alloc/a1"
+        ))
+        .expect("spiffe"),
         addr: SocketAddr::from_str("10.9.9.9:8080").expect("addr"),
         weight: 100,
         healthy: true,

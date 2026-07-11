@@ -369,7 +369,7 @@ fn tick_at(now_unix_ms: u64) -> TickContext {
 fn liveness_restart_spec_default() -> overdrive_core::traits::driver::AllocationSpec {
     overdrive_core::traits::driver::AllocationSpec {
         alloc: AllocationId::new("alloc-x").expect("valid alloc id"),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
             .expect("valid spiffe"),
         command: "/bin/svc".to_string(),
         args: vec![],
@@ -403,8 +403,10 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -431,8 +433,10 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,

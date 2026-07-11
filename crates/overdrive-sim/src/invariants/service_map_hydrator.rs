@@ -372,7 +372,7 @@ fn single_service_state(backend_ips: &[Ipv4Addr]) -> ServiceMapHydratorState {
     let backends: Vec<Backend> = backend_ips
         .iter()
         .map(|ip| Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
             weight: 1,
@@ -819,7 +819,7 @@ mod retry_budget_proptest {
         let vip =
             ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
         let backends = vec![Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), 8080),
             weight: 1,

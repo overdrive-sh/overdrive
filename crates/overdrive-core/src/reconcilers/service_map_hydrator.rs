@@ -610,7 +610,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
     fn spiffe(suffix: &str) -> SpiffeId {
-        let raw = format!("spiffe://overdrive.local/job/svc/alloc/{suffix}");
+        let raw = format!("spiffe://overdrive.local/workload/svc/alloc/{suffix}");
         SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
     }
 

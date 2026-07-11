@@ -90,7 +90,8 @@ async fn ipv6_vip_rejected_at_action_shim_as_operator_visible_failed() {
     let service_id = ServiceId::new(42).expect("ServiceId");
     let ipv6_vip = ServiceVip::new(IpAddr::V6(Ipv6Addr::LOCALHOST)).expect("v6 VIP");
     let backends = vec![Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/dns/alloc/dns-0").expect("SpiffeId"),
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/dns/alloc/dns-0")
+            .expect("SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1)), 5353),
         weight: 1,
         healthy: true,

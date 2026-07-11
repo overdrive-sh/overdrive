@@ -234,8 +234,8 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     let client = client_trusting(&ca_pem);
 
     // Per ADR-0008 §Endpoints — Phase 1 endpoint coverage:
-    //   - `POST /v1/jobs` real handler (step 03-01)
-    //   - `GET /v1/jobs/:id` real handler (step 03-02)
+    //   - `POST /v1/workloads` real handler (step 03-01)
+    //   - `GET /v1/workloads/:id` real handler (step 03-02)
     //   - `GET /v1/allocs?job=<id>` + `GET /v1/nodes` real observation-read
     //     handlers (step 03-03 + slice 01 step 01-03).
     //   - `GET /v1/cluster/info` real handler returning a
@@ -287,14 +287,14 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
         "GET /v1/cluster/info body must deserialise as ClusterStatus — route must reach the real handler",
     );
 
-    // POST /v1/jobs now routes through the real `submit_workload` handler
+    // POST /v1/workloads now routes through the real `submit_workload` handler
     // (step 03-01). A valid body yields 200 + a `SubmitWorkloadResponse`;
     // a malformed body would yield 422 from axum's `Json` extractor,
     // which is precisely why this assertion uses a canonical payload
     // rather than `{}`. Full happy-path + idempotency + conflict
     // coverage lives in `integration::submit_round_trip` — this
     // assertion only pins that the route remains mounted and reachable.
-    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", bound.port());
     // ADR-0051: `SubmitSpecInput` is `#[serde(tag = "kind")]` with
     // `deny_unknown_fields` — the per-kind discriminator MUST appear
     // inside `spec`. Without it the request fails JSON deserialisation
@@ -314,7 +314,7 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
             },
         },
     });
-    let resp = client.post(&url).json(&body).send().await.expect("POST /v1/jobs");
+    let resp = client.post(&url).json(&body).send().await.expect("POST /v1/workloads");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     handle.shutdown(Duration::from_secs(2)).await;

@@ -7,7 +7,7 @@
 //!
 //! The shapes pinned here are:
 //! - Step 02-03 AC — exact field sets; renaming breaks the contract.
-//! - ADR-0008 — endpoint table (`POST /v1/jobs`, `GET /v1/jobs/{id}`,
+//! - ADR-0008 — endpoint table (`POST /v1/workloads`, `GET /v1/workloads/{id}`,
 //!   `GET /v1/cluster/info`, `GET /v1/allocs`, `GET /v1/nodes`).
 //! - ADR-0015 — `ErrorBody` shape `{error, message, field}`.
 //!
@@ -41,7 +41,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Body of `POST /v1/jobs`. Carries the operator-submitted workload
+/// Body of `POST /v1/workloads`. Carries the operator-submitted workload
 /// spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
 /// dispatches on the [`SubmitSpecInput`] variant and routes each
 /// arm through the per-kind validating constructor
@@ -60,7 +60,7 @@ pub struct SubmitWorkloadRequest {
     pub spec: SubmitSpecInput,
 }
 
-/// Response for `POST /v1/jobs`. Carries `workload_id`, the canonical
+/// Response for `POST /v1/workloads`. Carries `workload_id`, the canonical
 /// `spec_digest`, and the idempotency `outcome` per ADR-0008 and
 /// ADR-0020.
 ///
@@ -99,7 +99,7 @@ pub struct SubmitWorkloadResponse {
     pub vip: Option<String>,
 }
 
-/// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
+/// Response for `POST /v1/workloads/{id}/stop`. Per ADR-0027 the body shape
 /// is `{ workload_id, outcome }` where `outcome ∈ { "stopped",
 /// "already_stopped" }`. 404 on unknown job (separate path).
 ///
@@ -112,7 +112,7 @@ pub struct StopWorkloadResponse {
     pub outcome: StopOutcome,
 }
 
-/// Outcome of `POST /v1/jobs/{id}/stop` per ADR-0027.
+/// Outcome of `POST /v1/workloads/{id}/stop` per ADR-0027.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum StopOutcome {
@@ -122,7 +122,7 @@ pub enum StopOutcome {
     AlreadyStopped,
 }
 
-/// Response for `POST /v1/jobs/{id}/restart`. Per ADR-0073 item 2 the
+/// Response for `POST /v1/workloads/{id}/restart`. Per ADR-0073 item 2 the
 /// body shape is `{ workload_id, outcome }` where `outcome ∈
 /// { "restarted", "resumed" }`. 404 on unknown workload (separate path).
 ///
@@ -136,7 +136,7 @@ pub struct RestartWorkloadResponse {
     pub outcome: RestartOutcome,
 }
 
-/// Outcome of `POST /v1/jobs/{id}/restart` per ADR-0073 item 2.
+/// Outcome of `POST /v1/workloads/{id}/restart` per ADR-0073 item 2.
 ///
 /// The two-variant decision is PINNED. The variant is the rollout-restart
 /// breadth observed at the handler's check-exists read; both correspond to
@@ -155,7 +155,7 @@ pub enum RestartOutcome {
     Resumed,
 }
 
-/// Outcome of an idempotent `POST /v1/jobs` submission.
+/// Outcome of an idempotent `POST /v1/workloads` submission.
 ///
 /// Distinguishes "your spec landed fresh" from "your spec was already
 /// there." Conflict (different spec at same key) is an HTTP-status
@@ -177,7 +177,7 @@ pub enum IdempotencyOutcome {
     Unchanged,
 }
 
-/// Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+/// Response for `GET /v1/workloads/{id}`. Carries the re-hydrated spec and
 /// the canonical spec digest per ADR-0014 and US-03 AC (amended by
 /// ADR-0020).
 ///
@@ -190,7 +190,7 @@ pub enum IdempotencyOutcome {
 /// structurally forbids), and `Schedule` carries `ScheduleSpecOutput`.
 /// `spec_digest` equals the lowercase-hex SHA-256 of the rkyv-archived
 /// bytes pulled out of the `IntentStore` — i.e. the same value the original
-/// `POST /v1/jobs` returned for this `workload_id`.
+/// `POST /v1/workloads` returned for this `workload_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WorkloadDescription {
     pub spec: DescribeSpecOutput,

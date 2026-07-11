@@ -50,7 +50,7 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/sg")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/sg")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

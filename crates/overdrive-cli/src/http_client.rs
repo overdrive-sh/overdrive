@@ -180,8 +180,8 @@ impl ApiClient {
         &self.base
     }
 
-    /// `POST /v1/jobs` with `Accept: application/json` — submit a job
-    /// spec to the control plane via the one-shot JSON-ack lane.
+    /// `POST /v1/workloads` with `Accept: application/json` — submit a
+    /// workload spec to the control plane via the one-shot JSON-ack lane.
     ///
     /// Slice 03 step 03-01 wires this to the `--detach` flag. Setting
     /// the explicit `Accept: application/json` header pins the JSON
@@ -197,7 +197,7 @@ impl ApiClient {
         &self,
         req: SubmitWorkloadRequest,
     ) -> Result<SubmitWorkloadResponse, CliError> {
-        let url = self.build_url("v1/jobs")?;
+        let url = self.build_url("v1/workloads")?;
         let resp = self
             .inner
             .post(url)
@@ -209,7 +209,7 @@ impl ApiClient {
         self.decode_typed(resp).await
     }
 
-    /// `POST /v1/jobs` with `Accept: application/x-ndjson` — drives the
+    /// `POST /v1/workloads` with `Accept: application/x-ndjson` — drives the
     /// streaming-submit lane per ADR-0032 §3 / architecture.md §10.
     ///
     /// Returns the raw `reqwest::Response` so the caller can iterate
@@ -228,7 +228,7 @@ impl ApiClient {
         &self,
         req: SubmitWorkloadRequest,
     ) -> Result<reqwest::Response, CliError> {
-        let url = self.build_url("v1/jobs")?;
+        let url = self.build_url("v1/workloads")?;
         // Override the client-wide 30s `.timeout(...)` for the streaming
         // lane. The server-side `streaming_cap` (60s default per
         // `lib.rs::DEFAULT_STREAMING_CAP`) is the authoritative wall-
@@ -262,8 +262,8 @@ impl ApiClient {
         Err(CliError::HttpStatus { status: status_u16, body })
     }
 
-    /// `POST /v1/jobs/{id}/stop` — record a stop intent for a
-    /// previously-submitted job. Per ADR-0027.
+    /// `POST /v1/workloads/{id}/stop` — record a stop intent for a
+    /// previously-submitted workload. Per ADR-0027.
     ///
     /// Empty request body. Returns `StopWorkloadResponse` on 200 OK with
     /// `outcome ∈ { Stopped, AlreadyStopped }`. A 404 maps to
@@ -273,10 +273,10 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn stop_workload(&self, id: &str) -> Result<StopWorkloadResponse, CliError> {
-        self.post_typed(&format!("v1/jobs/{id}/stop"), &serde_json::json!({})).await
+        self.post_typed(&format!("v1/workloads/{id}/stop"), &serde_json::json!({})).await
     }
 
-    /// `POST /v1/jobs/{id}/restart` — replace a declared workload's
+    /// `POST /v1/workloads/{id}/restart` — replace a declared workload's
     /// instance. Per ADR-0073 item 3.
     ///
     /// Empty request body. Returns `RestartWorkloadResponse` on 200 OK
@@ -290,16 +290,16 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn restart_workload(&self, id: &str) -> Result<RestartWorkloadResponse, CliError> {
-        self.post_typed(&format!("v1/jobs/{id}/restart"), &serde_json::json!({})).await
+        self.post_typed(&format!("v1/workloads/{id}/restart"), &serde_json::json!({})).await
     }
 
-    /// `GET /v1/jobs/{id}` — describe a previously-submitted job.
+    /// `GET /v1/workloads/{id}` — describe a previously-submitted workload.
     ///
     /// # Errors
     ///
     /// See [`CliError`] variants.
     pub async fn describe_workload(&self, id: &str) -> Result<WorkloadDescription, CliError> {
-        self.get_typed(&format!("v1/jobs/{id}")).await
+        self.get_typed(&format!("v1/workloads/{id}")).await
     }
 
     /// `GET /v1/cluster/info` — read control-plane mode, region,

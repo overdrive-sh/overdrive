@@ -157,7 +157,7 @@ async fn persist_service_and_allocate_vip(
 fn local_backend(addr: &str, alloc_suffix: &str) -> Backend {
     Backend {
         alloc: SpiffeId::from_str(&format!(
-            "spiffe://overdrive.local/job/payments/alloc/{alloc_suffix}"
+            "spiffe://overdrive.local/workload/payments/alloc/{alloc_suffix}"
         ))
         .expect("spiffe"),
         addr: SocketAddr::from_str(addr).expect("addr"),

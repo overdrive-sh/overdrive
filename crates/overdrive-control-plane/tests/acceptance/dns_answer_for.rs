@@ -63,12 +63,13 @@ fn fresh_store() -> Arc<SimObservationStore> {
     Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("valid node id"), 0))
 }
 
-/// A `Backend` whose `alloc` SVID carries `/job/<job>/alloc/...`, at a
+/// A `Backend` whose `alloc` SVID carries `/workload/<job>/alloc/...`, at a
 /// per-instance backend addr in `10.99.0.0/16` (deliberately a DIFFERENT block
 /// from the frontend `F` the answer must return).
 fn backend_for(job: &str, instance: u8, healthy: bool) -> Backend {
-    let spiffe = SpiffeId::new(&format!("spiffe://overdrive.local/job/{job}/alloc/a{instance}"))
-        .expect("valid spiffe id");
+    let spiffe =
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{job}/alloc/a{instance}"))
+            .expect("valid spiffe id");
     Backend {
         alloc: spiffe,
         addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, instance), 8080)),
@@ -90,16 +91,16 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
 }
 
 /// The `<job>` mesh name a `Backend`'s `alloc` SVID
-/// (`spiffe://overdrive.local/job/<job>/alloc/...`) dials as — mirrors the
+/// (`spiffe://overdrive.local/workload/<job>/alloc/...`) dials as — mirrors the
 /// production `name_index::workload_of` extraction so the fixture can model the
 /// 01-05 deploy-time assigner binding `<job> → F` on declaration.
-fn job_of_backend(backend: &Backend) -> MeshServiceName {
+fn workload_of_backend(backend: &Backend) -> MeshServiceName {
     let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
     let label = loop {
         match segments.next() {
-            Some("job") => break segments.next().expect("job segment present"),
+            Some("workload") => break segments.next().expect("workload segment present"),
             Some(_) => {}
-            None => panic!("backend SVID carries no /job/<job>/ segment"),
+            None => panic!("backend SVID carries no /workload/<workload>/ segment"),
         }
     };
     mesh_name(label)
@@ -120,7 +121,7 @@ async fn index_listing(
     for row in &rows {
         for backend in &row.backends {
             // Idempotent per <job>; mirrors the deploy-time assign-on-declare.
-            allocator.assign(&job_of_backend(backend)).expect("allocator has free addresses");
+            allocator.assign(&workload_of_backend(backend)).expect("allocator has free addresses");
         }
     }
     for row in rows {

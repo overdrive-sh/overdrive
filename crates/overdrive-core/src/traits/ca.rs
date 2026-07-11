@@ -932,7 +932,7 @@ mod tests {
         let cert_der = CaCertDer::new(vec![0xDE, 0xAD]);
         let serial = CertSerial::new("0badc0de").expect("serial parses");
         let spiffe =
-            SpiffeId::new("spiffe://overdrive.local/job/x/alloc/y").expect("spiffe parses");
+            SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/y").expect("spiffe parses");
 
         let root =
             RootCaHandle::new(cert_pem.clone(), cert_der.clone(), serial.clone(), key.clone());

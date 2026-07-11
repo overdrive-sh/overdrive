@@ -53,7 +53,7 @@ fn vip_v4(o: u8) -> ServiceVip {
 
 fn backend() -> Backend {
     Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/dns/alloc/dns-0")
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/dns/alloc/dns-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1)), 5353),
         weight: 1,

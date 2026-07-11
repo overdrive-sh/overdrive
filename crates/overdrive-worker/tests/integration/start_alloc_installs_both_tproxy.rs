@@ -275,7 +275,7 @@ fn cgroup_connect4_sections() -> Vec<String> {
 fn build_spec(alloc: &AllocationId, host_veth: Option<String>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/sa/alloc/01")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("valid spiffe id"),
         command: "/bin/true".to_owned(),
         args: vec![],

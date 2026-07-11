@@ -828,7 +828,7 @@ impl WorkloadIntentV1 {
 ///
 /// Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
 /// reuse this type verbatim as the body / field shape for
-/// `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
+/// `POST /v1/workloads` and `GET /v1/workloads/{id}` (ADR-0014 §Shared types).
 /// Carries `utoipa::ToSchema` so the generated `OpenAPI` document
 /// (ADR-0009, `cargo openapi-gen`) renders the spec shape
 /// consistently across the server and CLI lanes.
@@ -890,7 +890,7 @@ pub struct ExecInput {
 
 /// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
 /// validated `Job` aggregate. Used by `describe_workload` (ADR-0008 §GET
-/// /v1/jobs/{id}) to render the stored spec back onto the wire after
+/// /v1/workloads/{id}) to render the stored spec back onto the wire after
 /// rkyv access + deserialize.
 ///
 /// Non-fallible by construction: every field in `JobSpecInput` is a

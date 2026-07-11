@@ -77,8 +77,10 @@ fn fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -93,7 +95,7 @@ fn fact(
 fn liveness_restart_spec_default() -> overdrive_core::traits::driver::AllocationSpec {
     overdrive_core::traits::driver::AllocationSpec {
         alloc: aid("alloc-x"),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/x")
             .expect("valid spiffe"),
         command: "/bin/svc".to_string(),
         args: vec![],
@@ -1232,7 +1234,7 @@ fn readiness_fact(
         has_readiness_probe,
         readiness_success_threshold: success_threshold,
         backend_spiffe: overdrive_core::SpiffeId::new(&format!(
-            "spiffe://overdrive.local/job/svc/alloc/a{index}"
+            "spiffe://overdrive.local/workload/svc/alloc/a{index}"
         ))
         .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((
@@ -1434,8 +1436,10 @@ fn liveness_fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe,
         has_liveness_probe: true,
@@ -1769,8 +1773,10 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
@@ -2040,8 +2046,10 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
@@ -2111,8 +2119,10 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),

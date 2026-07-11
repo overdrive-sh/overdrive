@@ -49,7 +49,7 @@
 //! # OQ-1 — `<workload>` extraction (DECISION: local parse helper, ADR-0072)
 //!
 //! Each `Backend.alloc` is a [`SpiffeId`] of the shape
-//! `spiffe://overdrive.local/job/<job>/alloc/<alloc>` (the
+//! `spiffe://overdrive.local/workload/<job>/alloc/<alloc>` (the
 //! [`SpiffeId::for_allocation`] derivation). The OQ-1 primitive — extract the
 //! `<workload>` label from a `SpiffeId`'s path so the rows can be grouped by `<workload>`
 //! and looked up against the [`FrontendAddrAllocator`] (keyed by
@@ -110,8 +110,8 @@ pub enum NameIndexError {
 /// Extract the `<workload>` label from a workload [`SpiffeId`]'s path and reconstruct
 /// the [`MeshServiceName`] it dials as.
 ///
-/// The path is `/job/<job>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
-/// shape). This pulls the segment immediately after `/job/` and validates it
+/// The path is `/workload/<job>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
+/// shape). This pulls the segment immediately after `/workload/` and validates it
 /// as a v1 single-label mesh name via [`MeshServiceName::new`]. Returns `None`
 /// when the path is not the `job/.../alloc/...` shape OR the `<workload>` segment is
 /// not a valid v1 single-label mesh name (dotted, out-of-class, over 63
@@ -124,17 +124,17 @@ pub enum NameIndexError {
 /// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<workload>` from
 /// the SAME `service_backends` rows to key `by_frontend` from the shared
 /// allocator — reusing this one parse helper rather than re-deriving the
-/// `/job/<job>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
+/// `/workload/<job>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
 /// never invent API surface"; the design pins "mirror the `name_index` drain's
 /// row→`<workload>`→snapshot pattern").
 pub(crate) fn workload_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
-    // The path is `/job/<job>/alloc/<alloc>` — split on `/`, find the segment
-    // immediately after the `job` marker. A path that does not carry a `job`
-    // segment (or has nothing after it) yields no `<workload>`.
+    // The path is `/workload/<workload>/alloc/<alloc>` — split on `/`, find the
+    // segment immediately after the `workload` marker. A path that does not carry
+    // a `workload` segment (or has nothing after it) yields no `<workload>`.
     let mut segments = alloc.path().split('/').filter(|segment| !segment.is_empty());
     let workload_label = loop {
         match segments.next() {
-            Some("job") => break segments.next()?,
+            Some("workload") => break segments.next()?,
             Some(_) => {}
             None => return None,
         }

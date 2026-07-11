@@ -46,7 +46,7 @@ async fn limit_write_failure_warns_and_continues() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/lw")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/lw")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

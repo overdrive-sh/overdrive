@@ -42,7 +42,7 @@ async fn child_pid_appears_in_cgroup_procs() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/cp")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/cp")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

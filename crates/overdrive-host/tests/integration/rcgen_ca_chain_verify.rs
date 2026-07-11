@@ -380,7 +380,7 @@ fn rcgen_intermediate_cannot_sign_a_further_ca_path_len_enforced() {
 /// `@real-io` `@adapter-integration` `@walking_skeleton` `@S-04` — KPI K1
 /// (THE headline walking-skeleton proof, D2 completion): a real workload
 /// SVID minted by `RcgenCa::issue_svid` for
-/// `spiffe://overdrive.local/job/payments/alloc/a1b2c3` chain-verifies
+/// `spiffe://overdrive.local/workload/payments/alloc/a1b2c3` chain-verifies
 /// through the full hierarchy: `openssl verify -CAfile root.pem -untrusted
 /// intermediate.pem svid.pem` exits 0.
 ///
@@ -397,7 +397,7 @@ fn rcgen_full_svid_chain_verifies_root_intermediate_svid() {
         .expect("trust-domain SpiffeId parses");
     let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
     let node = NodeId::new("node-a").expect("NodeId parses");
-    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+    let workload = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
     let (not_before, not_after) = now_window();
     let req = SvidRequest::new(workload, not_before, not_after);
@@ -477,7 +477,7 @@ fn rcgen_svid_leaf_carries_exactly_one_uri_san_and_leaf_profile() {
     let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
         .expect("trust-domain SpiffeId parses");
     let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
-    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+    let workload = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
     let (not_before, not_after) = now_window();
     let req = SvidRequest::new(workload.clone(), not_before, not_after);
@@ -551,7 +551,7 @@ fn rcgen_svid_returns_matching_leaf_private_key_for_node_custody() {
     let subject = SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
         .expect("trust-domain SpiffeId parses");
     let ca = RcgenCa::new(Arc::new(OsEntropy), subject);
-    let workload = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+    let workload = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
         .expect("workload SpiffeId parses");
     let (not_before, not_after) = now_window();
     let req = SvidRequest::new(workload, not_before, not_after);

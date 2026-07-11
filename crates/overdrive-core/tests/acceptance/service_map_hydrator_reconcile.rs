@@ -55,7 +55,7 @@ fn make_vip() -> ServiceVip {
 
 fn make_backend() -> Backend {
     Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), 8080),
         weight: 1,
@@ -410,7 +410,7 @@ fn hydrator_skips_register_local_backend_for_loopback() {
 
     let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
     let backend = Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(host_ipv4), 8080),
         weight: 1,
@@ -460,7 +460,7 @@ fn hydrator_threads_per_listener_proto_into_register_local_backend() {
     let r = ServiceMapHydrator::canonical(host_ipv4, workload_subnet());
 
     let local_backend = |suffix: &str, port: u16| Backend {
-        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/job/dns/alloc/{suffix}"))
+        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/workload/dns/alloc/{suffix}"))
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(host_ipv4), port),
         weight: 1,

@@ -164,7 +164,7 @@ impl Driver for FailingDriver {
 
 fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSpec {
     let identity = SpiffeId::new(&format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
+        "spiffe://overdrive.local/workload/{}/alloc/{}",
         workload_id.as_str(),
         alloc_id.as_str(),
     ))

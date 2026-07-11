@@ -191,7 +191,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     // Submit `payments` job via the real HTTP surface — same shape as
     // `submit_round_trip.rs`. Asserts 200 + Inserted to confirm the
     // submit succeeded and we are now waiting on the convergence loop.
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
     let spec = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 1,
@@ -203,7 +203,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "submit must return 200");
     let body: SubmitWorkloadResponse = resp.json().await.expect("decode SubmitWorkloadResponse");
     assert_eq!(

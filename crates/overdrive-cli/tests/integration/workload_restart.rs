@@ -9,7 +9,7 @@
 //! on an ephemeral port; the trust triple is written by `serve`). NO
 //! `Command::spawn`, NO `CARGO_BIN_EXE_overdrive` — the `@real-io` proof
 //! for the restart route rides the production
-//! `POST /v1/jobs/:id/restart` → real `LocalIntentStore` path in
+//! `POST /v1/workloads/:id/restart` → real `LocalIntentStore` path in
 //! `run_server`, not a handler-internal pipeline substitute (per
 //! `docs/analysis/rca-user-port-gap.md`).
 //!
@@ -123,7 +123,7 @@ async fn workload_restart_for_declared_workload_returns_restart_output() {
     assert_eq!(deployed.workload_id, "payments", "precondition: `payments` deployed");
 
     // Restart it via the new verb — the @real-io proof rides the
-    // production POST /v1/jobs/payments/restart route into the real
+    // production POST /v1/workloads/payments/restart route into the real
     // LocalIntentStore in run_server.
     let output: RestartOutput = overdrive_cli::commands::workload::restart(RestartArgs {
         id: "payments".to_string(),
@@ -183,7 +183,7 @@ async fn workload_restart_of_stopped_workload_returns_resumed() {
     assert_eq!(deployed.workload_id, "payments", "precondition: `payments` deployed");
 
     // Stop it through the SHIPPED production stop verb — this POSTs the
-    // production POST /v1/jobs/payments/stop route, writing the `/stop`
+    // production POST /v1/workloads/payments/stop route, writing the `/stop`
     // sentinel into the real LocalIntentStore.
     let _stopped = overdrive_cli::commands::deploy::stop(StopArgs {
         id: "payments".to_string(),

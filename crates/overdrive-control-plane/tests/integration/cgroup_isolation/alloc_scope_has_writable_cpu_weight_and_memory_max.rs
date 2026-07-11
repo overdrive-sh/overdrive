@@ -141,7 +141,7 @@ impl Drop for ScopeCleanup {
 fn build_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/regression/alloc/0")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/regression/alloc/0")
             .expect("valid SpiffeId"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

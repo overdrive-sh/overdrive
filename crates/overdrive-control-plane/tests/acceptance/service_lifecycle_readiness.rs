@@ -63,7 +63,8 @@ fn alloc(id: &str) -> AllocationId {
 }
 
 fn spiffe(i: usize) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/job/svc/alloc/a{i}")).expect("valid spiffe")
+    SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc/alloc/a{i}"))
+        .expect("valid spiffe")
 }
 
 fn dataplane_identity() -> ServiceDataplaneIdentity {

@@ -5,7 +5,7 @@
 //! These four Tier-3 `#[tokio::test]`s each boot ONE in-process production boot
 //! fixture (the keystone's real-`EbpfDataplane` + `mtls_identity_override`
 //! shape) and prove the dial-by-name loop end-to-end through the PRODUCTION
-//! entry points — `run_server_with_obs_and_driver` (boot) + `POST /v1/jobs`
+//! entry points — `run_server_with_obs_and_driver` (boot) + `POST /v1/workloads`
 //! (deploy) + `getaddrinfo` from inside a deployed workload's
 //! PRODUCTION-provisioned netns (resolve, NOT `dig` — K2) + `connect`
 //! (capture / translate / mTLS).
@@ -650,18 +650,18 @@ impl Drop for Skeleton {
 }
 
 /// Deploy a Service spec through the real in-process deploy submit handler
-/// (`POST /v1/jobs` over the production HTTPS driving port). Returns `true` on
+/// (`POST /v1/workloads` over the production HTTPS driving port). Returns `true` on
 /// a 2xx accept.
 async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool {
     use overdrive_control_plane::api::SubmitWorkloadRequest;
-    let url = format!("https://localhost:{}/v1/jobs", skeleton.bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", skeleton.bound.port());
     let resp = skeleton
         .client
         .post(&url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
         .send()
         .await
-        .expect("deploy: POST /v1/jobs");
+        .expect("deploy: POST /v1/workloads");
     let status = resp.status();
     let body = resp.bytes().await.expect("read response body");
     if !status.is_success() {
@@ -671,12 +671,13 @@ async fn run_server_deploy(skeleton: &Skeleton, spec: ServiceSpecInput) -> bool 
 }
 
 /// Stop a deployed workload through the real in-process stop driving port
-/// (`POST /v1/jobs/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`
+/// (`POST /v1/workloads/{id}/stop`). Drives `StopAllocation` → `worker.stop_alloc`
 /// (which stops the per-alloc accept loops), the SAME path `overdrive job
 /// stop` drives. Returns `true` on a 2xx accept.
 async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/stop", skeleton.bound.port());
-    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/jobs/{id}/stop");
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/stop", skeleton.bound.port());
+    let resp = skeleton.client.post(&url).send().await.expect("stop: POST /v1/workloads/{id}/stop");
     let status = resp.status();
     let body = resp.bytes().await.expect("read stop response body");
     if !status.is_success() {
@@ -686,16 +687,17 @@ async fn run_server_stop(skeleton: &Skeleton, workload_id: &str) -> bool {
 }
 
 /// Restart a deployed workload through the real in-process restart driving port
-/// (`POST /v1/jobs/{id}/restart`, the `restart_workload` handler; ADR-0073), the
+/// (`POST /v1/workloads/{id}/restart`, the `restart_workload` handler; ADR-0073), the
 /// SAME path `overdrive workload restart <id>` drives. The handler atomically
 /// bumps the desired-run generation AND clears the `/stop` sentinel in ONE
 /// `IntentStore::txn`; the `WorkloadLifecycle` reconciler then places a FRESH
 /// instance (new AllocationId) because `observed_generation < generation`.
 /// Empty request body; returns `true` on a 2xx accept.
 async fn run_server_restart(skeleton: &Skeleton, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/restart", skeleton.bound.port());
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/restart", skeleton.bound.port());
     let resp =
-        skeleton.client.post(&url).send().await.expect("restart: POST /v1/jobs/{id}/restart");
+        skeleton.client.post(&url).send().await.expect("restart: POST /v1/workloads/{id}/restart");
     let status = resp.status();
     let body = resp.bytes().await.expect("read restart response body");
     if !status.is_success() {
@@ -1514,7 +1516,7 @@ async fn deploy_and_wait_stable_backend(skeleton: &Skeleton, server_id: &str) ->
 /// `<job>`-tagged backend SpiffeId.
 async fn stable_mesh_backend_addr(obs: &Arc<dyn ObservationStore>, job: &str) -> Option<Ipv4Addr> {
     let rows = obs.all_service_backends_rows().await.ok()?;
-    let needle = format!("/job/{job}/");
+    let needle = format!("/workload/{job}/");
     rows.into_iter()
         .flat_map(|r| r.backends)
         .filter(|b| b.healthy && b.alloc.as_str().contains(&needle))
@@ -1703,7 +1705,7 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// 0x17 oracle.
 ///
 /// The cycle is driven by the production `overdrive workload restart server`
-/// verb = `POST /v1/jobs/server/restart` (the `restart_workload` handler;
+/// verb = `POST /v1/workloads/server/restart` (the `restart_workload` handler;
 /// ADR-0073, shipped in Phase 01). The restart handler atomically bumps the
 /// desired-run generation AND clears the `/stop` sentinel in ONE
 /// `IntentStore::txn([IncrementU64{generation}, Delete{stop}])`; the
@@ -1711,7 +1713,7 @@ async fn answered_frontend_is_the_addr_mtls_resolve_translates_to_a_mesh_backend
 /// AllocationId) because `observed_generation < generation`. This is the
 /// production restart-after-stop path the earlier "no verb exists" narrative
 /// (now false — the verb shipped in Phase 01) said was missing. A same-spec
-/// `POST /v1/jobs` re-deploy is NOT used here precisely because it takes the
+/// `POST /v1/workloads` re-deploy is NOT used here precisely because it takes the
 /// `put_if_absent → KeyExists → Unchanged` path and does NOT clear the
 /// sticky operator-stop key (`IntentKey::for_workload_stop`; ADR-0037
 /// Amendment / `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does.
@@ -1769,7 +1771,7 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
     );
 
     // WHEN: cycle the server backend through the PRODUCTION restart verb —
-    // `POST /v1/jobs/server/restart` (ADR-0073). The handler atomically bumps
+    // `POST /v1/workloads/server/restart` (ADR-0073). The handler atomically bumps
     // the desired-run generation AND clears the `/stop` sentinel; the
     // `WorkloadLifecycle` reconciler then places a FRESH instance (a NEW
     // AllocationId → NEW workload_addr B2) because `observed_generation <
@@ -1905,7 +1907,7 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// inter-agent encryption proof lives in the sibling round-trip ATs.
 ///
 /// The mid-connection CHURN is driven by the production `overdrive workload
-/// restart server` verb = `POST /v1/jobs/server/restart` (the `restart_workload`
+/// restart server` verb = `POST /v1/workloads/server/restart` (the `restart_workload`
 /// handler; ADR-0073, shipped in Phase 01), fired while the in-flight connection
 /// is open. The restart handler atomically bumps the desired-run generation AND
 /// clears the `/stop` sentinel in ONE `IntentStore::txn([IncrementU64{generation},
@@ -1914,7 +1916,7 @@ async fn answered_frontend_is_byte_stable_across_alloc_cycle_next_connect_lands_
 /// instance B2 (new AllocationId) because `observed_generation < generation`.
 /// This is the production restart-after-stop path the earlier "no verb exists"
 /// narrative (now false — the verb shipped in Phase 01) said was missing. A
-/// same-spec `POST /v1/jobs` re-deploy is NOT used here precisely because it
+/// same-spec `POST /v1/workloads` re-deploy is NOT used here precisely because it
 /// takes the `put_if_absent → KeyExists → Unchanged` path and does NOT clear the
 /// sticky operator-stop key (`IntentKey::for_workload_stop`; ADR-0037 Amendment /
 /// `WorkloadLifecycle` §Bug 3) — `restart` is the verb that does. Sibling:
@@ -1970,7 +1972,7 @@ async fn in_flight_connection_fails_fast_on_backend_churn_subsequent_connect_lan
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     // WHEN B1 is CYCLED mid-connection through the PRODUCTION restart verb —
-    // `POST /v1/jobs/server/restart` (ADR-0073) — fired while the in-flight
+    // `POST /v1/workloads/server/restart` (ADR-0073) — fired while the in-flight
     // connection is still open. The restart handler atomically bumps the
     // desired-run generation AND clears the `/stop` sentinel; the
     // `WorkloadLifecycle` reconciler then STOPS the current instance B1 (→ the

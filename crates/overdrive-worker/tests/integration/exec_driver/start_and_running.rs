@@ -43,7 +43,7 @@ async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/sleep/alloc/ws22")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/sleep/alloc/ws22")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

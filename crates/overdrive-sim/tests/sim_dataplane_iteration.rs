@@ -57,7 +57,7 @@ fn spiffe(path: &str) -> SpiffeId {
 
 fn dummy_backend() -> Backend {
     Backend {
-        alloc: spiffe("/job/payments/alloc/a1b2c3"),
+        alloc: spiffe("/workload/payments/alloc/a1b2c3"),
         addr: "127.0.0.1:8080".parse().expect("valid socket"),
         weight: 100,
         healthy: true,

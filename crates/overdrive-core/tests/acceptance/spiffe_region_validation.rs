@@ -37,7 +37,7 @@ use proptest::prelude::*;
 #[test]
 fn spiffe_id_parses_canonical_whitepaper_example_and_exposes_accessors() {
     // Given the input from whitepaper §8.
-    let input = "spiffe://overdrive.local/job/payments/alloc/a1b2c3";
+    let input = "spiffe://overdrive.local/workload/payments/alloc/a1b2c3";
 
     // When Ana constructs a SpiffeId from that input.
     let id = SpiffeId::from_str(input).expect("canonical SPIFFE URI must parse");
@@ -54,7 +54,7 @@ fn spiffe_id_parses_canonical_whitepaper_example_and_exposes_accessors() {
     // leading `/` onward.
     assert_eq!(
         id.path(),
-        "/job/payments/alloc/a1b2c3",
+        "/workload/payments/alloc/a1b2c3",
         "path() must return the leading-`/`-prefixed path"
     );
 
@@ -105,7 +105,7 @@ fn region_parses_case_insensitively_and_emits_lowercase_canonical() {
 fn spiffe_missing_scheme_is_rejected_with_missing_scheme_variant() {
     // Given the input — a path that looks like a SPIFFE body but lacks the
     // `spiffe://` scheme.
-    let input = "overdrive.local/job/payments";
+    let input = "overdrive.local/workload/payments";
 
     // When Ana constructs a SpiffeId from that input.
     let outcome = SpiffeId::from_str(input);
@@ -129,7 +129,7 @@ fn spiffe_missing_scheme_is_rejected_with_missing_scheme_variant() {
 #[test]
 fn spiffe_empty_trust_domain_is_rejected_with_empty_trust_domain_variant() {
     // Given the input — a scheme-prefixed string with an empty trust domain.
-    let input = "spiffe:///job/payments";
+    let input = "spiffe:///workload/payments";
 
     // When Ana constructs a SpiffeId from that input.
     let outcome = SpiffeId::from_str(input);
@@ -233,7 +233,7 @@ fn region_with_whitespace_is_rejected_with_invalid_char_variant() {
 // ADR-0067 D5 — `SpiffeId::for_allocation` canonical extraction (step 01-01).
 //
 // `for_allocation(&WorkloadId, &AllocationId)` derives the SVID identity
-// `spiffe://overdrive.local/job/<workload>/alloc/<alloc>`. The allocation →
+// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>`. The allocation →
 // SPIFFE-URI derivation previously existed twice as private reconciler helpers
 // (`mint_alloc_identity` in `backend_discovery_bridge.rs`, `mint_identity` in
 // `workload_lifecycle.rs`); D5 consolidates them onto this single public
@@ -279,7 +279,7 @@ fn valid_label() -> impl Strategy<Value = String> {
 proptest! {
     /// For any valid `(WorkloadId, AllocationId)`, `SpiffeId::for_allocation`
     /// yields a `SpiffeId` whose canonical `Display` equals
-    /// `spiffe://overdrive.local/job/<workload>/alloc/<alloc>` AND round-trips
+    /// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` AND round-trips
     /// losslessly through `FromStr` — the newtype-roundtrip property.
     ///
     /// The generated segments vary per case and are never a fixed sentinel,
@@ -299,7 +299,7 @@ proptest! {
 
         // Then its canonical Display equals the contracted URI.
         let expected = format!(
-            "spiffe://overdrive.local/job/{}/alloc/{}",
+            "spiffe://overdrive.local/workload/{}/alloc/{}",
             workload.as_str(),
             alloc.as_str(),
         );
@@ -309,7 +309,7 @@ proptest! {
         prop_assert_eq!(id.trust_domain(), "overdrive.local");
         prop_assert_eq!(
             id.path(),
-            format!("/job/{}/alloc/{}", workload.as_str(), alloc.as_str())
+            format!("/workload/{}/alloc/{}", workload.as_str(), alloc.as_str())
         );
 
         // And it round-trips losslessly through FromStr (newtype-roundtrip).
@@ -338,6 +338,6 @@ fn for_allocation_matches_the_historical_helper_string_on_a_pinned_example() {
     let id = SpiffeId::for_allocation(&workload, &alloc);
 
     // The exact string both private helpers built via
-    // `format!("spiffe://overdrive.local/job/{}/alloc/{}", ..)`.
-    assert_eq!(id.to_string(), "spiffe://overdrive.local/job/payments/alloc/a1b2c3");
+    // `format!("spiffe://overdrive.local/workload/{}/alloc/{}", ..)`.
+    assert_eq!(id.to_string(), "spiffe://overdrive.local/workload/payments/alloc/a1b2c3");
 }

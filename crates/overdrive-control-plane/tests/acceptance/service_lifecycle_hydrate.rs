@@ -536,8 +536,10 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -545,8 +547,10 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         restart_count: 0,
         restart_spec: overdrive_core::traits::driver::AllocationSpec {
             alloc: aid.clone(),
-            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-                .expect("valid spiffe"),
+            identity: overdrive_core::SpiffeId::new(
+                "spiffe://overdrive.local/workload/svc/alloc/x",
+            )
+            .expect("valid spiffe"),
             command: "/bin/svc".to_string(),
             args: vec![],
             resources: overdrive_core::traits::driver::Resources {
@@ -637,8 +641,10 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -646,8 +652,10 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         restart_count: 0,
         restart_spec: overdrive_core::traits::driver::AllocationSpec {
             alloc: aid.clone(),
-            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-                .expect("valid spiffe"),
+            identity: overdrive_core::SpiffeId::new(
+                "spiffe://overdrive.local/workload/svc/alloc/x",
+            )
+            .expect("valid spiffe"),
             command: "/bin/svc".to_string(),
             args: vec![],
             resources: overdrive_core::traits::driver::Resources {

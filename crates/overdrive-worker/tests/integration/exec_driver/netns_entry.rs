@@ -138,7 +138,7 @@ async fn exec_driver_with_spec_netns_spawns_child_inside_target_netns() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/netns/alloc/01")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/netns/alloc/01")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],
@@ -198,7 +198,7 @@ async fn exec_driver_with_missing_netns_path_returns_netns_entry_error() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/netns/alloc/missing")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/netns/alloc/missing")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

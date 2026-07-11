@@ -141,7 +141,7 @@ fn service_map_keyed_on_vip_port_not_backend_port() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
 
     let alloc =
-        SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/vipport-B1").expect("SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/vipport-B1").expect("SpiffeId");
 
     // Install a UDP service with VIP port 53 and backend port 5353.
     runtime

@@ -4,8 +4,8 @@
 //!
 //! | Endpoint | Handler |
 //! |---|---|
-//! | `POST /v1/jobs` | `submit_workload` |
-//! | `GET /v1/jobs/{id}` | `describe_workload` |
+//! | `POST /v1/workloads` | `submit_workload` |
+//! | `GET /v1/workloads/{id}` | `describe_workload` |
 //! | `GET /v1/cluster/info` | `cluster_status` |
 //! | `GET /v1/allocs` | `alloc_status` |
 //! | `GET /v1/nodes` | `node_list` |
@@ -157,7 +157,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
     }
 }
 
-/// `POST /v1/jobs` — validate, archive via rkyv, commit through the
+/// `POST /v1/workloads` — validate, archive via rkyv, commit through the
 /// intent store, return `{workload_id, spec_digest, outcome}`.
 ///
 /// Idempotency contract (ADR-0015 §4 amended by ADR-0020):
@@ -182,7 +182,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 /// bytes and used both for the byte-equality check (against the
 /// `existing` bytes returned by `PutOutcome::KeyExists`) and for the
 /// response body.
-// Slice 02 step 02-02 — `POST /v1/jobs` 200 response is polymorphic
+// Slice 02 step 02-02 — `POST /v1/workloads` 200 response is polymorphic
 // on `Accept` per DESIGN [D6] / [D8]. The path declares both content
 // types under a single 200 response — `application/json` returns a
 // one-shot `SubmitWorkloadResponse`; `application/x-ndjson` returns a
@@ -193,7 +193,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 // branch).
 #[utoipa::path(
     post,
-    path = "/v1/jobs",
+    path = "/v1/workloads",
     request_body = api::SubmitWorkloadRequest,
     responses(
         (status = 200, description = "Job accepted (Accept negotiates one-shot vs streaming)",
@@ -625,7 +625,7 @@ fn wants_ndjson(headers: &HeaderMap) -> bool {
         .is_some_and(|s| s.contains("application/x-ndjson"))
 }
 
-/// `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
+/// `GET /v1/workloads/{id}` — read via `IntentStore::get`, rkyv-access the
 /// bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
 ///
 /// Canonical-hashing contract (ADR-0002 + development.md §Hashing):
@@ -646,7 +646,7 @@ fn wants_ndjson(headers: &HeaderMap) -> bool {
 /// store-wide nor per-entry index on the wire (see ADR-0020).
 #[utoipa::path(
     get,
-    path = "/v1/jobs/{id}",
+    path = "/v1/workloads/{id}",
     params(
         ("id" = String, Path, description = "Canonical WorkloadId"),
     ),
@@ -756,14 +756,14 @@ pub async fn describe_workload(
     Ok(Json(api::WorkloadDescription { spec, spec_digest }))
 }
 
-/// `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-
-/// submitted job. Per ADR-0027.
+/// `POST /v1/workloads/{id}/stop` — record a stop intent for a previously-
+/// submitted workload. Per ADR-0027.
 ///
-/// AIP-136 prescribes `POST /v1/jobs/{id}:stop`. axum 0.7 cannot
+/// AIP-136 prescribes `POST /v1/workloads/{id}:stop`. axum 0.7 cannot
 /// route the `:stop` verb suffix as a single path segment because its
 /// matcher (matchit) treats `:` as the path-parameter prefix —
-/// `/v1/jobs/:id:stop` is rejected. We use the path-subsegment form
-/// `/v1/jobs/{id}/stop` which is industry-standard, semantically
+/// `/v1/workloads/:id:stop` is rejected. We use the path-subsegment form
+/// `/v1/workloads/{id}/stop` which is industry-standard, semantically
 /// equivalent, and free of framework conflict. ADR-0027's guidance
 /// stands; only the URL form differs.
 ///
@@ -775,13 +775,13 @@ pub async fn describe_workload(
 /// 404 contract: a stop call against an `<id>` that was never
 /// submitted (no `IntentKey::for_workload(<id>)` row) returns HTTP 404.
 /// The original spec key MUST exist before a stop intent can be
-/// recorded — stopping a non-existent job is operator error, not an
+/// recorded — stopping a non-existent workload is operator error, not an
 /// idempotent no-op.
 ///
 /// Empty request body. The response body is `{ workload_id, outcome }`.
 #[utoipa::path(
     post,
-    path = "/v1/jobs/{id}/stop",
+    path = "/v1/workloads/{id}/stop",
     params(
         ("id" = String, Path, description = "Canonical WorkloadId"),
     ),
@@ -853,7 +853,7 @@ pub async fn stop_workload(
     Ok(axum::Json(StopWorkloadResponse { workload_id: workload_id.to_string(), outcome }))
 }
 
-/// `POST /v1/jobs/{id}/restart` — replace a declared workload's backend
+/// `POST /v1/workloads/{id}/restart` — replace a declared workload's backend
 /// instance with a fresh one. Per ADR-0073.
 ///
 /// Rollout-restart breadth: a running workload is stop-then-started; an
@@ -880,7 +880,7 @@ pub async fn stop_workload(
 /// classified from the `/stop` presence at the check-exists read.
 #[utoipa::path(
     post,
-    path = "/v1/jobs/{id}/restart",
+    path = "/v1/workloads/{id}/restart",
     params(
         ("id" = String, Path, description = "Canonical WorkloadId"),
     ),

@@ -458,7 +458,7 @@ fn build_udp_service(
     .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
 
     let backend_alloc =
-        SpiffeId::new("spiffe://overdrive.local/job/dns/alloc/B1").expect("backend SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/dns/alloc/B1").expect("backend SpiffeId");
     let backend_addr = SocketAddr::new(IpAddr::V4(BACKEND_IP), UDP_PORT);
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");

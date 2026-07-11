@@ -160,7 +160,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     // /bin/sh that traps and ignores SIGTERM; sleeps 60s.
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/sk")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/sk")
             .expect("valid spiffe id"),
         command: "/bin/sh".to_owned(),
         args: vec!["-c".to_owned(), "trap '' TERM; sleep 60".to_owned()],

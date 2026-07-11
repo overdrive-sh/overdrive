@@ -76,7 +76,7 @@ pub struct HeldSvidFacts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningAlloc {
     /// The workload the allocation belongs to — the first component of the
-    /// derived `spiffe://overdrive.local/job/<workload>/alloc/<alloc>` identity.
+    /// derived `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` identity.
     pub workload_id: WorkloadId,
     /// The node the allocation runs on — carried on `IssueSvid` so the action is
     /// self-describing (the `issued_certificates` row's `node_id`, ADR-0067 D2).
@@ -544,7 +544,7 @@ mod tests {
     /// dropped or swapped a field is caught here.
     #[test]
     fn held_svid_facts_carries_the_identity_and_validity_end() {
-        let spiffe = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+        let spiffe = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
             .expect("valid workload SpiffeId");
         let not_after = UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600));
 

@@ -147,7 +147,7 @@ fn tick_now() -> TickContext {
 fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/anl/alloc/01")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/anl/alloc/01")
             .expect("valid spiffe id"),
         command: command.to_owned(),
         args,

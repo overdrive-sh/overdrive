@@ -59,8 +59,10 @@ async fn live_map_returns_to_zero_after_eight_start_stop_cycles() {
         cleanups.push(AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone()));
         let spec = AllocationSpec {
             alloc: alloc.clone(),
-            identity: SpiffeId::new(&format!("spiffe://overdrive.local/job/livemap/alloc/{cycle}"))
-                .expect("valid spiffe id"),
+            identity: SpiffeId::new(&format!(
+                "spiffe://overdrive.local/workload/livemap/alloc/{cycle}"
+            ))
+            .expect("valid spiffe id"),
             command: "/bin/sleep".to_owned(),
             args: vec!["60".to_owned()],
             resources: Resources { cpu_milli: 50, memory_bytes: 16 * 1024 * 1024 },

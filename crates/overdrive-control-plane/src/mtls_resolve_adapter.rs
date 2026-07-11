@@ -462,7 +462,7 @@ impl BackendIndex {
         // `service_id`): a different service's frontend key is never touched.
         self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
         for backend in &row.backends {
-            // A backend whose SpiffeId is not the `/job/<job>/alloc/<alloc>`
+            // A backend whose SpiffeId is not the `/workload/<job>/alloc/<alloc>`
             // shape (or whose `<workload>` is not a v1 mesh name) contributes no
             // frontend key — it is not mesh-dialable by name.
             let Some(workload) = workload_of(&backend.alloc) else { continue };
@@ -1319,7 +1319,7 @@ mod tests {
         let bound_job = MeshServiceName::new("bound.svc.overdrive.local").expect("valid mesh name");
         let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
 
-        // A backend whose alloc SpiffeId is the `/job/<job>/alloc/<alloc>` shape
+        // A backend whose alloc SpiffeId is the `/workload/<job>/alloc/<alloc>` shape
         // the projection parses (`workload_of`). The backend's listener port is the
         // port the frontend key re-uses verbatim.
         let backend_port = 8080;

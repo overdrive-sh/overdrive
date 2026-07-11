@@ -36,7 +36,7 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use proptest::prelude::*;
 
 fn spiffe(tag: usize) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/job/svc/alloc/b-{tag}"))
+    SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc/alloc/b-{tag}"))
         .expect("valid SPIFFE URI")
 }
 

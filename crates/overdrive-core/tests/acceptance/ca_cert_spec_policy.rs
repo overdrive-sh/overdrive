@@ -37,12 +37,12 @@ use proptest::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Generate a single valid workload `SpiffeId` of the canonical shape
-/// `spiffe://overdrive.local/job/<name>/alloc/<id>`. Components are drawn from
+/// `spiffe://overdrive.local/workload/<name>/alloc/<id>`. Components are drawn from
 /// the lowercase DNS-label class so the generated value is always a valid SVID
 /// identity (never `""`, never a fixed fixture).
 fn workload_spiffe_id() -> impl Strategy<Value = SpiffeId> {
     ("[a-z][a-z0-9-]{0,20}", "[a-z0-9][a-z0-9]{0,15}").prop_map(|(name, alloc)| {
-        SpiffeId::new(&format!("spiffe://overdrive.local/job/{name}/alloc/{alloc}"))
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{name}/alloc/{alloc}"))
             .expect("generated SpiffeId components are valid")
     })
 }
@@ -132,7 +132,7 @@ proptest! {
 /// Example-pinned readability companion to the property above.
 #[test]
 fn svid_spec_subject_uri_equals_requested_spiffe_id() {
-    let requested = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+    let requested = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
         .expect("valid workload SVID subject");
 
     let spec = CertSpec::svid(vec![requested.clone()]).expect("exactly one URI SAN is accepted");
@@ -142,7 +142,7 @@ fn svid_spec_subject_uri_equals_requested_spiffe_id() {
     assert_eq!(spec.subject(), &requested);
     assert_eq!(
         spec.subject().as_str(),
-        "spiffe://overdrive.local/job/payments/alloc/a1b2c3",
+        "spiffe://overdrive.local/workload/payments/alloc/a1b2c3",
         "canonical-lowercase URI is preserved verbatim as the sole SAN"
     );
 }

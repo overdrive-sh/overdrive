@@ -144,7 +144,7 @@ fn sim_mtls_enforcement_outcome_matches_contract_both_directions() {
             for direction in [Direction::Outbound, Direction::Inbound] {
                 let held_alloc = alloc("alloc-held-0");
                 let absent_alloc = alloc("alloc-absent-0");
-                let spiffe = format!("spiffe://overdrive.local/job/j{spiffe_seed}/alloc/held");
+                let spiffe = format!("spiffe://overdrive.local/workload/j{spiffe_seed}/alloc/held");
 
                 // The held set is identical across arms (one SVID for `held_alloc`);
                 // only the bundle differs (present vs absent), which selects the
@@ -258,7 +258,7 @@ fn established_adapter(held_alloc: &AllocationId) -> SimMtlsEnforcement {
     let mut held = BTreeMap::new();
     held.insert(
         held_alloc.clone(),
-        svid("spiffe://overdrive.local/job/j/alloc/held", 1_900_000_000),
+        svid("spiffe://overdrive.local/workload/j/alloc/held", 1_900_000_000),
     );
     let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
     SimMtlsEnforcement::new(identity, MtlsLimits::default())

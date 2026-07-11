@@ -139,8 +139,10 @@ fn fact_from_row_and_intent(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-            .expect("valid spiffe"),
+        backend_spiffe: overdrive_core::SpiffeId::new(
+            "spiffe://overdrive.local/workload/svc/alloc/x",
+        )
+        .expect("valid spiffe"),
         backend_addr: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
@@ -148,8 +150,10 @@ fn fact_from_row_and_intent(
         restart_count: 0,
         restart_spec: overdrive_core::traits::driver::AllocationSpec {
             alloc: row.alloc_id.clone(),
-            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/job/svc/alloc/x")
-                .expect("valid spiffe"),
+            identity: overdrive_core::SpiffeId::new(
+                "spiffe://overdrive.local/workload/svc/alloc/x",
+            )
+            .expect("valid spiffe"),
             command: "/bin/svc".to_string(),
             args: vec![],
             resources: overdrive_core::traits::driver::Resources {

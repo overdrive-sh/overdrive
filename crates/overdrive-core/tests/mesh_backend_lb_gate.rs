@@ -78,7 +78,7 @@ fn make_tick(now_secs: u64) -> TickContext {
 fn desired_with_backend(backend_ip: Ipv4Addr) -> ServiceDesired {
     let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
     let backends = vec![Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(backend_ip), 8080),
         weight: 1,
@@ -268,7 +268,7 @@ fn desired_with_backends(backend_ips: &[Ipv4Addr]) -> ServiceDesired {
     let backends: Vec<Backend> = backend_ips
         .iter()
         .map(|ip| Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
             weight: 1,
@@ -470,7 +470,7 @@ fn v6_vip_desired_with_backends(vip6: Ipv6Addr, backend_ips: &[Ipv4Addr]) -> Ser
     let backends: Vec<Backend> = backend_ips
         .iter()
         .map(|ip| Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
             weight: 1,
@@ -688,7 +688,7 @@ fn local_backend_churn_redrives_register_local_backend_independent_of_remote_gat
         let vip =
             ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
         let backends = vec![Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(host), backend_port),
             weight: 1,
@@ -735,7 +735,7 @@ fn local_backend_churn_redrives_register_local_backend_independent_of_remote_gat
     );
     let local_fp_8080 = {
         let b = Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(host), 8080),
             weight: 1,
@@ -813,7 +813,7 @@ fn local_backend_churn_redrives_register_local_backend_independent_of_remote_gat
     }
     let local_fp_9090 = {
         let b = Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(host), 9090),
             weight: 1,
@@ -876,7 +876,7 @@ proptest! {
             // remote-only happy path — UNCHANGED: the surviving remote backend
             // is in the payload and the programmed fingerprint is over it.
             let remote_backend = Backend {
-                alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                     .expect("valid SpiffeId"),
                 addr: SocketAddr::new(IpAddr::V4(backend_ip), 8080),
                 weight: 1,

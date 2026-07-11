@@ -1,7 +1,7 @@
 //! Step 02-04 / Slice 3B scenario 3.12 —
 //! `stop_writes_separate_intent_key_preserving_spec`.
 //!
-//! After `POST /v1/jobs/<id>/stop`, the `IntentStore` must hold BOTH
+//! After `POST /v1/workloads/<id>/stop`, the `IntentStore` must hold BOTH
 //! the original `IntentKey::for_workload(<id>)` (unchanged byte-for-byte)
 //! AND `IntentKey::for_workload_stop(<id>)`. The job spec is preserved for
 //! audit / rollback / debugging; the stop signal is recorded as a
@@ -102,8 +102,8 @@ fn payments_spec() -> JobSpecInput {
 async fn stop_writes_separate_intent_key_preserving_spec() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
-    let stop_url = format!("https://localhost:{}/v1/jobs/payments/stop", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
+    let stop_url = format!("https://localhost:{}/v1/workloads/payments/stop", bound.port());
 
     // Submit a job first.
     let resp = client
@@ -111,7 +111,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let submit_body: SubmitWorkloadResponse = resp.json().await.expect("decode submit body");
     assert_eq!(submit_body.outcome, IdempotencyOutcome::Inserted);

@@ -534,14 +534,14 @@ fn issued_cert_summary(
 /// NEVER leaking cert PEM/DER bytes or private-key material (the S-OC-11 +
 /// S-OC-12 contract on the path `main.rs:158` actually calls).
 ///
-/// Kind is realistic: a running Job alloc with a `/job/` SPIFFE id. The
+/// Kind is realistic: a running Job alloc with a `/workload/` SPIFFE id. The
 /// server projects `issued_certificates` per running alloc with no
 /// `WorkloadKind` filter, so a Job legitimately carries this summary.
 #[test]
 fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
     let summary = issued_cert_summary(
         "0a1b2c3d4e5f",
-        "spiffe://overdrive.local/job/dns-resolver/alloc/alloc-0",
+        "spiffe://overdrive.local/workload/dns-resolver/alloc/alloc-0",
         "ffeeddccbbaa",
         1_700_000_000,
     );

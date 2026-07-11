@@ -235,7 +235,7 @@ define_label_newtype!(
 // -----------------------------------------------------------------------------
 
 /// SPIFFE ID for a workload, e.g.
-/// `spiffe://overdrive.local/job/payments/alloc/a1b2c3`.
+/// `spiffe://overdrive.local/workload/payments/alloc/a1b2c3`.
 ///
 /// Construction validates the `spiffe://<trust-domain>/<path>` shape and
 /// lowercases the canonical form. The stored value is always lowercased.
@@ -299,7 +299,7 @@ impl SpiffeId {
     }
 
     /// Derive the SVID identity for a workload allocation:
-    /// `spiffe://overdrive.local/job/<workload>/alloc/<alloc>`.
+    /// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>`.
     ///
     /// The canonical allocation-shaped constructor (ADR-0067 D5) — the single
     /// derivation the reconcilers route through, replacing the formerly
@@ -308,7 +308,7 @@ impl SpiffeId {
     /// Infallible by construction: [`WorkloadId`] and [`AllocationId`] are
     /// already-validated DNS-1123-label-like newtypes whose canonical form is
     /// lowercase ASCII alphanumerics plus `-` / `_` / `.`, leading and trailing
-    /// alphanumeric. Interpolated into the fixed `spiffe://overdrive.local/job/
+    /// alphanumeric. Interpolated into the fixed `spiffe://overdrive.local/workload/
     /// .../alloc/...` shape, the result always has the `spiffe://` scheme, the
     /// non-empty trust domain `overdrive.local`, and a non-empty path — so
     /// [`SpiffeId::new`] cannot reject it. The logically-unreachable
@@ -318,13 +318,16 @@ impl SpiffeId {
     /// code.
     #[must_use]
     pub fn for_allocation(workload: &WorkloadId, alloc: &AllocationId) -> Self {
-        let raw =
-            format!("spiffe://overdrive.local/job/{}/alloc/{}", workload.as_str(), alloc.as_str());
+        let raw = format!(
+            "spiffe://overdrive.local/workload/{}/alloc/{}",
+            workload.as_str(),
+            alloc.as_str()
+        );
         Self::new(&raw).unwrap_or_else(|_| {
             unreachable!(
                 "for_allocation derives a SpiffeId from already-validated \
                  WorkloadId/AllocationId newtypes interpolated into the fixed \
-                 spiffe://overdrive.local/job/.../alloc/... shape; SpiffeId::new \
+                 spiffe://overdrive.local/workload/.../alloc/... shape; SpiffeId::new \
                  cannot reject a valid scheme + non-empty trust domain + \
                  non-empty path"
             )
@@ -1365,14 +1368,14 @@ mod tests {
 
     #[test]
     fn spiffe_parses_canonical_form() {
-        let id = SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3").unwrap();
+        let id = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3").unwrap();
         assert_eq!(id.trust_domain(), "overdrive.local");
-        assert_eq!(id.path(), "/job/payments/alloc/a1b2c3");
+        assert_eq!(id.path(), "/workload/payments/alloc/a1b2c3");
     }
 
     #[test]
     fn spiffe_requires_scheme() {
-        let err = SpiffeId::new("overdrive.local/job/x").unwrap_err();
+        let err = SpiffeId::new("overdrive.local/workload/x").unwrap_err();
         assert!(matches!(err, IdParseError::SpiffeMissingScheme(_)));
     }
 
@@ -1448,8 +1451,8 @@ mod tests {
     fn spiffe_as_str_is_lowercased_canonical_for_mixed_case_input() {
         // Mixed-case input → `new` lowercases the whole string; `as_str`
         // must echo that lowercased canonical verbatim, scheme included.
-        let id = SpiffeId::new("SPIFFE://Overdrive.Local/Job/Payments").unwrap();
-        assert_eq!(id.as_str(), "spiffe://overdrive.local/job/payments");
+        let id = SpiffeId::new("SPIFFE://Overdrive.Local/Workload/Payments").unwrap();
+        assert_eq!(id.as_str(), "spiffe://overdrive.local/workload/payments");
     }
 
     proptest! {

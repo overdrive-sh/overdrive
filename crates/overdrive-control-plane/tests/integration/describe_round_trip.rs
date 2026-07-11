@@ -1,8 +1,8 @@
-//! Integration tests for `GET /v1/jobs/{id}` — step 03-02.
+//! Integration tests for `GET /v1/workloads/{id}` — step 03-02.
 //!
 //! Proves the Phase 1 `describe_workload` handler round-trip:
 //!
-//! 1. After `POST /v1/jobs`, `GET /v1/jobs/{id}` returns HTTP 200 with
+//! 1. After `POST /v1/workloads`, `GET /v1/workloads/{id}` returns HTTP 200 with
 //!    the canonical `WorkloadDescription` shape — `spec`, `spec_digest`
 //!    (per ADR-0020 the `commit_index` field is dropped).
 //! 2. The returned `spec` is byte-identical (via rkyv archive of the
@@ -158,21 +158,21 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
     let client = client_trusting(&ca_pem);
 
     // 1. Submit.
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
     let submit_resp = client
         .post(&submit_url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
     let submit_body: SubmitWorkloadResponse =
         submit_resp.json().await.expect("decode submit response");
 
     // 2. Describe.
     let describe_url =
-        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
-    let describe_resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
+        format!("https://localhost:{}/v1/workloads/{}", bound.port(), submit_body.workload_id);
+    let describe_resp = client.get(&describe_url).send().await.expect("GET /v1/workloads/{id}");
     assert_eq!(
         describe_resp.status(),
         reqwest::StatusCode::OK,
@@ -232,8 +232,8 @@ async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
     // (Note: uppercase ASCII canonicalises to lowercase via
     // `to_ascii_lowercase` in the parser, so `INVALID` → `invalid`
     // and yields a 404, not a 400 — the wrong lane for this test.)
-    let describe_url = format!("https://localhost:{}/v1/jobs/-bad", bound.port());
-    let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{malformed}");
+    let describe_url = format!("https://localhost:{}/v1/workloads/-bad", bound.port());
+    let resp = client.get(&describe_url).send().await.expect("GET /v1/workloads/{malformed}");
 
     assert_eq!(
         resp.status(),
@@ -268,8 +268,8 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
     // No prior submit — any valid WorkloadId format we pass in must 404
     // because the underlying `IntentStore::get` returns `None` for the
     // canonical key.
-    let describe_url = format!("https://localhost:{}/v1/jobs/no-such-job", bound.port());
-    let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{unknown}");
+    let describe_url = format!("https://localhost:{}/v1/workloads/no-such-job", bound.port());
+    let resp = client.get(&describe_url).send().await.expect("GET /v1/workloads/{unknown}");
 
     assert_eq!(
         resp.status(),
@@ -298,20 +298,20 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let client = client_trusting(&ca_pem);
 
     let spec = payments_spec();
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
     let submit_resp = client
         .post(&submit_url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
     let submit_body: SubmitWorkloadResponse =
         submit_resp.json().await.expect("decode submit response");
 
     let describe_url =
-        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
-    let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
+        format!("https://localhost:{}/v1/workloads/{}", bound.port(), submit_body.workload_id);
+    let resp = client.get(&describe_url).send().await.expect("GET /v1/workloads/{id}");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
     let description: WorkloadDescription = resp.json().await.expect("decode WorkloadDescription");
 
@@ -351,19 +351,19 @@ async fn describe_returns_spec_digest_matching_submit_response() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
     let submit_resp = client
         .post(&submit_url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     let submit_body: SubmitWorkloadResponse =
         submit_resp.json().await.expect("decode submit response");
 
     let describe_url =
-        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
-    let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
+        format!("https://localhost:{}/v1/workloads/{}", bound.port(), submit_body.workload_id);
+    let resp = client.get(&describe_url).send().await.expect("GET /v1/workloads/{id}");
     let description: WorkloadDescription = resp.json().await.expect("decode WorkloadDescription");
 
     assert_eq!(
@@ -564,19 +564,19 @@ proptest! {
             let (handle, bound, _tmp, ca_pem) = spawn_server().await;
             let client = client_trusting(&ca_pem);
 
-            let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
+            let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
             let submit_resp = client
                 .post(&submit_url)
                 .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec.clone()) })
                 .send()
                 .await
-                .expect("POST /v1/jobs");
+                .expect("POST /v1/workloads");
             prop_assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
             let submit_body: SubmitWorkloadResponse =
                 submit_resp.json().await.expect("decode submit body");
 
             let describe_url = format!(
-                "https://localhost:{}/v1/jobs/{}",
+                "https://localhost:{}/v1/workloads/{}",
                 bound.port(),
                 submit_body.workload_id,
             );

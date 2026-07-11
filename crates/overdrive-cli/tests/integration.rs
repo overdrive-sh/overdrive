@@ -99,7 +99,7 @@ mod integration {
     // backend-instance-replacement slice 01 step 01-04 — the e2e
     // production-loop closer: `overdrive workload restart` driven as a
     // direct CLI handler-call against an in-process run_server through
-    // the production POST /v1/jobs/:id/restart route.
+    // the production POST /v1/workloads/:id/restart route.
     //   * S-BIR-CLI-RESTART-SUCCESS — declared workload (absent /stop) →
     //     RestartOutput with deterministic Restarted label.
     //   * S-BIR-CLI-RESTART-RESUMED — declared workload stopped via the

@@ -472,7 +472,7 @@ struct Keystone {
     handle: Option<ServerHandle>,
     obs: Arc<dyn ObservationStore>,
     /// The HTTPS client trusting the server's ephemeral operator CA — the real
-    /// in-process deploy submit handler is `POST /v1/jobs` through this client.
+    /// in-process deploy submit handler is `POST /v1/workloads` through this client.
     client: reqwest::Client,
     bound: std::net::SocketAddr,
     _tmp: TempDir,
@@ -599,20 +599,20 @@ impl Drop for Keystone {
 }
 
 /// Deploy a Service spec through the real in-process deploy submit handler
-/// (`POST /v1/jobs` over the production HTTPS driving port — no subprocess).
+/// (`POST /v1/workloads` over the production HTTPS driving port — no subprocess).
 /// Returns `true` on a 2xx accept. This is the `overdrive deploy <SPEC>` handler
 /// called in-process per `overdrive-cli/CLAUDE.md` § "Integration tests — no
 /// subprocess".
 async fn run_server_deploy(keystone: &Keystone, spec: ServiceSpecInput) -> bool {
     use overdrive_control_plane::api::SubmitWorkloadRequest;
-    let url = format!("https://localhost:{}/v1/jobs", keystone.bound.port());
+    let url = format!("https://localhost:{}/v1/workloads", keystone.bound.port());
     let resp = keystone
         .client
         .post(&url)
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
         .send()
         .await
-        .expect("deploy: POST /v1/jobs");
+        .expect("deploy: POST /v1/workloads");
     let status = resp.status();
     let body = resp.bytes().await.expect("read response body");
     if !status.is_success() {
@@ -622,7 +622,7 @@ async fn run_server_deploy(keystone: &Keystone, spec: ServiceSpecInput) -> bool 
 }
 
 /// Stop a deployed workload through the real in-process stop driving port
-/// (`POST /v1/jobs/{id}/stop` over the production HTTPS client — no subprocess).
+/// (`POST /v1/workloads/{id}/stop` over the production HTTPS client — no subprocess).
 /// This is the SAME path an operator's `overdrive job stop` drives: the handler
 /// writes the stop-intent key and enqueues a `WorkloadLifecycle` eval; the
 /// convergence loop then drives the running allocation to Terminated, dispatching
@@ -633,8 +633,9 @@ async fn run_server_deploy(keystone: &Keystone, spec: ServiceSpecInput) -> bool 
 /// survives the in-process `Runtime::drop` and teardown blocks ~120s on it.
 /// Returns `true` on a 2xx accept.
 async fn run_server_stop(keystone: &Keystone, workload_id: &str) -> bool {
-    let url = format!("https://localhost:{}/v1/jobs/{workload_id}/stop", keystone.bound.port());
-    let resp = keystone.client.post(&url).send().await.expect("stop: POST /v1/jobs/{id}/stop");
+    let url =
+        format!("https://localhost:{}/v1/workloads/{workload_id}/stop", keystone.bound.port());
+    let resp = keystone.client.post(&url).send().await.expect("stop: POST /v1/workloads/{id}/stop");
     let status = resp.status();
     let body = resp.bytes().await.expect("read stop response body");
     if !status.is_success() {
@@ -969,7 +970,7 @@ async fn workload_reached_at_canonical_address_terminates_mtls_end_to_end() {
     assert!(
         stopped,
         "S-WS: the server workload must be accepted by the in-process stop driving port \
-         (POST /v1/jobs/{{id}}/stop) — this is the production path that drives \
+         (POST /v1/workloads/{{id}}/stop) — this is the production path that drives \
          StopAllocation → worker.stop_alloc, stopping the inbound accept loop"
     );
     let converged = poll_until(Duration::from_secs(20), Duration::from_millis(200), || {

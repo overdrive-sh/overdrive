@@ -3,7 +3,7 @@
 //!
 //! New top-level `workload` namespace (NOT under `job`, #220-aligned)
 //! carrying the operator-facing restart verb that drives the
-//! `POST /v1/jobs/{id}/restart` route shipped by step 01-03. Per ADR-0073
+//! `POST /v1/workloads/{id}/restart` route shipped by step 01-03. Per ADR-0073
 //! § "The six pinned signatures" item 1 this is the DESIGN-table-recorded
 //! home for `RestartArgs` / `RestartOutput` / `restart` — a separate
 //! module from `deploy.rs` because the restart handler is a distinct
@@ -53,7 +53,7 @@ pub struct RestartOutput {
 }
 
 /// Replace a declared workload's backend instance with a fresh one by
-/// driving `POST /v1/jobs/{id}/restart`.
+/// driving `POST /v1/workloads/{id}/restart`.
 ///
 /// Per ADR-0073: returns 200 OK with `outcome = Restarted` when no live
 /// stop intent existed at the handler's check-exists read, and

@@ -1,7 +1,7 @@
 //! Step 02-04 / Slice 3B scenario 3.10 —
 //! `stop_on_already_stopped_job_returns_already_stopped_outcome`.
 //!
-//! After a successful `POST /v1/jobs/<id>/stop`, a second call with
+//! After a successful `POST /v1/workloads/<id>/stop`, a second call with
 //! the same `<id>` must return 200 OK with `outcome =
 //! "already_stopped"` rather than failing or re-stopping.
 //!
@@ -93,7 +93,7 @@ fn payments_spec() -> JobSpecInput {
     }
 }
 
-/// Local mirror of the wire shape `POST /v1/jobs/<id>/stop` returns.
+/// Local mirror of the wire shape `POST /v1/workloads/<id>/stop` returns.
 /// Defined here in the test to pin the contract — the production type
 /// lives in `overdrive_control_plane::api` (`StopWorkloadResponse`).
 #[derive(Debug, Deserialize)]
@@ -106,8 +106,8 @@ struct StopWorkloadResponseBody {
 async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
-    let stop_url = format!("https://localhost:{}/v1/jobs/payments/stop", bound.port());
+    let submit_url = format!("https://localhost:{}/v1/workloads", bound.port());
+    let stop_url = format!("https://localhost:{}/v1/workloads/payments/stop", bound.port());
 
     // Submit the job first.
     let submit_resp = client
@@ -115,7 +115,7 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
         .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Job(payments_spec()) })
         .send()
         .await
-        .expect("POST /v1/jobs");
+        .expect("POST /v1/workloads");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
     let submit_body: SubmitWorkloadResponse = submit_resp.json().await.expect("decode submit");
     assert_eq!(submit_body.outcome, IdempotencyOutcome::Inserted);

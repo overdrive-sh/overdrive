@@ -77,7 +77,7 @@ fn build_service_submit_request(spec: &ServiceSpecInput) -> Request<Body> {
             .expect("serialize");
     Request::builder()
         .method(Method::POST)
-        .uri("/v1/jobs")
+        .uri("/v1/workloads")
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCEPT, "application/x-ndjson")
         .body(Body::from(body))
@@ -115,7 +115,7 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
 }
 
 fn build_router(state: AppState) -> Router {
-    Router::new().route("/v1/jobs", post(submit_workload)).with_state(state)
+    Router::new().route("/v1/workloads", post(submit_workload)).with_state(state)
 }
 
 fn make_lifecycle_event_terminal(

@@ -275,7 +275,7 @@ pub trait IntentStore: Send + Sync + 'static {
     ///
     /// This is the correct primitive for handlers that need to
     /// implement an idempotent create-or-conflict HTTP contract (`POST
-    /// /v1/jobs`); a naive `get` followed by a separate `put` has a
+    /// /v1/workloads`); a naive `get` followed by a separate `put` has a
     /// TOCTOU window and silently loses writes under concurrency.
     async fn put_if_absent(&self, key: &[u8], value: &[u8])
     -> Result<PutOutcome, IntentStoreError>;

@@ -136,7 +136,7 @@ pub async fn evaluate_backend_set_swap_atomic() -> InvariantResult {
 
 fn backend(job: &str, addr: &str) -> Backend {
     Backend {
-        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/job/{job}/alloc/x"))
+        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/workload/{job}/alloc/x"))
             .expect("valid SPIFFE ID"),
         addr: addr.parse().expect("valid SocketAddr"),
         weight: 1,

@@ -41,7 +41,7 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let initial_spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/rz")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/rz")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

@@ -90,7 +90,7 @@ pub struct AllocStatusOutput {
 ///
 /// * [`CliError::ConfigLoad`] — trust triple cannot be loaded.
 /// * [`CliError::Transport`] — control plane unreachable.
-/// * [`CliError::HttpStatus`] — `GET /v1/jobs/<id>` returned 4xx/5xx.
+/// * [`CliError::HttpStatus`] — `GET /v1/workloads/<id>` returned 4xx/5xx.
 ///   The 404 path (unknown job) is the load-bearing operator-facing
 ///   error and carries `body.error = "not_found"`.
 /// * [`CliError::BodyDecode`] — the server returned a 2xx with a

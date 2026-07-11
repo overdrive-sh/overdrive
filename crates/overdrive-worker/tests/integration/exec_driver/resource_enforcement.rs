@@ -44,7 +44,7 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
     let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/re")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/re")
             .expect("valid spiffe id"),
         command: "/bin/sleep".to_owned(),
         args: vec!["60".to_owned()],

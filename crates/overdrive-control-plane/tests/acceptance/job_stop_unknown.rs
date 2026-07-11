@@ -1,7 +1,7 @@
 //! Step 02-04 / Slice 3B scenario 3.11 —
 //! `stop_on_unknown_job_returns_404`.
 //!
-//! `POST /v1/jobs/<id>/stop` for an `<id>` that was never submitted
+//! `POST /v1/workloads/<id>/stop` for an `<id>` that was never submitted
 //! must return HTTP 404 with the canonical `ErrorBody { error,
 //! message, field }` shape. Per ADR-0027 + ADR-0015.
 //!
@@ -82,7 +82,7 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
 async fn stop_on_unknown_job_returns_404() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
-    let stop_url = format!("https://localhost:{}/v1/jobs/never-submitted/stop", bound.port());
+    let stop_url = format!("https://localhost:{}/v1/workloads/never-submitted/stop", bound.port());
 
     let resp = client.post(&stop_url).send().await.expect("POST stop");
     assert_eq!(
