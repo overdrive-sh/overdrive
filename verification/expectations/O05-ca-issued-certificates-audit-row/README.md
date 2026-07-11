@@ -6,7 +6,7 @@
 
 Every workload SVID the platform issues writes an `issued_certificates`
 **observation** row — the internal-CT-equivalent audit surface — readable via
-the existing `overdrive alloc status --job <id>` observation path. The row
+the existing `overdrive workload describe <id>` observation path. The row
 records `serial`, `spiffe_id`, `issuer_serial`, `not_before`, `not_after`,
 `node_id`, `issued_at`, and the `serial` / `spiffe_id` / `issuer_serial` match
 the minted certificate.
@@ -26,13 +26,13 @@ IntentStore, never gossiped); the *record of what was issued* is observation
 
 Precondition: the built-in CA issuance path (DELIVER) writes the
 `issued_certificates` observation row on alloc-start, and the existing
-`alloc status` path surfaces it. This expectation captures the
+`workload describe` path surfaces it. This expectation captures the
 **operator-observable** audit surface.
 
 Sub-claims:
 
 1. After the platform issues an SVID for a deployed workload,
-   `overdrive alloc status --job <id>` surfaces the `issued_certificates`
+   `overdrive workload describe <id>` surfaces the `issued_certificates`
    record (serial / spiffe_id / issuer visible).
 2. The surfaced `serial` and `spiffe_id` match the minted certificate
    (cross-checked against `openssl x509 -in svid.pem -noout -serial -ext subjectAltName`).
@@ -54,7 +54,7 @@ runner reads an **already-running deployment**, and no `overdrive serve` control
 plane is reachable in the harness (`od cluster status` → `failed to reach
 overdrive control plane … could not connect to server`, exit 1). The runner does
 not stand up a persistent `serve` lifecycle itself — bringing up `serve` →
-`deploy` → converge-to-Running → SVID-issuance-on-alloc-start → `alloc status`
+`deploy` → converge-to-Running → SVID-issuance-on-alloc-start → `workload describe`
 is a multi-component live flow that a single harness runner invocation cannot
 orchestrate.
 
@@ -64,10 +64,10 @@ What this slice DID land for O05:
   actual operator render — heading `Issued certificates:` with the four
   audit-row facts `serial:` / `spiffe_id:` / `issuer_serial:` / `not_after:`
   (`render::render_issued_certificates_section`,
-  `crates/overdrive-cli/src/render.rs`, wired into the live `alloc status` path
+  `crates/overdrive-cli/src/render.rs`, wired into the live `workload describe` path
   by deps 03-01/03-02) — instead of the prior loose case-insensitive grep.
 - A **negative no-leak check** was added: the render is metadata-only, so a
-  `BEGIN CERTIFICATE` / `BEGIN … PRIVATE KEY` block in `alloc status` would
+  `BEGIN CERTIFICATE` / `BEGIN … PRIVATE KEY` block in `workload describe` would
   FAIL the runner (the audit row persists only facts; the workload holds no
   SVID material — the kernel does mTLS, per CLAUDE.md's workload-identity
   model).

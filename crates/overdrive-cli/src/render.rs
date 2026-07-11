@@ -33,11 +33,10 @@ pub mod schedule;
 // `#[cfg(test)] mod tests`, so production code AND its tests were
 // deleted together in the same commit.
 
-use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::deploy::{DeployOutput, StopOutput};
 use crate::commands::node::NodeListOutput;
-use crate::commands::workload::RestartOutput;
+use crate::commands::workload::{RestartOutput, WorkloadDescribeOutput};
 use crate::http_client::CliError;
 
 /// Render a `ClusterStatusOutput` as a multi-line operator-facing
@@ -185,13 +184,13 @@ pub fn workload_restart_accepted(out: &RestartOutput) -> String {
     s
 }
 
-/// Render an `AllocStatusOutput` as the single, operator-facing,
-/// kind-aware alloc-status summary — the LIVE render path.
+/// Render a `WorkloadDescribeOutput` as the single, operator-facing,
+/// kind-aware describe summary — the LIVE render path.
 ///
-/// This is the ONE alloc-status renderer `overdrive alloc status`
-/// dispatches through: `main.rs` calls `commands::alloc::status(..)`
-/// (returning an `AllocStatusOutput`) and prints
-/// `render::alloc_status(&out)`. There is no second/duplicate renderer
+/// This is the ONE describe renderer `overdrive workload describe`
+/// dispatches through: `main.rs` calls `commands::workload::describe(..)`
+/// (returning a `WorkloadDescribeOutput`) and prints
+/// `render::workload_describe(&out)`. There is no second/duplicate renderer
 /// — the historical flat `alloc_status` and the test-only
 /// `alloc_status_kind_aware` were consolidated into this one function
 /// (workload-kind-discriminator step 02-02 built the kind-aware body but
@@ -227,7 +226,7 @@ pub fn workload_restart_accepted(out: &RestartOutput) -> String {
 /// side (ADR-0067 #215-boundary) projecting audit-row FACTS per running
 /// alloc, kind-agnostically.
 #[must_use]
-pub fn alloc_status(out: &AllocStatusOutput) -> String {
+pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
 
@@ -307,7 +306,7 @@ fn render_row_cause_detail(
 /// same presence-guard discipline as `render_listeners_section`. The
 /// VIP is the Service frontend address; it is grouped with `Listeners:`
 /// (VIP first). The label is aligned to a value column at offset 15.
-/// Called once by the single live `alloc_status` renderer, after the
+/// Called once by the single live `workload_describe` renderer, after the
 /// kind-specific body.
 fn render_vip_section(out: &mut String, vip: Option<&str>) {
     use std::fmt::Write as _;
@@ -322,7 +321,7 @@ fn render_vip_section(out: &mut String, vip: Option<&str>) {
 /// `<port>/<protocol>` using the protocol enum's canonical lowercase
 /// `as_str()` (per `.claude/rules/development.md` § "Label enums own
 /// their string representation"). Called once by the single live
-/// `alloc_status` renderer, after the kind-specific body.
+/// `workload_describe` renderer, after the kind-specific body.
 fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggregate::Listener]) {
     use std::fmt::Write as _;
     if listeners.is_empty() {
@@ -353,7 +352,7 @@ fn render_listeners_section(out: &mut String, listeners: &[overdrive_core::aggre
 /// render shows exactly the summaries provided, one row per alloc, not a
 /// history list.
 ///
-/// Rendered workload-kind-AGNOSTICALLY by the single live `alloc_status`
+/// Rendered workload-kind-AGNOSTICALLY by the single live `workload_describe`
 /// renderer (after the kind-specific body, for Job / Service / Schedule
 /// alike): the server projection (`handlers::issued_certificates_for_rows`)
 /// filters only on `AllocState::Running` with no `WorkloadKind` filter, and
@@ -784,11 +783,11 @@ pub fn format_job_alloc_status_attempts_table(
 /// catch-all wildcard. Future kinds require explicit arms. `kind` is
 /// `None` (forward-compat) → treated as Service.
 ///
-/// This is the kind-specific body of the single live `alloc_status`
+/// This is the kind-specific body of the single live `workload_describe`
 /// renderer. It does NOT render the empty-state signpost (a wrapper
-/// concern owned by `alloc_status`, which has the `AllocStatusOutput`
+/// concern owned by `workload_describe`, which has the `WorkloadDescribeOutput`
 /// wrapper fields) nor the kind-agnostic issued-certificates section
-/// (also rendered by `alloc_status` after this body, for every kind).
+/// (also rendered by `workload_describe` after this body, for every kind).
 fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
     use overdrive_core::aggregate::WorkloadKind;
     use std::fmt::Write as _;
@@ -837,7 +836,7 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                 render_row_cause_detail(out, row);
             }
             // VIP + Listeners (the Service frontend) are NOT rendered here
-            // — the wrapper `alloc_status` renders them once, after this
+            // — the wrapper `workload_describe` renders them once, after this
             // body, for every kind (presence-guarded: `vip` is `Some` only
             // for Service, listeners only when declared). Keeping them out
             // of this arm avoids a double-render.
@@ -1231,8 +1230,8 @@ pub fn format_service_failed_block(
         let _ = writeln!(s, "  stderr_tail: \"{detail}\"");
     }
 
-    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
+    let _ = writeln!(s, "  reproducer: overdrive workload describe {workload_name}");
     let _ = writeln!(s);
-    let _ = writeln!(s, "Hint: see alloc status for full context");
+    let _ = writeln!(s, "Hint: see workload describe for full context");
     s
 }

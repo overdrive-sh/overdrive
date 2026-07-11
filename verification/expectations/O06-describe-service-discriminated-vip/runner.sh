@@ -8,7 +8,7 @@
 # real kernel (Lima):
 #   SC1 (precondition): `overdrive deploy <svc>` exits 0 + prints `Accepted.`
 #       — the Service intent is persisted and its VIP allocated at submit.
-#   SC2 (O-surface):    `overdrive alloc status --job <id>` exits 0 — the real
+#   SC2 (O-surface):    `overdrive workload describe <id>` exits 0 — the real
 #       operator CLI mTLS client deserialises the NEW DescribeSpecOutput
 #       discriminated wire shape (the regression witness for the migration).
 #   SC3 (#183 deliverable): a raw mTLS `GET /v1/jobs/<id>` returns JSON whose
@@ -146,22 +146,22 @@ echo "# deploy exit: \$DEPLOY_RC"
 
 # --- wait for convergence so the capture shows a Running allocation, not the
 #     0-allocations empty-state. The default Service startup probe interval is
-#     ~2s, so a single 1s sleep cannot reach Running — poll alloc status up to
+#     ~2s, so a single 1s sleep cannot reach Running — poll workload describe up to
 #     ~25s and stop the moment allocations > 0. The describe VIP is allocated at
 #     SUBMIT (ADR-0049) and is unaffected by convergence; this only strengthens
 #     the alloc-status capture (SC2) to a converged operator view.
 CONVERGE_SECS=0
 for _ in \$(seq 1 25); do
-  OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" alloc status --job "\$WID" > "\$EVID/alloc_status_service.out" 2>&1 || true
+  OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" workload describe "\$WID" > "\$EVID/alloc_status_service.out" 2>&1 || true
   if grep -qE '^Allocations:[[:space:]]+[1-9]' "\$EVID/alloc_status_service.out"; then break; fi
   sleep 1; CONVERGE_SECS=\$((CONVERGE_SECS+1))
 done
 
 # --- SC2: final authoritative O-surface capture (exit code + converged output) ---
 ALLOC_RC=0
-OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" alloc status --job "\$WID" > "\$EVID/alloc_status_service.out" 2>&1 || ALLOC_RC=\$?
+OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" workload describe "\$WID" > "\$EVID/alloc_status_service.out" 2>&1 || ALLOC_RC=\$?
 { echo "alloc_status_exit=\$ALLOC_RC"; echo "converged_after_secs=\$CONVERGE_SECS"; } > "\$EVID/alloc_status_service.meta"
-echo "# alloc status exit: \$ALLOC_RC (converged_after=\${CONVERGE_SECS}s)"
+echo "# workload describe exit: \$ALLOC_RC (converged_after=\${CONVERGE_SECS}s)"
 
 # --- SC3: raw mTLS GET /v1/jobs/<id> — the describe wire response (#183) ---
 # Extract the trust triple's base64-PEM ca/crt/key (single-line TOML inline
@@ -233,19 +233,19 @@ if [[ -f "$EVIDENCE_DIR/deploy_service.out" ]]; then evidence_contains deploy_se
 # SC2 — CLI round-trips the widened describe response
 alloc_rc="$(sed -n 's/^alloc_status_exit=//p' "$EVIDENCE_DIR/alloc_status_service.meta" 2>/dev/null)"
 if [[ "$alloc_rc" == "0" ]]; then
-  echo "  [PASS] SC2: alloc status exited 0 — CLI deserialised DescribeSpecOutput"
+  echo "  [PASS] SC2: workload describe exited 0 — CLI deserialised DescribeSpecOutput"
 else
-  echo "  [FAIL] SC2: alloc status exited '${alloc_rc:-<none>}' — CLI failed to round-trip the describe response"; rc=1
+  echo "  [FAIL] SC2: workload describe exited '${alloc_rc:-<none>}' — CLI failed to round-trip the describe response"; rc=1
 fi
 
 # SC2b — the operator CLI now RENDERS the Service VIP (the rendering half of #220).
-# alloc status reads vip from the AllocStatusResponse envelope (ADR-0049) and prints
+# workload describe reads vip from the AllocStatusResponse envelope (ADR-0049) and prints
 # a `VIP: <ipv4>` line for Service reads. Before this landed the VIP was on the wire
 # but dropped by the CLI; this sub-claim is the operator-visible-VIP proof.
 if grep -Eq '^VIP:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$EVIDENCE_DIR/alloc_status_service.out" 2>/dev/null; then
-  echo "  [PASS] SC2b: alloc status renders the Service VIP line (operator-visible)"
+  echo "  [PASS] SC2b: workload describe renders the Service VIP line (operator-visible)"
 else
-  echo "  [FAIL] SC2b: alloc status output has no 'VIP: <ipv4>' line — CLI VIP rendering missing"; rc=1
+  echo "  [FAIL] SC2b: workload describe output has no 'VIP: <ipv4>' line — CLI VIP rendering missing"; rc=1
 fi
 
 # Informational (NOT a sub-claim — describe/VIP does not require convergence):

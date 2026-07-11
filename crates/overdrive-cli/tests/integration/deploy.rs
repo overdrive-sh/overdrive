@@ -15,7 +15,7 @@
 //!       with `workload_id = "payments"`, `intent_key = "workloads/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
-//!       `overdrive alloc status --job payments`.
+//!       `overdrive workload describe payments`.
 //!   (b) `replicas = 0` returns `CliError::InvalidSpec { field:
 //!       "replicas", message }` WITHOUT issuing any HTTP — the handler
 //!       runs `Job::from_submit` locally and fails fast.
@@ -159,8 +159,8 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
         "DeployOutput.endpoint must echo the endpoint recorded in the operator config",
     );
     assert_eq!(
-        output.next_command, "overdrive alloc status --job payments",
-        "DeployOutput.next_command must guide the operator to alloc status",
+        output.next_command, "overdrive workload describe payments",
+        "DeployOutput.next_command must guide the operator to workload describe",
     );
 
     handle.shutdown().await.expect("clean shutdown");

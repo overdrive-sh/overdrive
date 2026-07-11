@@ -1,9 +1,9 @@
-//! Acceptance tests for `overdrive_cli::render::alloc_status` — the
-//! SINGLE LIVE alloc-status renderer.
+//! Acceptance tests for `overdrive_cli::render::workload_describe` — the
+//! SINGLE LIVE workload-describe renderer.
 //!
-//! `main.rs:158` dispatches `overdrive alloc status` through
-//! `commands::alloc::status(..)` (returning an `AllocStatusOutput`) →
-//! `render::alloc_status(&out)`. This is the only renderer an operator
+//! `main.rs` dispatches `overdrive workload describe` through
+//! `commands::workload::describe(..)` (returning a `WorkloadDescribeOutput`) →
+//! `render::workload_describe(&out)`. This is the only renderer an operator
 //! sees; after the workload-kind-discriminator consolidation it carries
 //! the kind-aware body (Service replicas table / Job Verdict + per-attempt
 //! Exit + stderr tail / Schedule cron) plus the shared VIP / Listeners /
@@ -27,7 +27,7 @@
 //!   (j) Job kind-aware view (Verdict + per-attempt Exit + stderr tail).
 //!   (g/g2/h/i) Listeners, VIP, Failed-cause, issued-certificates.
 
-use overdrive_cli::commands::alloc::AllocStatusOutput;
+use overdrive_cli::commands::workload::WorkloadDescribeOutput;
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
 };
@@ -45,14 +45,14 @@ const NONEMPTY_DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0
 /// server-populated `workload_id` / `spec_digest` / `kind` (Service) the
 /// way the live command path does; the wrapper carries the empty-state
 /// onboarding message gated on `allocations_total == 0`.
-fn fixture_empty_state() -> AllocStatusOutput {
+fn fixture_empty_state() -> WorkloadDescribeOutput {
     let snapshot = AllocStatusResponse {
         workload_id: Some("payments".to_string()),
         spec_digest: Some(EMPTY_STATE_DIGEST.to_string()),
         kind: Some(WorkloadKind::Service),
         ..Default::default()
     };
-    AllocStatusOutput {
+    WorkloadDescribeOutput {
         workload_id: "payments".to_string(),
         spec_digest: EMPTY_STATE_DIGEST.to_string(),
         allocations_total: 0,
@@ -65,7 +65,7 @@ fn fixture_empty_state() -> AllocStatusOutput {
 
 /// A non-empty Service read: 3 running replicas. Snapshot fields are
 /// populated as the live server path populates them.
-fn fixture_with_allocations() -> AllocStatusOutput {
+fn fixture_with_allocations() -> WorkloadDescribeOutput {
     let rows: Vec<AllocStatusRowBody> = (0..3)
         .map(|i| {
             row_with_state(&format!("alloc-payments-{i}"), AllocStateWire::Running, None, None)
@@ -80,7 +80,7 @@ fn fixture_with_allocations() -> AllocStatusOutput {
         rows,
         ..Default::default()
     };
-    AllocStatusOutput {
+    WorkloadDescribeOutput {
         workload_id: "payments".to_string(),
         spec_digest: NONEMPTY_DIGEST.to_string(),
         allocations_total: 3,
@@ -94,9 +94,9 @@ fn fixture_with_allocations() -> AllocStatusOutput {
 // -------------------------------------------------------------------
 
 #[test]
-fn render_alloc_status_empty_state_contains_phase_1_first_workload() {
+fn render_workload_describe_empty_state_contains_phase_1_first_workload() {
     let out = fixture_empty_state();
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("phase-1-first-workload"),
@@ -118,9 +118,9 @@ fn render_alloc_status_empty_state_contains_phase_1_first_workload() {
 // -------------------------------------------------------------------
 
 #[test]
-fn render_alloc_status_with_allocations_shows_total_and_digest() {
+fn render_workload_describe_with_allocations_shows_total_and_digest() {
     let out = fixture_with_allocations();
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("payments"),
@@ -152,7 +152,7 @@ fn render_alloc_status_with_allocations_shows_total_and_digest() {
 // -------------------------------------------------------------------
 
 #[test]
-fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_populated() {
+fn render_workload_describe_suppresses_hint_when_allocations_exist_even_with_message_populated() {
     // A defensive fixture where allocations_total > 0 AND an
     // empty_state_message happens to be populated (producer might
     // populate it unconditionally). The orig `&&` gate suppresses the
@@ -171,7 +171,7 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
             .collect(),
         ..Default::default()
     };
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "payments".to_string(),
         spec_digest: "deadbeef".repeat(8),
         allocations_total: 5,
@@ -180,7 +180,7 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
             .to_string(),
         snapshot,
     };
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         !rendered.contains("phase-1-first-workload"),
@@ -197,7 +197,7 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
 }
 
 #[test]
-fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allocations() {
+fn render_workload_describe_suppresses_hint_when_message_is_empty_even_with_zero_allocations() {
     // `allocations_total == 0 && msg.is_empty()` — the symmetric
     // asymmetric case. Orig: both checks gate → hint not printed.
     // Mutation `&&` → `||`: `0 == 0 || false` = true → writeln!(s,
@@ -212,14 +212,14 @@ fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allo
         kind: Some(WorkloadKind::Service),
         ..Default::default()
     };
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "payments".to_string(),
         spec_digest: "cafebabe".repeat(8),
         allocations_total: 0,
         empty_state_message: String::new(),
         snapshot,
     };
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     // Under the correct `&&` gate the empty-state line is suppressed and
     // the first line is the kind-aware header. A `&&`→`||` mutation would
@@ -241,8 +241,8 @@ fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allo
 // -------------------------------------------------------------------
 // (g) Listener protocol rendering on the LIVE path.
 //
-// `main.rs:158` dispatches `overdrive alloc status` through the single
-// live `render::alloc_status(&AllocStatusOutput)` renderer. The listener
+// `main.rs` dispatches `overdrive workload describe` through the single
+// live `render::workload_describe(&WorkloadDescribeOutput)` renderer. The listener
 // protocol (`<port>/<proto>`) MUST render here so an operator deploying a
 // UDP Service sees `5353/udp`. Listeners are an INTENT property,
 // independent of allocations/convergence, so they render even at zero
@@ -257,15 +257,15 @@ const fn listener(port: u16, protocol: Proto) -> Listener {
 
 /// A pre-convergence (zero-allocation) UDP+TCP Service renders each
 /// listener as `<port>/<protocol>` under a `Listeners:` header — on the
-/// `render::alloc_status` path that the live command actually calls.
+/// `render::workload_describe` path that the live command actually calls.
 #[test]
-fn render_alloc_status_renders_listener_protocol_at_zero_allocations() {
+fn render_workload_describe_renders_listener_protocol_at_zero_allocations() {
     let snapshot = AllocStatusResponse {
         listeners: vec![listener(5353, Proto::Udp), listener(8080, Proto::Tcp)],
         ..Default::default()
     };
 
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 0,
@@ -275,7 +275,7 @@ fn render_alloc_status_renders_listener_protocol_at_zero_allocations() {
         snapshot,
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("Listeners:"),
@@ -296,8 +296,8 @@ fn render_alloc_status_renders_listener_protocol_at_zero_allocations() {
 /// A Job-shape output (empty `listeners`) renders NO `Listeners:`
 /// section — the section is listener-presence-guarded, not kind-guarded.
 #[test]
-fn render_alloc_status_renders_no_listeners_section_when_empty() {
-    let out = AllocStatusOutput {
+fn render_workload_describe_renders_no_listeners_section_when_empty() {
+    let out = WorkloadDescribeOutput {
         workload_id: "coinflip".to_string(),
         spec_digest: "f".repeat(64),
         allocations_total: 1,
@@ -306,7 +306,7 @@ fn render_alloc_status_renders_no_listeners_section_when_empty() {
         snapshot: AllocStatusResponse::default(),
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         !rendered.contains("Listeners:"),
@@ -321,7 +321,7 @@ fn render_alloc_status_renders_no_listeners_section_when_empty() {
 // `AllocStatusResponse.vip` already carries the platform-issued Service
 // VIP on the wire (ADR-0049 / #183) — populated for `WorkloadKind::Service`
 // reads from the allocator memo, `None` for Job/Schedule. The live
-// `render::alloc_status` path (the function `main.rs:158` actually calls)
+// `render::workload_describe` path (the function `main.rs` actually calls)
 // dropped it. An operator deploying a Service must see the VIP so the
 // frontend address is visible; this is the operator-visibility half of
 // #220 (NOT the alloc-status→describe-workload rename). VIP is a
@@ -330,17 +330,17 @@ fn render_alloc_status_renders_no_listeners_section_when_empty() {
 // -------------------------------------------------------------------
 
 /// A Service whose `AllocStatusResponse` carries a VIP renders a `VIP:`
-/// line with the platform-issued address on the live `render::alloc_status`
+/// line with the platform-issued address on the live `render::workload_describe`
 /// path so the operator sees the frontend address.
 #[test]
-fn render_alloc_status_renders_service_vip_when_present() {
+fn render_workload_describe_renders_service_vip_when_present() {
     let snapshot = AllocStatusResponse {
         vip: Some("10.96.0.2".to_string()),
         listeners: vec![listener(5353, Proto::Udp)],
         ..Default::default()
     };
 
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 1,
@@ -348,7 +348,7 @@ fn render_alloc_status_renders_service_vip_when_present() {
         snapshot,
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("VIP:"),
@@ -365,8 +365,8 @@ fn render_alloc_status_renders_service_vip_when_present() {
 /// A workload with no VIP (`vip: None` — Job/Schedule) renders NO `VIP:`
 /// line — the line is presence-guarded, never rendered as `VIP: None`.
 #[test]
-fn render_alloc_status_renders_no_vip_line_when_absent() {
-    let out = AllocStatusOutput {
+fn render_workload_describe_renders_no_vip_line_when_absent() {
+    let out = WorkloadDescribeOutput {
         workload_id: "coinflip".to_string(),
         spec_digest: "f".repeat(64),
         allocations_total: 1,
@@ -375,7 +375,7 @@ fn render_alloc_status_renders_no_vip_line_when_absent() {
         snapshot: AllocStatusResponse::default(),
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         !rendered.contains("VIP:"),
@@ -393,7 +393,7 @@ fn render_alloc_status_renders_no_vip_line_when_absent() {
 // status` read as a healthy bare `Allocations: 1` with NO per-row state
 // or error. An operator could not distinguish a healthy Running workload
 // from one whose process died on startup. The live renderer
-// (`render::alloc_status`, the function `main.rs:158` actually calls)
+// (`render::workload_describe`, the function `main.rs` actually calls)
 // MUST surface each allocation's state, and render a Failed allocation
 // prominently with its captured failure detail.
 // -------------------------------------------------------------------
@@ -425,7 +425,7 @@ fn row_with_state(
 /// in use` must read as Failed WITH its captured error on the live path.
 /// The bare `Allocations: 1` line is no longer the only signal.
 #[test]
-fn render_alloc_status_surfaces_failed_allocation_state_and_error() {
+fn render_workload_describe_surfaces_failed_allocation_state_and_error() {
     let snapshot = AllocStatusResponse {
         rows: vec![row_with_state(
             "alloc-dns-resolver-0",
@@ -436,7 +436,7 @@ fn render_alloc_status_surfaces_failed_allocation_state_and_error() {
         ..Default::default()
     };
 
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 1,
@@ -444,7 +444,7 @@ fn render_alloc_status_surfaces_failed_allocation_state_and_error() {
         snapshot,
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("Failed"),
@@ -466,13 +466,13 @@ fn render_alloc_status_surfaces_failed_allocation_state_and_error() {
 /// A healthy Running allocation must NOT read as Failed — no false
 /// failure signal on the live path.
 #[test]
-fn render_alloc_status_running_allocation_does_not_read_as_failed() {
+fn render_workload_describe_running_allocation_does_not_read_as_failed() {
     let snapshot = AllocStatusResponse {
         rows: vec![row_with_state("alloc-dns-resolver-0", AllocStateWire::Running, None, None)],
         ..Default::default()
     };
 
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 1,
@@ -480,7 +480,7 @@ fn render_alloc_status_running_allocation_does_not_read_as_failed() {
         snapshot,
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         rendered.contains("Running"),
@@ -497,17 +497,17 @@ fn render_alloc_status_running_allocation_does_not_read_as_failed() {
 // (i) Issued-certificate section on the LIVE path (built-in-ca #215,
 // EDD O05 / S-OC-11 + S-OC-12, ADR-0067 #215-boundary).
 //
-// `main.rs:158` dispatches `overdrive alloc status` through the single
-// live `render::alloc_status(&AllocStatusOutput)` renderer. The 03-02
+// `main.rs` dispatches `overdrive workload describe` through the single
+// live `render::workload_describe(&WorkloadDescribeOutput)` renderer. The 03-02
 // issued-certificates section was originally wired only into the (now
 // retired) test-only `alloc_status_kind_aware`, so the operator saw
 // nothing until this consolidation. The section MUST render on the live
 // path: it reads `out.snapshot.issued_certificates`
-// (the `&AllocStatusOutput` shape — fields live under `out.snapshot.*`),
+// (the `&WorkloadDescribeOutput` shape — fields live under `out.snapshot.*`),
 // surfacing the four audit-row FACTS (serial / spiffe_id / issuer_serial
 // / not_after) via `Display` and NEVER any cert PEM/DER bytes or private
 // key (the audit row carries facts only). See `overdrive-cli/CLAUDE.md`
-// § "Alloc-status rendering — `render::alloc_status` is the LIVE path".
+// § "Workload-describe rendering — `render::workload_describe` is the LIVE path".
 // -------------------------------------------------------------------
 
 /// Build an `IssuedCertSummary` from string parts + a `not_after` seconds
@@ -529,16 +529,16 @@ fn issued_cert_summary(
 
 /// A running alloc whose `AllocStatusResponse.issued_certificates` carries
 /// an `IssuedCertSummary` renders the issued-certificate section on the
-/// LIVE `render::alloc_status` path — surfacing the four audit-row facts
+/// LIVE `render::workload_describe` path — surfacing the four audit-row facts
 /// (serial / `spiffe_id` / `issuer_serial` / `not_after`) via `Display`, and
 /// NEVER leaking cert PEM/DER bytes or private-key material (the S-OC-11 +
-/// S-OC-12 contract on the path `main.rs:158` actually calls).
+/// S-OC-12 contract on the path `main.rs` actually calls).
 ///
 /// Kind is realistic: a running Job alloc with a `/workload/` SPIFFE id. The
 /// server projects `issued_certificates` per running alloc with no
 /// `WorkloadKind` filter, so a Job legitimately carries this summary.
 #[test]
-fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
+fn render_workload_describe_surfaces_issued_certificate_summary_on_live_path() {
     let summary = issued_cert_summary(
         "0a1b2c3d4e5f",
         "spiffe://overdrive.local/workload/dns-resolver/alloc/alloc-0",
@@ -556,7 +556,7 @@ fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
         ..Default::default()
     };
 
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: "dns-resolver".to_string(),
         spec_digest: "d7b885".to_string() + &"0".repeat(58),
         allocations_total: 1,
@@ -564,7 +564,7 @@ fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
         snapshot,
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     // The four audit-row facts are each surfaced via their `Display` on the
     // LIVE path (these FAIL before the production wiring — the live
@@ -607,8 +607,8 @@ fn render_alloc_status_surfaces_issued_certificate_summary_on_live_path() {
 /// additive, so the output is byte-identical to before the section
 /// existed.
 #[test]
-fn render_alloc_status_omits_issued_certificate_section_when_empty_on_live_path() {
-    let out = AllocStatusOutput {
+fn render_workload_describe_omits_issued_certificate_section_when_empty_on_live_path() {
+    let out = WorkloadDescribeOutput {
         workload_id: "coinflip".to_string(),
         spec_digest: "f".repeat(64),
         allocations_total: 1,
@@ -617,7 +617,7 @@ fn render_alloc_status_omits_issued_certificate_section_when_empty_on_live_path(
         snapshot: AllocStatusResponse::default(),
     };
 
-    let rendered = overdrive_cli::render::alloc_status(&out);
+    let rendered = overdrive_cli::render::workload_describe(&out);
 
     assert!(
         !rendered.contains("Issued certificates:"),
@@ -631,7 +631,7 @@ fn render_alloc_status_omits_issued_certificate_section_when_empty_on_live_path(
 // the Service replica table. This is the operator-visible change the
 // workload-kind-discriminator feature designed (step 02-02) but never
 // wired into the command; these tests prove it now renders on the path
-// `main.rs:158` actually calls (`render::alloc_status`), not a test-only
+// `main.rs` actually calls (`render::workload_describe`), not a test-only
 // renderer. Per design [D4] / ADR-0047 §4 / distill §3 (S-03-01..04).
 // -------------------------------------------------------------------
 
@@ -648,10 +648,10 @@ fn job_snapshot(workload: &str, rows: Vec<AllocStatusRowBody>) -> AllocStatusRes
     }
 }
 
-/// Wrap a snapshot into the `AllocStatusOutput` the command path
+/// Wrap a snapshot into the `WorkloadDescribeOutput` the command path
 /// produces (deriving `allocations_total` from the row count, the
 /// empty-state message only when there are zero allocations).
-fn wrap_live(snapshot: AllocStatusResponse) -> AllocStatusOutput {
+fn wrap_live(snapshot: AllocStatusResponse) -> WorkloadDescribeOutput {
     let allocations_total = snapshot.rows.len();
     let workload_id = snapshot.workload_id.clone().unwrap_or_default();
     let empty_state_message = if allocations_total == 0 {
@@ -662,7 +662,7 @@ fn wrap_live(snapshot: AllocStatusResponse) -> AllocStatusOutput {
     } else {
         String::new()
     };
-    AllocStatusOutput {
+    WorkloadDescribeOutput {
         spec_digest: snapshot.spec_digest.clone().unwrap_or_default(),
         workload_id,
         allocations_total,
@@ -678,13 +678,14 @@ fn wrap_live(snapshot: AllocStatusResponse) -> AllocStatusOutput {
 /// and NEVER the Service `is running with` / `Replicas` phrasing
 /// (S-03-05 anti-scenario).
 #[test]
-fn render_alloc_status_renders_job_kind_aware_view_on_live_path() {
+fn render_workload_describe_renders_job_kind_aware_view_on_live_path() {
     let rows = vec![row_with_state("alloc-coinflip-0", AllocStateWire::Failed, None, Some(1)), {
         let mut r = row_with_state("alloc-coinflip-1", AllocStateWire::Failed, None, Some(1));
         r.error = Some("panic: dice roll said 6\nstack trace line 1\n".to_string());
         r
     }];
-    let rendered = overdrive_cli::render::alloc_status(&wrap_live(job_snapshot("coinflip", rows)));
+    let rendered =
+        overdrive_cli::render::workload_describe(&wrap_live(job_snapshot("coinflip", rows)));
 
     assert!(rendered.contains("kind: Job"), "Job header must read 'kind: Job'; got:\n{rendered}");
     assert!(
@@ -717,7 +718,7 @@ fn render_alloc_status_renders_job_kind_aware_view_on_live_path() {
 /// table (`Alloc / State / Restarts / Since`) and NO `Exit` column nor
 /// `Verdict:` line (those are Job-only). Per S-03-01.
 #[test]
-fn render_alloc_status_renders_service_kind_aware_view_on_live_path() {
+fn render_workload_describe_renders_service_kind_aware_view_on_live_path() {
     let snapshot = AllocStatusResponse {
         workload_id: Some("payments".to_string()),
         spec_digest: Some("a".repeat(64)),
@@ -727,7 +728,7 @@ fn render_alloc_status_renders_service_kind_aware_view_on_live_path() {
         rows: vec![row_with_state("alloc-payments-0", AllocStateWire::Running, None, None)],
         ..Default::default()
     };
-    let rendered = overdrive_cli::render::alloc_status(&wrap_live(snapshot));
+    let rendered = overdrive_cli::render::workload_describe(&wrap_live(snapshot));
 
     assert!(
         rendered.contains("kind: Service"),

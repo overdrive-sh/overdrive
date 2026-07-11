@@ -102,7 +102,7 @@ The controlling evidence is the RCA
 `e9cec107`), which established the topology scope empirically:
 
 - A single-node UDP Service **converges and runs its backend** (post-ADR-0061):
-  `alloc status` → `Allocations: 1`, `socat UDP4-LISTEN` in
+  `workload describe` → `Allocations: 1`, `socat UDP4-LISTEN` in
   `alloc-dns-resolver-0.scope`.
 - `REVERSE_NAT_MAP` and `SERVICE_MAP` dump **`Found 0 elements`** — EXPECTED:
   the local backend programs `LOCAL_BACKEND_MAP` (via `cgroup_connect4`), not

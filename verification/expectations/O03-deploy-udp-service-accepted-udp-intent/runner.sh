@@ -193,16 +193,16 @@ OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" deploy "\$SPEC" \
 echo "# exit:    \$DEPLOY_RC" >> "\$EVID/deploy_dns_resolver.meta"
 echo "# deploy exit: \$DEPLOY_RC"
 
-# ---- alloc status: capture the listener-protocol render (sub-claim 3) --------
+# ---- workload describe: capture the listener-protocol render (sub-claim 3) ---
 # A Service's listeners are projected from the persisted WorkloadIntent::Service
-# aggregate (not the allocation), so \`alloc status\` renders each listener as
-# <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence to
-# a Running allocation. This is the operator-surface proof that the accepted
+# aggregate (not the allocation), so \`workload describe\` renders each listener
+# as <port>/<protocol> IMMEDIATELY after deploy-accept — before any convergence
+# to a Running allocation. This is the operator-surface proof that the accepted
 # intent carries Proto::Udp (closing sub-claim 3 black-box).
 ALLOC_RC=0
-OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" alloc status --job dns-resolver \
+OVERDRIVE_CONFIG_DIR="\$CFG_DIR" "\$BIN" workload describe dns-resolver \
   > "\$EVID/alloc_status_dns_resolver.out" 2>&1 || ALLOC_RC=\$?
-echo "# alloc status exit: \$ALLOC_RC"
+echo "# workload describe exit: \$ALLOC_RC"
 
 # ---- AFTER probes (steady state the run produced, pre-teardown) -------------
 { echo "# probe: XDP attachments AFTER deploy (pre-teardown)"; probe_xdp; }       > "\$EVID/probe_after_xdp.txt"      2>&1
@@ -285,7 +285,7 @@ else
 fi
 
 # Sub-claim 3: listener protocol (Proto::Udp) rendered at the operator surface.
-# `overdrive alloc status --job dns-resolver` renders each Service listener as
+# `overdrive workload describe dns-resolver` renders each Service listener as
 # <port>/<protocol>, projected from the persisted WorkloadIntent::Service
 # aggregate (commit 7e79007f) — so the udp/15353 listener surfaces as `15353/udp`.
 # This is the black-box operator-surface proof that the accepted intent carries
@@ -298,7 +298,7 @@ if [[ -f "$EVIDENCE_DIR/alloc_status_dns_resolver.out" ]]; then
     rc=1
   fi
 else
-  echo "  [FAIL] sub-claim 3: no alloc status output captured"
+  echo "  [FAIL] sub-claim 3: no workload describe output captured"
   rc=1
 fi
 

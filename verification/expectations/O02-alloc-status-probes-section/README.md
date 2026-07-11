@@ -1,10 +1,10 @@
-# O02 — `overdrive alloc status` renders a Probes section for a Service
+# O02 — `overdrive workload describe` renders a Probes section for a Service
 
 **Surface:** O (operator CLI) · **KPI:** K4 · **Status:** `pending`
 
 ## Expectation
 
-For a **Service** alloc with health-check probes, `overdrive alloc status
+For a **Service** alloc with health-check probes, `overdrive workload describe
 <job>` renders a **Probes** section: one row per probe, each showing role
 (startup / readiness / liveness), probe index, a mechanic summary (e.g.
 `tcp 0.0.0.0:8080`), last status, and last-observed timestamp. A probe with
@@ -24,7 +24,7 @@ runner prints the `overdrive serve` + `overdrive deploy` commands and exits
 `pending`.
 
 The runner deploys the quick-bind Service, then runs
-`overdrive alloc status <job>` through Lima and captures the render verbatim.
+`overdrive workload describe <job>` through Lima and captures the render verbatim.
 Sub-claims:
 
 1. The render contains a `Probes` heading / section.

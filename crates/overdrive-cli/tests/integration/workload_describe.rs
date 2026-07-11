@@ -1,12 +1,12 @@
-//! Slice 03 — `alloc status` kind-aware Job render.
+//! Slice 03 — `workload describe` kind-aware Job render.
 //!
 //! Per `docs/feature/workload-kind-discriminator/distill/test-scenarios.md`
 //! §3 / step 02-02 acceptance criteria. The driving port for these
-//! tests is the SINGLE LIVE `overdrive_cli::render::alloc_status`
-//! renderer — the one `main.rs:158` dispatches `overdrive alloc status`
-//! through (`commands::alloc::status` → `render::alloc_status`). These
-//! tests exercise it via the `render_live(..)` helper, which wraps an
-//! `AllocStatusResponse` into the `AllocStatusOutput` the command path
+//! tests is the SINGLE LIVE `overdrive_cli::render::workload_describe`
+//! renderer — the one `main.rs` dispatches `overdrive workload describe`
+//! through (`commands::workload::describe` → `render::workload_describe`).
+//! These tests exercise it via the `render_live(..)` helper, which wraps an
+//! `AllocStatusResponse` into the `WorkloadDescribeOutput` the command path
 //! produces. (The historical test-only `alloc_status_kind_aware` and the
 //! flat `alloc_status` were consolidated into this one live renderer.)
 //!
@@ -22,10 +22,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
-use overdrive_cli::commands::alloc::AllocStatusOutput;
+use overdrive_cli::commands::workload::WorkloadDescribeOutput;
 use overdrive_cli::render::{
-    JobVerdict, alloc_status, format_job_alloc_status_attempts_table,
-    format_job_alloc_status_header, format_job_verdict,
+    JobVerdict, format_job_alloc_status_attempts_table, format_job_alloc_status_header,
+    format_job_verdict, workload_describe,
 };
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary,
@@ -88,11 +88,11 @@ fn fixture_response(
     }
 }
 
-/// Wrap an `AllocStatusResponse` into the `AllocStatusOutput` the live
+/// Wrap an `AllocStatusResponse` into the `WorkloadDescribeOutput` the live
 /// command path produces, then render it through the single live
-/// `render::alloc_status` renderer (the one `main.rs:158` dispatches
+/// `render::workload_describe` renderer (the one `main.rs` dispatches
 /// through). The wrapper fields are derived the way
-/// `commands::alloc::status` derives them: `workload_id` / `spec_digest`
+/// `commands::workload::describe` derives them: `workload_id` / `spec_digest`
 /// from the snapshot, `allocations_total` from the row count,
 /// `empty_state_message` populated only when there are zero allocations.
 /// This is the driving port for these render-layer tests — exercising
@@ -108,14 +108,14 @@ fn render_live(response: AllocStatusResponse) -> String {
     } else {
         String::new()
     };
-    let out = AllocStatusOutput {
+    let out = WorkloadDescribeOutput {
         workload_id: response.workload_id.clone().unwrap_or_default(),
         spec_digest: response.spec_digest.clone().unwrap_or_default(),
         allocations_total,
         empty_state_message,
         snapshot: response,
     };
-    alloc_status(&out)
+    workload_describe(&out)
 }
 
 // ---------------------------------------------------------------------------
@@ -483,14 +483,14 @@ fn s_03_05_anti_scenario_job_never_renders_service_phrasing() {
 }
 
 // ---------------------------------------------------------------------------
-// S-03-06 — alloc status for unknown job: typed error
+// S-03-06 — workload describe for unknown workload: typed error
 // ---------------------------------------------------------------------------
 //
-// This scenario validates the existing error-path contract — alloc::status
+// This scenario validates the existing error-path contract — describe
 // already returns CliError::HttpStatus { status: 404, .. } for unknown
-// jobs (validated by walking_skeleton.rs::alloc_status_for_unknown_job_*).
-// We re-assert at the alloc_status surface that the error variant carries
-// the offending job id. This is a statelessly testable contract on the
+// workloads (validated by walking_skeleton.rs::describe_for_unknown_workload_*).
+// We re-assert at the describe surface that the error variant carries
+// the offending workload id. This is a statelessly testable contract on the
 // error type itself.
 
 #[test]
@@ -652,10 +652,10 @@ fn format_job_alloc_status_header_includes_name_kind_digest() {
 // S-OC-11 + S-OC-12 — issued-certificate summary render
 // (built-in-ca-operator-composition Slice 3, EDD O05; relocated from the
 // misplaced control-plane scaffold per the user-approved placement
-// correction — the render driving port `render::alloc_status` cannot be
+// correction — the render driving port `render::workload_describe` cannot be
 // reached from a crate `overdrive-cli` depends on).
 //
-// Driving port = `overdrive_cli::render::alloc_status` (the single live
+// Driving port = `overdrive_cli::render::workload_describe` (the single live
 // renderer) called in-process via `render_live(..)` over a constructed
 // `AllocStatusResponse` whose additive `issued_certificates` field (landed
 // in 03-01) carries `IssuedCertSummary` FACTS only — NO cert PEM/DER bytes,
@@ -691,7 +691,7 @@ fn issued_cert_summary(
 /// showing `serial`, `spiffe_id`, `issuer_serial`, and `not_after`, and the
 /// rendered serial faithfully matches the summary's serial.
 ///
-/// Kind is `Job` — the DISTILL AC verb is `overdrive alloc status --job <id>`
+/// Kind is `Job` — the DISTILL AC verb is `overdrive workload describe <id>`
 /// and the SVID `spiffe_id` is a `/workload/` path (`SpiffeId::for_allocation`),
 /// so the kind under test MUST match the namespace. The server projects
 /// `issued_certificates` per running alloc with NO `WorkloadKind` filter,
@@ -760,7 +760,7 @@ fn issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal() {
     let current_serial = current.serial.to_string();
 
     // Kind is `Job` — the spiffe_id is a `/workload/` path and the AC verb is
-    // `overdrive alloc status --job <id>`; the kind under test must match
+    // `overdrive workload describe <id>`; the kind under test must match
     // the SVID namespace (no Service/`/workload/` mismatch masking the render).
     let mut response = fixture_response(
         "dns-resolver",
@@ -830,8 +830,8 @@ fn alloc_status_omits_issued_certificate_section_when_empty() {
 }
 
 /// The issued-certificates section is workload-kind-AGNOSTIC: it renders for
-/// a Job-kind alloc status (the DISTILL AC verb is `overdrive alloc status
-/// --job <id>`) exactly as it does for a Service. This is the test that
+/// a Job-kind workload describe (the DISTILL AC verb is `overdrive workload
+/// describe <id>`) exactly as it does for a Service. This is the test that
 /// would have caught the Service-arm-only gating regression — its litmus:
 /// deleting the kind-agnostic `render_issued_certificates_section` call in
 /// the live `alloc_status` renderer turns it RED for the Job kind. The four

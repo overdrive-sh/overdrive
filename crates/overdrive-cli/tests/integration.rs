@@ -65,11 +65,11 @@ mod integration {
     mod coinflip_honesty_100_trials;
     mod job_kind_streaming;
 
-    // workload-kind-discriminator slice 03 — kind-aware alloc-status
+    // workload-kind-discriminator slice 03 — kind-aware workload-describe
     // Job render. KPI K3 byte-equality between rendered Exit column
     // and persisted exit_code (S-03-08 proptest 1024 cases). Per
     // step 02-02 acceptance criteria + ADR-0047 §1 / §4.
-    mod alloc_status;
+    mod workload_describe;
 
     // cgroup-fs-port step 01-06 — E2 walking-skeleton: composition root
     // probes RealCgroupFs BEFORE worker subsystem startup; on probe

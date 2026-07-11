@@ -13,7 +13,7 @@
 //!     `outcome = Inserted` and a `spec_digest` BYTE-IDENTICAL to a
 //!     locally-computed
 //!     `ContentHash::of(rkyv::to_bytes(&Job::from_submit(...)))`.
-//!     `alloc::status` GETs the same digest back.
+//!     `workload::describe` GETs the same digest back.
 //!   WS-2 (§1.2) — `cluster::status` returns four fields
 //!     (`{mode, region, reconcilers, broker}`); `broker.dispatched > 0`
 //!     after a tick proves the reconciler runtime is alive (the ADR-0020
@@ -38,10 +38,10 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use overdrive_cli::commands::alloc::{AllocStatusOutput, StatusArgs};
 use overdrive_cli::commands::cluster::StatusArgs as ClusterStatusArgs;
 use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{Job, JobSpecInput};
@@ -186,15 +186,16 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
          per-write witness.",
     );
 
-    // Phase 3 — WS-1: alloc status — returns digest byte-identical to local.
-    let status_output: AllocStatusOutput = overdrive_cli::commands::alloc::status(StatusArgs {
-        job: "payments".to_string(),
-        config_path: server_cfg.clone(),
-    })
-    .await
-    .expect("alloc::status");
+    // Phase 3 — WS-1: workload describe — returns digest byte-identical to local.
+    let status_output: WorkloadDescribeOutput =
+        overdrive_cli::commands::workload::describe(DescribeArgs {
+            id: "payments".to_string(),
+            config_path: server_cfg.clone(),
+        })
+        .await
+        .expect("workload::describe");
 
-    assert_eq!(status_output.workload_id, "payments", "status output must echo job id");
+    assert_eq!(status_output.workload_id, "payments", "describe output must echo workload id");
     assert_eq!(
         status_output.allocations_total, 0,
         "phase-1 allocations_total must be 0 (scheduler ships in phase-1-first-workload)",
@@ -207,7 +208,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
 
     assert_eq!(
         status_output.spec_digest, expected_digest,
-        "WS-1: spec_digest returned via alloc::status MUST be byte-identical to \
+        "WS-1: spec_digest returned via workload::describe MUST be byte-identical to \
          ContentHash::of(rkyv::to_bytes(&Job::from_submit(parsed))); this proves \
          the whole serve → submit → describe round-trip preserves \
          canonical rkyv bytes (ADR-0002 + ADR-0011). Post-ADR-0020 the digest \
@@ -313,26 +314,26 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
 }
 
 // -------------------------------------------------------------------
-// (b) alloc::status for unknown job → typed 404 with actionable message
+// (b) workload::describe for unknown workload → typed 404 with actionable message
 // -------------------------------------------------------------------
 
 #[tokio::test]
-async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actionable_message() {
+async fn describe_for_unknown_workload_returns_typed_http_status_404_with_actionable_message() {
     let (handle, server_tmp) = spawn_server().await;
     let server_cfg = config_path(server_tmp.path());
 
-    let err = overdrive_cli::commands::alloc::status(StatusArgs {
-        job: "mystery".to_string(),
+    let err = overdrive_cli::commands::workload::describe(DescribeArgs {
+        id: "mystery".to_string(),
         config_path: server_cfg,
     })
     .await
-    .expect_err("alloc::status must fail for an unknown job");
+    .expect_err("workload::describe must fail for an unknown workload");
 
     match &err {
         CliError::HttpStatus { status, body } => {
-            assert_eq!(*status, 404_u16, "expected HTTP 404 for unknown job; got {}", *status);
+            assert_eq!(*status, 404_u16, "expected HTTP 404 for unknown workload; got {}", *status);
             assert_eq!(body.error, "not_found", "error class must be `not_found`");
-            // Message must name the offending job id so the operator can act.
+            // Message must name the offending workload id so the operator can act.
             assert!(
                 body.message.contains("mystery") || body.message.contains("workloads/mystery"),
                 "ErrorBody.message must name `mystery`; got: {}",
@@ -340,7 +341,7 @@ async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actiona
             );
         }
         other => panic!(
-            "expected CliError::HttpStatus {{ status: 404, .. }} for unknown job, got {other:?}"
+            "expected CliError::HttpStatus {{ status: 404, .. }} for unknown workload, got {other:?}"
         ),
     }
 

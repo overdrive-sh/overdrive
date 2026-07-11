@@ -1,14 +1,14 @@
 //! Unit tests for pure render helper functions that were flagged as
 //! missed mutations: `format_human_duration`, `derive_job_verdict`,
-//! and the spec-digest branches of the live `alloc_status` renderer.
+//! and the spec-digest branches of the live `workload_describe` renderer.
 
 #![allow(clippy::expect_used)]
 
 use std::time::Duration;
 
-use overdrive_cli::commands::alloc::AllocStatusOutput;
+use overdrive_cli::commands::workload::WorkloadDescribeOutput;
 use overdrive_cli::render::{
-    JobVerdict, alloc_status, derive_job_verdict, format_human_duration, is_backoff_exhausted,
+    JobVerdict, derive_job_verdict, format_human_duration, is_backoff_exhausted, workload_describe,
 };
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ResourcesBody, RestartBudget,
@@ -124,10 +124,10 @@ fn verdict_terminated_nonzero_and_running_sibling_is_succeeded_not_in_progress()
 // The kind-aware body reads `out.snapshot.spec_digest` (the server-
 // populated wire field), NOT the wrapper-level `out.spec_digest`. These
 // migrated from the test-only `alloc_status_kind_aware` onto the single
-// live `render::alloc_status` path that `main.rs:158` dispatches through.
+// live `render::workload_describe` path that `main.rs` dispatches through.
 // ---------------------------------------------------------------------------
 
-fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusOutput {
+fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> WorkloadDescribeOutput {
     let snapshot = AllocStatusResponse {
         workload_id: Some("test-wl".to_string()),
         spec_digest: Some(spec_digest.to_string()),
@@ -140,7 +140,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusOutput {
         listeners: vec![],
         issued_certificates: vec![],
     };
-    AllocStatusOutput {
+    WorkloadDescribeOutput {
         workload_id: "test-wl".to_string(),
         spec_digest: spec_digest.to_string(),
         allocations_total: snapshot.rows.len(),
@@ -152,7 +152,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> AllocStatusOutput {
 #[test]
 fn service_branch_renders_spec_digest_when_present() {
     let out = status_fixture(WorkloadKind::Service, "abcd1234");
-    let rendered = alloc_status(&out);
+    let rendered = workload_describe(&out);
     assert!(
         rendered.contains("Spec digest: abcd1234"),
         "Service with non-empty spec_digest must render it; got:\n{rendered}",
@@ -162,7 +162,7 @@ fn service_branch_renders_spec_digest_when_present() {
 #[test]
 fn service_branch_omits_spec_digest_when_empty() {
     let out = status_fixture(WorkloadKind::Service, "");
-    let rendered = alloc_status(&out);
+    let rendered = workload_describe(&out);
     assert!(
         !rendered.contains("Spec digest:"),
         "Service with empty spec_digest must omit the line; got:\n{rendered}",
@@ -172,7 +172,7 @@ fn service_branch_omits_spec_digest_when_empty() {
 #[test]
 fn schedule_branch_renders_spec_digest_when_present() {
     let out = status_fixture(WorkloadKind::Schedule, "abcd1234");
-    let rendered = alloc_status(&out);
+    let rendered = workload_describe(&out);
     assert!(
         rendered.contains("Spec digest: abcd1234"),
         "Schedule with non-empty spec_digest must render it; got:\n{rendered}",
@@ -182,7 +182,7 @@ fn schedule_branch_renders_spec_digest_when_present() {
 #[test]
 fn schedule_branch_omits_spec_digest_when_empty() {
     let out = status_fixture(WorkloadKind::Schedule, "");
-    let rendered = alloc_status(&out);
+    let rendered = workload_describe(&out);
     assert!(
         !rendered.contains("Spec digest:"),
         "Schedule with empty spec_digest must omit the line; got:\n{rendered}",
@@ -290,7 +290,7 @@ fn failed_block_renders_header_reproducer_and_hint() {
         "header names workload; got:\n{rendered}",
     );
     assert!(
-        rendered.contains("reproducer: overdrive alloc status --job payments"),
+        rendered.contains("reproducer: overdrive workload describe payments"),
         "reproducer names the workload; got:\n{rendered}",
     );
     assert!(rendered.contains("Hint:"), "hint section present; got:\n{rendered}");

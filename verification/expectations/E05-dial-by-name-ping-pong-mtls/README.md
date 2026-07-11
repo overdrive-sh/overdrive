@@ -75,7 +75,7 @@ Sub-claims (to be captured once #227 + #75 land):
 
 1. `overdrive deploy a.toml` and `overdrive deploy b.toml` both exit 0
    (`Accepted.`), and both `a` and `b` reach Running-AND-HEALTHY (observable via
-   `overdrive alloc status`).
+   `overdrive workload describe`).
 2. From inside A's netns, `getaddrinfo("b.svc.overdrive.local")` (via `getent
    ahostsv4`, NOT `dig`) resolves to a stable `F ∈ 10.98.0.0/16` (never a
    `10.99.0.0/16` backend addr); symmetrically B resolves `a.svc.overdrive.local`.

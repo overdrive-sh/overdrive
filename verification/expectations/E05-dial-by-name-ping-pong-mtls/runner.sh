@@ -74,9 +74,9 @@ exit 0
 #   # 4. observe BOTH counters advance over a 60s window on a ~10s cadence
 #   #    (scrape each workload's stdout / a CLI surface twice, ~60s apart, and
 #   #    assert both inbound counts strictly increased).
-#   capture counters_t0 od alloc status <a-alloc> <b-alloc>
+#   capture counters_t0 od workload describe <a-alloc> <b-alloc>
 #   sleep 60
-#   capture counters_t1 od alloc status <a-alloc> <b-alloc>
+#   capture counters_t1 od workload describe <a-alloc> <b-alloc>
 #   #
 #   # 5. confidentiality: capture EACH hop's inter-agent leg-B ↔ leg-C wire and
 #   #    assert TLS-1.3 application_data (0x17) records in both directions; the

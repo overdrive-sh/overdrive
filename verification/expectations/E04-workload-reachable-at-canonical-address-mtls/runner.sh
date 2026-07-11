@@ -50,10 +50,10 @@ exit 0
 #   capture deploy_client od deploy "$CLIENT_SPEC"
 #   #    assert both .meta exit 0 and .out contains "Accepted."
 #   #
-#   # 2. discover the server's canonical workload_addr via `od alloc status`,
+#   # 2. discover the server's canonical workload_addr via `od workload describe`,
 #   #    then from the client workload's netns dial workload_addr:service_port
 #   #    DIRECTLY (no DNS) and assert the byte-exact application round-trip.
-#   capture server_alloc_status od alloc status <server-alloc>
+#   capture server_alloc_status od workload describe <server-alloc>
 #   #
 #   # 3. confidentiality: capture the leg-C/leg-B wire and assert TLS-1.3
 #   #    application_data (0x17) records in both directions; plaintext markers

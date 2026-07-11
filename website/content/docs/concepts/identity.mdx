@@ -13,7 +13,7 @@ describes the built-in CA and how it works.
 	resolves the operator key-encryption key, decrypts and adopts the persistent
 	root, and refuses to start if the envelope will not open. Every running
 	allocation then gets a SPIFFE SVID issued, held, and audited, and
-	`overdrive alloc status` reports each one. A held SVID reaches the wire:
+	`overdrive workload describe` reports each one. A held SVID reaches the wire:
 	[transparent mTLS](/docs/concepts/transparent-mtls) presents it on inbound and
 	outbound mesh connections and encrypts the traffic with TLS 1.3. The consumers
 	still unbuilt are the ingress gateway and the telemetry sink, so identity is
@@ -104,7 +104,7 @@ discovering it is not at the first handshake.
 
 No `overdrive` command issues a certificate. Issuance is a platform mechanism: when
 the control plane runs a workload, it mints that workload's SVID. What the operator
-*can* do is read the result — `overdrive alloc status` reports the current
+*can* do is read the result — `overdrive workload describe` reports the current
 certificate for each running allocation: its serial, SPIFFE identity, issuer
 serial, and expiry. It shows the facts of issuance, never the certificate bytes or
 the private key.
@@ -142,7 +142,7 @@ The built-in CA runs in `overdrive serve`:
 - **Wired and live:** at boot the control plane resolves the operator KEK,
   decrypts the persistent root and the node intermediate, and adopts them before
   issuing anything — refusing to start if an envelope will not open. Every running
-  allocation gets an audited SVID, and `overdrive alloc status` reports each one.
+  allocation gets an audited SVID, and `overdrive workload describe` reports each one.
   The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
   intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
   host/sim parity all sit on the production path.

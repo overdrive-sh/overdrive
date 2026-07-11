@@ -6,7 +6,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | ID | Surface | Expectation | KPI | Anchors | Status |
 |---|---|---|---|---|---|
 | [O01](O01-kind-rejection-guidance/) | O | Job/Schedule + probe rejected with actionable guidance | K5 | S-SHCP-PARSE-05/06, CLI-12..14 | `pending` |
-| [O02](O02-alloc-status-probes-section/) | O | `alloc status` renders a Probes section for a Service | K4 | S-SHCP-CLI-01..06 | `pending` |
+| [O02](O02-alloc-status-probes-section/) | O | `workload describe` renders a Probes section for a Service | K4 | S-SHCP-CLI-01..06 | `pending` |
 | [E01](E01-coinflip-service-honest-early-exit/) | E | coinflip-as-Service honest EarlyExit, never `(took live)` | K1 | S-SHCP-RECON-04, INT-CLI-01, CLI-07..11 | `pending` |
 | [O03](O03-deploy-udp-service-accepted-udp-intent/) | O | `overdrive deploy <udp-spec>` accepted; intent carries `Proto::Udp` | K1 | S-04-A, roadmap 01-05, ADR-0060, ADR-0061, US-04 | `satisfied` |
 | [E02](E02-udp-service-reverse-path-vip-sourced/) | E | deployed UDP service's reply sourced from VIP, not backend IP | K1 | S-04-A, K1, roadmap 01-03, ADR-0060, ADR-0061, US-04 | `pending` (remote-path) |
@@ -14,7 +14,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E04](E04-workload-reachable-at-canonical-address-mtls/) | E | a mesh workload is reachable at its canonical `workload_addr:service_port` over mTLS, end to end | K1 | S-WS, roadmap 03-02, GH #241, canonical-address design + ADR | `pending` |
 | [E05](E05-dial-by-name-ping-pong-mtls/) | E | two services dial each other by name; counters advance on a ~10s cadence; each hop is mTLS'd | K-DBN-3 | S-DBN-PINGPONG, roadmap 03-02, ADR-0072 REV-2, GH #243, slice-02 | `pending` |
 | [O04](O04-ca-refuse-to-start-actionable-error/) | O | control plane refuses to start on root-key decrypt failure with an actionable, cause-distinct error (no silent re-mint) | K3 | S-02-06/07, ADR-0063 D3/Earned-Trust, journey error_paths step 1 | `pending` |
-| [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `alloc status`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
+| [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `workload describe`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 
 ## Feature coverage

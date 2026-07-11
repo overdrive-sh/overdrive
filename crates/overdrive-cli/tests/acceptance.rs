@@ -19,8 +19,8 @@
 
 mod acceptance {
     mod insecure_rejected;
-    mod render_alloc_status;
     mod render_cluster_and_node;
+    mod render_workload_describe;
     mod render_workload_stop;
     mod render_workload_submit;
 

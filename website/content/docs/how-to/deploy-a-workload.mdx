@@ -164,11 +164,11 @@ answers "did it succeed?".
 The CLI reads live state back through the same config:
 
 ```bash
-overdrive alloc status --job payments   # spec digest + live allocation count
-overdrive node list                     # nodes the control plane knows about
+overdrive workload describe payments   # spec digest + live allocation count
+overdrive node list                    # nodes the control plane knows about
 ```
 
-`alloc status` is the command to reach for when you want to confirm a deploy
+`workload describe` is the command to reach for when you want to confirm a deploy
 took effect: it returns the canonical `spec_digest` the control plane holds for
 the workload alongside the number of live allocations, so you can check that the
 digest matches the spec you just deployed and that the workload is actually

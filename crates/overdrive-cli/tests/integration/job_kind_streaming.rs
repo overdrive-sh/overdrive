@@ -29,9 +29,9 @@ use std::path::{Path, PathBuf};
 
 use std::time::Duration;
 
-use overdrive_cli::commands::alloc::StatusArgs as AllocStatusArgs;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::workload::DescribeArgs as WorkloadDescribeArgs;
 use overdrive_control_plane::api::AllocStateWire;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -75,8 +75,8 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 async fn wait_for_alloc_running(config_path: &Path, job_id: &str) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let snapshot = overdrive_cli::commands::alloc::status_snapshot(AllocStatusArgs {
-            job: job_id.to_owned(),
+        let snapshot = overdrive_cli::commands::workload::describe_snapshot(WorkloadDescribeArgs {
+            id: job_id.to_owned(),
             config_path: config_path.to_owned(),
         })
         .await;

@@ -53,7 +53,7 @@ Sub-claims (to be captured once #227 + #75 land):
 
 1. `overdrive deploy <server-spec>` and `overdrive deploy <client-spec>` both
    exit 0 (`Accepted.`), and the server reaches Running with a materialised
-   canonical `workload_addr` (observable via `overdrive alloc status`).
+   canonical `workload_addr` (observable via `overdrive workload describe`).
 2. A client dialing the server's canonical `workload_addr:service_port`
    **directly** completes a TLS-1.3 handshake whose server cert chains to the
    platform's workload-identity trust bundle, and the application request →

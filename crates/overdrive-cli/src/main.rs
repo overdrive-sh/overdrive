@@ -50,9 +50,7 @@ fn main() -> Result<()> {
 // mutants::skip — thin binary dispatcher; tested via library-level acceptance tests per CLAUDE.md (no subprocess)
 #[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
-    use overdrive_cli::cli::{
-        AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand, WorkloadCommand,
-    };
+    use overdrive_cli::cli::{ClusterCommand, Command, JobCommand, NodeCommand, WorkloadCommand};
 
     match cli.command {
         Command::Cluster(ClusterCommand::Status) => {
@@ -167,17 +165,17 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Command::Alloc(AllocCommand::Status { job }) => {
+        Command::Workload(WorkloadCommand::Describe { id }) => {
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::alloc::StatusArgs { job, config_path };
-            match overdrive_cli::commands::alloc::status(args).await {
+            let args = overdrive_cli::commands::workload::DescribeArgs { id, config_path };
+            match overdrive_cli::commands::workload::describe(args).await {
                 Ok(out) => {
-                    print!("{}", overdrive_cli::render::alloc_status(&out));
+                    print!("{}", overdrive_cli::render::workload_describe(&out));
                     Ok(())
                 }
                 Err(err) => {
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
-                    Err(color_eyre::eyre::eyre!("alloc status failed"))
+                    Err(color_eyre::eyre::eyre!("workload describe failed"))
                 }
             }
         }
@@ -214,7 +212,7 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         other => {
-            // Remaining subcommands (Job, Alloc, Cluster::Upgrade) still
+            // Remaining subcommands (Job, Cluster::Upgrade) still
             // land in later Phase 1 steps. Log and exit 0 so smoke-tests
             // keep working.
             tracing::warn!(command = ?other, "command not yet wired");

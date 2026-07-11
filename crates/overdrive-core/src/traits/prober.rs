@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// `Pass` indicates the probe's success predicate was satisfied within
 /// the configured timeout. `Fail` carries a named failure reason
 /// suitable for direct operator-visible rendering — these strings end
-/// up in `ProbeResultRow.last_fail_reason`, in CLI `alloc status`
+/// up in `ProbeResultRow.last_fail_reason`, in CLI `workload describe`
 /// Probes section, and (for startup probes that exhaust their attempts)
 /// in the `ServiceSubmitEvent::Failed { reason: StartupProbeFailed
 /// { last_fail, .. } }` wire payload.

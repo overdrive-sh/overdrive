@@ -65,17 +65,13 @@ pub enum Command {
     #[command(subcommand)]
     Job(JobCommand),
 
-    /// Workload lifecycle — restart (and, per #220, describe).
+    /// Workload lifecycle — restart, describe.
     #[command(subcommand)]
     Workload(WorkloadCommand),
 
     /// Node inspection.
     #[command(subcommand)]
     Node(NodeCommand),
-
-    /// Allocation inspection.
-    #[command(subcommand)]
-    Alloc(AllocCommand),
 
     /// Cluster bootstrap and membership.
     #[command(subcommand)]
@@ -105,24 +101,16 @@ pub enum JobCommand {
 pub enum WorkloadCommand {
     /// Replace a declared workload's backend instance with a fresh one.
     Restart { id: String },
+    /// Read canonical `spec_digest` for a workload and the number of live
+    /// allocations for it. Named after ADR-0014's `GET /v1/workloads/{id}`
+    /// + `GET /v1/allocs` composition — the CLI surface is a single
+    ///   command even though it spans two handlers.
+    Describe { id: String },
 }
 
 #[derive(Debug, Subcommand)]
 pub enum NodeCommand {
     List,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum AllocCommand {
-    /// Read canonical `spec_digest` for a job and the number of live
-    /// allocations for it. Named after ADR-0014's `GET /v1/workloads/{id}`
-    /// + `GET /v1/allocs` composition — the CLI surface is a single
-    ///   command even though it spans two handlers.
-    Status {
-        /// Canonical `WorkloadId` to describe.
-        #[arg(long)]
-        job: String,
-    },
 }
 
 #[derive(Debug, Subcommand)]

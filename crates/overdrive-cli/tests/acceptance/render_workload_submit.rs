@@ -32,7 +32,7 @@ fn fixture_submit_output() -> DeployOutput {
         spec_digest: FIXTURE_DIGEST.to_string(),
         outcome: IdempotencyOutcome::Inserted,
         endpoint: Url::parse("https://127.0.0.1:7001").expect("parse endpoint"),
-        next_command: "overdrive alloc status --job payments".to_string(),
+        next_command: "overdrive workload describe payments".to_string(),
     }
 }
 
@@ -76,7 +76,7 @@ fn render_job_submit_accepted_contains_required_labels() {
         "rendered block must contain endpoint; got:\n{rendered}",
     );
     assert!(
-        rendered.contains("overdrive alloc status --job payments"),
+        rendered.contains("overdrive workload describe payments"),
         "rendered block must contain next_command; got:\n{rendered}",
     );
 }

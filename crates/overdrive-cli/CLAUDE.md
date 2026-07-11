@@ -13,7 +13,7 @@ not runtime-tunable per command.
 
 - `Cli` has no `endpoint` field — only `command`.
 - `ApiClient::from_config(config_path)` is the only constructor.
-- Handler arg structs (`DeployArgs`, `StatusArgs`, `ListArgs`) carry
+- Handler arg structs (`DeployArgs`, `DescribeArgs`, `ListArgs`) carry
   `config_path: PathBuf` — no endpoint field.
 - `DeployOutput.endpoint` and the `CliError::Transport` rendering
   both read from `ApiClient::base_url()` — the endpoint the trust
@@ -109,16 +109,21 @@ signal handling for the binary wrapper itself, it can exercise the
 test of the CLI's behaviour, and it must be tagged and scoped
 accordingly.
 
-## Alloc-status rendering — ONE renderer: `render::alloc_status`
+## Workload-describe rendering — ONE renderer: `render::workload_describe`
 
-`overdrive alloc status` renders through **`render::alloc_status(&AllocStatusOutput)`**
-— and only that function. `main.rs` dispatches
-`Command::Alloc(AllocCommand::Status { .. })` to `commands::alloc::status(..)`
-and prints `render::alloc_status(&out)`. That is the one renderer an
-operator ever sees, and it is now the ONLY alloc-status renderer in
-`render.rs`. There is no test-only duplicate to mistake it for.
+`overdrive workload describe <id>` renders through
+**`render::workload_describe(&WorkloadDescribeOutput)`** — and only that
+function. `main.rs` dispatches
+`Command::Workload(WorkloadCommand::Describe { .. })` to
+`commands::workload::describe(..)` and prints
+`render::workload_describe(&out)`. That is the one renderer an operator
+ever sees, and it is the ONLY describe renderer in `render.rs`. There is
+no test-only duplicate to mistake it for. The backing transport stays
+`GET /v1/allocs` via `ApiClient::alloc_status_for_workload` (the verb was
+renamed `alloc status --job` → `workload describe <id>` per #220; the wire
+type `AllocStatusResponse` and the `/v1/allocs` path are unchanged).
 
-`render::alloc_status` carries the **kind-aware** body that the
+`render::workload_describe` carries the **kind-aware** body that the
 `workload-kind-discriminator` feature designed (step 02-02, [D4] /
 ADR-0047 §4): it branches on `out.snapshot.kind`
 (`overdrive_core::aggregate::WorkloadKind`) via the private
@@ -143,8 +148,8 @@ signpost (`phase-1-first-workload`, DWD-05) rendered first when
 
 ### History — why this was a trap, and how it was closed
 
-`render.rs` used to carry **three** alloc-status renderers, and the
-wrong one was live:
+`render.rs` used to carry **three** describe/alloc-status renderers, and
+the wrong one was live:
 
 - `alloc_status` was a FLAT renderer (`Workload ID:` / `Spec digest:` /
   `Allocations:` + bare per-row lines) — it was live but did NOT branch
@@ -159,33 +164,38 @@ wrong one was live:
 - `alloc_snapshot(&AllocStatusResponse)` was an older ADR-0033 §4
   "journey TUI mockup", also test-only with zero `src/` callers.
 
-The consolidation (this branch) **finished the wiring**: the kind-aware
-body folded into the single live `render::alloc_status` (threading
-`AllocStatusOutput` so the empty-state signpost survives), the flat
-duplicate was retired single-cut, and `alloc_snapshot` + its tests were
-deleted (its transition-history mockup behavior — `Restart budget:` /
-`Last transition:` arrows / `source: driver(exec)` — had no live caller
-and is no longer produced). The authoritative tests moved onto the live
+The consolidation **finished the wiring**: the kind-aware body folded
+into a single live renderer (threading `WorkloadDescribeOutput` so the
+empty-state signpost survives), the flat duplicate was retired
+single-cut, and `alloc_snapshot` + its tests were deleted (its
+transition-history mockup behavior — `Restart budget:` / `Last
+transition:` arrows / `source: driver(exec)` — had no live caller and is
+no longer produced). The subsequent #220 rename renamed the operator verb
+(`alloc status --job` → `workload describe <id>`) and the live renderer
+(`render::alloc_status` → `render::workload_describe`) + its output type
+(`AllocStatusOutput` → `WorkloadDescribeOutput`); the rendered STRING
+output is byte-identical. The authoritative tests live on the live
 `render::*` path.
 
-### Rules for any operator-visible change to `overdrive alloc status`
+### Rules for any operator-visible change to `overdrive workload describe`
 
-1. **Make the change in `render::alloc_status`** (or the private
+1. **Make the change in `render::workload_describe`** (or the private
    `render_kind_aware_body` / shared section helpers it calls). There is
    no second renderer to keep in sync.
 2. **Test the LIVE path.** The live-path test home is
-   `tests/acceptance/render_alloc_status.rs` — call
-   `render::alloc_status(&AllocStatusOutput { snapshot:
+   `tests/acceptance/render_workload_describe.rs` — call
+   `render::workload_describe(&WorkloadDescribeOutput { snapshot:
    AllocStatusResponse { .. }, .. })` and assert on its output. See the
    `(j)` kind-aware Job/Service tests and the `(g)` / `(g2)` / `(h)` /
    `(i)` section tests for the canonical shapes. The render-layer
-   integration suite (`tests/integration/alloc_status.rs`) exercises the
-   same live renderer via its `render_live(..)` wrapper.
-3. **Mind the field source.** `alloc_status` takes `&AllocStatusOutput`,
-   so the snapshot fields live on `out.snapshot.*` (e.g.
-   `out.snapshot.issued_certificates`, `out.snapshot.kind`,
-   `out.snapshot.spec_digest`). The wrapper-level `out.workload_id` /
-   `out.spec_digest` / `out.allocations_total` / `out.empty_state_message`
-   are the command-derived envelope fields; the kind-aware body reads the
-   server-populated snapshot fields (which the live `commands::alloc::status`
-   populates from the `GET /v1/allocs` response).
+   integration suite (`tests/integration/workload_describe.rs`) exercises
+   the same live renderer via its `render_live(..)` wrapper.
+3. **Mind the field source.** `workload_describe` takes
+   `&WorkloadDescribeOutput`, so the snapshot fields live on
+   `out.snapshot.*` (e.g. `out.snapshot.issued_certificates`,
+   `out.snapshot.kind`, `out.snapshot.spec_digest`). The wrapper-level
+   `out.workload_id` / `out.spec_digest` / `out.allocations_total` /
+   `out.empty_state_message` are the command-derived envelope fields; the
+   kind-aware body reads the server-populated snapshot fields (which the
+   live `commands::workload::describe` populates from the `GET /v1/allocs`
+   response).

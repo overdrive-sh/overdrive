@@ -22,7 +22,7 @@ Two fixes unblocked the full capture:
    listening endpoint=https://127.0.0.1:7443/"), so the black-box deploy reaches
    it — sub-claims 1+2 (deploy exit 0 + `Accepted.`).
 2. alloc-status listener rendering (commit 7e79007f handler/response + e9cec107
-   the live-path render fix): `overdrive alloc status` now renders each Service
+   the live-path render fix): `overdrive workload describe` now renders each Service
    listener as <port>/<protocol>, projected from the persisted
    WorkloadIntent::Service aggregate — INDEPENDENT of convergence. So a deployed
    UDP Service renders `15353/udp` immediately at 0 allocations (pre-convergence),
@@ -64,7 +64,7 @@ invocation, with an EXIT-trap teardown sweep on every exit path (kill serve,
 cgroup mass-kill+rmdir, XDP detach across ifaces) and before+after no-leak
 probes (XDP attachment, loopback sanity, workload cgroups) written into
 `evidence/` as proof the shared VM is left clean. Serve lifetime is seconds:
-boot → deploy → `alloc status` → capture → teardown. It uses the production
+boot → deploy → `workload describe` → capture → teardown. It uses the production
 default config — post-ADR-0061 serve auto-provisions the `ovd-veth-cli`/
 `ovd-veth-bk` veth pair and attaches XDP to it (NOT `lo`, NOT `eth0`); no
 SimDataplane override (test-only, not black-box). Leaked cgroups/XDP across runs
@@ -72,13 +72,13 @@ are a documented hazard (`.claude/rules/{testing,debugging}.md`).
 
 The runner deploys a UDP `dns-resolver.toml` (udp/15353 listener + a real
 `/usr/bin/socat` UDP-echo backend present in the Lima VM) against the built
-binary, then runs `overdrive alloc status --job dns-resolver`, capturing both
+binary, then runs `overdrive workload describe dns-resolver`, capturing both
 commands' stdout/stderr and exit codes verbatim. Sub-claims:
 
 1. The deploy command exits `0`.
 2. Deploy stdout contains `Accepted.` (the `workload_submit_accepted` render shape).
 3. The accepted intent carries the udp listener protocol — observable at the
-   operator surface as `15353/udp` in `overdrive alloc status` (the Service's
+   operator surface as `15353/udp` in `overdrive workload describe` (the Service's
    `Listeners:` section, projected from the persisted `WorkloadIntent::Service`
    aggregate). A `15353/tcp` line would be a `Proto` coercion to `Tcp` and fails
    the sub-claim. Because the listeners come from the intent (not the
@@ -106,7 +106,7 @@ narrated), no `15353/tcp` coercion, no dodged sub-claim.
   + Workload ID `dns-resolver` / Intent key / Spec digest / Outcome `created` /
   Endpoint `https://127.0.0.1:7443/` / Next.
 - `evidence/deploy_dns_resolver.meta` — `# exit: 0`.
-- `evidence/alloc_status_dns_resolver.out` — `overdrive alloc status --job
+- `evidence/alloc_status_dns_resolver.out` — `overdrive workload describe
   dns-resolver` render including a `Listeners:` section with the line
   `  15353/udp` (and NO `15353/tcp`). The operator-surface proof of `Proto::Udp`.
 - `evidence/build.log` — the single `cargo build -p overdrive-cli --bin
@@ -128,5 +128,5 @@ Per-sub-claim verdict:
 
 The proto render landed in two commits: `7e79007f` added the `listeners`
 projection to `AllocStatusResponse` + the handler; `e9cec107` rendered it on the
-live `overdrive alloc status` path (`render::alloc_status`). The crate-internal
+live `overdrive workload describe` path (`render::alloc_status`). The crate-internal
 `what, forever` witness remains `deploy_udp_walking_skeleton.rs`.

@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: Every overdrive command, flag, and exit code that ships in Phase 1 — serve, deploy, and the job, node, alloc, and cluster inspection verbs.
+description: Every overdrive command, flag, and exit code that ships in Phase 1 — serve, deploy, and the job, node, workload, and cluster inspection verbs.
 ---
 
 `overdrive` is the single binary for both running the control plane and
@@ -78,27 +78,32 @@ overdrive job stop <ID>      # stop the workload with this id
 
 `stop` declares that the named workload should no longer run; the control plane
 records the intent and its allocations wind down. To read back what is running,
-use [`alloc status`](#overdrive-alloc) — `job list` is parsed but not yet wired
-(see [Accepted but not yet functional](#accepted-but-not-yet-functional)).
+use [`workload describe <ID>`](#overdrive-workload) — `job list` is parsed but not
+yet wired (see [Accepted but not yet functional](#accepted-but-not-yet-functional)).
 
-## `overdrive alloc`
+## `overdrive workload`
 
-Allocation inspection.
+Workload lifecycle — restart and inspect.
 
 ```bash
-overdrive alloc status --job <ID>
+overdrive workload restart <ID>    # replace the workload's backend with a fresh one
+overdrive workload describe <ID>   # spec digest + live allocation rows
 ```
 
-Returns the canonical `spec_digest` the control plane holds for the job and the
-number of live allocations for it. This is the command to confirm that a deploy
-took effect: match the returned digest against the spec you deployed, and check
-the allocation count.
+`restart` replaces a declared workload's running backend instance with a fresh
+one. The control plane tears down the current allocation and starts a new one
+from the same spec.
 
-For each running allocation that has been issued an identity, the output also lists
-its current certificate — serial, SPIFFE identity, issuer serial, and expiry —
-drawn from the issuance audit trail. These are the facts of issuance only; the
-certificate bytes and the private key never appear. The section is omitted for
-allocations with no issued certificate.
+`describe` returns the canonical `spec_digest` the control plane holds for the
+workload and the number of live allocations for it. This is the command to
+confirm that a deploy took effect: match the returned digest against the spec you
+deployed, and check the allocation count.
+
+For each running allocation that has been issued an identity, the `describe`
+output also lists its current certificate — serial, SPIFFE identity, issuer
+serial, and expiry — drawn from the issuance audit trail. These are the facts of
+issuance only; the certificate bytes and the private key never appear. The
+section is omitted for allocations with no issued certificate.
 
 ## `overdrive node`
 
@@ -127,7 +132,7 @@ currently logs `command not yet wired` and exits `0` without doing anything:
 
 | Command | State |
 | --- | --- |
-| `overdrive job list` | Parsed, no handler. Use [`alloc status --job <ID>`](#overdrive-alloc) to inspect a workload today. |
+| `overdrive job list` | Parsed, no handler. Use [`workload describe <ID>`](#overdrive-workload) to inspect a workload today. |
 | `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. High-availability mode is design-stage; Phase 1 is single-node. |
 
 They are documented here so the behavior is not mistaken for a bug: the command

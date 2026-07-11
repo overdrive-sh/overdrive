@@ -236,7 +236,7 @@ fn given_no_color_when_render_then_zero_ansi_escapes() {
 // enrichment shape.
 // ---------------------------------------------------------------------------
 
-use overdrive_cli::commands::alloc::format_alloc_status_json;
+use overdrive_cli::commands::workload::format_workload_describe_json;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::probe_result_row::ProbeResultRow;
 use std::str::FromStr as _;
@@ -252,13 +252,13 @@ fn fixture_result_row(role: ProbeRole, status: ProbeStatus) -> ProbeResultRow {
     }
 }
 
-/// JSON-mode AC (Service) — `format_alloc_status_json` for a
+/// JSON-mode AC (Service) — `format_workload_describe_json` for a
 /// Service-kind alloc includes a `probes` array carrying the
 /// `ProbeResultRowJson` projection.
 #[test]
 fn given_service_kind_when_format_json_then_probes_array_present() {
     let rows = vec![fixture_result_row(ProbeRole::Startup, ProbeStatus::Pass)];
-    let json = format_alloc_status_json(WorkloadKind::Service, &rows);
+    let json = format_workload_describe_json(WorkloadKind::Service, &rows);
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     let probes = value.get("probes").expect("Service JSON must carry `probes`");
     assert!(probes.is_array(), "`probes` must be an array; got: {probes}");
@@ -266,13 +266,13 @@ fn given_service_kind_when_format_json_then_probes_array_present() {
     assert_eq!(probes[0]["role"], "startup", "role projected; got: {probes}");
 }
 
-/// JSON-mode AC (Job) — `format_alloc_status_json` for a Job-kind
+/// JSON-mode AC (Job) — `format_workload_describe_json` for a Job-kind
 /// alloc OMITS the `probes` field entirely (serde skip-if-none), not
 /// `null`.
 #[test]
 fn given_job_kind_when_format_json_then_probes_field_omitted() {
     let rows = vec![fixture_result_row(ProbeRole::Startup, ProbeStatus::Pass)];
-    let json = format_alloc_status_json(WorkloadKind::Job, &rows);
+    let json = format_workload_describe_json(WorkloadKind::Job, &rows);
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     assert!(
         value.get("probes").is_none(),

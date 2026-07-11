@@ -13,19 +13,19 @@ add up (the alloc-status CLI VIP `10.96.0.2` byte-matches describe_api.json's
 "vip":"10.96.0.2"; describe HTTP 200; empty curlerr), no sub-claim dodged,
 anchors present and predate the capture.
 
-Captured CONVERGED: the runner polls alloc status until the workload reaches
+Captured CONVERGED: the runner polls workload describe until the workload reaches
 >=1 allocation (~1s) before capturing, so alloc_status_service.out shows
 `Allocations: 1 / alloc-dns-resolver-0: Running / reason: driver started`.
 
 SC2b is the operator-visible-VIP proof. It became true when the #220 rendering
-half landed (`render_vip_section` — `alloc status` now prints a `VIP: <ipv4>`
+half landed (`render_vip_section` — `workload describe` now prints a `VIP: <ipv4>`
 line for Service reads, reading the vip the AllocStatusResponse envelope already
 carried per ADR-0049). Before that, the VIP was on the wire (SC3) but the CLI
 dropped it; the evidence was re-captured at that HEAD and re-audited (different
 fox) — verdict held with SC2b added.
 
 Note: the converged capture incidentally double-confirms GH #219 — the
-`alloc status` 0-allocation empty-state hint ("the scheduler + driver land in
+`workload describe` 0-allocation empty-state hint ("the scheduler + driver land in
 phase-1-first-workload", alloc.rs:110) is stale: the driver demonstrably started
 ("reason: driver started"), so the scheduler+driver have not only landed (that
 feature shipped) but are actively running the workload. #219 tracks the message
@@ -53,13 +53,13 @@ a real kernel (Lima):
 1. **Precondition — deploy accepted.** `overdrive deploy <service-spec>`
    exits 0 and prints `Accepted.`; the Service intent is persisted and its
    VIP allocated at submit time (the precondition the reads below depend on).
-2. **O-surface — the operator inspection command works.** `overdrive alloc
-   status --job <id>` (the operator's real mTLS HTTP client against
+2. **O-surface — the operator inspection command works.** `overdrive workload
+   describe <id>` (the operator's real mTLS HTTP client against
    `GET /v1/allocs`, which carries `spec_digest` + the Service `vip` +
    `listeners` per ADR-0049) exits 0 against the deployed Service and renders
    the converged allocation.
-3. **O-surface — the operator SEES the VIP in the CLI.** That same `alloc
-   status` output now renders a `VIP: <ipv4>` line (the rendering half of
+3. **O-surface — the operator SEES the VIP in the CLI.** That same `workload
+   describe` output now renders a `VIP: <ipv4>` line (the rendering half of
    #220 — `render_vip_section`). Before it landed, the VIP was on the wire but
    the CLI dropped it; this is the operator-visible-VIP proof.
 4. **The #183 deliverable — discriminated describe shape + VIP on the wire.**
@@ -72,7 +72,7 @@ a real kernel (Lima):
 
 This is the **operator-observable closure of #183**: the describe endpoint
 returns the discriminated Service shape with the platform-issued VIP, and the
-operator's `alloc status` command now both works and prints that VIP.
+operator's `workload describe` command now both works and prints that VIP.
 
 - Anchor: GH #183 (`WorkloadDescription Service-arm wire-shape widening — oneOf discriminator for describe_workload`) — the issue this expectation closes.
 - Anchor: ADR-0064 (`docs/product/architecture/adr-0064-describe-side-spec-output-discriminator.md` — `DescribeSpecOutput` distinct kind-discriminated `oneOf`; Service arm carries a REQUIRED `vip: ServiceVip`; OQ-1/OQ-4/OQ-7).
@@ -83,7 +83,7 @@ operator's `alloc status` command now both works and prints that VIP.
 
 Captured via `verification/harness/run-expectation.sh O06` — the runner boots
 an ephemeral `overdrive serve` inside Lima (post-ADR-0061 veth dataplane
-model), deploys a Service spec, captures `overdrive alloc status` (the CLI
+model), deploys a Service spec, captures `overdrive workload describe` (the CLI
 round-trip) and a raw mTLS `GET /v1/jobs/{id}` (the describe wire response),
 then tears down with the XDP / cgroup leak sweep + before/after no-leak
 probes (per `.claude/rules/debugging.md` and `testing.md`). Black-box only —

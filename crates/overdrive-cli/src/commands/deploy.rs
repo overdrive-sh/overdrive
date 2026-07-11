@@ -162,7 +162,7 @@ pub struct DeployOutput {
     /// Endpoint the POST was issued to, echoed for operator clarity.
     pub endpoint: Url,
     /// Next-command hint the operator can run to inspect allocation
-    /// status — `overdrive alloc status --job <workload_id>`.
+    /// status — `overdrive workload describe <workload_id>`.
     pub next_command: String,
 }
 
@@ -253,7 +253,7 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
     //    prone second `workloads/` literal in this crate.
     let workload_id = parse_response_job_id(&resp.workload_id)?;
     let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
-    let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
+    let next_command = format!("overdrive workload describe {}", resp.workload_id);
     Ok(DeployOutput {
         workload_id: resp.workload_id,
         intent_key,
@@ -322,7 +322,7 @@ async fn deploy_service(
 
     let workload_id = parse_response_job_id(&resp.workload_id)?;
     let intent_key = IntentKey::for_workload(&workload_id).as_str().to_string();
-    let next_command = format!("overdrive alloc status --job {}", resp.workload_id);
+    let next_command = format!("overdrive workload describe {}", resp.workload_id);
     Ok(DeployOutput {
         workload_id: resp.workload_id,
         intent_key,
@@ -440,7 +440,7 @@ pub struct DeployStreamingOutput {
     pub outcome: IdempotencyOutcome,
     /// Endpoint the POST was issued to.
     pub endpoint: Url,
-    /// Next-command hint — `overdrive alloc status --job <workload_id>`.
+    /// Next-command hint — `overdrive workload describe <workload_id>`.
     pub next_command: String,
     /// CLI exit code per ADR-0032 §9: 0 for `Succeeded`, the workload's
     /// kernel-observed exit code for `Failed`. Mapping of pre-Accepted
@@ -718,7 +718,7 @@ async fn consume_stream(
                         settled_in_ms,
                         &witness,
                     );
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
@@ -754,7 +754,7 @@ async fn consume_stream(
                         stderr_tail.as_deref(),
                         early_exit_timing,
                     );
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
@@ -777,7 +777,7 @@ async fn consume_stream(
                         overdrive_core::aggregate::WorkloadKind::Service,
                         by,
                     );
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
@@ -920,7 +920,7 @@ async fn consume_stream_job(
                         &took_human,
                         attempts,
                     ));
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
@@ -957,7 +957,7 @@ async fn consume_stream_job(
                         &took_human,
                         attempts,
                     ));
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
@@ -990,7 +990,7 @@ async fn consume_stream_job(
                         backoff_exhausted,
                         &stderr_str,
                     ));
-                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {
                         workload_id: acc.workload_id,
                         intent_key: acc.intent_key,
