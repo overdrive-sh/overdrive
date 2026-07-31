@@ -744,6 +744,87 @@ it once and every future call site inherits the erosion.
 
 ---
 
+## Ground the premise: a state only a test seam can produce is not a feature
+
+**Before building anything that fixes, guards, or fails-closed on a
+state X, name the PRODUCTION code path that produces X — `overdrive
+serve` + `overdrive deploy` with the real composition, not a test
+boot.** Test-injection seams — a `*_override` config field, a `Sim*`
+adapter, a composition gate left off (`Option` port `None`, a disabled
+feature) — routinely produce states the production path never reaches. A
+feature scoped to defend such a state builds machinery for a non-problem,
+and its "fix" often breaks the very test path that was the only thing
+producing the state.
+
+This is the premise-grounding companion to § "Production code is not
+shaped by simulation" (that rule keeps test *concerns* out of production
+*code*; this one keeps test-only *states* out of feature *scope*) and to
+CLAUDE.md § "Build vertical slices through production entry points" (a
+feature must be production-drivable — so must the state it defends).
+
+### The check (falsifiable, one question)
+
+Ask at scoping and re-ask at every downstream wave: **does X happen in a
+real deploy, or only when a test disables / overrides a production-
+composed layer?**
+
+- Name the production call site that produces X. Trace it through
+  `run_server` / `start_alloc` / the action-shim with the REAL adapters
+  composed — not a `dataplane_override` / `Sim*` / mock injected.
+- If X appears only when a composition gate is OFF (a `*_override` set, an
+  `Option` port `None`, a flag disabled), X is a **test-configuration
+  artifact**, not a production state.
+- A "should-never-happen fault" framing is itself the trigger to run this
+  check: confirm the fault is *reachable at all* on the production path
+  before designing a defense. A state that is both should-never-happen
+  AND only-reachable-via-a-test-override is a non-problem twice over.
+
+### Who this binds
+
+Primarily DISCUSS (scoping) — ground the premise there or the whole
+feature is built on sand. But DESIGN, DISTILL, DELIVER, and review MUST
+re-run the check, never inherit the premise. A bug report that describes
+a *code smell* ("this does `unwrap_or(default)`, which *could* mask X")
+is NOT grounding — it names a shape, not a production occurrence. Verify
+the occurrence before elaborating the fix.
+
+### Symptoms during review
+
+- A feature-delta / ADR whose "problem" is a fallback / default / error
+  arm that no production call path exercises — the state is produced only
+  by a test injecting a `*_override` or a `Sim*` adapter.
+- A "should-never-happen" / "defense-in-depth" feature whose triggering
+  state has no named production producer (nobody wrote "`serve` + `deploy`
+  reaches X via <call site>").
+- A fix that, when it lands, breaks a test whose boot *disables* the
+  production layer — the tell that the "bug" is that test's configuration,
+  not production behaviour.
+
+### Precedent (GH #248 / ADR-0074, 2026-08-01)
+
+`BackendDiscoveryBridge` advertised `workload_addr.unwrap_or(host_ipv4)`
+per alloc. #248 was filed off that *smell* — "the bridge falls back to
+`host_ipv4` for a mesh alloc with a missing `workload_addr`, masking a
+dropped address" — and grew a full DISCUSS → DESIGN (ADR-0074) → DISTILL
+→ DELIVER arc (a 3-variant `AllocBackend` discriminator, 4 steps, Opus
+reviews, a mutation gate) before anyone traced the premise. The trace:
+production `run_server` composes mTLS unconditionally
+(`compose_mtls = config.dataplane_override.is_none()`,
+`overdrive-control-plane/src/lib.rs`), and `provision_and_inject_netns`
+assigns `workload_addr = Some(/30)` for **every** alloc past the
+`mtls_worker.is_some()` gate (`action_shim/mod.rs`). So in production the
+`host_ipv4` fallback **never fires** — every alloc carries a
+`workload_addr`. `workload_addr = None` (the state #248 fails-closed on)
+arises ONLY in tests that set `dataplane_override` to skip mTLS. The
+feature defended a test-only state; the discriminator did nothing in
+production and *broke* the one real test of the host-local path
+(`backend_discovery_bridge::walking_skeleton`, S-BDB-19), caught only at
+the pre-push full-suite gate. It was rigor applied inside a frame nobody
+grounded — and the whole arc collapses to one question asked at scoping:
+"does `workload_addr = None` happen in production?"
+
+---
+
 ## Trait definitions specify behavior, not just signature
 
 **A trait is a contract, and the contract is the SSOT.** Every method
