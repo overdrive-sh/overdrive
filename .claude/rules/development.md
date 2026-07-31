@@ -1931,6 +1931,54 @@ commit during a multi-step DELIVER wave), the body still describes
 *what is left and why* in prose — not which commands the agent
 happened to run before stopping.
 
+## Delegate code scrutiny to the review agent — orchestrators check gates, not diffs
+
+**When the workflow has a dedicated review step, the coordinating agent
+(orchestrator / dispatcher) does NOT hand-read the diff to re-verify
+correctness, design compliance, or test honesty. That adversarial
+scrutiny is the reviewer's job — dispatch the reviewer and act on its
+verdict.** An orchestrator that opens the changed files and inspects a
+function line-by-line to "make sure it's right" is doing the reviewer's
+job a second time, with a weaker instrument: a dedicated reviewer
+prompted to *refute* the change is a stronger signal than a coordinator
+skimming for reassurance, and the duplicated read burns the
+orchestrator's context and blurs the coordinate-vs-implement boundary.
+
+**What the orchestrator DOES verify (cheap, mechanical, structural):**
+
+- The step compiled / tests are green (read the runner's summary, don't
+  re-derive it).
+- The phase/audit log is complete (e.g. DES RED/GREEN/COMMIT logged),
+  the commit landed with the required trailers, the expected scaffolds
+  were converted, the scaffold/`should_panic` count is what it should
+  be.
+- Only the expected files changed — a diff *stat* (`git show --stat`) to
+  catch scope creep (an unexpected `src/` file, a new crate), NOT a
+  line-by-line read of the contents.
+- The reviewer actually ran and returned a verdict, and any BLOCKER it
+  raised was resolved.
+
+**What the orchestrator DELEGATES to the reviewer (deep, adversarial):**
+design-shape compliance (invented API surface vs the ADR/spec),
+testing-theater / vacuous-pass detection, vertical-slice / fault-injection
+legitimacy, mutation-robustness of a property, correctness of the logic.
+These are exactly what a `*-reviewer` dispatch is for; re-doing them by
+hand is waste.
+
+This does **not** weaken the "Reviewers / orchestrators accepting work:
+verify the output against the design's API shape" obligation (CLAUDE.md
+§ "Implement to the design"). The orchestrator *discharges* that
+obligation by **running the review gate and reading its verdict against
+the design**, not by personally re-reading the diff. The gate is the
+verification; the hand-read is redundant.
+
+**Symptom during review:** the orchestrator `Read`-ing a changed source
+file to inspect a specific function's body, tracing an assertion, or
+scrutinising a workaround — work a reviewer is about to do or has just
+done. If you catch yourself opening the diff to judge whether the code
+is *correct* (not merely whether the *right files* changed), stop and
+dispatch the reviewer instead.
+
 ## Deletion discipline
 
 When production code becomes unused — typically after a refactor that
