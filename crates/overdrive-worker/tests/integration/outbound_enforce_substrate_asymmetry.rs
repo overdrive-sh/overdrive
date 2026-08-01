@@ -155,6 +155,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use async_trait::async_trait;
@@ -1181,6 +1182,7 @@ async fn outbound_enforce_substrate_forward_copy_return_splice_asymmetry() {
         enforcement,
         Arc::clone(&resolve),
         Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(&pki, Some(VETH_H.to_owned()));
     worker.start_alloc(&spec).expect(

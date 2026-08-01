@@ -125,6 +125,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use rcgen::string::Ia5String;
@@ -1191,6 +1192,7 @@ fn run_one_regime(
         enforcement,
         Arc::clone(&resolve),
         Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
     worker.start_alloc(&spec).expect(
@@ -1439,6 +1441,7 @@ fn prove_workload_cannot_self_exempt(
         enforcement,
         Arc::clone(&resolve),
         Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
     ));
     let spec = build_client_spec(pki, Some(VETH_H.to_owned()));
     worker.start_alloc(&spec).expect("start_alloc (self-exempt probe)");

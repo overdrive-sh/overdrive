@@ -36,6 +36,7 @@ use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state — the SAME
@@ -204,5 +205,10 @@ pub fn build_worker() -> Arc<MtlsInterceptWorker> {
         Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
     let resolve: Arc<dyn MtlsResolve> =
         Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
-    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())))
+    Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
+    ))
 }

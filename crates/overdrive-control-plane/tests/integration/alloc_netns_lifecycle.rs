@@ -86,6 +86,7 @@ use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::ExecDriver;
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use tempfile::TempDir;
 
@@ -115,7 +116,12 @@ fn build_worker() -> Arc<MtlsInterceptWorker> {
             std::collections::BTreeMap::new(),
             overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
         ));
-    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())))
+    Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
+    ))
 }
 
 /// A shared in-process `SimObservationStore` — the dispatch path writes the

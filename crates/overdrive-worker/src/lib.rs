@@ -25,6 +25,12 @@ pub mod driver;
 // companions) with RAII teardown, and the outbound/inbound leg-acquire that
 // builds the `InterceptedConnection` for `MtlsEnforcement::enforce`.
 pub mod mtls_intercept;
+// mtls-intercept-install-fault-seam (GH #250, ADR-0076) — the per-alloc
+// intercept-INSTALL driven port (`MtlsIntercept`), its RAII guard marker
+// trait (`InterceptGuard`), and the production `HostMtlsIntercept` binding.
+// Makes the three privileged install primitives `start_alloc` performs
+// substitutable at the composition root.
+pub mod mtls_intercept_port;
 // transparent-mtls-host-socket (D-MTLS-16 / D-MTLS-17, GH #26; step 06-03) —
 // the (β) worker-side mTLS intercept-and-enforce lifecycle component the
 // action-shim fires alongside the driver hooks. Held by `AppState` as
