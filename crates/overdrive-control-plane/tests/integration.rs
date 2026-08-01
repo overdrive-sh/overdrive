@@ -97,6 +97,16 @@ mod integration {
     /// ADR-0025 § 3 step 5 (amended by ADR-0029). `start_local_node`
     /// in `run_server_with_obs_and_driver` writes the row. See
     /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
+    /// mtls-intercept-install-fault-seam step 04-01 (GH #250 / ADR-0076 §5.2) —
+    /// Tier-3 acceptance for the intercept-install FAIL-CLOSED CALL-SITE
+    /// ORDERING. Drives the PRODUCTION `action_shim::dispatch` on both the
+    /// `StartAllocation` and `RestartAllocation` arms with a `SimMtlsIntercept`
+    /// armed to refuse the leg-F bind: the arms `return` BEFORE
+    /// `release_for_exit_emission` / `on_alloc_running`, so a now-`Failed`
+    /// allocation never releases its exit watcher. Root + real `ip netns`
+    /// (the netns provision seam is gated on the same `mtls_worker.is_some()`
+    /// flag); SKIP otherwise.
+    mod mtls_install_fail_closed;
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
