@@ -517,6 +517,14 @@ components:
           - 'null'
           format: int32
           description: Phase 2+ — exit code observation. `None` in Phase 1.
+        last_terminated:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/LastTerminatedBody'
+            description: |-
+              The most recent terminal observation this allocation survived
+              (ADR-0078 § D1). `None` when the allocation has never been observed
+              terminal.
         last_transition:
           oneOf:
           - type: 'null'
@@ -538,6 +546,13 @@ components:
         resources:
           $ref: '#/components/schemas/ResourcesBody'
           description: Resource envelope this allocation requested.
+        restart_count:
+          type: integer
+          format: int32
+          description: |-
+            Monotone count of observed restarts for this allocation
+            (ADR-0078 § D3). `0` for an allocation that has never restarted.
+          minimum: 0
         started_at:
           type:
           - string
@@ -844,6 +859,52 @@ components:
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
+    LastTerminatedBody:
+      type: object
+      description: |-
+        Verbatim wire projection of the durable `AllocStatusRow.last_terminated`
+        (ADR-0078 § D1). `AllocState` → [`AllocStateWire`] and
+        `LogicalTimestamp` → the `(c=N,w=W)` string are the two conversions the
+        row body already performs elsewhere; every other field is byte-verbatim.
+
+        A separate wire type is REQUIRED, not gratuitous: `LastTerminated`
+        embeds `AllocState` and `LogicalTimestamp`, neither of which derives
+        serde or `ToSchema`. This mirrors the established projection; it does
+        not add a pattern.
+      required:
+      - state
+      - terminated_at
+      properties:
+        detail:
+          type:
+          - string
+          - 'null'
+        reason:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TransitionReason'
+        started_at:
+          type: string
+          description: |-
+            Wall clock at which the TERMINATED generation reached Running.
+            `UnixInstant` verbatim — the wire already carries this type directly
+            (`IssuedCertSummary.not_after`) and the renderer already renders it
+            via `Display`, so no new convention.
+        state:
+          $ref: '#/components/schemas/AllocStateWire'
+        stderr_tail:
+          type:
+          - string
+          - 'null'
+        terminal:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TerminalCondition'
+        terminated_at:
+          type: string
+          description: |-
+            `(c=<counter>,w=<writer>)` — the same coordinate shape
+            `AllocStatusRowBody.started_at` already carries.
     Listener:
       type: object
       description: |-
@@ -2068,6 +2129,368 @@ components:
             feature's scope).
         workload_id:
           type: string
+    TerminalCondition:
+      oneOf:
+      - type: object
+        description: |-
+          `WorkloadLifecycle`: restart budget reached; no further attempts
+          will be scheduled. `attempts` is the count consumed at the
+          moment of the deciding tick.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `WorkloadLifecycle`: restart budget reached; no further attempts
+              will be scheduled. `attempts` is the count consumed at the
+              moment of the deciding tick.
+            required:
+            - attempts
+            properties:
+              attempts:
+                type: integer
+                format: int32
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - backoff_exhausted
+      - type: object
+        description: |-
+          `WorkloadLifecycle`: explicit operator stop converged. The
+          allocation reached `Stopped` because the operator (or the
+          reconciler itself) requested it, not because of a failure.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `WorkloadLifecycle`: explicit operator stop converged. The
+              allocation reached `Stopped` because the operator (or the
+              reconciler itself) requested it, not because of a failure.
+            required:
+            - by
+            properties:
+              by:
+                $ref: '#/components/schemas/StoppedBy'
+          kind:
+            type: string
+            enum:
+            - stopped
+      - type: object
+        description: |-
+          Forward-compat for WASM third-party reconcilers per
+          whitepaper §18. `type_name` is a CamelCase identifier scoped
+          by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
+          `detail` is opaque bytes the reconciler may attach.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              Forward-compat for WASM third-party reconcilers per
+              whitepaper §18. `type_name` is a CamelCase identifier scoped
+              by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
+              `detail` is opaque bytes the reconciler may attach.
+            required:
+            - type_name
+            properties:
+              detail:
+                type:
+                - array
+                - 'null'
+                items:
+                  type: integer
+                  format: int32
+                  minimum: 0
+              type_name:
+                type: string
+          kind:
+            type: string
+            enum:
+            - custom
+      - type: object
+        description: |-
+          `WorkloadLifecycle`: workload exited cleanly (Job-kind natural
+          termination, exit code `0` is the canonical success but the
+          variant carries the observed `exit_code` verbatim because the
+          publication boundary owns the cleanliness classification —
+          downstream consumers must not redo the comparison from a row
+          they no longer hold the policy for). Per ADR-0037 Amendment
+          2026-05-10: typed natural-exit terminals replace the previous
+          reliance on `AllocStatusRow.exit_code` + heuristic mapping at
+          every consumer.
+
+          Emission lands in slice 02-04 (WorkloadLifecycle reconciler
+          natural-exit emission); the row-shape change lands in 02-05.
+          This variant exists at the type level from slice 02a (this
+          step) so every downstream `match` site is forward-compatible
+          with the additive shape ahead of runtime emission.
+
+          **Additive position**: appended after `Custom` to keep the
+          pre-existing rkyv discriminants (`BackoffExhausted=0`,
+          `Stopped=1`, `Custom=2`) stable. This variant takes
+          discriminant `3`, `Failed` takes discriminant `4`. Existing
+          archived rows decode unchanged.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `WorkloadLifecycle`: workload exited cleanly (Job-kind natural
+              termination, exit code `0` is the canonical success but the
+              variant carries the observed `exit_code` verbatim because the
+              publication boundary owns the cleanliness classification —
+              downstream consumers must not redo the comparison from a row
+              they no longer hold the policy for). Per ADR-0037 Amendment
+              2026-05-10: typed natural-exit terminals replace the previous
+              reliance on `AllocStatusRow.exit_code` + heuristic mapping at
+              every consumer.
+
+              Emission lands in slice 02-04 (WorkloadLifecycle reconciler
+              natural-exit emission); the row-shape change lands in 02-05.
+              This variant exists at the type level from slice 02a (this
+              step) so every downstream `match` site is forward-compatible
+              with the additive shape ahead of runtime emission.
+
+              **Additive position**: appended after `Custom` to keep the
+              pre-existing rkyv discriminants (`BackoffExhausted=0`,
+              `Stopped=1`, `Custom=2`) stable. This variant takes
+              discriminant `3`, `Failed` takes discriminant `4`. Existing
+              archived rows decode unchanged.
+            required:
+            - exit_code
+            properties:
+              exit_code:
+                type: integer
+                format: int32
+          kind:
+            type: string
+            enum:
+            - completed
+      - type: object
+        description: |-
+          `WorkloadLifecycle`: workload exited with a non-zero status (Job-kind
+          natural termination interpreted as failure by the reconciler).
+          Per ADR-0037 Amendment 2026-05-10. The `exit_code` field
+          carries the observed status verbatim — the reconciler does
+          the success/failure classification at the publication
+          boundary and the variant identity (`Completed` vs `Failed`)
+          IS the classification. Downstream consumers branch on the
+          variant, never on `exit_code != 0`.
+
+          Common Unix exit codes operators see in this variant:
+          `1` (generic failure), `127` (command-not-found),
+          `137` (SIGKILL — typically OOM under cgroup-v2),
+          `255` (generic shell failure). The full `i32` range is
+          supported so the variant can carry signal-encoded statuses
+          if a future driver emits them. `None` means the process was
+          killed by a signal without producing an exit code (OOM-killer,
+          external SIGKILL).
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `WorkloadLifecycle`: workload exited with a non-zero status (Job-kind
+              natural termination interpreted as failure by the reconciler).
+              Per ADR-0037 Amendment 2026-05-10. The `exit_code` field
+              carries the observed status verbatim — the reconciler does
+              the success/failure classification at the publication
+              boundary and the variant identity (`Completed` vs `Failed`)
+              IS the classification. Downstream consumers branch on the
+              variant, never on `exit_code != 0`.
+
+              Common Unix exit codes operators see in this variant:
+              `1` (generic failure), `127` (command-not-found),
+              `137` (SIGKILL — typically OOM under cgroup-v2),
+              `255` (generic shell failure). The full `i32` range is
+              supported so the variant can carry signal-encoded statuses
+              if a future driver emits them. `None` means the process was
+              killed by a signal without producing an exit code (OOM-killer,
+              external SIGKILL).
+            properties:
+              exit_code:
+                type:
+                - integer
+                - 'null'
+                format: int32
+          kind:
+            type: string
+            enum:
+            - failed
+      - type: object
+        description: |-
+          `ServiceLifecycle`: the Service alloc has converged to a
+          stable, fully-probed Running state per ADR-0055 / ADR-0056.
+          All declared startup probes (or the inferred default per
+          ADR-0058) reported Pass; the alloc is considered Stable
+          from the publication boundary onward.
+
+          `settled_in_ms` is the elapsed wall-clock duration (in
+          milliseconds) from alloc start to the deciding tick that
+          observed the last-to-Pass startup probe. `witness` names
+          which probe's Pass moved the reconciler to Stable (see
+          [`ProbeWitness`] for the per-field semantics).
+
+          **Additive position**: appended after `Failed` to keep the
+          pre-existing rkyv discriminants (`BackoffExhausted=0`,
+          `Stopped=1`, `Custom=2`, `Completed=3`, `Failed=4`) stable.
+          This variant takes discriminant `5`. Existing archived rows
+          decode unchanged (the canonical `Option<TerminalCondition>`
+          embeddings in `AllocStatusRowV1` continue to decode through
+          the same `AllocStatusRowEnvelope::V1` shape; the V1 fixture
+          is regenerated against the new canonical layout per
+          `.claude/rules/development.md` § "rkyv schema evolution"
+          greenfield single-cut exception, because no shipped consumer
+          has persisted bytes against the pre-existing V1 layout).
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `ServiceLifecycle`: the Service alloc has converged to a
+              stable, fully-probed Running state per ADR-0055 / ADR-0056.
+              All declared startup probes (or the inferred default per
+              ADR-0058) reported Pass; the alloc is considered Stable
+              from the publication boundary onward.
+
+              `settled_in_ms` is the elapsed wall-clock duration (in
+              milliseconds) from alloc start to the deciding tick that
+              observed the last-to-Pass startup probe. `witness` names
+              which probe's Pass moved the reconciler to Stable (see
+              [`ProbeWitness`] for the per-field semantics).
+
+              **Additive position**: appended after `Failed` to keep the
+              pre-existing rkyv discriminants (`BackoffExhausted=0`,
+              `Stopped=1`, `Custom=2`, `Completed=3`, `Failed=4`) stable.
+              This variant takes discriminant `5`. Existing archived rows
+              decode unchanged (the canonical `Option<TerminalCondition>`
+              embeddings in `AllocStatusRowV1` continue to decode through
+              the same `AllocStatusRowEnvelope::V1` shape; the V1 fixture
+              is regenerated against the new canonical layout per
+              `.claude/rules/development.md` § "rkyv schema evolution"
+              greenfield single-cut exception, because no shipped consumer
+              has persisted bytes against the pre-existing V1 layout).
+            required:
+            - settled_in_ms
+            - witness
+            properties:
+              settled_in_ms:
+                type: integer
+                format: int64
+                minimum: 0
+              witness:
+                $ref: '#/components/schemas/ProbeWitness'
+          kind:
+            type: string
+            enum:
+            - stable
+      - type: object
+        description: |-
+          `ServiceLifecycle`: the Service alloc transitioned to a
+          terminal Failed state per ADR-0055 / ADR-0056. The `reason`
+          carries the typed failure cause (startup-timeout / startup-
+          probe-failed / early-exit / liveness-probe-failed); see
+          [`ServiceFailureReason`] for the per-variant semantics.
+
+          **Additive position**: appended after `Stable` and takes
+          discriminant `6`. Same greenfield rationale as `Stable`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              `ServiceLifecycle`: the Service alloc transitioned to a
+              terminal Failed state per ADR-0055 / ADR-0056. The `reason`
+              carries the typed failure cause (startup-timeout / startup-
+              probe-failed / early-exit / liveness-probe-failed); see
+              [`ServiceFailureReason`] for the per-variant semantics.
+
+              **Additive position**: appended after `Stable` and takes
+              discriminant `6`. Same greenfield rationale as `Stable`.
+            required:
+            - reason
+            properties:
+              reason:
+                $ref: '#/components/schemas/ServiceFailureReason'
+          kind:
+            type: string
+            enum:
+            - service_failed
+      description: |-
+        Reconciler-emitted classification of *why* an allocation reached a
+        terminal lifecycle state.
+
+        Per ADR-0037 §1, this enum is the *publication boundary* between
+        reconciler-private View state (`restart_counts`,
+        `last_failure_seen_at`, the live backoff policy) and downstream
+        consumers (the durable `AllocStatusRow.terminal` field, the
+        streaming `LifecycleEvent.terminal` field, the HTTP
+        `RestartBudget.exhausted` projection). The reconciler's *decision*
+        rides on this type — it is not a derived value computed by
+        downstream consumers from inputs they would otherwise need to read
+        out of reconciler memory. See `.claude/rules/development.md`
+        §"Persist inputs, not derived state" for the layering rule the
+        ADR honours.
+
+        # Variants
+
+        - [`Self::BackoffExhausted`] — `WorkloadLifecycle` reached its restart
+          budget at the deciding tick. `attempts` is the count *consumed*
+          at that moment (in Phase 1, the budget is hard-coded; in
+          future phases the same variant carries the post-policy attempts).
+        - [`Self::Stopped`] — explicit operator stop converged. The
+          allocation reached `Stopped` because the operator (or the
+          reconciler itself) requested it, not because of a failure. The
+          inner [`StoppedBy`] reuses ADR-0032's existing initiator enum.
+        - [`Self::Custom`] — forward-compat for WASM third-party
+          reconcilers per whitepaper §18 (*Extension Model*). `type_name`
+          is a CamelCase identifier scoped by the reconciler's canonical
+          name (e.g. `"vendor.io/quota.QuotaExhausted"`); `detail` is
+          opaque rkyv-encoded bytes the reconciler may attach. Streaming
+          forwards `Custom` verbatim; well-known first-party variants stay
+          in the closed set above and are compile-time-checked at every
+          consumer.
+
+        # `SemVer` convention
+
+        Per ADR-0037 §3 (mirroring K8s `Condition.Reason` shape):
+
+        - **Adding a new well-known variant** — additive minor; existing
+          consumers use [`Self::Custom`] / a wildcard arm + warn-and-skip
+          shape until they explicitly handle the new variant.
+        - **Renaming or removing a variant** — major-bump breaking change.
+          The `#[non_exhaustive]` attribute on this enum is what makes the
+          minor-bump path safe: external `match` sites are required to
+          carry a wildcard arm, so adding a new variant cannot silently
+          change their behaviour.
+
+        # Field-shape rationale
+
+        `String` (not `Box<TerminalCondition>` or a recursive enum) is
+        chosen for `Custom.type_name` for the same reason
+        `RestartBudgetExhausted.last_cause_summary` is `String` on
+        [`TransitionReason`]: rkyv's `Archive` derive cannot resolve a
+        recursive enum, and the type-name is meant to be opaque to the
+        platform anyway — the reconciler emits a stable string id, the
+        consumer renders it. `Option<Vec<u8>>` for `detail` mirrors
+        rkyv-supported sum types and lets a reconciler attach a structured
+        payload if it has one without forcing every emitter to.
     TransitionReason:
       oneOf:
       - type: object

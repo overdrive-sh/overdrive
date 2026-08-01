@@ -143,6 +143,8 @@ async fn seed_running_row_with_addr(
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: Some(addr),
+        last_terminated: None,
+        restart_count: 0,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row)))
         .await

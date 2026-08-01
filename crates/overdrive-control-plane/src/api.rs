@@ -366,6 +366,47 @@ pub struct AllocStatusRowBody {
     /// strings).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Monotone count of observed restarts for this allocation
+    /// (ADR-0078 § D3). `0` for an allocation that has never restarted.
+    #[serde(default)]
+    pub restart_count: u32,
+    /// The most recent terminal observation this allocation survived
+    /// (ADR-0078 § D1). `None` when the allocation has never been observed
+    /// terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_terminated: Option<LastTerminatedBody>,
+}
+
+/// Verbatim wire projection of the durable `AllocStatusRow.last_terminated`
+/// (ADR-0078 § D1). `AllocState` → [`AllocStateWire`] and
+/// `LogicalTimestamp` → the `(c=N,w=W)` string are the two conversions the
+/// row body already performs elsewhere; every other field is byte-verbatim.
+///
+/// A separate wire type is REQUIRED, not gratuitous: `LastTerminated`
+/// embeds `AllocState` and `LogicalTimestamp`, neither of which derives
+/// serde or `ToSchema`. This mirrors the established projection; it does
+/// not add a pattern.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct LastTerminatedBody {
+    pub state: AllocStateWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<TransitionReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_tail: Option<String>,
+    /// Wall clock at which the TERMINATED generation reached Running.
+    /// `UnixInstant` verbatim — the wire already carries this type directly
+    /// (`IssuedCertSummary.not_after`) and the renderer already renders it
+    /// via `Display`, so no new convention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = String)]
+    pub started_at: Option<UnixInstant>,
+    /// `(c=<counter>,w=<writer>)` — the same coordinate shape
+    /// `AllocStatusRowBody.started_at` already carries.
+    pub terminated_at: String,
 }
 
 /// Response for `GET /v1/nodes`. Phase 1 always renders an empty

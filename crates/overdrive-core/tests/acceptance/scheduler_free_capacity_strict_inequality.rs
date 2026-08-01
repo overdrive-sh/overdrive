@@ -100,6 +100,8 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         // Host-netns fixture — no canonical workload address
         // (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }];
 
     let result = schedule(&nodes, &job.resources, &allocs);

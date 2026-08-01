@@ -31,7 +31,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverType,
 };
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
 };
 use overdrive_core::transition_reason::TerminalCondition;
@@ -269,18 +269,20 @@ fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
 // ADR-0032 §3 + ADR-0037 §4 + slice 02-06 (stderr_tail propagation)
 // each grew this list deliberately.
 #[allow(clippy::too_many_arguments)]
-fn build_alloc_status_row(
+pub(crate) fn build_alloc_status_row(
     alloc_id: AllocationId,
     workload_id: WorkloadId,
     node_id: NodeId,
     state: AllocState,
     // The row's LWW stamp, a REQUIRED parameter so every writer must decide
-    // it explicitly: `timestamp_for(tick, node_id.clone())` for an ordinary
-    // per-tick write, `superseding_timestamp(tick, prior)` for a row that
-    // replaces another row written in the SAME tick. Deriving it internally
-    // from the tick is what let a superseding `Failed` row silently inherit
-    // the counter of the `Running` row it had to dominate (GH #250) — the
-    // same required-parameter discipline `workload_addr` got for GH #248.
+    // it explicitly: `LogicalTimestamp::dominating(tick.tick, node_id, prior)`
+    // where `prior` is the `updated_at` of the row currently stored at this
+    // alloc's key (`None` only when genuinely no row exists). Deriving it
+    // from the tick ALONE is what let a superseding `Failed` row silently
+    // inherit the counter of the `Running` row it had to dominate (GH #250),
+    // and what made every write for a surviving alloc lose the LWW merge for
+    // the whole post-restart window (ADR-0077) — the same required-parameter
+    // discipline `workload_addr` got for GH #248.
     updated_at: LogicalTimestamp,
     reason: Option<TransitionReason>,
     detail: Option<String>,
@@ -306,7 +308,37 @@ fn build_alloc_status_row(
     // prior row's address (the dial-by-name walking-skeleton backend-drop;
     // the residual host_ipv4-fallback masking is tracked in #248).
     workload_addr: Option<std::net::Ipv4Addr>,
+    // ADR-0078 § D2. REQUIRED: the row this write supersedes at this alloc's
+    // LWW key (`None` ONLY when genuinely no row exists). The builder derives
+    // `last_terminated` and `restart_count` from it via
+    // `CrashFacts::advance(prior, state)` — using the SAME `state` it writes
+    // onto the row, so the two cannot be computed against different states.
+    // Callers never construct a `CrashFacts`. Same required-parameter
+    // discipline `updated_at` / `started_at` / `workload_addr` already carry:
+    // the compiler enumerates every writer, and the forget-to-forward bug
+    // class (which has bitten twice) cannot recur silently.
+    prior: Option<&AllocStatusRow>,
 ) -> AllocStatusRow {
+    // ADR-0078 § D1 / § D2: the two crash-observability fields are computed
+    // together, here, from the SAME `state` this builder writes onto the row.
+    // No call site names a `CrashFacts`, so "the facts were derived against a
+    // different state than the row carries" is not expressible.
+    let facts = CrashFacts::advance(prior, state);
+    if let Some(superseded) = prior
+        && facts.restart_count > superseded.restart_count
+    {
+        // The single increment site in the system — the only place a restart
+        // is observed landing. Emitted here so a crash-and-recover is
+        // *alertable*, not merely pollable (ADR-0078 § D2).
+        tracing::info!(
+            name: "alloc.restart.observed",
+            alloc = %alloc_id,
+            workload = %workload_id,
+            restart_count = facts.restart_count,
+            prior_state = %superseded.state,
+            "allocation recovered from a terminal observation",
+        );
+    }
     AllocStatusRow {
         alloc_id,
         workload_id,
@@ -341,6 +373,11 @@ fn build_alloc_status_row(
         // non-Running alloc is not a live backend). See #248 for the
         // residual host_ipv4-fallback masking.
         workload_addr,
+        // ADR-0078 § D1 / § D2: both derived by `CrashFacts::advance` above
+        // from the `prior` row and THIS row's `state`. Destructured onto the
+        // two fields as a unit so they cannot drift.
+        last_terminated: facts.last_terminated,
+        restart_count: facts.restart_count,
     }
 }
 
@@ -393,11 +430,12 @@ fn build_lifecycle_event(
 ///    [`TransitionReason::MtlsInterceptInstallFailed`] (`stage` = the install
 ///    step that failed; `detail` = the verbatim error `Display`) — mirroring
 ///    the existing `StartRejected → Failed` precedent. The superseding row's
-///    LWW stamp comes from [`superseding_timestamp`], NOT [`timestamp_for`]:
-///    both rows are written in the SAME tick by the SAME node, so a
-///    tick-derived counter would tie and the `Failed` row would be silently
-///    dropped, leaving the alloc durably recorded `Running` with no
-///    interception installed (GH #250 / ADR-0076 § Decision 7).
+///    LWW stamp comes from [`LogicalTimestamp::dominating`] against the
+///    `Running` row it replaces: both rows are written in the SAME tick by
+///    the SAME node, so a tick-derived counter would tie and the `Failed`
+///    row would be silently dropped, leaving the alloc durably recorded
+///    `Running` with no interception installed (GH #250 / ADR-0076
+///    § Decision 7, generalised by ADR-0077 § D1).
 /// 3. Emits the lifecycle event for the `Failed` transition.
 ///
 /// It does NOT call `driver.release_for_exit_emission` — both call sites
@@ -441,7 +479,11 @@ async fn fail_closed_on_mtls_install(
         running_row.workload_id.clone(),
         running_row.node_id.clone(),
         AllocState::Failed,
-        superseding_timestamp(tick, running_row),
+        LogicalTimestamp::dominating(
+            tick.tick,
+            running_row.node_id.clone(),
+            Some(&running_row.updated_at),
+        ),
         Some(reason),
         Some(cause.to_string()),
         None,
@@ -452,6 +494,11 @@ async fn fail_closed_on_mtls_install(
         // not a live backend (the bridge renders only `state == Running`),
         // so it carries no per-instance address.
         None,
+        // ADR-0078 § D2 site 1: the row this write supersedes at the alloc's
+        // LWW key is the `Running` row this same dispatch frame just wrote
+        // (the fail-closed supersession shape). `advance` FORWARDS both crash
+        // fields — the prior is `Running`, so no snapshot and no increment.
+        Some(running_row),
     );
     obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
     emit_event(bus, build_lifecycle_event(&failed_row, prior_state, TransitionSource::Reconciler));
@@ -521,9 +568,24 @@ async fn fail_closed_on_netns_provision(
     kind: overdrive_core::aggregate::WorkloadKind,
     prior_state: AllocStateWire,
     cause: TransitionReason,
+    // The row currently stored at this alloc's key, or `None` iff none
+    // exists. REQUIRED (no default, no builder) so the caller must decide it
+    // explicitly — the same discipline `build_alloc_status_row`'s
+    // `updated_at` / `workload_addr` / `prior` carry. A tick-derived stamp
+    // here loses the LWW merge for the entire post-restart window (ADR-0077
+    // § D2 site 1, correcting ADR-0076 § 7c's "any prior row is from an
+    // EARLIER tick" premise).
+    //
+    // ADR-0078 § D2 site 2 REPLACES ADR-0077 § D2 site 1's
+    // `prior_updated_at: Option<&LogicalTimestamp>` with the whole row —
+    // strictly more informative, and the stamp is derived from it internally
+    // below. Carrying BOTH would be two parameters derived from one row, with
+    // a standing risk they disagree.
+    prior: Option<&AllocStatusRow>,
 ) -> Result<(), ShimError> {
     let detail = cause.human_readable();
-    let updated_at = timestamp_for(tick, node_id.clone());
+    let updated_at =
+        LogicalTimestamp::dominating(tick.tick, node_id.clone(), prior.map(|r| &r.updated_at));
     let failed_row = build_alloc_status_row(
         alloc_id,
         workload_id,
@@ -539,6 +601,10 @@ async fn fail_closed_on_netns_provision(
         // Pre-Running provision failure — the alloc never reached Running
         // and owns no per-instance address.
         None,
+        // ADR-0078 § D2 site 2: `advance` FORWARDS both crash fields — the
+        // prior is `Running` / `Pending` / absent, never terminal, so this
+        // pre-Running failure neither snapshots nor increments.
+        prior,
     );
     obs.write(ObservationRow::AllocStatus(Box::new(failed_row.clone()))).await?;
     emit_event(bus, build_lifecycle_event(&failed_row, prior_state, TransitionSource::Reconciler));
@@ -1073,11 +1139,23 @@ async fn dispatch_single(
             // sites so the row-state and teardown decisions cannot drift.
             let is_stable = matches!(terminal, Some(TerminalCondition::Stable { .. }));
             let finalized_state = if is_stable { prior_row.state } else { AllocState::Failed };
-            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
+            let updated_at = LogicalTimestamp::dominating(
+                tick.tick,
+                prior_row.node_id.clone(),
+                Some(&prior_row.updated_at),
+            );
+            // ADR-0078 § D2 borrow-ordering constraint: `prior` is supplied as
+            // a borrow of the SAME row whose `workload_id` / `node_id` feed
+            // the builder's earlier parameters. Rust resolves argument
+            // expressions left-to-right, so those two identity fields are
+            // cloned out FIRST and the row itself stays alive to be borrowed
+            // in the final position.
+            let workload_id = prior_row.workload_id.clone();
+            let node_id = prior_row.node_id.clone();
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.workload_id,
-                prior_row.node_id,
+                workload_id,
+                node_id,
                 finalized_state,
                 updated_at,
                 prior_row.reason.clone(),
@@ -1099,6 +1177,16 @@ async fn dispatch_single(
                 // Running (the Stable success claim); a genuine terminal
                 // drops it to `None` — a dead alloc is not a live backend.
                 if is_stable { prior_workload_addr } else { None },
+                // ADR-0078 § D2 site 3: FORWARDS, it does NOT snapshot. The
+                // dominant case is `terminal → terminal` — an already-`Failed`
+                // row re-stamped with a terminal claim while forward-carrying
+                // that same row's `reason` / `detail` / `stderr_tail` /
+                // `started_at`. Snapshotting here would put those five facts
+                // on one row TWICE (once as row fields, once inside
+                // `last_terminated`), the two-sources-of-truth duplication
+                // § D1 rejects. The `Stable` arm forwards too — the prior is
+                // `Running`.
+                Some(&prior_row),
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:
@@ -1145,9 +1233,22 @@ async fn dispatch_single(
             // the allocation's state before this transition. For first-
             // seen allocs (no prior row) default to Pending — consistent
             // with how existing tests model the initial transition.
-            let prior_state: AllocStateWire = find_prior_alloc_row(obs, &alloc_id)
-                .await?
-                .map_or(AllocStateWire::Pending, |r| r.state.into());
+            //
+            // The row's `updated_at` is bound alongside `state` (ADR-0077
+            // § D2 site 3): this lookup already happens, so prior-derived
+            // stamping on the alloc-start path costs ZERO extra store
+            // reads — the value was simply being discarded.
+            //
+            // ADR-0078 § D2 site 4: `prior_row` must STAY ALIVE through the
+            // `driver.start` call below, because the final `state` (and hence
+            // the crash facts derived from it) is not known until the driver
+            // has answered. Neither binding below consumes it —
+            // `prior_updated_at` clones the stamp rather than moving it.
+            let prior_row = find_prior_alloc_row(obs, &alloc_id).await?;
+            let prior_state: AllocStateWire =
+                prior_row.as_ref().map_or(AllocStateWire::Pending, |r| r.state.into());
+            let prior_updated_at: Option<LogicalTimestamp> =
+                prior_row.as_ref().map(|r| r.updated_at.clone());
 
             // C3 PROVISION SEAM (D-TME-12 G1/G2/G3 + JOIN-2/6 + AC14, step
             // 04-01): assign the slot, provision the per-workload netns + veth,
@@ -1183,6 +1284,7 @@ async fn dispatch_single(
                     kind,
                     prior_state,
                     cause,
+                    prior_row.as_ref(),
                 )
                 .await;
             }
@@ -1248,7 +1350,8 @@ async fn dispatch_single(
             // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
             let workload_addr =
                 if state == AllocState::Running { spec.workload_addr } else { None };
-            let updated_at = timestamp_for(tick, node_id.clone());
+            let updated_at =
+                LogicalTimestamp::dominating(tick.tick, node_id.clone(), prior_updated_at.as_ref());
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
@@ -1262,6 +1365,11 @@ async fn dispatch_single(
                 kind,
                 started_at,
                 workload_addr,
+                // ADR-0078 § D2 site 4: `(None, 0)` on a genuinely fresh key.
+                // On a re-dispatch against a surviving row it forwards, and on
+                // a `terminal → Running` re-dispatch it snapshots + increments
+                // exactly as the RestartAllocation arm does.
+                prior_row.as_ref(),
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -1391,6 +1499,7 @@ async fn dispatch_single(
                     kind,
                     prior_state,
                     cause,
+                    Some(&prior_row),
                 )
                 .await;
             }
@@ -1467,11 +1576,20 @@ async fn dispatch_single(
             // attempt.
             let workload_addr =
                 if state == AllocState::Running { spec.workload_addr } else { None };
-            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
+            let updated_at = LogicalTimestamp::dominating(
+                tick.tick,
+                prior_row.node_id.clone(),
+                Some(&prior_row.updated_at),
+            );
+            // ADR-0078 § D2 borrow-ordering constraint — see the FinalizeFailed
+            // arm above. Clone the two identity fields first so `prior_row`
+            // survives to be borrowed in the final position.
+            let workload_id = prior_row.workload_id.clone();
+            let node_id = prior_row.node_id.clone();
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.workload_id,
-                prior_row.node_id,
+                workload_id,
+                node_id,
                 state,
                 updated_at,
                 reason,
@@ -1481,6 +1599,13 @@ async fn dispatch_single(
                 kind,
                 started_at,
                 workload_addr,
+                // ADR-0078 § D2 site 5 — THE crash-observability site. On a
+                // successful restart the prior is terminal and `state` is
+                // `Running`, so `advance` SNAPSHOTS the superseded terminal
+                // into `last_terminated` and INCREMENTS `restart_count`. On a
+                // driver-rejected restart (`state == Failed`) it forwards both
+                // unchanged: nothing restarted.
+                Some(&prior_row),
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -1577,11 +1702,20 @@ async fn dispatch_single(
             // (Pending → Stopped), the prior value is `None` and
             // stays `None`.
             let prior_started_at = prior_row.started_at;
-            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
+            let updated_at = LogicalTimestamp::dominating(
+                tick.tick,
+                prior_row.node_id.clone(),
+                Some(&prior_row.updated_at),
+            );
+            // ADR-0078 § D2 borrow-ordering constraint — see the FinalizeFailed
+            // arm above. Clone the two identity fields first so `prior_row`
+            // survives to be borrowed in the final position.
+            let workload_id = prior_row.workload_id.clone();
+            let node_id = prior_row.node_id.clone();
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.workload_id,
-                prior_row.node_id,
+                workload_id,
+                node_id,
                 AllocState::Terminated,
                 updated_at,
                 Some(TransitionReason::Stopped {
@@ -1596,6 +1730,12 @@ async fn dispatch_single(
                 // bridge renders only `state == Running`), so it carries no
                 // per-instance address.
                 None,
+                // ADR-0078 § D2 site 6: FORWARDS — `Running → Terminated` is a
+                // non-terminal prior, so no snapshot and no increment. A
+                // Terminated row carrying a prior generation's
+                // `last_terminated` keeps that history visible on the durable
+                // surface.
+                Some(&prior_row),
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // Service-health-check-probes step 01-03d / ADR-0054 § 2:
@@ -1733,46 +1873,6 @@ async fn dispatch_single(
             issue_svid::dispatch_drop(&action, identity);
             Ok(())
         }
-    }
-}
-
-/// Build a `LogicalTimestamp` from the current tick. The shim writes
-/// every observation row with `(counter = tick.tick + 1, writer = node_id)`
-/// so two writes for the same alloc on different ticks are correctly
-/// ordered under LWW.
-///
-/// # Two writes in the SAME tick are NOT ordered by this function
-///
-/// The counter derives from the tick alone, so two rows written for the
-/// same alloc, by the same node, inside ONE tick carry a byte-identical
-/// `(counter, writer)` — and [`LogicalTimestamp::dominates`] returns
-/// `false` on an equal counter with an equal writer. The second row would
-/// LOSE the last-write-wins merge and be silently dropped by both
-/// `ObservationStore` adapters. A row written to SUPERSEDE another row in
-/// the same tick MUST use [`superseding_timestamp`] instead.
-const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
-    LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
-}
-
-/// Build a `LogicalTimestamp` for a row written to SUPERSEDE `superseded`
-/// **within the same tick**, guaranteeing it strictly dominates under LWW.
-///
-/// [`timestamp_for`] alone cannot do this: it derives its counter from the
-/// tick, so a same-tick supersede would tie with the row it must replace
-/// and be silently discarded (GH #250 / ADR-0076 § Decision 7). The counter
-/// therefore derives from the row being superseded. `max` against the tick
-/// base keeps the stamp correct even when the superseded row is BEHIND the
-/// current tick, and single-sources the base from [`timestamp_for`] so the
-/// two cannot drift.
-///
-/// Same shape as the exit observer's successor-row write
-/// (`crate::worker::exit_observer`), which has always derived its counter
-/// from the prior row for exactly this reason.
-fn superseding_timestamp(tick: &TickContext, superseded: &AllocStatusRow) -> LogicalTimestamp {
-    let base = timestamp_for(tick, superseded.node_id.clone());
-    LogicalTimestamp {
-        counter: base.counter.max(superseded.updated_at.counter.saturating_add(1)),
-        writer: base.writer,
     }
 }
 
@@ -2250,19 +2350,19 @@ mod fail_closed_mtls_tests {
     }
 
     /// The `updated_at.counter` the seeded `Running` row carries — deliberately
-    /// `TICK + 1`, i.e. EXACTLY what [`timestamp_for`] stamps on a row written
-    /// during [`TICK`]. This models the REAL production shape: the `Running` row
+    /// `TICK + 1`, i.e. EXACTLY the tick floor a row written during [`TICK`]
+    /// resolves to. This models the REAL production shape: the `Running` row
     /// and the superseding `Failed` row are written in the SAME tick by the SAME
     /// node, so a tick-derived counter on the successor would TIE and the
     /// `Failed` row would be silently dropped by LWW (GH #250 / ADR-0076
     /// § Decision 7).
     ///
-    /// The prior value (`0`, against `TICK = 7`) let the helper's tick-derived
-    /// counter clear the seed ARTIFICIALLY — a different-counter shape
-    /// production never produces — which is precisely what masked the defect
-    /// through steps 01-01, 02-01 and 03-01. The successor now dominates only
-    /// because [`superseding_timestamp`] derives its counter from the row being
-    /// superseded.
+    /// The prior value (`0`, against `TICK = 7`) let a tick-derived counter
+    /// clear the seed ARTIFICIALLY — a different-counter shape production never
+    /// produces — which is precisely what masked the defect through steps
+    /// 01-01, 02-01 and 03-01. The successor now dominates only because
+    /// [`LogicalTimestamp::dominating`] derives its counter from the row being
+    /// superseded, with the tick as a mere floor (ADR-0077 § D1).
     const SEEDED_RUNNING_COUNTER: u64 = TICK + 1;
     /// The tick the helper reads its `LogicalTimestamp` from.
     const TICK: u64 = 7;
@@ -2306,6 +2406,8 @@ mod fail_closed_mtls_tests {
             listeners: Vec::new(),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(STARTED_AT_SECS))),
             workload_addr: Some(RUNNING_WORKLOAD_ADDR),
+            last_terminated: None,
+            restart_count: 0,
         }
     }
 

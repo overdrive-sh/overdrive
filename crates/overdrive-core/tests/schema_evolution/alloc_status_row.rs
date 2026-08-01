@@ -6,10 +6,21 @@
 //! signals the schema-evolution violation per ADR-0048 § 1 and
 //! `.claude/rules/testing.md` § "Archive schema-evolution roundtrip".
 //!
-//! **`FIXTURE_V1` is never touched.** Bumping the envelope to `V2`
-//! adds a new `FIXTURE_V2` constant + a new assertion in the same
-//! commit; existing constants stay verbatim. See `development.md`
+//! **`FIXTURE_V<N>` constants are never touched *casually*.** Bumping
+//! the envelope to `V<N+1>` adds a new `FIXTURE_V<N+1>` constant + a new
+//! assertion in the same commit. See `development.md`
 //! § "Version-bump procedure".
+//!
+//! **This envelope carries a documented exception, exercised at every
+//! variant append.** rkyv sizes an enum's inline region to
+//! `max(V1..VN)`, so appending a variant pads every prior variant's
+//! archive and makes the previously-pinned bytes structurally
+//! unreadable through the new envelope. The V2 append (2026-06-22) and
+//! the V3 append (2026-08-01, ADR-0078) each regenerated every prior
+//! `FIXTURE_V<N>`; both regenerations are authorised pre-shipment by
+//! `feedback_single_cut_greenfield_migrations.md` and each is recorded
+//! with a dated entry on the constant it touched. A regeneration
+//! without such an entry is a review rejection.
 
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -20,9 +31,9 @@ use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, AllocStatusRowV2,
-    LogicalTimestamp,
+    AllocStatusRowV3, LastTerminated, LogicalTimestamp,
 };
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 use super::harness::{
     assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
@@ -63,7 +74,23 @@ use super::harness::{
 /// archives `E::latest(canonical)` and asserts tag `1` — the V2
 /// discriminant — at `len - 224`), NOT guessed. Re-pinned in lockstep
 /// with `AllocStatusRowEnvelope::discriminant_offset_from_end()`.
-const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 224;
+///
+/// **Re-pinned 2026-08-01 — 224 → 416 — V3 append (ADR-0078).**
+/// Appending `V3(AllocStatusRowV3)` with its additive
+/// `last_terminated: Option<LastTerminated>` (which inlines an
+/// `Option<TransitionReason>`, an `Option<TerminalCondition>`, an
+/// `Option<UnixInstant>` and a `LogicalTimestamp`) plus a `u32`
+/// `restart_count` grows the outer enum's inline footprint to
+/// `max(V1, V2, V3)`, extending the trailing root structure by 192
+/// bytes: the canonical V1/V2 archive grew 256 → 448 bytes while the
+/// discriminant byte stayed at absolute index 32, so the offset from
+/// the end moved 224 → 416. EMPIRICAL: measured by diffing the
+/// regenerated V1 and V2 archives (the single byte that differs at
+/// absolute index 32 IS the tag) and cross-checked against the V3
+/// archive (496 bytes, tag `2` at absolute index 80 = `len - 416`).
+/// Re-pinned in lockstep with
+/// `AllocStatusRowEnvelope::discriminant_offset_from_end()`.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 416;
 
 /// Canonical V1 *inner payload* pinned by `FIXTURE_V1` below. This is
 /// the historical `AllocStatusRowV1` shape — its archived bytes are
@@ -98,13 +125,15 @@ fn canonical_v1_payload_inner() -> AllocStatusRowV1 {
     }
 }
 
-/// Canonical `Latest` (= V2) projection of the V1 golden payload. The
-/// V1 golden bytes decode through the envelope and the `From<V1> for
-/// V2` chain to exactly this value: every pre-existing field carried
-/// forward verbatim, `workload_addr` defaulted to `None`. Used by the
-/// V1-golden-decode and discriminant-triangulation tests.
+/// Canonical `Latest` (= V3) projection of the V1 golden payload. The
+/// V1 golden bytes decode through the envelope and the
+/// `From<V1> for V2` → `From<V2> for V3` chain to exactly this value:
+/// every pre-existing field carried forward verbatim, `workload_addr`
+/// defaulted to `None`, and the ADR-0078 crash-observability pair
+/// defaulted to `(None, 0)`. Used by the V1-golden-decode and
+/// discriminant-triangulation tests.
 fn canonical_v1_payload() -> AllocStatusRowLatest {
-    AllocStatusRowV2::from(canonical_v1_payload_inner())
+    AllocStatusRowV3::from(AllocStatusRowV2::from(canonical_v1_payload_inner()))
 }
 
 /// A canonical V2 payload (`workload_addr: None`) sharing the V1
@@ -141,9 +170,32 @@ fn canonical_v1_v2_base() -> AllocStatusRowV2 {
 /// deployed consumer, this constant becomes immutable per
 /// `.claude/rules/development.md` § "rkyv schema evolution".
 ///
+/// **Regenerated 2026-08-01 — greenfield, V3 append (ADR-0078).** Same
+/// mechanism as the 2026-06-22 regeneration one version down: appending
+/// `V3(AllocStatusRowV3)` — whose delta is `last_terminated:
+/// Option<LastTerminated>` plus `restart_count: u32` — grows the outer
+/// enum's INLINE footprint to `max(V1, V2, V3)`, so the V1 variant's
+/// inline region is padded by a further 192 bytes and the prior
+/// 256-byte archive is structurally unreadable through the new
+/// 448-byte-shaped envelope. Byte length 256 → 448; the discriminant
+/// byte stays at absolute index 32 (offset-from-end 224 → 416). This
+/// regeneration is authorised by
+/// `feedback_single_cut_greenfield_migrations.md` (this envelope has NO
+/// deployed consumer — Phase-1 single-node; "delete the on-disk redb
+/// file" is the upgrade path) and was NOT silent: ADR-0078 § D4(b)
+/// requires the case that applied to be recorded, and the case that
+/// applied is "the emitted hex differs, so both constants are
+/// regenerated".
+///
+/// The fixture still pins what it must: that a V1-shaped payload
+/// archives, decodes, and projects (via `From<AllocStatusRowV1> for
+/// AllocStatusRowV2` → `From<AllocStatusRowV2> for AllocStatusRowV3`)
+/// to a `Latest` with `workload_addr == None`, `last_terminated ==
+/// None` and `restart_count == 0`.
+///
 /// Produced by running `print_fixture_v1_bytes` (which archives the V1
 /// *variant* explicitly) and pasted verbatim.
-const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000010000000000000000f153650000000000000000000000000000000000000000";
+const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000010000000000000000f153650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 #[test]
 fn alloc_status_row_v1_decodes_through_current_envelope() {
@@ -168,19 +220,129 @@ fn canonical_v2_payload() -> AllocStatusRowV2 {
 /// bump (canonical-workload-address-inbound-tproxy, GH #241), per
 /// `development.md` § "rkyv schema evolution" → "Version-bump
 /// procedure" step 5. The hex was produced by running
-/// `print_fixture_v2_bytes` and pasted verbatim. `FIXTURE_V1` is NOT
-/// touched.
-const FIXTURE_V2: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000001000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000010000000000000000f15365000000000000000000000000010a630006000000";
+/// `print_fixture_v2_bytes` and pasted verbatim.
+///
+/// **Regenerated 2026-08-01 — greenfield, V3 append (ADR-0078).** Same
+/// mechanism and the same authorisation as `FIXTURE_V1`'s
+/// regeneration above (see that constant's docstring): the V3 variant
+/// append grows the outer enum's inline footprint, padding the V2
+/// variant's region and shifting the discriminant. Byte length
+/// 256 → 448. The V2 payload values are UNCHANGED — only the archive
+/// layout moved.
+const FIXTURE_V2: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000001000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000010000000000000000f15365000000000000000000000000010a630006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+/// The `Latest` (= V3) projection of the canonical V2 payload. The V2
+/// golden bytes decode through the envelope and the `From<V2> for V3`
+/// chain to exactly this value: every pre-existing field verbatim
+/// (including `workload_addr = Some(..)`), crash-observability pair
+/// defaulted to `(None, 0)`.
+fn canonical_v2_payload_latest() -> AllocStatusRowLatest {
+    AllocStatusRowV3::from(canonical_v2_payload())
+}
 
 /// S-V2 / golden-bytes pin for `AllocStatusRowEnvelope::V2`. Asserts
 /// the pinned V2 archived bytes still deserialise through today's
-/// envelope into the canonical V2 `Latest` projection (with
+/// envelope into the canonical `Latest` projection (with
 /// `workload_addr = Some(...)`). Co-resident with the untouched
 /// `FIXTURE_V1` test per the golden-discipline rule.
 #[test]
 fn alloc_status_row_v2_decodes_through_current_envelope() {
-    let expected = canonical_v2_payload();
+    let expected = canonical_v2_payload_latest();
     assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V2, &expected);
+}
+
+/// ADR-0078 § D4 step 5 — the V2 golden bytes (an old V2 archive)
+/// decode through the *current* envelope + `into_latest()` to an
+/// `AllocStatusRowV3` whose crash-observability pair is ABSENT
+/// (`last_terminated == None`, `restart_count == 0`), and every other
+/// field equals the canonical V2 payload byte-for-byte.
+///
+/// Mirrors `alloc_status_row_v1_golden_bytes_decode_to_v2_with_absent_workload_addr`
+/// one version up. `FIXTURE_V2` is NOT touched by this assertion — it
+/// proves that old V2 bytes still read through the V3 envelope (the
+/// backward-compat obligation of the envelope evolution).
+#[test]
+fn alloc_status_row_v2_golden_bytes_decode_to_v3_with_absent_crash_facts() {
+    let expected_v3 = canonical_v2_payload_latest();
+    assert_eq!(
+        expected_v3.last_terminated, None,
+        "From<V2> for V3 must default the additive last_terminated field to None",
+    );
+    assert_eq!(
+        expected_v3.restart_count, 0,
+        "From<V2> for V3 must default the additive restart_count field to 0",
+    );
+    assert_eq!(
+        expected_v3.workload_addr,
+        Some(Ipv4Addr::new(10, 99, 0, 6)),
+        "every pre-existing V2 field must be carried forward verbatim",
+    );
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V2, &expected_v3);
+
+    // The V2 (tag 1) archive must ALSO pass the
+    // `known_discriminants()`-driven probe inside `decode_envelope_bytes`
+    // — i.e. tag 1 stays in the known set after the V3 append, so a
+    // legacy V2 row is decoded (not flagged `UnknownVersion` and
+    // silently skipped on convergence). This kills a mutant that drops
+    // tag 1 from `known_discriminants`.
+    let v2_decoded = decode_envelope_bytes::<AllocStatusRowEnvelope>(
+        &hex::decode(FIXTURE_V2.trim()).expect("FIXTURE_V2 hex decodes"),
+    )
+    .expect("V2 (tag 1) archive must be a KNOWN discriminant — not flagged UnknownVersion");
+    assert_eq!(
+        v2_decoded, expected_v3,
+        "decode_envelope_bytes must project the V2 archive to the same V3 Latest as the \
+         from_bytes path",
+    );
+}
+
+/// Canonical V3 payload pinned by `FIXTURE_V3` below — a RECOVERED
+/// allocation: `Running`, carrying a populated `last_terminated`
+/// snapshot of the crash it survived and `restart_count: 1`.
+///
+/// Per ADR-0078 § D4 step 5 the V3 canonical payload MUST carry
+/// `last_terminated: Some(..)` with a populated `reason` and a non-zero
+/// `restart_count` — a `None`/`0` payload would pin only the
+/// discriminant and not the new layout.
+fn canonical_v3_payload() -> AllocStatusRowV3 {
+    let mut payload = canonical_v1_payload();
+    payload.last_terminated = Some(LastTerminated {
+        state: AllocState::Failed,
+        reason: Some(TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(137),
+            signal: Some(9),
+            stderr_tail: Some("Segmentation fault".to_owned()),
+        }),
+        detail: Some("killed by SIGKILL".to_owned()),
+        terminal: None,
+        stderr_tail: Some("Segmentation fault".to_owned()),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        terminated_at: LogicalTimestamp {
+            counter: 2,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+    });
+    payload.restart_count = 1;
+    payload
+}
+
+/// Hex-encoded rkyv-archived bytes of
+/// `AllocStatusRowEnvelope::V3(canonical_v3_payload())`.
+///
+/// Generated in the same commit as the `AllocStatusRowEnvelope::V3`
+/// bump (ADR-0078), per `development.md` § "rkyv schema evolution" →
+/// "Version-bump procedure" step 5. The hex was produced by running
+/// `print_fixture_v3_bytes` and pasted verbatim.
+const FIXTURE_V3: &str = "616c6c6f632d746573742d30317376632d7061796d656e7473005365676d656e746174696f6e206661756c746b696c6c6564206279205349474b494c4c5365676d656e746174696f6e206661756c740002000000000000008d000000a8ffffff8c000000adffffff6e6f64652d303031010000000000000001000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012ffffff00000000010000000000000000f1536500000000000000000000000000000000000000000100000000000000050000000000000001000000000000000e0000000100000089000000010900000100000092000000befeffff0000000000000000000000000100000091000000b8feffff00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000009200000089feffff00000000010000000000000000f1536500000000000000000000000002000000000000006e6f64652d3030310100000000000000";
+
+/// Golden-bytes pin for `AllocStatusRowEnvelope::V3` (ADR-0078).
+/// Asserts the pinned V3 archived bytes deserialise through today's
+/// envelope into the canonical `Latest` projection, with the
+/// crash-observability pair populated.
+#[test]
+fn alloc_status_row_v3_decodes_through_current_envelope() {
+    let expected = canonical_v3_payload();
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V3, &expected);
 }
 
 /// Triangulation defense for the empirically-pinned
@@ -190,17 +352,17 @@ fn alloc_status_row_v2_decodes_through_current_envelope() {
 /// `Latest`) archive places the latest tag at that offset. Both pins
 /// must update together on a `V<N+1>` bump.
 ///
-/// The expected tag is `1` — the rkyv discriminant of the appended
-/// `V2` variant (declaration order: `V1 = 0`, `V2 = 1`). The offset is
-/// shared across V1 and V2 archives because rkyv pads the inline enum
-/// to `max(V1, V2)`; the trailing root footprint is identical for both
-/// variants of the same envelope.
+/// The expected tag is `2` — the rkyv discriminant of the appended
+/// `V3` variant (declaration order: `V1 = 0`, `V2 = 1`, `V3 = 2`). The
+/// offset is shared across V1, V2 and V3 archives because rkyv pads the
+/// inline enum to `max(V1, V2, V3)`; the trailing root footprint is
+/// identical for every variant of the same envelope.
 #[test]
 fn alloc_status_row_discriminant_offset_triangulation() {
     assert_discriminant_offset_triangulation::<AllocStatusRowEnvelope>(
         canonical_v1_payload(),
         GOLDEN_DISCRIMINANT_OFFSET_V1,
-        1,
+        2,
     );
 }
 
@@ -209,16 +371,16 @@ fn alloc_status_row_discriminant_offset_triangulation() {
 /// through `decode_envelope_bytes`. See
 /// [`assert_unknown_version_probe_surfaces`] for the full rationale.
 ///
-/// `supported_max == 1` because the envelope is now V1+V2 (the highest
-/// known rkyv discriminant is 1, the appended `V2` variant). Re-pinned
-/// in the same commit as the V2 bump per `development.md` §
+/// `supported_max == 2` because the envelope is now V1+V2+V3 (the
+/// highest known rkyv discriminant is 2, the appended `V3` variant).
+/// Re-pinned in the same commit as the V3 bump per `development.md` §
 /// "Version-bump procedure".
 #[test]
 fn alloc_status_row_unknown_version_probe_surfaces() {
     assert_unknown_version_probe_surfaces::<AllocStatusRowEnvelope>(
         canonical_v1_payload(),
         "AllocStatusRowEnvelope",
-        1,
+        2,
     );
 }
 
@@ -243,7 +405,7 @@ fn alloc_status_row_unknown_version_probe_surfaces() {
 /// in the constructor below fails the equality assertion.
 #[test]
 fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope() {
-    let payload = AllocStatusRowV2::from(AllocStatusRowV1 {
+    let payload = AllocStatusRowV3::from(AllocStatusRowV2::from(AllocStatusRowV1 {
         alloc_id: AllocationId::new("alloc-gc-01").expect("valid alloc id"),
         workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
         node_id: NodeId::new("node-001").expect("valid node id"),
@@ -263,7 +425,7 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
         // Running first — the field is `Some(_)` to reflect that.
         // Value is arbitrary; the test asserts round-trip equality.
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
-    });
+    }));
     let envelope = AllocStatusRowEnvelope::latest(payload.clone());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
     let decoded: AllocStatusRowEnvelope =
@@ -297,7 +459,7 @@ fn fresh_alloc_status_row_stopped_by_system_gc_round_trips_through_v1_envelope()
 fn fresh_alloc_status_row_workload_netns_provision_failed_round_trips_through_v1_envelope() {
     use overdrive_core::transition_reason::TransitionReason;
 
-    let payload = AllocStatusRowV2::from(AllocStatusRowV1 {
+    let payload = AllocStatusRowV3::from(AllocStatusRowV2::from(AllocStatusRowV1 {
         alloc_id: AllocationId::new("alloc-netns-fail-01").expect("valid alloc id"),
         workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
         node_id: NodeId::new("node-001").expect("valid node id"),
@@ -318,7 +480,7 @@ fn fresh_alloc_status_row_workload_netns_provision_failed_round_trips_through_v1
         // The provision seam fires PRE-Running, so a Failed row from this cause
         // never reached Running — `started_at` is `None`.
         started_at: None,
-    });
+    }));
     let envelope = AllocStatusRowEnvelope::latest(payload.clone());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
     let decoded: AllocStatusRowEnvelope =
@@ -370,9 +532,26 @@ fn print_fixture_v1_bytes() {
     reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V2"
 )]
 fn print_fixture_v2_bytes() {
-    let envelope = AllocStatusRowEnvelope::latest(canonical_v2_payload());
+    // The V2 golden bytes pin the historical V2 archive — they MUST be
+    // produced from the V2 inner payload wrapped as the V2 envelope
+    // variant, NOT from the re-aliased Latest (= V3). Construct the V2
+    // envelope variant explicitly so this aid keeps regenerating the
+    // V2 fixture across future version bumps.
+    let envelope = AllocStatusRowEnvelope::V2(canonical_v2_payload());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
     println!("FIXTURE_V2 = \"{}\"", hex::encode(bytes.as_ref()));
+}
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when bumping a payload variant; the pinned FIXTURE_V<N> constants are the load-bearing artifact"]
+#[allow(
+    clippy::print_stdout,
+    reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V3"
+)]
+fn print_fixture_v3_bytes() {
+    let envelope = AllocStatusRowEnvelope::latest(canonical_v3_payload());
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    println!("FIXTURE_V3 = \"{}\"", hex::encode(bytes.as_ref()));
 }
 
 // ---------------------------------------------------------------------
@@ -427,9 +606,11 @@ fn alloc_status_row_v1_golden_bytes_decode_to_v2_with_absent_workload_addr() {
         "From<V1> for V2 must default the additive workload_addr field to None",
     );
     // The V1 golden bytes project (via decode -> into_latest -> the
-    // From<V1> chain) to the V2 Latest shape, with workload_addr None
-    // and every pre-existing field carried forward unchanged.
-    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V1, &expected_v2);
+    // From<V1> -> From<V2> chain) to the current Latest shape, with
+    // workload_addr None and every pre-existing field carried forward
+    // unchanged.
+    let expected_latest = AllocStatusRowV3::from(expected_v2);
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V1, &expected_latest);
 
     // The V1 (tag 0) archive must ALSO pass the
     // `known_discriminants()`-driven probe inside `decode_envelope_bytes`
@@ -444,8 +625,8 @@ fn alloc_status_row_v1_golden_bytes_decode_to_v2_with_absent_workload_addr() {
     )
     .expect("V1 (tag 0) archive must be a KNOWN discriminant — not flagged UnknownVersion");
     assert_eq!(
-        v1_decoded, expected_v2,
-        "decode_envelope_bytes must project the V1 archive to the same V2 Latest as the \
+        v1_decoded, expected_latest,
+        "decode_envelope_bytes must project the V1 archive to the same Latest as the \
          from_bytes path",
     );
 }
@@ -463,7 +644,7 @@ fn alloc_status_row_v2_with_workload_addr_round_trips_archive_access_deserialize
     // round-trip whose correctness does not depend on the IP value.
     for octets in [[10, 99, 0, 2], [192, 168, 1, 254], [0, 0, 0, 0], [255, 255, 255, 255]] {
         let addr = Ipv4Addr::from(octets);
-        let mut payload = canonical_v1_v2_base();
+        let mut payload = AllocStatusRowV3::from(canonical_v1_v2_base());
         payload.workload_addr = Some(addr);
 
         let envelope = AllocStatusRowEnvelope::latest(payload.clone());
@@ -481,17 +662,34 @@ fn alloc_status_row_v2_with_workload_addr_round_trips_archive_access_deserialize
     }
 }
 
-/// S-V2 / AC2 — `into_latest()` projects a `V2` variant verbatim
-/// (`V2 => Ok(v2)`). Kills a mutant that swaps the V2 arm for the V1
-/// `From` chain.
+/// S-V2 / AC2 — `into_latest()` projects the LATEST variant verbatim
+/// (`V3 => Ok(v3)`). Kills a mutant that swaps the latest arm for one of
+/// the `From`-chained legacy arms.
 #[test]
-fn alloc_status_row_v2_into_latest_projects_verbatim() {
-    let mut payload = canonical_v1_v2_base();
+fn alloc_status_row_latest_into_latest_projects_verbatim() {
+    let mut payload = AllocStatusRowV3::from(canonical_v1_v2_base());
     payload.workload_addr = Some(Ipv4Addr::new(10, 99, 0, 6));
+    payload.restart_count = 3;
     let envelope = AllocStatusRowEnvelope::latest(payload.clone());
-    let projected = envelope.into_latest().expect("into_latest V2 arm");
+    let projected = envelope.into_latest().expect("into_latest latest arm");
     assert_eq!(
         projected, payload,
-        "into_latest() must project a V2 envelope to its payload verbatim, preserving workload_addr",
+        "into_latest() must project a V3 envelope to its payload verbatim, preserving \
+         workload_addr and the crash-observability pair",
+    );
+}
+
+/// ADR-0078 § D4 step 4 — `into_latest()` on a `V2` envelope chains
+/// through `From<V2> for V3`. Kills a mutant that drops the V2 arm or
+/// routes it through the V1 chain.
+#[test]
+fn alloc_status_row_v2_into_latest_chains_through_v3() {
+    let payload = canonical_v2_payload();
+    let envelope = AllocStatusRowEnvelope::V2(payload.clone());
+    let projected = envelope.into_latest().expect("into_latest V2 arm");
+    assert_eq!(
+        projected,
+        AllocStatusRowV3::from(payload),
+        "into_latest() must chain a V2 envelope through From<V2> for V3",
     );
 }

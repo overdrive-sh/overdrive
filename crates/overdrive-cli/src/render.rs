@@ -300,6 +300,63 @@ fn render_row_cause_detail(
     }
 }
 
+/// Append the indented `last terminated:` block for one row, IFF the row
+/// carries a `last_terminated` snapshot (ADR-0078 § D5).
+///
+/// Presence-guarded and additive: a row that has never been terminal emits
+/// nothing, so healthy output is byte-identical to before. Shared by the
+/// Service and Job arms, called per row.
+///
+/// `restarts:` is Job-arm-only (`show_restarts`) because the Service arm
+/// already carries a `Restarts` column; rendering it twice would be noise.
+///
+/// `state_label` and `TransitionReason::human_readable()` are the
+/// vocabulary the renderer already uses — no new operator vocabulary is
+/// introduced. Paired with the row's own `started_at` (which, on a
+/// recovered row, is the moment the allocation came back), an operator
+/// reads both ends of the crash window without a third field.
+fn render_last_terminated_detail(
+    out: &mut String,
+    row: &overdrive_control_plane::api::AllocStatusRowBody,
+    show_restarts: bool,
+) {
+    use std::fmt::Write as _;
+    let Some(lt) = &row.last_terminated else {
+        return;
+    };
+    let reason_clause = lt
+        .reason
+        .as_ref()
+        .map_or_else(String::new, |reason| format!(" \u{2014} {}", reason.human_readable()));
+    let _ = writeln!(
+        out,
+        "    last terminated: {} at {}{reason_clause}",
+        state_label(lt.state),
+        lt.terminated_at,
+    );
+    if let Some(started_at) = lt.started_at {
+        let _ = writeln!(out, "    last terminated ran since: {started_at}");
+    }
+    if let Some(detail) = &lt.detail {
+        let _ = writeln!(out, "    last terminated detail: {detail}");
+    }
+    if show_restarts && row.restart_count > 0 {
+        let _ = writeln!(out, "    restarts: {}", row.restart_count);
+    }
+    if let Some(stderr_tail) = &lt.stderr_tail
+        && !stderr_tail.is_empty()
+    {
+        let _ = writeln!(
+            out,
+            "    last terminated stderr (last {} lines):",
+            overdrive_core::traits::driver::STDERR_TAIL_LINES
+        );
+        for line in stderr_tail.lines() {
+            let _ = writeln!(out, "      {line}");
+        }
+    }
+}
+
 /// Append the operator-facing `VIP:` line to `out` IFF the workload
 /// carries a platform-issued Service VIP. `AllocStatusResponse.vip` is
 /// `Some` only for `WorkloadKind::Service` reads (populated from the
@@ -770,6 +827,12 @@ pub fn format_job_alloc_status_attempts_table(
             started,
             duration,
         );
+        // ADR-0078 § D5: the per-attempt column set
+        // (`Attempt / State / Exit / Started / Duration`) is UNCHANGED — it
+        // is pinned by the KPI-K3 byte-equality assertions. The restart
+        // count and the terminal snapshot surface in the presence-guarded
+        // detail block instead, so a healthy Job renders byte-identically.
+        render_last_terminated_detail(&mut s, row, true);
     }
     s
 }
@@ -811,20 +874,21 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
             // Per-alloc table — Service columns: Alloc / State / Restarts / Since.
             let _ =
                 writeln!(out, "{:<24} {:<12} {:<10} {:<20}", "Alloc", "State", "Restarts", "Since");
-            // Restarts default to 0 in Phase 1 (per-alloc restart counter
-            // not surfaced on the wire row body yet — this is a
-            // forward-compat placeholder).
-            // Restarts default to 0 in Phase 1 (per-alloc restart counter
-            // not surfaced on the wire row body yet — this is a
-            // forward-compat placeholder). A Failed/errored alloc's
-            // captured cause is surfaced on an indented detail line beneath
-            // its table row — preserving RCA finding S-A4 (a Service alloc
-            // whose backend died on startup, e.g. `bind: Address already in
-            // use`, must read as Failed WITH its cause, not a healthy bare
-            // count). The designed `Alloc / State / Restarts / Since`
-            // columns are unchanged; the detail line is additive and
-            // presence-guarded (only emitted when the row carries a
-            // structured `reason` or a verbatim driver `error`).
+            // `Restarts` renders the durable per-alloc restart counter
+            // (ADR-0078 § D5) — the monotone count of observed
+            // `terminal → Running` transitions at this alloc's LWW key. It
+            // was a hard-coded `"0"` placeholder from Phase 1 until the
+            // counter landed on the wire row body.
+            //
+            // A Failed/errored alloc's captured cause is surfaced on an
+            // indented detail line beneath its table row — preserving RCA
+            // finding S-A4 (a Service alloc whose backend died on startup,
+            // e.g. `bind: Address already in use`, must read as Failed WITH
+            // its cause, not a healthy bare count). The designed
+            // `Alloc / State / Restarts / Since` columns are unchanged; the
+            // detail lines are additive and presence-guarded (only emitted
+            // when the row carries a structured `reason`, a verbatim driver
+            // `error`, or an ADR-0078 `last_terminated` snapshot).
             for row in &response.rows {
                 let since = row.started_at.as_deref().unwrap_or("\u{2014}");
                 let _ = writeln!(
@@ -832,10 +896,13 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                     "{:<24} {:<12} {:<10} {:<20}",
                     row.alloc_id,
                     state_label(row.state),
-                    "0",
+                    row.restart_count,
                     since,
                 );
                 render_row_cause_detail(out, row);
+                // Service arm: the `Restarts` column already carries the
+                // count, so the detail block omits the `restarts:` line.
+                render_last_terminated_detail(out, row, false);
             }
             // VIP + Listeners (the Service frontend) are NOT rendered here
             // — the wrapper `workload_describe` renders them once, after this

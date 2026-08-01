@@ -46,6 +46,10 @@ fn main() {
         // (the `from:` type mismatch below), not an incidental
         // missing-field error.
         workload_addr: None,
+        // AllocStatusRowV3 additive fields (ADR-0078): same rationale —
+        // one fixture, one reason to fail.
+        last_terminated: None,
+        restart_count: 0,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

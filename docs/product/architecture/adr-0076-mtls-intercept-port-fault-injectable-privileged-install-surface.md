@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. 2026-08-01 (rev 4, same day — revised after user direction on scope and
-justification).
+Accepted. 2026-08-01 (rev 6, same day — three factual corrections to § 7c / § 7d
+applied in place, mandated by ADR-0077 § D6).
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave for GH #250). Mode:
 propose. Tags: phase-1, transparent-mtls, application-arch, port-extraction,
 testability, fail-closed.
@@ -64,6 +64,30 @@ during DELIVER step 04-01 and is fixed in-scope at user direction):
    feature's scope and were NOT fixed.
 3. **DELIVER gains step 04-02** carrying the production fix and un-ignoring the
    step-04-01 assertion A-1' that is currently `#[ignore]`d against this defect.
+
+**Rev 6 changes** (2026-08-01, same day — three statements in rev 5's
+out-of-scope findings are factually wrong and are corrected in place, as mandated
+by ADR-0077 § D6. The **decision is unchanged**; ADR-0077 amends this ADR and
+does **not** supersede it):
+
+1. **§ 7c's `fail_closed_on_netns_provision` row is corrected from "NO" to
+   AFFECTED.** The clause rev 5 used to clear it — *"Any prior row is from an
+   EARLIER tick, hence a strictly smaller counter"* — is precisely the premise
+   the cross-restart counter regression falsifies. It is site 1 of ADR-0077 § D2.
+2. **§ 7d finding 1 is upgraded from "NOT reproduced at runtime" to REPRODUCED
+   end-to-end**, through real `overdrive serve` + `overdrive deploy` + restart,
+   with four independent recovery-window measurement points
+   (`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+   § 2, § 3 — the "RCA" below).
+3. **§ 7d finding 3 is corrected on both counts.** The tick-derived set is **ten
+   production sites across four row types**, not the single row type rev 5 named
+   with reachability unaudited; and `NodeHealthRow` is **wall-clock-derived and
+   immune**, not a member of that set.
+
+Findings 1 and 3 now carry a forward pointer to **ADR-0077**, which owns the
+remedy — closing the "no forward pointer" gap § 7d originally recorded as
+deliberate. The pointer is an accepted in-repo ADR, not a promised slice, so
+CLAUDE.md § "Deferrals require GitHub issues" is satisfied without an issue.
 
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
@@ -539,16 +563,21 @@ tick is the necessary condition. Every candidate was checked:
 |---|---|---|
 | `StartAllocation` `Running` (`:1269`) → `fail_closed_on_mtls_install` (`:446`) | **YES — the defect** | Both rows from the same `tick`; `Failed` copies `running_row.node_id`. |
 | `RestartAllocation` `Running` (`:1482`) → `fail_closed_on_mtls_install` (`:446`) | **YES — the defect, second arm** | Identical mechanism through the same shared helper. |
-| `fail_closed_on_netns_provision` (`:532`) | **NO** | Fires at the PRE-`Running` provision seam, strictly before `driver.start` and before any row write in that dispatch. It builds a FRESH row from `alloc_id`/`workload_id`/`node_id` — there is no row to supersede. Any prior row is from an EARLIER tick, hence a strictly smaller counter. *(Verified, not assumed.)* |
+| `fail_closed_on_netns_provision` (`:532`) | **YES — rev 6 correction; this cell read "NO"** | It has no *same-tick* supersede: it fires at the PRE-`Running` provision seam, strictly before `driver.start` and before any row write in that dispatch, and it builds a FRESH row from `alloc_id`/`workload_id`/`node_id`. But the clause that cleared it — *"Any prior row is from an EARLIER tick, hence a strictly smaller counter"* — is **false**, and is exactly the premise the cross-restart counter regression falsifies (finding 1 below, as corrected): after a restart the tick counter restarts at 0 while the surviving row keeps its pre-restart high-water mark, so an earlier tick does **not** imply a smaller counter. It is **site 1 of ADR-0077 § D2**, which owns the remedy. |
 | `StartRejected` → `Failed` (`:1239`, `state == Failed`) | **NO** | It is the SAME single write — `state` is `Running`-or-`Failed` on one `build_alloc_status_row` call. No supersede. |
 | `RestartAllocation` stop-half (`:1342`) | **NO** | Calls `driver.stop` only; writes no `Terminated` row. |
 | `FinalizeFailed` (`:1091`) | **NO** | One write per `dispatch_single`; `prior_row` is from an earlier tick. |
 | `StopAllocation` → `Terminated` (`:1585`) | **NO** | One write per `dispatch_single`. |
 | Exit observer (`exit_observer.rs:602`) | **NO — and is the precedent** | Already derives `prior.updated_at.counter + 1` (`:541-544`). Immune by construction. |
 
-**Only the two mTLS fail-closed arms are affected, and both are fixed by the
-single shared helper.** The netns-provision sibling is confirmed clean for the
-reason predicted — it writes a fresh pre-`Running` row with nothing to supersede.
+**Only the two mTLS fail-closed arms are affected *as same-tick supersedes*, and
+both are fixed by the single shared helper.** The netns-provision sibling does
+write a fresh pre-`Running` row with nothing to supersede — but **rev 6
+withdraws the conclusion that this makes it clean**. Its counter is still
+tick-derived, so it is defective under the cross-restart mechanism of finding 1,
+and ADR-0077 § D2 carries it as site 1. The audit above was scoped to the
+same-tick collision; it was not, and did not claim to be, an audit of the
+tick-derived rule itself.
 
 #### 7d. Three systemic LWW findings — OUT OF SCOPE, not fixed, no issue created
 
@@ -556,6 +585,13 @@ The audit surfaced three further exposures in the same mechanism. None is caused
 by this feature, none is fixed by it, and none is a deferral with a promised
 slice. They are recorded as observed facts. **No GitHub issue was created —
 agents do not open issues unilaterally.**
+
+**Rev 6 — findings 1 and 3 as rev 5 wrote them are factually wrong and are
+corrected below; finding 2 stands as written.** Both corrections now point
+forward to **ADR-0077**, which owns the remedy. That does not retroactively make
+them deferrals of *this* feature: the decision was taken in its own ADR, exactly
+as the closing paragraph of this section anticipated, and the pointer resolves to
+an accepted artifact rather than a promise.
 
 1. **Cross-restart counter regression (the largest).** `tick_n` is
    `let mut tick_n: u64 = 0;` inside `spawn_convergence_loop`
@@ -568,9 +604,23 @@ agents do not open issues unilaterally.**
    restart the writer's counter starts at 1 while surviving rows carry the
    pre-restart high-water mark, and every action-shim write for a pre-existing
    alloc is dropped by LWW until the tick counter catches up. Same-writer means
-   the tiebreak cannot rescue it. No test, comment, ADR or RCA in the repo
-   acknowledges this. **Verified from source; NOT reproduced at runtime** — no
-   existing restart test writes a post-restart row and asserts it wins.
+   the tiebreak cannot rescue it.
+
+   **Rev 6 — REPRODUCED end-to-end; the runtime caveat is withdrawn.** Rev 5
+   closed this finding with *"No test, comment, ADR or RCA in the repo
+   acknowledges this. Verified from source; NOT reproduced at runtime — no
+   existing restart test writes a post-restart row and asserts it wins."* All of
+   that is now false. The defect was reproduced through the real binary —
+   `overdrive serve` + `overdrive deploy`, kill, restart on one fixed `data_dir`
+   — where the post-restart write was silently dropped and `overdrive job stop`
+   returned **exit 0** against a store that still read `Running`, with **no**
+   warning, error, or LWW-reject line anywhere in the boot log (RCA § 2). The
+   recovery window is `≈ prior_counter` ticks — *a surviving allocation is
+   unwritable for at least as long as the previous control-plane process was up*
+   — confirmed at **four independent measurement points**: prior counters 4, 269,
+   522, and a synthetic 6000 whose boundary was exact (tick 5999 loses, 6000
+   wins) (RCA § 3). **ADR-0077** now owns the remedy; this is one of the ten
+   sites in its § D2.
 2. **Next-tick tie residual.** A same-tick supersede consumes counter `tick+2`,
    so an ordinary write on the *immediately following* tick (`tick+1` → counter
    `tick+2`) ties and is dropped. Narrow (it needs a write on the very next
@@ -581,9 +631,25 @@ agents do not open issues unilaterally.**
 3. **Other tick-derived rows.** `ServiceBackendRow` is written by two different
    reconcilers (`service_lifecycle.rs:860`, `backend_discovery_bridge.rs:392`),
    both using `tick.tick + 1`, keyed on `service_id` alone — structurally exposed
-   to the same collision; reachability was not audited. `NodeHealthRow` uses
-   `counter = unix_seconds` (`worker/src/node_health.rs:55`), so two heartbeats
-   in one wall-clock second collide — benign at current heartbeat intervals.
+   to the same collision.
+
+   **Rev 6 — the set is larger than this, and `NodeHealthRow` is not in it.** Rev
+   5 left `ServiceBackendRow`'s reachability unaudited, named no other exposed row
+   type, and grouped `NodeHealthRow` with the tick-derived rows. The audited set
+   is **ten production sites across four row types**: `AllocStatusRow` (five sites
+   — `action_shim/mod.rs:526`, `:1076`, `:1251`, `:1470`, `:1580`),
+   `ServiceBackendRow` (the two named above), `ServiceHydrationResultRow`
+   (`action_shim/dataplane_update_service.rs:126`, `:155`), and
+   `ReconcileConflictRow` (`reconciler_runtime.rs:1444`). All are redb-persisted
+   and LWW-guarded, so all inherit the regression in finding 1 (RCA § 4.1;
+   enumerated with per-site remedies and prior-row availability in **ADR-0077**
+   § D2). `NodeHealthRow` is **NOT** among them: its counter is
+   **wall-clock-derived** (`clock.unix_now().as_secs()`,
+   `overdrive-worker/src/node_health.rs:55`), so it does not reset when the
+   process does and is **immune** to the cross-restart regression. Its
+   two-heartbeats-in-one-wall-clock-second collision is a separate issue — still
+   benign at current heartbeat intervals — and rev 5 was wrong to file it under
+   the same mechanism.
 
 Findings 1 and 2 share one remedy — making the counter monotone against the
 prior row at **every** write site (`max(tick+1, prior+1)`), which also repairs
@@ -591,6 +657,14 @@ the restart regression because a prior-derived counter cannot regress. That is a
 larger decision than this feature and belongs to its own ADR; § 7b's required
 `updated_at` parameter is the enabling precondition for it, not a down payment
 on it.
+
+**Rev 6:** that ADR now exists and is accepted — **ADR-0077**, *"Every durable
+observation write derives its LWW counter from the row it replaces, never from
+the tick"*. It generalises § 7b to all ten sites (its § D2) and takes the shape
+predicted here, with the tick demoted to a **floor** rather than the source. It
+**amends** this ADR — the three corrections recorded under "Rev 6 changes" — and
+does **not** supersede it: the decision above stands, and § 7b's
+`superseding_timestamp` is the shape ADR-0077 generalises.
 
 ## Alternatives Considered
 

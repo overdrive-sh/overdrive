@@ -63,9 +63,9 @@ use overdrive_core::id::{
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, LagAwareSubscription, NodeHealthRow, ObservationRow, ObservationStore,
-    ObservationStoreError, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
-    SubscriptionEvent,
+    AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
+    ObservationStore, ObservationStoreError, ReconcileConflictRow, ServiceBackendRow,
+    ServiceHydrationResultRow, SubscriptionEvent,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -161,6 +161,55 @@ struct PeerState {
     pending_write_failures: Mutex<VecDeque<ObservationStoreError>>,
 }
 
+/// Emit a structured `observation.lww.rejected` event for a write the
+/// LWW comparator discarded. Pure diagnostics — the caller's
+/// accept/reject decision, its index mutation, its fan-out, and its
+/// return value are unaffected.
+///
+/// Called from the reject arm of every
+/// [`LogicalTimestamp`]-comparing `apply_*` merge below, where BOTH
+/// the incoming and the stored stamp are in scope. Funnelling every
+/// site through one helper is what keeps the field set from drifting
+/// between row kinds — and, more importantly, from drifting against
+/// the host adapter's identically-named event.
+///
+/// # Why `debug!` here and `warn!` in the host adapter
+///
+/// The `LocalObservationStore` sibling
+/// (`overdrive-store-local/src/observation_backend.rs`) emits the same
+/// event, with the same field names, at `warn!`. That divergence is
+/// deliberate and is NOT an adapter-contract divergence under
+/// `.claude/rules/development.md` § "Trait definitions specify
+/// behavior, not just signature": the `ObservationStore::write`
+/// contract governs *observable* behaviour — no mutation, no emission
+/// on a losing write — and says nothing about logging. Both adapters
+/// remain byte-identical on every clause the contract does cover.
+///
+/// The level tracks the **gossip** difference, not a behavioural one.
+/// This adapter has a `GossipRouter`, so a re-delivered row losing to
+/// the copy it already merged IS the LWW idempotency case the
+/// [`LogicalTimestamp::dominates`] docstring calls expected; warning
+/// on it would be noise by design. The host adapter is single-node
+/// with no gossip surface, so a reject there is always anomalous and
+/// earns an operator-visible warning.
+fn log_lww_reject(
+    row_kind: &'static str,
+    key: &str,
+    incoming: &LogicalTimestamp,
+    stored: &LogicalTimestamp,
+) {
+    tracing::debug!(
+        name: "observation.lww.rejected",
+        row_kind = row_kind,
+        key = key,
+        incoming_counter = incoming.counter,
+        incoming_writer = %incoming.writer,
+        stored_counter = stored.counter,
+        stored_writer = %stored.writer,
+        "observation write discarded: incoming row does not dominate the stored row",
+    );
+}
+
 impl PeerState {
     fn new(_seed: u64) -> Arc<Self> {
         let (fan_out, _rx) = broadcast::channel(DEFAULT_FANOUT_CAPACITY);
@@ -232,13 +281,23 @@ impl PeerState {
         match by_sh.get(&key) {
             None => {
                 by_sh.insert(key, incoming.clone());
+                drop(by_sh);
                 true
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_sh.insert(key, incoming.clone());
+                drop(by_sh);
                 true
             }
-            Some(_) => false,
+            Some(existing) => {
+                log_lww_reject(
+                    "service_hydration_results",
+                    &format!("{}/fp={}", incoming.service_id, incoming.fingerprint),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
         }
     }
 
@@ -251,13 +310,23 @@ impl PeerState {
         match by_sb.get(&key) {
             None => {
                 by_sb.insert(key, incoming.clone());
+                drop(by_sb);
                 true
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_sb.insert(key, incoming.clone());
+                drop(by_sb);
                 true
             }
-            Some(_) => false,
+            Some(existing) => {
+                log_lww_reject(
+                    "service_backends",
+                    &incoming.service_id.to_string(),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
         }
     }
 
@@ -271,13 +340,26 @@ impl PeerState {
         match by_rc.get(&key) {
             None => {
                 by_rc.insert(key, incoming.clone());
+                drop(by_rc);
                 true
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_rc.insert(key, incoming.clone());
+                drop(by_rc);
                 true
             }
-            Some(_) => false,
+            Some(existing) => {
+                log_lww_reject(
+                    "reconcile_conflict",
+                    &format!(
+                        "{}/{}:{}/{}",
+                        incoming.service_id, incoming.vip, incoming.port, incoming.proto
+                    ),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
         }
     }
 
@@ -309,13 +391,23 @@ impl PeerState {
         match by_alloc.get(&incoming.alloc_id) {
             None => {
                 by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
+                drop(by_alloc);
                 true
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
+                drop(by_alloc);
                 true
             }
-            Some(_) => false,
+            Some(existing) => {
+                log_lww_reject(
+                    "alloc_status",
+                    incoming.alloc_id.as_str(),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
         }
     }
 
@@ -327,13 +419,23 @@ impl PeerState {
         match by_node.get(&incoming.node_id) {
             None => {
                 by_node.insert(incoming.node_id.clone(), incoming.clone());
+                drop(by_node);
                 true
             }
             Some(existing) if incoming.last_heartbeat.dominates(&existing.last_heartbeat) => {
                 by_node.insert(incoming.node_id.clone(), incoming.clone());
+                drop(by_node);
                 true
             }
-            Some(_) => false,
+            Some(existing) => {
+                log_lww_reject(
+                    "node_health",
+                    incoming.node_id.as_str(),
+                    &incoming.last_heartbeat,
+                    &existing.last_heartbeat,
+                );
+                false
+            }
         }
     }
 

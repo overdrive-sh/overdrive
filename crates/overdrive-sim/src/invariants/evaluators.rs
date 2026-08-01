@@ -555,6 +555,8 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 // canonical workload address (AllocStatusRowV2 additive
                 // field, GH #241).
                 workload_addr: None,
+                last_terminated: None,
+                restart_count: 0,
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(Box::new(row))).await {
@@ -4549,6 +4551,8 @@ mod tests {
             // Host-netns fixture — no canonical workload address
             // (AllocStatusRowV2 additive field, GH #241).
             workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
         }
     }
 

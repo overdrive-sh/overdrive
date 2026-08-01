@@ -109,6 +109,18 @@ pub async fn dispatch(
     };
 
     let fp = fingerprint(vip, backends);
+    // ADR-0077 § D2 sites 6+7: the LWW counter derives from the row this
+    // write replaces, never from the tick alone (a tick-derived counter
+    // regresses on restart while the durable row does not, so the write
+    // silently loses the merge for the whole post-restart window). The LWW
+    // key here is the composite `(service_id, fingerprint)`, so the prior
+    // is the row AT THIS FINGERPRINT — a different backend set lives in a
+    // different row and is not the prior. One lookup, shared by the
+    // IPv6-reject early return and the normal path below.
+    let prior_rows = observation.service_hydration_results_rows(service_id).await?;
+    let prior_updated_at: Option<LogicalTimestamp> =
+        prior_rows.into_iter().find(|r| r.fingerprint == fp).map(|r| r.updated_at);
+
     // V4 validation lives here, at the operator-visible rejection site
     // (ADR-0060 D1a): `ServiceFrontend::new` rejects an IPv6 VIP, which
     // we map to the existing operator-visible `Failed` row — NOT a late
@@ -123,10 +135,11 @@ pub async fn dispatch(
                 failed_at: tick.now_unix,
                 reason,
             },
-            updated_at: LogicalTimestamp {
-                counter: tick.tick.saturating_add(1),
-                writer: writer.clone(),
-            },
+            updated_at: LogicalTimestamp::dominating(
+                tick.tick,
+                writer.clone(),
+                prior_updated_at.as_ref(),
+            ),
         };
         observation.write(ObservationRow::ServiceHydration(row)).await?;
         return Ok(DispatchOutcome::Failed);
@@ -152,10 +165,11 @@ pub async fn dispatch(
         service_id: *service_id,
         fingerprint: fp,
         status,
-        updated_at: LogicalTimestamp {
-            counter: tick.tick.saturating_add(1),
-            writer: writer.clone(),
-        },
+        updated_at: LogicalTimestamp::dominating(
+            tick.tick,
+            writer.clone(),
+            prior_updated_at.as_ref(),
+        ),
     };
     observation.write(ObservationRow::ServiceHydration(row)).await?;
     Ok(outcome)

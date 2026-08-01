@@ -213,6 +213,16 @@ mod acceptance {
     // `action_shim::dispatch` + sim adapters, no root/Lima/integration-tests.
     mod finalize_failed_forward_carries_workload_addr;
 
+    // ADR-0078 § D6 T-C / T-G / T-H — the action shim writes the
+    // crash-observability facts (`last_terminated` + `restart_count`) at
+    // the real § D2 call sites: RestartAllocation snapshots + increments,
+    // a driver-rejected restart forwards, FinalizeFailed does not
+    // self-duplicate, StopAllocation forwards. Default-lane: real
+    // `action_shim::dispatch` + sim adapters. The Tier-3 sibling driving
+    // the REAL exit observer through two crash cycles (T-F) lives at
+    // `tests/integration/workload_lifecycle/crash_observability_two_cycles.rs`.
+    mod action_shim_crash_observability;
+
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`
     // for the same reason as `runtime_convergence_loop` — the

@@ -98,6 +98,8 @@ pub fn make_alloc_running(alloc_id: &str, workload_id: &str, target_node: &str) 
         // canonical workload address (AllocStatusRowV2 additive field,
         // GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -124,6 +126,8 @@ pub fn make_alloc_terminated(
         // Host-netns fixture — no canonical workload address
         // (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -245,6 +249,8 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         // workload address (AllocStatusRowV2 additive
                         // field, GH #241).
                         workload_addr: None,
+                        last_terminated: None,
+                        restart_count: 0,
                     }
                 })
                 .collect()

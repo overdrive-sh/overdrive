@@ -3,9 +3,19 @@
 //!
 //! Submits a 1-replica job; waits until the alloc is Running; SIGKILLs
 //! the workload externally; drives the convergence loop forward; and
-//! asserts the alloc state transitions through Terminated → Running
-//! again under the (deterministic, same) `alloc_id` (Phase 1 reuses
-//! `mint_alloc_id(workload_id)` per ADR-0023).
+//! asserts the alloc recovers under the (deterministic, same) `alloc_id`
+//! (Phase 1 reuses `mint_alloc_id(workload_id)` per ADR-0023).
+//!
+//! # The contract (ADR-0078 § D6)
+//!
+//! Phase 3 asserts on the DURABLE crash facts the recovered `Running`
+//! row carries — `restart_count` and `last_terminated` — never on a
+//! transient `Failed` row. This is strictly stronger than the assertion
+//! it replaced: the old shape proved only "a `Failed` row existed at some
+//! instant"; this proves the SIGKILL was classified as a *crash* (not an
+//! intentional stop), that the workload recovered, that exactly one
+//! restart was counted, and that the recovered row strictly dominates the
+//! terminal it describes — all from state no LWW merge can discard.
 //!
 //! The "fresh `alloc_id`" framing in the scenario name reflects the
 //! Phase-2+ direction; in Phase 1 single-mode the alloc id is a pure
@@ -26,7 +36,8 @@ use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
+use overdrive_core::transition_reason::TransitionReason;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::ExecDriver;
@@ -188,25 +199,34 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // not on the syscall result.
     let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
 
-    // Phase 3: drive the convergence loop forward. The exit-observer
-    // subsystem must (i) classify the SIGKILL as a crash (no
-    // `intentional_stop` flag was set — RCA §Approved fix item 4),
-    // writing `AllocState::Failed`, and (ii) the reconciler must
-    // re-enqueue and bring up a fresh Running row whose counter
-    // strictly dominates the Failed row.
+    // Phase 3: drive convergence until the DURABLE crash facts appear on
+    // the recovered Running row (ADR-0078 § D6).
+    //
+    // `last_terminated` and `restart_count` survive the LWW merge by
+    // construction, so there is no transient window to catch and no race
+    // to lose. The previous shape polled for a row in `AllocState::Failed`
+    // and captured its counter — but that `Failed` row is transient BY
+    // DESIGN (the reconciler's whole job is to replace it), and the test
+    // only won the race at HEAD because of the pre-ADR-0077 defect: the
+    // exit observer stamped `prior.counter + 1`, the restart write stamped
+    // `tick.tick + 1`, the two tied on the very next tick, and `dominates`
+    // returns `false` on `Equal` — so the restart write was silently
+    // DROPPED and `Failed` lingered long enough to be seen. Under ADR-0077
+    // the restart write dominates immediately and whether a 20 ms poll
+    // lands inside the exit-observer-write → shim-write window is a
+    // genuine race the test has no way to win reliably.
     //
     // Real wall-clock sleep (not just yield) between ticks so the OS
     // can deliver SIGCHLD, ExecDriver's per-alloc watcher (`child.wait()`)
     // can resolve, the watcher can write to its mpsc, and the
     // exit_observer can drain it and write the Failed row to obs.
     // Under heavy parallel test load `yield_now` alone has been
-    // observed to complete the 90-tick budget before the OS reaper has
+    // observed to complete the tick budget before the OS reaper has
     // had a chance to deliver the signal — `tokio::time::sleep`
     // releases the current task to the runtime AND advances real
     // wall-clock during which the kernel can do its work.
-    let mut saw_failed = false;
-    let mut failed_counter: u64 = 0;
-    while tick_n < 90 && !saw_failed {
+    let mut recovered: Option<AllocStatusRow> = None;
+    while tick_n < 150 && recovered.is_none() {
         run_convergence_tick(
             &state,
             &workload_lifecycle_name,
@@ -219,38 +239,30 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         .expect("tick");
         tokio::time::sleep(Duration::from_millis(20)).await;
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
-        if let Some(row) = rows.iter().find(|r| matches!(r.state, AllocState::Failed)) {
-            saw_failed = true;
-            failed_counter = row.updated_at.counter;
-        }
+        recovered =
+            rows.into_iter().find(|r| r.state == AllocState::Running && r.restart_count >= 1);
         tick_n += 1;
     }
-    assert!(saw_failed, "watcher must classify SIGKILL as Failed");
+    let row = recovered.expect(
+        "alloc must converge to a Running row carrying restart_count >= 1 after SIGKILL \
+         within the Phase-3 tick budget",
+    );
 
-    let mut recovered = false;
-    while tick_n < 150 && !recovered {
-        run_convergence_tick(
-            &state,
-            &workload_lifecycle_name,
-            &target,
-            start + Duration::from_millis(tick_n.saturating_mul(100)),
-            tick_n,
-            deadline,
-        )
-        .await
-        .expect("tick");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        let rows = state.obs.alloc_status_rows().await.expect("read rows");
-        if let Some(row) = rows.iter().find(|r| r.state == AllocState::Running)
-            && row.updated_at.counter > failed_counter
-        {
-            recovered = true;
-        }
-        tick_n += 1;
-    }
+    // The crash happened, exactly once.
+    assert_eq!(row.restart_count, 1, "exactly one observed restart");
+
+    // The crash is durably described on the converged row.
+    let lt = row.last_terminated.as_ref().expect("recovered row must carry last_terminated");
+    assert_eq!(lt.state, AllocState::Failed, "the SIGKILL was classified Failed");
     assert!(
-        recovered,
-        "alloc must reach a fresh Running (counter > Failed counter) after SIGKILL \
-         within the Phase-3 tick budget (final tick_n={tick_n})"
+        matches!(lt.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        "the SIGKILL must be classified as a crash, not an intentional stop: {:?}",
+        lt.reason,
+    );
+
+    // The recovered row strictly dominates the terminal it summarises.
+    assert!(
+        row.updated_at.dominates(&lt.terminated_at),
+        "the recovered Running row must dominate the Failed row it snapshots",
     );
 }

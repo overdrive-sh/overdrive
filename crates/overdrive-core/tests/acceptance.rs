@@ -40,6 +40,22 @@ mod acceptance {
     // `overdrive_core::testing::observation_store::run_lww_conformance`.
     mod logical_timestamp_dominates;
 
+    // ADR-0077 (cross-restart LWW counter regression) T1 — the
+    // postcondition of `LogicalTimestamp::dominating`, the single
+    // sanctioned constructor for a durable row's LWW stamp. Sibling of
+    // `logical_timestamp_dominates` above: that file pins the COMPARATOR,
+    // this one pins the CONSTRUCTOR that feeds it.
+    mod logical_timestamp_dominating;
+
+    // ADR-0078 (a crash-and-recover is durably observable) T-A + T-B —
+    // the postconditions of `CrashFacts::advance`, the single sanctioned
+    // producer of the `last_terminated` / `restart_count` pair, plus the
+    // field-for-field fidelity of the `LastTerminated` snapshot it mints.
+    // Sibling of the two `logical_timestamp_*` files above: those pin how
+    // a row is STAMPED, this pins what a row REMEMBERS across the merge
+    // that stamp resolves.
+    mod crash_facts_advance;
+
     // phase-1-first-workload — branch-coverage tests pinning the
     // `WorkloadLifecycle::reconcile` decision points (Stop/Run/Restart).
     mod any_reconciler_dispatch;

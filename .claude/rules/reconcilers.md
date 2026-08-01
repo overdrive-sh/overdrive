@@ -135,6 +135,39 @@ The shapes that signal Bar 1 is being violated:
 - A non-atomic create sequence (resource visible after step 1, more
   fallible steps after) with no path that completes a partially-created
   resource on the next run.
+- **A `View` field holding a fingerprint / hash / "last written" marker
+  of what the reconciler EMITTED, consulted as the diff.** The
+  hash-shaped sibling of adopt-and-skip:
+
+  ```rust
+  if resource.exists() { return Ok(()) }      // the classic
+  if Some(new_fp) == prev_fp { continue }     // the same bug, hashed
+  ```
+
+  Presence of a matching hash *of what I emitted* is taken as proof the
+  desired state is satisfied. Two independent defects hide in it:
+
+  1. **It is not `actual`.** A reconciler that never reads back the
+     resource it manages cannot detect drift in it — only drift in its
+     own intent. A populated `State.actual` field is NOT sufficient
+     evidence: check that `actual` is *the resource this reconciler
+     manages*, not a second input it derives desired from.
+  2. **"Last written" is usually unverifiable.** The marker is stamped on
+     the *emit* path — before the effect is attempted — and the write
+     surface commonly returns `Ok(())` whether or not the write landed.
+     The field then records "last emitted" while its docstring claims
+     "last successfully written", and any failed write is permanently
+     forgotten: the reconciler has dedup'd itself out of ever retrying.
+
+  Compounding hazard: the runtime fsyncs the `View` **before**
+  dispatching the actions (`development.md` § "Reconciler I/O", STEP 7 →
+  STEP 8). A marker stamped on emit therefore outlives the effect it
+  claims to record, across crashes and restarts.
+
+  Watch for the marker being justified by `development.md` § "Persist
+  inputs, not derived state" — a hash the reconciler *computed* is
+  derived state; the input is the observed resource it declined to read.
+  Citing that rule for such a field is a smell, not a defence.
 
 ---
 
@@ -147,9 +180,33 @@ The shapes that signal Bar 1 is being violated:
   usable one. ADR-0061 § 3.1 (amended 2026-06-03 "adopt untouched" →
   "idempotent converge-on-boot").
 - **Full reconcilers (Bar 2):** `WorkloadLifecycle`,
-  `ServiceMapHydrator`, `BackendDiscoveryBridge`, `ServiceLifecycle`
+  `ServiceMapHydrator`, `ServiceLifecycle`
   (`crates/overdrive-core/src/reconcilers/`,
-  `crates/overdrive-core/src/service_lifecycle.rs`).
+  `crates/overdrive-core/src/service_lifecycle.rs`). **`ServiceMapHydrator`
+  is the reference shape** — its `State` carries `desired` AND an `actual`
+  that is the resource it manages (`ServiceHydrationStatus`), with
+  `RetryMemory` sitting *beside* that real diff rather than standing in
+  for it (`service_map_hydrator.rs:143-157`).
+- **A `Reconciler` impl that does NOT converge (the fingerprint
+  anti-pattern above, live in tree):** `BackendDiscoveryBridge`
+  (`crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:309`).
+  It is a `Reconciler` by trait and apply-once by structure — do not read
+  it as a Bar-2 exemplar. `BackendDiscoveryBridgeState` (`:170`) holds
+  `actual: RunningAllocSet`, but that is a second *input* it cross-products
+  with `desired.listeners`; the resource it manages is the
+  `service_backends` rows, which it never reads (`hydrate_actual`,
+  `reconciler_runtime.rs:2688-2696`, calls `alloc_status_rows()`; the
+  runtime's only `service_backends_rows` call, `:1698`, belongs to the
+  hydrator). So `view.last_written_fingerprint` (`:249`) IS its diff
+  (`:376`), stamped on emit (`:428`), while `obs.write` returns `Ok(())`
+  on a dropped write — and its docstring (`:203-211`) cites "Persist
+  inputs, not derived state" as justification. Consequence, reproduced
+  2026-08-01: a write silently dropped by observation-store LWW is never
+  retried and the stale row stands indefinitely, where the same drop
+  against `WorkloadLifecycle` (which guards on the observed row, not a
+  view marker) self-heals on the next tick. Full analysis:
+  `docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+  § 4.3.
 - **Executor, NOT a reconciler:** `EbpfDataplane` map writes — driven by
   `ServiceMapHydrator` via `Action::DataplaneUpdateService`. The
   dataplane is the executor; the hydrator owns the diff.

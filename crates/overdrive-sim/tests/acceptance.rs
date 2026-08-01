@@ -23,6 +23,11 @@ mod acceptance {
     // subscribe_all_events`, the production trigger the resolve-adapter's
     // synthetic doubles bypass.
     mod sim_observation_lagged_overflow;
+    // Diagnostics for the silent-LWW-drop defect
+    // (`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+    // § 2.3 / § 8.2 fix 1): `observation.lww.rejected` fires on a losing
+    // write and stays quiet on an accepted one.
+    mod sim_observation_lww_reject_logging;
 
     // Step 01-01 — LWW conformance harness invocation. RED scaffold;
     // GREEN counterpart is step 01-02 (lands the harness in

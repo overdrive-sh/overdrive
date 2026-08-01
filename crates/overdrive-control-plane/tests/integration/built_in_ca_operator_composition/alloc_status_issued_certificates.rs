@@ -146,6 +146,8 @@ async fn write_running_row(state: &AppState, alloc: &AllocationId, workload_id: 
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }

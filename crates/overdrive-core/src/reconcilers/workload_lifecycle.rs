@@ -1122,8 +1122,12 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// True iff the alloc row represents a *natural exit* the Job-kind
 /// reconciler should finalize on.
 fn is_natural_exit(row: &AllocStatusRow) -> bool {
-    let terminal_state = matches!(row.state, AllocState::Terminated | AllocState::Failed);
-    terminal_state && !is_intentionally_stopped(row)
+    // Collapsed onto `AllocState::is_terminal` per ADR-0078 § D1: the
+    // terminal-bucket predicate lives on the enum that owns it, so this
+    // site and `CrashFacts::advance` cannot drift. `is_restartable`'s
+    // predicate above is deliberately NOT collapsed — it is a different,
+    // wider set (`Terminated | Draining | Failed`).
+    row.state.is_terminal() && !is_intentionally_stopped(row)
 }
 
 /// Classify a natural-exit alloc row into the typed
@@ -1757,6 +1761,8 @@ mod current_alloc_tests {
             listeners: Vec::new(),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
             workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
         }
     }
 

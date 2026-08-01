@@ -207,6 +207,22 @@ pub enum AllocState {
     Failed,
 }
 
+impl AllocState {
+    /// True iff this is a terminal lifecycle bucket. `Draining` is
+    /// transient-and-restartable, NOT terminal (cf. `is_restartable`,
+    /// `crates/overdrive-core/src/reconcilers/workload_lifecycle.rs`).
+    ///
+    /// Per ADR-0078 § D1 this predicate lives on the enum that owns it,
+    /// the same locality argument `.claude/rules/development.md`
+    /// § "Label enums own their string representation" makes for
+    /// `as_str`. It is the single terminal-detection site consulted by
+    /// [`CrashFacts::advance`] and by `WorkloadLifecycle::is_natural_exit`.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Terminated | Self::Failed)
+    }
+}
+
 impl std::fmt::Display for AllocState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Canonical lowercase form matches whitepaper §4 lifecycle
@@ -229,6 +245,26 @@ impl std::fmt::Display for AllocState {
 /// `(counter, writer)` is lexicographically ordered: the lamport counter
 /// dominates, and the writer's [`NodeId`] breaks ties deterministically.
 /// Clock skew across peers cannot invert ordering.
+///
+/// # Per-key monotonicity invariant (ADR-0077)
+///
+/// `counter` is a **per-LWW-key version number**, NOT a scheduling
+/// coordinate. It is durable and monotone forever at a given row key:
+/// the sequence of counters written to one key is strictly increasing,
+/// **including across process restarts**.
+///
+/// The convergence tick (`TickContext.tick`) is a *different quantity* —
+/// process-global, reset to `0` on every process start. Deriving a
+/// counter from the tick alone conflates the two and breaks the
+/// invariant: after a restart the tick regresses while the durable rows
+/// do not, so every tick-derived write for a surviving row silently
+/// loses the LWW merge until the tick climbs back past the pre-restart
+/// high-water mark (`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`).
+///
+/// Every durable write therefore mints its stamp with
+/// [`LogicalTimestamp::dominating`], which derives the counter from the
+/// row it replaces and treats the tick only as a floor. Struct-literal
+/// construction outside test code is rejected by the `dst-lint` gate.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct LogicalTimestamp {
     pub counter: u64,
@@ -236,6 +272,55 @@ pub struct LogicalTimestamp {
 }
 
 impl LogicalTimestamp {
+    /// Mint the LWW stamp for a durable write that must dominate the row
+    /// currently stored at the same key (ADR-0077 § D1).
+    ///
+    /// The counter derives from `prior`; `tick_floor` is only a floor.
+    ///
+    /// # Preconditions
+    ///
+    /// `prior` is the `updated_at` of the row currently at *this row's LWW
+    /// key*, read from the [`ObservationStore`], or `None` iff no row
+    /// exists at that key. `tick_floor` is `TickContext.tick`, or `0` for a
+    /// writer that runs outside a convergence loop and has no tick (the
+    /// exit observer).
+    ///
+    /// # Postcondition
+    ///
+    /// `LogicalTimestamp::dominating(t, w, Some(p)).dominates(p) == true`
+    /// for every `t`, every `w`, and every `p` with
+    /// `p.counter < u64::MAX`. The returned counter is `>= tick_floor + 1`.
+    ///
+    /// # Edge cases
+    ///
+    /// - `prior == None` → `tick_floor + 1` (a genuinely-first write at the
+    ///   key).
+    /// - `p.counter == u64::MAX` → [`u64::saturating_add`] clamps and the
+    ///   postcondition does **not** hold. Unreachable at the 100 ms
+    ///   convergence cadence (~5.8 × 10¹⁰ years); stated rather than hidden.
+    /// - `tick_floor == 0` with `prior == Some(p)` → `p.counter + 1`, i.e.
+    ///   exactly the exit observer's historical shape.
+    /// - `writer` is **not** derived from `prior` — each site passes its own
+    ///   writer, preserving today's tiebreak behaviour unchanged.
+    ///
+    /// # Observable invariant
+    ///
+    /// For any key, the sequence of counters produced by successive
+    /// `dominating` calls that each read the current row is strictly
+    /// increasing, **independently of the tick sequence that fed them** —
+    /// including across a process restart, and including across two
+    /// different tick sequences.
+    ///
+    /// This is a read-modify-write and is correct only under a
+    /// **single-writer-at-a-time** discipline for a given key (ADR-0077
+    /// § D1 honest limit, § D4 standing constraint).
+    #[must_use]
+    pub fn dominating(tick_floor: u64, writer: NodeId, prior: Option<&Self>) -> Self {
+        let floor = tick_floor.saturating_add(1);
+        let counter = prior.map_or(floor, |p| floor.max(p.counter.saturating_add(1)));
+        Self { counter, writer }
+    }
+
     /// Total order on [`LogicalTimestamp`]: `(counter, writer)`
     /// lexicographic. Returns `true` when `self` strictly dominates
     /// `other` and therefore wins under last-write-wins.
@@ -320,7 +405,12 @@ impl LogicalTimestamp {
 /// field. The exit-observer write path populates it; every host-netns
 /// fixture leaves it `None` (defaulted by the `From<V1> for V2`
 /// up-conversion on legacy reads).
-pub type AllocStatusRow = AllocStatusRowV2;
+///
+/// Re-aliased V2 → V3 in the same commit as the
+/// `AllocStatusRowEnvelope::V3` bump (ADR-0078) — the crash-observability
+/// pair `last_terminated` + `restart_count`, which make a
+/// crash-and-recover durably observable under last-write-wins.
+pub type AllocStatusRow = AllocStatusRowV3;
 
 /// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
 ///
@@ -648,6 +738,33 @@ impl JobSpec {
 // path, which is discouraged by code review) PLUS Layer 2 (the
 // `xtask::dst_lint` envelope-variant-construction scanner in
 // Group 5). The structural defense is Layer 2.
+// `large_enum_variant` fires once V3 appends `Option<LastTerminated>`
+// (ADR-0078): V1/V2 are ~320 bytes and V3 is ~552. Boxing a variant is the
+// WRONG fix here, on three independent grounds:
+//
+//  1. rkyv archives `Box<T>` as an `ArchivedBox` — a RELATIVE POINTER —
+//     which moves the payload out of the enum's inline region entirely.
+//     That is a wire-format change, and controlling the wire format is
+//     precisely what this versioned envelope exists to do (ADR-0048). It
+//     would force a further discriminant re-pin and a regeneration of every
+//     golden fixture, for zero runtime benefit.
+//  2. ADR-0078 § D4 step 1 pins the variant shape as `V3(AllocStatusRowV3)`.
+//     Boxing it would diverge from the accepted design.
+//  3. The size never lands anywhere it costs: this enum is codec-internal
+//     (never re-exported from `lib.rs`), constructed one-at-a-time at the
+//     persistence boundary and immediately either rkyv-serialised or
+//     projected via `into_latest()`. It is never held in a collection. The
+//     consumer-side footprint is already absorbed by the `Box` on
+//     `ObservationRow::AllocStatus` (see that variant's docstring, which
+//     records the same clippy threshold being crossed in 2026-05-24 and
+//     boxed THERE — the place it actually mattered).
+#[allow(
+    clippy::large_enum_variant,
+    reason = "boxing a variant would change the rkyv archive layout this versioned \
+              envelope exists to control; the enum is codec-internal and transient, \
+              and the consumer-side size is already absorbed by the Box on \
+              ObservationRow::AllocStatus"
+)]
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocStatusRowEnvelope {
     V1(AllocStatusRowV1),
@@ -659,13 +776,20 @@ pub enum AllocStatusRowEnvelope {
     // `From<V1> for V2` chain. Per `development.md` § "rkyv schema
     // evolution" → "Version-bump procedure".
     V2(AllocStatusRowV2),
+    // V3 appends the crash-observability pair `last_terminated` +
+    // `restart_count` (ADR-0078). The V1 and V2 discriminants are UNMOVED
+    // (declaration order: V1 = 0, V2 = 1, V3 = 2) so pre-existing archives
+    // continue to read through the `From<V1> for V2` → `From<V2> for V3`
+    // chain. Per `development.md` § "rkyv schema evolution" →
+    // "Version-bump procedure".
+    V3(AllocStatusRowV3),
 }
 
 // Alias-to-payload (UI-02): the public name points at the LATEST
 // payload struct so call sites keep using struct-literal
 // `AllocStatusRow { ... }`. Re-aliased V1 → V2 in the same commit as
-// the variant append.
-pub type AllocStatusRowLatest = AllocStatusRowV2;
+// the variant append, and V2 → V3 in the ADR-0078 commit.
+pub type AllocStatusRowLatest = AllocStatusRowV3;
 
 // SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
 // enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
@@ -828,17 +952,326 @@ impl From<AllocStatusRowV1> for AllocStatusRowV2 {
     }
 }
 
+/// Verbatim snapshot of the most recent terminal observation for an
+/// allocation, preserved across the successor write that would otherwise
+/// discard it under last-write-wins (ADR-0078 § D1).
+///
+/// # Membership rule — the closed list, not a judgement call
+///
+/// This struct carries **exactly** those [`AllocStatusRow`] fields that a
+/// successor write OVERWRITES. Fields every writer forward-carries anyway
+/// (`alloc_id`, `workload_id`, `node_id`, `kind`, `listeners`,
+/// `workload_addr`) are NOT included — snapshotting them would duplicate a
+/// value that is already stable across the transition. Adding a field to
+/// [`AllocStatusRow`] obliges a decision here, and the rule decides it:
+/// overwritten ⇒ snapshotted, forward-carried ⇒ not.
+///
+/// # Depth is structural, not conventional
+///
+/// This type does NOT contain a `last_terminated` of its own. Depth-1 is
+/// therefore *unrepresentable-otherwise*, not merely "the current policy" —
+/// an unbounded in-row history cannot be written by a future author without
+/// changing this type. Storage is O(1) in crash-loop depth: a workload
+/// crash-looping 10 000 times produces exactly one `LastTerminated` and
+/// `restart_count = 10000`. This mirrors Kubernetes' accepted,
+/// production-proven `lastState` limitation: the detail of crash N-1 is
+/// permanently lost once crash N is observed.
+///
+/// # Deliberate divergence from Kubernetes
+///
+/// Kubernetes' `lastState` on a currently-terminated container shows the
+/// *previous* termination. So does this field: it is populated ONLY by the
+/// write that supersedes a terminal row, never by the terminal write itself.
+/// The invariant is therefore exact and checkable: **`last_terminated` never
+/// describes the row that carries it.** A terminal row's own facts are on the
+/// row's own `state` / `reason` / `detail` / `terminal` / `stderr_tail`
+/// fields; duplicating them into `last_terminated` would create two sources
+/// of truth for one transition.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct LastTerminated {
+    /// The terminal lifecycle bucket. Always `Terminated` or `Failed` —
+    /// [`CrashFacts::advance`] is the only constructor and it snapshots only
+    /// from a row satisfying [`AllocState::is_terminal`].
+    pub state: AllocState,
+    /// The superseded row's typed cause-class, verbatim. Carries `exit_code`
+    /// / `signal` / `stderr_tail` inside
+    /// [`TransitionReason::WorkloadCrashedImmediately`], `path` inside
+    /// [`TransitionReason::ExecBinaryNotFound`], and so on — NOT flattened
+    /// into scalars. `None` when the superseded row carried no reason.
+    pub reason: Option<TransitionReason>,
+    /// The superseded row's verbatim driver / OS text, verbatim. The
+    /// audit-preserving sidecar the typed `reason` payload cannot capture
+    /// (raw `errno`-decorated `std::io::Error::Display` strings).
+    pub detail: Option<String>,
+    /// The superseded row's reconciler terminal claim, verbatim. `None` when
+    /// the terminal was observed OUTSIDE a reconciler tick — the exit
+    /// observer emits `terminal: None` per ADR-0037 § 4, which is the common
+    /// crash case.
+    pub terminal: Option<TerminalCondition>,
+    /// The superseded row's `stderr_tail`, verbatim — the workload's dying
+    /// words. Already bounded to `STDERR_TAIL_LINES` at the observation seam.
+    pub stderr_tail: Option<String>,
+    /// Wall-clock instant at which the TERMINATED generation reached
+    /// Running, verbatim from the superseded row's `started_at`. `None` when
+    /// that generation never reached Running (a pre-Running provision or
+    /// start failure). This is Kubernetes' `lastState.terminated.startedAt`.
+    pub started_at: Option<UnixInstant>,
+    /// LWW stamp of the superseded terminal row. Identifies exactly WHICH
+    /// durable observation this snapshot summarises, and is the coordinate
+    /// the operator surface already renders as `(c=N,w=W)`.
+    ///
+    /// There is deliberately NO `finished_at` wall clock: no writer in tree
+    /// records one, and synthesising it at the *successor* site would stamp
+    /// the RESTART time onto a field named for the TERMINATION time — a lie
+    /// the type would then carry forever. `terminated_at` is what is
+    /// genuinely known, and [`LogicalTimestamp::dominates`] gives it a total
+    /// order.
+    pub terminated_at: LogicalTimestamp,
+}
+
+impl LastTerminated {
+    /// Snapshot the fields a successor write would overwrite on the
+    /// terminal row `p`.
+    ///
+    /// **Private to the defining module** (ADR-0078 § Enforcement
+    /// Layer 1): [`CrashFacts::advance`] is the only reachable producer,
+    /// so "a `LastTerminated` describes a terminal row" holds by
+    /// reachability rather than by convention.
+    fn from_superseded(p: &AllocStatusRow) -> Self {
+        Self {
+            state: p.state,
+            reason: p.reason.clone(),
+            detail: p.detail.clone(),
+            terminal: p.terminal.clone(),
+            stderr_tail: p.stderr_tail.clone(),
+            started_at: p.started_at,
+            terminated_at: p.updated_at.clone(),
+        }
+    }
+}
+
+/// The two crash-observability fields of [`AllocStatusRow`], computed as a
+/// unit from the row being superseded (ADR-0078 § D1, § D2).
+///
+/// Contract shape: **pure function, return-only.** [`CrashFacts::advance`]
+/// reads nothing but its arguments, writes nothing, and allocates only its
+/// own return value. It is the sole sanctioned constructor for both fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrashFacts {
+    pub last_terminated: Option<LastTerminated>,
+    pub restart_count: u32,
+}
+
+impl CrashFacts {
+    /// Derive the crash facts a successor row must carry.
+    ///
+    /// **Snapshots ONLY on a recovery — the `terminal → non-terminal`
+    /// transition.** Every other shape forwards the prior row's two fields
+    /// verbatim. This is Kubernetes' `lastState` semantics exactly: the field
+    /// is populated on the RESTARTED container, not on the dying one.
+    ///
+    /// # Preconditions
+    ///
+    /// `prior` is the row this write **supersedes at this allocation's LWW
+    /// key** — either the LWW-winner read from the [`ObservationStore`], or a
+    /// row this same dispatch frame has already written to that key (the
+    /// fail-closed supersession shape, ADR-0078 § D2 site 1). `None` iff no
+    /// row exists at that key. `next_state` is the [`AllocState`] the caller
+    /// is about to write, and MUST be the same value the caller puts on the
+    /// row — the builder guarantees this by computing `advance` itself
+    /// (§ D2).
+    ///
+    /// # Postconditions
+    ///
+    /// - `prior == None` → `CrashFacts { last_terminated: None, restart_count: 0 }`.
+    /// - `prior == Some(p)`, `p.state.is_terminal()`, `!next_state.is_terminal()`
+    ///   → `last_terminated == Some(<verbatim snapshot of p>)`.
+    /// - **Every other case** → `last_terminated == p.last_terminated`,
+    ///   verbatim (forward-carry).
+    /// - `restart_count == p.restart_count + 1` iff `p.state.is_terminal()`
+    ///   **and** `next_state == AllocState::Running`; else `p.restart_count`.
+    /// - For every `p` and every `s`:
+    ///   `p.restart_count <= advance(Some(p), s).restart_count <= p.restart_count + 1`
+    ///   (monotone, never more than one increment per write).
+    ///
+    /// # Edge cases
+    ///
+    /// - **`terminal → terminal` forwards, it does NOT snapshot.** This is the
+    ///   `FinalizeFailed` shape (§ D2 site 3): that arm re-stamps an
+    ///   already-`Failed` row with a terminal claim while forward-carrying the
+    ///   same `reason` / `detail` / `stderr_tail` / `started_at`.
+    ///   Snapshotting there would put those five facts on the row **twice** —
+    ///   once as row fields, once inside `last_terminated` — which is
+    ///   precisely the two-sources-of-truth duplication the design rejects.
+    ///   Forwarding is also the honest reading: `FinalizeFailed` is not a
+    ///   *new* terminal, it is the same terminal restamped.
+    /// - **A driver-REJECTED restart (`Failed → Failed`) forwards and does not
+    ///   increment.** Nothing restarted, and the new row carries its own
+    ///   `StartRejected` cause, so the prior crash's facts are lost — the
+    ///   accepted depth-1 loss. The *attempt* is separately counted by the
+    ///   reconciler's budget (`WorkloadLifecycleView.restart_counts`) and
+    ///   published as `TerminalCondition::BackoffExhausted { attempts }`.
+    /// - **An mTLS fail-closed supersession (`Running → Failed` within one
+    ///   dispatch, § D2 site 1) forwards.** The prior is `Running`, so no
+    ///   snapshot and no increment — but note the alloc's `Running` row DID
+    ///   land first, so if that write itself incremented (it superseded a
+    ///   terminal), the count stands for a restart that was immediately
+    ///   reversed. Stated, not hidden.
+    /// - **Re-dispatching against an already-`Running` row** forwards both
+    ///   fields unchanged — idempotent on a non-terminal prior.
+    /// - **An operator-stopped `Terminated` prior counts like any other
+    ///   terminal.** `Terminated → Running` on the same key snapshots and
+    ///   increments; `advance` deliberately does NOT consult an
+    ///   intentional-stop discriminator. **This is unreachable in Phase 1**:
+    ///   `is_restartable` excludes intentionally-stopped rows so no
+    ///   `RestartAllocation` is emitted, and a resubmit mints a FRESH
+    ///   `alloc_id` from the observed row count, landing on a NEW LWW key
+    ///   with `restart_count == 0`. If a future path makes it reachable,
+    ///   excluding operator stops from the count is a decision to take THEN,
+    ///   with `is_intentionally_stopped` as the predicate — do not improvise
+    ///   it now.
+    /// - `p.restart_count == u32::MAX` → [`u32::saturating_add`] clamps; the
+    ///   strict increment does not hold. Unreachable in practice.
+    ///
+    /// # Observable invariant
+    ///
+    /// Across the whole life of one allocation key, `restart_count` is
+    /// non-decreasing, and `last_terminated` is `Some` from the first
+    /// **recovery** onward — i.e. `last_terminated.is_some()` implies the
+    /// allocation recovered from that terminal at least once, **independently
+    /// of how many intermediate LWW values were discarded**.
+    #[must_use]
+    pub fn advance(prior: Option<&AllocStatusRow>, next_state: AllocState) -> Self {
+        let Some(p) = prior else {
+            return Self { last_terminated: None, restart_count: 0 };
+        };
+        let prior_terminal = p.state.is_terminal();
+        let last_terminated = if prior_terminal && !next_state.is_terminal() {
+            Some(LastTerminated::from_superseded(p))
+        } else {
+            p.last_terminated.clone()
+        };
+        let restart_count = if prior_terminal && matches!(next_state, AllocState::Running) {
+            p.restart_count.saturating_add(1)
+        } else {
+            p.restart_count
+        };
+        Self { last_terminated, restart_count }
+    }
+}
+
+// SCAFFOLD: false — V3 payload for `AllocStatusRowEnvelope` (ADR-0078).
+// `pub` due to rustc E0446 in the trait impl (same constraint as V1/V2);
+// Layer 1 enforced by non-re-export from `lib.rs` + Layer 2 dst_lint
+// scanner.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocStatusRowV3 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub node_id: NodeId,
+    pub state: AllocState,
+    pub updated_at: LogicalTimestamp,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub terminal: Option<TerminalCondition>,
+    pub stderr_tail: Option<String>,
+    pub kind: WorkloadKind,
+    pub listeners: Vec<ListenerRow>,
+    /// Wall-clock instant at which this allocation first transitioned
+    /// Pending → Running. Carried forward verbatim from
+    /// [`AllocStatusRowV1::started_at`] — see that field's docstring
+    /// for the full "persist inputs, not derived state" rationale.
+    pub started_at: Option<UnixInstant>,
+    /// Canonical per-allocation workload address. Carried forward verbatim
+    /// from [`AllocStatusRowV2::workload_addr`] — see that field's
+    /// docstring for the materialized-join rationale and the #239 Phase-1
+    /// single-cut constraint.
+    pub workload_addr: Option<Ipv4Addr>,
+    /// The most recent terminal observation this allocation SURVIVED —
+    /// the depth-1 `lastState` snapshot that makes a crash-and-recover
+    /// durably observable under last-write-wins (ADR-0078 § D1).
+    ///
+    /// `None` until the allocation recovers from its first terminal.
+    /// **Never describes the row that carries it**: it is populated only
+    /// by the write that supersedes a terminal row, never by the terminal
+    /// write itself. See [`LastTerminated`] for the membership rule.
+    ///
+    /// Computed exclusively by [`CrashFacts::advance`]; no writer sets it
+    /// directly.
+    pub last_terminated: Option<LastTerminated>,
+    /// Monotone per-allocation restart counter — Kubernetes'
+    /// `restartCount` / Nomad's `Restarts` (ADR-0078 § D1, § D3).
+    ///
+    /// Increments by exactly 1 on the write that observes a
+    /// `terminal → Running` transition at this LWW key; carried forward
+    /// verbatim by every other write. Never decreases, never resets.
+    ///
+    /// `u32` matches the attempt counters it sits beside
+    /// (`WorkloadLifecycleView.restart_counts`,
+    /// `TerminalCondition::BackoffExhausted { attempts }`,
+    /// `TransitionReason::RestartBudgetExhausted { attempts }`).
+    /// `saturating_add` clamps at `u32::MAX`; at that point the
+    /// postcondition "strictly greater than prior on a restart" no longer
+    /// holds. Stated rather than hidden, exactly as ADR-0077 § D1 states
+    /// its `u64::MAX` edge.
+    ///
+    /// **An observed input, not derived state.** It counts *observed
+    /// transitions*: no constant, policy table, or operator knob anywhere
+    /// in the codebase can change its correct value. It is NOT the same
+    /// quantity as `WorkloadLifecycleView.restart_counts`, which counts
+    /// restart *attempts* at emit time and drives the backoff budget —
+    /// the two diverge on every driver-rejected restart. Do not source
+    /// one from the other (ADR-0078 § D3).
+    ///
+    /// Computed exclusively by [`CrashFacts::advance`]; no writer sets it
+    /// directly.
+    pub restart_count: u32,
+}
+
+/// Additive V2 → V3 up-conversion: every pre-existing field carried
+/// forward verbatim; `last_terminated` defaults to `None` and
+/// `restart_count` to `0` (a V2 row was written before crash
+/// observability existed, so the honest projection is "no terminal
+/// observed, no restarts counted"). Per `development.md` § "rkyv schema
+/// evolution" → "Version-bump procedure" step 4.
+impl From<AllocStatusRowV2> for AllocStatusRowV3 {
+    fn from(v2: AllocStatusRowV2) -> Self {
+        Self {
+            alloc_id: v2.alloc_id,
+            workload_id: v2.workload_id,
+            node_id: v2.node_id,
+            state: v2.state,
+            updated_at: v2.updated_at,
+            reason: v2.reason,
+            detail: v2.detail,
+            terminal: v2.terminal,
+            stderr_tail: v2.stderr_tail,
+            kind: v2.kind,
+            listeners: v2.listeners,
+            started_at: v2.started_at,
+            workload_addr: v2.workload_addr,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+}
+
 impl VersionedEnvelope for AllocStatusRowEnvelope {
-    type Latest = AllocStatusRowV2;
+    type Latest = AllocStatusRowV3;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V2(payload)
+        Self::V3(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        // The V1 arm must chain EXPLICITLY through V2 (ADR-0078 § D4 step
+        // 4): no `From<V1> for V3` exists and none should be added — each
+        // hop is a separate, additive, independently-reviewable
+        // projection.
         match self {
-            Self::V1(v1) => Ok(v1.into()),
-            Self::V2(v2) => Ok(v2),
+            Self::V1(v1) => Ok(AllocStatusRowV2::from(v1).into()),
+            Self::V2(v2) => Ok(v2.into()),
+            Self::V3(v3) => Ok(v3),
         }
     }
 
@@ -887,22 +1320,35 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
     /// `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep at every variant or
     /// layout change.
     ///
+    /// **Repinned 2026-08-01 — 224 → 416 — V3 append (ADR-0078).**
+    /// Appending `V3(AllocStatusRowV3)` — whose delta over V2 is
+    /// `last_terminated: Option<LastTerminated>` (itself carrying inline
+    /// `Option<TransitionReason>` / `Option<TerminalCondition>` /
+    /// `Option<UnixInstant>` / `LogicalTimestamp`) plus a `u32` — grows the
+    /// outer enum's INLINE footprint to `max(V1, V2, V3)`, extending the
+    /// trailing root structure and shifting the discriminant offset. The
+    /// value is EMPIRICAL — derived from the actual archived bytes via the
+    /// schema-evolution triangulation test
+    /// (`alloc_status_row_discriminant_offset_triangulation`), NOT guessed.
+    /// Update this constant and `GOLDEN_DISCRIMINANT_OFFSET_V1` in lockstep
+    /// at every variant or layout change.
+    ///
     /// Re-pin alongside the schema-evolution fixture at every
     /// version-bump per
     /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
     /// docstring.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(224)
+        Some(416)
     }
 
     fn known_discriminants() -> &'static [u8] {
-        // V1 = 0, V2 = 1 (rkyv declaration order). The V2 bump appended
-        // tag 1 (canonical-workload-address-inbound-tproxy, GH #241);
-        // V1 (tag 0) continues to round-trip through `into_latest` via
-        // the `From<V1> for V2` chain. Empirically verified by the
-        // `alloc_status_row_unknown_version_probe_surfaces` test
-        // (supported_max == 1).
-        &[0, 1]
+        // V1 = 0, V2 = 1, V3 = 2 (rkyv declaration order). The V3 bump
+        // appended tag 2 (ADR-0078); V1 (tag 0) and V2 (tag 1) continue to
+        // round-trip through `into_latest` via the
+        // `From<V1> for V2` → `From<V2> for V3` chain. Empirically verified
+        // by the `alloc_status_row_unknown_version_probe_surfaces` test
+        // (supported_max == 2).
+        &[0, 1, 2]
     }
 
     fn type_name() -> &'static str {
@@ -1002,10 +1448,11 @@ pub struct ServiceHydrationResultRowV1 {
     /// additions are the documented exception).
     pub status: ServiceHydrationStatus,
     /// Lamport timestamp of this row. Same shape as
-    /// [`AllocStatusRow::updated_at`] — the action shim writes
-    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
-    /// for the same `(service_id, fingerprint)` on different ticks
-    /// are correctly ordered under LWW.
+    /// [`AllocStatusRow::updated_at`] — the action shim mints it with
+    /// [`LogicalTimestamp::dominating`], deriving the counter from the
+    /// prior row at this `(service_id, fingerprint)` key with the tick as
+    /// a floor, so successive writes for the key are strictly ordered
+    /// under LWW **including across a process restart** (ADR-0077 § D1).
     pub updated_at: LogicalTimestamp,
 }
 
@@ -1210,10 +1657,12 @@ pub struct ReconcileConflictRowV1 {
     /// Route the SECOND (conflicting) emitted write took.
     pub second_route: ConflictRoute,
     /// Lamport timestamp of this row. Same shape as
-    /// [`ServiceHydrationResultRowV1::updated_at`] — the convergence
-    /// tick writes `(counter = tick.tick + 1, writer = node_id)` so two
-    /// conflict observations for the same `(service_id, vip, port,
-    /// proto)` on different ticks are correctly ordered under LWW.
+    /// [`ServiceHydrationResultRowV1::updated_at`] — the convergence tick
+    /// mints it with [`LogicalTimestamp::dominating`], deriving the
+    /// counter from the prior row at this `(service_id, vip, port, proto)`
+    /// key with the tick as a floor, so successive conflict observations
+    /// for the key are strictly ordered under LWW **including across a
+    /// process restart** (ADR-0077 § D1).
     pub updated_at: LogicalTimestamp,
 }
 

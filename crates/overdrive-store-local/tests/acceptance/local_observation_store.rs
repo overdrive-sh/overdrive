@@ -62,6 +62,8 @@ fn alloc_row(alloc_id: &str, state: AllocState, counter: u64) -> AllocStatusRow 
         // Host-netns observation fixture — no canonical workload
         // address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

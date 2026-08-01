@@ -117,6 +117,24 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             _ => Some(format!("(c={},w={})", row.updated_at.counter, row.updated_at.writer)),
         };
 
+        // ADR-0078 § D5: a mechanical projection of the durable
+        // `last_terminated` snapshot — `AllocState` → `AllocStateWire` and
+        // `LogicalTimestamp` → the `(c=N,w=W)` coordinate string are the two
+        // conversions this body already performs above; every other field is
+        // byte-verbatim. No derivation.
+        let last_terminated = row.last_terminated.map(|lt| api::LastTerminatedBody {
+            state: AllocStateWire::from(lt.state),
+            reason: lt.reason,
+            detail: lt.detail,
+            terminal: lt.terminal,
+            stderr_tail: lt.stderr_tail,
+            started_at: lt.started_at,
+            terminated_at: format!(
+                "(c={},w={})",
+                lt.terminated_at.counter, lt.terminated_at.writer
+            ),
+        });
+
         Self {
             alloc_id: row.alloc_id.to_string(),
             workload_id: row.workload_id.to_string(),
@@ -132,6 +150,8 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             exit_code: None,
             last_transition,
             error: row.detail,
+            restart_count: row.restart_count,
+            last_terminated,
         }
     }
 }
