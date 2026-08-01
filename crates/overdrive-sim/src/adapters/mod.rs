@@ -41,6 +41,13 @@ pub mod llm;
 // `SimIdentityRead`; the `mtls_enforcement_equivalence` structural guard drives
 // both this and the host adapter through the same sequence (ADR-0069 F3).
 pub mod mtls_enforcement;
+// mtls-intercept-install-fault-seam step 03-01 (GH #250) — `SimMtlsIntercept`,
+// the in-memory `overdrive_worker::mtls_intercept_port::MtlsIntercept` double
+// with per-method fault scripting. Materialises an armed `SimInterceptFault`
+// into the REAL `InterceptError` shape the production substrate produces,
+// short-circuiting before any syscall, so the fail-closed install paths are
+// exercisable on demand (ADR-0076 § 4.6).
+pub mod mtls_intercept;
 // transparent-mtls-enrollment step 01-02 — `SimMtlsResolve`, the in-memory
 // `overdrive_core::traits::mtls_resolve::MtlsResolve` double. Classifies each
 // `orig_dst` against a scripted `BTreeMap<SocketAddrV4, MtlsResolution>` table;
@@ -68,4 +75,5 @@ pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
+pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
