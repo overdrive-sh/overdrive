@@ -2239,19 +2239,14 @@ mod fail_closed_mtls_tests {
             workload_id: workload.clone(),
             node_id: node.clone(),
             state: AllocState::Running,
-            updated_at: LogicalTimestamp {
-                counter: SEEDED_RUNNING_COUNTER,
-                writer: node.clone(),
-            },
+            updated_at: LogicalTimestamp { counter: SEEDED_RUNNING_COUNTER, writer: node.clone() },
             reason: Some(TransitionReason::Started),
             detail: None,
             terminal: None,
             stderr_tail: None,
             kind: WorkloadKind::Service,
             listeners: Vec::new(),
-            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
-                STARTED_AT_SECS,
-            ))),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(STARTED_AT_SECS))),
             workload_addr: Some(RUNNING_WORKLOAD_ADDR),
         }
     }
