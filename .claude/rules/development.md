@@ -353,6 +353,112 @@ the rule does not apply.
 
 ---
 
+## A convergent record cannot answer "did it happen"
+
+**Any event whose OCCURRENCE is operator-meaningful MUST get a durable
+surface of its own. It cannot be inferred from a convergent
+current-state record.** A last-write-wins register discards intermediate
+values *by construction* — that is the type's semantics, not a defect in
+it. A record that always reflects "the latest fact" is, for exactly that
+reason, unable to tell you that an earlier fact ever existed.
+
+This is the complement to § "Persist inputs, not derived state" above,
+and the two pull in opposite directions on purpose. That rule says: do
+not persist what you can recompute. This one says: some things are **not
+recomputable**, because convergence already destroyed the input. Before
+deciding a value can be re-derived on read, check that the state it
+would be derived *from* still exists.
+
+### The framing error this rule exists to prevent
+
+When convergence swallows an event, the question that surfaces is
+naturally phrased as *"is a transient `Failed` row acceptable?"* — and
+that phrasing is the bug. It presents a **correctness requirement as a
+preference**, invites a design trade-off, and gets resolved by whoever
+finds the current behaviour easiest to defend.
+
+State it the other way and it stops being a trade-off: **an orchestrator
+that silently swallows a crash-and-recover is lying about what
+happened.** A crash is a crash. If it crashed and recovered, that must be
+observable. Restart counts, crash-loop detection, post-incident forensics
+and error budgets all depend on the occurrence surviving; none of them
+can be reconstructed from a row that has converged back to `Running`.
+
+### The test
+
+For any state a converging record passes *through*, ask: **does anything
+depend on knowing it occurred?** Not "was it visible for long enough" —
+occurrence, not duration. If an operator, an auditor, an SLO, a retry
+budget, or a future investigation needs it, the convergent record is the
+wrong place to look for it and always will be.
+
+Occurrence-bearing facts in this codebase's shape: a workload crash, a
+restart, a failover, a policy denial, a certificate revocation, a
+throttle, a dropped write. Each is a *thing that happened*; none is
+recoverable from the state that followed it.
+
+### The shape of the answer
+
+Prior art converges (Kubernetes `lastState` + `restartCount`; Nomad's
+bounded task-event ring + `Restarts`): a **bounded** snapshot of the last
+occurrence plus a **monotone counter**, carried on the converged record
+itself, with any fuller history living on a separate and explicitly lossy
+surface. Bounded is the load-bearing word — an unbounded log embedded in
+a converged row is not a fix, it is a second defect (see
+`.claude/rules/reconcilers.md` on markers that outlive the effect they
+record, and the disqualified "last N events in one LWW-merged blob" shape
+in the research below).
+
+Prefer making the bound *structural* rather than conventional: a
+non-nesting snapshot type makes unbounded in-row history
+unrepresentable, per § "Type-driven design".
+
+### Symptoms during review
+
+- A design question phrased as *"is a transient X acceptable?"*, *"does
+  the intermediate state need to be visible?"*, or *"the row reflects the
+  latest fact, which is arguably correct"* — the last one is true and
+  beside the point.
+- A test that polls for a state the system is actively converging away
+  from. It is racy by construction, and if it passes today it may be
+  passing *because* of a bug that holds the state in place — the exact
+  shape of `killed_workload_is_restarted_with_fresh_alloc_id` before
+  ADR-0078.
+- "The event is on the broadcast channel" offered as the durability
+  answer, where that channel is in-process and lost on restart.
+- An operator-facing count or history field that renders a hard-coded
+  constant because nothing ever populated it.
+
+### Precedent
+
+ADR-0078 (`docs/product/architecture/`). ADR-0077 correctly made the LWW
+counter derive from the prior row; a crash-then-restart then converged
+straight back to `Running` and the crash became unobservable in the row
+`overdrive workload describe` reads. `LogicalTimestamp::dominates`
+(`crates/overdrive-core/src/traits/observation_store.rs:346`) was working
+exactly as specified — the loss was structural, not a merge bug. The fix
+is `LastTerminated` (`:991`), a depth-1 non-nesting snapshot, plus a
+monotone `restart_count`, derived by `CrashFacts::advance` (`:1060`,
+`:1144`). Landed `e2a8cb07`.
+
+Full chain: the reproduction in
+`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`;
+the prior-art and CRDT evidence, including which shapes are disqualified
+under gossip merge, in
+`docs/research/orchestration/crash-observability-under-lww-comprehensive-research.md`.
+
+### Cross-references
+
+- § "Persist inputs, not derived state" — the complement; check the input
+  still exists before relying on recomputation.
+- § "Type-driven design" — make the bound unrepresentable rather than
+  merely discouraged.
+- `.claude/rules/reconcilers.md` § "Symptoms during review" — the
+  emit-time marker consulted as the diff; the same "my record of it
+  replaced the thing itself" error, one layer up.
+
+---
+
 ## Port-trait dependencies — `overdrive-host` is production, `overdrive-sim` is tests
 
 `overdrive-core` declares the port traits (`Clock`, `Transport`, `Entropy`,
