@@ -400,16 +400,6 @@ fn build_lifecycle_event(
 /// `Ok(())` after writing its Failed row. The obs-store write is the one
 /// fallible step propagated as `ShimError`.
 #[allow(clippy::too_many_arguments)]
-// mutants: skip — no killer test exercises the mtls-intercept-install
-// fail-closed path (`mtls_worker` is a concrete `Arc<MtlsInterceptWorker>`,
-// not a port, so there is no install-failure seam), so cargo-mutants'
-// whole-body `-> Ok(())` mutant is MISSED — a fail-closed security handler
-// silently turned into a no-op would pass the suite. Pre-existing
-// transparent-mtls-host-socket helper (step 06-03 / `5d7fbae0`), surfaced
-// by the dial-by-name 02-02 mutation review. The REAL suppression is the
-// `.cargo/mutants.toml` `exclude_re` entry (a bare comment suppresses
-// nothing — `.claude/rules/testing.md`); the fault-injection seam + killer
-// test are tracked in overdrive-sh/overdrive#250 (remove both when it lands).
 async fn fail_closed_on_mtls_install(
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
@@ -2056,6 +2046,604 @@ mod tests {
         assert!(
             store.get(&key_b).await.expect("get b").is_none(),
             "B's intent must NOT be persisted (its put failed)"
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test fixtures may panic on programmer error per project precedent in tests/"
+)]
+mod fail_closed_mtls_tests {
+    //! Contract of the transparent-mTLS intercept-install fail-closed handler
+    //! [`fail_closed_on_mtls_install`] (GH #250 / ADR-0076).
+    //!
+    //! The helper is module-private and every one of its eight arguments is
+    //! default-lane constructible with no I/O, so this module drives it
+    //! DIRECTLY — no socket, no netns, no subprocess, no tempdir. That is a
+    //! deliberate, bounded departure from the driving-port rule: the
+    //! call-site ordering property (the arms `return` BEFORE
+    //! `driver.release_for_exit_emission`) is NOT observable here and is
+    //! defended separately by the integration-lane test that drives
+    //! [`dispatch`].
+    //!
+    //! # SUT state machine
+    //!
+    //! ```text
+    //!   Pending --driver.start Ok--> Running(row written, watcher parked)
+    //!       |                            |
+    //!       |                            +-- start_alloc Ok --> release gate, on_alloc_running
+    //!       |                            |
+    //!       |                            +-- start_alloc Err --> [fail_closed_on_mtls_install]
+    //!       |                                                       stop driver (best effort)
+    //!       |                                                       write superseding Failed row
+    //!       |                                                       emit LifecycleEvent
+    //!       |                                                       return WITHOUT releasing gate
+    //!       +-- driver.start StartRejected --> Failed (handle None, gate never armed;
+    //!                                          the mTLS guard is unreachable — it sits
+    //!                                          inside `if state == AllocState::Running`)
+    //! ```
+    //!
+    //! `Failed` is terminal within this helper: the guard fires at most once
+    //! per dispatch, so a second install failure for an already-`Failed`
+    //! alloc is structurally unreachable.
+    //!
+    //! # Universe
+    //!
+    //! Port-exposed observables only: the returned `Result<(), ShimError>`;
+    //! every `AllocStatusRow` readable from the `ObservationStore` for the
+    //! alloc; [`RecordingDriver`]'s `stops` / `releases` /
+    //! `on_alloc_running_calls` records; every [`LifecycleEvent`] received on
+    //! the broadcast bus. Nothing private is read.
+
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::time::{Duration, Instant};
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::TickContext;
+    use overdrive_core::traits::driver::{
+        AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType,
+        Resources,
+    };
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+        ObservationStoreError,
+    };
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_worker::mtls_intercept::InterceptError;
+    use overdrive_worker::mtls_intercept_worker::MtlsInterceptInstallError;
+    use tokio::sync::broadcast;
+
+    use super::{
+        AllocStateWire, LifecycleEvent, ShimError, TransitionReason, TransitionSource,
+        fail_closed_on_mtls_install,
+    };
+
+    /// What [`RecordingDriver::stop`] reports back. The helper's stop is
+    /// deliberately best-effort (`let _ = driver.stop(handle).await;`), so
+    /// both arms must leave the Failed row and the un-released gate intact.
+    #[derive(Debug, Clone, Copy)]
+    enum StopOutcome {
+        /// The workload was still there and stopped cleanly.
+        Ok,
+        /// The workload already exited between `driver.start` returning and
+        /// the intercept install completing — the production-reachable
+        /// `DriverError::NotFound` shape the helper's own comment names.
+        NotFound,
+    }
+
+    /// Recording [`Driver`] double (the `InertDriver` precedent at
+    /// `tests/acceptance/finalize_failed_forward_carries_workload_addr.rs`).
+    ///
+    /// Records `stop`, and overrides the two DEFAULTED no-op lifecycle hooks
+    /// — `release_for_exit_emission` and `on_alloc_running` — so their
+    /// non-invocation is observable rather than assumed.
+    struct RecordingDriver {
+        stops: parking_lot::Mutex<Vec<AllocationId>>,
+        releases: parking_lot::Mutex<Vec<AllocationId>>,
+        on_alloc_running_calls: parking_lot::Mutex<Vec<AllocationId>>,
+        stop_outcome: StopOutcome,
+    }
+
+    impl RecordingDriver {
+        fn new(stop_outcome: StopOutcome) -> Self {
+            Self {
+                stops: parking_lot::Mutex::new(Vec::new()),
+                releases: parking_lot::Mutex::new(Vec::new()),
+                on_alloc_running_calls: parking_lot::Mutex::new(Vec::new()),
+                stop_outcome,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Driver for RecordingDriver {
+        fn r#type(&self) -> DriverType {
+            DriverType::Exec
+        }
+
+        async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+            Err(DriverError::StartRejected {
+                reason: "RecordingDriver: start() is not on the fail-closed path".to_owned(),
+                driver: DriverType::Exec,
+            })
+        }
+
+        async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+            self.stops.lock().push(handle.alloc.clone());
+            match self.stop_outcome {
+                StopOutcome::Ok => Ok(()),
+                StopOutcome::NotFound => Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
+            }
+        }
+
+        async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+            Err(DriverError::NotFound { alloc: handle.alloc.clone() })
+        }
+
+        async fn resize(
+            &self,
+            _handle: &AllocationHandle,
+            _resources: Resources,
+        ) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+            self.releases.lock().push(handle.alloc.clone());
+        }
+
+        fn on_alloc_running(&self, spec: &AllocationSpec) {
+            self.on_alloc_running_calls.lock().push(spec.alloc.clone());
+        }
+    }
+
+    /// The `updated_at.counter` the seeded `Running` row carries. The helper
+    /// stamps `tick.tick + 1` on the `Failed` row, so with [`TICK`] below the
+    /// successor strictly dominates under LWW.
+    const SEEDED_RUNNING_COUNTER: u64 = 0;
+    /// The tick the helper reads its `LogicalTimestamp` from.
+    const TICK: u64 = 7;
+    /// Wall-clock the alloc reached Running at — forward-carried verbatim
+    /// onto the `Failed` row (assertion A-9, the #248 drop shape).
+    const STARTED_AT_SECS: u64 = 1_700_000_000;
+    /// The per-instance address the seeded `Running` row owns. The `Failed`
+    /// row must NOT inherit it (assertion A-4) — a failed alloc is not a live
+    /// backend.
+    const RUNNING_WORKLOAD_ADDR: Ipv4Addr = Ipv4Addr::new(10, 42, 0, 2);
+
+    /// The alloc identity triple every case shares.
+    fn ids() -> (AllocationId, WorkloadId, NodeId) {
+        (
+            AllocationId::new("mif-alloc-0").expect("valid alloc id"),
+            WorkloadId::new("mif-workload").expect("valid workload id"),
+            NodeId::new("mif-node").expect("valid node id"),
+        )
+    }
+
+    /// The `Running` `AllocStatusRow` the helper supersedes. Carries a
+    /// `Some(..)` `started_at` and a `Some(..)` `workload_addr` so the
+    /// forward-carry (A-9) and the deliberate non-carry (A-4) are both
+    /// falsifiable.
+    fn seeded_running_row(
+        alloc: &AllocationId,
+        workload: &WorkloadId,
+        node: &NodeId,
+    ) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: alloc.clone(),
+            workload_id: workload.clone(),
+            node_id: node.clone(),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp {
+                counter: SEEDED_RUNNING_COUNTER,
+                writer: node.clone(),
+            },
+            reason: Some(TransitionReason::Started),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
+                STARTED_AT_SECS,
+            ))),
+            workload_addr: Some(RUNNING_WORKLOAD_ADDR),
+        }
+    }
+
+    fn tick_context() -> TickContext {
+        let now = Instant::now();
+        TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(STARTED_AT_SECS + 5)),
+            tick: TICK,
+            deadline: now + Duration::from_millis(100),
+        }
+    }
+
+    /// `InterceptError::TransparentListener` carrying the `errno` the real
+    /// syscall would have returned (`EPERM` = missing `CAP_NET_ADMIN`).
+    fn transparent_listener(errno: i32) -> InterceptError {
+        InterceptError::TransparentListener {
+            addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+            source: std::io::Error::from_raw_os_error(errno),
+        }
+    }
+
+    /// `InterceptError::TproxyInstall` carrying the failing-command text the
+    /// real `nft` / `ip` shell-out would report.
+    fn tproxy_install(reason: &str) -> InterceptError {
+        InterceptError::TproxyInstall { reason: reason.to_owned() }
+    }
+
+    /// The SIX constructible `MtlsInterceptInstallError` shapes paired with
+    /// the `stage()` string each must map onto, against the CLOSED four-value
+    /// vocabulary. Cases 5 and 6 pin the two ALIAS arms — `LegFLocalAddr` and
+    /// `LegCLocalAddr` fold onto their bind siblings' stage strings, and
+    /// without them a future edit splitting the alias arms goes unnoticed.
+    ///
+    /// Every shape is built from an EXISTING public variant with public field
+    /// types: enum-level `#[non_exhaustive]` blocks exhaustive MATCHING, not
+    /// CONSTRUCTION. No new constructor, no `#[doc(hidden)]`, no new variant.
+    fn install_error_cases() -> Vec<(&'static str, MtlsInterceptInstallError, &'static str)> {
+        vec![
+            (
+                "outbound nft-TPROXY install",
+                MtlsInterceptInstallError::OutboundTproxyInstall(tproxy_install(
+                    "nft add rule: Operation not permitted",
+                )),
+                "outbound_tproxy_install",
+            ),
+            (
+                "leg-F transparent bind",
+                MtlsInterceptInstallError::LegFBind(transparent_listener(libc::EPERM)),
+                "leg_f_bind",
+            ),
+            (
+                "leg-C transparent bind",
+                MtlsInterceptInstallError::Inbound(transparent_listener(libc::ENOPROTOOPT)),
+                "leg_c_transparent_listener",
+            ),
+            (
+                "inbound nft-TPROXY install",
+                MtlsInterceptInstallError::Inbound(tproxy_install(
+                    "nft add rule: No such file or directory",
+                )),
+                "inbound_tproxy",
+            ),
+            (
+                "leg-F getsockname capture (alias arm)",
+                MtlsInterceptInstallError::LegFLocalAddr {
+                    source: std::io::Error::from_raw_os_error(libc::ENOTSOCK),
+                },
+                "leg_f_bind",
+            ),
+            (
+                "leg-C getsockname capture (alias arm)",
+                MtlsInterceptInstallError::LegCLocalAddr {
+                    source: std::io::Error::from_raw_os_error(libc::ENOTSOCK),
+                },
+                "leg_c_transparent_listener",
+            ),
+        ]
+    }
+
+    /// The complete port-exposed universe one drive of the helper produces.
+    /// Captured as owned data so each assertion helper reads a snapshot
+    /// rather than re-locking the double mid-assertion.
+    struct Observed {
+        outcome: Result<(), ShimError>,
+        row: Option<AllocStatusRow>,
+        stops: Vec<AllocationId>,
+        releases: Vec<AllocationId>,
+        on_alloc_running_calls: Vec<AllocationId>,
+        events: Vec<LifecycleEvent>,
+    }
+
+    /// Seed a `Running` row, drive [`fail_closed_on_mtls_install`] once, and
+    /// capture the whole universe. Returns the seeded row alongside the
+    /// observation so supersession is asserted against a real predecessor.
+    ///
+    /// `reject_write` arms `SimObservationStore::inject_write_failure` AFTER
+    /// the seed — the queue is FIFO-consumed, so the helper's own write is
+    /// the one refused.
+    async fn drive(
+        cause: &MtlsInterceptInstallError,
+        stop_outcome: StopOutcome,
+        reject_write: bool,
+    ) -> (AllocStatusRow, Observed) {
+        let (alloc, workload, node) = ids();
+        let store = SimObservationStore::single_peer(node.clone(), 0);
+        let running_row = seeded_running_row(&alloc, &workload, &node);
+        store
+            .write(ObservationRow::AllocStatus(Box::new(running_row.clone())))
+            .await
+            .expect("seeding the Running row must succeed");
+        if reject_write {
+            store.inject_write_failure(ObservationStoreError::Unreachable {
+                peer: "mif-peer".to_owned(),
+            });
+        }
+
+        let driver = RecordingDriver::new(stop_outcome);
+        let (bus, mut events) = broadcast::channel::<LifecycleEvent>(16);
+        let tick = tick_context();
+        let handle = AllocationHandle { alloc: alloc.clone(), pid: Some(4242) };
+
+        let outcome = fail_closed_on_mtls_install(
+            &driver,
+            &store,
+            &bus,
+            &tick,
+            &running_row,
+            AllocStateWire::Running,
+            Some(&handle),
+            cause,
+        )
+        .await;
+
+        let mut drained = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            drained.push(event);
+        }
+        let observed = Observed {
+            outcome,
+            row: store.alloc_status_row(&alloc).await.expect("reading the alloc row must succeed"),
+            stops: driver.stops.lock().clone(),
+            releases: driver.releases.lock().clone(),
+            on_alloc_running_calls: driver.on_alloc_running_calls.lock().clone(),
+            events: drained,
+        };
+        (running_row, observed)
+    }
+
+    /// Assertions A-2, A-3, A-4, A-8, A-9 — the superseding `Failed` row's
+    /// full field contract, including the forward-carried identity/kind and
+    /// the deliberately NON-carried per-instance address.
+    fn assert_superseding_failed_row(
+        label: &str,
+        seeded: &AllocStatusRow,
+        observed: &Observed,
+        expected_stage: &str,
+        expected_detail: &str,
+    ) {
+        let row = observed.row.as_ref().unwrap_or_else(|| {
+            panic!("[{label}] the store must hold a row for the alloc after fail-closed")
+        });
+
+        // A-2 — Failed, strictly dominating the seeded Running row under LWW.
+        assert_eq!(
+            row.state,
+            AllocState::Failed,
+            "[{label}] the fail-closed handler must supersede Running with Failed"
+        );
+        assert!(
+            row.updated_at.counter > seeded.updated_at.counter,
+            "[{label}] the Failed row must strictly dominate the seeded Running row under \
+             LWW; got {} vs seeded {}",
+            row.updated_at.counter,
+            seeded.updated_at.counter
+        );
+
+        // A-3 — the typed cause-class, its per-case `stage`, the verbatim detail.
+        match row.reason.as_ref() {
+            Some(TransitionReason::MtlsInterceptInstallFailed { stage, detail }) => {
+                assert_eq!(
+                    stage, expected_stage,
+                    "[{label}] the Failed row must name the refusing install stage against \
+                     the closed vocabulary"
+                );
+                assert_eq!(
+                    detail, expected_detail,
+                    "[{label}] the reason detail must be the verbatim cause Display"
+                );
+            }
+            other => panic!(
+                "[{label}] the Failed row must carry \
+                 TransitionReason::MtlsInterceptInstallFailed; got {other:?}"
+            ),
+        }
+        assert_eq!(
+            row.detail.as_deref(),
+            Some(expected_detail),
+            "[{label}] the detail column must carry the verbatim cause Display"
+        );
+
+        // A-4 — a failed alloc is not a live backend and makes no terminal claim.
+        assert_eq!(
+            row.workload_addr, None,
+            "[{label}] the Failed row must NOT inherit the Running row's per-instance \
+             address — a failed alloc is not a live backend"
+        );
+        assert_eq!(
+            row.terminal, None,
+            "[{label}] a single mid-budget install failure is not a terminal claim — \
+             WorkloadLifecycle owns BackoffExhausted"
+        );
+
+        // A-8 — identity + kind forward-carried byte-equal.
+        assert_eq!(
+            row.alloc_id, seeded.alloc_id,
+            "[{label}] alloc_id must be forward-carried verbatim"
+        );
+        assert_eq!(
+            row.workload_id, seeded.workload_id,
+            "[{label}] workload_id must be forward-carried verbatim"
+        );
+        assert_eq!(
+            row.node_id, seeded.node_id,
+            "[{label}] node_id must be forward-carried verbatim"
+        );
+        assert_eq!(row.kind, seeded.kind, "[{label}] kind must be forward-carried verbatim");
+
+        // A-9 — `started_at` forward-carried as `Some(..)`, never dropped to
+        // `None` (the GH #248 forward-carry drop shape).
+        assert_eq!(
+            row.started_at, seeded.started_at,
+            "[{label}] started_at must be forward-carried verbatim, never dropped to None"
+        );
+        assert!(
+            row.started_at.is_some(),
+            "[{label}] the fixture's Running row carries Some(started_at), so a None here \
+             is the forward-carry drop, not an honest absence"
+        );
+    }
+
+    /// Assertions A-5 and A-6 — the workload is stopped exactly once, and the
+    /// exit-emission gate is NEVER released for a now-`Failed` alloc.
+    fn assert_stopped_once_and_gate_never_released(
+        label: &str,
+        alloc: &AllocationId,
+        observed: &Observed,
+    ) {
+        assert_eq!(
+            observed.stops.as_slice(),
+            std::slice::from_ref(alloc),
+            "[{label}] the fail-closed handler must stop the spawned workload exactly once"
+        );
+        assert!(
+            observed.releases.is_empty(),
+            "[{label}] the exit-emission gate must NEVER be released by the fail-closed \
+             handler; got {:?}",
+            observed.releases
+        );
+        assert!(
+            observed.on_alloc_running_calls.is_empty(),
+            "[{label}] a now-Failed alloc must never be announced Running to its driver; \
+             got {:?}",
+            observed.on_alloc_running_calls
+        );
+    }
+
+    /// Assertions A-7 and A-10 — exactly ONE lifecycle transition, from the
+    /// prior state to `Failed`, attributed to the reconciler.
+    fn assert_single_reconciler_failed_event(label: &str, observed: &Observed) {
+        assert_eq!(
+            observed.events.len(),
+            1,
+            "[{label}] exactly ONE LifecycleEvent must be emitted; got {:?}",
+            observed.events
+        );
+        let event = &observed.events[0];
+        assert_eq!(
+            event.to,
+            AllocStateWire::Failed,
+            "[{label}] the announced transition must land on Failed"
+        );
+        assert_eq!(
+            event.from,
+            AllocStateWire::Running,
+            "[{label}] the announced transition must originate at the prior state"
+        );
+        assert_eq!(
+            event.source,
+            TransitionSource::Reconciler,
+            "[{label}] the fail-closed transition is reconciler-attributed"
+        );
+    }
+
+    /// S-MIF-01 — an intercept-install failure drives the allocation `Failed`,
+    /// stops the driver, and never releases the exit gate.
+    ///
+    /// Table-driven over the six constructible cause shapes (the module
+    /// idiom; the argument space is a closed six-element set, so a generator
+    /// would be parametrisation theatre). Assertions A-1 … A-10 are
+    /// case-invariant except A-3's `stage`, pinned per case.
+    #[tokio::test]
+    async fn install_failure_supersedes_running_with_failed_and_never_releases_the_gate() {
+        for (label, cause, expected_stage) in install_error_cases() {
+            let expected_detail = cause.to_string();
+            let (seeded, observed) = drive(&cause, StopOutcome::Ok, false).await;
+
+            // A-1 — the dispatch itself succeeded; the alloc is durably Failed.
+            assert!(
+                observed.outcome.is_ok(),
+                "[{label}] the handler must return Ok(()) — the failure is RECORDED, not \
+                 surfaced as ShimError; got {:?}",
+                observed.outcome
+            );
+
+            assert_superseding_failed_row(
+                label,
+                &seeded,
+                &observed,
+                expected_stage,
+                &expected_detail,
+            );
+            assert_stopped_once_and_gate_never_released(label, &seeded.alloc_id, &observed);
+            assert_single_reconciler_failed_event(label, &observed);
+        }
+    }
+
+    /// S-MIF-02 — a driver stop that errors does not prevent the Failed row.
+    ///
+    /// A workload that exits between `driver.start` returning and the
+    /// intercept install completing yields `DriverError::NotFound` from
+    /// `driver.stop`. The helper's stop is deliberately best-effort; turning
+    /// it into a `?` would abort BEFORE the Failed row is written, leaving the
+    /// alloc recorded `Running` with no interception installed — the
+    /// un-alarmed exclusion-mechanism failure.
+    #[tokio::test]
+    async fn a_vanished_workload_still_yields_the_superseding_failed_row() {
+        let cause = MtlsInterceptInstallError::LegFBind(transparent_listener(libc::EPERM));
+        let (seeded, observed) = drive(&cause, StopOutcome::NotFound, false).await;
+
+        assert!(
+            observed.outcome.is_ok(),
+            "a NotFound stop is tolerated — the handler must still report Ok(()); got {:?}",
+            observed.outcome
+        );
+        let row = observed.row.as_ref().expect("the store must hold a row for the alloc");
+        assert_eq!(
+            row.state,
+            AllocState::Failed,
+            "a vanished workload must NOT prevent the superseding Failed row — otherwise the \
+             alloc stays recorded Running with no mTLS interception installed"
+        );
+        assert!(
+            matches!(row.reason, Some(TransitionReason::MtlsInterceptInstallFailed { .. })),
+            "the Failed row must still carry the install-failure cause-class; got {:?}",
+            row.reason
+        );
+        assert_stopped_once_and_gate_never_released(
+            "vanished workload",
+            &seeded.alloc_id,
+            &observed,
+        );
+    }
+
+    /// S-MIF-03 — an observation-store write rejection surfaces as an error
+    /// and emits no lifecycle event.
+    ///
+    /// Pins the write-then-emit ORDERING: an edit that emitted the transition
+    /// before (or regardless of) the write would announce a `Failed`
+    /// transition no durable row backs.
+    #[tokio::test]
+    async fn a_rejected_observation_write_surfaces_and_announces_nothing() {
+        let cause = MtlsInterceptInstallError::LegFBind(transparent_listener(libc::EPERM));
+        let (_seeded, observed) = drive(&cause, StopOutcome::Ok, true).await;
+
+        assert!(
+            matches!(observed.outcome, Err(ShimError::Observation(_))),
+            "a rejected observation write must be REPORTED as ShimError::Observation, never \
+             swallowed; got {:?}",
+            observed.outcome
+        );
+        assert!(
+            observed.events.is_empty(),
+            "no lifecycle transition may be announced without a durable row behind it; \
+             got {:?}",
+            observed.events
+        );
+        assert!(
+            observed.releases.is_empty(),
+            "the exit-emission gate must still never be released; got {:?}",
+            observed.releases
         );
     }
 }
