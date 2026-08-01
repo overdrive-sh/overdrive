@@ -26,44 +26,47 @@
 //! defend only the shared helper. What these defend against is a FUTURE
 //! DIVERGENT EDIT to one block.
 //!
-//! # The four assertions, and why A-1' is parked
+//! # The four assertions
 //!
-//! The design pins four observables per arm (§ 5.2 / OQ-7):
+//! The design pins four observables per arm (§ 5.2 / OQ-7); all four are live:
 //!
 //! | | Assertion | Home |
 //! |---|---|---|
 //! | A-6' | `release_for_exit_emission` NEVER called | live, below |
 //! | A-8' | `driver.on_alloc_running` never called | live, below |
 //! | A-9' | the alloc STILL holds its net slot | live, below |
-//! | A-1' | `Running` written FIRST, then superseded by `Failed` | `#[ignore]`d, below |
+//! | A-1' | `Running` written FIRST, then superseded by `Failed` | live, below |
 //!
-//! A-1' is **`#[ignore]`d against a REAL, REPRODUCED PRODUCTION DEFECT**, not
-//! deleted and not weakened — the same discipline `dns_responder_nxdomain`
-//! applies to its blocked recovery-after-stop observable. The defect:
+//! # A-1' found a real production defect, which is now FIXED
 //!
-//! > `fail_closed_on_mtls_install` builds its superseding `Failed` row from the
-//! > SAME `tick` and the SAME `node_id` as the `Running` row it must supersede
-//! > (`action_shim/mod.rs:1239` and `:430`, both resolving through
-//! > `timestamp_for` at `:1728`), so both rows carry a BYTE-IDENTICAL
-//! > `LogicalTimestamp { counter: tick.tick + 1, writer: node_id }`.
-//! > `LogicalTimestamp::dominates` returns `false` on an equal counter with an
-//! > equal writer, so the `Failed` row LOSES the LWW merge and is silently
-//! > dropped — by `SimObservationStore::apply_alloc_status` AND by the
-//! > production single-node `overdrive-store-local::apply_alloc_status_lww`
+//! A-1' is the first test in the codebase able to observe the fail-closed path
+//! through the real `action_shim::dispatch`, and on its first execution it
+//! reproduced a genuine production defect. It was:
+//!
+//! > `fail_closed_on_mtls_install` built its superseding `Failed` row from the
+//! > SAME `tick` and the SAME `node_id` as the `Running` row it had to
+//! > supersede, both resolving through `timestamp_for`, so both rows carried a
+//! > BYTE-IDENTICAL `LogicalTimestamp { counter: tick.tick + 1, writer:
+//! > node_id }`. `LogicalTimestamp::dominates` returns `false` on an equal
+//! > counter with an equal writer, so the `Failed` row LOST the LWW merge and
+//! > was silently dropped — by `SimObservationStore::apply_alloc_status` AND by
+//! > the production single-node `overdrive-store-local::apply_alloc_status_lww`
 //! > that `run_server` wires via `wire_single_node_observation`.
 //!
-//! The operator-visible consequence under a real `serve` + `deploy`: an mTLS
-//! intercept-install failure leaves the allocation **durably recorded
-//! `Running` with no interception installed**. The driver IS stopped and the
-//! `LifecycleEvent` IS emitted (both verified), so the workload is not left
-//! running uninstrumented — but the durable record lies, which is the surface
-//! this feature exists to defend.
+//! The operator-visible consequence under a real `serve` + `deploy` was that an
+//! mTLS intercept-install failure left the allocation **durably recorded
+//! `Running` with no interception installed**. The driver WAS stopped and the
+//! `LifecycleEvent` WAS emitted, so the workload was never left running
+//! uninstrumented — but the durable record lied, which is the surface this
+//! feature exists to defend.
 //!
-//! Fixing it is a production behaviour change, which ADR-0076 § Decision 4 and
-//! this step's scope both exclude. UN-IGNORE A-1' in the same commit that
-//! lands the fix; it passes the moment the `Failed` row dominates. A tracking
-//! issue is pending operator approval (agents do not open issues unilaterally)
-//! — this module doc is the interim record.
+//! The fix of record is ADR-0076 rev 5 § Decision 7 and
+//! `docs/feature/mtls-intercept-install-fault-seam/design/architecture.md`
+//! § 4.8: a same-tick supersede derives its LWW counter from the row it
+//! supersedes (`superseding_timestamp`), never from the tick, and
+//! `build_alloc_status_row`'s stamp became a REQUIRED parameter so every writer
+//! decides it explicitly. `LogicalTimestamp::dominates` was NOT changed — the
+//! comparator is correct; the counter the shim assigned was wrong.
 //!
 //! # SUT state machine
 //!
@@ -197,12 +200,7 @@ fn build_worker(intercept: Arc<dyn MtlsIntercept>) -> Arc<MtlsInterceptWorker> {
             std::collections::BTreeMap::new(),
             overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
         ));
-    Arc::new(MtlsInterceptWorker::new(
-        enforcement,
-        resolve,
-        Arc::new(SimClock::new()),
-        intercept,
-    ))
+    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
 }
 
 /// A shared in-process `SimObservationStore` — the dispatch path writes the
@@ -499,8 +497,7 @@ async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailC
     let _guard = arm_netns_guard(NetSlot::new(slot_index).expect("slot in range"));
 
     let alloc = AllocationId::new(alloc_name).expect("valid alloc id");
-    let workload =
-        WorkloadId::new(&format!("svc-{alloc_name}")).expect("valid workload id");
+    let workload = WorkloadId::new(&format!("svc-{alloc_name}")).expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
 
     let action = match arm {
@@ -628,9 +625,8 @@ async fn restart_allocation_install_failure_never_releases_the_exit_watcher() {
 }
 
 // ---------------------------------------------------------------------------
-// A-1' — the ROW SUPERSESSION property. BLOCKED on a reproduced production
-// defect; see the module doc for the full diagnosis. Un-ignore in the same
-// commit that lands the fix.
+// A-1' — the ROW SUPERSESSION property. This pair reproduced the LWW collision
+// described in the module doc; both are live against the fix.
 // ---------------------------------------------------------------------------
 
 /// A-1' — the `Running` row is written FIRST and then SUPERSEDED by a `Failed`
@@ -674,22 +670,17 @@ fn assert_supersession_observable(scenario: &str, outcome: &FailClosedOutcome) {
     );
 }
 
-/// S-MIF-04 A-1' — BLOCKED, see the module doc.
+/// S-MIF-04 A-1' — the `StartAllocation` arm's supersession.
 ///
-/// Reproduced failure: the drained write-order universe holds ONE row, the
-/// `Running` row (`LogicalTimestamp { counter: 1, writer: NodeId("node-001") }`).
-/// The superseding `Failed` row carries a byte-identical timestamp, loses the
-/// LWW merge in `apply_alloc_status`, and is dropped before it can fan out.
+/// This is the test that reproduced the LWW collision: before the fix the
+/// drained write-order universe held ONE row, the `Running` row
+/// (`LogicalTimestamp { counter: 1, writer: NodeId("node-001") }`), because the
+/// superseding `Failed` row carried a byte-identical timestamp, lost the merge
+/// in `apply_alloc_status`, and was dropped before it could fan out.
 #[tokio::test]
-#[ignore = "blocked on the fail-closed LogicalTimestamp collision — fail_closed_on_mtls_install \
-            stamps its Failed row from the same tick + node_id as the Running row it supersedes, \
-            so dominates() is false and the row is dropped by both SimObservationStore and the \
-            production overdrive-store-local LWW. Un-ignore with the fix; see the module doc."]
 async fn start_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {
-        eprintln!(
-            "SKIP start_allocation_install_failure_supersedes_running_with_failed: not root"
-        );
+        eprintln!("SKIP start_allocation_install_failure_supersedes_running_with_failed: not root");
         return;
     }
     eprintln!("EXECUTED S-MIF-04 A-1' (root)");
@@ -699,10 +690,10 @@ async fn start_allocation_install_failure_supersedes_running_with_failed() {
     assert_supersession_observable("S-MIF-04", &outcome);
 }
 
-/// S-MIF-05 A-1' — BLOCKED on the same defect as its `StartAllocation` sibling.
+/// S-MIF-05 A-1' — the `RestartAllocation` arm's supersession, which reproduced
+/// the same collision as its `StartAllocation` sibling through the same shared
+/// helper.
 #[tokio::test]
-#[ignore = "blocked on the fail-closed LogicalTimestamp collision — see the sibling \
-            start_allocation_install_failure_supersedes_running_with_failed and the module doc."]
 async fn restart_allocation_install_failure_supersedes_running_with_failed() {
     if !is_root() {
         eprintln!(

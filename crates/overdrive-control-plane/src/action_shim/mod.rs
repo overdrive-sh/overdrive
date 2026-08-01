@@ -274,7 +274,14 @@ fn build_alloc_status_row(
     workload_id: WorkloadId,
     node_id: NodeId,
     state: AllocState,
-    tick: &TickContext,
+    // The row's LWW stamp, a REQUIRED parameter so every writer must decide
+    // it explicitly: `timestamp_for(tick, node_id.clone())` for an ordinary
+    // per-tick write, `superseding_timestamp(tick, prior)` for a row that
+    // replaces another row written in the SAME tick. Deriving it internally
+    // from the tick is what let a superseding `Failed` row silently inherit
+    // the counter of the `Running` row it had to dominate (GH #250) — the
+    // same required-parameter discipline `workload_addr` got for GH #248.
+    updated_at: LogicalTimestamp,
     reason: Option<TransitionReason>,
     detail: Option<String>,
     terminal: Option<TerminalCondition>,
@@ -300,13 +307,12 @@ fn build_alloc_status_row(
     // the residual host_ipv4-fallback masking is tracked in #248).
     workload_addr: Option<std::net::Ipv4Addr>,
 ) -> AllocStatusRow {
-    let writer = node_id.clone();
     AllocStatusRow {
         alloc_id,
         workload_id,
         node_id,
         state,
-        updated_at: timestamp_for(tick, writer),
+        updated_at,
         reason,
         detail,
         terminal,
@@ -386,8 +392,12 @@ fn build_lifecycle_event(
 /// 2. Writes a superseding `Failed` `AllocStatusRow` carrying
 ///    [`TransitionReason::MtlsInterceptInstallFailed`] (`stage` = the install
 ///    step that failed; `detail` = the verbatim error `Display`) — mirroring
-///    the existing `StartRejected → Failed` precedent. LWW resolves the brief
-///    observed-`Running`-then-`Failed` window to the latest write.
+///    the existing `StartRejected → Failed` precedent. The superseding row's
+///    LWW stamp comes from [`superseding_timestamp`], NOT [`timestamp_for`]:
+///    both rows are written in the SAME tick by the SAME node, so a
+///    tick-derived counter would tie and the `Failed` row would be silently
+///    dropped, leaving the alloc durably recorded `Running` with no
+///    interception installed (GH #250 / ADR-0076 § Decision 7).
 /// 3. Emits the lifecycle event for the `Failed` transition.
 ///
 /// It does NOT call `driver.release_for_exit_emission` — both call sites
@@ -431,7 +441,7 @@ async fn fail_closed_on_mtls_install(
         running_row.workload_id.clone(),
         running_row.node_id.clone(),
         AllocState::Failed,
-        tick,
+        superseding_timestamp(tick, running_row),
         Some(reason),
         Some(cause.to_string()),
         None,
@@ -513,12 +523,13 @@ async fn fail_closed_on_netns_provision(
     cause: TransitionReason,
 ) -> Result<(), ShimError> {
     let detail = cause.human_readable();
+    let updated_at = timestamp_for(tick, node_id.clone());
     let failed_row = build_alloc_status_row(
         alloc_id,
         workload_id,
         node_id,
         AllocState::Failed,
-        tick,
+        updated_at,
         Some(cause),
         Some(detail),
         None,
@@ -1062,12 +1073,13 @@ async fn dispatch_single(
             // sites so the row-state and teardown decisions cannot drift.
             let is_stable = matches!(terminal, Some(TerminalCondition::Stable { .. }));
             let finalized_state = if is_stable { prior_row.state } else { AllocState::Failed };
+            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
                 finalized_state,
-                tick,
+                updated_at,
                 prior_row.reason.clone(),
                 // Propagate the prior row's verbatim driver text. The
                 // last failed Start/RestartAllocation populates `detail`
@@ -1236,12 +1248,13 @@ async fn dispatch_single(
             // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
             let workload_addr =
                 if state == AllocState::Running { spec.workload_addr } else { None };
+            let updated_at = timestamp_for(tick, node_id.clone());
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
                 node_id,
                 state,
-                tick,
+                updated_at,
                 reason,
                 detail,
                 None,
@@ -1454,12 +1467,13 @@ async fn dispatch_single(
             // attempt.
             let workload_addr =
                 if state == AllocState::Running { spec.workload_addr } else { None };
+            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
                 state,
-                tick,
+                updated_at,
                 reason,
                 detail,
                 None,
@@ -1563,12 +1577,13 @@ async fn dispatch_single(
             // (Pending → Stopped), the prior value is `None` and
             // stays `None`.
             let prior_started_at = prior_row.started_at;
+            let updated_at = timestamp_for(tick, prior_row.node_id.clone());
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.workload_id,
                 prior_row.node_id,
                 AllocState::Terminated,
-                tick,
+                updated_at,
                 Some(TransitionReason::Stopped {
                     by: overdrive_core::transition_reason::StoppedBy::Reconciler,
                 }),
@@ -1725,8 +1740,40 @@ async fn dispatch_single(
 /// every observation row with `(counter = tick.tick + 1, writer = node_id)`
 /// so two writes for the same alloc on different ticks are correctly
 /// ordered under LWW.
+///
+/// # Two writes in the SAME tick are NOT ordered by this function
+///
+/// The counter derives from the tick alone, so two rows written for the
+/// same alloc, by the same node, inside ONE tick carry a byte-identical
+/// `(counter, writer)` — and [`LogicalTimestamp::dominates`] returns
+/// `false` on an equal counter with an equal writer. The second row would
+/// LOSE the last-write-wins merge and be silently dropped by both
+/// `ObservationStore` adapters. A row written to SUPERSEDE another row in
+/// the same tick MUST use [`superseding_timestamp`] instead.
 const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
     LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
+}
+
+/// Build a `LogicalTimestamp` for a row written to SUPERSEDE `superseded`
+/// **within the same tick**, guaranteeing it strictly dominates under LWW.
+///
+/// [`timestamp_for`] alone cannot do this: it derives its counter from the
+/// tick, so a same-tick supersede would tie with the row it must replace
+/// and be silently discarded (GH #250 / ADR-0076 § Decision 7). The counter
+/// therefore derives from the row being superseded. `max` against the tick
+/// base keeps the stamp correct even when the superseded row is BEHIND the
+/// current tick, and single-sources the base from [`timestamp_for`] so the
+/// two cannot drift.
+///
+/// Same shape as the exit observer's successor-row write
+/// (`crate::worker::exit_observer`), which has always derived its counter
+/// from the prior row for exactly this reason.
+fn superseding_timestamp(tick: &TickContext, superseded: &AllocStatusRow) -> LogicalTimestamp {
+    let base = timestamp_for(tick, superseded.node_id.clone());
+    LogicalTimestamp {
+        counter: base.counter.max(superseded.updated_at.counter.saturating_add(1)),
+        writer: base.writer,
+    }
 }
 
 /// Look up the LWW-winner observation row for `alloc_id`, used by the
@@ -2202,10 +2249,21 @@ mod fail_closed_mtls_tests {
         }
     }
 
-    /// The `updated_at.counter` the seeded `Running` row carries. The helper
-    /// stamps `tick.tick + 1` on the `Failed` row, so with [`TICK`] below the
-    /// successor strictly dominates under LWW.
-    const SEEDED_RUNNING_COUNTER: u64 = 0;
+    /// The `updated_at.counter` the seeded `Running` row carries — deliberately
+    /// `TICK + 1`, i.e. EXACTLY what [`timestamp_for`] stamps on a row written
+    /// during [`TICK`]. This models the REAL production shape: the `Running` row
+    /// and the superseding `Failed` row are written in the SAME tick by the SAME
+    /// node, so a tick-derived counter on the successor would TIE and the
+    /// `Failed` row would be silently dropped by LWW (GH #250 / ADR-0076
+    /// § Decision 7).
+    ///
+    /// The prior value (`0`, against `TICK = 7`) let the helper's tick-derived
+    /// counter clear the seed ARTIFICIALLY — a different-counter shape
+    /// production never produces — which is precisely what masked the defect
+    /// through steps 01-01, 02-01 and 03-01. The successor now dominates only
+    /// because [`superseding_timestamp`] derives its counter from the row being
+    /// superseded.
+    const SEEDED_RUNNING_COUNTER: u64 = TICK + 1;
     /// The tick the helper reads its `LogicalTimestamp` from.
     const TICK: u64 = 7;
     /// Wall-clock the alloc reached Running at — forward-carried verbatim
@@ -2417,10 +2475,13 @@ mod fail_closed_mtls_tests {
             AllocState::Failed,
             "[{label}] the fail-closed handler must supersede Running with Failed"
         );
-        assert!(
-            row.updated_at.counter > seeded.updated_at.counter,
-            "[{label}] the Failed row must strictly dominate the seeded Running row under \
-             LWW; got {} vs seeded {}",
+        assert_eq!(
+            row.updated_at.counter,
+            SEEDED_RUNNING_COUNTER + 1,
+            "[{label}] the Failed row must carry the seeded Running row's counter PLUS ONE so it \
+             strictly dominates under LWW — the two rows are written in the SAME tick by the SAME \
+             node, so a tick-derived counter would tie and the Failed row would be silently \
+             dropped; got {} vs seeded {}",
             row.updated_at.counter,
             seeded.updated_at.counter
         );
