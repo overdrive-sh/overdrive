@@ -11,6 +11,17 @@
 
 ---
 
+> **AMENDMENT 2026-08-01 — this document's "no production behaviour change"
+> claim is WITHDRAWN.** DELIVER step 04-01 found a real production defect: the
+> superseding `Failed` row loses the LWW merge, so an mTLS install failure
+> leaves the allocation **durably recorded `Running` with no interception
+> installed**. It is fixed in-scope at user direction. The character-exact fix
+> is **§ 4.8**; the architectural record is **ADR-0076 rev 5 § Decision 7**
+> (including the blast-radius audit and three out-of-scope systemic findings);
+> DELIVER gains **step 04-02**. Read §§ 0–4.7 and § 7 with that amendment in
+> hand — where they say the feature changes no production behaviour, § 4.8 is
+> the exception.
+
 ## 0. Executive summary — and the two findings that reshape the decision
 
 The research ranked **Candidate A** (extract an `MtlsIntercept` port trait,
@@ -936,6 +947,189 @@ every dispatch call site.
 
 ---
 
+### 4.8 THE ONE PRODUCTION FIX — the superseding `Failed` row must win the LWW merge (added 2026-08-01, DELIVER step 04-02)
+
+> **This section supersedes every "no production behaviour change" statement in
+> this document.** ADR-0076 rev 5 § Decision 7 is the architectural record; this
+> section is the character-exact API surface a crafter implements. The defect
+> was found by step 04-01's A-1' — the first test in the codebase able to
+> observe the fail-closed path through the real `action_shim::dispatch`.
+
+#### The defect, in one paragraph
+
+`fail_closed_on_mtls_install` builds its superseding `Failed` row from the SAME
+`tick` and the SAME `node_id` as the `Running` row it must supersede
+(`mod.rs:1239`/`:1457` and `:429`, both resolving through `timestamp_for` at
+`:1728`), so both rows carry a byte-identical
+`LogicalTimestamp { counter: tick.tick + 1, writer: node_id }`.
+`LogicalTimestamp::dominates` returns `false` on an equal counter with an equal
+writer, so the `Failed` row **loses the merge and is silently dropped** — by
+`SimObservationStore::apply_alloc_status` AND by the production
+`overdrive-store-local::apply_alloc_status_lww` that `run_server` wires. An mTLS
+install failure therefore leaves the allocation **durably recorded `Running`
+with no interception installed**. The driver IS stopped and the `LifecycleEvent`
+IS emitted, so nothing runs uninstrumented — but the durable record lies, which
+is the surface this feature exists to defend.
+
+#### The fix — CHARACTER-EXACT, five edits in one file
+
+All five are in
+`crates/overdrive-control-plane/src/action_shim/mod.rs`. Nothing else in the
+workspace changes. **A crafter who needs a symbol not listed here MUST return a
+BLOCKER rather than invent one** (CLAUDE.md § "Implement to the design").
+
+**Edit 1 — new helper, inserted immediately AFTER `timestamp_for` (i.e. after
+the closing brace at `:1730`), and `timestamp_for`'s rustdoc corrected.**
+Replace the whole `timestamp_for` doc-comment-plus-fn block with:
+
+```rust
+/// Build a `LogicalTimestamp` from the current tick. The shim writes
+/// every observation row with `(counter = tick.tick + 1, writer = node_id)`
+/// so two writes for the same alloc on different ticks are correctly
+/// ordered under LWW.
+///
+/// # Two writes in the SAME tick are NOT ordered by this function
+///
+/// The counter derives from the tick alone, so two rows written for the
+/// same alloc, by the same node, inside ONE tick carry a byte-identical
+/// `(counter, writer)` — and [`LogicalTimestamp::dominates`] returns
+/// `false` on an equal counter with an equal writer. The second row would
+/// LOSE the last-write-wins merge and be silently dropped by both
+/// `ObservationStore` adapters. A row written to SUPERSEDE another row in
+/// the same tick MUST use [`superseding_timestamp`] instead.
+const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
+    LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
+}
+
+/// Build a `LogicalTimestamp` for a row written to SUPERSEDE `superseded`
+/// **within the same tick**, guaranteeing it strictly dominates under LWW.
+///
+/// [`timestamp_for`] alone cannot do this: it derives its counter from the
+/// tick, so a same-tick supersede would tie with the row it must replace
+/// and be silently discarded (GH #250 / ADR-0076 § Decision 7). The counter
+/// therefore derives from the row being superseded. `max` against the tick
+/// base keeps the stamp correct even when the superseded row is BEHIND the
+/// current tick, and single-sources the base from [`timestamp_for`] so the
+/// two cannot drift.
+///
+/// Same shape as the exit observer's successor-row write
+/// (`crate::worker::exit_observer`), which has always derived its counter
+/// from the prior row for exactly this reason.
+fn superseding_timestamp(tick: &TickContext, superseded: &AllocStatusRow) -> LogicalTimestamp {
+    let base = timestamp_for(tick, superseded.node_id.clone());
+    LogicalTimestamp {
+        counter: base.counter.max(superseded.updated_at.counter.saturating_add(1)),
+        writer: base.writer,
+    }
+}
+```
+
+**Edit 2 — `build_alloc_status_row`: the `tick` parameter becomes a required
+`updated_at`.** In the parameter list (`:277`) replace `tick: &TickContext,`
+with:
+
+```rust
+    // The row's LWW stamp, a REQUIRED parameter so every writer must decide
+    // it explicitly: `timestamp_for(tick, node_id.clone())` for an ordinary
+    // per-tick write, `superseding_timestamp(tick, prior)` for a row that
+    // replaces another row written in the SAME tick. Deriving it internally
+    // from the tick is what let a superseding `Failed` row silently inherit
+    // the counter of the `Running` row it had to dominate (GH #250) — the
+    // same required-parameter discipline `workload_addr` got for GH #248.
+    updated_at: LogicalTimestamp,
+```
+
+and in the body (`:302-309`) replace
+
+```rust
+) -> AllocStatusRow {
+    let writer = node_id.clone();
+    AllocStatusRow {
+        alloc_id,
+        workload_id,
+        node_id,
+        state,
+        updated_at: timestamp_for(tick, writer),
+```
+
+with
+
+```rust
+) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id,
+        workload_id,
+        node_id,
+        state,
+        updated_at,
+```
+
+**Edit 3 — the ONE supersede call site** (`fail_closed_on_mtls_install`,
+`:429-445`). `running_row` is a `&AllocStatusRow` and position 3 passes a clone,
+so no hoist is needed. Replace the 5th argument `tick,` with:
+
+```rust
+        superseding_timestamp(tick, running_row),
+```
+
+`fail_closed_on_mtls_install`'s signature, arity (8) and
+`#[allow(clippy::too_many_arguments)]` attribute are **UNCHANGED** — `tick` is
+still consumed, now by `superseding_timestamp`.
+
+**Edit 4 — the five ordinary call sites**, each hoisting a `let updated_at`
+binding BEFORE the call (arguments evaluate left-to-right, and positions 2–3
+move out of `prior_row`, so an inline expression at position 5 would not
+compile). Each passes a value byte-identical to today's, so **all five are
+behaviour-preserving**:
+
+| Site | Hoisted binding | 5th argument |
+|---|---|---|
+| `fail_closed_on_netns_provision` `:516` | `let updated_at = timestamp_for(tick, node_id.clone());` | `updated_at,` |
+| `FinalizeFailed` `:1065` | `let updated_at = timestamp_for(tick, prior_row.node_id.clone());` | `updated_at,` |
+| `StartAllocation` `:1239` | `let updated_at = timestamp_for(tick, node_id.clone());` | `updated_at,` |
+| `RestartAllocation` `:1457` | `let updated_at = timestamp_for(tick, prior_row.node_id.clone());` | `updated_at,` |
+| `StopAllocation` `:1566` | `let updated_at = timestamp_for(tick, prior_row.node_id.clone());` | `updated_at,` |
+
+**Edit 5 — `fail_closed_on_mtls_install`'s rustdoc** (`:390`). The sentence
+*"LWW resolves the brief observed-`Running`-then-`Failed` window to the latest
+write"* was FALSE until this fix. Replace it with:
+
+```rust
+///    the existing `StartRejected → Failed` precedent. The superseding row's
+///    LWW stamp comes from [`superseding_timestamp`], NOT [`timestamp_for`]:
+///    both rows are written in the SAME tick by the SAME node, so a
+///    tick-derived counter would tie and the `Failed` row would be silently
+///    dropped, leaving the alloc durably recorded `Running` with no
+///    interception installed (GH #250 / ADR-0076 § Decision 7).
+```
+
+#### What is deliberately NOT changed
+
+- **`LogicalTimestamp::dominates` is UNTOUCHED.** The comparator is correct —
+  an equal `(counter, writer)` genuinely is not newer, and the LWW idempotency
+  case (re-delivered gossip is a no-op) depends on `false`. The bug is the
+  counter the shim assigns. The comparator is the SSOT both adapters consult
+  (`docs/feature/fix-observation-lww-merge/deliver/rca.md`).
+- **No `ObservationStore` adapter is changed**, in either crate.
+- **`dispatch` / `dispatch_single` signatures are UNCHANGED**, as § 4.7 requires.
+- **The three systemic LWW findings in ADR-0076 § 7d are NOT fixed here** — the
+  cross-restart counter regression, the next-tick tie residual, and the other
+  tick-derived row types. They are out of this feature's scope, no issue was
+  created, and no forward pointer is written.
+
+#### Blast-radius audit
+
+Recorded in full in ADR-0076 § Decision 7c. Result: **only the two mTLS
+fail-closed arms are affected**, and both are fixed by the single shared helper.
+`fail_closed_on_netns_provision` is confirmed clean — it fires at the
+PRE-`Running` provision seam and writes a FRESH row with nothing to supersede
+(verified, not assumed). `StartRejected → Failed`, the `RestartAllocation`
+stop-half, `FinalizeFailed` and `StopAllocation` each write at most one row per
+`dispatch_single`. The exit observer is immune by construction and is the
+precedent the fix follows.
+
+---
+
 ## 5. The tests
 
 ### 5.1 T1 — default-lane mutant killer (in-crate unit test)
@@ -979,8 +1173,12 @@ class in this repo** — it is why `workload_addr` became a required parameter
 > rate that skipped the load-bearing arm entirely, because the arm generated no
 > mutant). **Consequence:** a 100% function-scoped kill rate over a one-mutant
 > set would be *vacuous*, so A-8/A-9/A-10 rest on the **#248 forward-carry bug
-> class**, not on mutation coverage. DELIVER must run `cargo mutants --list`
-> scoped to the function and record the ACTUAL generated set on the step (§ 6).
+> class**, not on mutation coverage. DELIVER must record the ACTUAL generated
+> set on the step, read verbatim off the scoped run's guest
+> `target/xtask/mutants.out/outcomes.json`, BEFORE stating any kill rate (§ 6).
+> There is **no `cargo mutants --list`** available here — it is denied by
+> `.claude/hooks/block-cargo-mutants.ts` and the xtask wrapper has no `--list`
+> mode; the enumeration comes out of the run itself.
 
 | # | Assertion | Regression it defends |
 |---|---|---|
@@ -1200,10 +1398,23 @@ logic of its own to diverge.
    inside `fail_closed_on_mtls_install`, and the scoped run must report 100%
    for that function.**
 5. **Enumerate the ACTUAL mutant set first — do not assume it** *(added at
-   review iteration 2)*. Before claiming item 4 is met, run `cargo mutants
-   --list` scoped to `crates/overdrive-control-plane/src/action_shim/mod.rs`
-   and record the mutants generated inside `fail_closed_on_mtls_install` on the
-   step. cargo-mutants does **not** insert statements or substitute call
+   review iteration 2; mechanism corrected at DELIVER review)*. Before
+   claiming item 4 is met, run the scoped pass through the sanctioned wrapper
+   (`cargo xtask lima run -- cargo xtask mutants --diff origin/main --features
+   integration-tests --package overdrive-control-plane --file
+   crates/overdrive-control-plane/src/action_shim/mod.rs`, backgrounded), then
+   read the **guest** `target/xtask/mutants.out/outcomes.json` — the per-mutant
+   record written alongside the aggregate `mutants-summary.json`
+   (`xtask/src/mutants.rs:116-121`) — and record verbatim on the step every
+   mutant whose function is `fail_closed_on_mtls_install`, with its outcome.
+   **No kill-rate figure may be stated before that enumeration is recorded.**
+   `cargo mutants --list` is **not available**: it is denied by
+   `.claude/hooks/block-cargo-mutants.ts` (whose regex matches even behind a
+   `cargo xtask lima run --` prefix) and `xtask::mutants::Scope`
+   (`xtask/src/mutants.rs:82`) exposes no `--list` mode. Prescribing it would
+   pre-compute the answer this gate exists to verify and hand the crafter a
+   denied command — narration, not evidence. cargo-mutants does **not** insert
+   statements or substitute call
    arguments, and this helper contains **no binary operators**, so the
    generated set may be **just the whole-body mutant** — in which case a 100%
    function-scoped kill rate is **vacuous** and must be reported as such. This
