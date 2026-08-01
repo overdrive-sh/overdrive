@@ -62,9 +62,16 @@
     cargo-mutants does not generate (it neither inserts statements nor
     substitutes call arguments, and the helper has no binary operators).
     **Closed**: column renamed "Regression it defends"; a new § 6.5 requires
-    `cargo mutants --list` before claiming the contract is met, and states
-    plainly that a 100% kill over a one-mutant set is **vacuous** — so
-    A-8/A-9/A-10 rest on the #248 bug class, not on mutation coverage.
+    the ACTUAL mutant set to be enumerated before claiming the contract is met,
+    and states plainly that a 100% kill over a one-mutant set is **vacuous** —
+    so A-8/A-9/A-10 rest on the #248 bug class, not on mutation coverage.
+    *(Mechanism corrected at DELIVER review, 2026-08-01: § 6.5 originally
+    prescribed `cargo mutants --list`, which cannot run here —
+    `.claude/hooks/block-cargo-mutants.ts` denies it even behind a
+    `cargo xtask lima run --` prefix, and the xtask wrapper has no `--list`
+    mode. The enumeration is now read off the scoped run's own guest
+    `target/xtask/mutants.out/outcomes.json`. The requirement is unchanged;
+    only the command is.)*
   - **M-3** — § 5.2 told the crafter to reuse a zero-argument `build_worker()`
     *and* to arm a fault on the sim it constructs inline, which is
     unsatisfiable. **Closed**: a test-local `build_worker(intercept: Arc<dyn
@@ -131,6 +138,38 @@
 | **DFS-6** | **DELIVER ordering: T1 + the two suppression deletions land as ONE step, FIRST — before the port extraction.** | T1 is independently valuable, independently gated, needs no production change, and de-risks the mutation contract from everything that follows. Bundling it with the port would make the gate's green depend on the port's correctness. | `architecture.md` § 9 |
 | **DFS-8** | **Lima+root integration tests PARTICIPATE in the mutation gate — so T2's integration-lane placement is not a coverage compromise.** *(Added at rev 4; this is the fact that makes DFS-0b tolerable and that closes the "we need a second port" pressure.)* The canonical CI invocation is `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests`, and **`cargo xtask lima run` runs as root by default**. `.claude/rules/testing.md` makes the Lima prefix *mandatory* for any mutation run carrying `--features integration-tests` **precisely because** without it the `#[cfg(target_os = "linux")]` surface is unreachable and *"the kill-rate gate becomes meaningless."* A Lima+root T2 therefore kills call-site mutants **in the real gate**. **Default-lane placement is a WALL-CLOCK property, not a COVERAGE one.** | Two consequences follow and are carried through the design. **(1)** OQ-9's "T1 alone must suffice" is re-grounded on the DELIVER ordering (DFS-6), not on a false claim that Lima-gated tests do not count. **(2)** Building a `WorkloadNetns` port to make T2 default-lane would buy wall-clock and local ergonomics, **not** gate coverage — a second, independent reason it stays out of scope here (see "Rejected in full"). Rejected framing: *"T2 is Lima-gated, therefore the fail-closed path is effectively ungated."* False — it is gated by the canonical CI mutation invocation. | `.claude/rules/testing.md` § "Mutation testing (cargo-mutants)" → Usage, § "Running tests — Lima VM"; CI per-PR job F |
 | **DFS-7** | **The trait contract states ONLY what BOTH adapters can honour; substrate specifics live on `HostMtlsIntercept`'s own rustdoc.** *(Added at review iteration 1 — H5.)* Moved OFF the trait and onto the host adapter: `IP_TRANSPARENT` + `IP_FREEBIND` on the bound socket; "exactly ONE `nft` rule appended to the shared prerouting chain"; the shared-routing-infra convergence; "guard `Drop` removes that rule by handle". What REMAINS on the trait: a bound-and-listening listener with a NON-ZERO port when `addr` carried 0, distinct listeners per call, a guard owning exactly what its call acquired whose `Drop` neither panics nor errors, and nothing-acquired-outlives-an-`Err`. | The first draft stated the substrate specifics as **trait** postconditions — making the contract **unimplementable by half its sanctioned implementors** (the sim binds a plain listener and appends no rule, both by necessity per DFS-5 / DFS-3). `.claude/rules/development.md` § "Trait definitions specify behavior, not just signature" is explicit that adapters diverging on the same call means *"the bug is in the trait contract, not in either adapter — fix the trait docstring first."* Four rustdoc sections were present, so the rule was formally satisfied and substantively violated. The divergence was on the **Ok** arms — exactly where T4 claims equivalence — which is why T4 would otherwise have had to assert a WEAKER set than the contract stated. Post-split, contract and T4 assertion set **coincide exactly**, and the honest gap shrinks to the fault arms alone (OQ-8), which is what the design always claimed. | review iteration 1 H5; `.claude/rules/development.md` § "Trait definitions specify behavior, not just signature" |
+
+
+---
+
+## DFS-9 — the one production fix (added 2026-08-01, after DELIVER step 04-01)
+
+| # | Decision | Alternatives rejected, and why | Source |
+|---|---|---|---|
+| **DFS-9** | **The superseding `Failed` row derives its LWW counter from the row it supersedes — and this feature therefore DOES make a production behaviour change.** DFS-1…DFS-8 and OQ-4 all rest on "no production behaviour change"; **that claim is withdrawn, not qualified.** Step 04-01's A-1' — the first test able to observe the fail-closed path through the real `action_shim::dispatch` — found that `fail_closed_on_mtls_install` builds its `Failed` row from the SAME `tick` and SAME `node_id` as the `Running` row it must supersede, so both carry a byte-identical `LogicalTimestamp` and `dominates` returns `false`. The `Failed` row is **silently dropped by both adapters**, leaving the alloc **durably recorded `Running` with no interception installed** — the exact surface this feature exists to defend. Fix: a new module-private `superseding_timestamp(tick, superseded)` returning `max(tick+1, superseded.counter+1)`, plus `build_alloc_status_row`'s `tick` parameter becoming a **required** `updated_at: LogicalTimestamp` so every writer decides its stamp explicitly. Character-exact surface: `architecture.md` § 4.8. Blast-radius audit: ADR-0076 § 7c — **only the two mTLS fail-closed arms are affected**; `fail_closed_on_netns_provision` is verified clean (pre-`Running` seam, fresh row, nothing to supersede). Lands as DELIVER **step 04-02**, un-ignoring A-1' on both arms. | **(a) Change `LogicalTimestamp::dominates` to let an equal-`(counter, writer)` incoming row win.** Rejected — it would be a bug: equal timestamps genuinely are not newer, and the LWW idempotency case (re-delivered gossip is a no-op) depends on `false`. It would also make acceptance order-dependent across gossip replay. The comparator is the SSOT both adapters consult and it is correct; the shim's counter assignment was wrong. **(b) Reorder — install the intercept BEFORE writing the `Running` row** (Alt-J). Makes the collision structurally impossible, and is tempting on principle. Rejected as a materially larger behaviour change than the defect requires: it deletes an observable durable transition, leaves a spawned driver with NO row if the `Failed` write then fails, and changes what a concurrent reader sees on every successful start. The chosen fix **restores** the behaviour the design already claimed rather than redesigning the sequence. **(c) A per-write monotonic `AtomicU64` in the shim** (Alt-K). Rejected: threads mutable state through `dispatch` (the signature DFS-1 deliberately keeps unchanged) and is **restart-unsafe** without seeding from the store's high-water mark — which is itself an out-of-scope systemic finding. **(d) Synthesize a distinct/advanced `TickContext` for the second write** (Alt-L). Rejected: the tick is one per-evaluation snapshot whose `now`/`now_unix`/`deadline` the whole reconcile path reads for consistency; fabricating a second tick to move one counter is a lie about which tick the write belongs to. **(e) Patch `row.updated_at` after building.** Rejected: that is precisely the shape `build_alloc_status_row`'s own `workload_addr` comment rejects for the identical bug class (GH #248). | `action_shim/mod.rs:429`, `:1239`, `:1457`, `:1728`; `overdrive-core/src/traits/observation_store.rs:261`; `worker/exit_observer.rs:541-544` (the precedent); ADR-0076 rev 5 § Decision 7 |
+
+**Three systemic LWW findings surfaced by the audit are OUT OF SCOPE and were
+NOT fixed** (ADR-0076 § 7d, recorded as observed facts — **no GitHub issue was
+created; agents do not open issues unilaterally**):
+
+1. **Cross-restart counter regression.** `tick_n` resets to `0` on every boot
+   (`control-plane/src/lib.rs:2434`, bumped at `:2469`, ~864k/day at the 100 ms
+   cadence) and is never seeded from anything persistent, while `alloc_status`
+   rows ARE durable across restart (ADR-0012 § "Restart semantics"). Post-restart
+   writes for a pre-existing alloc are therefore dropped by LWW until the tick
+   counter catches up. **Verified from source; NOT reproduced at runtime.**
+2. **Next-tick tie residual.** A same-tick supersede consumes counter `tick+2`,
+   so a write on the immediately-following tick ties. Pre-existing in identical
+   shape for the exit observer, whose module doc already documents it as
+   accepted. DFS-9 does not close it.
+3. **Other tick-derived rows.** `ServiceBackendRow` is written by two reconcilers
+   both using `tick.tick + 1` and keyed on `service_id` alone (reachability not
+   audited); `NodeHealthRow` uses wall-clock seconds, so two heartbeats in one
+   second collide (benign at current intervals).
+
+Findings 1 and 2 share one remedy — monotone-against-prior at every write site —
+which is a larger decision than this feature. DFS-9's required `updated_at`
+parameter is the enabling precondition for it, not a down payment on it.
 
 ---
 

@@ -47,6 +47,24 @@ the call-site file count is corrected 8 → 7.
    [#197](https://github.com/overdrive-sh/overdrive/issues/197)** (Alt-F). No
    new issue was created.
 
+**Rev 5 changes** (2026-08-01, same day — a REAL PRODUCTION DEFECT surfaced
+during DELIVER step 04-01 and is fixed in-scope at user direction):
+
+1. **This ADR no longer claims the feature makes no production behaviour
+   change. That claim is now FALSE, and revs 1–4 asserted it.** Step 04-01's
+   end-to-end test — the first test in the codebase able to observe the
+   fail-closed path through the real `action_shim::dispatch` — found that the
+   superseding `Failed` row **loses the LWW merge and is silently dropped**, so
+   an mTLS install failure leaves the allocation durably recorded `Running`
+   with no interception installed. The feature's own headline claim was unmet
+   in production. § Decision 7 records the defect and the fix; § Consequences
+   is corrected.
+2. **A blast-radius audit of every same-tick supersede site is recorded**
+   (§ Decision 7c), including three systemic LWW findings that are OUT of this
+   feature's scope and were NOT fixed.
+3. **DELIVER gains step 04-02** carrying the production fix and un-ignoring the
+   step-04-01 assertion A-1' that is currently `#[ignore]`d against this defect.
+
 Feature record: `docs/feature/mtls-intercept-install-fault-seam/design/`
 (`architecture.md` — verbatim API surface; `wave-decisions.md` — OQ-1…OQ-9).
 Research: `docs/research/testing/fault-injection-seam-fail-closed-paths-research.md`
@@ -409,7 +427,206 @@ Fault arms short-circuit before any syscall and are therefore **pure**
   scores kill rate across the diff window — catching only the whole-body mutant
   can still fail the PR gate.
 
+### 7. The superseding `Failed` row must derive its LWW counter from the row it supersedes (rev 5)
+
+**This is a production behaviour change, and it is the correction of a real
+defect this feature's own test found.** It is recorded here rather than in a
+separate ADR because the defect falsifies *this* ADR's headline claim: the
+fail-closed control it exists to make testable did not, in production, produce
+the durable record it promised.
+
+#### 7a. The defect
+
+`fail_closed_on_mtls_install` (`action_shim/mod.rs:403`) writes a superseding
+`Failed` row that **does not dominate** the `Running` row it must replace, so
+both `ObservationStore` adapters silently discard it. Three legs, each verified
+in source:
+
+1. `timestamp_for(tick, writer)` (`:1728`) returns
+   `LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }` — the
+   counter derives **only from the tick**, with no per-write sequence.
+2. The `Running` row (built at `:1239` / `:1457`) and the superseding `Failed`
+   row (built inside the helper at `:429`) are constructed from the **same
+   `tick`**, and the `Failed` row copies `running_row.node_id` as its writer.
+   Both rows therefore carry a byte-identical `(counter, writer)`.
+3. `LogicalTimestamp::dominates`
+   (`overdrive-core/src/traits/observation_store.rs:261`) returns `true` on
+   `Greater`, `false` on `Less`, and on `Equal` tiebreaks
+   `self.writer.to_string() > other.writer.to_string()` — **same writer ⇒
+   `false`**.
+
+So `failed_row.dominates(running_row) == false`. This fires in
+`SimObservationStore::apply_alloc_status` **and** in the production
+`overdrive-store-local::apply_alloc_status_lww` that `run_server` wires via
+`wire_single_node_observation`. Both return `Ok(())` to the caller, so the lost
+write is indistinguishable from success at the call site.
+
+**Operator-visible consequence:** an mTLS install failure leaves the allocation
+**durably recorded `Running` with no interception installed**. The driver *is*
+stopped and the `LifecycleEvent` *is* emitted, so no workload keeps running
+uninstrumented — but the durable record lies, and that record is the exact
+surface this feature exists to defend.
+
+**Why it survived until DELIVER 04-01.** Step 01-01's helper-level test seeds
+the `Running` row with `SEEDED_RUNNING_COUNTER = 0` and invokes the helper with
+`TICK = 7`, so its assertion A-2 ("strictly greater counter") holds in the
+fixture and never in production. The artificial different-counter shape masked
+the defect. Only the real `dispatch` — step 04-01's A-1' — can observe it. That
+is the port's value arriving from a direction this ADR did not anticipate, and
+it is worth recording as such: the justification in § Context was
+call-site-ordering testability, and what the call-site test actually caught
+first was a durable-state defect.
+
+#### 7b. The fix
+
+A same-tick supersede derives its counter from **the row it supersedes**, never
+from the tick. A new module-private helper beside `timestamp_for`:
+
+```rust
+fn superseding_timestamp(tick: &TickContext, superseded: &AllocStatusRow) -> LogicalTimestamp {
+    let base = timestamp_for(tick, superseded.node_id.clone());
+    LogicalTimestamp {
+        counter: base.counter.max(superseded.updated_at.counter.saturating_add(1)),
+        writer: base.writer,
+    }
+}
+```
+
+and `build_alloc_status_row`'s `tick: &TickContext` parameter becomes
+`updated_at: LogicalTimestamp` — a **required** parameter, so every writer must
+decide its stamp explicitly. Five call sites pass
+`timestamp_for(tick, <node_id>.clone())` (byte-identical values to today); the
+one supersede site passes `superseding_timestamp(tick, running_row)`.
+
+Three properties of this shape, each load-bearing:
+
+- **`max`, not a bare `prior + 1`.** It keeps `tick` live (so
+  `fail_closed_on_mtls_install`'s arity is unchanged at 8 and no unused-parameter
+  lint fires), it single-sources the tick base from `timestamp_for` so the two
+  cannot drift, and it is correct even if a future supersede site's prior row
+  is *behind* the current tick.
+- **A required parameter, not a post-build patch.** This is the discipline
+  `build_alloc_status_row` already applies to `workload_addr` for the identical
+  bug class (GH #248: *"Making it a parameter rather than a defaulted `None`
+  field kills the forgot-to-forward-carry bug class"*). Mutating `row.updated_at`
+  after building is the shape that comment rejects.
+- **It generalises rather than patching one site.** After the swap, every
+  writer's LWW stamp is an explicit, reviewable decision at the call site — which
+  is also the precondition for the systemic work in § 7c, should it be taken up.
+
+Honest limit: this makes the bug class **visible and deliberate**, not
+*impossible*. A future writer at a supersede site can still pass
+`timestamp_for(...)`. The structural defense is the required parameter plus the
+rustdoc on both helpers; there is no type that forbids the wrong choice.
+
+The existing in-repo precedent is the exit observer, which has always derived
+its successor row's counter from the prior row for exactly this reason
+(`worker/exit_observer.rs:541-544`). The fix brings the shim into line with it.
+
+`LogicalTimestamp::dominates` is **NOT** changed. The comparator is correct: a
+row with an equal `(counter, writer)` genuinely is not newer, and its LWW
+idempotency case (re-delivered gossip is a no-op) depends on that. The bug is in
+the counter the shim assigns, not in the comparison. The comparator was promoted
+out of the sim crate precisely so one definition governs both adapters
+(`docs/feature/fix-observation-lww-merge/deliver/rca.md`).
+
+#### 7c. Blast-radius audit — every same-tick supersede site
+
+A second `AllocStatusRow` write for the same alloc, by the same node, within one
+tick is the necessary condition. Every candidate was checked:
+
+| Site | Affected? | Reason |
+|---|---|---|
+| `StartAllocation` `Running` (`:1269`) → `fail_closed_on_mtls_install` (`:446`) | **YES — the defect** | Both rows from the same `tick`; `Failed` copies `running_row.node_id`. |
+| `RestartAllocation` `Running` (`:1482`) → `fail_closed_on_mtls_install` (`:446`) | **YES — the defect, second arm** | Identical mechanism through the same shared helper. |
+| `fail_closed_on_netns_provision` (`:532`) | **NO** | Fires at the PRE-`Running` provision seam, strictly before `driver.start` and before any row write in that dispatch. It builds a FRESH row from `alloc_id`/`workload_id`/`node_id` — there is no row to supersede. Any prior row is from an EARLIER tick, hence a strictly smaller counter. *(Verified, not assumed.)* |
+| `StartRejected` → `Failed` (`:1239`, `state == Failed`) | **NO** | It is the SAME single write — `state` is `Running`-or-`Failed` on one `build_alloc_status_row` call. No supersede. |
+| `RestartAllocation` stop-half (`:1342`) | **NO** | Calls `driver.stop` only; writes no `Terminated` row. |
+| `FinalizeFailed` (`:1091`) | **NO** | One write per `dispatch_single`; `prior_row` is from an earlier tick. |
+| `StopAllocation` → `Terminated` (`:1585`) | **NO** | One write per `dispatch_single`. |
+| Exit observer (`exit_observer.rs:602`) | **NO — and is the precedent** | Already derives `prior.updated_at.counter + 1` (`:541-544`). Immune by construction. |
+
+**Only the two mTLS fail-closed arms are affected, and both are fixed by the
+single shared helper.** The netns-provision sibling is confirmed clean for the
+reason predicted — it writes a fresh pre-`Running` row with nothing to supersede.
+
+#### 7d. Three systemic LWW findings — OUT OF SCOPE, not fixed, no issue created
+
+The audit surfaced three further exposures in the same mechanism. None is caused
+by this feature, none is fixed by it, and none is a deferral with a promised
+slice. They are recorded as observed facts. **No GitHub issue was created —
+agents do not open issues unilaterally.**
+
+1. **Cross-restart counter regression (the largest).** `tick_n` is
+   `let mut tick_n: u64 = 0;` inside `spawn_convergence_loop`
+   (`control-plane/src/lib.rs:2434`), incremented once per loop iteration
+   (`:2469`) at the 100 ms `DEFAULT_TICK_CADENCE` — roughly 864,000/day — and is
+   **never seeded from anything persistent**. `alloc_status` rows **are** durable
+   (`observation_wiring.rs:39-42` opens `observation.redb` under the data dir;
+   ADR-0012 § "Restart semantics" guarantees a row written before restart is
+   returned after it), and nothing truncates the table at boot. So after a
+   restart the writer's counter starts at 1 while surviving rows carry the
+   pre-restart high-water mark, and every action-shim write for a pre-existing
+   alloc is dropped by LWW until the tick counter catches up. Same-writer means
+   the tiebreak cannot rescue it. No test, comment, ADR or RCA in the repo
+   acknowledges this. **Verified from source; NOT reproduced at runtime** — no
+   existing restart test writes a post-restart row and asserts it wins.
+2. **Next-tick tie residual.** A same-tick supersede consumes counter `tick+2`,
+   so an ordinary write on the *immediately following* tick (`tick+1` → counter
+   `tick+2`) ties and is dropped. Narrow (it needs a write on the very next
+   tick), and pre-existing in identical shape for the exit observer — whose
+   module doc already documents it as accepted (*"the action shim's next tick may
+   dominate it, but the broadcasted `LifecycleEvent` is the permanent record"*).
+   The fix in § 7b does not close it.
+3. **Other tick-derived rows.** `ServiceBackendRow` is written by two different
+   reconcilers (`service_lifecycle.rs:860`, `backend_discovery_bridge.rs:392`),
+   both using `tick.tick + 1`, keyed on `service_id` alone — structurally exposed
+   to the same collision; reachability was not audited. `NodeHealthRow` uses
+   `counter = unix_seconds` (`worker/src/node_health.rs:55`), so two heartbeats
+   in one wall-clock second collide — benign at current heartbeat intervals.
+
+Findings 1 and 2 share one remedy — making the counter monotone against the
+prior row at **every** write site (`max(tick+1, prior+1)`), which also repairs
+the restart regression because a prior-derived counter cannot regress. That is a
+larger decision than this feature and belongs to its own ADR; § 7b's required
+`updated_at` parameter is the enabling precondition for it, not a down payment
+on it.
+
 ## Alternatives Considered
+
+**Alt-J — reorder: install the intercept BEFORE writing the `Running` row.**
+Would make the collision structurally impossible — with no second write there is
+nothing to supersede — and is genuinely attractive on principle. **Rejected**:
+it is a materially larger production behaviour change than the defect requires.
+It deletes an observable durable state transition, leaves a spawned driver
+process with *no* row at all if the `Failed` write then fails (today the
+`Running` row is at least durable), and changes what a concurrent reader sees on
+every successful start, not just the failing one. The fix in § 7b restores the
+behaviour this ADR already claimed (*"LWW resolves the brief observed-`Running`-
+then-`Failed` window to the latest write"*) rather than redesigning the sequence.
+Recorded so the option is foreclosed by reasoning, not overlooked.
+
+**Alt-K — a per-write monotonic sequence in the shim.** An `AtomicU64` bumped
+per write. **Rejected**: it requires threading mutable state through `dispatch`
+(a wide blast radius on a signature this ADR deliberately keeps unchanged,
+§ Decision 3), and it is **restart-unsafe** without seeding from the store's
+high-water mark — which is finding 1 in § 7d, i.e. the larger decision this fix
+declines to prejudge.
+
+**Alt-L — synthesize a distinct/advanced `TickContext` for the second write.**
+**Rejected**: the tick is a single per-evaluation snapshot whose `now` /
+`now_unix` / `deadline` the whole reconcile path reads for consistency
+(`reconciler_runtime.rs:1318`). Fabricating a second tick to move one counter is
+a lie about which tick the write belongs to, and it corrupts every other field
+that rides on the same snapshot.
+
+**Alt-M — change `LogicalTimestamp::dominates` to break the equal-`(counter,
+writer)` tie in favour of the incoming row.** **Rejected**, and it would be a
+bug: equal timestamps genuinely are not newer, and the LWW idempotency case
+(re-delivered gossip must be a no-op) depends on `false`. It would also make
+row acceptance order-dependent across gossip replay. The comparator is the SSOT
+both adapters consult and it is correct; the shim's counter assignment is what
+was wrong.
 
 **Alt-A — T1 only: kill the mutant, skip the port.** After Finding A this is
 the cheapest option and is genuinely tempting. **Rejected** because T1 is a
@@ -530,11 +747,31 @@ production type, the same objection that sinks Alt-C in miniature.
 
 ### Negative
 
-- **NO production behaviour change.** With the boot probe struck (§ Decision 4),
-  every production path behaves byte-for-byte as before: `HostMtlsIntercept`'s
-  three methods are one-line delegations to the free functions `start_alloc`
-  already called, and `run_server` gains no gate. Revs 1–3 carried a
-  refuse-to-boot behaviour change; rev 4 does not.
+- **ONE production behaviour change, and it is a defect repair (rev 5).** Revs
+  1–4 claimed *"NO production behaviour change"*; that claim is **withdrawn**,
+  not qualified. Per § Decision 7 the superseding `Failed` row now carries a
+  counter derived from the row it supersedes, so it wins the LWW merge — where
+  before it was silently dropped and the allocation stayed durably recorded
+  `Running` with no interception installed. `build_alloc_status_row`'s `tick`
+  parameter becomes a required `updated_at: LogicalTimestamp`; the five
+  non-supersede call sites pass byte-identical values, so their behaviour is
+  unchanged.
+
+  Everything else in this ADR remains behaviour-preserving: with the boot probe
+  struck (§ Decision 4), `HostMtlsIntercept`'s three methods are one-line
+  delegations to the free functions `start_alloc` already called, and
+  `run_server` gains no gate. Revs 1–3 carried a refuse-to-boot behaviour
+  change; rev 4 removed it; rev 5 adds only the defect repair.
+
+- **The `no production behaviour change` framing shaped downstream artifacts
+  that must now be read with rev 5 in hand.** The DELIVER roadmap's `notes`
+  justify the absence of a `walking_skeleton_gate` partly on that claim, and
+  step 04-01's test module `#[ignore]`s assertion A-1' against this very defect
+  on the grounds that fixing it was out of scope. Step 04-02 lands the fix and
+  un-ignores A-1'; the roadmap note is left standing because its *conclusion*
+  (no scenario satisfies the walking-skeleton litmus) does not depend on the
+  withdrawn premise — the fix is a durable-record repair, not a new
+  operator-facing capability.
 - **The `CAP_NET_ADMIN` misdiagnosis remains.** A capability-less node still
   refuses every deploy under `WorkloadNetnsProvisionFailed` rather than a cause
   naming the missing capability. This decision knowingly leaves that in place as

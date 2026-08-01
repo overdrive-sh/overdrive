@@ -1,0 +1,139 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "mtls-intercept-install-fault-seam",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T08:51:58Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T08:57:42Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T09:12:36Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T09:25:50Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T09:33:41Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T09:36:33Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T09:55:15Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T10:04:59Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T10:09:59Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T10:17:37Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-01T10:23:32Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN failed - A-1' unsatisfiable without a production change AC-12 forbids. The fail-closed Failed row carries a LogicalTimestamp byte-identical to the Running row it must supersede (both stamped counter=tick.tick+1, writer=node_id from the same tick in the same dispatch frame via timestamp_for at action_shim/mod.rs:1728), so LogicalTimestamp::dominates returns false and the row is rejected by both SimObservationStore::apply_alloc_status and the production overdrive-store-local apply_alloc_status_lww. Nothing committed; litmus L-4 and L-5 both confirmed RED and reverted via Edit; action_shim/mod.rs verified byte-clean vs HEAD. Awaiting operator decision: fix in-scope, split, or ADR-0076 amendment.",
+      "t": "2026-08-01T10:24:44Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T10:40:01Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:00:38Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:06:29Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:08:06Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:18:30Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:25:44Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-01T12:27:03Z"
+    }
+  ]
+}

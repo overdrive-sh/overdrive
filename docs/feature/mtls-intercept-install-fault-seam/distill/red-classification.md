@@ -118,7 +118,7 @@ port's correctness.
 
 | Step | Content | Gate |
 |---|---|---|
-| **01** | S-MIF-01/02/03 (authored GREEN) + **delete** the `.cargo/mutants.toml` `exclude_re` entry `"fail_closed_on_mtls_install"` (`:592-615` incl. its comment) + **delete** the source-site `// mutants: skip` block (`action_shim/mod.rs:403-412`). **No production change.** | Litmus L-1/L-2/L-3 each observed RED then reverted. `cargo mutants --list` scoped to the file, with the mutants generated inside the function **recorded on the step**. The scoped gate re-run (§ 4) at **100 % for the function** — reported as vacuous if the generated set is a single mutant. |
+| **01** | S-MIF-01/02/03 (authored GREEN) + **delete** the `.cargo/mutants.toml` `exclude_re` entry `"fail_closed_on_mtls_install"` (`:592-615` incl. its comment) + **delete** the source-site `// mutants: skip` block (`action_shim/mod.rs:403-412`). **No production change.** | Litmus L-1/L-2/L-3 each observed RED then reverted. The scoped gate run (§ 4), with every mutant inside the function **read verbatim off the guest `outcomes.json` and recorded on the step** BEFORE any kill-rate figure is stated (there is no `--list` command — it is hook-denied; see § 4). Then **100 % for the function** — reported as vacuous, naming the mutant, if the enumerated set is a single mutant. |
 | **02** | The port: `crates/overdrive-worker/src/mtls_intercept_port.rs` (`InterceptGuard`, `MtlsIntercept`, `HostMtlsIntercept`), the `pub mod` registration, the `MtlsInterceptWorker` 4th mandatory param + guard-type widening to `Box<dyn InterceptGuard>`, the **four adjacent doc fixes** (`:467` intra-doc link, `:28` module prose, `:260-263` and `:269-273` the two `AllocIntercept` guard-field docstrings), the `run_server` wiring (**wire only, no gate**) + the step-(4) "three → four ports" comment, and **all 9 non-production call sites** passing `Arc::new(HostMtlsIntercept::new())`. | **Behaviour-preserving refactor — no new scenario goes GREEN here.** The gate is: the mandatory 4th `new()` parameter is compiler-enforced at every call site; the **existing** Tier-3 suite (`start_alloc_installs_both_tproxy.rs`, `bidirectional_walking_skeleton.rs`, `inbound_tproxy_harness.rs`, `outbound_enforce_substrate_asymmetry.rs`, `alloc_netns_lifecycle.rs`) stays green; step 01's mutation result is unaffected. |
 | **03** | `crates/overdrive-sim/src/adapters/mtls_intercept.rs` (`SimInterceptFault`, `SimMtlsIntercept`, the private `InertGuard`), the `adapters/mod.rs` module decl **and** `pub use`, the `overdrive-worker.path` dep in `overdrive-sim/Cargo.toml`. | S-MIF-06/07/08/13 GREEN, default lane. |
 | **04** | `crates/overdrive-control-plane/tests/integration/mtls_install_fail_closed.rs` + its `tests/integration.rs` declaration. | S-MIF-04/05 GREEN under Lima+root. **Litmus L-4 and L-5 each observed RED then reverted** — mandatory; this is the port's sole justification. |
@@ -140,15 +140,32 @@ cargo xtask lima run -- cargo xtask mutants --diff origin/main \
 
 - Run **backgrounded** (`.claude/rules/testing.md` § "Mutation testing is the
   exception"). Do not `pkill`; do not add a post-run `git checkout`.
-- Read the **guest** `target/xtask/mutants-summary.json` — the host artifact is
-  stale on macOS.
+- **Read the guest artifacts, not the host copies** — on macOS the host
+  `target/xtask/…` copies go stale (project memory
+  `reference_lima_mutation_summary_host_path_trap`). This ONE run writes two of
+  them: the **per-mutant** `target/xtask/mutants.out/outcomes.json` and the
+  **aggregate** `target/xtask/mutants-summary.json`
+  (`xtask/src/mutants.rs:116-121`).
 - **Obligation: 100 % of the mutants inside `fail_closed_on_mtls_install`**,
   not ≥ 80 % — the `exclude_re` entry is a bare **function-name anchor**, so
   deleting it un-suppresses every mutant in the function.
-- **Enumerate before claiming.** `cargo mutants --list` first; record the
-  actual set. If it is a single whole-body mutant, say so and report the 100 %
-  as **vacuous** — A-8/A-9/A-10 rest on the #248 forward-carry bug class, not
-  on mutation coverage.
+- **Enumerate before claiming.** From the guest `outcomes.json`, record
+  **verbatim** every mutant whose function is `fail_closed_on_mtls_install`,
+  each with its per-mutant outcome. **No kill-rate figure may be stated before
+  that enumeration is recorded.** If the enumeration turns out to be a single
+  whole-body mutant, say so and report the 100 % as **vacuous**, naming the
+  mutant — A-8/A-9/A-10 rest on the #248 forward-carry bug class, not on
+  mutation coverage.
+- **There is no `--list` step.** `cargo mutants --list` **cannot run in this
+  repo** and must not be prescribed or attempted: `.claude/hooks/block-cargo-
+  mutants.ts` denies on `(?:^|[\s;&|])cargo\s+mutants\b`, which matches even
+  behind a `cargo xtask lima run --` prefix (whitespace precedes the token),
+  and `xtask::mutants::Scope` (`xtask/src/mutants.rs:82`) exposes only
+  `--diff` xor `--workspace`, `--file`, `--package`, `--features` and
+  `--test-whole-workspace` — no `--list` mode. The enumeration therefore comes
+  out of the run's own `outcomes.json`, above; a step that pre-computes the
+  expected mutant set and reports it as observed because the listing command
+  was denied has converted this gate into narration (§ 5).
 - If any mutant survives with only T1, **surface a blocker**. It is not a
   licence to re-add the suppression, and not a licence to lean on T2 (which
   does not exist yet at step 01).

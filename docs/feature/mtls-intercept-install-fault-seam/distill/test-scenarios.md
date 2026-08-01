@@ -330,7 +330,18 @@ blockquote; see § "Mutation-gate traceability" below).
 | # | Assertion | Regression it defends |
 | --- | --- | --- |
 | A-1 | Returns `Ok(())` | body → `Err(...)` |
-| A-2 | The obs store holds a SUPERSEDING row for the alloc with `state == AllocState::Failed` and a strictly greater `updated_at.counter` than the seeded `Running` row | whole-body → `Ok(())`; `AllocState::Failed` → any other state |
+| A-2 | The obs store holds a SUPERSEDING row for the alloc with `state == AllocState::Failed` and `updated_at.counter == SEEDED_RUNNING_COUNTER + 1` (**exact**, strengthened at step 04-02 from "strictly greater") | whole-body → `Ok(())`; `AllocState::Failed` → any other state; **the same-tick LWW collision (GH #250 / ADR-0076 § 7)** |
+
+> **A-2 FIXTURE CORRECTION — step 04-02.** As authored in step 01-01 the fixture
+> sets `SEEDED_RUNNING_COUNTER = 0` against `TICK = 7`, so the helper's
+> tick-derived counter (`8`) exceeded the seeded counter *artificially* and A-2
+> passed in a shape production never produces. In production both rows are
+> written from the SAME tick, so they tie and the `Failed` row is silently
+> dropped. Step 04-02 sets `SEEDED_RUNNING_COUNTER = TICK + 1` — modelling the
+> real same-tick supersede — and tightens A-2 to exact equality. Post-fix the
+> counter is `max(TICK + 1, SEEDED + 1) = 9`; **pre-fix it is `8`, tying with
+> the seeded row, so A-2 goes RED.** This moves the defect's regression guard
+> out of the Lima+root lane (A-1') and into the DEFAULT lane.
 | A-3 | That row's `reason` is `TransitionReason::MtlsInterceptInstallFailed { stage, detail }` with `stage == "leg_f_bind"` and `detail == cause.to_string()` | `reason: None`; a wrong `stage()` mapping; a swapped `stage`/`detail` |
 | A-4 | That row's `workload_addr` is `None` and `terminal` is `None` | the `None,` / `None` wirings |
 | A-5 | `RecordingDriver::stops` contains the alloc exactly once | deletion of the `driver.stop(handle)` call |
@@ -419,7 +430,9 @@ Scenario: A workload that already vanished still fails its allocation closed
   Saltzer & Schroeder describe (architecture.md § 1, research Finding 5.2).
 - **Mutation target**: cargo-mutants' `Result`-returning-call handling and any
   future `?` edit on the stop. Reported honestly: whether the tool generates a
-  mutant here must be read off `cargo mutants --list`, per § 6.5.
+  mutant here must be read off the scoped run's guest
+  `target/xtask/mutants.out/outcomes.json`, per § 6.5 (there is no `--list`
+  command — it is hook-denied; see § "Mutation-gate traceability").
 - **Expected RED**: **NOT a scaffold** — authored GREEN; falsified by the
   `let _ =` → `?` litmus in `red-classification.md`.
 
@@ -552,6 +565,19 @@ trace them):
 | # | Assertion | Why it needs T2 |
 | --- | --- | --- |
 | A-1' | The latest row for the alloc is `Failed` with `MtlsInterceptInstallFailed { stage: "leg_f_bind", .. }`, superseding a `Running` row that WAS written first | proves `start_alloc`'s `Err` actually reaches the helper through the production guard |
+
+> **A-1' STATUS — `#[ignore]`d at step 04-01, UN-IGNORED at step 04-02.** A-1'
+> was authored, executed, and found to FAIL against a **real, reproduced
+> production defect**: the superseding `Failed` row is built from the same
+> `tick` and same `node_id` as the `Running` row, so it ties under LWW and is
+> silently dropped by both `ObservationStore` adapters — leaving the allocation
+> durably recorded `Running` with no interception installed. It was `#[ignore]`d
+> with the defect named in the test module's doc, not deleted and not weakened.
+> Step 04-02 lands the fix (`architecture.md` § 4.8 / ADR-0076 rev 5
+> § Decision 7) and removes both `#[ignore]` attributes in the same commit.
+> **A-1' is the falsification that the fix works**: litmus L-7 reintroduces the
+> defect and A-1' must go RED on BOTH arms. A-6'/A-8'/A-9' were unaffected and
+> have been live and green since 04-01.
 | A-6' | `release_for_exit_emission` was **NEVER** called for the alloc | the gate-non-release is a property of the CALL SITE's `return` placement (`mod.rs:1307` before `:1319`), not of the helper. A reordering that releases first survives T1 entirely. **This is the security-critical assertion and the one most easily omitted.** |
 | A-8' | `driver.on_alloc_running` was never called for the alloc | same ordering property, second observable |
 | A-9' | After the fail-closed dispatch, `net_slot_allocator.snapshot()` still contains the alloc — the slot is **retained**, released later by the terminal action's teardown seam | a *characterisation* assertion of today's behaviour: the fail-closed path returns before `teardown_and_release_netns` (`:887`), and T2 is the first test in the codebase able to observe it |
@@ -950,7 +976,7 @@ with no logic of its own to diverge.
 | Scenario | Mutant(s) it is expected to kill | Confidence |
 |---|---|---|
 | **S-MIF-01** | The **one** whole-body mutant `replace fail_closed_on_mtls_install -> Result<(), ShimError> with Ok(())` — the mutant `exclude_re` currently suppresses. **Any single one of its 6 cases kills it**; the other 5 defend the specification. | **HIGH** — this is the recorded MISSED mutant from the dial-by-name 02-02 review. |
-| S-MIF-01 (cases 1–6), S-MIF-02, S-MIF-03 | **Every other mutant cargo-mutants generates inside the function**, whatever that set turns out to be. The `exclude_re` entry is a bare **function-name anchor** — its own comment says *"the whole helper is uncovered, not just the whole-body mutant"* — so deleting it un-suppresses all of them, while `cargo xtask mutants` scores **kill rate across the diff window**. The contract is **100 % of the function's mutants**, not ≥ 80 %. | **MEDIUM** — set unknown until enumerated; see the mandatory `--list` step below. |
+| S-MIF-01 (cases 1–6), S-MIF-02, S-MIF-03 | **Every other mutant cargo-mutants generates inside the function**, whatever that set turns out to be. The `exclude_re` entry is a bare **function-name anchor** — its own comment says *"the whole helper is uncovered, not just the whole-body mutant"* — so deleting it un-suppresses all of them, while `cargo xtask mutants` scores **kill rate across the diff window**. The contract is **100 % of the function's mutants**, not ≥ 80 %. | **MEDIUM** — set unknown until enumerated; see the mandatory `outcomes.json` enumeration step below. |
 | S-MIF-04 | Mutants in the `StartAllocation` guard block (`mod.rs:1304-1318`) and any reordering that moves `release_for_exit_emission` (`:1319`) ahead of the fail-closed `return` (`:1307`). | MEDIUM |
 | S-MIF-05 | The same in the `RestartAllocation` block (`:1504-1518`, `:1507` before `:1519`). | MEDIUM |
 | S-MIF-06/07/08/13 | Mutants in `SimMtlsIntercept`'s three trait-method bodies and the four scripting helpers (fault→error materialisation, `.take()`-vs-clone, partial `clear_faults`, aliased slot). | HIGH — small pure functions, mutation-friendly. |
@@ -980,9 +1006,29 @@ and OQ-6 already states the correction:
 
 ### Mandatory: enumerate the ACTUAL mutant set BEFORE claiming 100 % (§ 6.5)
 
-Before asserting the contract is met, run `cargo mutants --list` scoped to
-`crates/overdrive-control-plane/src/action_shim/mod.rs` and **record the
-mutants generated inside `fail_closed_on_mtls_install` on the DELIVER step**.
+Before asserting the contract is met, run the scoped pass through the
+sanctioned wrapper (backgrounded) —
+
+```
+cargo xtask lima run -- cargo xtask mutants --diff origin/main \
+  --features integration-tests \
+  --package overdrive-control-plane \
+  --file crates/overdrive-control-plane/src/action_shim/mod.rs
+```
+
+— then read the **guest** `target/xtask/mutants.out/outcomes.json` (the
+per-mutant record cargo-mutants writes alongside the aggregate
+`target/xtask/mutants-summary.json`; `xtask/src/mutants.rs:116-121`) and
+**record verbatim, on the DELIVER step, every mutant whose function is
+`fail_closed_on_mtls_install`, each with its per-mutant outcome**. **No
+kill-rate figure may be stated before that enumeration is recorded.**
+
+**`cargo mutants --list` cannot run in this repo and must not be prescribed.**
+`.claude/hooks/block-cargo-mutants.ts` denies on
+`(?:^|[\s;&|])cargo\s+mutants\b`, which matches even behind a
+`cargo xtask lima run --` prefix (whitespace precedes the token), and
+`xtask::mutants::Scope` (`xtask/src/mutants.rs:82`) has no `--list` mode. The
+enumeration comes out of the run's own `outcomes.json`, above.
 
 cargo-mutants does **not** insert statements and does **not** substitute call
 arguments, and this helper contains **no binary operators** — so the generated
