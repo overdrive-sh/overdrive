@@ -210,10 +210,7 @@ impl MtlsIntercept for SimMtlsIntercept {
             // docs: a test defect, not a supported scenario) — materialises
             // against the loopback wildcard. The sanctioned outbound pairing is
             // `TproxyInstall`, which carries no address at all.
-            return Err(materialise(
-                fault,
-                SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
-            ));
+            return Err(materialise(fault, SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)));
         }
 
         // The double installs no nft rule, so the guard owns nothing and its
@@ -395,9 +392,7 @@ mod tests {
     #[test]
     fn armed_fault_is_standing_and_fires_on_every_call() {
         let sut = SimMtlsIntercept::new();
-        sut.script_bind_fault(SimInterceptFault::TransparentListener {
-            errno: libc::EADDRINUSE,
-        });
+        sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EADDRINUSE });
 
         let first = drive_expecting_err(&sut, Method::BindTransparent);
         let second = drive_expecting_err(&sut, Method::BindTransparent);
@@ -433,8 +428,7 @@ mod tests {
         });
 
         sut.clear_faults();
-        sut.install_outbound("veth-alloc0", 4001)
-            .expect("clear_faults disarms the outbound slot");
+        sut.install_outbound("veth-alloc0", 4001).expect("clear_faults disarms the outbound slot");
         sut.install_inbound(VIRT, 4002).expect("clear_faults disarms the inbound slot");
 
         sut.clear_faults();
@@ -474,8 +468,7 @@ mod tests {
         sut.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
         sut.install_outbound("veth-alloc0", 4001)
             .expect("a bind fault does not leak into install_outbound");
-        sut.install_inbound(VIRT, 4002)
-            .expect("a bind fault does not leak into install_inbound");
+        sut.install_inbound(VIRT, 4002).expect("a bind fault does not leak into install_inbound");
 
         // Direction 2 — arming the OUTBOUND slot refuses only `install_outbound`.
         let sut = SimMtlsIntercept::new();
