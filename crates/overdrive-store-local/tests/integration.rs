@@ -38,6 +38,11 @@ mod integration {
     mod issuance_ordinal_conformance;
     mod issuance_ordinal_durable_reopen;
     mod observation_backend_proptest;
+    // Diagnostics for the silent-LWW-drop defect
+    // (`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+    // § 2.3 / § 8.2 fix 1): `observation.lww.rejected` fires on a losing
+    // write and stays quiet on an accepted one.
+    mod observation_lww_reject_logging;
     mod probe_result_roundtrip;
     mod snapshot_proptest;
 }

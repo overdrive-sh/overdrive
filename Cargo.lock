@@ -2172,6 +2172,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
  "x509-parser",
 ]
 

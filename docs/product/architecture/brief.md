@@ -328,9 +328,11 @@ Two implementations of `ObservationStore` coexist in the Phase 1 workspace:
 - **`LocalObservationStore`** (class `adapter-host`, in
   `overdrive-store-local`, per ADR-0012 revised 2026-04-24) — the
   **production** single-node server adapter. Redb-backed on disk
-  (`<data_dir>/observation.redb`); single-writer overwrite semantics (no
-  LWW merge, no site-IDs, no tombstones — those land with Phase 2's
-  `CorrosionStore`); subscriptions via `tokio::sync::broadcast` in the
+  (`<data_dir>/observation.redb`); single-writer *posture* (one writing
+  process, no gossip peers) — but it **does** perform the LWW merge on
+  every durable row, corrected 2026-08-01, see the correction below. No
+  site-IDs and no tombstones; those genuinely land with Phase 2's
+  `CorrosionStore`. Subscriptions via `tokio::sync::broadcast` in the
   same idiom as `LocalStore::watch`.
 - **`SimObservationStore`** (class `adapter-sim`, in `overdrive-sim`)
   — the **DST harness** adapter. In-memory LWW with injectable gossip
@@ -345,11 +347,60 @@ the minimum the DST harness needs (per US-04 and whitepaper §4):
 - `node_health { node_id, region, last_heartbeat }`
 
 Rows are full-row writes (§4 guardrail) — no field-diff merges. Logical
-timestamps are `(lamport_counter, writer_node_id)` tuples preserved in
-every row for forward-compatibility with the Phase 2 Corrosion gossip
-layer; `LocalObservationStore` does not consult them (single-writer has
-no ordering question to resolve), `SimObservationStore` and the future
-`CorrosionStore` do.
+timestamps are `(counter, writer)` tuples — `LogicalTimestamp`,
+`crates/overdrive-core/src/traits/observation_store.rs:253` — carried in
+every row.
+
+> **Correction (2026-08-01).** This paragraph previously read
+> *"`LocalObservationStore` does not consult them (single-writer has no
+> ordering question to resolve)"*. **That is false.**
+> `LocalObservationStore` is the **production LWW path**. Every durable
+> write goes through an `apply_*_lww` helper that reads the row already
+> stored at the key and admits the incoming row **only** when
+> `incoming.updated_at.dominates(&prior_row.updated_at)` — six of them,
+> in `crates/overdrive-store-local/src/observation_backend.rs`:
+> `apply_alloc_status_lww` (`:1058`), `apply_node_health_lww` (`:1103`),
+> `apply_service_backends_lww` (`:1141`), `apply_probe_result_lww`
+> (`:1179`), `apply_service_hydration_lww` (`:1204`),
+> `apply_reconcile_conflict_lww` (`:1241`). A row that does not dominate
+> is **discarded**, and `ObservationStore::write` still returns
+> `Ok(())` — so no caller can distinguish a dropped write from a
+> successful one. That comparison is what silently dropped writes in the
+> cross-restart regression
+> (`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`).
+>
+> The claim was **already false before ADR-0077**: `dominates`
+> (`observation_store.rs:337`) is the single comparator **both** adapters
+> must consult, and it was promoted out of the sim leaf crate into
+> `overdrive-core` precisely so the production adapter would use it —
+> its own docstring cites the RCA that motivated the promotion
+> (`observation_store.rs:330-335` →
+> `docs/feature/fix-observation-lww-merge/deliver/rca.md`). This section
+> was not updated then either.
+
+What is true: the tuples **are** forward-compatible with the Phase 2
+Corrosion gossip layer, and `SimObservationStore` and the future
+`CorrosionStore` consult them as well. `LocalObservationStore` is not
+the exception the old text made it.
+
+**Counter semantics — per-key, not per-tick (ADR-0077).** ADR-0077
+defines `counter` as a durable **per-LWW-key version number** that must
+be monotone at a given row key including across process restarts. It is
+*not* a scheduling coordinate: deriving it from the convergence tick
+conflates two different quantities and breaks the merge across a restart
+— which is what today's tick-derived sites do (§ 63 records the
+reproduced defect). ADR-0077 § D1 mandates that every durable write
+mint its stamp with `LogicalTimestamp::dominating(tick_floor, writer,
+prior)` — counter derived from the row it replaces, tick only a floor,
+so the merge survives a restart.
+
+That is an **accepted decision, not yet a landed implementation.**
+ADR-0077 § D9 splits the work into Unit A (the constructor + the eight
+action-shim sites) and Unit B (the two reconciler sites, blocked on the
+bridge-convergence step). Neither unit has landed at the time of
+writing; § 63 records the per-site state for the two sites this brief
+names. Do not read the mandated rule as a description of current
+behaviour — ADR-0077 § D2 is the authoritative per-site register.
 
 Production `CorrosionStore` (Phase 2+) will implement the same trait with
 the same row shapes, backed by cr-sqlite and SWIM/QUIC. It replaces
@@ -610,10 +661,16 @@ Key properties of `LocalObservationStore`:
   into production service. `overdrive-sim` is no longer a runtime
   dependency of `overdrive-control-plane`; it stays the DST harness's
   home.
-- **No CRDT machinery.** Single-writer overwrite semantics. Owner-writer
-  site-IDs, LWW logical-timestamp merges, and tombstone discipline land
-  with `CorrosionStore` in Phase 2, where they have peers to
-  coordinate.
+- **No CRDT machinery — but the LWW merge is live** (corrected
+  2026-08-01). **LWW logical-timestamp merges do NOT wait for Phase 2**:
+  `LocalObservationStore` applies one on every durable row today, via
+  six `apply_*_lww` helpers that discard a non-dominating incoming row
+  (§ 6, `crates/overdrive-store-local/src/observation_backend.rs:1058`
+  ff.). What genuinely lands with `CorrosionStore` in Phase 2, where
+  there are peers to coordinate, is **owner-writer site-IDs and
+  tombstone discipline**. "Single-writer" describes the deployment
+  posture — one writing process, no gossip — not the absence of an
+  ordering check.
 - **Subscriptions via `tokio::sync::broadcast`.** Same idiom as
   `LocalStore::watch` per its Phase 1 substitute; lagging subscribers
   get `RecvError::Lagged`, stream wrapper terminates, caller
@@ -2414,7 +2471,7 @@ Schema:
 | `status` | tagged enum: `Pending` / `Completed` / `Failed` | See `ServiceHydrationStatus` shape. |
 | `applied_at` / `failed_at` | `UnixInstant` | Tagged-enum payload. |
 | `reason` | `String` | `Failed`-variant only. |
-| `lamport_counter` / `writer_node_id` | per ObservationStore convention | Forward-compat with Phase 2 Corrosion gossip. |
+| `lamport_counter` / `writer_node_id` | `LogicalTimestamp`, per ObservationStore convention | **Load-bearing in Phase 1, not merely forward-compat** (corrected 2026-08-01). `apply_service_hydration_lww` (`crates/overdrive-store-local/src/observation_backend.rs:1204`) discards an incoming row that does not dominate the row stored at `(service_id, fingerprint)`. Also forward-compat with Phase 2 Corrosion gossip. Counter derivation per ADR-0077 (§ 6). |
 
 **Migration:** additive-only (no `ALTER TABLE ADD COLUMN NULL`
 against existing tables). **Single-writer in Phase 2.2** — only
@@ -2810,11 +2867,31 @@ Per-target keying = `WorkloadId`. The bridge:
 | `actual.running` | `ObservationStore::alloc_status_rows_for_workload(workload_id)` filtered to `state == Running` | New match arm in `hydrate_actual` |
 | `view.last_written_fingerprint` | `BTreeMap<ServiceId, BackendSetFingerprint>` — runtime-owned ViewStore | `RedbViewStore::bulk_load` at register; `write_through` after each tick |
 
-The View carries **inputs only** per `.claude/rules/development.md`
+~~The View carries **inputs only** per `.claude/rules/development.md`
 § "Persist inputs, not derived state" — the persisted fingerprint
 is the content-hash of inputs (covering both `assigned_vip` and
 `backends`), and the dedup decision is recomputed every tick from the
-fresh fingerprint vs the persisted value.
+fresh fingerprint vs the persisted value.~~
+
+**Struck 2026-08-01 — the "inputs only" claim is false.**
+`last_written_fingerprint` is **derived state**, not an input: it is a
+cached hash of `(vip, backends)` that the bridge itself computed, and it
+is stamped on the **emit** path (`backend_discovery_bridge.rs:428`), not
+on a confirmed write — `ObservationStore::write` returns `Ok(())` on a
+dropped write, so there is no success signal to record. The genuine
+input is the observed `ServiceBackendRow`, which the bridge declines to
+read: `hydrate_actual` reads `alloc_status_rows()`, never
+`service_backends_rows` (RCA § 4.2–4.3). The fingerprint therefore *is*
+the diff, which is the `.claude/rules/reconcilers.md` adopt-and-skip
+symptom — Bar 1 ("converge, don't apply-once") is not met, and a dropped
+write is never retried.
+
+The remedy is the **bridge-convergence step**, which hydrates the
+managed rows into `actual` and deletes this field; the same step site 9
+below waits on. Recorded here so the claim is not trusted in the
+interim — this brief does not assert a fix that has not been designed or
+landed. ADR-0077 § D8 carries the identical correction for the code-side
+View docstring (`backend_discovery_bridge.rs:203-211`, `:237-241`).
 
 
 New action variant `Action::WriteServiceBackendRow { row, correlation }`
@@ -2823,13 +2900,55 @@ in `crates/overdrive-core/src/reconciler.rs`. Action-shim wrapper at
 mirrors the `dataplane_update_service.rs` shape; dispatch is
 `observation.write(ObservationRow::ServiceBackend(row))`.
 
-`LogicalTimestamp` for the bridge's writes uses
-`counter = tick.tick.saturating_add(1)` and
-`writer = AppState.node_id` — identical to the action shim's
-service-hydration write at line 121-122 of
-`dataplane_update_service.rs`. Multi-node Phase 2+ compat: per-node
-monotonic counter + writer tiebreak IS the CR-SQLite LWW shape; the
-bridge does NOT preclude a future owner-writer convention.
+**`LogicalTimestamp` for the bridge's writes — superseded by ADR-0077
+(2026-08-01).** This paragraph previously recorded the rule as
+`counter = tick.tick.saturating_add(1)`, `writer = AppState.node_id`.
+The writer half stands. **The counter half is the defect, not the
+design.**
+
+The convergence tick resets to `0` on every process start
+(`crates/overdrive-control-plane/src/lib.rs:2434` — a literal `0`, never
+seeded from persistent state) while observation rows are fsync-durable
+across restarts. A tick-derived counter therefore *regresses* at
+restart, and every write for a surviving row silently loses the LWW
+merge until the tick climbs back past the pre-restart high-water mark.
+The writer tiebreak cannot rescue the tie: `NodeId` is the compile-time
+literal `"local"` (`lib.rs:1701`), so `dominates`' `Equal` arm evaluates
+`"local" > "local"` → deterministic `false`
+(`crates/overdrive-core/src/traits/observation_store.rs:344`). The
+outage window scales with the *previous* process's uptime — reproduced
+end-to-end through real `serve` + `deploy` + restart at prior counter
+4 → 0.5 s, 269 → 29 s, 522 → 52 s
+(`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+§ 2–3).
+
+**"Per-node monotonic counter" was false.** The old multi-node-compat
+sentence read *"per-node monotonic counter + writer tiebreak IS the
+CR-SQLite LWW shape."* The tiebreak half is accurate and the conclusion
+survives — the bridge still does NOT preclude a future owner-writer
+convention. But the tick counter is **not** monotonic per node: it
+resets per process while durable rows keep their high-water mark, which
+is the entire defect. Under ADR-0077's rule the counter *is* per-key
+monotone across restarts, which is what makes the Phase 2+ CR-SQLite
+compat claim true rather than aspirational.
+
+**The mandated rule** (ADR-0077 § D1) is
+`LogicalTimestamp::dominating(tick_floor, writer, prior)` — the counter
+derives from the row the write replaces; the tick is only a floor.
+
+**Per-site status — the two sites the old text equated are in different
+implementation units and must not be read as one:**
+
+| Site | ADR-0077 | State at time of writing |
+|---|---|---|
+| The bridge's `WriteServiceBackendRow` stamp — `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:392-395` | site 9, **Unit B** | **Still tick-derived; carries the defect.** Not implemented. `reconcile` is pure-sync with no store handle (ADR-0035/0036), so the prior stamp must arrive through `actual` — which makes site 9 **blocked on the bridge-convergence step** that adds `service_backends` to `BackendDiscoveryBridgeState` (ADR-0077 § D2 dependency contract, § D9). |
+| The action shim's service-hydration write — `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs` | sites 6/7, **Unit A** | Migration authored, **not landed** — uncommitted, and its clippy/mutation gates have not run. Do not cite it as precedent until it lands. |
+
+The bridge additionally does not converge — its dedup diffs against a
+fingerprint of what it *emitted* rather than against the rows it
+manages, so a dropped write is never retried (RCA § 4.2–4.3). That is a
+`.claude/rules/reconcilers.md` Bar 1 violation independent of the
+counter, and it is the same bridge-convergence step site 9 waits on.
 
 VIP handling (revised 2026-05-20 for ADR-0049): VIPs are
 **platform-issued**. The operator cannot supply a VIP — the field

@@ -106,6 +106,8 @@ fn alloc_running(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatu
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -126,6 +128,8 @@ fn alloc_operator_stopped(alloc_id: &str, workload_id: &str, node_id: &str) -> A
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -145,6 +149,8 @@ fn alloc_draining(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStat
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -170,6 +176,8 @@ fn alloc_crashed(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatu
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

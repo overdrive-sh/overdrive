@@ -538,10 +538,12 @@ async fn handle_exit_event(
     let prior_state: AllocStateWire = prior.state.into();
 
     let (state, mut reason) = classify(&event.kind, event.intentional_stop);
-    let updated_at = LogicalTimestamp {
-        counter: prior.updated_at.counter.saturating_add(1),
-        writer: prior.node_id.clone(),
-    };
+    // `tick_floor = 0` because this writer runs OUTSIDE any convergence loop
+    // and has no tick (ADR-0077 § D2). `max(1, prior + 1) == prior + 1` for
+    // every prior, so the emitted counter is byte-identical to the historical
+    // hand-rolled `prior.counter + 1` this migrated from.
+    let updated_at =
+        LogicalTimestamp::dominating(0, prior.node_id.clone(), Some(&prior.updated_at));
     // Bound the stderr_tail to the project-wide line budget at the
     // observation seam. The driver-side ring buffer in `ExecDriver`
     // already caps emission at `STDERR_TAIL_LINES`, but the observer
@@ -556,29 +558,34 @@ async fn handle_exit_event(
     if let TransitionReason::WorkloadCrashedImmediately { stderr_tail: ref mut tail, .. } = reason {
         tail.clone_from(&stderr_tail);
     }
-    let row = AllocStatusRow {
-        alloc_id: event.alloc.clone(),
-        workload_id: prior.workload_id,
-        node_id: prior.node_id,
+    // ADR-0078 § D2 site 7: routed through `build_alloc_status_row` rather
+    // than hand-building the row. This is NOT cosmetic — it is what puts the
+    // exit observer inside the builder's required-parameter net. A
+    // `restart_count: 0` typed by hand at a raw literal compiles, satisfies
+    // every lint, and silently resets the counter on every crash; there is no
+    // such literal to type once the site calls the builder. The `listeners:
+    // Vec::new()` the literal used to set is what the builder sets internally.
+    let row = crate::action_shim::build_alloc_status_row(
+        event.alloc.clone(),
+        // Phase-1 greenfield (ADR-0047 §4 / step 02-02 [D4]): the exit
+        // observer inherits the prior row's identity + kind so the
+        // denormalised fields stay accurate across the workload's lifetime.
+        // It never invents them — it always has a `prior` row in scope
+        // (loaded above) whose values are authoritative.
+        prior.workload_id.clone(),
+        prior.node_id.clone(),
         state,
         updated_at,
-        reason: Some(reason),
-        detail: None,
+        Some(reason),
+        None,
         // ADR-0037 §4: emission sites outside a reconciler tick (the
         // exit observer is one — it runs in a per-allocation watcher
         // task, not a reconcile loop) MUST emit `terminal: None`.
         // Structurally meaningful: "I am not making a terminal claim";
         // the reconciler is the single writer for terminal decisions.
-        terminal: None,
+        None,
         stderr_tail,
-        // Phase-1 greenfield (ADR-0047 §4 / step 02-02 [D4]): the
-        // exit observer inherits the prior row's kind so the
-        // denormalised field stays accurate across the workload's
-        // lifetime. The exit observer never invents a kind — it
-        // always has a `prior` row in scope (loaded above) whose
-        // `kind` is the authoritative value written at submit time.
-        kind: prior.kind,
-        listeners: Vec::new(),
+        prior.kind,
         // Subsidiary GAP-1 fix: the exit observer is a successor-row
         // writer for a Terminated / Failed transition — by definition
         // the alloc MUST have reached Running at some point (the
@@ -586,7 +593,7 @@ async fn handle_exit_event(
         // shim records Pending → Running). Preserve the prior row's
         // `started_at` verbatim. Same forward-carry pattern as
         // `stderr_tail` / `kind` / `workload_id` / `node_id`.
-        started_at: prior.started_at,
+        prior.started_at,
         // canonical-workload-address-inbound-tproxy (GH #241 /
         // AllocStatusRowV2): the exit observer is a successor-row
         // writer for a Terminated / Failed transition — forward-carry
@@ -597,8 +604,12 @@ async fn handle_exit_event(
         // there the value rides the prior row into every successor
         // transition. `None` for host-netns allocs (every current
         // fixture, where the C3 seam never ran).
-        workload_addr: prior.workload_addr,
-    };
+        prior.workload_addr,
+        // ADR-0078 § D2 site 7: FORWARDS. The crash row this writer produces
+        // carries the PREVIOUS terminal's snapshot, per § D1's invariant that
+        // `last_terminated` never describes the row that carries it.
+        Some(&prior),
+    );
     obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
     Ok(Some((row, prior_state)))
 }

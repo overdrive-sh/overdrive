@@ -45,9 +45,9 @@
 //!
 //! > `fail_closed_on_mtls_install` built its superseding `Failed` row from the
 //! > SAME `tick` and the SAME `node_id` as the `Running` row it had to
-//! > supersede, both resolving through `timestamp_for`, so both rows carried a
-//! > BYTE-IDENTICAL `LogicalTimestamp { counter: tick.tick + 1, writer:
-//! > node_id }`. `LogicalTimestamp::dominates` returns `false` on an equal
+//! > supersede, both resolving through the same tick-derived helper, so both
+//! > rows carried a BYTE-IDENTICAL `(counter = tick.tick + 1, writer =
+//! > node_id)`. `LogicalTimestamp::dominates` returns `false` on an equal
 //! > counter with an equal writer, so the `Failed` row LOST the LWW merge and
 //! > was silently dropped — by `SimObservationStore::apply_alloc_status` AND by
 //! > the production single-node `overdrive-store-local::apply_alloc_status_lww`
@@ -63,10 +63,18 @@
 //! The fix of record is ADR-0076 rev 5 § Decision 7 and
 //! `docs/feature/mtls-intercept-install-fault-seam/design/architecture.md`
 //! § 4.8: a same-tick supersede derives its LWW counter from the row it
-//! supersedes (`superseding_timestamp`), never from the tick, and
-//! `build_alloc_status_row`'s stamp became a REQUIRED parameter so every writer
-//! decides it explicitly. `LogicalTimestamp::dominates` was NOT changed — the
-//! comparator is correct; the counter the shim assigned was wrong.
+//! supersedes, never from the tick, and `build_alloc_status_row`'s stamp became
+//! a REQUIRED parameter so every writer decides it explicitly.
+//! `LogicalTimestamp::dominates` was NOT changed — the comparator is correct;
+//! the counter the shim assigned was wrong.
+//!
+//! **ADR-0077 generalised that fix to EVERY durable write site.** The
+//! prior-derivation mechanism now lives in one constructor,
+//! `LogicalTimestamp::dominating(tick_floor, writer, prior)`, and the two
+//! bespoke shim helpers (`timestamp_for` / `superseding_timestamp`) were
+//! deleted. The same-tick supersede this file defends is now the `prior =
+//! Some(&running_row.updated_at)` call at the `fail_closed_on_mtls_install`
+//! site; the behaviour asserted below is unchanged.
 //!
 //! # SUT state machine
 //!
@@ -470,6 +478,8 @@ async fn seed_running_row(
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row)))
         .await

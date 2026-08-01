@@ -558,10 +558,11 @@ async fn seed_running_row(
         workload_id: workload.clone(),
         node_id: node.clone(),
         state: AllocState::Running,
-        // counter 0 so the FinalizeFailed write (`timestamp_for` → counter
-        // `tick.tick + 1` = 1, with the SAME writer = this row's node_id) strictly
-        // DOMINATES under LWW — a counter tie with an equal writer is retained
-        // (idempotency case), which would otherwise mask the finalize write.
+        // counter 0 so the FinalizeFailed write strictly DOMINATES under LWW —
+        // a counter tie with an equal writer is retained (idempotency case),
+        // which would otherwise mask the finalize write. Post-ADR-0077 the
+        // stamp is `LogicalTimestamp::dominating(tick.tick, node_id, Some(&0))`
+        // = `max(tick + 1, 1)`, which dominates this seed for every tick.
         updated_at: LogicalTimestamp { counter: 0, writer: node.clone() },
         reason: Some(TransitionReason::Started),
         detail: None,
@@ -571,6 +572,8 @@ async fn seed_running_row(
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
     obs.write(ObservationRow::AllocStatus(Box::new(row)))
         .await

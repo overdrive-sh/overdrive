@@ -149,6 +149,8 @@ fn build_row(terminal: Option<TerminalCondition>) -> AllocStatusRow {
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
         // Host-netns acceptance fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

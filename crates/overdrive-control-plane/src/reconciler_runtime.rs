@@ -1280,6 +1280,118 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// ADR-0013 §8 / whitepaper §18. Without this, the reconciler runs
 /// once after submit, the broker drains empty, and convergence stalls.
 ///
+/// Surface a reconcile-output invariant violation on both operator
+/// channels, then return so the caller can self-heal.
+///
+/// Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
+/// posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a genuine
+/// same-slot conflict the violation is surfaced on TWO channels — the
+/// Kubernetes Events model: a machine-queryable control signal distinct
+/// from a best-effort human signal. The caller then skips dispatch this
+/// tick, persists the View, and retries next tick. NO stop /
+/// early-return: the appliance OS has no operator shell, so the system
+/// must self-heal.
+///
+/// Infallible by construction: **every** failure inside is logged and
+/// swallowed, because this function is itself the error-reporting path.
+/// A failure to report must not abort the tick that is reporting.
+async fn surface_reconcile_conflict(
+    state: &AppState,
+    reconciler_name: &ReconcilerName,
+    target: &TargetResource,
+    tick: &TickContext,
+    violation: &action_shim::validate::ReconcilerOutputViolation,
+) {
+    // Channel 1 (machine-queryable control signal): a durable
+    // `reconcile_conflict` observation row keyed on the conflicting
+    // `(service_id, vip, port, proto)` slot. Operators query it via
+    // `ObservationStore::reconcile_conflict_rows`. Best-effort write —
+    // a write failure must NOT abort the tick (the tracing signal below
+    // still fires and convergence retries), so we log + drop the error
+    // rather than propagate.
+    let action_shim::validate::ReconcilerOutputViolation::ConflictingServiceWrites {
+        service_id,
+        vip,
+        vip_port,
+        proto,
+        first_route,
+        second_route,
+    } = violation;
+    let (service_id, vip, vip_port, proto, first_route, second_route) =
+        (*service_id, *vip, *vip_port, *proto, *first_route, *second_route);
+    // `vip_port` is `Some(_)` for every surviving conflict class in
+    // Phase 1 (same-route same-slot carries the shared port); the
+    // `Option` exists only to avoid churning the variant if a future
+    // port-less conflict class lands. Fall back to 0 if ever `None`.
+    let port = vip_port.unwrap_or(0);
+    // ADR-0077 § D2 site 8: the LWW counter derives from the prior row
+    // at this `(service_id, vip, port, proto)` key, never from the tick
+    // alone. The conflict write is already best-effort (a write failure
+    // is logged and convergence continues, because the tracing event
+    // below is the primary signal), so a READ failure must not abort the
+    // conflict signal either — but it must not be silently absorbed
+    // (`.claude/rules/development.md` § "Errors"): log the cause and
+    // proceed with `None`.
+    let prior_updated_at: Option<LogicalTimestamp> =
+        match state.obs.reconcile_conflict_rows(&service_id).await {
+            Ok(rows) => rows
+                .into_iter()
+                .find(|r| r.vip == vip && r.port == port && r.proto == proto)
+                .map(|r| r.updated_at),
+            Err(err) => {
+                tracing::warn!(
+                    target: "overdrive::reconciler",
+                    name = "reconciler.output.conflict_prior_read_failed",
+                    reconciler = %reconciler_name,
+                    target = %target.as_str(),
+                    error = %err,
+                    "could not read the prior reconcile_conflict row; stamping without a \
+                     prior floor — this write may lose the LWW merge. The tracing signal \
+                     above is unaffected."
+                );
+                None
+            }
+        };
+    let conflict_row = ReconcileConflictRow {
+        service_id,
+        vip,
+        port,
+        proto,
+        first_route: write_route_to_conflict_route(first_route),
+        second_route: write_route_to_conflict_route(second_route),
+        // LWW timestamp matching the action-shim convention
+        // (prior-derived counter, tick as floor) — see
+        // `ServiceHydrationResultRowV1::updated_at`.
+        updated_at: LogicalTimestamp::dominating(
+            tick.tick,
+            state.node_id.clone(),
+            prior_updated_at.as_ref(),
+        ),
+    };
+    if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
+        tracing::warn!(
+            target: "overdrive::reconciler",
+            name = "reconciler.output.conflict_row_write_failed",
+            reconciler = %reconciler_name,
+            target = %target.as_str(),
+            error = %err,
+            "failed to write reconcile_conflict observation row; the tracing \
+             signal still fired and convergence will retry next tick"
+        );
+    }
+    // Channel 2 (supplemental human signal): the structured tracing
+    // event. KEPT alongside the observation row, never replaced.
+    tracing::error!(
+        target: "overdrive::reconciler",
+        name = "reconciler.output.invariant_violation",
+        reconciler = %reconciler_name,
+        target = %target.as_str(),
+        tick = tick.tick,
+        violation = ?violation,
+        "reconciler emitted conflicting Actions in one tick; skipping dispatch"
+    );
+}
+
 /// # Errors
 ///
 /// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
@@ -1397,103 +1509,35 @@ pub async fn run_convergence_tick(
     // unchanged) so `lib.rs` logs it; the self-heal is the re-enqueue. The
     // invariant-conflict branch directly below already self-heals by NOT
     // early-returning — this matches that posture for the dispatch path.
-    let dispatch_outcome: Result<(), ConvergenceError> = if let Err(violation) =
-        action_shim::validate::validate_reconcile_output(&actions)
-    {
-        // Surface-then-continue (`.claude/rules/reconcilers.md` self-heal
-        // posture; RCA `fix-mixed-backend-dispatch-spin` § Fix C). On a
-        // genuine same-slot conflict we surface the violation on TWO
-        // channels — the Kubernetes Events model: a machine-queryable
-        // control signal distinct from a best-effort human signal — then
-        // skip dispatch this tick, persist the View, and retry next
-        // tick. NO stop / early-return: the appliance OS has no operator
-        // shell, so the system must self-heal.
-        //
-        // Channel 1 (machine-queryable control signal): a durable
-        // `reconcile_conflict` observation row keyed on the conflicting
-        // `(service_id, vip, port, proto)` slot. Operators query it via
-        // `ObservationStore::reconcile_conflict_rows`. Best-effort write
-        // — a write failure must NOT abort the tick (the tracing signal
-        // below still fires and convergence retries), so we log + drop
-        // the error rather than propagate.
-        let action_shim::validate::ReconcilerOutputViolation::ConflictingServiceWrites {
-            service_id,
-            vip,
-            vip_port,
-            proto,
-            first_route,
-            second_route,
-        } = &violation;
-        let (service_id, vip, vip_port, proto, first_route, second_route) =
-            (*service_id, *vip, *vip_port, *proto, *first_route, *second_route);
-        // `vip_port` is `Some(_)` for every surviving conflict class in
-        // Phase 1 (same-route same-slot carries the shared port); the
-        // `Option` exists only to avoid churning the variant if a future
-        // port-less conflict class lands. Fall back to 0 if ever `None`.
-        let port = vip_port.unwrap_or(0);
-        let conflict_row = ReconcileConflictRow {
-            service_id,
-            vip,
-            port,
-            proto,
-            first_route: write_route_to_conflict_route(first_route),
-            second_route: write_route_to_conflict_route(second_route),
-            // LWW timestamp matching the action-shim convention
-            // (`counter = tick.tick + 1`, `writer = node_id`) — see
-            // `ServiceHydrationResultRowV1::updated_at`.
-            updated_at: LogicalTimestamp {
-                counter: tick.tick.saturating_add(1),
-                writer: state.node_id.clone(),
-            },
+    let dispatch_outcome: Result<(), ConvergenceError> =
+        if let Err(violation) = action_shim::validate::validate_reconcile_output(&actions) {
+            surface_reconcile_conflict(state, reconciler_name, target, &tick, &violation).await;
+            // The validate-violation path is itself a self-heal: skip dispatch,
+            // keep the persisted View, retry next tick. It contributes no dispatch
+            // error to propagate.
+            Ok(())
+        } else {
+            // Dispatch through the action shim — this is where `.await`
+            // is permitted. Per-action error isolation lives in the shim.
+            // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
+            // after every successful `obs.write` per architecture.md §10.
+            //
+            // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
+            // (step 01-08), so the shim receives the REAL engine, replacing
+            // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
+            // is the AppState-aware path that ALSO persists workflow-instance
+            // desired-intent for every `Action::StartWorkflow` BEFORE handing
+            // the actions to the engine off the shim — so the workflow-lifecycle
+            // reconciler's `hydrate_desired` can read the instance back on the
+            // next tick (and re-emit on restart).
+            // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
+            // and returned at the END of the function, AFTER the self-re-enqueue
+            // below. A recoverable shim error must still re-enqueue (self-heal) so
+            // the persisted retry memory actually re-drives on a later tick.
+            action_shim::dispatch_with_workflow_intent(actions, state, &tick)
+                .await
+                .map_err(ConvergenceError::Shim)
         };
-        if let Err(err) = state.obs.write(ObservationRow::ReconcileConflict(conflict_row)).await {
-            tracing::warn!(
-                target: "overdrive::reconciler",
-                name = "reconciler.output.conflict_row_write_failed",
-                reconciler = %reconciler_name,
-                target = %target.as_str(),
-                error = %err,
-                "failed to write reconcile_conflict observation row; the tracing \
-                 signal still fired and convergence will retry next tick"
-            );
-        }
-        // Channel 2 (supplemental human signal): the structured tracing
-        // event. KEPT alongside the observation row, never replaced.
-        tracing::error!(
-            target: "overdrive::reconciler",
-            name = "reconciler.output.invariant_violation",
-            reconciler = %reconciler_name,
-            target = %target.as_str(),
-            tick = tick.tick,
-            violation = ?violation,
-            "reconciler emitted conflicting Actions in one tick; skipping dispatch"
-        );
-        // The validate-violation path is itself a self-heal: skip dispatch,
-        // keep the persisted View, retry next tick. It contributes no dispatch
-        // error to propagate.
-        Ok(())
-    } else {
-        // Dispatch through the action shim — this is where `.await`
-        // is permitted. Per-action error isolation lives in the shim.
-        // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
-        // after every successful `obs.write` per architecture.md §10.
-        //
-        // ADR-0064 §5 — the WorkflowEngine is now composed into AppState
-        // (step 01-08), so the shim receives the REAL engine, replacing
-        // the 01-05/01-06 `None` placeholder. `dispatch_with_workflow_intent`
-        // is the AppState-aware path that ALSO persists workflow-instance
-        // desired-intent for every `Action::StartWorkflow` BEFORE handing
-        // the actions to the engine off the shim — so the workflow-lifecycle
-        // reconciler's `hydrate_desired` can read the instance back on the
-        // next tick (and re-emit on restart).
-        // NOTE: no `?` here — the outcome is captured into `dispatch_outcome`
-        // and returned at the END of the function, AFTER the self-re-enqueue
-        // below. A recoverable shim error must still re-enqueue (self-heal) so
-        // the persisted retry memory actually re-drives on a later tick.
-        action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-            .await
-            .map_err(ConvergenceError::Shim)
-    };
 
     // Cooperative yield — every action_shim::dispatch path on the
     // single-node SimObservationStore returns Ready synchronously
@@ -3386,6 +3430,8 @@ mod tests {
                 },
                 // Per-alloc canonical workload address (AllocStatusRowV2 additive field, GH #241).
                 workload_addr,
+                last_terminated: None,
+                restart_count: 0,
             };
             state
                 .obs

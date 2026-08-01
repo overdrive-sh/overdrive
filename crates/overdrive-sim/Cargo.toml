@@ -64,6 +64,14 @@ overdrive-worker.path = "../overdrive-worker"
 ciborium.workspace       = true
 serde.workspace          = true
 serde_json.workspace     = true
+# Structured diagnostics for the `observation.lww.rejected` event that
+# `adapters/observation_store.rs` emits when the LWW comparator discards
+# an incoming row. The host sibling (`overdrive-store-local`) already
+# carries `tracing` for the same purpose; this crate had no `tracing`
+# edge at all, so emitting the sim half of that event requires the dep.
+# Consumes the existing `[workspace.dependencies]` entry per
+# `.claude/rules/development.md` § Dependencies — no new workspace dep.
+tracing.workspace        = true
 # Used by the `ExitEventObservableOutcome` invariant evaluator
 # (fix-exit-observer-running-gate step 01-05 — Solution 4) to
 # archive a `Job` aggregate into the in-process `LocalIntentStore`
@@ -116,6 +124,12 @@ x509-parser.workspace  = true
 # `ENOPROTOOPT` = kernel without `IP_TRANSPARENT`). The adapter itself takes a
 # plain `i32` and never names `libc`, so this stays out of `[dependencies]`.
 libc.workspace         = true
+# Dev-dep ONLY — the `observation.lww.rejected` capture test
+# (`tests/acceptance/sim_observation_lww_reject_logging.rs`) installs a
+# thread-local `Layer` to assert the event fires on reject and does NOT
+# fire on accept. Mirrors the host adapter's existing capture harness in
+# `overdrive-store-local/tests/integration/envelope_observation_skip.rs`.
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

@@ -438,6 +438,8 @@ fn row_with_state(
         exit_code,
         last_transition: None,
         error: error.map(str::to_owned),
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 
@@ -770,5 +772,168 @@ fn render_workload_describe_renders_service_kind_aware_view_on_live_path() {
     assert!(
         !rendered.contains("Verdict:"),
         "Service render must NOT carry a 'Verdict:' line (Job-only); got:\n{rendered}",
+    );
+}
+
+// -------------------------------------------------------------------
+// T-E (ADR-0078 § D6) — the crash-observability operator surface.
+//
+// Two obligations, both on the LIVE renderer:
+//   1. a row carrying `restart_count: 2` + a populated `last_terminated`
+//      renders the `Restarts` cell `2` AND the `last terminated:` block;
+//   2. a row with `last_terminated: None` renders byte-identically to
+//      today — the additive/presence-guard proof.
+// -------------------------------------------------------------------
+
+/// A `LastTerminatedBody` describing a SIGKILL crash the allocation
+/// survived — the shape `handlers.rs` projects from a real
+/// `AllocStatusRow.last_terminated`.
+fn crash_snapshot() -> overdrive_control_plane::api::LastTerminatedBody {
+    overdrive_control_plane::api::LastTerminatedBody {
+        state: AllocStateWire::Failed,
+        reason: Some(overdrive_core::TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(137),
+            signal: Some(9),
+            stderr_tail: Some("Segmentation fault".to_owned()),
+        }),
+        detail: Some("killed by SIGKILL".to_owned()),
+        terminal: None,
+        stderr_tail: Some("Segmentation fault".to_owned()),
+        started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+        terminated_at: "(c=2,w=local)".to_owned(),
+    }
+}
+
+/// Wrap a single row into a `WorkloadDescribeOutput` of the given kind.
+fn describe_output_for(kind: WorkloadKind, row: AllocStatusRowBody) -> WorkloadDescribeOutput {
+    let snapshot = AllocStatusResponse {
+        workload_id: Some("recovery".to_string()),
+        spec_digest: Some(NONEMPTY_DIGEST.to_string()),
+        kind: Some(kind),
+        replicas_desired: 1,
+        replicas_running: 1,
+        rows: vec![row],
+        ..Default::default()
+    };
+    WorkloadDescribeOutput {
+        workload_id: "recovery".to_string(),
+        spec_digest: NONEMPTY_DIGEST.to_string(),
+        allocations_total: 1,
+        empty_state_message: String::new(),
+        snapshot,
+    }
+}
+
+/// T-E (1) — Service arm. The `Restarts` column carries the real count
+/// (it rendered a hard-coded `"0"` from Phase 1 until ADR-0078), and the
+/// presence-guarded `last terminated:` block names the crash beneath the
+/// table row.
+///
+/// Kills the mutant that reverts `row.restart_count` to the `"0"`
+/// literal, and the one that drops the detail block entirely.
+#[test]
+fn render_workload_describe_service_renders_restart_count_and_last_terminated() {
+    let mut row = row_with_state("alloc-recovery-0", AllocStateWire::Running, None, None);
+    row.restart_count = 2;
+    row.last_terminated = Some(crash_snapshot());
+
+    let rendered =
+        overdrive_cli::render::workload_describe(&describe_output_for(WorkloadKind::Service, row));
+
+    assert!(
+        rendered.contains("Restarts"),
+        "the Service arm must keep its Restarts column; got:\n{rendered}",
+    );
+    let alloc_line = rendered
+        .lines()
+        .find(|l| l.starts_with("alloc-recovery-0"))
+        .unwrap_or_else(|| panic!("the alloc table row must be present; got:\n{rendered}"));
+    assert!(
+        alloc_line.contains('2'),
+        "the Restarts cell must carry the real count (2), not a hard-coded 0; got: {alloc_line:?}",
+    );
+    assert!(
+        rendered.contains("last terminated: Failed at (c=2,w=local)"),
+        "the crash must be named with its state and LWW coordinate; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last terminated detail: killed by SIGKILL"),
+        "the verbatim driver text must surface; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last terminated stderr"),
+        "the workload's dying words must surface; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("Segmentation fault"),
+        "and the stderr lines themselves; got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("    restarts: "),
+        "the Service arm already has a Restarts COLUMN — the detail block must not \
+         duplicate it; got:\n{rendered}",
+    );
+}
+
+/// T-E (2) — the additive/presence-guard proof. A row that has never
+/// been terminal renders byte-identically to a run with the fields
+/// absent, so healthy output is unchanged.
+///
+/// Asserted as a byte-equality between two renders that differ ONLY in
+/// `last_terminated`, which is stronger than a `!contains` probe: it
+/// catches a stray blank line or trailing space as well as a stray block.
+#[test]
+fn render_workload_describe_healthy_row_is_byte_identical_without_last_terminated() {
+    let baseline = row_with_state("alloc-recovery-0", AllocStateWire::Running, None, None);
+    assert_eq!(baseline.restart_count, 0, "the baseline fixture is a never-restarted alloc");
+    assert_eq!(baseline.last_terminated, None, "and it has survived no terminal");
+
+    let rendered_service = overdrive_cli::render::workload_describe(&describe_output_for(
+        WorkloadKind::Service,
+        baseline.clone(),
+    ));
+    let rendered_job =
+        overdrive_cli::render::workload_describe(&describe_output_for(WorkloadKind::Job, baseline));
+
+    for (arm, rendered) in [("Service", &rendered_service), ("Job", &rendered_job)] {
+        assert!(
+            !rendered.contains("last terminated"),
+            "{arm} arm: a never-terminal row must emit no last-terminated block; got:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("    restarts: "),
+            "{arm} arm: a never-restarted row must emit no restarts detail line; got:\n{rendered}",
+        );
+    }
+}
+
+/// T-E (3) — Job arm. The per-attempt column set
+/// (`Attempt / State / Exit / Started / Duration`) is UNCHANGED — it is
+/// pinned by the KPI-K3 byte-equality assertions — so the restart count
+/// surfaces on the detail line instead of as a sixth column.
+#[test]
+fn render_workload_describe_job_renders_restarts_in_the_detail_block_not_a_column() {
+    let mut row = row_with_state("alloc-recovery-0", AllocStateWire::Running, None, None);
+    row.restart_count = 2;
+    row.last_terminated = Some(crash_snapshot());
+
+    let rendered =
+        overdrive_cli::render::workload_describe(&describe_output_for(WorkloadKind::Job, row));
+
+    let header = rendered
+        .lines()
+        .find(|l| l.starts_with("Attempt"))
+        .unwrap_or_else(|| panic!("the Job per-attempt header must be present; got:\n{rendered}"));
+    assert!(
+        !header.contains("Restarts"),
+        "the Job per-attempt column set is pinned — no Restarts column; got: {header:?}",
+    );
+    assert!(
+        rendered.contains("    restarts: 2"),
+        "the Job arm surfaces the count on the detail line; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last terminated: Failed at (c=2,w=local)"),
+        "and the crash is named; got:\n{rendered}",
     );
 }

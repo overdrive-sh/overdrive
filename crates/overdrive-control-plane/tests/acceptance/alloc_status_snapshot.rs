@@ -149,6 +149,8 @@ async fn write_row(
         },
         // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }
@@ -371,6 +373,8 @@ async fn write_terminal_row(
         },
         // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
     state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("obs write");
 }

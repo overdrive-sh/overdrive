@@ -107,6 +107,15 @@ mod integration {
     /// (the netns provision seam is gated on the same `mtls_worker.is_some()`
     /// flag); SKIP otherwise.
     mod mtls_install_fail_closed;
+
+    /// ADR-0077 § D7 Layer 3 (T2) — the cross-restart LWW regression test.
+    /// Drops and reopens a REAL `LocalObservationStore` on one redb path,
+    /// then drives `action_shim::dispatch` at `tick = 0` (the literal
+    /// initialiser in `spawn_convergence_loop`) and asserts the write WINS
+    /// the LWW merge. An in-memory fixture cannot express the substrate
+    /// behaviour this pins — "the tick resets while the rows do not."
+    mod lww_counter_survives_restart;
+
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
@@ -194,6 +203,13 @@ mod integration {
         // reuse the same `AllocCleanup` guard via `super::super::`.
         pub mod cleanup;
         mod convergence_loop_spawned_in_production_boot;
+        /// ADR-0078 § D6 T-F — TWO crash-restart cycles through the REAL
+        /// exit observer and action shim. The ONLY test that fails when a
+        /// writer forward-carries `last_terminated` / `restart_count`
+        /// wrongly: T-A tests the pure function, T-C and the rewritten
+        /// `crash_recovery` both assert `== 1` after one cycle, so only a
+        /// second cycle observes a resetting writer.
+        mod crash_observability_two_cycles;
         mod crash_recovery;
         mod crash_recovery_obs_write_rejected;
         mod exit_observer;

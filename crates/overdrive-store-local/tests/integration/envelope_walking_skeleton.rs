@@ -103,6 +103,8 @@ async fn operator_restart_observes_yesterday_alloc_status_without_subtree_overru
         // Host-netns walking-skeleton fixture — no canonical workload
         // address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     };
 
     let _guard = set_default(subscriber);

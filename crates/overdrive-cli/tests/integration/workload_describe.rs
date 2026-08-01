@@ -63,6 +63,8 @@ fn fixture_row(
         exit_code,
         last_transition: None,
         error: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

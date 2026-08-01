@@ -185,6 +185,8 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         // being absent (canonical-workload-address-inbound-tproxy,
         // GH #241 / AllocStatusRowV2 additive field).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

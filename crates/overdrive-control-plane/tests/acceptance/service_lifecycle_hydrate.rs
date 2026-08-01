@@ -194,6 +194,8 @@ fn make_alloc_status_row(
         started_at,
         // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
         workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
     }
 }
 

@@ -191,6 +191,38 @@ pub enum BannedKind {
     /// the helper's call site. Either failure means production boots
     /// without exercising the Earned-Trust gate.
     ProbeGateHelperUnused,
+    /// A `LogicalTimestamp { .. }` struct literal in production source
+    /// — banned per ADR-0077 § D7 Layer 2. Every durable observation
+    /// write must derive its LWW counter from the row it replaces via
+    /// [`LOGICAL_TIMESTAMP_REPLACEMENT`]; a struct literal mints a
+    /// counter from nothing and re-opens the cross-restart regression
+    /// the ADR exists to close (a fresh process restarts `tick` at 0
+    /// while durable rows keep their high-water mark, so a
+    /// tick-derived stamp loses every LWW comparison and the write is
+    /// silently discarded).
+    ///
+    /// Exempt: `#[cfg(test)]` items and the defining
+    /// `impl LogicalTimestamp` block. See
+    /// [`logical_timestamp_literal_path_in_scope`] for the scanned
+    /// scope and why it is incremental rather than exemption-based.
+    LogicalTimestampStructLiteral,
+    /// A `LastTerminated { .. }`, `CrashFacts { .. }`,
+    /// `AllocStatusRow { .. }` or `AllocStatusRowV3 { .. }` struct literal
+    /// in production source — banned per ADR-0078 § Enforcement Layer 2.
+    ///
+    /// The crash-observability pair (`last_terminated`, `restart_count`)
+    /// is computed by exactly one function,
+    /// `CrashFacts::advance(prior, next_state)`, invoked by exactly one
+    /// caller, `build_alloc_status_row`. A raw
+    /// `AllocStatusRow { …, last_terminated: None, restart_count: 0 }`
+    /// bypasses that net entirely: it compiles, satisfies every other
+    /// lint, and silently resets the restart counter on every write.
+    ///
+    /// Exempt: `#[cfg(test)]` items, `src/testing/**`, the defining
+    /// `impl` blocks, and the single sanctioned constructor
+    /// [`ALLOC_ROW_SANCTIONED_CONSTRUCTOR`]. See
+    /// [`crash_facts_literal_path_in_scope`] for the scanned scope.
+    CrashObservabilityStructLiteral,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -1821,6 +1853,528 @@ fn envelope_name_to_snake_case(name: &str) -> String {
 }
 
 // -----------------------------------------------------------------------------
+// `LogicalTimestamp { .. }` struct-literal lint clause — ADR-0077 § D7 Layer 2
+// -----------------------------------------------------------------------------
+//
+// ADR-0077 § D1 makes `LogicalTimestamp::dominating(tick_floor, writer, prior)`
+// the only sanctioned way to mint an observation-row stamp: the LWW counter
+// derives from the row it replaces, with the tick as a floor only. Layer 1 of
+// § D7 deleted the two unsafe helpers (`timestamp_for`, `superseding_timestamp`)
+// so the convenient wrong path no longer exists — but `LogicalTimestamp`'s
+// fields are `pub` (they are read by `dominates`, by `format_logical_timestamp`,
+// and by the rkyv archived surface), so a struct literal remains *syntactically*
+// constructible. This clause is Layer 2: it makes that residual path fail CI.
+//
+// Direct precedent: ADR-0048's "Layer 2 — variant-construction lint"
+// ([`scan_for_envelope_variant_construction`] above), same mechanism. Purely
+// syntactic; imports no `overdrive-*` crate, so `.claude/rules/development.md`
+// § "xtask is build / test / dev orchestration, NOT a runtime entry point"
+// stays intact.
+//
+// Two exemptions, both structural rather than per-site allowlists:
+//
+//   - `#[cfg(test)]` items. A test fixture pinning a specific counter is
+//     stating the *precondition* of a scenario, not minting a production
+//     stamp; the ordering contract `dominating` enforces is exactly what
+//     those fixtures exist to exercise.
+//   - The defining `impl LogicalTimestamp` block. `dominating` itself must
+//     construct the value it returns.
+
+/// The type whose struct-literal construction this clause bans.
+const LOGICAL_TIMESTAMP_TYPE: &str = "LogicalTimestamp";
+
+/// The sanctioned constructor, named in the violation's help text.
+const LOGICAL_TIMESTAMP_REPLACEMENT: &str =
+    "LogicalTimestamp::dominating(tick_floor, writer, prior)";
+
+/// Is this `impl` block the defining `impl LogicalTimestamp`?
+///
+/// Matches on the self-type's last path segment, so both
+/// `impl LogicalTimestamp` and a fully-qualified
+/// `impl crate::traits::observation_store::LogicalTimestamp` are
+/// recognised. Trait impls (`impl Display for LogicalTimestamp`) match
+/// too — they are equally part of the type's own definition site and
+/// equally entitled to construct it.
+fn is_logical_timestamp_impl(item_impl: &syn::ItemImpl) -> bool {
+    let syn::Type::Path(type_path) = &*item_impl.self_ty else { return false };
+    type_path.path.segments.last().is_some_and(|seg| seg.ident == LOGICAL_TIMESTAMP_TYPE)
+}
+
+/// Visitor that flags `LogicalTimestamp { .. }` struct-literal
+/// expressions outside `#[cfg(test)]` context and outside the defining
+/// `impl LogicalTimestamp` block.
+struct LogicalTimestampLiteralCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// Number of `#[cfg(test)]`-attributed items currently open.
+    cfg_test_depth: usize,
+    /// Depth of currently-open `impl …LogicalTimestamp` blocks.
+    in_defining_impl_depth: usize,
+}
+
+impl<'a> LogicalTimestampLiteralCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self { file, violations: Vec::new(), cfg_test_depth: 0, in_defining_impl_depth: 0 }
+    }
+
+    const fn is_exempt_context(&self) -> bool {
+        self.cfg_test_depth > 0 || self.in_defining_impl_depth > 0
+    }
+}
+
+impl<'ast> Visit<'ast> for LogicalTimestampLiteralCollector<'_> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_mod(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let cfg_pushed = has_cfg_test_attr(&node.attrs);
+        if cfg_pushed {
+            self.cfg_test_depth += 1;
+        }
+        let impl_pushed = is_logical_timestamp_impl(node);
+        if impl_pushed {
+            self.in_defining_impl_depth += 1;
+        }
+        visit::visit_item_impl(self, node);
+        if impl_pushed {
+            self.in_defining_impl_depth -= 1;
+        }
+        if cfg_pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        let is_target =
+            node.path.segments.last().is_some_and(|seg| seg.ident == LOGICAL_TIMESTAMP_TYPE);
+        if is_target && !self.is_exempt_context() {
+            let start = node.path.segments.first().map_or_else(
+                || node.brace_token.span.join().start(),
+                |seg| seg.ident.span().start(),
+            );
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line: start.line,
+                column: start.column + 1,
+                banned_path: format!("{LOGICAL_TIMESTAMP_TYPE} {{ .. }}"),
+                replacement_trait: LOGICAL_TIMESTAMP_REPLACEMENT.to_owned(),
+                kind: BannedKind::LogicalTimestampStructLiteral,
+            });
+        }
+        visit::visit_expr_struct(self, node);
+    }
+}
+
+/// Scan `source` for `LogicalTimestamp { .. }` struct-literal
+/// expressions outside `#[cfg(test)]` items and outside the defining
+/// `impl LogicalTimestamp` block.
+///
+/// Purely syntactic — no `overdrive-*` import per the xtask boundary in
+/// `.claude/rules/development.md` § "xtask is build / test / dev
+/// orchestration, NOT a runtime entry point".
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file. Callers
+/// in [`scan_workspace`] ignore the error — the file will fail
+/// `cargo check` regardless — matching the convention used by the other
+/// `scan_source_*` entry points in this module.
+pub fn scan_source_logical_timestamp_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = LogicalTimestampLiteralCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Is `rel_path` (relative to the workspace root) inside the scanned
+/// scope for the ADR-0077 § D7 Layer-2 clause?
+///
+/// **Scope is deliberately incremental, tracking ADR-0077 § D9's A → B
+/// implementation ordering.** § D7 names both
+/// `crates/overdrive-core/src/**` and
+/// `crates/overdrive-control-plane/src/**` as the eventual scope, and
+/// § D7 explicitly forbids inventing an exemption for a defective site.
+/// Unit A migrates sites 1–8, all of which live in the control-plane
+/// crate; sites 9 (`backend_discovery_bridge.rs`) and 10
+/// (`service_lifecycle.rs`) live in `overdrive-core` and are Unit B,
+/// blocked on the bridge-convergence step (§ D2 dependency contract).
+///
+/// Scoping the clause to the crate whose sites are actually migrated is
+/// **not** the exemption § D7 forbids: an exemption permanently
+/// whitelists a known-defective site and would still be there after the
+/// site is fixed, whereas the scope here widens to
+/// `crates/overdrive-core/src/**` in the same change that lands sites 9
+/// and 10. It keeps the gate green-and-meaningful instead of red-and-
+/// ignored, and it adds no per-site allowlist, no `#[allow]`, and no
+/// named exception.
+fn logical_timestamp_literal_path_in_scope(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    if !rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
+        return false;
+    }
+    // `src/testing/**` is excluded because it is test-support code that
+    // never enters a production build, but is gated at its *declaration*
+    // rather than in-file: `overdrive-core/src/lib.rs` declares it
+    // `#[cfg(any(test, feature = "test-utils"))] pub mod testing;`, so the
+    // files under `src/testing/` carry no `#[cfg(test)]` attribute of
+    // their own. A purely in-file scanner (which this is — it never reads
+    // the declaring `lib.rs`) therefore cannot see the gate and would
+    // flag e.g. `src/testing/observation_store.rs`'s `fn ts(..)` fixture
+    // helper as production code. The path exclusion encodes what the
+    // declaration already guarantees. (Unreachable while the scope below
+    // is control-plane-only; it lands now so widening to `overdrive-core`
+    // in Unit B is a one-line change.)
+    if s.contains("/src/testing/") {
+        return false;
+    }
+    s.contains("crates/overdrive-control-plane/src/") || s.contains("overdrive-control-plane/src/")
+}
+
+/// Dispatch the ADR-0077 § D7 Layer-2 `LogicalTimestamp { .. }` clause
+/// across the workspace, path-scoped by
+/// [`logical_timestamp_literal_path_in_scope`].
+fn scan_logical_timestamp_literal_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            if !logical_timestamp_literal_path_in_scope(&rel) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_logical_timestamp_literal(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
+// Crash-observability struct-literal lint clause — ADR-0078 § Enforcement
+// Layer 2
+// -----------------------------------------------------------------------------
+//
+// ADR-0078 § D1/§ D2 make `CrashFacts::advance(prior, next_state)` the ONLY
+// producer of `AllocStatusRow.last_terminated` and `.restart_count`, and
+// `build_alloc_status_row` the ONLY caller of `advance`. Layer 1 gets most of
+// the way there: `prior` is a required builder parameter (no default, no
+// builder-pattern setter), and because the builder computes the facts itself
+// from the same `state` it writes, no call site can supply a value at all.
+//
+// The residual path Layer 1 cannot close is a RAW struct literal. `AllocStatusRow`'s
+// fields are all `pub` (the wire projection, the reconcilers, and the rkyv
+// archived surface all read them), so
+// `AllocStatusRow { …, last_terminated: None, restart_count: 0 }` remains
+// syntactically constructible outside the builder. It compiles, it satisfies
+// every other lint, and it silently resets the restart counter on every write —
+// exactly the shape the exit observer carried before ADR-0078 § D2 site 7
+// routed it through the builder. This clause is Layer 2: it makes that residual
+// path fail CI.
+//
+// Direct precedent: ADR-0048's variant-construction clause
+// ([`scan_for_envelope_variant_construction`]) and ADR-0077 § D7 Layer 2
+// ([`scan_source_logical_timestamp_literal`]), same mechanism. Purely
+// syntactic; imports no `overdrive-*` crate, so `.claude/rules/development.md`
+// § "xtask is build / test / dev orchestration, NOT a runtime entry point"
+// stays intact.
+//
+// Exemptions, all structural rather than per-site allowlists:
+//
+//   - `#[cfg(test)]` items and `src/testing/**`. A fixture pinning a specific
+//     `restart_count` is stating the PRECONDITION of a scenario, not minting a
+//     production row; those fixtures are exactly what exercises the contract.
+//   - The defining `impl` blocks. `CrashFacts::advance` and
+//     `LastTerminated::from_superseded` construct via `Self { .. }` (which this
+//     scanner does not match), but a future author writing the type's name
+//     explicitly inside its own `impl` is equally entitled to.
+//   - The single sanctioned constructor `build_alloc_status_row`. This is the
+//     direct analogue of the `impl LogicalTimestamp` exemption on the ADR-0077
+//     clause: the one function whose whole job is to produce the value, and the
+//     one the ADR routes every production writer through. Without it the clause
+//     would flag the very site § D2 designates as correct. It is a NAMED
+//     function, not a path allowlist — moving a raw literal into a differently
+//     named helper does not inherit the exemption.
+
+/// The types whose struct-literal construction this clause bans.
+///
+/// `AllocStatusRow` is the public alias (currently `= AllocStatusRowV3`);
+/// both names are listed so an author who reaches past the alias is caught
+/// too. `LastTerminated` and `CrashFacts` have zero pre-existing literals
+/// anywhere, so ADR-0077's staged-scope problem does not recur for them.
+const CRASH_OBSERVABILITY_TYPES: &[&str] =
+    &["LastTerminated", "CrashFacts", "AllocStatusRow", "AllocStatusRowV3"];
+
+/// The one function entitled to construct an `AllocStatusRow` literal —
+/// the action shim's builder, which derives the crash-observability pair
+/// via `CrashFacts::advance` from its required `prior` parameter.
+const ALLOC_ROW_SANCTIONED_CONSTRUCTOR: &str = "build_alloc_status_row";
+
+/// The sanctioned path, named in the violation's help text.
+const CRASH_OBSERVABILITY_REPLACEMENT: &str = "build_alloc_status_row(.., prior) — which derives both fields via \
+     CrashFacts::advance(prior, state)";
+
+/// Is this `impl` block the defining `impl` for one of the banned types?
+fn is_crash_observability_impl(item_impl: &syn::ItemImpl) -> bool {
+    let syn::Type::Path(type_path) = &*item_impl.self_ty else { return false };
+    type_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|seg| CRASH_OBSERVABILITY_TYPES.iter().any(|t| seg.ident == t))
+}
+
+/// Visitor that flags banned crash-observability struct literals outside
+/// `#[cfg(test)]` context, outside the defining `impl` blocks, and outside
+/// the sanctioned constructor.
+struct CrashObservabilityLiteralCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// Number of `#[cfg(test)]`-attributed items currently open.
+    cfg_test_depth: usize,
+    /// Depth of currently-open defining `impl` blocks.
+    in_defining_impl_depth: usize,
+    /// Depth of currently-open sanctioned-constructor bodies.
+    in_sanctioned_ctor_depth: usize,
+}
+
+impl<'a> CrashObservabilityLiteralCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self {
+            file,
+            violations: Vec::new(),
+            cfg_test_depth: 0,
+            in_defining_impl_depth: 0,
+            in_sanctioned_ctor_depth: 0,
+        }
+    }
+
+    const fn is_exempt_context(&self) -> bool {
+        self.cfg_test_depth > 0
+            || self.in_defining_impl_depth > 0
+            || self.in_sanctioned_ctor_depth > 0
+    }
+}
+
+impl<'ast> Visit<'ast> for CrashObservabilityLiteralCollector<'_> {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_item_mod(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let cfg_pushed = has_cfg_test_attr(&node.attrs);
+        if cfg_pushed {
+            self.cfg_test_depth += 1;
+        }
+        let ctor_pushed = node.sig.ident == ALLOC_ROW_SANCTIONED_CONSTRUCTOR;
+        if ctor_pushed {
+            self.in_sanctioned_ctor_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if ctor_pushed {
+            self.in_sanctioned_ctor_depth -= 1;
+        }
+        if cfg_pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let pushed = has_cfg_test_attr(&node.attrs);
+        if pushed {
+            self.cfg_test_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let cfg_pushed = has_cfg_test_attr(&node.attrs);
+        if cfg_pushed {
+            self.cfg_test_depth += 1;
+        }
+        let impl_pushed = is_crash_observability_impl(node);
+        if impl_pushed {
+            self.in_defining_impl_depth += 1;
+        }
+        visit::visit_item_impl(self, node);
+        if impl_pushed {
+            self.in_defining_impl_depth -= 1;
+        }
+        if cfg_pushed {
+            self.cfg_test_depth -= 1;
+        }
+    }
+
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        let banned = node
+            .path
+            .segments
+            .last()
+            .and_then(|seg| CRASH_OBSERVABILITY_TYPES.iter().find(|t| seg.ident == **t));
+        if let Some(type_name) = banned
+            && !self.is_exempt_context()
+        {
+            let start = node.path.segments.first().map_or_else(
+                || node.brace_token.span.join().start(),
+                |seg| seg.ident.span().start(),
+            );
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line: start.line,
+                column: start.column + 1,
+                banned_path: format!("{type_name} {{ .. }}"),
+                replacement_trait: CRASH_OBSERVABILITY_REPLACEMENT.to_owned(),
+                kind: BannedKind::CrashObservabilityStructLiteral,
+            });
+        }
+        visit::visit_expr_struct(self, node);
+    }
+}
+
+/// Scan `source` for banned crash-observability struct-literal expressions.
+///
+/// Purely syntactic — no `overdrive-*` import per the xtask boundary in
+/// `.claude/rules/development.md` § "xtask is build / test / dev
+/// orchestration, NOT a runtime entry point".
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file. Callers
+/// in [`scan_workspace`] ignore the error — the file will fail
+/// `cargo check` regardless — matching the convention used by the other
+/// `scan_source_*` entry points in this module.
+pub fn scan_source_crash_observability_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = CrashObservabilityLiteralCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// Is `rel_path` (relative to the workspace root) inside the scanned
+/// scope for the ADR-0078 § Enforcement Layer-2 clause?
+///
+/// Scope is `crates/overdrive-core/src/**` and
+/// `crates/overdrive-control-plane/src/**` — the two crates ADR-0078
+/// names. Unlike ADR-0077 § D7's clause, this one is NOT staged: the
+/// census (see `crash_observability_literal_real_src_is_clean`) confirms
+/// every hit in both trees is already exempt today, so the full scope
+/// lands with the ADR.
+///
+/// `src/testing/**` is excluded because it is test-support code that
+/// never enters a production build, but is gated at its *declaration*
+/// rather than in-file: `overdrive-core/src/lib.rs` declares it
+/// `#[cfg(any(test, feature = "test-utils"))] pub mod testing;`, so the
+/// files under `src/testing/` carry no `#[cfg(test)]` attribute of their
+/// own. A purely in-file scanner (which this is) cannot see the gate; the
+/// path exclusion encodes what the declaration already guarantees.
+///
+/// `crates/overdrive-sim/src/invariants/**` constructs rows but is
+/// outside the scanned crates by design — those are DST scenario drivers,
+/// not control-plane writers.
+fn crash_facts_literal_path_in_scope(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    if !rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
+        return false;
+    }
+    if s.contains("/src/testing/") {
+        return false;
+    }
+    s.contains("crates/overdrive-control-plane/src/")
+        || s.contains("overdrive-control-plane/src/")
+        || s.contains("crates/overdrive-core/src/")
+        || s.contains("overdrive-core/src/")
+}
+
+/// Dispatch the ADR-0078 § Enforcement Layer-2 clause across the
+/// workspace, path-scoped by [`crash_facts_literal_path_in_scope`].
+fn scan_crash_observability_literal_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+    metadata: &cargo_metadata::Metadata,
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    let workspace_root = Path::new(metadata.workspace_root.as_str())
+        .canonicalize()
+        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf());
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(&workspace_root).unwrap_or(&rs).to_path_buf();
+            if !crash_facts_literal_path_in_scope(&rel) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_crash_observability_literal(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -1942,6 +2496,16 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // GAP-3 + GAP-5 closures from `.context/01-03-structural-gap-audit.md`.
     violations.extend(scan_underscore_binding_probe_runner(&classes, &metadata)?);
     violations.extend(scan_probe_gate_absence_checks(&classes)?);
+
+    // ADR-0077 § D7 Layer 2 — `LogicalTimestamp { .. }` struct literals
+    // outside `#[cfg(test)]` and outside the defining `impl` block.
+    violations.extend(scan_logical_timestamp_literal_workspace(&classes, &metadata)?);
+
+    // ADR-0078 § Enforcement Layer 2 — `LastTerminated { .. }` /
+    // `CrashFacts { .. }` / `AllocStatusRow { .. }` struct literals outside
+    // `#[cfg(test)]`, `src/testing/**`, the defining `impl` blocks, and the
+    // sanctioned `build_alloc_status_row` constructor.
+    violations.extend(scan_crash_observability_literal_workspace(&classes, &metadata)?);
     Ok(violations)
 }
 
@@ -2043,7 +2607,38 @@ fn collect_rs_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// Render a single violation as a rustc-style stderr block.
 pub fn render_violation(v: &Violation) -> String {
-    let (header, help, note) = match v.kind {
+    let (header, help, note) = violation_message(v);
+    format!(
+        "{header}\n  \
+         --> {file}:{line}:{col}\n  \
+         |\n  \
+         |    {banned}\n  \
+         |\n  \
+         = help: {help}\n  \
+         = note: {note}\n",
+        file = v.file.display(),
+        line = v.line,
+        col = v.column,
+        banned = v.banned_path,
+    )
+}
+
+/// The `(header, help, note)` triple for one violation kind.
+///
+/// Extracted from [`render_violation`] to keep that function under the
+/// `clippy::too_many_lines` threshold — the same extraction
+/// [`scan_live_literal_workspace`] performed on [`scan_workspace`]. The
+/// mechanics are unchanged: one arm per [`BannedKind`], exhaustive, so a
+/// new lint kind cannot be added without deciding its operator-facing
+/// text.
+#[allow(
+    clippy::too_many_lines,
+    reason = "an exhaustive one-arm-per-BannedKind message table; splitting it across \
+              two functions would break the exhaustiveness check that forces every new \
+              lint kind to declare its operator-facing text"
+)]
+fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
+    match v.kind {
         BannedKind::Api => (
             "error: banned API used in core crate",
             format!("use {}::... via dependency injection instead", v.replacement_trait),
@@ -2111,20 +2706,30 @@ pub fn render_violation(v: &Violation) -> String {
             ),
             "see GAP-3 from .context/01-03-structural-gap-audit.md and ADR-0054 § 7",
         ),
-    };
-    format!(
-        "{header}\n  \
-         --> {file}:{line}:{col}\n  \
-         |\n  \
-         |    {banned}\n  \
-         |\n  \
-         = help: {help}\n  \
-         = note: {note}\n",
-        file = v.file.display(),
-        line = v.line,
-        col = v.column,
-        banned = v.banned_path,
-    )
+        BannedKind::LogicalTimestampStructLiteral => (
+            "error: `LogicalTimestamp { .. }` struct literal in production source",
+            format!(
+                "use {} — the LWW counter must derive from the row this write \
+                 replaces, with the tick as a floor only. A literal counter is \
+                 lost across a restart: `tick` resets to 0 while durable rows \
+                 keep their high-water mark, so the write fails `dominates` and \
+                 is silently discarded.",
+                v.replacement_trait,
+            ),
+            "see ADR-0077 § D1 / § D7 Layer 2",
+        ),
+        BannedKind::CrashObservabilityStructLiteral => (
+            "error: crash-observability struct literal in production source",
+            format!(
+                "use {} — `last_terminated` and `restart_count` have exactly one \
+                 producer, and a raw literal bypasses it: it compiles, satisfies \
+                 every other lint, and silently resets the restart counter on \
+                 every write.",
+                v.replacement_trait,
+            ),
+            "see ADR-0078 § D1 / § D2 / § Enforcement Layer 2",
+        ),
+    }
 }
 
 /// CLI-shaped entry point: run the scan against `manifest_path`, write
@@ -3532,5 +4137,371 @@ mod tests {
             violations.is_empty(),
             "qualified path call must satisfy the contract; got {violations:?}"
         );
+    }
+
+    // ------- ADR-0077 § D7 Layer 2: LogicalTimestamp struct literal -------
+
+    /// Workspace root, derived from the xtask crate's manifest dir.
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .to_path_buf()
+    }
+
+    /// (a) The census § D7 demands: the **real**
+    /// `crates/overdrive-control-plane/src/` tree must scan clean.
+    ///
+    /// This is the load-bearing test — it is the mechanical form of the
+    /// ADR's per-site disposition table for Unit A. Sites 1–8 migrate to
+    /// `LogicalTimestamp::dominating`; every literal that remains in that
+    /// tree must be inside `#[cfg(test)]`. If a future edit re-introduces
+    /// a production literal, or moves a fixture out of a `#[cfg(test)]`
+    /// module, this fails.
+    #[test]
+    fn logical_timestamp_literal_real_control_plane_src_is_clean() {
+        let src = workspace_root().join("crates/overdrive-control-plane/src");
+        let files = collect_rs_files(&src).expect("control-plane src must be walkable");
+        assert!(!files.is_empty(), "control-plane src must contain .rs files");
+        let mut violations = Vec::new();
+        for rs in files {
+            let rel = rs.strip_prefix(workspace_root()).unwrap_or(&rs).to_path_buf();
+            if !logical_timestamp_literal_path_in_scope(&rel) {
+                continue;
+            }
+            let source = std::fs::read_to_string(&rs)
+                .unwrap_or_else(|e| panic!("read {}: {e}", rs.display()));
+            violations.extend(
+                scan_source_logical_timestamp_literal(&source, &rel)
+                    .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+            );
+        }
+        assert!(
+            violations.is_empty(),
+            "crates/overdrive-control-plane/src must construct every LogicalTimestamp \
+             via `LogicalTimestamp::dominating` (ADR-0077 § D1); got {violations:?}"
+        );
+    }
+
+    /// (b) A production struct literal is flagged.
+    #[test]
+    fn logical_timestamp_literal_in_production_is_flagged() {
+        let source = r"
+            fn write_row(tick: u64, node: NodeId) -> AllocStatusRow {
+                AllocStatusRow {
+                    updated_at: LogicalTimestamp { counter: tick + 1, writer: node },
+                }
+            }
+        ";
+        let violations =
+            scan_source_logical_timestamp_literal(source, Path::new("x.rs")).expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::LogicalTimestampStructLiteral);
+        assert_eq!(violations[0].line, 4, "violation must point at the literal");
+    }
+
+    /// (c) The sanctioned constructor call is NOT flagged.
+    #[test]
+    fn logical_timestamp_dominating_call_is_clean() {
+        let source = r"
+            fn write_row(tick: u64, node: NodeId, prior: Option<&LogicalTimestamp>) -> Row {
+                Row { updated_at: LogicalTimestamp::dominating(tick, node, prior) }
+            }
+        ";
+        let violations =
+            scan_source_logical_timestamp_literal(source, Path::new("x.rs")).expect("parses");
+        assert!(violations.is_empty(), "`dominating` call must not be flagged; got {violations:?}");
+    }
+
+    /// (d) Literals inside `#[cfg(test)]` items are exempt — module,
+    /// free fn, and impl-method forms all suppress.
+    #[test]
+    fn logical_timestamp_literal_in_cfg_test_is_exempt() {
+        let source = r"
+            #[cfg(test)]
+            mod tests {
+                fn ts(c: u64) -> LogicalTimestamp {
+                    LogicalTimestamp { counter: c, writer: node() }
+                }
+            }
+
+            #[cfg(test)]
+            fn fixture() -> LogicalTimestamp {
+                LogicalTimestamp { counter: 1, writer: node() }
+            }
+
+            impl Fixtures {
+                #[cfg(test)]
+                fn stamp(&self) -> LogicalTimestamp {
+                    LogicalTimestamp { counter: 2, writer: node() }
+                }
+            }
+        ";
+        let violations =
+            scan_source_logical_timestamp_literal(source, Path::new("x.rs")).expect("parses");
+        assert!(violations.is_empty(), "#[cfg(test)] literals must be exempt; got {violations:?}");
+    }
+
+    /// (e) The defining `impl LogicalTimestamp` block may construct the
+    /// value — that is `dominating`'s own body.
+    #[test]
+    fn logical_timestamp_literal_in_defining_impl_is_exempt() {
+        let source = r"
+            impl LogicalTimestamp {
+                pub fn dominating(t: u64, w: NodeId, p: Option<&Self>) -> LogicalTimestamp {
+                    LogicalTimestamp { counter: t, writer: w }
+                }
+            }
+        ";
+        let violations =
+            scan_source_logical_timestamp_literal(source, Path::new("x.rs")).expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the defining impl block must be exempt; got {violations:?}"
+        );
+    }
+
+    /// (f) A non-`#[cfg(test)]` fn nested inside a production `impl` for
+    /// some *other* type is still flagged — the defining-impl exemption
+    /// must not leak to unrelated impls.
+    #[test]
+    fn logical_timestamp_literal_in_unrelated_impl_is_flagged() {
+        let source = r"
+            impl ActionShim {
+                fn stamp(&self, tick: u64) -> LogicalTimestamp {
+                    LogicalTimestamp { counter: tick, writer: self.node.clone() }
+                }
+            }
+        ";
+        let violations =
+            scan_source_logical_timestamp_literal(source, Path::new("x.rs")).expect("parses");
+        assert_eq!(violations.len(), 1, "unrelated impl must not be exempt; got {violations:?}");
+    }
+
+    /// (g) Path scoping — the Unit-A scope ruling, made falsifiable.
+    ///
+    /// Control-plane `src/` is in scope; `overdrive-core/src/` is NOT
+    /// (sites 9 and 10 are Unit B, § D9); `tests/` trees are NOT (the
+    /// clause guards production source only); and `src/testing/**` is
+    /// excluded because it is gated at its declaration in `lib.rs`
+    /// rather than in-file.
+    #[test]
+    fn logical_timestamp_literal_path_scope_is_unit_a() {
+        let in_scope = ["crates/overdrive-control-plane/src/action_shim/mod.rs"];
+        let out_of_scope = [
+            // Unit B — widens here when sites 9 and 10 land.
+            "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
+            "crates/overdrive-core/src/service_lifecycle.rs",
+            // Declaration-gated test-support code (see the exclusion comment).
+            "crates/overdrive-core/src/testing/observation_store.rs",
+            // Test trees are never production source.
+            "crates/overdrive-control-plane/tests/integration/adopt_on_restart.rs",
+            // Non-Rust files.
+            "crates/overdrive-control-plane/src/notes.md",
+        ];
+        for p in in_scope {
+            assert!(logical_timestamp_literal_path_in_scope(Path::new(p)), "{p} must be in scope");
+        }
+        for p in out_of_scope {
+            assert!(
+                !logical_timestamp_literal_path_in_scope(Path::new(p)),
+                "{p} must be out of scope"
+            );
+        }
+    }
+
+    /// (h) The scope ruling is honest about *why* `overdrive-core/src`
+    /// is excluded: sites 9 and 10 still carry literals today. If a
+    /// future change migrates them, this test fails and is the prompt to
+    /// widen [`logical_timestamp_literal_path_in_scope`] to
+    /// `crates/overdrive-core/src/**` (ADR-0077 § D9, Unit B) rather
+    /// than leaving a silently-narrow gate.
+    #[test]
+    fn logical_timestamp_unit_b_sites_still_carry_literals() {
+        let root = workspace_root();
+        let unit_b = [
+            "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
+            "crates/overdrive-core/src/service_lifecycle.rs",
+        ];
+        let mut remaining = 0usize;
+        for rel in unit_b {
+            let abs = root.join(rel);
+            let source =
+                std::fs::read_to_string(&abs).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+            remaining += scan_source_logical_timestamp_literal(&source, Path::new(rel))
+                .unwrap_or_else(|e| panic!("parse {rel}: {e}"))
+                .len();
+        }
+        assert!(
+            remaining > 0,
+            "Unit B sites 9/10 no longer construct LogicalTimestamp literals — \
+             widen `logical_timestamp_literal_path_in_scope` to include \
+             crates/overdrive-core/src/** (ADR-0077 § D7 / § D9)"
+        );
+    }
+
+    // ------- ADR-0078 § Enforcement Layer 2: crash-observability literals -------
+
+    /// (a) The census ADR-0078 § Enforcement demands: the **real**
+    /// `crates/overdrive-core/src/` and
+    /// `crates/overdrive-control-plane/src/` trees must scan clean.
+    ///
+    /// This is the load-bearing test — it is the mechanical form of the
+    /// ADR's clause-2 census obligation. § D2 site 7 routes the exit
+    /// observer's raw `AllocStatusRow { .. }` literal through
+    /// `build_alloc_status_row`, leaving the builder itself as the only
+    /// production construction site (exempt as the sanctioned
+    /// constructor). If a future edit writes a new raw literal — the
+    /// shape that silently resets `restart_count` on every write — this
+    /// fails.
+    #[test]
+    fn crash_observability_literal_real_src_is_clean() {
+        let roots = [
+            workspace_root().join("crates/overdrive-core/src"),
+            workspace_root().join("crates/overdrive-control-plane/src"),
+        ];
+        let mut scanned = 0usize;
+        let mut violations = Vec::new();
+        for src in roots {
+            let files =
+                collect_rs_files(&src).unwrap_or_else(|e| panic!("walk {}: {e}", src.display()));
+            assert!(!files.is_empty(), "{} must contain .rs files", src.display());
+            for rs in files {
+                let rel = rs.strip_prefix(workspace_root()).unwrap_or(&rs).to_path_buf();
+                if !crash_facts_literal_path_in_scope(&rel) {
+                    continue;
+                }
+                scanned += 1;
+                let source = std::fs::read_to_string(&rs)
+                    .unwrap_or_else(|e| panic!("read {}: {e}", rs.display()));
+                violations.extend(
+                    scan_source_crash_observability_literal(&source, &rel)
+                        .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+                );
+            }
+        }
+        assert!(scanned > 0, "the scoped census must actually scan files");
+        assert!(
+            violations.is_empty(),
+            "crates/{{overdrive-core,overdrive-control-plane}}/src must construct every \
+             AllocStatusRow through `build_alloc_status_row` (ADR-0078 § D2); got {violations:?}"
+        );
+    }
+
+    /// (b) A production raw `AllocStatusRow { .. }` literal is flagged —
+    /// including the exact shape that silently resets the counter.
+    #[test]
+    fn crash_observability_raw_alloc_row_literal_is_flagged() {
+        let source = r"
+            fn write_crash_row(prior: &AllocStatusRow) -> AllocStatusRow {
+                AllocStatusRow {
+                    state: AllocState::Failed,
+                    last_terminated: None,
+                    restart_count: 0,
+                }
+            }
+        ";
+        let violations =
+            scan_source_crash_observability_literal(source, Path::new("x.rs")).expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::CrashObservabilityStructLiteral);
+        assert_eq!(violations[0].line, 3, "violation must point at the literal");
+    }
+
+    /// (c) `LastTerminated { .. }` and `CrashFacts { .. }` literals are
+    /// flagged too — clause 1 of the ADR's Layer-2 list.
+    #[test]
+    fn crash_observability_helper_type_literals_are_flagged() {
+        let source = r"
+            fn forge() -> CrashFacts {
+                CrashFacts {
+                    last_terminated: Some(LastTerminated { state: AllocState::Failed }),
+                    restart_count: 99,
+                }
+            }
+        ";
+        let violations =
+            scan_source_crash_observability_literal(source, Path::new("x.rs")).expect("parses");
+        assert_eq!(violations.len(), 2, "expected both literals flagged; got {violations:?}");
+    }
+
+    /// (d) The sanctioned constructor is exempt — it is the one function
+    /// whose whole job is to produce the row, and § D2 routes every
+    /// production writer through it.
+    #[test]
+    fn crash_observability_sanctioned_constructor_is_exempt() {
+        let source = r"
+            fn build_alloc_status_row(prior: Option<&AllocStatusRow>) -> AllocStatusRow {
+                let facts = CrashFacts::advance(prior, state);
+                AllocStatusRow {
+                    last_terminated: facts.last_terminated,
+                    restart_count: facts.restart_count,
+                }
+            }
+        ";
+        let violations =
+            scan_source_crash_observability_literal(source, Path::new("x.rs")).expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned constructor must not be flagged; got {violations:?}"
+        );
+    }
+
+    /// (e) A differently-named helper does NOT inherit the exemption —
+    /// the exemption is a named function, not a path allowlist.
+    #[test]
+    fn crash_observability_lookalike_helper_is_not_exempt() {
+        let source = r"
+            fn build_alloc_status_row_v2(prior: Option<&AllocStatusRow>) -> AllocStatusRow {
+                AllocStatusRow { last_terminated: None, restart_count: 0 }
+            }
+        ";
+        let violations =
+            scan_source_crash_observability_literal(source, Path::new("x.rs")).expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "a lookalike helper must not inherit the exemption; got {violations:?}"
+        );
+    }
+
+    /// (f) Literals inside `#[cfg(test)]` items are exempt — module,
+    /// free fn, and impl-method forms all suppress.
+    #[test]
+    fn crash_observability_literal_in_cfg_test_is_exempt() {
+        let source = r"
+            #[cfg(test)]
+            mod tests {
+                fn row() -> AllocStatusRow {
+                    AllocStatusRow { last_terminated: None, restart_count: 0 }
+                }
+            }
+
+            #[cfg(test)]
+            fn fixture() -> AllocStatusRow {
+                AllocStatusRow { last_terminated: None, restart_count: 3 }
+            }
+        ";
+        let violations =
+            scan_source_crash_observability_literal(source, Path::new("x.rs")).expect("parses");
+        assert!(violations.is_empty(), "cfg(test) literals are exempt; got {violations:?}");
+    }
+
+    /// (g) `src/testing/**` is out of scope — gated at its declaration,
+    /// invisible to a per-file scanner.
+    #[test]
+    fn crash_observability_src_testing_is_out_of_scope() {
+        assert!(!crash_facts_literal_path_in_scope(Path::new(
+            "crates/overdrive-core/src/testing/observation_store.rs"
+        )));
+        assert!(crash_facts_literal_path_in_scope(Path::new(
+            "crates/overdrive-core/src/traits/observation_store.rs"
+        )));
+        assert!(crash_facts_literal_path_in_scope(Path::new(
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs"
+        )));
+        assert!(!crash_facts_literal_path_in_scope(Path::new(
+            "crates/overdrive-sim/src/invariants/evaluators.rs"
+        )));
     }
 }
