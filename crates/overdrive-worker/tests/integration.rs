@@ -144,6 +144,20 @@ mod integration {
     // inverse direction). Q4 authn-only (encryption + asymmetry, NOT intended-peer).
     mod outbound_enforce_substrate_asymmetry;
 
+    // mtls-intercept-install-fault-seam (ADR-0076, step 05-01) — T4, the
+    // `MtlsIntercept` DST-equivalence structural guard (§ 5.4 / OQ-8). Drives
+    // BOTH sanctioned adapters — `HostMtlsIntercept` and `SimMtlsIntercept` —
+    // through the SAME call sequence and asserts the SAME observables, so a
+    // divergence isolates exactly one of the trait contract / host adapter /
+    // sim adapter. Scope is the `Ok`-arm contract set (S-MIF-09..12); the
+    // FAULT arms are deliberately NOT equivalence-tested (the host adapter
+    // cannot be made to exhibit them on demand — that inability is the whole
+    // reason this port exists). Integration-lane for two independent reasons:
+    // `HostMtlsIntercept` needs CAP_NET_ADMIN for IP_TRANSPARENT and real
+    // `nft`, and the SIM's `bind_transparent` `Ok` arm binds a REAL plain
+    // loopback socket (DFS-5).
+    mod mtls_intercept_equivalence;
+
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
