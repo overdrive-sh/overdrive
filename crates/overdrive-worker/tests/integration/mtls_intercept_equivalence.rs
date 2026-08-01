@@ -18,13 +18,23 @@
 //! | `bind_transparent` returns a bound listener whose `local_addr()` port is NON-ZERO when `addr` carried port 0 | S-MIF-09 |
 //! | Each call returns a DISTINCT listener | S-MIF-10 |
 //! | `install_*` returns a guard owning exactly what the call acquired; `Drop` never panics | S-MIF-11 |
-//! | A re-install of an identical capture is idempotent-by-convergence, and `Drop` never panics even for a guard whose state was already released out-of-band | S-MIF-12 |
+//! | `Drop` never panics even for a guard whose state was already released out-of-band | S-MIF-12 |
+//! | A re-install of an identical capture is idempotent-by-convergence — it does not create a duplicate | **NOT asserted — substrate, owned by `HostMtlsIntercept`'s Tier-3 suite.** |
 //! | *"the capture is in effect against this adapter's OWN substrate"* | **NOT asserted — deliberately.** |
 //!
-//! That last clause is **recorded here rather than silently dropped**. It is
-//! unobservable through any trait accessor, so no adapter can diverge on it
-//! *observably*; it is honoured and asserted PER-ADAPTER — for
-//! `HostMtlsIntercept` by the existing Tier-3 suite
+//! Those last two clauses are **recorded here rather than silently dropped**,
+//! both for the same reason: neither is observable through any trait accessor,
+//! so no adapter can diverge on either *observably*.
+//!
+//! On the idempotence row specifically — S-MIF-12 DOES drive the re-install
+//! (that is how it reaches the double-`Drop` case), but it asserts only that
+//! both installs return `Ok` and that both releases are clean. **Non-
+//! duplication itself is not asserted**: counting rules means reading `nft`,
+//! which is `HostMtlsIntercept`'s substrate and vacuous for the sim. A
+//! regression appending a duplicate rule would pass this suite.
+//!
+//! The in-effect-against-own-substrate clause is honoured and asserted
+//! PER-ADAPTER — for `HostMtlsIntercept` by the existing Tier-3 suite
 //! (`start_alloc_installs_both_tproxy.rs`, `bidirectional_walking_skeleton.rs`,
 //! which observe real `nft` state and real intercepted traffic); for the sim,
 //! vacuously.
