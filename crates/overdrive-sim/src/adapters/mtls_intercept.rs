@@ -257,9 +257,16 @@ mod tests {
     /// substrate reports it.
     #[derive(Debug, Clone, Copy)]
     enum ExpectedErr {
-        /// `InterceptError::TransparentListener` whose `source.raw_os_error()`
-        /// is exactly this `errno`.
-        TransparentListener(i32),
+        /// `InterceptError::TransparentListener` carrying exactly this `addr`
+        /// and whose `source.raw_os_error()` is exactly this `errno`.
+        ///
+        /// `addr` is asserted, not ignored: ADR-0076 § 4.6 pins it as "the
+        /// address the faulted call was made with", and the two methods that
+        /// can materialise this shape are called with DISTINCT addresses
+        /// ([`LEG_ADDR`] vs [`VIRT`]). Dropping the assertion would let
+        /// `materialise`'s address argument be swapped for any other value
+        /// undetected.
+        TransparentListener { addr: SocketAddrV4, errno: i32 },
         /// `InterceptError::TproxyInstall` carrying exactly this `reason`.
         TproxyInstall(&'static str),
     }
@@ -278,7 +285,7 @@ mod tests {
             (
                 Method::BindTransparent,
                 SimInterceptFault::TransparentListener { errno: libc::EPERM },
-                ExpectedErr::TransparentListener(libc::EPERM),
+                ExpectedErr::TransparentListener { addr: LEG_ADDR, errno: libc::EPERM },
             ),
             (
                 Method::InstallOutbound,
@@ -293,7 +300,7 @@ mod tests {
             (
                 Method::InstallInbound,
                 SimInterceptFault::TransparentListener { errno: libc::ENOPROTOOPT },
-                ExpectedErr::TransparentListener(libc::ENOPROTOOPT),
+                ExpectedErr::TransparentListener { addr: VIRT, errno: libc::ENOPROTOOPT },
             ),
         ]
     }
@@ -334,12 +341,18 @@ mod tests {
     /// discriminant AND its payload.
     fn assert_err_shape(got: &InterceptError, expected: ExpectedErr) {
         match expected {
-            ExpectedErr::TransparentListener(errno) => match got {
-                InterceptError::TransparentListener { source, .. } => assert_eq!(
-                    source.raw_os_error(),
-                    Some(errno),
-                    "TransparentListener must carry the armed errno",
-                ),
+            ExpectedErr::TransparentListener { addr, errno } => match got {
+                InterceptError::TransparentListener { addr: got_addr, source } => {
+                    assert_eq!(
+                        *got_addr, addr,
+                        "TransparentListener must carry the address the faulted call was made with",
+                    );
+                    assert_eq!(
+                        source.raw_os_error(),
+                        Some(errno),
+                        "TransparentListener must carry the armed errno",
+                    );
+                }
                 other => panic!("expected TransparentListener, got {other:?}"),
             },
             ExpectedErr::TproxyInstall(reason) => match got {
@@ -355,7 +368,7 @@ mod tests {
     /// substrate produces, across the 4 sanctioned pairings.
     ///
     /// Universe (port-exposed): the `Result` the trait method returns — its
-    /// `Err` discriminant, plus `source.raw_os_error()` for
+    /// `Err` discriminant, plus `addr` and `source.raw_os_error()` for
     /// `TransparentListener` and `reason` for `TproxyInstall`. Nothing reads a
     /// private slot; the scripting helpers are the only writes and the trait
     /// method the only read.
@@ -380,8 +393,8 @@ mod tests {
     /// consecutive calls with the same cause, and does not decay.
     ///
     /// Universe: the two `Result`s from the two consecutive `bind_transparent`
-    /// calls — both `Err`, both `TransparentListener`, both carrying the armed
-    /// `raw_os_error()`.
+    /// calls — both `Err`, both `TransparentListener`, both carrying the bind
+    /// `addr` and the armed `raw_os_error()`.
     ///
     /// Two calls, not `n`: two is the minimum that distinguishes standing from
     /// one-shot, and it is the exact cardinality the production caller exhibits
@@ -397,8 +410,9 @@ mod tests {
         let first = drive_expecting_err(&sut, Method::BindTransparent);
         let second = drive_expecting_err(&sut, Method::BindTransparent);
 
-        assert_err_shape(&first, ExpectedErr::TransparentListener(libc::EADDRINUSE));
-        assert_err_shape(&second, ExpectedErr::TransparentListener(libc::EADDRINUSE));
+        let expected = ExpectedErr::TransparentListener { addr: LEG_ADDR, errno: libc::EADDRINUSE };
+        assert_err_shape(&first, expected);
+        assert_err_shape(&second, expected);
     }
 
     /// S-MIF-08 — `clear_faults` disarms ALL three slots, and clearing an
@@ -410,8 +424,17 @@ mod tests {
     ///
     /// `bind_transparent` is deliberately NOT re-driven after the clear — its
     /// `Ok` arm binds a real plain loopback socket (DFS-5) and would push this
-    /// scenario into the integration lane. That its slot is cleared is covered
-    /// indirectly by S-MIF-13 and directly at integration lane by S-MIF-09.
+    /// scenario into the integration lane.
+    ///
+    /// **Consequence, recorded rather than glossed: that the BIND slot is
+    /// cleared is NOT asserted — not here, and nowhere else in the tree.**
+    /// `clear_faults` has exactly two call sites, both in this test; S-MIF-13
+    /// arms its slots on three FRESH doubles and never clears, and the
+    /// integration-lane S-MIF-09 never clears either. So deleting
+    /// `clear_faults`'s `*self.bind_fault.lock() = None;` line survives the
+    /// entire suite. Closing that gap requires re-driving `bind_transparent`,
+    /// whose `Ok` arm is the real socket bind this default-lane scenario
+    /// exists to stay out of — so the gap is stated, not covered.
     ///
     /// The second `clear_faults()` is the fault state machine's
     /// illegal-event-from-the-disarmed-state case (C2b), asserted as a benign
