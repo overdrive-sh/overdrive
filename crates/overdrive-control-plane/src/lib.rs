@@ -2030,7 +2030,18 @@ pub async fn run_server_with_obs_and_driver(
                 ));
             }
 
-            // (4) construct the worker with all three ports as REQUIRED params
+            // The per-alloc intercept-INSTALL port. `HostMtlsIntercept` is
+            // stateless and delegates one-for-one to the same
+            // `crate::mtls_intercept` free functions `start_alloc` called
+            // before this port existed, so wiring it changes no production
+            // behaviour. Deliberately NOT probe-gated (ADR-0076 § Decision 4):
+            // `CAP_NET_ADMIN` is already proven per-deploy at the upstream
+            // netns-provision seam, so a boot probe would buy a better
+            // diagnosis, not a new safety property — out of GH #250's scope.
+            let intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept> =
+                Arc::new(overdrive_worker::mtls_intercept_port::HostMtlsIntercept::new());
+
+            // (4) construct the worker with all four ports as REQUIRED params
             // (mandatory `new()`, no builder). As of step 04-01 (ADR-0071 Path
             // A) the worker holds no `MtlsDataplane` and no cgroup root — the
             // OUTBOUND egress nft-TPROXY rule is installed per-alloc by
@@ -2044,6 +2055,7 @@ pub async fn run_server_with_obs_and_driver(
                 enforcement,
                 resolve,
                 config.clock.clone(),
+                intercept,
             )))
         } else {
             None

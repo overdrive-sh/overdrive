@@ -25,9 +25,11 @@
 //! - [`stop_alloc`](MtlsInterceptWorker::stop_alloc) — fired at the
 //!   action-shim's `on_alloc_terminal` site. Drains the alloc's
 //!   per-connection teardown set (`enforcement.teardown`), aborts the
-//!   accept tasks, and drops the OUTBOUND + INBOUND `TproxyInterceptGuard`s
-//!   (each removes its per-veth / per-virt nft rule by handle; the
-//!   node-global shared routing infra is left intact). Idempotent.
+//!   accept tasks, and drops the OUTBOUND + INBOUND intercept guards (each
+//!   releases exactly what its install acquired — for the production
+//!   `HostMtlsIntercept` that is its per-veth / per-virt nft rule, removed by
+//!   handle; the node-global shared routing infra is left intact).
+//!   Idempotent.
 //!
 //! ## Supervision shape — (C)+(B), no central loop (ADR-0070 / D-MTLS-16)
 //!
@@ -87,9 +89,9 @@ use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use parking_lot::Mutex;
 
 use crate::mtls_intercept::{
-    InterceptError, TproxyInterceptGuard, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
-    install_inbound_tproxy, install_outbound_tproxy, make_transparent_listener,
+    InterceptError, accept_inbound_leg, accept_outbound_and_recover_orig_dst,
 };
+use crate::mtls_intercept_port::{InterceptGuard, MtlsIntercept};
 
 /// Per-alloc transparent-mTLS intercept-install failure (D-MTLS-18).
 ///
@@ -257,24 +259,32 @@ impl MtlsInterceptInstallError {
 /// torn down on `stop_alloc`. This is lifecycle bookkeeping keyed by
 /// `AllocationId` (NOT a liveness loop — D-MTLS-16).
 struct AllocIntercept {
-    /// The OUTBOUND nft-TPROXY egress-rule guard for this alloc's host-side
-    /// veth (`install_outbound_tproxy`, D-TME-4 / ADR-0071 Path A). Dropping
-    /// it removes the per-veth egress rule from the shared `prerouting`
-    /// chain by handle (the node-global shared routing infra is left intact).
+    /// The OUTBOUND egress-capture guard for this alloc's host-side veth
+    /// ([`MtlsIntercept::install_outbound`], D-TME-4 / ADR-0071 Path A).
+    /// Dropping it releases exactly what that install acquired, and nothing
+    /// another guard owns (the [`InterceptGuard`] contract). WHAT is released
+    /// is adapter-specific and NOT asserted here: `HostMtlsIntercept` removes
+    /// the per-veth egress `nft` rule from the shared `prerouting` chain by
+    /// handle, leaving the node-global shared routing infra intact; a
+    /// simulation adapter releases nothing.
     /// `Some` on the mTLS-composed production boot (where the action-shim C3
     /// seam set `spec.host_veth`); `None` off the gate (a fixture with no
     /// provisioned veth), where the leg-F listener + accept loop still stand
-    /// up but no egress rule is installed.
-    _outbound_tproxy_guard: Option<TproxyInterceptGuard>,
-    /// The inbound nft-TPROXY redirect guards — ONE per declared Service
-    /// listener port (D-A1, GH #241). Each guard's `Drop` removes its per-virt
-    /// rule (keyed `ip daddr <workload_addr> tcp dport <service_port>`,
-    /// tproxy-redirected to the ephemeral leg-C port) from the shared chain by
-    /// handle. `start_alloc` installs one rule per `spec.service_ports` entry
+    /// up but no egress capture is installed.
+    _outbound_tproxy_guard: Option<Box<dyn InterceptGuard>>,
+    /// The inbound redirect guards — ONE per declared Service listener port
+    /// ([`MtlsIntercept::install_inbound`], D-A1, GH #241). Each guard's
+    /// `Drop` releases exactly what its own install acquired and nothing
+    /// another guard owns (the [`InterceptGuard`] contract); for
+    /// `HostMtlsIntercept` that is its per-virt `nft` rule (keyed
+    /// `ip daddr <workload_addr> tcp dport <service_port>`, tproxy-redirected
+    /// to the ephemeral leg-C port), removed from the shared chain by handle,
+    /// while a simulation adapter releases nothing.
+    /// `start_alloc` installs one capture per `spec.service_ports` entry
     /// when `spec.workload_addr` is `Some`; the `Vec` is EMPTY for a Job-kind /
     /// host-netns workload (`None` addr or empty `service_ports`) — the
     /// unchanged 0-rules path. All guards drop together on `stop_alloc`.
-    _inbound_tproxy_guards: Vec<TproxyInterceptGuard>,
+    _inbound_tproxy_guards: Vec<Box<dyn InterceptGuard>>,
     /// The ephemeral loopback addr leg-C (the inbound `IP_TRANSPARENT`
     /// listener) was bound to in `start_alloc`, captured BEFORE the listener
     /// was moved into the spawned inbound `accept_loop` — mirroring the leg-F
@@ -402,6 +412,14 @@ pub struct MtlsInterceptWorker {
     /// liveness in v1 is (C) kernel + (B) self-teardown, neither of which
     /// reads the clock here.
     _clock: Arc<dyn Clock>,
+    /// The per-alloc intercept-INSTALL port (`HostMtlsIntercept` in
+    /// production; `SimMtlsIntercept` under test composition). Wraps the three
+    /// privileged un-ownable primitives `start_alloc` performs — the
+    /// `IP_TRANSPARENT` bind and the two nft-TPROXY installs — so the install
+    /// surface is substitutable at the composition root. Mandatory `new()`
+    /// param, no builder (`.claude/rules/development.md` § "Port-trait
+    /// dependencies").
+    intercept: Arc<dyn MtlsIntercept>,
     /// Per-alloc teardown bookkeeping (D-MTLS-16). `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice" — the
     /// set is drained deterministically on stop.
@@ -427,13 +445,28 @@ impl MtlsInterceptWorker {
     /// through it and branches on the [`MtlsResolution`] variant — production
     /// wires `ServiceBackendsResolve` (reading `service_backends`), tests wire
     /// `SimMtlsResolve`.
+    ///
+    /// As of GH #250 (ADR-0076) the worker holds the [`MtlsIntercept`]
+    /// install port: `start_alloc`'s three privileged primitives (the two
+    /// `IP_TRANSPARENT` binds and the two nft-TPROXY installs) go through it,
+    /// so the install surface is substitutable at the composition root.
+    /// Production wires `HostMtlsIntercept` (a one-for-one delegation to the
+    /// same free functions `start_alloc` called before the port existed, so
+    /// wiring it changes no behaviour); tests wire `SimMtlsIntercept`.
     #[must_use]
     pub fn new(
         enforcement: Arc<dyn MtlsEnforcement>,
         resolve: Arc<dyn MtlsResolve>,
         clock: Arc<dyn Clock>,
+        intercept: Arc<dyn MtlsIntercept>,
     ) -> Self {
-        Self { enforcement, resolve, _clock: clock, intercepts: Mutex::new(BTreeMap::new()) }
+        Self {
+            enforcement,
+            resolve,
+            _clock: clock,
+            intercept,
+            intercepts: Mutex::new(BTreeMap::new()),
+        }
     }
 
     /// Install the per-alloc intercept and start the accept→`enforce`
@@ -464,7 +497,7 @@ impl MtlsInterceptWorker {
     /// variant, dropping every guard acquired this call.
     ///
     /// **Partial-teardown on the `Err` path.** Every guard acquired before
-    /// the failing step (the OUTBOUND [`TproxyInterceptGuard`], the leg-F /
+    /// the failing step (the OUTBOUND [`InterceptGuard`], the leg-F /
     /// leg-C listeners) is still a LOCAL at each failure point — it has not
     /// yet been handed to `spawn_legs_and_record`, so `stop_alloc` cannot find
     /// it in `self.intercepts`. Returning `Err` before recording drops those
@@ -520,11 +553,13 @@ impl MtlsInterceptWorker {
         // rule points at.
         // Fail-closed (D-MTLS-18 site 2): on bind failure, return `Err`;
         // nothing is acquired yet, so there is nothing to tear down.
-        let leg_f_listener =
-            match make_transparent_listener(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)) {
-                Ok(l) => l,
-                Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
-            };
+        let leg_f_listener = match self
+            .intercept
+            .bind_transparent(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0))
+        {
+            Ok(l) => l,
+            Err(source) => return Err(MtlsInterceptInstallError::leg_f_bind(source)),
+        };
         // The agent's chosen leg-F address — the kernel-redirect TARGET the
         // OUTBOUND nft-TPROXY egress rule redirects the workload's egress to.
         // Load-bearing: it is the `agent_leg_f_port` the egress rule points at
@@ -556,7 +591,8 @@ impl MtlsInterceptWorker {
         // accept path without the kernel redirect.
         let outbound_tproxy_guard = match spec.host_veth.as_deref() {
             Some(host_veth) => Some(
-                install_outbound_tproxy(host_veth, leg_f_addr.port())
+                self.intercept
+                    .install_outbound(host_veth, leg_f_addr.port())
                     .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?,
             ),
             None => None,
@@ -572,11 +608,13 @@ impl MtlsInterceptWorker {
         // (the inbound carve-out is REJECTED per D-MTLS-18 P2);
         // `outbound_tproxy_guard` + `leg_f_listener` (the guards acquired so
         // far) drop here → remove the egress rule / close the leg-F listener.
-        let inbound_listener =
-            match make_transparent_listener(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0)) {
-                Ok(l) => l,
-                Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
-            };
+        let inbound_listener = match self
+            .intercept
+            .bind_transparent(SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0))
+        {
+            Ok(l) => l,
+            Err(source) => return Err(MtlsInterceptInstallError::Inbound(source)),
+        };
         // Capture leg-C's bound addr BEFORE the listener moves into the spawned
         // inbound `accept_loop` — mirroring the leg-F capture pattern above
         // (:378-382; leg-F's addr is an inline local consumed inline, with no
@@ -623,7 +661,8 @@ impl MtlsInterceptWorker {
         if let Some(workload_addr) = spec.workload_addr {
             for port in &spec.service_ports {
                 let virt = SocketAddrV4::new(workload_addr, port.get());
-                inbound_tproxy_guards.push(install_inbound_tproxy(virt, leg_c_addr.port())?);
+                inbound_tproxy_guards
+                    .push(self.intercept.install_inbound(virt, leg_c_addr.port())?);
             }
         }
 
@@ -646,8 +685,8 @@ impl MtlsInterceptWorker {
     fn spawn_legs_and_record(
         self: &Arc<Self>,
         spec: &AllocationSpec,
-        outbound_tproxy_guard: Option<TproxyInterceptGuard>,
-        inbound_tproxy_guards: Vec<TproxyInterceptGuard>,
+        outbound_tproxy_guard: Option<Box<dyn InterceptGuard>>,
+        inbound_tproxy_guards: Vec<Box<dyn InterceptGuard>>,
         leg_f_listener: std::net::TcpListener,
         inbound_listener: std::net::TcpListener,
         leg_c_addr: SocketAddrV4,
@@ -980,8 +1019,8 @@ impl MtlsInterceptWorker {
     fn record_intercept_full(
         &self,
         alloc: AllocationId,
-        outbound_tproxy_guard: Option<TproxyInterceptGuard>,
-        inbound_tproxy_guards: Vec<TproxyInterceptGuard>,
+        outbound_tproxy_guard: Option<Box<dyn InterceptGuard>>,
+        inbound_tproxy_guards: Vec<Box<dyn InterceptGuard>>,
         leg_c_addr: SocketAddrV4,
         accept_tasks: Vec<tokio::task::JoinHandle<()>>,
         enforced: EnforcedSet,
@@ -1390,7 +1429,12 @@ mod tests {
         resolve: Arc<dyn MtlsResolve>,
     ) -> Arc<MtlsInterceptWorker> {
         let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-        Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock))
+        Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            clock,
+            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+        ))
     }
 
     /// Build a `SimMtlsResolve` that maps `orig_dst` to `arm` (any other addr
@@ -1922,7 +1966,12 @@ mod tests {
         let resolve =
             resolve_scripting(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), MtlsResolution::NonMesh);
         let enforcement: Arc<dyn MtlsEnforcement> = Arc::clone(&spy) as Arc<dyn MtlsEnforcement>;
-        let worker = Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock));
+        let worker = Arc::new(MtlsInterceptWorker::new(
+            enforcement,
+            resolve,
+            clock,
+            Arc::new(crate::mtls_intercept_port::HostMtlsIntercept::new()),
+        ));
 
         let the_alloc = alloc("alloc-orphan-race");
         // Register an alloc that shares `enforced` — the SAME set spawn_enforce

@@ -107,6 +107,7 @@ use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, Resolved
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
+use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use parking_lot::Mutex;
 
@@ -302,7 +303,12 @@ fn build_worker() -> Arc<MtlsInterceptWorker> {
             BTreeMap::new(),
             overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
         ));
-    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())))
+    Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
+    ))
 }
 
 /// The MERGED-step 04-01 AT: `start_alloc` installs the OUTBOUND egress
@@ -621,8 +627,12 @@ fn build_worker_with_spy(
     let resolve: Arc<dyn MtlsResolve> =
         Arc::new(SimMtlsResolve::new(scripted, MtlsResolution::NonMesh));
     let enforcement: Arc<dyn MtlsEnforcement> = spy;
-    let worker =
-        Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new())));
+    let worker = Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        Arc::new(SimClock::new()),
+        Arc::new(HostMtlsIntercept::new()),
+    ));
     (worker, calls)
 }
 
