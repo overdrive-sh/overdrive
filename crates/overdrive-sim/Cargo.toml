@@ -53,6 +53,14 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 # values to CBOR via `ciborium` for storage parity with the production
 # `RedbViewStore`. Per ADR-0035 §3.
 overdrive-control-plane.path = "../overdrive-control-plane"
+# `SimMtlsIntercept` (GH #250) implements
+# `overdrive_worker::mtls_intercept_port::MtlsIntercept` — the per-alloc
+# intercept-INSTALL port whose trait, error type, and guard trait are declared
+# in `overdrive-worker`. Same shape as the `overdrive-control-plane` dep above
+# (a port trait declared outside `overdrive-core`, sim adapter here). NOT a new
+# edge class: `overdrive-sim` already reaches `overdrive-worker` transitively
+# through `overdrive-control-plane`.
+overdrive-worker.path = "../overdrive-worker"
 ciborium.workspace       = true
 serde.workspace          = true
 serde_json.workspace     = true
@@ -102,6 +110,12 @@ overdrive-core = { workspace = true, features = ["test-utils"] }
 # `[dependencies]`, not the test-only graph). Gated behind `integration-tests`.
 rcgen.workspace        = true
 x509-parser.workspace  = true
+# Dev-dep ONLY — the `SimMtlsIntercept` contract tests (GH #250, S-MIF-06/07)
+# arm faults in the REAL error shapes the production substrate produces, which
+# means naming the real `errno` constants (`EPERM` = missing `CAP_NET_ADMIN`,
+# `ENOPROTOOPT` = kernel without `IP_TRANSPARENT`). The adapter itself takes a
+# plain `i32` and never names `libc`, so this stays out of `[dependencies]`.
+libc.workspace         = true
 
 [lints]
 workspace = true
