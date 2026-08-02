@@ -4206,7 +4206,7 @@ C4Component
   Container(core_traits, "overdrive-core::traits::prober", "Three port traits — TcpProber / HttpProber / ExecProber — declared with rustdoc preconditions, postconditions, edge cases, invariants per development.md")
   Container(core_obs, "overdrive-core::observation::probe_result_row", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
   Container(obs_store, "LocalObservationStore", "redb-backed; write_probe_result + list_probe_results_for_alloc")
-  Container(reconciler_runtime, "ReconcilerRuntime", "Reads probe_results into ServiceLifecycleState.actual on hydrate_actual")
+  Container(reconciler_runtime, "ReconcilerRuntime", "Reads probe_results on hydrate_actual; projects them into actual.allocs as ServiceAllocFact.latest_startup/readiness/liveness_probe")
   Container(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile; consumes ProbeResultRow via actual; emits Stable/Failed/WriteServiceBackendRow/RestartAllocation Actions")
   Container(exec_driver, "ExecDriver (existing per ADR-0030)", "Per-alloc supervisor signals ProbeRunner on alloc Running and terminal")
 

@@ -381,7 +381,7 @@ C4Component
   }
 
   Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
-    Component(reconciler_runtime, "ReconcilerRuntime (existing per ADR-0035)", "Reads probe_results into ServiceLifecycleState.actual on hydrate_actual; dispatches to ServiceLifecycleReconciler")
+    Component(reconciler_runtime, "ReconcilerRuntime (existing per ADR-0035)", "Reads probe_results on hydrate_actual; projects them into actual.allocs as ServiceAllocFact.latest_startup/readiness/liveness_probe; dispatches to ServiceLifecycleReconciler")
     Component(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile (per development.md § Reconciler I/O)", "Consumes ProbeResultRow via actual; emits Stable/Failed (startup gate) / WriteServiceBackendRow (readiness) / RestartAllocation (liveness)")
     Component(action_shim, "action_shim (existing per ADR-0023, EXTENDED)", "Action dispatch", "New: maps TerminalCondition::Stable | Failed onto ServiceSubmitEvent::Stable | Failed (V2 wire); preserves ADR-0037 §4 byte-equality contract")
     Component(streaming, "streaming.rs (existing per ADR-0032, EXTENDED)", "NDJSON broadcast subscriber", "Routes Service-kind LifecycleEvent.terminal to ServiceSubmitEvent V2 wire variants")
