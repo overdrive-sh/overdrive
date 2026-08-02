@@ -1,0 +1,2 @@
+# probe: per-alloc network namespaces POST-TEARDOWN (after sweep)
+(no ovd-ns-* namespaces)

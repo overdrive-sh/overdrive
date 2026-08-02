@@ -1,0 +1,18 @@
+Service 'liveness-fails' (kind: Service)
+Spec digest: 5a4584b9eeb3ea28453e28cc00220d1e21b5e35a45702be3975edb7bd20d9a05
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-liveness-fails-0   Running      82         (c=187,w=local)     
+    reason: driver started
+    last terminated: Terminated at (c=186,w=local) — stopped (by operator)
+    last terminated ran since: 1785663944.014470179
+    last terminated stderr (last 5 lines):
+      2026/08/02 11:45:44 socat[2918275] W exiting on signal 15
+VIP:           10.96.0.3
+Listeners:
+  8092/tcp
+Issued certificates:
+  serial:        2109ab2909b8097ff2502242f179bb72
+    spiffe_id:     spiffe://overdrive.local/workload/liveness-fails/alloc/alloc-liveness-fails-0
+    issuer_serial: 7d736e3fb8ddc37e7524397b60d49cfe
+    not_after:     1785667444.627089964

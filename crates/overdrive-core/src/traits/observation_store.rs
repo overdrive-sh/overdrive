@@ -2166,19 +2166,28 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   existed produces an unreachable orphan row (acceptable —
     ///   readers filter by alloc_id at read time).
     /// - `row.probe_idx` matches the spec's 0-indexed probe position
-    ///   at the time of observation. The probe-runner is the only
-    ///   sanctioned writer; it never invents indices.
+    ///   **within `row.role`'s own array** — per-role, not across the
+    ///   concatenation of all three roles (ADR-0057:132-134, ADR-0080
+    ///   § D1). The probe-runner is the only sanctioned writer, and it
+    ///   carries the parser-assigned `ProbeDescriptor.idx` verbatim;
+    ///   it never invents indices.
     ///
     /// # Postconditions
     /// - On `Ok(())`, the row is durable: a subsequent
     ///   [`Self::list_probe_results_for_alloc`] call MUST include the
     ///   written row IFF its `last_observed_at_unix_ms` dominates the
     ///   prior row at the composite primary key
-    ///   `(alloc_id, probe_idx)`.
+    ///   `(alloc_id, role, probe_idx)`.
     /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
     ///   timestamp does NOT strictly exceed the existing row's
-    ///   timestamp at the same `(alloc_id, probe_idx)` MUST NOT
+    ///   timestamp at the same `(alloc_id, role, probe_idx)` MUST NOT
     ///   mutate state.
+    /// - `role` is load-bearing in the key (ADR-0080 § D2). Because
+    ///   `probe_idx` is per-role, an implementation that omits `role`
+    ///   makes `(alloc, Startup, 0)`, `(alloc, Readiness, 0)` and
+    ///   `(alloc, Liveness, 0)` collide on one key and clobber one
+    ///   another under LWW — silent durable data loss, not a
+    ///   read-miss.
     /// - The probe-result surface is per-alloc-per-probe LATEST only;
     ///   per-tick history is NOT persisted. Per
     ///   `.claude/rules/development.md` § "Persist inputs, not derived
@@ -2186,23 +2195,28 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   live spec policy.
     ///
     /// # Edge cases
-    /// - Concurrent writes for the same `(alloc_id, probe_idx)` with
-    ///   identical `last_observed_at_unix_ms`: the second write loses
-    ///   (strict-dominate rule). Idempotent.
+    /// - Concurrent writes for the same `(alloc_id, role, probe_idx)`
+    ///   with identical `last_observed_at_unix_ms`: the second write
+    ///   loses (strict-dominate rule). Idempotent.
+    /// - Two rows differing ONLY in `role` (same alloc, same
+    ///   `probe_idx`) are distinct rows and MUST both survive — the
+    ///   production shape for a Service declaring one startup and one
+    ///   readiness probe.
     /// - `row.status == ProbeStatus::Fail { reason }` where `reason`
     ///   is empty: accepted as-is. The trait does not validate the
     ///   reason string shape — the renderer handles empty strings.
     ///
     /// # Observable invariants
-    /// - For any `(alloc_id, probe_idx)`,
+    /// - For any `(alloc_id, role, probe_idx)`,
     ///   `list_probe_results_for_alloc(alloc_id)` returns exactly one
-    ///   row per distinct `probe_idx` — the LWW winner.
+    ///   row per distinct `(role, probe_idx)` pair — the LWW winner.
     /// - `write_probe_result` is the ONLY mutator of the probe-result
     ///   table; no other trait method writes probe rows.
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>;
 
     /// List every LWW-winner [`ProbeResultRow`] for the given
-    /// allocation, one row per distinct `probe_idx`.
+    /// allocation, across every role — one row per distinct
+    /// `(role, probe_idx)` pair.
     ///
     /// # Preconditions
     /// - `alloc_id` is well-formed. The store does not validate
@@ -2210,12 +2224,15 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   returns `Ok(vec![])`.
     ///
     /// # Postconditions
-    /// - Iteration order is deterministic — sorted ascending by
-    ///   `probe_idx` (per
-    ///   `.claude/rules/development.md` § "Ordered-collection choice"
-    ///   — `BTreeMap`-shape semantics on the underlying store).
-    /// - At most one row per distinct `probe_idx` is returned (the
-    ///   LWW winner; see [`Self::write_probe_result`]).
+    /// - Iteration order is deterministic — grouped by `role` in
+    ///   [`ProbeRole::as_key_byte`] order (which agrees with the
+    ///   enum's derived `Ord`), and within a role sorted ascending by
+    ///   `probe_idx` (per `.claude/rules/development.md`
+    ///   § "Ordered-collection choice" — `BTreeMap`-shape semantics
+    ///   on the underlying store). Every adapter MUST agree on this
+    ///   order.
+    /// - At most one row per distinct `(role, probe_idx)` pair is
+    ///   returned (the LWW winner; see [`Self::write_probe_result`]).
     /// - The returned rows have `row.alloc_id == *alloc_id` for every
     ///   element. The store filters at read time; the caller does
     ///   not need to re-filter.

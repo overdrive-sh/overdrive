@@ -141,6 +141,8 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> WorkloadDescribeOutp
         vip: None,
         listeners: vec![],
         issued_certificates: vec![],
+        probes: vec![],
+        probe_results: vec![],
     };
     WorkloadDescribeOutput {
         workload_id: "test-wl".to_string(),

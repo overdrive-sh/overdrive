@@ -79,7 +79,7 @@ use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
@@ -126,12 +126,21 @@ const RECONCILE_CONFLICT_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_reconcile_conflict");
 
 /// Holds the rkyv-archived bytes of every `ProbeResultRow`, keyed on
-/// the canonical composite encoding of `(alloc_id, probe_idx)` per
-/// ADR-0054 §5. Key layout: `alloc_id_bytes || 0x00 || probe_idx LE
-/// u32` — the NUL separator guarantees unambiguous prefix-scan
-/// boundaries (no `AllocationId` byte sequence may contain NUL since
-/// it is parsed from non-empty `&str`). LWW resolution on
+/// the canonical composite encoding of `(alloc_id, role, probe_idx)`
+/// per ADR-0054 §5 as amended by ADR-0080 § D2. Key layout:
+/// `alloc_id_bytes || 0x00 || role_byte || probe_idx LE u32` — the NUL
+/// separator guarantees unambiguous prefix-scan boundaries (no
+/// `AllocationId` byte sequence may contain NUL since it is parsed
+/// from non-empty `&str`). LWW resolution on
 /// `last_observed_at_unix_ms`.
+///
+/// `role_byte` ([`ProbeRole::as_key_byte`]) is load-bearing, not
+/// decorative: `probe_idx` is 0-indexed **within its own role array**,
+/// so `startup[0]`, `readiness[0]` and `liveness[0]` would otherwise
+/// encode to one key and clobber each other under LWW — silent
+/// durable data loss. It precedes `probe_idx` so a role's rows stay
+/// contiguous under the alloc prefix, preserving ordered per-role
+/// iteration.
 const PROBE_RESULTS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_probe_results");
 
@@ -170,23 +179,34 @@ const ISSUANCE_ORDINAL_COUNTER_TABLE: TableDefinition<&[u8], u64> =
 /// construction; the empty slice is the canonical one-entry key.
 const ISSUANCE_ORDINAL_KEY: &[u8] = b"next";
 
-/// Encode the composite `(alloc_id, probe_idx)` key as a byte
-/// sequence. Sort order on the underlying redb `BTree` mirrors the
-/// lexicographic-on-bytes order of this layout — for a given
-/// `alloc_id`, probe indices sort ascending.
-fn encode_probe_result_key(alloc_id: &AllocationId, probe_idx: ProbeIdx) -> Vec<u8> {
+/// Encode the composite `(alloc_id, role, probe_idx)` key as a byte
+/// sequence, per ADR-0080 § D2. Sort order on the underlying redb
+/// `BTree` mirrors the lexicographic-on-bytes order of this layout —
+/// for a given `alloc_id`, rows group by role (in
+/// [`ProbeRole::as_key_byte`] order, which agrees with the enum's
+/// derived `Ord`) and within a role sort ascending by probe index.
+fn encode_probe_result_key(
+    alloc_id: &AllocationId,
+    role: ProbeRole,
+    probe_idx: ProbeIdx,
+) -> Vec<u8> {
     let alloc_bytes = alloc_id.as_str().as_bytes();
     let idx_bytes = probe_idx.get().to_le_bytes();
-    let mut out = Vec::with_capacity(alloc_bytes.len() + 1 + idx_bytes.len());
+    let mut out = Vec::with_capacity(alloc_bytes.len() + 2 + idx_bytes.len());
     out.extend_from_slice(alloc_bytes);
     out.push(0x00);
+    out.push(role.as_key_byte());
     out.extend_from_slice(&idx_bytes);
     out
 }
 
-/// Encode the prefix `(alloc_id, *)` for range scans — the
+/// Encode the prefix `(alloc_id, *, *)` for range scans — the
 /// `alloc_id` bytes + NUL separator (first segment of
 /// [`encode_probe_result_key`]).
+///
+/// Unchanged by ADR-0080 § D2: `role_byte` is inserted AFTER the NUL,
+/// so the `[alloc||0x00, alloc||0x01)` range still captures every one
+/// of the alloc's rows across every role in one scan.
 fn encode_probe_result_prefix(alloc_id: &AllocationId) -> Vec<u8> {
     let alloc_bytes = alloc_id.as_str().as_bytes();
     let mut out = Vec::with_capacity(alloc_bytes.len() + 1);
@@ -1172,15 +1192,16 @@ fn apply_service_backends_lww(
 }
 
 /// LWW-guarded insert for `ProbeResultRow`. Keyed on the composite
-/// `(alloc_id, probe_idx)` per ADR-0054 §5. Strictly-dominate on
-/// `last_observed_at_unix_ms` — equal timestamps are no-ops
-/// (idempotent re-write). On envelope decode failure of the prior
-/// row, treats the incoming write as dominating per ADR-0048 § 3.
+/// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
+/// ADR-0080 § D2. Strictly-dominate on `last_observed_at_unix_ms` —
+/// equal timestamps are no-ops (idempotent re-write). On envelope
+/// decode failure of the prior row, treats the incoming write as
+/// dominating per ADR-0048 § 3.
 fn apply_probe_result_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &ProbeResultRow,
 ) -> Result<bool, ObservationStoreError> {
-    let key = encode_probe_result_key(&incoming.alloc_id, incoming.probe_idx);
+    let key = encode_probe_result_key(&incoming.alloc_id, incoming.role, incoming.probe_idx);
     let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
         match decode_envelope::<ProbeResultRowEnvelope>(prior.value()) {
             Ok(prior_row) => incoming.last_observed_at_unix_ms > prior_row.last_observed_at_unix_ms,

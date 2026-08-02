@@ -267,7 +267,137 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // kind. Presence-guarded + additive: a workload with no issued certs
     // renders byte-identically to before.
     render_issued_certificates_section(&mut s, &out.snapshot.issued_certificates);
+    // Probes are the Service health surface (US-06 / K4). The section
+    // is kind-guarded INSIDE `probes_section` (Service-only, non-empty
+    // only), so calling it unconditionally here is safe and keeps the
+    // guard in one place — the same shape as the presence-guarded
+    // sections above.
+    s.push_str(&probes_section(
+        out.snapshot.kind.unwrap_or(overdrive_core::aggregate::WorkloadKind::Service),
+        &probe_render_rows(&out.snapshot),
+        // Phase 1 describe output is plain text end to end — every
+        // section above emits zero ANSI sequences. `true` is the
+        // truthful argument for what this renderer actually produces,
+        // not a stub: threading a `NO_COLOR` env read into a pure
+        // render fn would introduce process-global state for a colour
+        // path that does not exist.
+        /*no_color=*/
+        true,
+    ));
     s
+}
+
+/// Join the snapshot's probe DECLARATIONS against its observed probe
+/// RESULTS into the render-layer [`ProbeRenderRow`] input.
+///
+/// The declaration side (`snapshot.probes`) is authoritative for which
+/// rows exist: a declared probe with no observed row renders
+/// `last=pending` (row ABSENCE is the pending state per ADR-0054 §5 —
+/// adapters never write a `Pending` status). Both sides arrive
+/// `(role, idx)`-ascending from the server, and the join preserves
+/// that, so the operator-visible order is deterministic across reads.
+///
+/// One rendered row per `(allocation, declared probe)`, because the
+/// durable `ProbeResultRow` key is `(alloc_id, role, probe_idx)` — a
+/// probe observation is a fact about ONE allocation, and collapsing N
+/// allocations' rows into one line would either hide replicas or
+/// invent an aggregate. When the workload has no allocations yet
+/// (submitted, not converged) the declarations still render once each
+/// as `pending`, which is the state an operator most needs to see.
+///
+/// KNOWN LIMITATION (surfaced, not papered over): [`ProbeRenderRow`]
+/// carries no allocation identity, so at `replicas > 1` the section
+/// lists each declared probe once per allocation with no column
+/// distinguishing them. Every line is individually true; the grouping
+/// is lossy. The `--json` surface is unaffected — `ProbeResultRowJson`
+/// carries `alloc_id`.
+fn probe_render_rows(response: &AllocStatusResponse) -> Vec<ProbeRenderRow> {
+    use std::collections::BTreeMap;
+
+    // Index the observed rows by their durable composite key. `BTreeMap`
+    // (not `HashMap`) per `.claude/rules/development.md`
+    // § "Ordered-collection choice" — this map is iterated indirectly
+    // through a deterministic lookup order and its contents are
+    // operator-visible.
+    let observed: BTreeMap<(&str, &str, u32), &overdrive_control_plane::api::ProbeResultRowJson> =
+        response
+            .probe_results
+            .iter()
+            .map(|r| ((r.alloc_id.as_str(), r.role.as_str(), r.probe_idx), r))
+            .collect();
+
+    // Allocation axis. An empty workload still renders its declarations
+    // once (the `pending` case) — modelled as a single `None` alloc so
+    // the descriptor loop below is written once, not twice.
+    let alloc_ids: Vec<Option<&str>> = if response.rows.is_empty() {
+        vec![None]
+    } else {
+        response.rows.iter().map(|row| Some(row.alloc_id.as_str())).collect()
+    };
+
+    let mut rows = Vec::with_capacity(alloc_ids.len() * response.probes.len());
+    for alloc_id in alloc_ids {
+        for descriptor in &response.probes {
+            let row = alloc_id.and_then(|alloc| {
+                observed.get(&(alloc, descriptor.role.as_str(), descriptor.idx.get())).copied()
+            });
+            rows.push(ProbeRenderRow {
+                role: descriptor.role,
+                probe_idx: descriptor.idx,
+                mechanic: descriptor.mechanic.clone(),
+                status: row.map(|r| probe_status_from_wire(&r.status)),
+                last_observed_at_unix_ms: row.map(|r| r.last_observed_at_unix_ms),
+                // `inferred` is an INTENT fact (ADR-0058 synthesis
+                // happens at parse time), so it is read from the
+                // descriptor — which is populated whether or not the
+                // probe has ticked. The observation row mirrors the
+                // same flag; taking it from the declaration keeps the
+                // `(inferred)` suffix correct in the pending case too.
+                inferred: descriptor.inferred,
+                // ---------------------------------------------------
+                // The `(consecutive_failures/threshold)` ratio suffix
+                // is DELIBERATELY suppressed, as a unit.
+                //
+                // `ProbeRenderRow`'s own docs say `consecutive_failures`
+                // is composed "from the observation-side
+                // `ProbeResultRow`" — but that durable row carries no
+                // such field, and nothing else on the wire does either.
+                // The only in-tree counter is
+                // `ServiceLifecycleView::liveness_consecutive_failures`,
+                // reconciler-private and liveness-only.
+                //
+                // Populating `failure_threshold` alone would make the
+                // renderer emit `(0/3)` for a probe that IS currently
+                // failing — a false statement about how close the
+                // workload is to a liveness restart. Emitting nothing
+                // asserts nothing. So both fields stay at their
+                // no-claim values until the counter has an honest
+                // source; `last=fail (<reason>)` still renders.
+                // ---------------------------------------------------
+                consecutive_failures: 0,
+                failure_threshold: None,
+            });
+        }
+    }
+    rows
+}
+
+/// Project the wire-side probe status back to the typed core enum the
+/// render layer speaks.
+///
+/// Mechanical inverse of `ProbeResultRowJson`'s `From<&ProbeResultRow>`
+/// status arm — total, allocation-only, no fallible parse.
+fn probe_status_from_wire(
+    status: &overdrive_control_plane::api::ProbeStatusJson,
+) -> overdrive_core::observation::probe_result_row::ProbeStatus {
+    use overdrive_control_plane::api::ProbeStatusJson;
+    use overdrive_core::observation::probe_result_row::ProbeStatus;
+    match status {
+        ProbeStatusJson::Pass => ProbeStatus::Pass,
+        ProbeStatusJson::Fail { last_fail_reason } => {
+            ProbeStatus::Fail { last_fail_reason: last_fail_reason.clone() }
+        }
+    }
 }
 
 /// Append an indented cause-detail block for a single Service per-alloc

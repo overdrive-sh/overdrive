@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::observation::{ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
@@ -75,6 +75,7 @@ fn alloc_id(s: &str) -> AllocationId {
 
 fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
         timeout_seconds: 5,

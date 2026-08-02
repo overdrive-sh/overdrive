@@ -1,0 +1,7 @@
+Accepted.
+Workload ID:   liveness-absent
+Intent key:    workloads/liveness-absent
+Spec digest:   65dc095aba22119cc94e3866b696ec750a92c9d7cac52730c909fbef08f3b64a
+Outcome:       created
+Endpoint:      https://127.0.0.1:7443/
+Next: overdrive workload describe liveness-absent

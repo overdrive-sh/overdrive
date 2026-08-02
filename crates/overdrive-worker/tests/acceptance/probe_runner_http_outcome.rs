@@ -50,6 +50,7 @@ fn node_id_for_obs_store() -> overdrive_core::id::NodeId {
 
 fn descriptor_http(path: &str, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Http { path: path.to_owned(), port, host: None },
         timeout_seconds: 5,

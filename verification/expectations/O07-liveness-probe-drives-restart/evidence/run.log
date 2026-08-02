@@ -1,0 +1,43 @@
+  --- serve_deploy.out (tail) ---
+echo "INNER_DONE serve_status=ready"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+# building the overdrive binary (single compile shared by serve+deploy+describe)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o07-cfg.jwEqBV data=/tmp/od-o07-data.16YmAc creds=/tmp/od-o07-creds.aLEyOI
+# serve ready: trust triple written at /tmp/od-o07-cfg.jwEqBV/.overdrive/config (pid 2911399)
+# deploy absent exit: 0
+# deploy fails exit: 0
+# deploy holds exit: 0
+# PRIMARY snapshot at T+20s (gates sub-claims 2-4)
+# workload describe liveness-absent () exit: 0
+# workload describe liveness-fails () exit: 0
+# workload describe liveness-holds () exit: 0
+# CONTEXT snapshot at T+40s (ungated; shows the startup cliff)
+# workload describe liveness-absent (_t40s) exit: 0
+# workload describe liveness-fails (_t40s) exit: 0
+# workload describe liveness-holds (_t40s) exit: 0
+INNER_DONE serve_status=ready
+  [PASS] no-leak: probe_before_loopback shows HEALTHY loopback
+  [PASS] no-leak: probe_post_teardown_loopback shows HEALTHY loopback
+  [PASS] no-leak: post-teardown shows no alloc-*.scope left behind
+  [PASS] no-leak: post-teardown shows no ovd-ns-* namespaces left behind
+  [PASS] sub-claim 1: deploy absent exited 0
+  [PASS] 'deploy_absent.out' contains: Accepted.
+  [PASS] sub-claim 1: deploy fails exited 0
+  [PASS] 'deploy_fails.out' contains: Accepted.
+  [PASS] sub-claim 1: deploy holds exited 0
+  [PASS] 'deploy_holds.out' contains: Accepted.
+  [observed] absent: state=Running restarts=0
+  [observed] fails:  state=Running restarts=38
+  [observed] holds:  state=Running restarts=39
+  [PASS] confound guard: baseline is still Running at the primary snapshot
+  [PASS] sub-claim 2: liveness-absent was NOT restarted (Restarts 0)
+  [PASS] sub-claim 3: liveness-fails WAS restarted (Restarts 38 > 0)
+  [FAIL] sub-claim 4: liveness-holds shows Restarts='39' (expected 0) — a HEALTHY workload is being restarted; see evidence/namespace_reachability.txt
+  --- CONTEXT snapshot at T+40s (not gated; records the startup cliff) ---
+  [context] absent: state=Failed restarts=0
+  [context] fails: state=Running restarts=82
+  [context] holds: state=Running restarts=82
+O07 sub-claim aggregate exit: 1

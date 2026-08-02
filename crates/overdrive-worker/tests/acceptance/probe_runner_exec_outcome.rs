@@ -69,6 +69,7 @@ fn node_id_for_obs_store() -> overdrive_core::id::NodeId {
 
 fn descriptor_exec(command: &[&str]) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Exec {
             command: command.iter().map(|s| (*s).to_owned()).collect(),

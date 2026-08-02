@@ -1,0 +1,13 @@
+expectation_id: "O07"
+date_utc: "2026-08-02T09:45:01Z"
+overdrive_sha: "86d6331b6536d1dd60953a40ab225dede9c3968b"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "58617f9a747187e5b76c799fa2cfd78f20251b33"
+harness_invocation: "verification/harness/run-expectation.sh O07"
+executed_in_lima: true
+runner_exit_code: "1"
+anchors: ["ADR-0080 § D1 (`docs/product/architecture/adr-0080-probe-idx-is-per-role-and-stable-does-not-stop-the-supervisor.md` — restore `ProbeDescriptor.idx`, parser-assigned per role; `ProbeRunner::start_alloc` MUST consume `descriptor.idx` and MUST NOT derive one from `enumerate()`)","ADR-0080 § D2 (`role` joins the durable composite key `(alloc_id, role, probe_idx)`; D1-without-D2 is forbidden)","ADR-0080 § "A third instance, same class" (the liveness filter at `reconciler_runtime.rs:3046-3053` is broken identically and more severely — liveness-driven restart is dead on the production path for any Service with a startup probe)","ADR-0080 § "Why nothing caught it — the key cannot represent the contract" (no test exercises the hydrate filter; `service_lifecycle_readiness.rs` hand-builds a state production cannot produce)","ADR-0055 (`TerminalCondition::Stable` is NON-terminal; readiness and liveness are continuous post-Stable) — the contract D4 restores","ADR-0057 § 132-134 (`probe_idx` is the 0-indexed position within the per-role array) and `crates/overdrive-core/src/observation/probe_result_row.rs:159` (same contract, restated on the durable row)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

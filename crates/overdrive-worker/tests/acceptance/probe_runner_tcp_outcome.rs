@@ -27,6 +27,7 @@ fn alloc_id(s: &str) -> AllocationId {
 
 fn descriptor_tcp(host: &str, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
         timeout_seconds: 5,

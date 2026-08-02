@@ -1,0 +1,4 @@
+# probe: workload cgroups AFTER observation
+alloc-liveness-absent-0.scope
+alloc-liveness-fails-0.scope
+alloc-liveness-holds-0.scope

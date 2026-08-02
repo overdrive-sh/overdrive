@@ -1,0 +1,99 @@
+# liveness-holds-service.toml — ADR-0080 Stage 1 / O07 verification fixture
+# (the NEGATIVE CONTROL of the O07 three-population diff).
+#
+# Identical to `liveness-fails-service.toml` except for ONE input: this spec's
+# liveness probe targets the port its own workload BINDS. A healthy workload
+# whose liveness target is serving must NOT be restarted.
+#
+#   liveness-absent-service.toml : no liveness probe            -> expect NO restart
+#   liveness-fails-service.toml  : liveness -> 9192, unbound    -> expect restart
+#   liveness-holds-service.toml  : liveness -> 8093, ITS OWN listener -> expect NO restart
+#
+# (The bind/probe port numbers differ across the three specs — 8091 / 8092 /
+# 8093 — so all three can be deployed against one control plane without
+# colliding on a listening socket. That difference is incidental; the
+# load-bearing difference is whether a liveness probe is declared, and whether
+# its target is bound.)
+#
+# WHY THE CONTROL IS NECESSARY
+# ----------------------------
+# The baseline attributes restart churn to the liveness DECLARATION. This
+# fixture attributes it to the liveness OUTCOME. Without it, "declaring a
+# liveness probe restarts the Service" is indistinguishable from "declaring a
+# liveness probe restarts the Service *whether or not the workload is healthy*"
+# — and those are a working feature and a broken one respectively.
+#
+# It also guards the fix in the other direction. A Stage-1 regression that
+# over-reached — leaving liveness supervised but mis-scoring its results, or
+# restarting on any liveness observation rather than a failing one — would
+# restart this Service too. This fixture is what catches that.
+#
+# CAPTURED RESULT: THIS CONTROL IS REFUTED, AND THE CAUSE IS NOT ADR-0080
+# ----------------------------------------------------------------------
+# On the Lima dev VM (2026-08-02) this Service IS restarted, repeatedly, exactly
+# like its failing sibling. The cause is a namespace boundary the probe runner
+# does not cross, and it is INDEPENDENT of ADR-0080:
+#
+#   * The workload binds `0.0.0.0:8093` inside its own network namespace
+#     (`ovd-ns-NNNN`), created by the mTLS netns gate on the production
+#     `serve` + `deploy` path.
+#   * The probe runner issues its TCP connect from the control plane's
+#     namespace and performs no `setns`.
+#   * Measured: a host-namespace connect to 8093 is REFUSED while `ss` shows
+#     `socat` LISTENing on `0.0.0.0:8093` inside `ovd-ns-0000`.
+#
+# So on this composition every TCP probe fails regardless of workload health,
+# and a liveness probe cannot express "my workload is healthy". The same
+# boundary independently drives a Service with a TCP STARTUP probe to `Failed`
+# once its startup deadline elapses, which is why the O07 observation window is
+# deliberately shorter than that deadline.
+#
+# This predates ADR-0080 — Stage 1 did not cause it. Before Stage 1 the liveness
+# observation was discarded before any decision consumed it, so an unreachable
+# liveness probe was inert; Stage 1 correctly connects the observation to the
+# restart decision, which is what makes the pre-existing reachability gap
+# operator-visible for the first time. Keep this fixture: it is the evidence.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/O07-liveness-probe-drives-restart/runner.sh
+
+[service]
+id = "liveness-holds"
+replicas = 1
+
+[[listener]]
+port = 8093
+protocol = "tcp"
+
+[exec]
+# Identical shape to both siblings: a real /usr/bin/socat binding the WILDCARD
+# address with `fork` so it survives unbounded probe connects, and never exiting
+# on its own. Any restart observed on THIS allocation is unexplained by the
+# workload — which is the point of the control.
+command = "/usr/bin/socat"
+args    = ["TCP-LISTEN:8093,fork,reuseaddr", "PIPE"]
+
+# Same explicit startup probe as both siblings (non-empty `startup_probes` is
+# the ADR-0080 Mechanism-1 precondition — see `liveness-fails-service.toml`).
+[[health_check.startup]]
+type = "tcp"
+port = 8093
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+# THE ONLY LOAD-BEARING DIFFERENCE FROM `liveness-fails-service.toml`: this
+# liveness probe targets 8093 — the port this workload's own socat binds — so a
+# platform that can see its workloads observes Pass on every tick, the
+# consecutive-failure streak never leaves 0, and the restart predicate never
+# trips.
+[[health_check.liveness]]
+type = "tcp"
+port = 8093
+interval_seconds = 2
+timeout_seconds = 1
+failure_threshold = 2
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

@@ -28,11 +28,14 @@ use overdrive_cli::render::{
     format_job_verdict, workload_describe,
 };
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary,
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ProbeResultRowJson,
+    ProbeStatusJson,
 };
+use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{Listener, WorkloadKind};
 use overdrive_core::dataplane::Proto;
 use overdrive_core::id::{CertSerial, SpiffeId};
+use overdrive_core::observation::probe_result_row::{ProbeIdx, ProbeRole};
 use overdrive_core::wall_clock::UnixInstant;
 use proptest::prelude::*;
 use std::num::NonZeroU16;
@@ -87,6 +90,8 @@ fn fixture_response(
         vip: None,
         listeners: vec![],
         issued_certificates: vec![],
+        probes: vec![],
+        probe_results: vec![],
     }
 }
 
@@ -892,4 +897,242 @@ fn job_alloc_status_surfaces_issued_certificate_summary() {
              (found {forbidden:?}); got:\n{rendered}",
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Probes section — the declaration × observation join (US-06 / K4).
+//
+// The end-to-end proof that probe state reaches the operator lives in
+// `workload_describe_probes.rs`, which drives a real `serve` + a real
+// deployed Service. These tests cover the join branches that a Tier-3
+// test cannot reach DETERMINISTICALLY — a probe that has not yet ticked
+// (a sub-2s race against the probe interval) and a multi-allocation
+// Service — through the same single live `workload_describe` renderer
+// via `render_live`. They are complementary to the Tier-3 test, not a
+// substitute for it: a renderer-only suite is what let
+// `render::probes_section` ship with zero production callers.
+// ---------------------------------------------------------------------------
+
+/// Build a probe descriptor for the render-layer join fixtures.
+fn fixture_descriptor(
+    role: ProbeRole,
+    idx: u32,
+    mechanic: ProbeMechanic,
+    inferred: bool,
+) -> ProbeDescriptor {
+    ProbeDescriptor {
+        idx: ProbeIdx::new(idx),
+        role,
+        mechanic,
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: matches!(role, ProbeRole::Liveness).then_some(3),
+        success_threshold: matches!(role, ProbeRole::Readiness).then_some(1),
+        inferred,
+    }
+}
+
+fn fixture_probe_result(
+    alloc_id: &str,
+    role: ProbeRole,
+    idx: u32,
+    status: ProbeStatusJson,
+) -> ProbeResultRowJson {
+    ProbeResultRowJson {
+        alloc_id: alloc_id.to_owned(),
+        probe_idx: idx,
+        role: role.as_str().to_owned(),
+        status,
+        last_observed_at_unix_ms: 1_700_000_000_000,
+        inferred: false,
+    }
+}
+
+/// A declared probe with NO observed row renders `last=pending`, not a
+/// blank cell and not a missing row.
+///
+/// Row ABSENCE is the pending state per ADR-0054 §5 — adapters never
+/// write a `Pending` status — so the join must materialise it from the
+/// declaration side alone. This is the state an operator sees in the
+/// first seconds after a deploy, and the one most likely to be silently
+/// dropped by a join written observation-first.
+#[test]
+fn declared_probe_with_no_observed_row_renders_pending() {
+    let mut response = fixture_response(
+        "payments",
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-payments-0", AllocStateWire::Running, None, Some("100@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.probes = vec![fixture_descriptor(
+        ProbeRole::Startup,
+        0,
+        ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
+        /*inferred=*/ true,
+    )];
+    // No `probe_results` — the probe has been declared but has not
+    // ticked yet.
+
+    let rendered = render_live(response);
+
+    assert!(
+        rendered.contains("Probes:"),
+        "a Service that DECLARES a probe must render the section even before the probe \
+         ticks — otherwise the operator cannot tell 'no probes declared' from 'probes \
+         declared but not yet run'; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("startup probe[0]"),
+        "the declared probe must render one row; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last=pending"),
+        "an unobserved probe renders `last=pending`; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last_observed_at=\u{2014}"),
+        "an unobserved probe has no timestamp — the em-dash placeholder, never a fabricated \
+         0 or the current time; got:\n{rendered}",
+    );
+}
+
+/// A Service that declares NO probes renders no Probes section at all —
+/// not a bare `Probes:` header with nothing beneath it.
+///
+/// This is the `[[health_check.startup]] = []` explicit-opt-out shape
+/// (the Phase-1 first-Running semantics preserved per ADR-0058). The
+/// kind-guard covers Job/Schedule; this covers the third empty case,
+/// which is a Service.
+#[test]
+fn service_declaring_no_probes_renders_no_probes_section() {
+    let response = fixture_response(
+        "payments",
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-payments-0", AllocStateWire::Running, None, Some("100@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    // `probes` and `probe_results` both left empty by `fixture_response`.
+
+    let rendered = render_live(response);
+
+    assert!(
+        !rendered.contains("Probes"),
+        "a Service with the explicit `[[health_check.startup]] = []` opt-out must render no \
+         Probes section and no empty header; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("(kind: Service)"),
+        "the Service kind-aware body must still render; got:\n{rendered}",
+    );
+}
+
+/// The join keys on `(alloc_id, role, probe_idx)`, so a row observed
+/// for one allocation never bleeds onto another's line.
+///
+/// The durable `ProbeResultRow` PK is per-allocation (ADR-0080 § D2). A
+/// join that keyed on `(role, probe_idx)` alone would report the first
+/// replica's Pass as though every replica were healthy — the exact
+/// class of lie this surface exists to prevent.
+#[test]
+fn probe_rows_do_not_bleed_across_allocations() {
+    let mut response = fixture_response(
+        "payments",
+        WorkloadKind::Service,
+        vec![
+            fixture_row("alloc-payments-0", AllocStateWire::Running, None, Some("100@node-1")),
+            fixture_row("alloc-payments-1", AllocStateWire::Running, None, Some("101@node-1")),
+        ],
+        /*desired=*/ 2,
+        /*running=*/ 2,
+    );
+    response.probes = vec![fixture_descriptor(
+        ProbeRole::Liveness,
+        0,
+        ProbeMechanic::Http {
+            path: "/healthz".to_owned(),
+            port: 8080,
+            host: Some("127.0.0.1".to_owned()),
+        },
+        /*inferred=*/ false,
+    )];
+    // Only replica 0 has been observed, and it is FAILING. Replica 1 has
+    // no row at all.
+    response.probe_results = vec![fixture_probe_result(
+        "alloc-payments-0",
+        ProbeRole::Liveness,
+        0,
+        ProbeStatusJson::Fail { last_fail_reason: "HTTP 503".to_owned() },
+    )];
+
+    let rendered = render_live(response);
+
+    assert!(
+        rendered.contains("last=fail (HTTP 503)"),
+        "the observed failure must render with its reason; got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("last=pending"),
+        "the second replica has no observed row, so its line must read pending — if the join \
+         keyed on (role, probe_idx) alone it would inherit replica 0's Fail and the section \
+         would misreport which replica is sick; got:\n{rendered}",
+    );
+    assert_eq!(
+        rendered.matches("liveness probe[0]").count(),
+        2,
+        "one row per (allocation, declared probe): 2 allocations x 1 probe; got:\n{rendered}",
+    );
+}
+
+/// The `(consecutive_failures/threshold)` ratio suffix is NOT rendered.
+///
+/// This pins the deliberate suppression documented on
+/// `render::probe_render_rows`: no wire field and no durable row carries
+/// a consecutive-failure count, so populating `failure_threshold` alone
+/// would make the renderer emit `(0/3)` for a probe that IS failing — a
+/// false statement about how close the workload is to a liveness
+/// restart. The test exists so that when a counter DOES get an honest
+/// source, whoever wires it is forced to come here and say so, rather
+/// than the ratio silently reappearing as `(0/N)`.
+#[test]
+fn failing_probe_renders_no_fabricated_failure_ratio() {
+    let mut response = fixture_response(
+        "payments",
+        WorkloadKind::Service,
+        vec![fixture_row("alloc-payments-0", AllocStateWire::Running, None, Some("100@node-1"))],
+        /*desired=*/ 1,
+        /*running=*/ 1,
+    );
+    response.probes = vec![fixture_descriptor(
+        ProbeRole::Liveness,
+        0,
+        ProbeMechanic::Http {
+            path: "/healthz".to_owned(),
+            port: 8080,
+            host: Some("127.0.0.1".to_owned()),
+        },
+        /*inferred=*/ false,
+    )];
+    response.probe_results = vec![fixture_probe_result(
+        "alloc-payments-0",
+        ProbeRole::Liveness,
+        0,
+        ProbeStatusJson::Fail { last_fail_reason: "HTTP 503".to_owned() },
+    )];
+
+    let rendered = render_live(response);
+
+    assert!(
+        rendered.contains("last=fail (HTTP 503)"),
+        "the failure itself IS reported — suppression applies only to the ratio; \
+         got:\n{rendered}",
+    );
+    assert!(
+        !rendered.contains("(0/3)"),
+        "the descriptor declares failure_threshold = 3 and nothing carries a consecutive- \
+         failure count, so a `(0/3)` here would be a fabricated claim that the probe has \
+         failed zero times while reporting it as failing; got:\n{rendered}",
+    );
 }

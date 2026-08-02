@@ -1,0 +1,40 @@
+ M api/openapi.yaml
+ M crates/overdrive-control-plane/src/action_shim/mod.rs
+ M crates/overdrive-control-plane/src/reconciler_runtime.rs
+ M crates/overdrive-control-plane/tests/acceptance.rs
+ M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs
+ M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs
+ M crates/overdrive-control-plane/tests/acceptance/service_lifecycle_runtime_reenqueue.rs
+ M crates/overdrive-core/src/aggregate/mod.rs
+ M crates/overdrive-core/src/aggregate/probe_descriptor.rs
+ M crates/overdrive-core/src/aggregate/workload_spec.rs
+ M crates/overdrive-core/src/api/describe.rs
+ M crates/overdrive-core/src/observation/probe_result_row.rs
+ M crates/overdrive-core/src/testing/observation_store.rs
+ M crates/overdrive-core/src/traits/driver.rs
+ M crates/overdrive-core/src/traits/observation_store.rs
+ M crates/overdrive-core/tests/acceptance/aggregate_validation.rs
+ M crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs
+ M crates/overdrive-core/tests/acceptance/intent_persists_probe_descriptors.rs
+ M crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs
+ M crates/overdrive-core/tests/acceptance/workload_lifecycle_projects_service_probes_into_alloc_spec.rs
+ M crates/overdrive-core/tests/schema_evolution/service_spec.rs
+ M crates/overdrive-sim/src/adapters/observation_store.rs
+ M crates/overdrive-store-local/src/observation_backend.rs
+ M crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
+ M crates/overdrive-worker/src/driver.rs
+ M crates/overdrive-worker/src/probe_runner/mod.rs
+ M crates/overdrive-worker/src/probe_runner/supervisor.rs
+ M crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs
+ M crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs
+ M crates/overdrive-worker/tests/acceptance/probe_runner_supervised_tick.rs
+ M crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs
+ M docs/product/architecture/adr-0054-probe-runner-subsystem.md
+ M docs/product/architecture/adr-0055-service-lifecycle-reconciler.md
+ M verification/expectations/INDEX.md
+?? crates/overdrive-control-plane/tests/acceptance/stable_does_not_stop_probe_supervision.rs
+?? docs/product/architecture/adr-0080-probe-idx-is-per-role-and-stable-does-not-stop-the-supervisor.md
+?? examples/liveness-absent-service.toml
+?? examples/liveness-fails-service.toml
+?? examples/liveness-holds-service.toml
+?? verification/expectations/O07-liveness-probe-drives-restart/

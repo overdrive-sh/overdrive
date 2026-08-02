@@ -103,6 +103,7 @@ async fn build_state(
 
 fn startup_probe(port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
         timeout_seconds: 5,

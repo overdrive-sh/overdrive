@@ -119,6 +119,7 @@ async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppSt
 
 fn declared_tcp_probe(port: u16, max_attempts: u32, interval_seconds: u32) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
         timeout_seconds: 5,
@@ -132,6 +133,7 @@ fn declared_tcp_probe(port: u16, max_attempts: u32, interval_seconds: u32) -> Pr
 
 fn inferred_tcp_probe(port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
         timeout_seconds: 5,

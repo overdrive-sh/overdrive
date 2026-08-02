@@ -36,7 +36,7 @@ use std::time::Duration;
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::observation::{ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
@@ -60,6 +60,7 @@ fn node_id_for_obs_store() -> NodeId {
 /// `clock.sleep` registration in the typical case.
 fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
         timeout_seconds: 5,
@@ -348,5 +349,140 @@ async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
     // Both calls returned the same root token.
     drop(token1);
     drop(token2);
+    runner.stop_alloc(&alloc);
+}
+
+/// Descriptor at an explicit `(role, per-role idx)` — the shape
+/// `project_probe_descriptors` hands `start_alloc`.
+fn descriptor_at(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
+    ProbeDescriptor {
+        idx: ProbeIdx::new(idx),
+        role,
+        mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port },
+        timeout_seconds: 5,
+        interval_seconds: 1,
+        max_attempts: 30,
+        failure_threshold: if role == ProbeRole::Liveness { Some(3) } else { None },
+        success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
+        inferred: false,
+    }
+}
+
+/// AT-04 (ADR-0080 § D1) — **the producer-side Mechanism-1 guard.**
+///
+/// `start_alloc` receives a FLAT vector: `project_probe_descriptors`
+/// concatenates `startup ++ readiness ++ liveness`, so a readiness
+/// probe's position in that vector is `startup_probes.len() + i`. That
+/// vector is a TRANSPORT — its positions carry no index semantics.
+///
+/// Pre-fix `start_alloc` derived `probe_idx` from `enumerate()` over
+/// exactly that concatenation, so for the production-typical Service
+/// (one startup + one readiness, ADR-0058 inference) readiness probe 0
+/// was written at `probe_idx = 1`. Every consumer filters on **per-role**
+/// index 0 (`reconciler_runtime.rs` `latest_probe_status(.., idx 0)`),
+/// so the readiness observation was never read — `Backend.healthy`
+/// stayed permanently `false` and the Service was permanently
+/// `MeshUnreachable` + NXDOMAIN.
+///
+/// The assertion below is the exact discriminator: it demands
+/// `(Readiness, 0)`. The pre-fix producer yields `(Readiness, 1)`.
+#[tokio::test]
+async fn start_alloc_writes_each_probe_at_its_per_role_index_not_its_flat_position() {
+    let tcp = Arc::new(SimTcpProber::new());
+    for _ in 0..8 {
+        tcp.enqueue_outcome(ProbeOutcome::Pass);
+    }
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
+
+    let alloc = alloc_id("alloc-per-role-idx");
+    // The concatenation `project_probe_descriptors` produces for a
+    // Service declaring one startup and one readiness probe. Both
+    // carry per-role idx 0; only their FLAT positions differ (0 and 1).
+    let descriptors = vec![
+        descriptor_at(ProbeRole::Startup, 0, 9001),
+        descriptor_at(ProbeRole::Readiness, 0, 9002),
+    ];
+
+    let _token = runner.start_alloc(&alloc, descriptors);
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(1));
+
+    let mut rows = wait_for_rows(&obs, &alloc, 2, 128).await;
+    rows.sort_by_key(|r| (r.role, r.probe_idx));
+
+    assert_eq!(
+        rows.iter().map(|r| (r.role, r.probe_idx.0)).collect::<Vec<_>>(),
+        vec![(ProbeRole::Startup, 0), (ProbeRole::Readiness, 0)],
+        "every probe MUST be written at its parser-assigned PER-ROLE index. Seeing \
+         (Readiness, 1) here is the pre-ADR-0080 producer deriving the index from the flat \
+         position in the startup++readiness++liveness transport vector — the readiness \
+         observation then lands at a key no consumer ever reads, which is what made a \
+         Service declaring a readiness probe permanently unreachable.",
+    );
+
+    runner.stop_alloc(&alloc);
+}
+
+/// AT-05 (ADR-0080 § D1 + § D2) — the per-role index is preserved for
+/// a role declaring MORE than one probe, and every probe of every role
+/// occupies its own durable key.
+///
+/// Under the pre-fix flat producer this vector writes indices
+/// `0, 1, 2` — startup 0 and 1 match by accident of ordering, and
+/// readiness 0 lands at 2. Under the fix it writes `(Startup, 0)`,
+/// `(Startup, 1)`, `(Readiness, 0)`.
+///
+/// Storage correctness for probes 1..N is the § D1 + § D2 side effect
+/// recorded in ADR-0080 § "A fourth, pre-existing gap"; consultation
+/// still reads index 0 only, and this test asserts storage, not
+/// consultation.
+#[tokio::test]
+async fn start_alloc_preserves_per_role_indices_across_a_multi_probe_role() {
+    let tcp = Arc::new(SimTcpProber::new());
+    for _ in 0..16 {
+        tcp.enqueue_outcome(ProbeOutcome::Pass);
+    }
+    let clock = Arc::new(SimClock::default());
+    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
+
+    let runner = ProbeRunner::new(
+        tcp,
+        Arc::new(SimHttpProber::new()),
+        Arc::new(SimExecProber::new()),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+    );
+
+    let alloc = alloc_id("alloc-multi-role-idx");
+    let descriptors = vec![
+        descriptor_at(ProbeRole::Startup, 0, 9001),
+        descriptor_at(ProbeRole::Startup, 1, 9002),
+        descriptor_at(ProbeRole::Readiness, 0, 9003),
+    ];
+
+    let _token = runner.start_alloc(&alloc, descriptors);
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(1));
+
+    let mut rows = wait_for_rows(&obs, &alloc, 3, 128).await;
+    rows.sort_by_key(|r| (r.role, r.probe_idx));
+
+    assert_eq!(
+        rows.iter().map(|r| (r.role, r.probe_idx.0)).collect::<Vec<_>>(),
+        vec![(ProbeRole::Startup, 0), (ProbeRole::Startup, 1), (ProbeRole::Readiness, 0)],
+        "three probes occupy three distinct (role, probe_idx) keys. A flat-position \
+         producer writes (Readiness, 2) for the third; a key omitting `role` would collapse \
+         (Startup, 0) and (Readiness, 0) onto one row.",
+    );
+
     runner.stop_alloc(&alloc);
 }

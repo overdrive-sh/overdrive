@@ -1,0 +1,14 @@
+Service 'liveness-absent' (kind: Service)
+Spec digest: 65dc095aba22119cc94e3866b696ec750a92c9d7cac52730c909fbef08f3b64a
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-liveness-absent-0  Running      0          (c=4,w=local)       
+    reason: driver started
+VIP:           10.96.0.2
+Listeners:
+  8091/tcp
+Issued certificates:
+  serial:        c1ce7a4677d8147c8681a6e6add621a2
+    spiffe_id:     spiffe://overdrive.local/workload/liveness-absent/alloc/alloc-liveness-absent-0
+    issuer_serial: 7d736e3fb8ddc37e7524397b60d49cfe
+    not_after:     1785667444.626472329

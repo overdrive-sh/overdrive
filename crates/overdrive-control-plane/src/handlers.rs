@@ -1085,7 +1085,7 @@ pub async fn alloc_status(
     // Per ADR-0050 / step 02-03d — project per-variant identity,
     // resource envelope, replica count, and (Service-only) allocated
     // VIP from the typed `WorkloadIntent`.
-    let (resources_body, replicas_desired, response_vip, listeners) = match &intent {
+    let (resources_body, replicas_desired, response_vip, listeners, probes) = match &intent {
         WorkloadIntent::Job(job) => (
             api::ResourcesBody {
                 cpu_milli: job.resources.cpu_milli,
@@ -1095,6 +1095,12 @@ pub async fn alloc_status(
             None,
             // Job carries no listeners — the operator-facing surface
             // renders no Listeners section for non-Service kinds.
+            Vec::new(),
+            // Job carries no probes — a run-to-completion workload's
+            // success criterion IS its exit code (US-07 /
+            // `JOB_PROBES_GUIDANCE`); the parser rejects
+            // `[[health_check.*]]` on this kind, so the aggregate has
+            // no probe surface to project.
             Vec::new(),
         ),
         WorkloadIntent::Service(svc) => {
@@ -1121,6 +1127,16 @@ pub async fn alloc_status(
                 // intent listeners, never synthesise. The CLI render
                 // layer renders each as `<port>/<protocol>`.
                 svc.listeners.clone(),
+                // Project the persisted Service intent's probe
+                // DECLARATIONS in `(role, idx)` order. Same
+                // persist-inputs discipline as `listeners`: the
+                // descriptors are projected verbatim from the
+                // aggregate — including the ADR-0058-synthesised
+                // default-TCP startup probe, which the parser wrote
+                // into the aggregate at submit time and which is
+                // therefore an intent fact here, not a read-time
+                // synthesis.
+                service_probe_descriptors(svc),
             )
         }
         WorkloadIntent::Schedule(sched) => (
@@ -1130,6 +1146,11 @@ pub async fn alloc_status(
             },
             sched.job.replicas.get(),
             None,
+            Vec::new(),
+            // Schedule composes a per-fire workload each tick; the
+            // durable thing a probe would gate is the Service the
+            // Schedule fires against, not the Schedule envelope
+            // (US-07 / `SCHEDULE_PROBES_GUIDANCE`).
             Vec::new(),
         ),
     };
@@ -1161,6 +1182,21 @@ pub async fn alloc_status(
         .await
         .map_err(|e| ControlPlaneError::internal("issued_certificate_rows", e))?;
     let issued_certificates = issued_certificates_for_rows(&workload_rows, &issued_cert_rows);
+
+    // Observation-side probe surface. Read per allocation through the
+    // `ObservationStore` trait (not a concrete adapter) so the Phase 2
+    // `CorrosionStore` swap needs no handler change — the same
+    // discipline `alloc_status_rows` / `issued_certificate_rows` follow
+    // above. Gated on the DECLARATION side being non-empty: with no
+    // declared probe there is nothing for an observed row to join
+    // against, and the two kinds that can never declare one (Job /
+    // Schedule — the parser rejects `[[health_check.*]]` on both) would
+    // otherwise pay N per-alloc reads that can only ever return empty.
+    let probe_results = if probes.is_empty() {
+        Vec::new()
+    } else {
+        probe_results_for_rows(state.obs.as_ref(), &workload_rows).await?
+    };
 
     let rows: Vec<api::AllocStatusRowBody> = workload_rows
         .into_iter()
@@ -1198,7 +1234,71 @@ pub async fn alloc_status(
         vip: response_vip,
         listeners,
         issued_certificates,
+        probes,
+        probe_results,
     }))
+}
+
+/// Flatten a Service aggregate's three per-role probe arrays into one
+/// `(role, idx)`-ascending vector for the wire.
+///
+/// The concatenation order — startup, then readiness, then liveness —
+/// matches [`ProbeRole`](overdrive_core::observation::probe_result_row::ProbeRole)'s
+/// declaration order (and therefore its derived `Ord` and its
+/// `as_key_byte` durable-key order), and each array is already
+/// `idx`-ascending because the parser assigns `ProbeDescriptor.idx`
+/// positionally within its own role array (ADR-0080 § D1). So the
+/// result is `(role, idx)`-ascending without a sort, and agrees
+/// element-for-element with the order
+/// `ObservationStore::list_probe_results_for_alloc` guarantees on the
+/// observation side.
+///
+/// The vector is the flat wire projection ONLY. `probe_idx` remains
+/// per-role: the position of a descriptor in THIS vector carries no
+/// index semantics and MUST NOT be used to derive one (ADR-0080 § D1 —
+/// deriving an index from the flat concatenation is the exact defect
+/// that ADR restored `ProbeDescriptor.idx` to prevent).
+fn service_probe_descriptors(
+    svc: &overdrive_core::aggregate::ServiceV1,
+) -> Vec<overdrive_core::aggregate::probe_descriptor::ProbeDescriptor> {
+    svc.startup_probes
+        .iter()
+        .chain(svc.readiness_probes.iter())
+        .chain(svc.liveness_probes.iter())
+        .cloned()
+        .collect()
+}
+
+/// Read the latest observed [`ProbeResultRow`] for every allocation of
+/// this workload and project each to its wire mirror.
+///
+/// One `list_probe_results_for_alloc` call per allocation row, in
+/// `workload_rows` order (the deterministic observation-store order);
+/// within an allocation the store guarantees rows grouped by `role` in
+/// `ProbeRole::as_key_byte` order, ascending `probe_idx` within a role.
+/// The concatenation is therefore deterministic end to end, which is
+/// what makes the CLI's join and the operator-visible render order
+/// stable across reads.
+///
+/// A store error is NOT swallowed into an empty vector: per
+/// `.claude/rules/development.md` § "Distinct failure modes get
+/// distinct error variants", an unreadable probe table must not be
+/// indistinguishable from "this workload has no probe observations
+/// yet" — that would render `last=pending` for a probe that has in
+/// fact been failing for an hour.
+async fn probe_results_for_rows(
+    obs: &dyn overdrive_core::traits::observation_store::ObservationStore,
+    workload_rows: &[AllocStatusRow],
+) -> Result<Vec<api::ProbeResultRowJson>, ControlPlaneError> {
+    let mut out: Vec<api::ProbeResultRowJson> = Vec::new();
+    for row in workload_rows {
+        let rows = obs
+            .list_probe_results_for_alloc(&row.alloc_id)
+            .await
+            .map_err(|e| ControlPlaneError::internal("list_probe_results_for_alloc", e))?;
+        out.extend(rows.iter().map(api::ProbeResultRowJson::from));
+    }
+    Ok(out)
 }
 
 /// Project, per RUNNING alloc, the single latest-by-`issuance_ordinal`

@@ -1,11 +1,12 @@
 //! Tier 3 integration — `LocalObservationStore::write_probe_result`
 //! / `list_probe_results_for_alloc` roundtrip across redb reopens
-//! plus LWW semantics on `(alloc_id, probe_idx)`.
+//! plus LWW semantics on `(alloc_id, role, probe_idx)`.
 //!
-//! Per ADR-0054 §5 (probe-results table) and ADR-0048 (versioned
-//! envelope evolution) — every persisted `ProbeResultRow` round-trips
-//! bit-identical through the rkyv envelope, and stale writes are
-//! no-ops under the strict-dominate LWW rule.
+//! Per ADR-0054 §5 (probe-results table, key amended by ADR-0080 § D2)
+//! and ADR-0048 (versioned envelope evolution) — every persisted
+//! `ProbeResultRow` round-trips bit-identical through the rkyv
+//! envelope, and stale writes are no-ops under the strict-dominate LWW
+//! rule.
 
 #![allow(clippy::expect_used)]
 
@@ -151,6 +152,80 @@ async fn probe_results_per_alloc_per_probe_idx_independent_keys() {
         store.list_probe_results_for_alloc(&other_alloc).await.expect("list other-alloc rows");
     assert_eq!(other_read.len(), 1, "other alloc has its own row");
     assert_eq!(other_read[0].probe_idx, ProbeIdx::new(0));
+}
+
+/// ADR-0080 § D2 / § A2 — the redb byte-key encoder puts `role` in the
+/// key, so the three roles' probe **0** are three distinct rows.
+///
+/// This is the durable-storage half of the guard the trait-level
+/// conformance harness runs against every adapter
+/// (`overdrive_core::testing::observation_store::run_lww_conformance`
+/// case ix.a); it is repeated here against the real redb file, ACROSS A
+/// REOPEN, because the byte-encoded key is what actually lands on disk
+/// and a prefix-scan boundary error would only surface after an fsync.
+///
+/// Fails for any encoder that omits `role_byte`: `probe_idx` is
+/// 0-indexed within its own role array, so the three rows would encode
+/// to one key and the two earlier writes would be silently destroyed
+/// under LWW rather than merely unreadable.
+#[tokio::test]
+async fn probe_results_per_alloc_are_keyed_by_role_as_well_as_index() {
+    let tmp = TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("obs.redb");
+
+    let alloc_id = alloc("alloc-role-keyed-1");
+    // Every row sits at per-role index 0 — the production shape for a
+    // Service declaring one probe of each role. Distinct statuses make
+    // a lost row identifiable rather than merely missing.
+    let mk = |role: ProbeRole, status: ProbeStatus, at: u64| ProbeResultRow {
+        alloc_id: alloc_id.clone(),
+        probe_idx: ProbeIdx::new(0),
+        role,
+        status,
+        last_observed_at_unix_ms: at,
+        inferred: false,
+    };
+    let startup = mk(ProbeRole::Startup, ProbeStatus::Pass, 1_000);
+    let readiness = mk(
+        ProbeRole::Readiness,
+        ProbeStatus::Fail { last_fail_reason: "not-serving-yet".to_owned() },
+        2_000,
+    );
+    let liveness = mk(ProbeRole::Liveness, ProbeStatus::Pass, 3_000);
+
+    {
+        let store = LocalObservationStore::open(&db_path).expect("open store");
+        for row in [&startup, &readiness, &liveness] {
+            store.write_probe_result(row.clone()).await.expect("write role-keyed row");
+        }
+    }
+
+    // Reopen — the assertion is about what survived to disk under the
+    // byte-encoded key, not about in-memory state.
+    let store = LocalObservationStore::open(&db_path).expect("reopen store");
+    let read = store.list_probe_results_for_alloc(&alloc_id).await.expect("list after reopen");
+
+    assert_eq!(
+        read.len(),
+        3,
+        "all three roles' probe 0 must survive as distinct rows; got {:?}",
+        read.iter().map(|r| (r.role, r.probe_idx.get())).collect::<Vec<_>>(),
+    );
+    for expected in [&startup, &readiness, &liveness] {
+        assert!(
+            read.contains(expected),
+            "the {:?}-role row must survive verbatim across the reopen; got {read:?}",
+            expected.role,
+        );
+    }
+    // The `role_byte` precedes `probe_idx` in the key layout precisely
+    // so a role's rows stay contiguous under the alloc prefix; the scan
+    // therefore yields them in `ProbeRole::as_key_byte` order.
+    assert_eq!(
+        read.iter().map(|r| r.role).collect::<Vec<_>>(),
+        vec![ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness],
+        "the prefix scan groups by role in as_key_byte order",
+    );
 }
 
 /// S-SHCP-INT-01-07 (US-01 / AC #6) — listing an alloc with no

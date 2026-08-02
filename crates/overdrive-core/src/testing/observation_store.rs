@@ -39,6 +39,14 @@
 //!    re-broadcast (`write` returns no second fan-out). Defends the
 //!    contract on [`ObservationStore::issued_certificate_rows`] against
 //!    a blind upsert.
+//! 9. **Probe-result composite key** — the primary key is
+//!    `(alloc_id, role, probe_idx)` per ADR-0080 § D2, iterated grouped
+//!    by role then ascending by index. `role` is load-bearing:
+//!    `probe_idx` is 0-indexed within its own role array, so an adapter
+//!    that omits `role` collapses `startup[0]` / `readiness[0]` /
+//!    `liveness[0]` onto one key and silently DESTROYS two observations
+//!    under LWW. Because both adapters run this identical sequence, it
+//!    doubles as the adapter-equivalence guard.
 //!
 //! # Determinism
 //!
@@ -71,6 +79,7 @@ use tokio::time::timeout;
 use crate::UnixInstant;
 use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
+use crate::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
     ObservationRow, ObservationStore, SubscriptionEvent,
@@ -277,6 +286,18 @@ pub async fn run_lww_conformance<T: ObservationStore + ?Sized>(store: &T) {
     //        boundary. See
     //        `docs/feature/fix-issued-cert-append-only/deliver/rca.md`.
     case_issued_certificate_append_only(store).await;
+
+    // (ix) Probe-result composite key is `(alloc_id, role, probe_idx)`
+    //      per ADR-0080 § D2. `role` is load-bearing; an adapter that
+    //      omits it silently destroys observations rather than merely
+    //      failing to find them. Both adapters run the identical
+    //      sequence here, which is what makes this the adapter-
+    //      equivalence guard per `.claude/rules/development.md`
+    //      § "Trait definitions specify behavior, not just signature".
+    case_probe_key_separates_roles_at_the_same_index(store).await;
+    case_probe_key_separates_indices_within_one_role(store).await;
+    case_probe_result_lww_is_scoped_to_role_and_index(store).await;
+    case_probe_results_iterate_by_role_then_index(store).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -876,5 +897,209 @@ async fn case_independent_of_audit_table<T: ObservationStore + ?Sized>(store: &T
         second, row_count,
         "(2) the ordinal must NOT be a function of the audit table's row count — equality \
          would mean the `len()` derivation is back; second={second}, row_count={row_count}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-cases — ProbeResult composite key (ADR-0080 § D2)
+// ---------------------------------------------------------------------------
+
+/// Build a probe-result row for the conformance sub-cases. `scope`
+/// keeps each sub-case's allocation id unique so the cases do not
+/// interfere and the harness needs no `clear` method.
+fn probe_row(
+    scope: &str,
+    role: ProbeRole,
+    probe_idx: u32,
+    status: ProbeStatus,
+    observed_at: u64,
+) -> ProbeResultRow {
+    ProbeResultRow {
+        alloc_id: AllocationId::new(&format!("probe-{scope}"))
+            .expect("scoped probe alloc id parses"),
+        probe_idx: ProbeIdx::new(probe_idx),
+        role,
+        status,
+        last_observed_at_unix_ms: observed_at,
+        inferred: false,
+    }
+}
+
+/// (ix.a) ADR-0080 § A2 — **the catastrophic-partial-fix guard.**
+///
+/// `probe_idx` is 0-indexed within its OWN role array, so every
+/// Service that declares a startup probe and a readiness probe writes
+/// a row at index 0 for each. If `role` is absent from the composite
+/// key those rows encode to the same key and clobber each other under
+/// LWW: two of the three observations are DESTROYED, not merely
+/// unreadable.
+///
+/// This case fails for any adapter whose key omits `role` — the
+/// distinct statuses make the surviving row identifiable, so the
+/// failure names which observation was lost rather than only reporting
+/// a count.
+async fn case_probe_key_separates_roles_at_the_same_index<T: ObservationStore + ?Sized>(store: &T) {
+    let scope = "role-separation";
+    let startup = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
+    let readiness = probe_row(
+        scope,
+        ProbeRole::Readiness,
+        0,
+        ProbeStatus::Fail { last_fail_reason: "readiness-not-yet-serving".to_owned() },
+        2_000,
+    );
+    let liveness = probe_row(scope, ProbeRole::Liveness, 0, ProbeStatus::Pass, 3_000);
+
+    for row in [&startup, &readiness, &liveness] {
+        store.write_probe_result(row.clone()).await.expect("(ix.a) probe write must succeed");
+    }
+
+    let read = store
+        .list_probe_results_for_alloc(&startup.alloc_id)
+        .await
+        .expect("(ix.a) list probe results");
+
+    assert_eq!(
+        read.len(),
+        3,
+        "(ix.a) all three roles' probe 0 must coexist — the durable key is \
+         (alloc_id, role, probe_idx) per ADR-0080 § D2. Got {} row(s): {:?}. An adapter \
+         whose key omits `role` collapses them onto one key and silently DESTROYS two \
+         observations under LWW (ADR-0080 § A2).",
+        read.len(),
+        read.iter().map(|r| (r.role, r.probe_idx.get())).collect::<Vec<_>>(),
+    );
+    for expected in [&startup, &readiness, &liveness] {
+        assert!(
+            read.contains(expected),
+            "(ix.a) the {:?}-role row at probe_idx 0 must survive verbatim; it is missing \
+             from {read:?}",
+            expected.role,
+        );
+    }
+}
+
+/// (ix.b) ADR-0080 § D7 item 7 — multi-probe storage distinctness.
+///
+/// Two probes of ONE role are stored at distinct keys and both remain
+/// retrievable. Note this pins STORAGE only: per ADR-0080
+/// § "A fourth, pre-existing gap", no decision consults probes 1..N
+/// today. Correct storage is the D1+D2 side effect, not a claim that
+/// consultation changed.
+async fn case_probe_key_separates_indices_within_one_role<T: ObservationStore + ?Sized>(store: &T) {
+    let scope = "index-separation";
+    let first = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
+    let second = probe_row(
+        scope,
+        ProbeRole::Startup,
+        1,
+        ProbeStatus::Fail { last_fail_reason: "second-startup-probe-down".to_owned() },
+        1_000,
+    );
+
+    for row in [&first, &second] {
+        store.write_probe_result(row.clone()).await.expect("(ix.b) probe write must succeed");
+    }
+
+    let read =
+        store.list_probe_results_for_alloc(&first.alloc_id).await.expect("(ix.b) list results");
+
+    assert_eq!(read.len(), 2, "(ix.b) two probes of one role occupy distinct keys; got {read:?}");
+    assert!(read.contains(&first) && read.contains(&second), "(ix.b) both rows survive: {read:?}");
+}
+
+/// (ix.c) LWW is scoped to the FULL `(alloc_id, role, probe_idx)`
+/// identity — a newer write dominates only its own key, and never
+/// reaches across a role or an index boundary.
+///
+/// The stale-write half also pins the strict-dominate rule at the
+/// widened key: an older timestamp at an occupied key is a no-op.
+async fn case_probe_result_lww_is_scoped_to_role_and_index<T: ObservationStore + ?Sized>(
+    store: &T,
+) {
+    let scope = "lww-scope";
+    let startup_pass = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
+    let readiness_pass = probe_row(scope, ProbeRole::Readiness, 0, ProbeStatus::Pass, 1_000);
+    for row in [&startup_pass, &readiness_pass] {
+        store.write_probe_result(row.clone()).await.expect("(ix.c) seed write must succeed");
+    }
+
+    // A LATER readiness Fail dominates its own key only.
+    let readiness_fail = probe_row(
+        scope,
+        ProbeRole::Readiness,
+        0,
+        ProbeStatus::Fail { last_fail_reason: "backend-drained".to_owned() },
+        9_000,
+    );
+    store.write_probe_result(readiness_fail.clone()).await.expect("(ix.c) newer write");
+
+    // A STALE startup write at an occupied key is a no-op.
+    let stale_startup = probe_row(
+        scope,
+        ProbeRole::Startup,
+        0,
+        ProbeStatus::Fail { last_fail_reason: "stale-must-not-land".to_owned() },
+        500,
+    );
+    store.write_probe_result(stale_startup).await.expect("(ix.c) stale write returns Ok");
+
+    let read =
+        store.list_probe_results_for_alloc(&startup_pass.alloc_id).await.expect("(ix.c) list");
+
+    assert_eq!(read.len(), 2, "(ix.c) still exactly one row per (role, idx); got {read:?}");
+    assert!(
+        read.contains(&startup_pass),
+        "(ix.c) the startup row is untouched by a newer READINESS write and by a stale \
+         startup write; got {read:?}",
+    );
+    assert!(
+        read.contains(&readiness_fail),
+        "(ix.c) the readiness row advances to the newer Fail; got {read:?}",
+    );
+}
+
+/// (ix.d) Iteration order is grouped by `role` (in
+/// [`ProbeRole::as_key_byte`] order, which agrees with the enum's
+/// derived `Ord`) then ascending by `probe_idx`.
+///
+/// This is the clause that makes the byte-keyed and tuple-keyed
+/// adapters observationally identical: the byte encoder places
+/// `role_byte` BEFORE the index precisely so a role's rows stay
+/// contiguous, and the tuple key orders the same way. An adapter that
+/// swapped the two key segments would still hold every row but would
+/// hand the reconciler a different order.
+async fn case_probe_results_iterate_by_role_then_index<T: ObservationStore + ?Sized>(store: &T) {
+    let scope = "iteration-order";
+    // Written in an order that matches neither the expected output
+    // order nor the timestamps, so a passing assertion cannot be an
+    // accident of insertion sequence.
+    let rows = [
+        probe_row(scope, ProbeRole::Liveness, 0, ProbeStatus::Pass, 4_000),
+        probe_row(scope, ProbeRole::Startup, 1, ProbeStatus::Pass, 2_000),
+        probe_row(scope, ProbeRole::Readiness, 0, ProbeStatus::Pass, 3_000),
+        probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000),
+    ];
+    for row in &rows {
+        store.write_probe_result(row.clone()).await.expect("(ix.d) probe write must succeed");
+    }
+
+    let read = store
+        .list_probe_results_for_alloc(&rows[0].alloc_id)
+        .await
+        .expect("(ix.d) list probe results");
+
+    let observed: Vec<(ProbeRole, u32)> =
+        read.iter().map(|r| (r.role, r.probe_idx.get())).collect();
+    assert_eq!(
+        observed,
+        vec![
+            (ProbeRole::Startup, 0),
+            (ProbeRole::Startup, 1),
+            (ProbeRole::Readiness, 0),
+            (ProbeRole::Liveness, 0),
+        ],
+        "(ix.d) rows iterate grouped by role (Startup < Readiness < Liveness, matching \
+         ProbeRole::as_key_byte) then ascending by probe_idx; got {observed:?}",
     );
 }

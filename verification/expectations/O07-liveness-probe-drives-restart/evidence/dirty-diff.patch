@@ -1,0 +1,2888 @@
+diff --git a/api/openapi.yaml b/api/openapi.yaml
+index 3aecd232..1dcd98a2 100644
+--- a/api/openapi.yaml
++++ b/api/openapi.yaml
+@@ -1021,6 +1021,7 @@ components:
+         (per ADR-0058) from operator-declared probes. Renderer surfaces
+         as `(inferred)` suffix per US-06 AC.
+       required:
++      - idx
+       - role
+       - mechanic
+       - timeout_seconds
+@@ -1035,6 +1036,19 @@ components:
+           format: int32
+           description: Liveness only. `None` for startup / readiness.
+           minimum: 0
++        idx:
++          $ref: '#/components/schemas/ProbeIdx'
++          description: |-
++            0-indexed position within THIS descriptor's role array
++            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
++            construction and carried verbatim into `ServiceV1`; never
++            re-derived downstream.
++
++            Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
++            the original implementation dropped. `ProbeRunner::start_alloc`
++            consumes it verbatim — it MUST NOT derive an index from the
++            flat concatenated descriptor vector, whose position carries no
++            index semantics.
+         inferred:
+           type: boolean
+           description: |-
+@@ -1064,6 +1078,17 @@ components:
+           type: integer
+           format: int32
+           minimum: 0
++    ProbeIdx:
++      type: integer
++      format: int32
++      description: |-
++        0-indexed position of a probe within its role's TOML array (or
++        `0` for the inferred default probe per ADR-0058 / C4).
++
++        `ProbeIdx` is the load-bearing cross-step variable per
++        `discuss/shared-artifacts-registry.md`: it MUST match across
++        (parser → ProbeResultRow PK → CLI render → wire payloads).
++      minimum: 0
+     ProbeMechanic:
+       oneOf:
+       - type: object
+diff --git a/crates/overdrive-control-plane/src/action_shim/mod.rs b/crates/overdrive-control-plane/src/action_shim/mod.rs
+index 2b6d0623..ea9e15d9 100644
+--- a/crates/overdrive-control-plane/src/action_shim/mod.rs
++++ b/crates/overdrive-control-plane/src/action_shim/mod.rs
+@@ -1189,18 +1189,27 @@ async fn dispatch_single(
+                 Some(&prior_row),
+             );
+             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
+-            // Service-health-check-probes step 01-03d / ADR-0054 § 2:
+-            // FinalizeFailed is a terminal claim (BackoffExhausted /
+-            // Completed / Failed) — fire the terminal lifecycle hook
+-            // so any probe supervisor spawned earlier in the alloc's
+-            // lifetime is cleaned up. Default no-op when no
+-            // ProbeRunner is wired.
+-            // Probe-supervisor cleanup is correct for BOTH a Stable and a
+-            // genuine terminal (a Stable alloc has indeed passed startup, so
+-            // its supervisor hook is benign-or-correct) — NOT gated on
+-            // `is_stable`. Only the two DESTRUCTIVE infrastructure teardowns
+-            // below are gated (canonical-address inbound RCA §9, GH #241).
+-            driver.on_alloc_terminal(&row.alloc_id);
++            // Service-health-check-probes step 01-03d / ADR-0054 § 2 +
++            // ADR-0080 § D4: fire the probe lifecycle hook matching what
++            // this FinalizeFailed actually claims.
++            //
++            // `Stable` is NON-TERMINAL (ADR-0055): the alloc stays Running
++            // and keeps serving, and readiness / liveness are continuous
++            // post-Stable per `ProbeRole`'s contract. Routing it through
++            // `on_alloc_terminal` tore the whole supervisor down and
++            // cancelled every role — which made readiness and liveness
++            // structurally unreachable for their entire intended lifetime
++            // and left `Backend.healthy` a constant. `on_alloc_stable`
++            // retires the startup role only; the supervisor survives.
++            //
++            // A genuine terminal (BackoffExhausted / Completed / Failed)
++            // still tears the whole supervisor down. Both hooks default to
++            // no-op when no ProbeRunner is wired.
++            if is_stable {
++                driver.on_alloc_stable(&row.alloc_id);
++            } else {
++                driver.on_alloc_terminal(&row.alloc_id);
++            }
+             // The mTLS-intercept detach and the C3 netns teardown are both
+             // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
+             // claim (the alloc stays Running and keeps serving on leg-C / its
+diff --git a/crates/overdrive-control-plane/src/reconciler_runtime.rs b/crates/overdrive-control-plane/src/reconciler_runtime.rs
+index 73ff47a2..23e55c05 100644
+--- a/crates/overdrive-control-plane/src/reconciler_runtime.rs
++++ b/crates/overdrive-control-plane/src/reconciler_runtime.rs
+@@ -2967,6 +2967,35 @@ async fn hydrate_service_lifecycle_actual(
+     }))
+ }
+ 
++/// LWW-latest projection of one probe's observed status out of an
++/// alloc's probe-result rows, selecting on the full
++/// `(role, probe_idx)` identity.
++///
++/// Per ADR-0080 § D3 this is the SINGLE projection every consumer of a
++/// probe observation calls. It was extracted from the three
++/// copy-pasted filter chains in [`hydrate_service_alloc_facts`] so the
++/// readers cannot drift — the defect this ADR fixes was precisely a
++/// producer and its consumers disagreeing about what `probe_idx`
++/// indexes.
++///
++/// BOTH clauses are load-bearing. `role` alone would, for a Service
++/// declaring several probes of one role, silently return whichever row
++/// happens to be LWW-latest across the whole role; `probe_idx` alone
++/// would cross roles, since the index is per-role. The rows are
++/// already one-per-`(role, probe_idx)` at the store (the composite PK,
++/// § D2), so `max_by_key` is a defensive tie-break over what is
++/// normally a single element.
++fn latest_probe_status(
++    rows: &[overdrive_core::observation::ProbeResultRow],
++    role: overdrive_core::observation::ProbeRole,
++    probe_idx: overdrive_core::observation::ProbeIdx,
++) -> Option<overdrive_core::observation::ProbeStatus> {
++    rows.iter()
++        .filter(|p| p.role == role && p.probe_idx == probe_idx)
++        .max_by_key(|p| p.last_observed_at_unix_ms)
++        .map(|p| p.status.clone())
++}
++
+ /// Per-workload projection of every `AllocStatusRow` belonging to
+ /// `workload_id` into a `BTreeMap<AllocationId, ServiceAllocFact>`,
+ /// joining each row with its per-`(alloc_id, probe_idx=0,
+@@ -3020,37 +3049,28 @@ async fn hydrate_service_alloc_facts(
+         // Per-alloc LWW projection of probe results — latest status at
+         // startup-role probe_idx 0 (the only probe the Slice-01
+         // reconciler branches consult).
+-        let latest_startup_probe = probe_rows
+-            .iter()
+-            .filter(|p| {
+-                p.role == overdrive_core::observation::ProbeRole::Startup
+-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+-            })
+-            .max_by_key(|p| p.last_observed_at_unix_ms)
+-            .map(|p| p.status.clone());
++        let latest_startup_probe = latest_probe_status(
++            &probe_rows,
++            overdrive_core::observation::ProbeRole::Startup,
++            overdrive_core::observation::ProbeIdx::new(0),
++        );
+         // Slice 04 — per-alloc LWW projection of the readiness-role
+         // probe at idx 0. `None` (no row yet) is the load-bearing
+         // initial state: `Backend.healthy = false` until first Pass
+         // (S-SHCP-RECON-08c, avoids the inverse race).
+-        let latest_readiness_probe = probe_rows
+-            .iter()
+-            .filter(|p| {
+-                p.role == overdrive_core::observation::ProbeRole::Readiness
+-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+-            })
+-            .max_by_key(|p| p.last_observed_at_unix_ms)
+-            .map(|p| p.status.clone());
++        let latest_readiness_probe = latest_probe_status(
++            &probe_rows,
++            overdrive_core::observation::ProbeRole::Readiness,
++            overdrive_core::observation::ProbeIdx::new(0),
++        );
+         // Slice 05 — per-alloc LWW projection of the liveness-role probe
+         // at idx 0. `None` (no row yet) leaves the consecutive-failure
+         // counter untouched in the reconciler (no observation this tick).
+-        let latest_liveness_probe = probe_rows
+-            .iter()
+-            .filter(|p| {
+-                p.role == overdrive_core::observation::ProbeRole::Liveness
+-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
+-            })
+-            .max_by_key(|p| p.last_observed_at_unix_ms)
+-            .map(|p| p.status.clone());
++        let latest_liveness_probe = latest_probe_status(
++            &probe_rows,
++            overdrive_core::observation::ProbeRole::Liveness,
++            overdrive_core::observation::ProbeIdx::new(0),
++        );
+ 
+         // Backend identity for the dataplane backend set this alloc
+         // contributes to. Delegates to `SpiffeId::for_allocation` — the
+@@ -3995,6 +4015,451 @@ mod tests {
+         }
+     }
+ 
++    // -----------------------------------------------------------------
++    // ADR-0080 § D7 item 1 — the hydrate-boundary regression guard, and
++    // the end-to-end proof that `Backend.healthy` tracks OBSERVATION.
++    //
++    // Before ADR-0080 `Backend.healthy` was a constant function of
++    // INTENT, never of observation:
++    //
++    //   no readiness probe  -> `true`, always
++    //   >=1 readiness probe -> `false`, PERMANENTLY
++    //
++    // and `false` is consumed fail-closed at three live seams
++    // (`mtls_resolve_adapter::classify_by_addr` -> `MeshUnreachable`,
++    // `first_healthy_backend_for` -> no frontend re-key, and
++    // `dns_responder/name_index.rs` -> the name is WITHHELD ->
++    // NXDOMAIN). Net operator-visible behaviour: declaring a readiness
++    // probe made a Service permanently unreachable.
++    //
++    // Mechanism 1 (this module's target): `ProbeRunner::start_alloc`
++    // assigned `probe_idx` from the flat position in the concatenated
++    // `startup ++ readiness ++ liveness` TRANSPORT vector, while every
++    // consumer filtered on PER-ROLE index 0. Readiness probe 0
++    // therefore landed at flat index `startup_probes.len()` and was
++    // never read — for the dominant production shape, since ADR-0058's
++    // inference fills `startup_probes` unless the operator explicitly
++    // opts out.
++    //
++    // WHY THE PRE-EXISTING TESTS DID NOT CATCH IT: every readiness test
++    // constructed `ServiceAllocFact` BY HAND, setting
++    // `latest_readiness_probe: Some(..)` alongside
++    // `startup_probes_empty: false` — a combination the production
++    // hydrate could not produce. Those stay valid as reconcile-branch
++    // unit tests (production can produce that state now), but they can
++    // never catch a producer/consumer index disagreement, because they
++    // skip the producer.
++    //
++    // This module therefore builds NO `ServiceAllocFact`. It writes
++    // `ProbeResultRow`s into a REAL redb `LocalObservationStore` and
++    // enters through the production `hydrate_actual` and the production
++    // `ServiceLifecycleReconciler::reconcile`, asserting on the
++    // `healthy` flag of the emitted `Action::WriteServiceBackendRow` —
++    // the driven-port boundary the dataplane and the withhold seams
++    // consume.
++    //
++    // Homed in-src rather than under `tests/integration/` (where
++    // ADR-0080 § D7 item 1 sketches it) because `AnyReconciler` /
++    // `AnyState` are `pub(crate)`; reaching `hydrate_actual_for_test`
++    // from an external test crate would require widening the crate's
++    // public API, which the design does not sanction.
++    // -----------------------------------------------------------------
++    mod readiness_gates_backend_healthy {
++        use std::sync::Arc;
++        use std::time::{Duration, Instant};
++
++        use overdrive_core::UnixInstant;
++        use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
++        use overdrive_core::aggregate::{
++            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent,
++            WorkloadKind,
++        };
++        use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
++        use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
++        use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
++        use overdrive_core::reconcilers::{
++            Action, AnyReconciler, AnyState, Reconciler, TargetResource, TickContext,
++        };
++        use overdrive_core::service_lifecycle::{
++            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
++        };
++        use overdrive_core::traits::driver::DriverType;
++        use overdrive_core::traits::intent_store::IntentStore;
++        use overdrive_core::traits::observation_store::{
++            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
++        };
++        use overdrive_sim::adapters::clock::SimClock;
++        use overdrive_sim::adapters::dataplane::SimDataplane;
++        use overdrive_sim::adapters::driver::SimDriver;
++        use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
++        use tempfile::TempDir;
++
++        use crate::AppState;
++        use crate::reconciler_runtime::{ReconcilerRuntime, hydrate_actual_for_test};
++
++        const WORKLOAD: &str = "readiness-gate-svc";
++        const ALLOC: &str = "readiness-gate-svc-0";
++
++        fn workload_id() -> WorkloadId {
++            WorkloadId::new(WORKLOAD).expect("valid workload id")
++        }
++
++        fn writer_node() -> NodeId {
++            NodeId::new("writer-1").expect("valid NodeId")
++        }
++
++        fn alloc_id() -> AllocationId {
++            AllocationId::new(ALLOC).expect("valid alloc id")
++        }
++
++        fn target() -> TargetResource {
++            TargetResource::new(&format!("workload/{WORKLOAD}")).expect("valid target")
++        }
++
++        /// The production-typical Service shape: ONE startup probe AND
++        /// ONE readiness probe.
++        ///
++        /// The startup probe is load-bearing for this guard. It is what
++        /// makes `startup_probes.len() == 1`, which under the
++        /// pre-ADR-0080 flat indexing put readiness probe 0 at flat
++        /// index 1 — invisible to a consumer filtering on
++        /// `probe_idx == 0`. A fixture with an empty startup array
++        /// would pass even against the broken producer, which is
++        /// exactly why the defect survived. ADR-0058's inference gives
++        /// real Services a startup probe unless the operator opts out,
++        /// so this is the shape that matters.
++        fn service_intent_with_startup_and_readiness() -> WorkloadIntent {
++            let tcp_probe = |role: ProbeRole| ProbeDescriptor {
++                // BOTH probes sit at per-role index 0 — that is the
++                // point: they are DISTINCT probes that share an index
++                // and are separated by `role`, in the descriptor
++                // (§ D1) and in the durable key (§ D2) alike.
++                idx: ProbeIdx::new(0),
++                role,
++                mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port: 8080 },
++                timeout_seconds: 5,
++                interval_seconds: 2,
++                max_attempts: 30,
++                failure_threshold: None,
++                success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
++                inferred: false,
++            };
++
++            let svc = ServiceV1::from_submit(ServiceSpecInput {
++                id: WORKLOAD.to_owned(),
++                replicas: 1,
++                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
++                driver: DriverInput::Exec(ExecInput {
++                    command: "/bin/serve".to_owned(),
++                    args: vec![],
++                }),
++                listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
++                startup_probes: vec![tcp_probe(ProbeRole::Startup)],
++                readiness_probes: vec![tcp_probe(ProbeRole::Readiness)],
++                liveness_probes: vec![],
++            })
++            .expect("canonical Service spec is valid");
++            WorkloadIntent::Service(svc)
++        }
++
++        /// Build an `AppState` whose observation store is a REAL redb
++        /// [`LocalObservationStore`] — not the in-memory sim adapter.
++        /// The composite probe-result key this guard depends on is
++        /// byte-encoded only in the redb backend, so the real store is
++        /// what makes the assertion meaningful.
++        async fn build_state(tmp: &TempDir, intent: &WorkloadIntent) -> AppState {
++            let runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
++                .expect("runtime new");
++            let store_path = tmp.path().join("intent.redb");
++            let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
++            let obs: Arc<dyn ObservationStore> = Arc::new(
++                LocalObservationStore::open(tmp.path().join("observation.redb"))
++                    .expect("open observation store"),
++            );
++
++            let key = IntentKey::for_workload(&workload_id());
++            let archived = intent.archive_for_store().expect("rkyv archive");
++            store.put(key.as_bytes(), archived.as_ref()).await.expect("put intent");
++            let kind_key = IntentKey::for_workload_kind(&workload_id());
++            store
++                .put(kind_key.as_bytes(), &[WorkloadKind::Service.discriminator_byte()])
++                .await
++                .expect("put kind");
++
++            let allocator =
++                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
++            AppState::new(
++                store,
++                store_path,
++                obs,
++                Arc::new(runtime),
++                Arc::new(SimDriver::new(DriverType::Exec)),
++                Arc::new(SimClock::new()),
++                Arc::new(SimDataplane::new()),
++                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
++                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
++                ))),
++                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
++                writer_node(),
++                allocator,
++                crate::test_empty_listener_facts(),
++                std::net::Ipv4Addr::LOCALHOST,
++            )
++        }
++
++        /// Allocate the Service's VIP through the production allocator
++        /// path — without it `service_dataplane_identity` returns
++        /// `None` and the readiness branch is a no-op (no row to write).
++        async fn allocate_vip(state: &AppState, intent: &WorkloadIntent) {
++            let digest = intent.spec_digest().expect("spec_digest");
++            let bytes: [u8; 32] = *digest.as_bytes();
++            let mut guard = state.allocator.lock().await;
++            guard.allocate(bytes).await.expect("allocate vip");
++            drop(guard);
++        }
++
++        async fn write_running_alloc(state: &AppState) {
++            let row = AllocStatusRow {
++                alloc_id: alloc_id(),
++                workload_id: workload_id(),
++                node_id: NodeId::new("local").expect("node id"),
++                state: AllocState::Running,
++                updated_at: LogicalTimestamp { counter: 1, writer: writer_node() },
++                reason: None,
++                detail: None,
++                terminal: None,
++                stderr_tail: None,
++                kind: WorkloadKind::Service,
++                listeners: Vec::new(),
++                started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
++                    1_700_000_000,
++                ))),
++                workload_addr: None,
++                last_terminated: None,
++                restart_count: 0,
++            };
++            state
++                .obs
++                .write(ObservationRow::AllocStatus(Box::new(row)))
++                .await
++                .expect("write Running alloc row");
++        }
++
++        /// Write one probe observation exactly as `ProbeRunner`'s
++        /// `supervised_probe_loop` does — through `write_probe_result`,
++        /// at the descriptor's per-role `idx`.
++        async fn write_probe(
++            state: &AppState,
++            role: ProbeRole,
++            status: ProbeStatus,
++            observed_at: u64,
++        ) {
++            state
++                .obs
++                .write_probe_result(ProbeResultRow {
++                    alloc_id: alloc_id(),
++                    probe_idx: ProbeIdx::new(0),
++                    role,
++                    status,
++                    last_observed_at_unix_ms: observed_at,
++                    inferred: false,
++                })
++                .await
++                .expect("write probe result");
++        }
++
++        fn tick_at(counter: u64) -> TickContext {
++            let now = Instant::now();
++            TickContext {
++                now,
++                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(
++                    1_700_000_000 + counter,
++                )),
++                tick: counter,
++                deadline: now + Duration::from_secs(1),
++            }
++        }
++
++        /// Hydrate through the production path and return the
++        /// `ServiceLifecycleState` the reconciler consumes.
++        async fn hydrate(state: &AppState) -> ServiceLifecycleState {
++            let reconciler = AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new());
++            let hydrated = hydrate_actual_for_test(&reconciler, &target(), state)
++                .await
++                .expect("hydrate_actual must succeed");
++            let AnyState::ServiceLifecycle(s) = hydrated else {
++                panic!("expected AnyState::ServiceLifecycle");
++            };
++            s
++        }
++
++        /// Reconcile through the production reconciler and extract the
++        /// `healthy` flag of the single backend on the emitted
++        /// `WriteServiceBackendRow` — the driven-port boundary the
++        /// dataplane and the DNS / mesh withhold seams consume.
++        fn reconcile_backend_healthy(
++            actual: &ServiceLifecycleState,
++            view: &ServiceLifecycleView,
++            tick: &TickContext,
++        ) -> (Option<bool>, ServiceLifecycleView) {
++            let reconciler = ServiceLifecycleReconciler::new();
++            // `ServiceLifecycleReconciler::reconcile` ignores its
++            // `desired` parameter (`_desired`), so passing `actual`
++            // twice is the honest call shape here.
++            let (actions, next_view) = reconciler.reconcile(actual, actual, view, tick);
++            let healthy = actions.iter().find_map(|a| match a {
++                Action::WriteServiceBackendRow { row, .. } => {
++                    Some(row.backends.first().expect("one Running backend").healthy)
++                }
++                _ => None,
++            });
++            (healthy, next_view)
++        }
++
++        /// **The guard.** `Backend.healthy` is a function of the
++        /// readiness OBSERVATION, driven end-to-end through the
++        /// production path.
++        ///
++        /// 1. A Service declaring one startup AND one readiness probe,
++        ///    with an allocated VIP and one `Running` alloc.
++        /// 2. `startup/0 = Pass`, `readiness/0 = Fail` written through
++        ///    the real store -> hydrate -> the fact carries
++        ///    `latest_readiness_probe = Some(Fail)` (§ D7 item 1: this
++        ///    is `None` under the broken producer, because readiness
++        ///    landed at flat index 1) -> reconcile emits
++        ///    `healthy: false`.
++        /// 3. `readiness/0 = Pass` at a later timestamp -> hydrate ->
++        ///    reconcile emits `healthy: true`.
++        ///
++        /// Step 3 is what proves the flag TRACKS observation rather
++        /// than merely being derivable as `false`: pre-fix `healthy`
++        /// was permanently `false` for any Service with a readiness
++        /// probe, so a recovery could never flip it back.
++        #[tokio::test]
++        async fn readiness_observation_drives_backend_healthy_false_then_true() {
++            let tmp = TempDir::new().expect("tempdir");
++            let intent = service_intent_with_startup_and_readiness();
++            let state = build_state(&tmp, &intent).await;
++            allocate_vip(&state, &intent).await;
++            write_running_alloc(&state).await;
++
++            // ---- Tick 1: startup Pass, readiness FAIL.
++            write_probe(&state, ProbeRole::Startup, ProbeStatus::Pass, 1_000).await;
++            write_probe(
++                &state,
++                ProbeRole::Readiness,
++                ProbeStatus::Fail { last_fail_reason: "backend still warming".to_owned() },
++                1_000,
++            )
++            .await;
++
++            let actual = hydrate(&state).await;
++            let fact =
++                actual.allocs.get(&alloc_id()).expect("the Running alloc must hydrate to a fact");
++
++            // § D7 item 1 — the direct hydrate-boundary assertion.
++            // Under the pre-ADR-0080 producer this is `None`: the
++            // readiness descriptor was written at flat index 1 (because
++            // `startup_probes.len() == 1`) while the consumer filters
++            // on per-role index 0.
++            assert_eq!(
++                fact.latest_readiness_probe,
++                Some(ProbeStatus::Fail { last_fail_reason: "backend still warming".to_owned() }),
++                "the readiness observation MUST reach the hydrated fact. `None` here means \
++                 the producer and the consumer disagree about what `probe_idx` indexes — the \
++                 defect ADR-0080 § D1 fixes by carrying the parser-assigned per-role index \
++                 verbatim into ProbeRunner::start_alloc",
++            );
++            assert!(fact.has_readiness_probe, "the spec declares a readiness probe");
++            assert!(
++                !fact.startup_probes_empty,
++                "the fixture declares a startup probe — the production-typical shape under \
++                 ADR-0058 inference, and the shape the flat index broke",
++            );
++
++            let (healthy_on_fail, view_after_fail) =
++                reconcile_backend_healthy(&actual, &ServiceLifecycleView::default(), &tick_at(1));
++            assert_eq!(
++                healthy_on_fail,
++                Some(false),
++                "a readiness Fail must gate traffic off: healthy=false. The flag is consumed \
++                 fail-closed — MeshUnreachable on dial, and the name withheld from DNS",
++            );
++
++            // ---- Tick 2: readiness recovers.
++            write_probe(&state, ProbeRole::Readiness, ProbeStatus::Pass, 2_000).await;
++
++            let actual = hydrate(&state).await;
++            let fact = actual
++                .allocs
++                .get(&alloc_id())
++                .expect("the Running alloc must still hydrate to a fact");
++            assert_eq!(
++                fact.latest_readiness_probe,
++                Some(ProbeStatus::Pass),
++                "the later Pass wins LWW at (alloc, Readiness, 0)",
++            );
++
++            let (healthy_on_pass, _) =
++                reconcile_backend_healthy(&actual, &view_after_fail, &tick_at(2));
++            assert_eq!(
++                healthy_on_pass,
++                Some(true),
++                "a readiness Pass at or above the success threshold must admit traffic: \
++                 healthy=true. Pre-ADR-0080 `healthy` was PERMANENTLY false for any Service \
++                 declaring a readiness probe, so recovery was unrepresentable",
++            );
++        }
++
++        /// The startup probe's own observation is unaffected by the
++        /// readiness row that shares its `probe_idx` — the two are
++        /// separated by `role` in the descriptor and in the durable key
++        /// alike.
++        ///
++        /// Consumer-side companion to the store-level § A2 guard: it
++        /// fails if `role` is dropped from the key (the LATER readiness
++        /// Fail would clobber the startup row and surface as
++        /// `latest_startup_probe`), and it fails if the per-role index
++        /// is reverted to a flat one (startup would still match by
++        /// accident of ordering, but readiness would go `None`).
++        #[tokio::test]
++        async fn startup_and_readiness_observations_at_index_zero_do_not_shadow_each_other() {
++            let tmp = TempDir::new().expect("tempdir");
++            let intent = service_intent_with_startup_and_readiness();
++            let state = build_state(&tmp, &intent).await;
++            allocate_vip(&state, &intent).await;
++            write_running_alloc(&state).await;
++
++            // Startup Pass FIRST, readiness Fail LATER — so a key that
++            // omits `role` would let the readiness Fail win LWW and be
++            // surfaced as the startup status.
++            write_probe(&state, ProbeRole::Startup, ProbeStatus::Pass, 1_000).await;
++            write_probe(
++                &state,
++                ProbeRole::Readiness,
++                ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
++                9_000,
++            )
++            .await;
++
++            let actual = hydrate(&state).await;
++            let fact =
++                actual.allocs.get(&alloc_id()).expect("the Running alloc must hydrate to a fact");
++
++            assert_eq!(
++                fact.latest_startup_probe,
++                Some(ProbeStatus::Pass),
++                "the startup observation is untouched by a LATER readiness write at the same \
++                 probe_idx; surfacing the readiness Fail here means `role` left the durable key",
++            );
++            assert_eq!(
++                fact.latest_readiness_probe,
++                Some(ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() }),
++                "and the readiness observation survives alongside it",
++            );
++        }
++    }
++
+     // -----------------------------------------------------------------
+     // workflow-lifecycle hydrate boundary — regression guard against
+     // the redundant double-scan of the `workflows/` intent prefix.
+diff --git a/crates/overdrive-control-plane/tests/acceptance.rs b/crates/overdrive-control-plane/tests/acceptance.rs
+index c65ef916..90bc93bf 100644
+--- a/crates/overdrive-control-plane/tests/acceptance.rs
++++ b/crates/overdrive-control-plane/tests/acceptance.rs
+@@ -279,6 +279,12 @@ mod acceptance {
+     /// `Arc<ProbeRunner>` into an underscore-binding. See
+     /// `.context/01-03-structural-gap-audit.md`.
+     mod probe_runner_composition;
++    // ADR-0080 § D4 / § D7 items 4 + 5 — `Stable` is NON-terminal, so
++    // the action shim routes it to `on_alloc_stable` (retire the
++    // startup role, keep the supervisor) rather than
++    // `on_alloc_terminal` (tear everything down). A genuine terminal
++    // and a `StopAllocation` still stop the whole supervisor.
++    mod stable_does_not_stop_probe_supervision;
+     // GAP-1 corrective patch — real ServiceLifecycle hydrate impls
+     // (`hydrate_desired` / `hydrate_actual` join intent + observation
+     // + LWW probe projection per the Phase 01 structural gap audit).
+diff --git a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs
+index 39dbdd61..d8c3e95f 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_hydrate.rs
+@@ -119,6 +119,7 @@ async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppSt
+ 
+ fn declared_tcp_probe(port: u16, max_attempts: u32, interval_seconds: u32) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
+         timeout_seconds: 5,
+@@ -132,6 +133,7 @@ fn declared_tcp_probe(port: u16, max_attempts: u32, interval_seconds: u32) -> Pr
+ 
+ fn inferred_tcp_probe(port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
+         timeout_seconds: 5,
+diff --git a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs
+index e271e114..e23070bd 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_probe_to_stable.rs
+@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
+ 
+ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+ use overdrive_core::id::{AllocationId, NodeId};
+-use overdrive_core::observation::{ProbeRole, ProbeStatus};
++use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
+ use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+ use overdrive_core::service_lifecycle::{
+     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+@@ -75,6 +75,7 @@ fn alloc_id(s: &str) -> AllocationId {
+ 
+ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
+         timeout_seconds: 5,
+diff --git a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_runtime_reenqueue.rs b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_runtime_reenqueue.rs
+index a60074a6..cfd5a3d3 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_runtime_reenqueue.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/service_lifecycle_runtime_reenqueue.rs
+@@ -103,6 +103,7 @@ async fn build_state(
+ 
+ fn startup_probe(port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port },
+         timeout_seconds: 5,
+diff --git a/crates/overdrive-core/src/aggregate/mod.rs b/crates/overdrive-core/src/aggregate/mod.rs
+index 82dd1721..864356a8 100644
+--- a/crates/overdrive-core/src/aggregate/mod.rs
++++ b/crates/overdrive-core/src/aggregate/mod.rs
+@@ -593,6 +593,19 @@ impl ServiceV1 {
+         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
+         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
+ 
++        // ADR-0080 § D1 — this is the SECOND ingress (the API/wire
++        // path; the TOML parser is the first). `ProbeDescriptor.idx`
++        // is parser-assigned by contract, so a caller-supplied value
++        // is NOT trusted here: it is re-assigned from each vector's
++        // own 0-based position. Without this, a wire client could
++        // submit two descriptors of one role carrying the same `idx`
++        // and collide their durable probe-result rows under the
++        // `(alloc_id, role, probe_idx)` key (§ D2), silently losing
++        // one probe's observations to LWW.
++        let startup_probes = reindex_probes_by_position(startup_probes);
++        let readiness_probes = reindex_probes_by_position(readiness_probes);
++        let liveness_probes = reindex_probes_by_position(liveness_probes);
++
+         Ok(Self {
+             id,
+             replicas,
+@@ -612,6 +625,27 @@ impl ServiceV1 {
+     }
+ }
+ 
++/// Re-assign every descriptor's `idx` from its 0-based position in
++/// its own role vector, per ADR-0080 § D1.
++///
++/// The TOML parser assigns `idx` at `ServiceSpecV2` construction and
++/// the projection carries it verbatim, so for the CLI path this is an
++/// identity transform. For the API/wire path it is the enforcement
++/// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a
++/// caller-supplied duplicate `(role, idx)` pair would collide two
++/// probes' durable rows under the composite key.
++fn reindex_probes_by_position(probes: Vec<ProbeDescriptor>) -> Vec<ProbeDescriptor> {
++    probes
++        .into_iter()
++        .enumerate()
++        .map(|(position, mut probe)| {
++            probe.idx =
++                crate::observation::ProbeIdx::new(u32::try_from(position).unwrap_or(u32::MAX));
++            probe
++        })
++        .collect()
++}
++
+ /// Validate probe mechanic content at the API admission boundary.
+ ///
+ /// The TOML parser validates at parse time in `parse_http_mechanic` /
+diff --git a/crates/overdrive-core/src/aggregate/probe_descriptor.rs b/crates/overdrive-core/src/aggregate/probe_descriptor.rs
+index e63500a5..dfe90aab 100644
+--- a/crates/overdrive-core/src/aggregate/probe_descriptor.rs
++++ b/crates/overdrive-core/src/aggregate/probe_descriptor.rs
+@@ -16,7 +16,7 @@
+ 
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::observation::ProbeRole;
++use crate::observation::{ProbeIdx, ProbeRole};
+ 
+ /// Per-kind guidance text surfaced on
+ /// [`crate::aggregate::workload_spec::ParseError::ProbesNotAllowedOnKind`]
+@@ -145,6 +145,17 @@ impl ProbeMechanic {
+     utoipa::ToSchema,
+ )]
+ pub struct ProbeDescriptor {
++    /// 0-indexed position within THIS descriptor's role array
++    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
++    /// construction and carried verbatim into `ServiceV1`; never
++    /// re-derived downstream.
++    ///
++    /// Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
++    /// the original implementation dropped. `ProbeRunner::start_alloc`
++    /// consumes it verbatim — it MUST NOT derive an index from the
++    /// flat concatenated descriptor vector, whose position carries no
++    /// index semantics.
++    pub idx: ProbeIdx,
+     pub role: ProbeRole,
+     pub mechanic: ProbeMechanic,
+     pub timeout_seconds: u32,
+diff --git a/crates/overdrive-core/src/aggregate/workload_spec.rs b/crates/overdrive-core/src/aggregate/workload_spec.rs
+index 06d09204..6f55f3e5 100644
+--- a/crates/overdrive-core/src/aggregate/workload_spec.rs
++++ b/crates/overdrive-core/src/aggregate/workload_spec.rs
+@@ -1047,7 +1047,20 @@ fn format_listener_pair(l: Listener) -> String {
+ // ---------------------------------------------------------------------------
+ 
+ use crate::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+-use crate::observation::ProbeRole;
++use crate::observation::{ProbeIdx, ProbeRole};
++
++/// Project a parser-loop 0-based position into the `ProbeIdx` carried
++/// on the emitted [`ProbeDescriptor`], per ADR-0080 § D1.
++///
++/// The index is **per-role**: each `[[health_check.<role>]]` array
++/// restarts at 0, which is exactly the contract ADR-0057:132-134 and
++/// `ProbeResultRow::probe_idx`'s docstring state. The saturating cast
++/// is unreachable in practice (a TOML array of >4 billion probe
++/// entries), and saturating rather than panicking keeps the parser
++/// total.
++fn probe_idx_from_position(position: usize) -> ProbeIdx {
++    ProbeIdx::new(u32::try_from(position).unwrap_or(u32::MAX))
++}
+ 
+ /// ADR-0057 §2 default values for a startup probe — operator omits
+ /// `timeout_seconds` / `interval_seconds` / `max_attempts` → these apply.
+@@ -1109,6 +1122,8 @@ fn parse_startup_probes(
+     if !was_explicit && !listeners.is_empty() {
+         let first = &listeners[0];
+         let inferred = ProbeDescriptor {
++            // Sole member of the synthesised startup array (ADR-0058).
++            idx: ProbeIdx::new(0),
+             role: ProbeRole::Startup,
+             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: first.port.get() },
+             timeout_seconds: STARTUP_TIMEOUT_DEFAULT_S,
+@@ -1152,6 +1167,7 @@ fn parse_one_startup_probe(
+             .map_err(|err| map_zero_to_named_error(err, "max_attempts", probe_idx))?;
+ 
+     Ok(ProbeDescriptor {
++        idx: probe_idx_from_position(probe_idx),
+         role: ProbeRole::Startup,
+         mechanic,
+         timeout_seconds,
+@@ -1283,6 +1299,7 @@ fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescrip
+         .map_err(|err| map_zero_to_named_error(err, "success_threshold", probe_idx))?;
+ 
+         out.push(ProbeDescriptor {
++            idx: probe_idx_from_position(probe_idx),
+             role: ProbeRole::Readiness,
+             mechanic,
+             timeout_seconds,
+@@ -1381,6 +1398,7 @@ fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescript
+         .map_err(|err| map_zero_to_named_error(err, "failure_threshold", probe_idx))?;
+ 
+         out.push(ProbeDescriptor {
++            idx: probe_idx_from_position(probe_idx),
+             role: ProbeRole::Liveness,
+             mechanic,
+             timeout_seconds,
+diff --git a/crates/overdrive-core/src/api/describe.rs b/crates/overdrive-core/src/api/describe.rs
+index d2b00abb..3d228413 100644
+--- a/crates/overdrive-core/src/api/describe.rs
++++ b/crates/overdrive-core/src/api/describe.rs
+@@ -164,7 +164,7 @@ mod tests {
+     }
+ 
+     use crate::aggregate::probe_descriptor::ProbeMechanic;
+-    use crate::observation::ProbeRole;
++    use crate::observation::{ProbeIdx, ProbeRole};
+ 
+     /// Strategy producing a valid `ProbeDescriptor` with a TCP mechanic
+     /// (the only mechanic the round-trip needs to exercise; the wire
+@@ -172,6 +172,10 @@ mod tests {
+     /// descriptor passes `ProbeMechanic::validate`.
+     fn probe_descriptor_strategy() -> impl Strategy<Value = ProbeDescriptor> {
+         (
++            // ADR-0080 § D1 — the describe wire shape carries the
++            // per-role `idx`; the round-trip must preserve every
++            // representable value, not just 0.
++            any::<u32>(),
+             prop_oneof![
+                 Just(ProbeRole::Startup),
+                 Just(ProbeRole::Readiness),
+@@ -188,6 +192,7 @@ mod tests {
+         )
+             .prop_map(
+                 |(
++                    idx,
+                     role,
+                     host,
+                     port,
+@@ -198,6 +203,7 @@ mod tests {
+                     success_threshold,
+                     inferred,
+                 )| ProbeDescriptor {
++                    idx: ProbeIdx::new(idx),
+                     role,
+                     mechanic: ProbeMechanic::Tcp { host, port },
+                     timeout_seconds,
+@@ -290,13 +296,14 @@ mod tests {
+     #[test]
+     fn service_to_describe_carries_passed_vip_and_maps_listeners() {
+         use crate::aggregate::probe_descriptor::ProbeMechanic;
+-        use crate::observation::ProbeRole;
++        use crate::observation::{ProbeIdx, ProbeRole};
+ 
+         // An operator-declared startup probe — `ServiceV1::from_submit`
+         // passes probe vecs through unchanged (validation only; default-
+         // TCP synthesis happens at the TOML parser, NOT in `from_submit`),
+         // so the describe round-trip is exact equality with this input.
+         let startup_probe = ProbeDescriptor {
++            idx: ProbeIdx::new(0),
+             role: ProbeRole::Startup,
+             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
+             timeout_seconds: 5,
+diff --git a/crates/overdrive-core/src/observation/probe_result_row.rs b/crates/overdrive-core/src/observation/probe_result_row.rs
+index 10f4a194..6ed1bd97 100644
+--- a/crates/overdrive-core/src/observation/probe_result_row.rs
++++ b/crates/overdrive-core/src/observation/probe_result_row.rs
+@@ -1,9 +1,13 @@
+ //! `ProbeResultRow` — per-probe observation row, LWW per
+-//! `(alloc_id, probe_idx)`.
++//! `(alloc_id, role, probe_idx)`.
+ //!
+-//! Per ADR-0054 §5: a probe's latest observed outcome is durable
+-//! observation, never intent. Row identity is the composite PK
+-//! `(alloc_id, probe_idx)`; latest-writer-wins. NOT append-mode —
++//! Per ADR-0054 §5 as amended by ADR-0080 § D2: a probe's latest
++//! observed outcome is durable observation, never intent. Row identity
++//! is the composite PK `(alloc_id, role, probe_idx)`;
++//! latest-writer-wins. `role` is load-bearing in the key — `probe_idx`
++//! is 0-indexed **within its own role array**, so without `role` the
++//! three roles' probe 0 would collide on one key and clobber each
++//! other under LWW. NOT append-mode —
+ //! per-tick history is recomputed at read time from this latest row
+ //! plus the live spec policy, NEVER persisted (per
+ //! `.claude/rules/development.md` § "Persist inputs, not derived
+@@ -50,6 +54,7 @@ use crate::id::AllocationId;
+     rkyv::Archive,
+     rkyv::Serialize,
+     rkyv::Deserialize,
++    utoipa::ToSchema,
+ )]
+ #[serde(transparent)]
+ pub struct ProbeIdx(pub u32);
+@@ -110,6 +115,26 @@ impl ProbeRole {
+             Self::Liveness => "liveness",
+         }
+     }
++
++    /// Stable durable-key discriminant per ADR-0080 § D2. Values are
++    /// PERSISTED as the `role_byte` segment of the probe-result
++    /// composite key (`alloc_id || 0x00 || role_byte || probe_idx LE
++    /// u32`) — **never renumber; append only**.
++    ///
++    /// The byte order MUST agree with this enum's derived [`Ord`]
++    /// (declaration order `Startup < Readiness < Liveness`) so the
++    /// byte-keyed `LocalObservationStore` and the tuple-keyed
++    /// `SimObservationStore` iterate a given alloc's rows in the same
++    /// order, per `.claude/rules/development.md` § "Trait definitions
++    /// specify behavior, not just signature".
++    #[must_use]
++    pub const fn as_key_byte(self) -> u8 {
++        match self {
++            Self::Startup => 0,
++            Self::Readiness => 1,
++            Self::Liveness => 2,
++        }
++    }
+ }
+ 
+ /// Observed outcome of a probe attempt as durable observation.
+@@ -139,9 +164,9 @@ pub enum ProbeStatus {
+ /// `ProbeResultRow` V1 payload — the latest-observed outcome of a
+ /// single probe for a single allocation.
+ ///
+-/// Composite PK: `(alloc_id, probe_idx)`. LWW resolution per
+-/// `last_observed_at` (logical timestamp inherited from the
+-/// `ObservationRow` envelope; not duplicated here).
++/// Composite PK: `(alloc_id, role, probe_idx)` per ADR-0080 § D2.
++/// LWW resolution per `last_observed_at` (logical timestamp inherited
++/// from the `ObservationRow` envelope; not duplicated here).
+ #[derive(
+     Debug,
+     Clone,
+diff --git a/crates/overdrive-core/src/testing/observation_store.rs b/crates/overdrive-core/src/testing/observation_store.rs
+index e7bf9466..097f2635 100644
+--- a/crates/overdrive-core/src/testing/observation_store.rs
++++ b/crates/overdrive-core/src/testing/observation_store.rs
+@@ -39,6 +39,14 @@
+ //!    re-broadcast (`write` returns no second fan-out). Defends the
+ //!    contract on [`ObservationStore::issued_certificate_rows`] against
+ //!    a blind upsert.
++//! 9. **Probe-result composite key** — the primary key is
++//!    `(alloc_id, role, probe_idx)` per ADR-0080 § D2, iterated grouped
++//!    by role then ascending by index. `role` is load-bearing:
++//!    `probe_idx` is 0-indexed within its own role array, so an adapter
++//!    that omits `role` collapses `startup[0]` / `readiness[0]` /
++//!    `liveness[0]` onto one key and silently DESTROYS two observations
++//!    under LWW. Because both adapters run this identical sequence, it
++//!    doubles as the adapter-equivalence guard.
+ //!
+ //! # Determinism
+ //!
+@@ -71,6 +79,7 @@ use tokio::time::timeout;
+ use crate::UnixInstant;
+ use crate::ca::issued_certificate_row::IssuedCertificateRow;
+ use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
++use crate::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+ use crate::traits::observation_store::{
+     AllocState, AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
+     ObservationRow, ObservationStore, SubscriptionEvent,
+@@ -277,6 +286,18 @@ pub async fn run_lww_conformance<T: ObservationStore + ?Sized>(store: &T) {
+     //        boundary. See
+     //        `docs/feature/fix-issued-cert-append-only/deliver/rca.md`.
+     case_issued_certificate_append_only(store).await;
++
++    // (ix) Probe-result composite key is `(alloc_id, role, probe_idx)`
++    //      per ADR-0080 § D2. `role` is load-bearing; an adapter that
++    //      omits it silently destroys observations rather than merely
++    //      failing to find them. Both adapters run the identical
++    //      sequence here, which is what makes this the adapter-
++    //      equivalence guard per `.claude/rules/development.md`
++    //      § "Trait definitions specify behavior, not just signature".
++    case_probe_key_separates_roles_at_the_same_index(store).await;
++    case_probe_key_separates_indices_within_one_role(store).await;
++    case_probe_result_lww_is_scoped_to_role_and_index(store).await;
++    case_probe_results_iterate_by_role_then_index(store).await;
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -878,3 +899,207 @@ async fn case_independent_of_audit_table<T: ObservationStore + ?Sized>(store: &T
+          would mean the `len()` derivation is back; second={second}, row_count={row_count}"
+     );
+ }
++
++// ---------------------------------------------------------------------------
++// Sub-cases — ProbeResult composite key (ADR-0080 § D2)
++// ---------------------------------------------------------------------------
++
++/// Build a probe-result row for the conformance sub-cases. `scope`
++/// keeps each sub-case's allocation id unique so the cases do not
++/// interfere and the harness needs no `clear` method.
++fn probe_row(
++    scope: &str,
++    role: ProbeRole,
++    probe_idx: u32,
++    status: ProbeStatus,
++    observed_at: u64,
++) -> ProbeResultRow {
++    ProbeResultRow {
++        alloc_id: AllocationId::new(&format!("probe-{scope}"))
++            .expect("scoped probe alloc id parses"),
++        probe_idx: ProbeIdx::new(probe_idx),
++        role,
++        status,
++        last_observed_at_unix_ms: observed_at,
++        inferred: false,
++    }
++}
++
++/// (ix.a) ADR-0080 § A2 — **the catastrophic-partial-fix guard.**
++///
++/// `probe_idx` is 0-indexed within its OWN role array, so every
++/// Service that declares a startup probe and a readiness probe writes
++/// a row at index 0 for each. If `role` is absent from the composite
++/// key those rows encode to the same key and clobber each other under
++/// LWW: two of the three observations are DESTROYED, not merely
++/// unreadable.
++///
++/// This case fails for any adapter whose key omits `role` — the
++/// distinct statuses make the surviving row identifiable, so the
++/// failure names which observation was lost rather than only reporting
++/// a count.
++async fn case_probe_key_separates_roles_at_the_same_index<T: ObservationStore + ?Sized>(store: &T) {
++    let scope = "role-separation";
++    let startup = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
++    let readiness = probe_row(
++        scope,
++        ProbeRole::Readiness,
++        0,
++        ProbeStatus::Fail { last_fail_reason: "readiness-not-yet-serving".to_owned() },
++        2_000,
++    );
++    let liveness = probe_row(scope, ProbeRole::Liveness, 0, ProbeStatus::Pass, 3_000);
++
++    for row in [&startup, &readiness, &liveness] {
++        store.write_probe_result(row.clone()).await.expect("(ix.a) probe write must succeed");
++    }
++
++    let read = store
++        .list_probe_results_for_alloc(&startup.alloc_id)
++        .await
++        .expect("(ix.a) list probe results");
++
++    assert_eq!(
++        read.len(),
++        3,
++        "(ix.a) all three roles' probe 0 must coexist — the durable key is \
++         (alloc_id, role, probe_idx) per ADR-0080 § D2. Got {} row(s): {:?}. An adapter \
++         whose key omits `role` collapses them onto one key and silently DESTROYS two \
++         observations under LWW (ADR-0080 § A2).",
++        read.len(),
++        read.iter().map(|r| (r.role, r.probe_idx.get())).collect::<Vec<_>>(),
++    );
++    for expected in [&startup, &readiness, &liveness] {
++        assert!(
++            read.contains(expected),
++            "(ix.a) the {:?}-role row at probe_idx 0 must survive verbatim; it is missing \
++             from {read:?}",
++            expected.role,
++        );
++    }
++}
++
++/// (ix.b) ADR-0080 § D7 item 7 — multi-probe storage distinctness.
++///
++/// Two probes of ONE role are stored at distinct keys and both remain
++/// retrievable. Note this pins STORAGE only: per ADR-0080
++/// § "A fourth, pre-existing gap", no decision consults probes 1..N
++/// today. Correct storage is the D1+D2 side effect, not a claim that
++/// consultation changed.
++async fn case_probe_key_separates_indices_within_one_role<T: ObservationStore + ?Sized>(store: &T) {
++    let scope = "index-separation";
++    let first = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
++    let second = probe_row(
++        scope,
++        ProbeRole::Startup,
++        1,
++        ProbeStatus::Fail { last_fail_reason: "second-startup-probe-down".to_owned() },
++        1_000,
++    );
++
++    for row in [&first, &second] {
++        store.write_probe_result(row.clone()).await.expect("(ix.b) probe write must succeed");
++    }
++
++    let read =
++        store.list_probe_results_for_alloc(&first.alloc_id).await.expect("(ix.b) list results");
++
++    assert_eq!(read.len(), 2, "(ix.b) two probes of one role occupy distinct keys; got {read:?}");
++    assert!(read.contains(&first) && read.contains(&second), "(ix.b) both rows survive: {read:?}");
++}
++
++/// (ix.c) LWW is scoped to the FULL `(alloc_id, role, probe_idx)`
++/// identity — a newer write dominates only its own key, and never
++/// reaches across a role or an index boundary.
++///
++/// The stale-write half also pins the strict-dominate rule at the
++/// widened key: an older timestamp at an occupied key is a no-op.
++async fn case_probe_result_lww_is_scoped_to_role_and_index<T: ObservationStore + ?Sized>(
++    store: &T,
++) {
++    let scope = "lww-scope";
++    let startup_pass = probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000);
++    let readiness_pass = probe_row(scope, ProbeRole::Readiness, 0, ProbeStatus::Pass, 1_000);
++    for row in [&startup_pass, &readiness_pass] {
++        store.write_probe_result(row.clone()).await.expect("(ix.c) seed write must succeed");
++    }
++
++    // A LATER readiness Fail dominates its own key only.
++    let readiness_fail = probe_row(
++        scope,
++        ProbeRole::Readiness,
++        0,
++        ProbeStatus::Fail { last_fail_reason: "backend-drained".to_owned() },
++        9_000,
++    );
++    store.write_probe_result(readiness_fail.clone()).await.expect("(ix.c) newer write");
++
++    // A STALE startup write at an occupied key is a no-op.
++    let stale_startup = probe_row(
++        scope,
++        ProbeRole::Startup,
++        0,
++        ProbeStatus::Fail { last_fail_reason: "stale-must-not-land".to_owned() },
++        500,
++    );
++    store.write_probe_result(stale_startup).await.expect("(ix.c) stale write returns Ok");
++
++    let read =
++        store.list_probe_results_for_alloc(&startup_pass.alloc_id).await.expect("(ix.c) list");
++
++    assert_eq!(read.len(), 2, "(ix.c) still exactly one row per (role, idx); got {read:?}");
++    assert!(
++        read.contains(&startup_pass),
++        "(ix.c) the startup row is untouched by a newer READINESS write and by a stale \
++         startup write; got {read:?}",
++    );
++    assert!(
++        read.contains(&readiness_fail),
++        "(ix.c) the readiness row advances to the newer Fail; got {read:?}",
++    );
++}
++
++/// (ix.d) Iteration order is grouped by `role` (in
++/// [`ProbeRole::as_key_byte`] order, which agrees with the enum's
++/// derived `Ord`) then ascending by `probe_idx`.
++///
++/// This is the clause that makes the byte-keyed and tuple-keyed
++/// adapters observationally identical: the byte encoder places
++/// `role_byte` BEFORE the index precisely so a role's rows stay
++/// contiguous, and the tuple key orders the same way. An adapter that
++/// swapped the two key segments would still hold every row but would
++/// hand the reconciler a different order.
++async fn case_probe_results_iterate_by_role_then_index<T: ObservationStore + ?Sized>(store: &T) {
++    let scope = "iteration-order";
++    // Written in an order that matches neither the expected output
++    // order nor the timestamps, so a passing assertion cannot be an
++    // accident of insertion sequence.
++    let rows = [
++        probe_row(scope, ProbeRole::Liveness, 0, ProbeStatus::Pass, 4_000),
++        probe_row(scope, ProbeRole::Startup, 1, ProbeStatus::Pass, 2_000),
++        probe_row(scope, ProbeRole::Readiness, 0, ProbeStatus::Pass, 3_000),
++        probe_row(scope, ProbeRole::Startup, 0, ProbeStatus::Pass, 1_000),
++    ];
++    for row in &rows {
++        store.write_probe_result(row.clone()).await.expect("(ix.d) probe write must succeed");
++    }
++
++    let read = store
++        .list_probe_results_for_alloc(&rows[0].alloc_id)
++        .await
++        .expect("(ix.d) list probe results");
++
++    let observed: Vec<(ProbeRole, u32)> =
++        read.iter().map(|r| (r.role, r.probe_idx.get())).collect();
++    assert_eq!(
++        observed,
++        vec![
++            (ProbeRole::Startup, 0),
++            (ProbeRole::Startup, 1),
++            (ProbeRole::Readiness, 0),
++            (ProbeRole::Liveness, 0),
++        ],
++        "(ix.d) rows iterate grouped by role (Startup < Readiness < Liveness, matching \
++         ProbeRole::as_key_byte) then ascending by probe_idx; got {observed:?}",
++    );
++}
+diff --git a/crates/overdrive-core/src/traits/driver.rs b/crates/overdrive-core/src/traits/driver.rs
+index 06e2588e..5d66ad48 100644
+--- a/crates/overdrive-core/src/traits/driver.rs
++++ b/crates/overdrive-core/src/traits/driver.rs
+@@ -510,4 +510,23 @@ pub trait Driver: Send + Sync + 'static {
+     ///
+     /// Default no-op — symmetric with [`Self::on_alloc_running`].
+     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
++
++    /// Lifecycle hook fired by the action shim when an allocation is
++    /// announced `Stable` (ADR-0055 — a NON-terminal condition).
++    ///
++    /// Startup probing is bounded by the startup window and is
++    /// complete at Stable; readiness and liveness are continuous
++    /// post-Stable per [`crate::observation::ProbeRole`]'s contract.
++    /// Implementations stop ONLY the startup-role tasks and leave the
++    /// supervisor alive.
++    ///
++    /// Per ADR-0080 § D4 this hook exists because routing `Stable`
++    /// through [`Self::on_alloc_terminal`] was a category error: it
++    /// tore down the whole probe supervisor, making readiness and
++    /// liveness structurally unreachable for their entire intended
++    /// lifetime.
++    ///
++    /// Default no-op — symmetric with [`Self::on_alloc_running`] /
++    /// [`Self::on_alloc_terminal`].
++    fn on_alloc_stable(&self, _alloc_id: &AllocationId) {}
+ }
+diff --git a/crates/overdrive-core/src/traits/observation_store.rs b/crates/overdrive-core/src/traits/observation_store.rs
+index 3c566039..c2d51b66 100644
+--- a/crates/overdrive-core/src/traits/observation_store.rs
++++ b/crates/overdrive-core/src/traits/observation_store.rs
+@@ -2166,19 +2166,28 @@ pub trait ObservationStore: Send + Sync + 'static {
+     ///   existed produces an unreachable orphan row (acceptable —
+     ///   readers filter by alloc_id at read time).
+     /// - `row.probe_idx` matches the spec's 0-indexed probe position
+-    ///   at the time of observation. The probe-runner is the only
+-    ///   sanctioned writer; it never invents indices.
++    ///   **within `row.role`'s own array** — per-role, not across the
++    ///   concatenation of all three roles (ADR-0057:132-134, ADR-0080
++    ///   § D1). The probe-runner is the only sanctioned writer, and it
++    ///   carries the parser-assigned `ProbeDescriptor.idx` verbatim;
++    ///   it never invents indices.
+     ///
+     /// # Postconditions
+     /// - On `Ok(())`, the row is durable: a subsequent
+     ///   [`Self::list_probe_results_for_alloc`] call MUST include the
+     ///   written row IFF its `last_observed_at_unix_ms` dominates the
+     ///   prior row at the composite primary key
+-    ///   `(alloc_id, probe_idx)`.
++    ///   `(alloc_id, role, probe_idx)`.
+     /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
+     ///   timestamp does NOT strictly exceed the existing row's
+-    ///   timestamp at the same `(alloc_id, probe_idx)` MUST NOT
++    ///   timestamp at the same `(alloc_id, role, probe_idx)` MUST NOT
+     ///   mutate state.
++    /// - `role` is load-bearing in the key (ADR-0080 § D2). Because
++    ///   `probe_idx` is per-role, an implementation that omits `role`
++    ///   makes `(alloc, Startup, 0)`, `(alloc, Readiness, 0)` and
++    ///   `(alloc, Liveness, 0)` collide on one key and clobber one
++    ///   another under LWW — silent durable data loss, not a
++    ///   read-miss.
+     /// - The probe-result surface is per-alloc-per-probe LATEST only;
+     ///   per-tick history is NOT persisted. Per
+     ///   `.claude/rules/development.md` § "Persist inputs, not derived
+@@ -2186,23 +2195,28 @@ pub trait ObservationStore: Send + Sync + 'static {
+     ///   live spec policy.
+     ///
+     /// # Edge cases
+-    /// - Concurrent writes for the same `(alloc_id, probe_idx)` with
+-    ///   identical `last_observed_at_unix_ms`: the second write loses
+-    ///   (strict-dominate rule). Idempotent.
++    /// - Concurrent writes for the same `(alloc_id, role, probe_idx)`
++    ///   with identical `last_observed_at_unix_ms`: the second write
++    ///   loses (strict-dominate rule). Idempotent.
++    /// - Two rows differing ONLY in `role` (same alloc, same
++    ///   `probe_idx`) are distinct rows and MUST both survive — the
++    ///   production shape for a Service declaring one startup and one
++    ///   readiness probe.
+     /// - `row.status == ProbeStatus::Fail { reason }` where `reason`
+     ///   is empty: accepted as-is. The trait does not validate the
+     ///   reason string shape — the renderer handles empty strings.
+     ///
+     /// # Observable invariants
+-    /// - For any `(alloc_id, probe_idx)`,
++    /// - For any `(alloc_id, role, probe_idx)`,
+     ///   `list_probe_results_for_alloc(alloc_id)` returns exactly one
+-    ///   row per distinct `probe_idx` — the LWW winner.
++    ///   row per distinct `(role, probe_idx)` pair — the LWW winner.
+     /// - `write_probe_result` is the ONLY mutator of the probe-result
+     ///   table; no other trait method writes probe rows.
+     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>;
+ 
+     /// List every LWW-winner [`ProbeResultRow`] for the given
+-    /// allocation, one row per distinct `probe_idx`.
++    /// allocation, across every role — one row per distinct
++    /// `(role, probe_idx)` pair.
+     ///
+     /// # Preconditions
+     /// - `alloc_id` is well-formed. The store does not validate
+@@ -2210,12 +2224,15 @@ pub trait ObservationStore: Send + Sync + 'static {
+     ///   returns `Ok(vec![])`.
+     ///
+     /// # Postconditions
+-    /// - Iteration order is deterministic — sorted ascending by
+-    ///   `probe_idx` (per
+-    ///   `.claude/rules/development.md` § "Ordered-collection choice"
+-    ///   — `BTreeMap`-shape semantics on the underlying store).
+-    /// - At most one row per distinct `probe_idx` is returned (the
+-    ///   LWW winner; see [`Self::write_probe_result`]).
++    /// - Iteration order is deterministic — grouped by `role` in
++    ///   [`ProbeRole::as_key_byte`] order (which agrees with the
++    ///   enum's derived `Ord`), and within a role sorted ascending by
++    ///   `probe_idx` (per `.claude/rules/development.md`
++    ///   § "Ordered-collection choice" — `BTreeMap`-shape semantics
++    ///   on the underlying store). Every adapter MUST agree on this
++    ///   order.
++    /// - At most one row per distinct `(role, probe_idx)` pair is
++    ///   returned (the LWW winner; see [`Self::write_probe_result`]).
+     /// - The returned rows have `row.alloc_id == *alloc_id` for every
+     ///   element. The store filters at read time; the caller does
+     ///   not need to re-filter.
+diff --git a/crates/overdrive-core/tests/acceptance/aggregate_validation.rs b/crates/overdrive-core/tests/acceptance/aggregate_validation.rs
+index 35f7e345..0a56df83 100644
+--- a/crates/overdrive-core/tests/acceptance/aggregate_validation.rs
++++ b/crates/overdrive-core/tests/acceptance/aggregate_validation.rs
+@@ -506,10 +506,11 @@ fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_
+ // ---------------------------------------------------------------------------
+ 
+ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+-use overdrive_core::observation::ProbeRole;
++use overdrive_core::observation::{ProbeIdx, ProbeRole};
+ 
+ fn make_http_probe(path: &str) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Http { path: path.to_owned(), port: 8080, host: None },
+         timeout_seconds: 5,
+@@ -573,6 +574,7 @@ fn service_from_submit_rejects_https_in_probe_path() {
+ fn service_from_submit_rejects_http_probe_with_zero_port() {
+     let mut spec = canonical_service_spec();
+     spec.startup_probes = vec![ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Http { path: "/healthz".to_owned(), port: 0, host: None },
+         timeout_seconds: 5,
+@@ -597,6 +599,7 @@ fn service_from_submit_rejects_http_probe_with_zero_port() {
+ fn service_from_submit_rejects_tcp_probe_with_zero_port() {
+     let mut spec = canonical_service_spec();
+     spec.startup_probes = vec![ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port: 0 },
+         timeout_seconds: 5,
+@@ -621,6 +624,7 @@ fn service_from_submit_rejects_tcp_probe_with_zero_port() {
+ fn service_from_submit_rejects_exec_probe_with_empty_command() {
+     let mut spec = canonical_service_spec();
+     spec.startup_probes = vec![ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Exec { command: vec![] },
+         timeout_seconds: 5,
+diff --git a/crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs b/crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs
+index d60c47f6..3fcbcf62 100644
+--- a/crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs
++++ b/crates/overdrive-core/tests/acceptance/health_check_toml_parse.rs
+@@ -829,3 +829,138 @@ fn liveness_failure_threshold_zero_yields_named_parse_error() {
+         other => panic!("expected ProbeFailureThresholdZero, got {other:?}"),
+     }
+ }
++
++// ---------------------------------------------------------------------
++// ADR-0080 § D7 item 6 — `ProbeDescriptor.idx` round-trip.
++//
++// `idx` is the parser-assigned 0-based position within the descriptor's
++// OWN role array (ADR-0057:132-134; `ProbeResultRow::probe_idx`'s
++// docstring; `discuss/shared-artifacts-registry.md`). ADR-0057:172
++// specified the field and the original implementation dropped it, which
++// forced `ProbeRunner::start_alloc` to invent an index from the only one
++// available at that call site — the flat position in the concatenated
++// `startup ++ readiness ++ liveness` transport vector. Readiness probe 0
++// then landed at flat index `startup_probes.len()` while every consumer
++// filtered on per-role index 0.
++//
++// The two properties below are what make the durable composite key
++// `(alloc_id, role, probe_idx)` (§ D2) a valid identity:
++//
++//   1. per-role positional — `probes[i].idx == i` for each role array;
++//   2. globally pairwise-distinct — no two descriptors ANYWHERE in the
++//      spec share a `(role, idx)` pair, so no two probes can collide on
++//      one durable key.
++//
++// Property 2 does not follow from property 1 alone: it additionally
++// requires each parser to stamp its own role, which is what keeps the
++// three per-role sequences from overlapping.
++// ---------------------------------------------------------------------
++
++/// Render `n` TCP probe entries under `[[health_check.<section>]]`.
++/// Each carries a distinct port so the descriptors are distinguishable
++/// beyond their index.
++fn tcp_probe_block(section: &str, n: usize) -> String {
++    use std::fmt::Write as _;
++
++    let mut out = String::new();
++    for i in 0..n {
++        let port = 9000 + u16::try_from(i).unwrap_or(0);
++        writeln!(out, "[[health_check.{section}]]\ntype = \"tcp\"\nport = {port}")
++            .expect("writing into a String is infallible");
++    }
++    out
++}
++
++proptest! {
++    #![proptest_config(ProptestConfig::with_cases(64))]
++
++    /// For ANY combination of declared probe counts (including >1 per
++    /// role and 0 for a role), every descriptor's `idx` equals its
++    /// position in its OWN role array, and every `(role, idx)` pair is
++    /// unique across the concatenation of all three arrays.
++    ///
++    /// `startup` is drawn from `1..=3` because an omitted startup
++    /// section triggers ADR-0058 default inference, which is covered by
++    /// its own case below — here we want the operator-declared array.
++    #[test]
++    fn parser_assigns_per_role_positional_indices_that_are_globally_unique(
++        startup_n in 1usize..=3,
++        readiness_n in 0usize..=3,
++        liveness_n in 0usize..=3,
++    ) {
++        let toml = format!(
++            "{SERVICE_PRELUDE}\n{}{}{}",
++            tcp_probe_block("startup", startup_n),
++            tcp_probe_block("readiness", readiness_n),
++            tcp_probe_block("liveness", liveness_n),
++        );
++        let spec = unwrap_service(
++            WorkloadSpecInput::from_toml_str(&toml).expect("multi-probe spec parses"),
++        );
++
++        prop_assert_eq!(spec.startup_probes.len(), startup_n);
++        prop_assert_eq!(spec.readiness_probes.len(), readiness_n);
++        prop_assert_eq!(spec.liveness_probes.len(), liveness_n);
++
++        // Property 1 — per-role positional.
++        for (role, probes) in [
++            (ProbeRole::Startup, &spec.startup_probes),
++            (ProbeRole::Readiness, &spec.readiness_probes),
++            (ProbeRole::Liveness, &spec.liveness_probes),
++        ] {
++            for (position, probe) in probes.iter().enumerate() {
++                prop_assert_eq!(
++                    probe.idx.get(),
++                    u32::try_from(position).expect("test vectors are tiny"),
++                    "{:?} probe at array position {} must carry idx {}",
++                    role,
++                    position,
++                    position,
++                );
++                prop_assert_eq!(
++                    probe.role,
++                    role,
++                    "each parser stamps its own role — without that, property 2 below cannot \
++                     hold",
++                );
++            }
++        }
++
++        // Property 2 — globally pairwise-distinct `(role, idx)`. This is
++        // the precondition for `(alloc_id, role, probe_idx)` being an
++        // identity: a duplicate pair means two probes clobber each
++        // other's durable row under LWW.
++        let flat: Vec<(ProbeRole, u32)> = spec
++            .startup_probes
++            .iter()
++            .chain(spec.readiness_probes.iter())
++            .chain(spec.liveness_probes.iter())
++            .map(|p| (p.role, p.idx.get()))
++            .collect();
++        let distinct: std::collections::BTreeSet<(ProbeRole, u32)> = flat.iter().copied().collect();
++        prop_assert_eq!(
++            distinct.len(),
++            flat.len(),
++            "every (role, idx) pair must be unique across all three role arrays; got {:?}",
++            flat,
++        );
++    }
++}
++
++/// The ADR-0058 default-inference site assigns `idx = 0` — it
++/// synthesises the sole member of the startup array.
++#[test]
++fn inferred_default_startup_probe_carries_per_role_index_zero() {
++    let spec = unwrap_service(
++        WorkloadSpecInput::from_toml_str(SERVICE_PRELUDE).expect("bare service parses"),
++    );
++    assert_eq!(spec.startup_probes.len(), 1, "ADR-0058 infers one default startup probe");
++    let inferred = &spec.startup_probes[0];
++    assert!(inferred.inferred, "the synthesised probe is flagged inferred");
++    assert_eq!(
++        inferred.idx,
++        overdrive_core::observation::ProbeIdx::new(0),
++        "the inferred probe is the sole member of the startup array, so its per-role index \
++         is 0",
++    );
++}
+diff --git a/crates/overdrive-core/tests/acceptance/intent_persists_probe_descriptors.rs b/crates/overdrive-core/tests/acceptance/intent_persists_probe_descriptors.rs
+index b1a9c3d0..86d36f4a 100644
+--- a/crates/overdrive-core/tests/acceptance/intent_persists_probe_descriptors.rs
++++ b/crates/overdrive-core/tests/acceptance/intent_persists_probe_descriptors.rs
+@@ -42,7 +42,7 @@ use overdrive_core::aggregate::{
+ };
+ use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+ use overdrive_core::codec::decode_envelope_bytes;
+-use overdrive_core::observation::ProbeRole;
++use overdrive_core::observation::{ProbeIdx, ProbeRole};
+ use proptest::prelude::*;
+ 
+ // ---------------------------------------------------------------------------
+@@ -66,6 +66,13 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
+ 
+ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+     (
++        // ADR-0080 § D1 — `idx` is drawn ARBITRARILY here, deliberately
++        // modelling a hostile wire client. `ServiceV1::from_submit` is
++        // the API/wire ingress and does not trust a caller-supplied
++        // index: it re-assigns from vector position, so a client cannot
++        // inject a duplicate `(role, idx)` pair and collide two probes'
++        // durable rows under the composite key (§ D2).
++        0u32..=9,
+         arb_probe_role(),
+         arb_mechanic(),
+         1u32..=60,
+@@ -77,6 +84,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+     )
+         .prop_map(
+             |(
++                idx,
+                 role,
+                 mechanic,
+                 timeout_seconds,
+@@ -86,6 +94,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+                 success_threshold,
+                 inferred,
+             )| ProbeDescriptor {
++                idx: ProbeIdx::new(idx),
+                 role,
+                 mechanic,
+                 timeout_seconds,
+@@ -98,6 +107,20 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+         )
+ }
+ 
++/// The projection `from_submit` is expected to apply to one probe
++/// vector: every field carried verbatim, `idx` re-assigned from the
++/// 0-based position (ADR-0080 § D1).
++fn expected_after_from_submit(input: &[ProbeDescriptor]) -> Vec<ProbeDescriptor> {
++    input
++        .iter()
++        .enumerate()
++        .map(|(position, probe)| ProbeDescriptor {
++            idx: ProbeIdx::new(u32::try_from(position).expect("test vectors are tiny")),
++            ..probe.clone()
++        })
++        .collect()
++}
++
+ fn arb_probe_vec() -> impl Strategy<Value = Vec<ProbeDescriptor>> {
+     proptest::collection::vec(arb_probe_descriptor(), 0..=3)
+ }
+@@ -158,13 +181,20 @@ proptest! {
+     /// validating constructor MUST NOT drop probe data on the way
+     /// through. This is the gap that produced the bug: the legacy
+     /// `from_submit` had ZERO probe-related code.
++    ///
++    /// Every field is carried verbatim EXCEPT `idx`, which ADR-0080
++    /// § D1 re-assigns from the descriptor's 0-based position in its
++    /// own vector. The generator draws `idx` arbitrarily, so this
++    /// assertion is what pins the re-assignment: a `from_submit` that
++    /// trusted the caller's index would fail here for every case whose
++    /// drawn index differs from its position.
+     #[test]
+     fn at_02_from_submit_projects_all_three_probe_vecs(
+         input in arb_service_spec_input(),
+     ) {
+-        let expected_startup = input.startup_probes.clone();
+-        let expected_readiness = input.readiness_probes.clone();
+-        let expected_liveness = input.liveness_probes.clone();
++        let expected_startup = expected_after_from_submit(&input.startup_probes);
++        let expected_readiness = expected_after_from_submit(&input.readiness_probes);
++        let expected_liveness = expected_after_from_submit(&input.liveness_probes);
+ 
+         let svc = ServiceV1::from_submit(input)
+             .expect("canonical ServiceSpecInput is valid");
+@@ -173,6 +203,49 @@ proptest! {
+         prop_assert_eq!(&svc.readiness_probes, &expected_readiness);
+         prop_assert_eq!(&svc.liveness_probes, &expected_liveness);
+     }
++
++    /// ADR-0080 § D1 regression guard — the API/wire ingress never
++    /// admits two descriptors of one vector carrying the same `idx`.
++    ///
++    /// A duplicate `(role, idx)` pair would make two probes share one
++    /// durable `(alloc_id, role, probe_idx)` key (§ D2) and silently
++    /// clobber each other under LWW. The generator can and does draw
++    /// duplicate indices; `from_submit` MUST normalise them away.
++    #[test]
++    fn from_submit_normalises_indices_so_no_two_probes_of_a_role_collide(
++        input in arb_service_spec_input(),
++    ) {
++        let startup_len = input.startup_probes.len();
++        let readiness_len = input.readiness_probes.len();
++        let liveness_len = input.liveness_probes.len();
++
++        let svc = ServiceV1::from_submit(input)
++            .expect("canonical ServiceSpecInput is valid");
++
++        for (label, probes, expected_len) in [
++            ("startup", &svc.startup_probes, startup_len),
++            ("readiness", &svc.readiness_probes, readiness_len),
++            ("liveness", &svc.liveness_probes, liveness_len),
++        ] {
++            let indices: std::collections::BTreeSet<u32> =
++                probes.iter().map(|p| p.idx.get()).collect();
++            prop_assert_eq!(
++                indices.len(),
++                expected_len,
++                "{} probe indices must be pairwise distinct after from_submit; got {:?}",
++                label,
++                probes.iter().map(|p| p.idx.get()).collect::<Vec<_>>(),
++            );
++            for (position, probe) in probes.iter().enumerate() {
++                prop_assert_eq!(
++                    probe.idx.get(),
++                    u32::try_from(position).expect("test vectors are tiny"),
++                    "{} probe idx must equal its 0-based position",
++                    label,
++                );
++            }
++        }
++    }
+ }
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs b/crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs
+index 80fe6177..13e9ea70 100644
+--- a/crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs
++++ b/crates/overdrive-core/tests/acceptance/probe_descriptor_roundtrip.rs
+@@ -56,6 +56,10 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
+ 
+ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+     (
++        // ADR-0080 § D1 — `idx` is the per-role array position. The
++        // roundtrip property must hold for every representable index,
++        // not just 0, so the generator spans a multi-probe range.
++        0u32..=3,
+         arb_probe_role(),
+         arb_mechanic(),
+         1u32..=60,
+@@ -67,6 +71,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+     )
+         .prop_map(
+             |(
++                idx,
+                 role,
+                 mechanic,
+                 timeout_seconds,
+@@ -77,6 +82,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
+                 inferred,
+             )| {
+                 ProbeDescriptor {
++                    idx: ProbeIdx::new(idx),
+                     role,
+                     mechanic,
+                     timeout_seconds,
+diff --git a/crates/overdrive-core/tests/acceptance/workload_lifecycle_projects_service_probes_into_alloc_spec.rs b/crates/overdrive-core/tests/acceptance/workload_lifecycle_projects_service_probes_into_alloc_spec.rs
+index fc2846e0..06765733 100644
+--- a/crates/overdrive-core/tests/acceptance/workload_lifecycle_projects_service_probes_into_alloc_spec.rs
++++ b/crates/overdrive-core/tests/acceptance/workload_lifecycle_projects_service_probes_into_alloc_spec.rs
+@@ -36,7 +36,7 @@ use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, ServiceV
+ use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadIntent, WorkloadKind};
+ use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+ use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
+-use overdrive_core::observation::ProbeRole;
++use overdrive_core::observation::{ProbeIdx, ProbeRole};
+ use overdrive_core::reconcilers::{
+     Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
+     WorkloadLifecycleView, project_probe_descriptors,
+@@ -94,7 +94,19 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+ }
+ 
+ fn tcp_descriptor(role: ProbeRole, port: u16) -> ProbeDescriptor {
++    tcp_descriptor_at(role, 0, port)
++}
++
++/// As [`tcp_descriptor`], with an explicit per-role array position.
++///
++/// ADR-0080 § D1 — `idx` is the descriptor's 0-based position within
++/// its OWN role array, so a fixture declaring two probes of one role
++/// must carry `0` and `1`. Two descriptors of one role sharing an
++/// index would collide on the durable `(alloc_id, role, probe_idx)`
++/// key (§ D2).
++fn tcp_descriptor_at(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(idx),
+         role,
+         mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port },
+         timeout_seconds: 1,
+@@ -143,9 +155,12 @@ fn alloc_failed_with_budget(alloc_id: &str, workload_id: &str, node_id: &str) ->
+ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
+     let nodes = one_node_map("local");
+ 
+-    // Two TCP startup descriptors — the operator's declared probe set.
+-    let descriptors =
+-        vec![tcp_descriptor(ProbeRole::Startup, 8080), tcp_descriptor(ProbeRole::Startup, 9090)];
++    // Two TCP startup descriptors — the operator's declared probe set,
++    // at per-role positions 0 and 1 (ADR-0080 § D1).
++    let descriptors = vec![
++        tcp_descriptor_at(ProbeRole::Startup, 0, 8080),
++        tcp_descriptor_at(ProbeRole::Startup, 1, 9090),
++    ];
+ 
+     let desired = WorkloadLifecycleState {
+         workload_id: jid("svc"),
+@@ -197,6 +212,18 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
+         start.probe_descriptors, descriptors,
+         "spec.probe_descriptors must byte-equal desired.probe_descriptors",
+     );
++    // ADR-0080 § D1 — the projection carries the parser-assigned
++    // per-role `idx` VERBATIM. `project_probe_descriptors` concatenates
++    // startup ++ readiness ++ liveness into a transport vector whose
++    // positions carry no index semantics; a projection that re-derived
++    // the index from flat position would be indistinguishable here for
++    // startup (which sorts first) but would silently mis-index every
++    // readiness and liveness probe downstream.
++    assert_eq!(
++        start.probe_descriptors.iter().map(|d| d.idx.get()).collect::<Vec<_>>(),
++        vec![0, 1],
++        "two startup probes must reach the AllocationSpec at per-role indices 0 and 1",
++    );
+ }
+ 
+ const fn spec_descriptors_len(spec: &overdrive_core::traits::driver::AllocationSpec) -> usize {
+diff --git a/crates/overdrive-core/tests/schema_evolution/service_spec.rs b/crates/overdrive-core/tests/schema_evolution/service_spec.rs
+index cea4a9cd..8f9c7007 100644
+--- a/crates/overdrive-core/tests/schema_evolution/service_spec.rs
++++ b/crates/overdrive-core/tests/schema_evolution/service_spec.rs
+@@ -20,7 +20,7 @@ use overdrive_core::aggregate::{
+ };
+ use overdrive_core::codec::VersionedEnvelope;
+ use overdrive_core::dataplane::backend_key::Proto;
+-use overdrive_core::observation::ProbeRole;
++use overdrive_core::observation::{ProbeIdx, ProbeRole};
+ 
+ use super::harness::assert_envelope_v_roundtrip;
+ 
+@@ -54,6 +54,7 @@ fn canonical_v2_payload() -> ServiceSpecLatest {
+             protocol: Proto::Tcp,
+         }],
+         startup_probes: vec![ProbeDescriptor {
++            idx: ProbeIdx::new(0),
+             role: ProbeRole::Startup,
+             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: 9090 },
+             timeout_seconds: 5,
+@@ -79,7 +80,22 @@ const FIXTURE_V1: &str = "7376632d7072652d70726f6265732f7573722f62696e2f73657276
+ /// Hex-encoded rkyv-archived bytes of
+ /// `ServiceSpecEnvelope::V2(canonical_v2_payload())`. Pinned on the
+ /// GREEN landing of step 01-02.
+-const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f736572766572000000822300000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e00000000000000000000000000000000000000010000000000000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b4ffffff00000000acffffff00000000";
++///
++/// **Regenerated for ADR-0080 § D1** (2026-08-02) — `ProbeDescriptor`
++/// gained the per-role `idx: ProbeIdx` field ADR-0057:172 specified and
++/// the original implementation dropped. The archived layout of
++/// `ProbeDescriptor` is positional, and this fixture's `startup_probes`
++/// vector is POPULATED, so the added field shifts its offsets. Under
++/// the Phase-1 greenfield single-cut migration policy (per
++/// `feedback_single_cut_greenfield_migrations.md`: "delete the on-disk
++/// redb file" is the official upgrade path) the new field set is
++/// admitted in-place rather than minting `ServiceSpecV3`; the fixture is
++/// regenerated in the SAME commit so the structural defense — every
++/// persisted layout has a pinned golden-bytes fixture — is preserved.
++/// `FIXTURE_V1` above is deliberately NOT regenerated: `ServiceSpecV1`
++/// carries no `ProbeDescriptor`, so its layout provably did not move
++/// (verified — the regeneration tool emits byte-identical V1 hex).
++const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f73657276657200000082230000000000000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e000000000000000000000000000000000000000100000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b8ffffff00000000b0ffffff00000000";
+ 
+ /// V1 fixture decodes through the bumped envelope and projects to the
+ /// canonical V2 `Latest` (with three empty probe vectors). This is the
+diff --git a/crates/overdrive-sim/src/adapters/observation_store.rs b/crates/overdrive-sim/src/adapters/observation_store.rs
+index 6b18d9aa..69190ce6 100644
+--- a/crates/overdrive-sim/src/adapters/observation_store.rs
++++ b/crates/overdrive-sim/src/adapters/observation_store.rs
+@@ -61,7 +61,7 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+ use overdrive_core::id::{
+     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
+ };
+-use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
+ use overdrive_core::traits::observation_store::{
+     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
+     ObservationStore, ObservationStoreError, ReconcileConflictRow, ServiceBackendRow,
+@@ -121,11 +121,21 @@ struct PeerState {
+     /// for deterministic iteration across seeds (dst-lint /
+     /// `.claude/rules/development.md` § "Ordered-collection choice").
+     by_reconcile_conflict: Mutex<BTreeMap<(ServiceId, Ipv4Addr, u16, Proto), ReconcileConflictRow>>,
+-    /// `probe_results` LWW index — keyed on `(alloc_id, probe_idx)`
+-    /// per ADR-0054 §5. One row per `(alloc_id, probe_idx)` carrying
+-    /// the latest observed outcome; LWW resolution on
++    /// `probe_results` LWW index — keyed on
++    /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
++    /// ADR-0080 § D2. One row per `(alloc_id, role, probe_idx)`
++    /// carrying the latest observed outcome; LWW resolution on
+     /// `last_observed_at_unix_ms`.
+-    by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeIdx), ProbeResultRow>>,
++    ///
++    /// `role` is load-bearing in the key, exactly as in the byte-keyed
++    /// `LocalObservationStore`: `probe_idx` is 0-indexed within its
++    /// own role array, so without `role` the three roles' probe 0
++    /// would collide and clobber each other. `ProbeRole`'s derived
++    /// `Ord` (declaration order) agrees with its `as_key_byte`
++    /// discriminant, so both adapters iterate an alloc's rows in the
++    /// same order per `.claude/rules/development.md` § "Trait
++    /// definitions specify behavior, not just signature".
++    by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeRole, ProbeIdx), ProbeResultRow>>,
+     /// `issued_certificates` audit index — keyed on the issued
+     /// certificate's `CertSerial` (ADR-0063 D6). Append-only: serials
+     /// are CSPRNG-drawn, so a key collision is the issuance bug, not an
+@@ -443,12 +453,13 @@ impl PeerState {
+         self.by_alloc.lock().get(alloc_id).cloned()
+     }
+ 
+-    /// LWW merge for `probe_results`. Keyed on `(alloc_id, probe_idx)`
+-    /// per ADR-0054 §5. Strictly-dominate on
++    /// LWW merge for `probe_results`. Keyed on
++    /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
++    /// ADR-0080 § D2. Strictly-dominate on
+     /// `last_observed_at_unix_ms` — equal timestamps are no-ops
+     /// (idempotent re-write).
+     fn apply_probe_result(&self, incoming: &ProbeResultRow) -> bool {
+-        let key = (incoming.alloc_id.clone(), incoming.probe_idx);
++        let key = (incoming.alloc_id.clone(), incoming.role, incoming.probe_idx);
+         let mut by_pr = self.by_probe_results.lock();
+         match by_pr.get(&key) {
+             None => {
+@@ -465,12 +476,18 @@ impl PeerState {
+         }
+     }
+ 
+-    /// Snapshot every probe-result row for a single allocation,
+-    /// sorted ascending by `probe_idx`. Deterministic iteration via
+-    /// the `BTreeMap` key ordering.
++    /// Snapshot every probe-result row for a single allocation, across
++    /// every role, grouped by `role` then ascending by `probe_idx`.
++    /// Deterministic iteration via the `BTreeMap` key ordering, which
++    /// matches the byte-keyed `LocalObservationStore`'s scan order
++    /// because `ProbeRole`'s `Ord` agrees with its `as_key_byte`.
+     fn probe_results_for_alloc(&self, alloc_id: &AllocationId) -> Vec<ProbeResultRow> {
+         let by_pr = self.by_probe_results.lock();
+-        by_pr.iter().filter(|((aid, _), _)| aid == alloc_id).map(|(_, row)| row.clone()).collect()
++        by_pr
++            .iter()
++            .filter(|((aid, _, _), _)| aid == alloc_id)
++            .map(|(_, row)| row.clone())
++            .collect()
+     }
+ 
+     /// Snapshot every `issued_certificates` audit row this peer holds,
+diff --git a/crates/overdrive-store-local/src/observation_backend.rs b/crates/overdrive-store-local/src/observation_backend.rs
+index 5057e465..4d1a745b 100644
+--- a/crates/overdrive-store-local/src/observation_backend.rs
++++ b/crates/overdrive-store-local/src/observation_backend.rs
+@@ -79,7 +79,7 @@ use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+ use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
+ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+ use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
+-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope};
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
+ use overdrive_core::traits::observation_store::{
+     AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
+     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
+@@ -126,12 +126,21 @@ const RECONCILE_CONFLICT_TABLE: TableDefinition<&[u8], &[u8]> =
+     TableDefinition::new("observation_reconcile_conflict");
+ 
+ /// Holds the rkyv-archived bytes of every `ProbeResultRow`, keyed on
+-/// the canonical composite encoding of `(alloc_id, probe_idx)` per
+-/// ADR-0054 §5. Key layout: `alloc_id_bytes || 0x00 || probe_idx LE
+-/// u32` — the NUL separator guarantees unambiguous prefix-scan
+-/// boundaries (no `AllocationId` byte sequence may contain NUL since
+-/// it is parsed from non-empty `&str`). LWW resolution on
++/// the canonical composite encoding of `(alloc_id, role, probe_idx)`
++/// per ADR-0054 §5 as amended by ADR-0080 § D2. Key layout:
++/// `alloc_id_bytes || 0x00 || role_byte || probe_idx LE u32` — the NUL
++/// separator guarantees unambiguous prefix-scan boundaries (no
++/// `AllocationId` byte sequence may contain NUL since it is parsed
++/// from non-empty `&str`). LWW resolution on
+ /// `last_observed_at_unix_ms`.
++///
++/// `role_byte` ([`ProbeRole::as_key_byte`]) is load-bearing, not
++/// decorative: `probe_idx` is 0-indexed **within its own role array**,
++/// so `startup[0]`, `readiness[0]` and `liveness[0]` would otherwise
++/// encode to one key and clobber each other under LWW — silent
++/// durable data loss. It precedes `probe_idx` so a role's rows stay
++/// contiguous under the alloc prefix, preserving ordered per-role
++/// iteration.
+ const PROBE_RESULTS_TABLE: TableDefinition<&[u8], &[u8]> =
+     TableDefinition::new("observation_probe_results");
+ 
+@@ -170,23 +179,34 @@ const ISSUANCE_ORDINAL_COUNTER_TABLE: TableDefinition<&[u8], u64> =
+ /// construction; the empty slice is the canonical one-entry key.
+ const ISSUANCE_ORDINAL_KEY: &[u8] = b"next";
+ 
+-/// Encode the composite `(alloc_id, probe_idx)` key as a byte
+-/// sequence. Sort order on the underlying redb `BTree` mirrors the
+-/// lexicographic-on-bytes order of this layout — for a given
+-/// `alloc_id`, probe indices sort ascending.
+-fn encode_probe_result_key(alloc_id: &AllocationId, probe_idx: ProbeIdx) -> Vec<u8> {
++/// Encode the composite `(alloc_id, role, probe_idx)` key as a byte
++/// sequence, per ADR-0080 § D2. Sort order on the underlying redb
++/// `BTree` mirrors the lexicographic-on-bytes order of this layout —
++/// for a given `alloc_id`, rows group by role (in
++/// [`ProbeRole::as_key_byte`] order, which agrees with the enum's
++/// derived `Ord`) and within a role sort ascending by probe index.
++fn encode_probe_result_key(
++    alloc_id: &AllocationId,
++    role: ProbeRole,
++    probe_idx: ProbeIdx,
++) -> Vec<u8> {
+     let alloc_bytes = alloc_id.as_str().as_bytes();
+     let idx_bytes = probe_idx.get().to_le_bytes();
+-    let mut out = Vec::with_capacity(alloc_bytes.len() + 1 + idx_bytes.len());
++    let mut out = Vec::with_capacity(alloc_bytes.len() + 2 + idx_bytes.len());
+     out.extend_from_slice(alloc_bytes);
+     out.push(0x00);
++    out.push(role.as_key_byte());
+     out.extend_from_slice(&idx_bytes);
+     out
+ }
+ 
+-/// Encode the prefix `(alloc_id, *)` for range scans — the
++/// Encode the prefix `(alloc_id, *, *)` for range scans — the
+ /// `alloc_id` bytes + NUL separator (first segment of
+ /// [`encode_probe_result_key`]).
++///
++/// Unchanged by ADR-0080 § D2: `role_byte` is inserted AFTER the NUL,
++/// so the `[alloc||0x00, alloc||0x01)` range still captures every one
++/// of the alloc's rows across every role in one scan.
+ fn encode_probe_result_prefix(alloc_id: &AllocationId) -> Vec<u8> {
+     let alloc_bytes = alloc_id.as_str().as_bytes();
+     let mut out = Vec::with_capacity(alloc_bytes.len() + 1);
+@@ -1172,15 +1192,16 @@ fn apply_service_backends_lww(
+ }
+ 
+ /// LWW-guarded insert for `ProbeResultRow`. Keyed on the composite
+-/// `(alloc_id, probe_idx)` per ADR-0054 §5. Strictly-dominate on
+-/// `last_observed_at_unix_ms` — equal timestamps are no-ops
+-/// (idempotent re-write). On envelope decode failure of the prior
+-/// row, treats the incoming write as dominating per ADR-0048 § 3.
++/// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
++/// ADR-0080 § D2. Strictly-dominate on `last_observed_at_unix_ms` —
++/// equal timestamps are no-ops (idempotent re-write). On envelope
++/// decode failure of the prior row, treats the incoming write as
++/// dominating per ADR-0048 § 3.
+ fn apply_probe_result_lww(
+     table: &mut Table<'_, &[u8], &[u8]>,
+     incoming: &ProbeResultRow,
+ ) -> Result<bool, ObservationStoreError> {
+-    let key = encode_probe_result_key(&incoming.alloc_id, incoming.probe_idx);
++    let key = encode_probe_result_key(&incoming.alloc_id, incoming.role, incoming.probe_idx);
+     let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+         match decode_envelope::<ProbeResultRowEnvelope>(prior.value()) {
+             Ok(prior_row) => incoming.last_observed_at_unix_ms > prior_row.last_observed_at_unix_ms,
+diff --git a/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs b/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
+index d18d1061..29952067 100644
+--- a/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
++++ b/crates/overdrive-store-local/tests/integration/probe_result_roundtrip.rs
+@@ -1,11 +1,12 @@
+ //! Tier 3 integration — `LocalObservationStore::write_probe_result`
+ //! / `list_probe_results_for_alloc` roundtrip across redb reopens
+-//! plus LWW semantics on `(alloc_id, probe_idx)`.
++//! plus LWW semantics on `(alloc_id, role, probe_idx)`.
+ //!
+-//! Per ADR-0054 §5 (probe-results table) and ADR-0048 (versioned
+-//! envelope evolution) — every persisted `ProbeResultRow` round-trips
+-//! bit-identical through the rkyv envelope, and stale writes are
+-//! no-ops under the strict-dominate LWW rule.
++//! Per ADR-0054 §5 (probe-results table, key amended by ADR-0080 § D2)
++//! and ADR-0048 (versioned envelope evolution) — every persisted
++//! `ProbeResultRow` round-trips bit-identical through the rkyv
++//! envelope, and stale writes are no-ops under the strict-dominate LWW
++//! rule.
+ 
+ #![allow(clippy::expect_used)]
+ 
+@@ -153,6 +154,80 @@ async fn probe_results_per_alloc_per_probe_idx_independent_keys() {
+     assert_eq!(other_read[0].probe_idx, ProbeIdx::new(0));
+ }
+ 
++/// ADR-0080 § D2 / § A2 — the redb byte-key encoder puts `role` in the
++/// key, so the three roles' probe **0** are three distinct rows.
++///
++/// This is the durable-storage half of the guard the trait-level
++/// conformance harness runs against every adapter
++/// (`overdrive_core::testing::observation_store::run_lww_conformance`
++/// case ix.a); it is repeated here against the real redb file, ACROSS A
++/// REOPEN, because the byte-encoded key is what actually lands on disk
++/// and a prefix-scan boundary error would only surface after an fsync.
++///
++/// Fails for any encoder that omits `role_byte`: `probe_idx` is
++/// 0-indexed within its own role array, so the three rows would encode
++/// to one key and the two earlier writes would be silently destroyed
++/// under LWW rather than merely unreadable.
++#[tokio::test]
++async fn probe_results_per_alloc_are_keyed_by_role_as_well_as_index() {
++    let tmp = TempDir::new().expect("tempdir");
++    let db_path = tmp.path().join("obs.redb");
++
++    let alloc_id = alloc("alloc-role-keyed-1");
++    // Every row sits at per-role index 0 — the production shape for a
++    // Service declaring one probe of each role. Distinct statuses make
++    // a lost row identifiable rather than merely missing.
++    let mk = |role: ProbeRole, status: ProbeStatus, at: u64| ProbeResultRow {
++        alloc_id: alloc_id.clone(),
++        probe_idx: ProbeIdx::new(0),
++        role,
++        status,
++        last_observed_at_unix_ms: at,
++        inferred: false,
++    };
++    let startup = mk(ProbeRole::Startup, ProbeStatus::Pass, 1_000);
++    let readiness = mk(
++        ProbeRole::Readiness,
++        ProbeStatus::Fail { last_fail_reason: "not-serving-yet".to_owned() },
++        2_000,
++    );
++    let liveness = mk(ProbeRole::Liveness, ProbeStatus::Pass, 3_000);
++
++    {
++        let store = LocalObservationStore::open(&db_path).expect("open store");
++        for row in [&startup, &readiness, &liveness] {
++            store.write_probe_result(row.clone()).await.expect("write role-keyed row");
++        }
++    }
++
++    // Reopen — the assertion is about what survived to disk under the
++    // byte-encoded key, not about in-memory state.
++    let store = LocalObservationStore::open(&db_path).expect("reopen store");
++    let read = store.list_probe_results_for_alloc(&alloc_id).await.expect("list after reopen");
++
++    assert_eq!(
++        read.len(),
++        3,
++        "all three roles' probe 0 must survive as distinct rows; got {:?}",
++        read.iter().map(|r| (r.role, r.probe_idx.get())).collect::<Vec<_>>(),
++    );
++    for expected in [&startup, &readiness, &liveness] {
++        assert!(
++            read.contains(expected),
++            "the {:?}-role row must survive verbatim across the reopen; got {read:?}",
++            expected.role,
++        );
++    }
++    // The `role_byte` precedes `probe_idx` in the key layout precisely
++    // so a role's rows stay contiguous under the alloc prefix; the scan
++    // therefore yields them in `ProbeRole::as_key_byte` order.
++    assert_eq!(
++        read.iter().map(|r| r.role).collect::<Vec<_>>(),
++        vec![ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness],
++        "the prefix scan groups by role in as_key_byte order",
++    );
++}
++
+ /// S-SHCP-INT-01-07 (US-01 / AC #6) — listing an alloc with no
+ /// probe-result rows returns `Ok(vec![])`, never an error.
+ #[tokio::test]
+diff --git a/crates/overdrive-worker/src/driver.rs b/crates/overdrive-worker/src/driver.rs
+index cd949546..397894cc 100644
+--- a/crates/overdrive-worker/src/driver.rs
++++ b/crates/overdrive-worker/src/driver.rs
+@@ -28,6 +28,7 @@ use tokio::sync::{mpsc, oneshot};
+ use tracing::{debug, warn};
+ 
+ use overdrive_core::id::AllocationId;
++use overdrive_core::observation::ProbeRole;
+ use overdrive_core::traits::CgroupFs;
+ use overdrive_core::traits::clock::Clock;
+ use overdrive_core::traits::driver::{
+@@ -767,6 +768,23 @@ impl Driver for ExecDriver {
+             runner.stop_alloc(alloc_id);
+         }
+     }
++
++    /// Per ADR-0080 § D4: `Stable` is NON-terminal (ADR-0055), so it
++    /// retires only the startup role. Readiness and liveness keep
++    /// ticking under the surviving supervisor — they are continuous
++    /// post-Stable by `ProbeRole`'s own contract, and cancelling them
++    /// here is what made `Backend.healthy` a constant rather than a
++    /// function of observation.
++    ///
++    /// Per-role teardown rather than "leave everything running"
++    /// because `supervised_probe_loop` is unbounded: it ticks until
++    /// cancelled, so a surviving startup task would keep writing
++    /// post-Stable startup rows that LWW into `latest`.
++    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
++        if let Some(ref runner) = self.probe_runner {
++            runner.stop_role(alloc_id, ProbeRole::Startup);
++        }
++    }
+ }
+ 
+ /// Spawn a per-allocation watcher task that owns the `Child`, awaits
+diff --git a/crates/overdrive-worker/src/probe_runner/mod.rs b/crates/overdrive-worker/src/probe_runner/mod.rs
+index 0189a995..79db946b 100644
+--- a/crates/overdrive-worker/src/probe_runner/mod.rs
++++ b/crates/overdrive-worker/src/probe_runner/mod.rs
+@@ -43,7 +43,7 @@ use std::time::Duration;
+ 
+ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+ use overdrive_core::id::AllocationId;
+-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeStatus};
++use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+ use overdrive_core::traits::clock::Clock;
+ use overdrive_core::traits::observation_store::ObservationStore;
+ use overdrive_core::traits::prober::{
+@@ -320,8 +320,18 @@ impl ProbeRunner {
+             return root_token;
+         }
+         supervisor.mark_started();
+-        for (idx, descriptor) in probe_descriptors.into_iter().enumerate() {
+-            let handle = supervisor.spawn_probe_task();
++        for descriptor in probe_descriptors {
++            // ADR-0080 § D1 — consume the parser-assigned per-role
++            // index verbatim. The flat vector `project_probe_descriptors`
++            // hands us is a TRANSPORT concatenating startup ++ readiness
++            // ++ liveness; its positions carry no index semantics, so
++            // deriving an index from `enumerate()` here (as this site
++            // previously did) put readiness probe 0 at flat index
++            // `startup_probes.len()` while every consumer filtered on
++            // per-role index 0 — the read-miss that made readiness and
++            // liveness structurally unobservable.
++            let probe_idx = descriptor.idx;
++            let handle = supervisor.spawn_probe_task(descriptor.role);
+             let child_token = handle.cancellation_token();
+             let tcp_prober = Arc::clone(&self.tcp_prober);
+             let http_prober = Arc::clone(&self.http_prober);
+@@ -329,12 +339,6 @@ impl ProbeRunner {
+             let clock = Arc::clone(&self.clock);
+             let observation_store = Arc::clone(&self.observation_store);
+             let alloc_id_for_task = alloc_id.clone();
+-            // ProbeIdx is 0-indexed across the descriptor vector
+-            // per the `discuss/shared-artifacts-registry.md`
+-            // contract — saturating cast keeps this safe past
+-            // u32::MAX descriptors (operationally impossible; the
+-            // max-attempts ceiling is 30).
+-            let probe_idx = ProbeIdx::new(u32::try_from(idx).unwrap_or(u32::MAX));
+             tokio::spawn(async move {
+                 supervised_probe_loop(
+                     tcp_prober,
+@@ -374,6 +378,36 @@ impl ProbeRunner {
+         }
+     }
+ 
++    /// Cancel every probe task of `role` under `alloc_id`, leaving the
++    /// supervisor and all other roles running.
++    ///
++    /// Cooperative shutdown only, same discipline as [`Self::stop_alloc`].
++    /// Idempotent: an unknown alloc, or a role with no live tasks, is
++    /// a no-op.
++    ///
++    /// Per ADR-0080 § D4 this is what `Stable` drives — `Stable` is a
++    /// NON-terminal condition (ADR-0055), so it retires the startup
++    /// role only and leaves readiness / liveness supervision intact.
++    /// [`Self::active_alloc_count`] still reports the alloc afterwards;
++    /// the supervisor is alive, only one role's tasks are cancelled.
++    pub fn stop_role(&self, alloc_id: &AllocationId, role: ProbeRole) {
++        let supervisors = self.supervisors.lock();
++        if let Some(supervisor) = supervisors.get(alloc_id) {
++            supervisor.cancel_role(role);
++        }
++    }
++
++    /// Whether `role` is still supervised for `alloc_id`. Inspection
++    /// surface for tests and operator diagnostics, beside
++    /// [`Self::active_alloc_count`].
++    ///
++    /// `false` for an unknown alloc, and for a role that never spawned
++    /// a task (an undeclared role has no token).
++    #[must_use]
++    pub fn is_role_live(&self, alloc_id: &AllocationId, role: ProbeRole) -> bool {
++        self.supervisors.lock().get(alloc_id).is_some_and(|s| s.is_role_live(role))
++    }
++
+     /// Count of live per-alloc supervisors — exposed for inspection
+     /// by tests and operator-facing diagnostics.
+     #[must_use]
+diff --git a/crates/overdrive-worker/src/probe_runner/supervisor.rs b/crates/overdrive-worker/src/probe_runner/supervisor.rs
+index bc1fcd64..5f5eaca5 100644
+--- a/crates/overdrive-worker/src/probe_runner/supervisor.rs
++++ b/crates/overdrive-worker/src/probe_runner/supervisor.rs
+@@ -1,17 +1,31 @@
+-//! Per-alloc supervisor — owns a [`tokio::task::JoinSet`] of per-
+-//! probe tasks plus the [`tokio_util::sync::CancellationToken`] that
+-//! cooperatively shuts them down.
++//! Per-alloc supervisor — owns the root
++//! [`tokio_util::sync::CancellationToken`] that cooperatively shuts
++//! down every per-probe task, plus one intermediate token per
++//! [`ProbeRole`] so a single role can be stopped independently.
+ //!
+ //! Per ADR-0054 §2: each allocation gets ONE supervisor; that
+ //! supervisor spawns ONE task per declared/inferred probe. Tasks
+-//! observe the supervisor's cancellation token on every `select!`
+-//! round and exit cooperatively — no [`tokio::task::JoinHandle::abort`]
+-//! per `.claude/rules/testing.md` § cooperative-shutdown discipline.
++//! observe their cancellation token on every `select!` round and exit
++//! cooperatively — no [`tokio::task::JoinHandle::abort`] per
++//! `.claude/rules/testing.md` § cooperative-shutdown discipline. The
++//! supervisor holds no [`tokio::task::JoinSet`]; cancellation alone is
++//! sufficient because every probe task self-terminates on observing
++//! its token.
++//!
++//! Per ADR-0080 § D4 the token graph is two levels deep —
++//! `root → per-role → per-task` — so `Stable` (a NON-terminal
++//! condition per ADR-0055) can retire only the startup role while
++//! readiness and liveness keep ticking. Cancelling `root` still
++//! cancels every role transitively, so the whole-supervisor teardown
++//! stays atomic.
+ //!
+ //! The supervisor is `Send + Sync` so the `ProbeRunner` can hold it
+ //! inside a `parking_lot::Mutex<BTreeMap<AllocationId, _>>` and
+ //! mutate from any async context.
+ 
++use std::collections::BTreeMap;
++
++use overdrive_core::observation::ProbeRole;
+ use tokio_util::sync::CancellationToken;
+ 
+ /// Cooperative-shutdown handle for a single per-probe task.
+@@ -23,9 +37,11 @@ use tokio_util::sync::CancellationToken;
+ /// child cooperatively).
+ #[derive(Debug)]
+ pub struct ProbeTaskHandle {
+-    /// Child token derived from the supervisor's root token.
+-    /// Dropping the supervisor cancels the root, which propagates to
+-    /// every child token simultaneously.
++    /// Child token derived from the task's ROLE token, which is
++    /// itself a child of the supervisor's root token (ADR-0080 § D4).
++    /// Cancelling the role cancels only that role's tasks; dropping
++    /// or cancelling the supervisor cancels the root, which propagates
++    /// through every role token to every task simultaneously.
+     cancel: CancellationToken,
+ }
+ 
+@@ -39,26 +55,38 @@ impl ProbeTaskHandle {
+     }
+ }
+ 
+-/// Per-alloc supervisor. Owns the root [`CancellationToken`] and a
+-/// [`JoinSet`] tracking every per-probe task spawned beneath it.
++/// Per-alloc supervisor. Owns the root [`CancellationToken`] plus one
++/// intermediate token per [`ProbeRole`]; holds no [`tokio::task::JoinSet`]
++/// (cancellation alone drains every probe task cooperatively).
+ ///
+-/// Cancellation propagates atomically: cancelling the supervisor
+-/// (via [`Self::cancel`] or via `drop`) cancels every derived child
+-/// token in the same instant. Task bodies that observe the child
+-/// token in a `select!` arm exit on the next async yield.
++/// Whole-supervisor cancellation propagates atomically: cancelling the
++/// supervisor (via [`Self::cancel`] or via `drop`) cancels the root,
++/// which propagates through every role token to every task in the same
++/// instant. Task bodies that observe their token in a `select!` arm
++/// exit on the next async yield.
+ pub struct AllocSupervisor {
+-    /// Root cancellation token. Owned by the supervisor; every
+-    /// per-probe task receives a `child_token()` cloned from this.
+-    /// Phase 2 may extend this struct with a `tokio::task::JoinSet`
+-    /// when the supervisor needs to `await` per-probe completion;
+-    /// today cancellation alone is sufficient (probes self-terminate
+-    /// on cancellation observation).
++    /// Root cancellation token. Owned by the supervisor; every role
++    /// token is a `child_token()` of this, and every per-probe task's
++    /// token is in turn a child of its role's token.
+     root: CancellationToken,
++    /// Per-role intermediate tokens, each derived from `root` via
++    /// `child_token()` and created on first use (ADR-0080 § D4). A
++    /// probe task's token is a child of ITS ROLE's token, so
++    /// cancelling one role cancels only that role's tasks, while
++    /// cancelling `root` still cancels every role in the same instant.
++    ///
++    /// `BTreeMap`, not `HashMap`, per `.claude/rules/development.md`
++    /// § "Ordered-collection choice" — the map is iterated by
++    /// [`Self::is_role_live`]'s sibling diagnostics and by DST
++    /// observation.
++    per_role: BTreeMap<ProbeRole, CancellationToken>,
+     /// Set to `true` after the first `start_alloc` spawns probe
+     /// tasks. Subsequent calls return the existing token without
+     /// re-spawning — structural guard against duplicate task sets
+-    /// writing to the same `(alloc_id, probe_idx)` store keys at
+-    /// double cadence.
++    /// writing to the same `(alloc_id, role, probe_idx)` store keys at
++    /// double cadence. Load-bearing for per-role cancellation: a
++    /// cancelled role token can never parent a newly-spawned task,
++    /// because no second spawn round happens.
+     started: bool,
+ }
+ 
+@@ -68,7 +96,7 @@ impl AllocSupervisor {
+     /// [`Self::spawn_probe_task`] is called.
+     #[must_use]
+     pub fn new() -> Self {
+-        Self { root: CancellationToken::new(), started: false }
++        Self { root: CancellationToken::new(), per_role: BTreeMap::new(), started: false }
+     }
+ 
+     /// The root cancellation token. Per-probe tasks observe a
+@@ -79,11 +107,46 @@ impl AllocSupervisor {
+         self.root.clone()
+     }
+ 
+-    /// Register a per-probe task handle so cancellation-derived
+-    /// child tokens can be issued from a single root. Returns the
+-    /// handle owning the child token the task observes.
+-    pub fn spawn_probe_task(&self) -> ProbeTaskHandle {
+-        ProbeTaskHandle { cancel: self.root.child_token() }
++    /// Register a per-probe task handle for a task of `role`. Returns
++    /// the handle owning the token the task observes — a child of
++    /// `role`'s intermediate token, created on first use, which is
++    /// itself a child of the supervisor's root.
++    ///
++    /// Per ADR-0080 § D4 the role level is what makes [`Self::cancel_role`]
++    /// possible without a task collection.
++    pub fn spawn_probe_task(&mut self, role: ProbeRole) -> ProbeTaskHandle {
++        // The fresh child is built BEFORE the `entry` borrow so
++        // `self.root` and `self.per_role` are never borrowed at once.
++        // A `CancellationToken` that loses the `or_insert` race is
++        // simply dropped — an un-awaited token has no side effect.
++        let fresh = self.root.child_token();
++        let role_token = self.per_role.entry(role).or_insert(fresh).clone();
++        ProbeTaskHandle { cancel: role_token.child_token() }
++    }
++
++    /// Cancel every task of `role`, leaving other roles and the
++    /// supervisor itself running.
++    ///
++    /// Cooperative shutdown only — task bodies observe the
++    /// cancellation on their next `select!` round. Idempotent; a role
++    /// with no tasks (hence no token) is a no-op.
++    pub fn cancel_role(&self, role: ProbeRole) {
++        if let Some(token) = self.per_role.get(&role) {
++            token.cancel();
++        }
++    }
++
++    /// Whether `role` has a live (created, un-cancelled) token.
++    ///
++    /// Reports TOKEN liveness, not task liveness. That is a valid
++    /// proxy only because `supervised_probe_loop` has exactly one exit
++    /// — its `child_token.cancelled()` arm — so a live token implies a
++    /// live task. This coupling is load-bearing for the ADR-0080 § D7
++    /// item-4 regression guard; if the loop ever gains a second exit,
++    /// this observable must be revisited.
++    #[must_use]
++    pub fn is_role_live(&self, role: ProbeRole) -> bool {
++        self.per_role.get(&role).is_some_and(|token| !token.is_cancelled())
+     }
+ 
+     /// Whether probe tasks have already been spawned under this
+@@ -98,9 +161,13 @@ impl AllocSupervisor {
+         self.started = true;
+     }
+ 
+-    /// Cancel every per-probe task spawned under this supervisor.
+-    /// Cooperative — task bodies observe the cancellation on their
+-    /// next `select!` round.
++    /// Cancel every per-probe task spawned under this supervisor,
++    /// across every role. Cooperative — task bodies observe the
++    /// cancellation on their next `select!` round.
++    ///
++    /// Cancelling the root propagates through every role token
++    /// transitively, so whole-supervisor teardown remains atomic
++    /// under the ADR-0080 § D4 two-level token graph.
+     pub fn cancel(&self) {
+         self.root.cancel();
+     }
+@@ -129,8 +196,8 @@ mod tests {
+ 
+     #[test]
+     fn cancel_propagates_to_child_tokens() {
+-        let supervisor = AllocSupervisor::new();
+-        let handle = supervisor.spawn_probe_task();
++        let mut supervisor = AllocSupervisor::new();
++        let handle = supervisor.spawn_probe_task(ProbeRole::Startup);
+         let child = handle.cancellation_token();
+         assert!(!child.is_cancelled(), "child token is not cancelled before parent cancel");
+         supervisor.cancel();
+@@ -140,13 +207,82 @@ mod tests {
+     #[test]
+     fn drop_propagates_to_child_tokens() {
+         let child = {
+-            let supervisor = AllocSupervisor::new();
+-            let handle = supervisor.spawn_probe_task();
++            let mut supervisor = AllocSupervisor::new();
++            let handle = supervisor.spawn_probe_task(ProbeRole::Startup);
+             handle.cancellation_token()
+         };
+         // Supervisor dropped at end of inner scope — drop impl
+-        // cancels the root, which propagates to the surviving
+-        // child token clone.
++        // cancels the root, which propagates through the role token
++        // to the surviving grandchild token clone.
+         assert!(child.is_cancelled(), "child token is cancelled when supervisor is dropped");
+     }
++
++    /// ADR-0080 § D4 — `cancel_role` retires exactly one role's tasks
++    /// and leaves every other role's tasks running. This is the unit
++    /// under `Stable`: startup probing is complete at Stable while
++    /// readiness and liveness are continuous post-Stable per
++    /// `ProbeRole`'s own contract.
++    #[test]
++    fn cancel_role_retires_only_that_roles_tasks() {
++        let mut supervisor = AllocSupervisor::new();
++        let startup = supervisor.spawn_probe_task(ProbeRole::Startup).cancellation_token();
++        let readiness = supervisor.spawn_probe_task(ProbeRole::Readiness).cancellation_token();
++        let liveness = supervisor.spawn_probe_task(ProbeRole::Liveness).cancellation_token();
++
++        supervisor.cancel_role(ProbeRole::Startup);
++
++        assert!(startup.is_cancelled(), "the cancelled role's task token is cancelled");
++        assert!(!readiness.is_cancelled(), "readiness survives a startup-role cancellation");
++        assert!(!liveness.is_cancelled(), "liveness survives a startup-role cancellation");
++        assert!(!supervisor.is_role_live(ProbeRole::Startup));
++        assert!(supervisor.is_role_live(ProbeRole::Readiness));
++        assert!(supervisor.is_role_live(ProbeRole::Liveness));
++    }
++
++    /// Two tasks of the SAME role share one intermediate token, so a
++    /// single `cancel_role` retires both. Guards the multi-probe-per-role
++    /// shape (probes 1..N of a role are spawned today even though no
++    /// decision consults them — ADR-0080 § "A fourth, pre-existing gap").
++    #[test]
++    fn cancel_role_retires_every_task_of_that_role() {
++        let mut supervisor = AllocSupervisor::new();
++        let first = supervisor.spawn_probe_task(ProbeRole::Readiness).cancellation_token();
++        let second = supervisor.spawn_probe_task(ProbeRole::Readiness).cancellation_token();
++
++        supervisor.cancel_role(ProbeRole::Readiness);
++
++        assert!(first.is_cancelled(), "first readiness task cancelled");
++        assert!(second.is_cancelled(), "second readiness task cancelled");
++    }
++
++    /// Cancelling the root still cancels every role transitively —
++    /// the atomicity claim the struct docstring makes.
++    #[test]
++    fn root_cancel_propagates_through_every_role_token() {
++        let mut supervisor = AllocSupervisor::new();
++        let startup = supervisor.spawn_probe_task(ProbeRole::Startup).cancellation_token();
++        let readiness = supervisor.spawn_probe_task(ProbeRole::Readiness).cancellation_token();
++
++        supervisor.cancel();
++
++        assert!(startup.is_cancelled());
++        assert!(readiness.is_cancelled());
++        assert!(!supervisor.is_role_live(ProbeRole::Startup));
++        assert!(!supervisor.is_role_live(ProbeRole::Readiness));
++    }
++
++    /// A role that never spawned a task has no token; cancelling it
++    /// and querying its liveness are both no-ops (the idempotence the
++    /// `cancel_role` contract promises).
++    #[test]
++    fn cancel_role_for_undeclared_role_is_a_noop() {
++        let mut supervisor = AllocSupervisor::new();
++        let readiness = supervisor.spawn_probe_task(ProbeRole::Readiness).cancellation_token();
++
++        supervisor.cancel_role(ProbeRole::Liveness);
++        supervisor.cancel_role(ProbeRole::Liveness);
++
++        assert!(!supervisor.is_role_live(ProbeRole::Liveness), "undeclared role is never live");
++        assert!(!readiness.is_cancelled(), "an undeclared role's cancel touches nothing else");
++    }
+ }
+diff --git a/crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs b/crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs
+index dae9d0b7..7ae10aa1 100644
+--- a/crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs
++++ b/crates/overdrive-worker/tests/acceptance/probe_runner_exec_outcome.rs
+@@ -69,6 +69,7 @@ fn node_id_for_obs_store() -> overdrive_core::id::NodeId {
+ 
+ fn descriptor_exec(command: &[&str]) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Exec {
+             command: command.iter().map(|s| (*s).to_owned()).collect(),
+diff --git a/crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs b/crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs
+index ba3d96da..38318bef 100644
+--- a/crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs
++++ b/crates/overdrive-worker/tests/acceptance/probe_runner_http_outcome.rs
+@@ -50,6 +50,7 @@ fn node_id_for_obs_store() -> overdrive_core::id::NodeId {
+ 
+ fn descriptor_http(path: &str, port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Http { path: path.to_owned(), port, host: None },
+         timeout_seconds: 5,
+diff --git a/crates/overdrive-worker/tests/acceptance/probe_runner_supervised_tick.rs b/crates/overdrive-worker/tests/acceptance/probe_runner_supervised_tick.rs
+index 4d5a769e..7edb2c46 100644
+--- a/crates/overdrive-worker/tests/acceptance/probe_runner_supervised_tick.rs
++++ b/crates/overdrive-worker/tests/acceptance/probe_runner_supervised_tick.rs
+@@ -36,7 +36,7 @@ use std::time::Duration;
+ 
+ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+ use overdrive_core::id::{AllocationId, NodeId};
+-use overdrive_core::observation::{ProbeRole, ProbeStatus};
++use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
+ use overdrive_core::traits::clock::Clock;
+ use overdrive_core::traits::observation_store::ObservationStore;
+ use overdrive_core::traits::prober::ProbeOutcome;
+@@ -60,6 +60,7 @@ fn node_id_for_obs_store() -> NodeId {
+ /// `clock.sleep` registration in the typical case.
+ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
+         timeout_seconds: 5,
+@@ -350,3 +351,138 @@ async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
+     drop(token2);
+     runner.stop_alloc(&alloc);
+ }
++
++/// Descriptor at an explicit `(role, per-role idx)` — the shape
++/// `project_probe_descriptors` hands `start_alloc`.
++fn descriptor_at(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
++    ProbeDescriptor {
++        idx: ProbeIdx::new(idx),
++        role,
++        mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port },
++        timeout_seconds: 5,
++        interval_seconds: 1,
++        max_attempts: 30,
++        failure_threshold: if role == ProbeRole::Liveness { Some(3) } else { None },
++        success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
++        inferred: false,
++    }
++}
++
++/// AT-04 (ADR-0080 § D1) — **the producer-side Mechanism-1 guard.**
++///
++/// `start_alloc` receives a FLAT vector: `project_probe_descriptors`
++/// concatenates `startup ++ readiness ++ liveness`, so a readiness
++/// probe's position in that vector is `startup_probes.len() + i`. That
++/// vector is a TRANSPORT — its positions carry no index semantics.
++///
++/// Pre-fix `start_alloc` derived `probe_idx` from `enumerate()` over
++/// exactly that concatenation, so for the production-typical Service
++/// (one startup + one readiness, ADR-0058 inference) readiness probe 0
++/// was written at `probe_idx = 1`. Every consumer filters on **per-role**
++/// index 0 (`reconciler_runtime.rs` `latest_probe_status(.., idx 0)`),
++/// so the readiness observation was never read — `Backend.healthy`
++/// stayed permanently `false` and the Service was permanently
++/// `MeshUnreachable` + NXDOMAIN.
++///
++/// The assertion below is the exact discriminator: it demands
++/// `(Readiness, 0)`. The pre-fix producer yields `(Readiness, 1)`.
++#[tokio::test]
++async fn start_alloc_writes_each_probe_at_its_per_role_index_not_its_flat_position() {
++    let tcp = Arc::new(SimTcpProber::new());
++    for _ in 0..8 {
++        tcp.enqueue_outcome(ProbeOutcome::Pass);
++    }
++    let clock = Arc::new(SimClock::default());
++    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
++
++    let runner = ProbeRunner::new(
++        tcp,
++        Arc::new(SimHttpProber::new()),
++        Arc::new(SimExecProber::new()),
++        Arc::clone(&clock) as Arc<dyn Clock>,
++        Arc::clone(&obs) as Arc<dyn ObservationStore>,
++    );
++
++    let alloc = alloc_id("alloc-per-role-idx");
++    // The concatenation `project_probe_descriptors` produces for a
++    // Service declaring one startup and one readiness probe. Both
++    // carry per-role idx 0; only their FLAT positions differ (0 and 1).
++    let descriptors = vec![
++        descriptor_at(ProbeRole::Startup, 0, 9001),
++        descriptor_at(ProbeRole::Readiness, 0, 9002),
++    ];
++
++    let _token = runner.start_alloc(&alloc, descriptors);
++    yield_for_task_poll().await;
++    clock.tick(Duration::from_secs(1));
++
++    let mut rows = wait_for_rows(&obs, &alloc, 2, 128).await;
++    rows.sort_by_key(|r| (r.role, r.probe_idx));
++
++    assert_eq!(
++        rows.iter().map(|r| (r.role, r.probe_idx.0)).collect::<Vec<_>>(),
++        vec![(ProbeRole::Startup, 0), (ProbeRole::Readiness, 0)],
++        "every probe MUST be written at its parser-assigned PER-ROLE index. Seeing \
++         (Readiness, 1) here is the pre-ADR-0080 producer deriving the index from the flat \
++         position in the startup++readiness++liveness transport vector — the readiness \
++         observation then lands at a key no consumer ever reads, which is what made a \
++         Service declaring a readiness probe permanently unreachable.",
++    );
++
++    runner.stop_alloc(&alloc);
++}
++
++/// AT-05 (ADR-0080 § D1 + § D2) — the per-role index is preserved for
++/// a role declaring MORE than one probe, and every probe of every role
++/// occupies its own durable key.
++///
++/// Under the pre-fix flat producer this vector writes indices
++/// `0, 1, 2` — startup 0 and 1 match by accident of ordering, and
++/// readiness 0 lands at 2. Under the fix it writes `(Startup, 0)`,
++/// `(Startup, 1)`, `(Readiness, 0)`.
++///
++/// Storage correctness for probes 1..N is the § D1 + § D2 side effect
++/// recorded in ADR-0080 § "A fourth, pre-existing gap"; consultation
++/// still reads index 0 only, and this test asserts storage, not
++/// consultation.
++#[tokio::test]
++async fn start_alloc_preserves_per_role_indices_across_a_multi_probe_role() {
++    let tcp = Arc::new(SimTcpProber::new());
++    for _ in 0..16 {
++        tcp.enqueue_outcome(ProbeOutcome::Pass);
++    }
++    let clock = Arc::new(SimClock::default());
++    let obs = Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0));
++
++    let runner = ProbeRunner::new(
++        tcp,
++        Arc::new(SimHttpProber::new()),
++        Arc::new(SimExecProber::new()),
++        Arc::clone(&clock) as Arc<dyn Clock>,
++        Arc::clone(&obs) as Arc<dyn ObservationStore>,
++    );
++
++    let alloc = alloc_id("alloc-multi-role-idx");
++    let descriptors = vec![
++        descriptor_at(ProbeRole::Startup, 0, 9001),
++        descriptor_at(ProbeRole::Startup, 1, 9002),
++        descriptor_at(ProbeRole::Readiness, 0, 9003),
++    ];
++
++    let _token = runner.start_alloc(&alloc, descriptors);
++    yield_for_task_poll().await;
++    clock.tick(Duration::from_secs(1));
++
++    let mut rows = wait_for_rows(&obs, &alloc, 3, 128).await;
++    rows.sort_by_key(|r| (r.role, r.probe_idx));
++
++    assert_eq!(
++        rows.iter().map(|r| (r.role, r.probe_idx.0)).collect::<Vec<_>>(),
++        vec![(ProbeRole::Startup, 0), (ProbeRole::Startup, 1), (ProbeRole::Readiness, 0)],
++        "three probes occupy three distinct (role, probe_idx) keys. A flat-position \
++         producer writes (Readiness, 2) for the third; a key omitting `role` would collapse \
++         (Startup, 0) and (Readiness, 0) onto one row.",
++    );
++
++    runner.stop_alloc(&alloc);
++}
+diff --git a/crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs b/crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs
+index 2f4f5cd1..d39d7241 100644
+--- a/crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs
++++ b/crates/overdrive-worker/tests/acceptance/probe_runner_tcp_outcome.rs
+@@ -27,6 +27,7 @@ fn alloc_id(s: &str) -> AllocationId {
+ 
+ fn descriptor_tcp(host: &str, port: u16) -> ProbeDescriptor {
+     ProbeDescriptor {
++        idx: ProbeIdx::new(0),
+         role: ProbeRole::Startup,
+         mechanic: ProbeMechanic::Tcp { host: host.to_owned(), port },
+         timeout_seconds: 5,
+diff --git a/docs/product/architecture/adr-0054-probe-runner-subsystem.md b/docs/product/architecture/adr-0054-probe-runner-subsystem.md
+index c153ffc0..9eacf785 100644
+--- a/docs/product/architecture/adr-0054-probe-runner-subsystem.md
++++ b/docs/product/architecture/adr-0054-probe-runner-subsystem.md
+@@ -344,6 +344,31 @@ iterates it (deciding tick for `Stable` walks every startup probe to
+ find the witness; `alloc status` render walks every probe to emit
+ the Probes section in stable order).
+ 
++**Amendment 2026-08-02 — the reconciler half of that rationale
++describes behaviour that is specified but not implemented.** The
++ordered-collection choice stands; the justification for it does not
++describe the implemented deciding tick. That tick does not walk every
++startup probe — it consults exactly one row per role, selected by
++`probe_idx == ProbeIdx::new(0)` and reduced with `max_by_key` on
++`last_observed_at_unix_ms`: startup at
++`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
++readiness at `:3035-3042`, liveness at `:3046-3053`.
++`spec_facts_for_service` likewise derives the startup thresholds from
++`svc.startup_probes[0]` alone (`:1963`). Probes `1..N` are spawned one
++task per descriptor
++(`crates/overdrive-worker/src/probe_runner/mod.rs:323`) and write
++durable `ProbeResultRow`s per tick (`:543`, `:551`), but no decision
++path consults them. (The render clause of the same sentence is not
++assessed by this annotation.)
++
++ADR-0080 § "A fourth, pre-existing gap this ADR deliberately does NOT
++address" is where the decision not to close this gap within that ADR's
++scope is recorded. ADR-0080 is accepted (2026-08-02) and not yet
++implemented; its Stage 1 (D1 + D2) makes `ProbeIdx` per-role and
++parser-assigned and adds `role` to the composite key described above,
++so per-role probes `1..N` are stored distinctly rather than sharing one
++key space across roles.
++
+ Per ADR-0048 § "Version-bump procedure" the new row ships as
+ `ProbeResultRowEnvelope::V1(ProbeResultRowV1)`; the public alias is
+ `type ProbeResultRow = ProbeResultRowV1`. Existing fixtures are
+@@ -582,3 +607,15 @@ table for forensic audit; out of scope here.
+   `GET /v1/allocs` endpoint and the Probes-section rendered output
+   are unchanged; only the CLI verb changed. The `alloc_status` /
+   `ProbeResultRow` identifiers are unrelated and unchanged.
++- 2026-08-02 — **Amendment** — accuracy annotation only; no decision
++  changed. Marked the reconciler-side half of the `BTreeMap`
++  ordered-collection rationale ("deciding tick for `Stable` walks every
++  startup probe to find the witness") as **specified but not
++  implemented**: the deciding tick consults one row per role at
++  `probe_idx == ProbeIdx::new(0)`
++  (`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
++  `:3035-3042`, `:3046-3053`), while probes `1..N` are spawned and write
++  durable rows (`crates/overdrive-worker/src/probe_runner/mod.rs:323`,
++  `:543`) that nothing consults. ADR-0080 § "A fourth, pre-existing gap
++  this ADR deliberately does NOT address" records the decision not to
++  close the gap within that ADR's scope.
+diff --git a/docs/product/architecture/adr-0055-service-lifecycle-reconciler.md b/docs/product/architecture/adr-0055-service-lifecycle-reconciler.md
+index 62c3ba24..50dc4b8d 100644
+--- a/docs/product/architecture/adr-0055-service-lifecycle-reconciler.md
++++ b/docs/product/architecture/adr-0055-service-lifecycle-reconciler.md
+@@ -248,6 +248,39 @@ impl Reconciler for ServiceLifecycle {
+      downstream actions. This ADR does not implement the
+      rate-limiter; it makes its addition non-breaking.
+ 
++**Amendment 2026-08-02 — the per-probe iteration in steps 2–4 is
++specified but not implemented.** Those steps describe reading a result
++for each declared probe (`for each probe in spec.startup_probes` /
++`readiness_probes` / `liveness_probes`). The implemented hydrate path
++consults exactly ONE row per role: the three projections in
++`hydrate_service_alloc_facts` filter on `probe_idx ==
++ProbeIdx::new(0)` and reduce with `max_by_key` on
++`last_observed_at_unix_ms` — startup at
++`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
++readiness at `:3035-3042`, liveness at `:3046-3053`. The spec-side
++threshold projections are single-probe for the same reason:
++`spec_facts_for_service` reads `svc.startup_probes[0]` (`:1963`),
++`readiness_facts_for_service` reads `.first()` (`:1981`), and
++`liveness_facts_for_service` reads `.first()` (`:1996`).
++
++Probes `1..N` of every role are nonetheless spawned and do write
++durable rows — `project_probe_descriptors`
++(`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:1253-1269`)
++concatenates all three vectors in full, and `ProbeRunner::start_alloc`
++spawns one task per descriptor via `iter().enumerate()`
++(`crates/overdrive-worker/src/probe_runner/mod.rs:323`), each writing a
++`ProbeResultRow` per tick (`:543`, `:551`; adapter-failure rows at
++`:520`, `:528`). No decision path consults those rows.
++
++The decision recorded above is unchanged; only its implementation
++status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
++ADR deliberately does NOT address" is where the decision not to close
++this gap as part of that ADR's scope is recorded. ADR-0080 is accepted
++(2026-08-02) and not yet implemented; its Stage 1 (D1 + D2) makes
++`ProbeIdx` per-role and parser-assigned and adds `role` to the durable
++composite key, so per-role probes `1..N` are stored distinctly rather
++than sharing one key space across roles.
++
+ The function is < 200 LOC, pure, sync, no `.await`, no I/O.
+ 
+ ### 4. `Stable` as non-terminal condition — extension to ADR-0037
+@@ -350,6 +383,26 @@ OR-semantics is reserved for a future operator-configurable knob
+ (e.g. `[health_check].startup_combinator = "any" | "all"` with
+ default `"all"`); out of scope for Phase 1.
+ 
++**Amendment 2026-08-02 — AND-of-all is specified but not implemented.**
++No implemented decision path evaluates a conjunction over ≥2 startup
++probes. The startup projection consults a single row, the one at
++`probe_idx == ProbeIdx::new(0)`
++(`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`),
++and `spec_facts_for_service` derives the startup thresholds from
++`svc.startup_probes[0]` alone (`:1963`). A second declared startup
++probe is spawned
++(`crates/overdrive-worker/src/probe_runner/mod.rs:323`) and writes
++durable rows (`:543`, `:551`) that no `Stable` predicate reads, so the
++`witness` rule in the third bullet above — "the LAST probe to cross its
++threshold" — has no implemented counterpart either.
++
++The AND-of-all decision itself is unchanged; only its implementation
++status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
++ADR deliberately does NOT address" is where the decision not to close
++this gap as part of that ADR's scope is recorded, and it names
++ratifying the readiness and liveness combinators this section leaves
++specified for startup only as part of what closing it would require.
++
+ ### 6. `successThreshold` for readiness (P2-Q8 resolution)
+ 
+ ```toml
+@@ -495,3 +548,15 @@ without a real use case.
+ - 2026-05-24 — Initial accepted version. Resolves P1-Q3 (in part),
+   P2-Q7, P2-Q8, P2-Q9 from
+   `docs/feature/service-health-check-probes/feature-delta.md`.
++- 2026-08-02 — **Amendment** — accuracy annotation only; no decision
++  changed. Marked the multi-probe-per-role behaviour in § 3 (steps 2–4,
++  the per-probe iteration) and § 5 (AND-of-all for multi-startup-probe
++  `Stable`) as **specified but not implemented**. Every implemented
++  consumer reads per-role index 0 only
++  (`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
++  `:3035-3042`, `:3046-3053`, and `:1963` / `:1981` / `:1996`), while
++  probes `1..N` are spawned and write durable rows
++  (`crates/overdrive-worker/src/probe_runner/mod.rs:323`, `:543`) that
++  nothing consults. ADR-0080 § "A fourth, pre-existing gap this ADR
++  deliberately does NOT address" records the decision not to close the
++  gap within that ADR's scope.
+diff --git a/verification/expectations/INDEX.md b/verification/expectations/INDEX.md
+index a93f94a0..9b985263 100644
+--- a/verification/expectations/INDEX.md
++++ b/verification/expectations/INDEX.md
+@@ -16,6 +16,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+ | [O04](O04-ca-refuse-to-start-actionable-error/) | O | control plane refuses to start on root-key decrypt failure with an actionable, cause-distinct error (no silent re-mint) | K3 | S-02-06/07, ADR-0063 D3/Earned-Trust, journey error_paths step 1 | `pending` |
+ | [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `workload describe`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
+ | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
++| [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
+ 
+ ## Feature coverage
+ 
+@@ -74,6 +75,29 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
+   on-disk staged Rust ping-pong bin are READY for the capture; neither harness
+   has landed, so E05 cannot be captured against the built binary yet.
+ 
++- **probe-idx-per-role / ADR-0080 Stage 1** — O07 (a declared liveness probe
++  reaches the reconciler's restart decision, observed black-box through
++  `overdrive deploy` + `overdrive workload describe`). The three fixtures
++  `examples/liveness-{absent,fails,holds}-service.toml` differ from each other by
++  ONE input each, so the diff is attributable: no liveness probe → not
++  restarted; a declared failing one → restarted. That is ADR-0080 § D1 seen from
++  outside the binary, and it is the surface the in-process tiers structurally
++  could not cover — the readiness/liveness acceptance suites hand-build a
++  `ServiceAllocFact` the production hydrate cannot produce (ADR-0080 § "Why
++  nothing caught it"). Status `pending` **by design**: evidence IS captured
++  (`executed_in_lima: true`, SHA `86d6331b`), but sub-claims 1–3 pass while
++  sub-claim 4 is **refuted** — a Service whose liveness probe targets its own
++  demonstrably-serving listener is restarted too, because TCP probes are issued
++  from the control plane's network namespace and the workload's socket lives in
++  the allocation's own `ovd-ns-NNNN`. That reachability gap **predates ADR-0080**
++  and Stage 1 did not cause it; Stage 1 is what makes it operator-visible. The
++  verdict is left to a different-fox adversarial audit rather than self-stamped,
++  and `partial`/`broken` are not claimed because the legend requires a linked
++  issue and issue creation needs explicit user approval (CLAUDE.md § "Deferrals
++  require GitHub issues"). O07 deliberately does NOT claim ADR-0080 § D4
++  (`Stable` stops only the startup role): no allocation reaches `Stable` here,
++  since the startup probe is unreachable for the same reason.
++
+ ## Adding an expectation
+ 
+ 1. `mkdir verification/expectations/<SURFACE><NN>-<slug>/` with a `README.md`

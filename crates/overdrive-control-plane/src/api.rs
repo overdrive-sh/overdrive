@@ -319,6 +319,44 @@ pub struct AllocStatusResponse {
     /// NO key. Additive + skip-if-empty: existing consumers see no change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issued_certificates: Vec<IssuedCertSummary>,
+    /// Probe DECLARATIONS carried by the persisted `WorkloadIntent::
+    /// Service` aggregate — the operator's `[[health_check.*]]` rows
+    /// plus any ADR-0058-synthesised default-TCP startup probe. Empty
+    /// for `Job` / `Schedule` reads (probes are Service-only per US-07)
+    /// and for a Service whose operator wrote the explicit
+    /// `[[health_check.startup]] = []` opt-out.
+    ///
+    /// Same convention as [`Self::listeners`]: an INTENT property
+    /// projected verbatim from the typed core aggregate (the type
+    /// already carries `Serialize`/`Deserialize`/`ToSchema`), rendered
+    /// at ANY allocation count so a pre-convergence Service still
+    /// surfaces its declared probes as `last=pending`.
+    ///
+    /// Ordered `(role, idx)` ascending — `startup_probes` then
+    /// `readiness_probes` then `liveness_probes`, matching
+    /// [`ProbeRole`](overdrive_core::observation::probe_result_row::ProbeRole)'s
+    /// derived `Ord` and the deterministic iteration order
+    /// `ObservationStore::list_probe_results_for_alloc` guarantees, so
+    /// the CLI join is order-stable on both sides.
+    ///
+    /// Additive-safe: `skip_serializing_if = "Vec::is_empty"` keeps the
+    /// JSON wire backward-compatible for non-Service reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<overdrive_core::aggregate::probe_descriptor::ProbeDescriptor>,
+    /// Latest OBSERVED probe outcome per `(alloc_id, role, probe_idx)`
+    /// across every allocation of this workload — the observation-side
+    /// half that joins against [`Self::probes`].
+    ///
+    /// Projected from `ObservationStore::list_probe_results_for_alloc`
+    /// per allocation (which returns exactly the LWW winner per
+    /// `(role, probe_idx)`), in `Self::rows` order. A declared probe
+    /// with NO row here has not yet ticked — row ABSENCE is the
+    /// `pending` state per ADR-0054 §5; adapters never write a
+    /// `Pending` status.
+    ///
+    /// Additive + skip-if-empty, same as [`Self::issued_certificates`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_results: Vec<ProbeResultRowJson>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
@@ -531,6 +569,19 @@ pub struct ErrorBody {
         // for any future wire surface that names them.
         overdrive_core::aggregate::Listener,
         overdrive_core::aggregate::ServiceVip,
+        // service-health-check-probes — the two halves of the
+        // `AllocStatusResponse` probe surface. `ProbeDescriptor` (with
+        // its `ProbeMechanic` / `ProbeIdx` / `ProbeRole` leaves) is the
+        // intent side; `ProbeResultRowJson` (with `ProbeStatusJson`) is
+        // the observation side. Registered explicitly — same discipline
+        // as the `Listener` / `ServiceVip` leaves above — so the schema
+        // references resolve in `components.schemas`.
+        overdrive_core::aggregate::probe_descriptor::ProbeDescriptor,
+        overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+        overdrive_core::observation::probe_result_row::ProbeIdx,
+        overdrive_core::observation::probe_result_row::ProbeRole,
+        ProbeResultRowJson,
+        ProbeStatusJson,
     )),
     tags(
         (name = "workloads", description = "Workload lifecycle endpoints"),
@@ -783,21 +834,21 @@ pub enum ProbeStatusJson {
 
 impl From<&overdrive_core::observation::probe_result_row::ProbeResultRow> for ProbeResultRowJson {
     fn from(row: &overdrive_core::observation::probe_result_row::ProbeResultRow) -> Self {
-        use overdrive_core::observation::probe_result_row::{ProbeRole, ProbeStatus};
+        use overdrive_core::observation::probe_result_row::ProbeStatus;
         let status = match &row.status {
             ProbeStatus::Pass => ProbeStatusJson::Pass,
             ProbeStatus::Fail { last_fail_reason } => {
                 ProbeStatusJson::Fail { last_fail_reason: last_fail_reason.clone() }
             }
         };
-        // Role projection — matches the `#[serde(rename_all = "snake_case")]`
-        // shape declared on `ProbeRole`.
-        let role = match row.role {
-            ProbeRole::Startup => "startup",
-            ProbeRole::Readiness => "readiness",
-            ProbeRole::Liveness => "liveness",
-        }
-        .to_string();
+        // Role projection delegates to `ProbeRole::as_str()` — the enum
+        // owns its own string representation per
+        // `.claude/rules/development.md` § "Label enums own their string
+        // representation". A local `match` here would be a second copy
+        // of that mapping and would silently drift from the
+        // `#[serde(rename_all = "snake_case")]` shape the CLI join
+        // compares against.
+        let role = row.role.as_str().to_owned();
         Self {
             alloc_id: row.alloc_id.to_string(),
             probe_idx: row.probe_idx.get(),

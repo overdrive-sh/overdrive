@@ -61,7 +61,7 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{
     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
 };
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
     ObservationStore, ObservationStoreError, ReconcileConflictRow, ServiceBackendRow,
@@ -121,11 +121,21 @@ struct PeerState {
     /// for deterministic iteration across seeds (dst-lint /
     /// `.claude/rules/development.md` § "Ordered-collection choice").
     by_reconcile_conflict: Mutex<BTreeMap<(ServiceId, Ipv4Addr, u16, Proto), ReconcileConflictRow>>,
-    /// `probe_results` LWW index — keyed on `(alloc_id, probe_idx)`
-    /// per ADR-0054 §5. One row per `(alloc_id, probe_idx)` carrying
-    /// the latest observed outcome; LWW resolution on
+    /// `probe_results` LWW index — keyed on
+    /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
+    /// ADR-0080 § D2. One row per `(alloc_id, role, probe_idx)`
+    /// carrying the latest observed outcome; LWW resolution on
     /// `last_observed_at_unix_ms`.
-    by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeIdx), ProbeResultRow>>,
+    ///
+    /// `role` is load-bearing in the key, exactly as in the byte-keyed
+    /// `LocalObservationStore`: `probe_idx` is 0-indexed within its
+    /// own role array, so without `role` the three roles' probe 0
+    /// would collide and clobber each other. `ProbeRole`'s derived
+    /// `Ord` (declaration order) agrees with its `as_key_byte`
+    /// discriminant, so both adapters iterate an alloc's rows in the
+    /// same order per `.claude/rules/development.md` § "Trait
+    /// definitions specify behavior, not just signature".
+    by_probe_results: Mutex<BTreeMap<(AllocationId, ProbeRole, ProbeIdx), ProbeResultRow>>,
     /// `issued_certificates` audit index — keyed on the issued
     /// certificate's `CertSerial` (ADR-0063 D6). Append-only: serials
     /// are CSPRNG-drawn, so a key collision is the issuance bug, not an
@@ -443,12 +453,13 @@ impl PeerState {
         self.by_alloc.lock().get(alloc_id).cloned()
     }
 
-    /// LWW merge for `probe_results`. Keyed on `(alloc_id, probe_idx)`
-    /// per ADR-0054 §5. Strictly-dominate on
+    /// LWW merge for `probe_results`. Keyed on
+    /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
+    /// ADR-0080 § D2. Strictly-dominate on
     /// `last_observed_at_unix_ms` — equal timestamps are no-ops
     /// (idempotent re-write).
     fn apply_probe_result(&self, incoming: &ProbeResultRow) -> bool {
-        let key = (incoming.alloc_id.clone(), incoming.probe_idx);
+        let key = (incoming.alloc_id.clone(), incoming.role, incoming.probe_idx);
         let mut by_pr = self.by_probe_results.lock();
         match by_pr.get(&key) {
             None => {
@@ -465,12 +476,18 @@ impl PeerState {
         }
     }
 
-    /// Snapshot every probe-result row for a single allocation,
-    /// sorted ascending by `probe_idx`. Deterministic iteration via
-    /// the `BTreeMap` key ordering.
+    /// Snapshot every probe-result row for a single allocation, across
+    /// every role, grouped by `role` then ascending by `probe_idx`.
+    /// Deterministic iteration via the `BTreeMap` key ordering, which
+    /// matches the byte-keyed `LocalObservationStore`'s scan order
+    /// because `ProbeRole`'s `Ord` agrees with its `as_key_byte`.
     fn probe_results_for_alloc(&self, alloc_id: &AllocationId) -> Vec<ProbeResultRow> {
         let by_pr = self.by_probe_results.lock();
-        by_pr.iter().filter(|((aid, _), _)| aid == alloc_id).map(|(_, row)| row.clone()).collect()
+        by_pr
+            .iter()
+            .filter(|((aid, _, _), _)| aid == alloc_id)
+            .map(|(_, row)| row.clone())
+            .collect()
     }
 
     /// Snapshot every `issued_certificates` audit row this peer holds,

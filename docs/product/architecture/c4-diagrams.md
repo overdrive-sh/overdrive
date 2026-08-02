@@ -349,7 +349,7 @@ C4Container
   Container(cli, "overdrive-cli", "Rust binary", "Parses [[health_check.*]] TOML; submits ServiceSpec with probes to control plane via NDJSON; renders Probes section for Service kind")
   Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — ServiceLifecycleReconciler (new sibling to WorkloadLifecycle); ServiceSubmitEvent V2 wire shape (Stable, Failed); action shim maps TerminalCondition to wire variant")
   Container(worker, "overdrive-worker", "Rust crate", "EXTENDED — ProbeRunner subsystem; per-alloc supervisor + per-probe tokio tasks; TcpProber/HttpProber/CgroupExecProber production bindings")
-  ContainerDb(obs, "LocalObservationStore (redb)", "Single-writer ObservationStore", "NEW table — ProbeResultRow keyed (alloc_id, probe_idx) LWW; rkyv envelope V1 per ADR-0048")
+  ContainerDb(obs, "LocalObservationStore (redb)", "Single-writer ObservationStore", "NEW table — ProbeResultRow keyed (alloc_id, role, probe_idx) LWW; rkyv envelope V1 per ADR-0048")
   ContainerDb(intent, "LocalIntentStore (redb)", "IntentStore", "ServiceSpec V2 — gains startup_probes/readiness_probes/liveness_probes Vec fields; rkyv envelope V1→V2")
 
   Rel(operator, cli, "Submits Service spec with [[health_check.*]] TOML")
@@ -372,7 +372,7 @@ C4Component
 
   Container_Boundary(worker, "overdrive-worker (adapter-host)") {
     Component(runner, "ProbeRunner", "Rust struct (Arc-shared per node)", "start_alloc / stop_alloc / probe() Earned Trust gate; holds CancellationTokens per alloc")
-    Component(supervisor, "Per-alloc supervisor task", "tokio::task", "Spawns N per-probe tasks via JoinSet; cancels on alloc terminal")
+    Component(supervisor, "Per-alloc supervisor", "root + per-role CancellationTokens (no JoinSet)", "Spawns N detached per-probe tasks; cancels root on alloc terminal, one role token on Stable (ADR-0080 D4)")
     Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
     Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
     Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
@@ -389,22 +389,22 @@ C4Component
 
   Container_Boundary(core, "overdrive-core") {
     Component(core_traits, "traits::prober (NEW module)", "TcpProber / HttpProber / ExecProber port traits with rustdoc preconditions, postconditions, edge cases, observable invariants per development.md")
-    Component(core_obs, "observation::probe_result (NEW module)", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
+    Component(core_obs, "observation::probe_result_row (NEW module)", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
     Component(core_tc, "transition_reason (EXTENDED)", "TerminalCondition gains Stable, Failed variants; ServiceFailureReason enum NEW")
     Component(core_spec, "aggregate::ServiceSpec (EXTENDED)", "Gains startup_probes / readiness_probes / liveness_probes Vec<ProbeDescriptor>; rkyv envelope V2")
   }
 
-  ContainerDb(obs_store, "LocalObservationStore (redb)", "EXTENDED — write_probe_result + list_probe_results_for_alloc methods on trait; new redb table for ProbeResultRow keyed (alloc_id, probe_idx) LWW")
+  ContainerDb(obs_store, "LocalObservationStore (redb)", "EXTENDED — write_probe_result + list_probe_results_for_alloc methods on trait; new redb table for ProbeResultRow keyed (alloc_id, role, probe_idx) LWW")
   Container(exec_driver, "ExecDriver (existing per ADR-0030)", "Per-alloc supervisor signals ProbeRunner on alloc Running and terminal")
 
   Rel(exec_driver, runner, "on_alloc_running(alloc_id, probe_descriptors) / on_alloc_terminal(alloc_id)")
   Rel(runner, supervisor, "spawn per-alloc supervisor task; pass CancellationToken")
-  Rel(supervisor, probe_task, "spawn N per-probe tasks via JoinSet")
+  Rel(supervisor, probe_task, "spawn N detached per-probe tasks, each under a child of its role token")
   Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
   Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
   Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
   Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
-  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, probe_idx)")
+  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, role, probe_idx)")
   Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
   Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
   Rel(service_reconciler, action_shim, "Emits Stable/Failed Action::SetTerminalCondition + WriteServiceBackendRow + RestartAllocation")
@@ -425,8 +425,15 @@ The diagram makes six architectural properties visually explicit:
    feature-delta Risk #1). Each per-probe-instance task owns its
    own `clock.sleep(interval)` and `probe.probe()` call; no
    shared scheduler, no head-of-line blocking across probes.
-   `JoinSet` drop on supervisor cancel guarantees bounded
-   shutdown.
+   Shutdown is bounded cooperatively, not by abort: the
+   supervisor holds no `JoinSet` and the spawned handles are
+   detached, so cancelling a token is what drains its tasks —
+   each body observes the token in a biased `select!` arm and
+   returns on the next async yield. The token graph is two
+   levels deep (`root → per-role → per-task`, ADR-0080 § D4), so
+   a root cancel tears the whole supervisor down atomically while
+   a role cancel retires exactly one role — the mechanism behind
+   `Stable` stopping startup probing only.
 3. **Three port traits, three production adapters, three sim
    adapters** (per ADR-0054 §3). Each trait carries explicit
    rustdoc preconditions, postconditions, edge cases. DST
@@ -437,11 +444,17 @@ The diagram makes six architectural properties visually explicit:
    (per ADR-0059). `CgroupExecProber` reuses
    `place_pid_in_scope` + `cgroup_kill` from `ExecDriver`'s
    existing module; bounded new code in the exec-probe path.
-5. **LWW observation, not append-mode** (per ADR-0054 §5 +
+5. **LWW observation, not append-mode** (per ADR-0054 §5 as
+   amended by ADR-0080 § D2 +
    `.claude/rules/development.md` § "Persist inputs, not derived
-   state"). Composite primary key `(alloc_id, probe_idx)`;
+   state"). Composite primary key `(alloc_id, role, probe_idx)`;
    `redb::insert` semantics give LWW structurally; no merge
-   logic. Operational history (consecutive failures,
+   logic. `role` is load-bearing: `probe_idx` is 0-indexed within
+   its own role array (ADR-0080 § D1), so a two-part key would
+   make `(alloc, Startup, 0)`, `(alloc, Readiness, 0)` and
+   `(alloc, Liveness, 0)` collide and clobber one another under
+   LWW — silent durable data loss, rejected in ADR-0080 § A2.
+   Operational history (consecutive failures,
    last_observed_at) is the reconciler's recomputation at read
    time, not a persisted derived field.
 6. **`Stable` non-terminal semantics encoded structurally** (per

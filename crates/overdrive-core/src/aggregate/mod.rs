@@ -593,6 +593,19 @@ impl ServiceV1 {
         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
 
+        // ADR-0080 § D1 — this is the SECOND ingress (the API/wire
+        // path; the TOML parser is the first). `ProbeDescriptor.idx`
+        // is parser-assigned by contract, so a caller-supplied value
+        // is NOT trusted here: it is re-assigned from each vector's
+        // own 0-based position. Without this, a wire client could
+        // submit two descriptors of one role carrying the same `idx`
+        // and collide their durable probe-result rows under the
+        // `(alloc_id, role, probe_idx)` key (§ D2), silently losing
+        // one probe's observations to LWW.
+        let startup_probes = reindex_probes_by_position(startup_probes);
+        let readiness_probes = reindex_probes_by_position(readiness_probes);
+        let liveness_probes = reindex_probes_by_position(liveness_probes);
+
         Ok(Self {
             id,
             replicas,
@@ -610,6 +623,27 @@ impl ServiceV1 {
             liveness_probes,
         })
     }
+}
+
+/// Re-assign every descriptor's `idx` from its 0-based position in
+/// its own role vector, per ADR-0080 § D1.
+///
+/// The TOML parser assigns `idx` at `ServiceSpecV2` construction and
+/// the projection carries it verbatim, so for the CLI path this is an
+/// identity transform. For the API/wire path it is the enforcement
+/// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a
+/// caller-supplied duplicate `(role, idx)` pair would collide two
+/// probes' durable rows under the composite key.
+fn reindex_probes_by_position(probes: Vec<ProbeDescriptor>) -> Vec<ProbeDescriptor> {
+    probes
+        .into_iter()
+        .enumerate()
+        .map(|(position, mut probe)| {
+            probe.idx =
+                crate::observation::ProbeIdx::new(u32::try_from(position).unwrap_or(u32::MAX));
+            probe
+        })
+        .collect()
 }
 
 /// Validate probe mechanic content at the API admission boundary.

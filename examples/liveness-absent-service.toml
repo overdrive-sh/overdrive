@@ -1,0 +1,63 @@
+# liveness-absent-service.toml — ADR-0080 Stage 1 / O07 verification fixture
+# (the BASELINE of the O07 three-population diff).
+#
+# A Service with a listener, a real long-lived backend, and an explicitly
+# declared startup probe — and NO `[[health_check.liveness]]` section at all.
+# Nothing in the platform should restart it.
+#
+# WHY A BASELINE IS LOAD-BEARING
+# ------------------------------
+# `.claude/rules/debugging.md` § 5: compare populations, not isolated failures.
+# O07's positive claim is "a declared liveness probe now reaches the
+# reconciler's restart decision" — observed as restart churn on
+# `liveness-fails-service.toml`. That observation is only ATTRIBUTABLE to the
+# liveness declaration if an otherwise-identical Service WITHOUT one sits still.
+# Without this fixture, "the liveness Service restarted" is equally consistent
+# with "every Service on this control plane restarts" (a converge-loop thrash, a
+# crash-looping backend, a cgroup or netns provisioning failure) — all of which
+# are live hazards in this environment and none of which would say anything
+# about ADR-0080.
+#
+# This spec is byte-for-byte the same as its two siblings except that they
+# append a `[[health_check.liveness]]` block and it does not. Same backend
+# binary, same wildcard TCP listener, same explicit startup probe, same
+# resources. One input differs; the diff is therefore readable.
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/O07-liveness-probe-drives-restart/runner.sh
+
+[service]
+id = "liveness-absent"
+replicas = 1
+
+[[listener]]
+port = 8091
+protocol = "tcp"
+
+[exec]
+# `socat` is a real on-disk binary in the Lima dev VM (/usr/bin/socat), not a
+# phantom path. `TCP-LISTEN:...,fork,reuseaddr` binds the WILDCARD address and
+# forks a handler per connection, so it survives an unbounded number of probe
+# connects — unlike `nc -l`, which serves one connection and exits. It never
+# exits on its own, so any state churn observed on this allocation would be
+# platform-driven, never a self-inflicted workload exit. That is exactly the
+# property that makes this a usable baseline.
+command = "/usr/bin/socat"
+args    = ["TCP-LISTEN:8091,fork,reuseaddr", "PIPE"]
+
+# Declared EXPLICITLY rather than relying on the ADR-0058 default inference, to
+# hold this fixture identical to its siblings — where a NON-EMPTY
+# `startup_probes` vector is the load-bearing precondition for the ADR-0080
+# Mechanism-1 defect (see `liveness-fails-service.toml`).
+[[health_check.startup]]
+type = "tcp"
+port = 8091
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+# NO `[[health_check.liveness]]` — this is the whole point of the fixture.
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

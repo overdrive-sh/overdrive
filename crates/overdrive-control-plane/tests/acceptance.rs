@@ -39,6 +39,15 @@ mod acceptance {
     // rows + `WorkloadLifecycleView`, 404 on missing job. KPI-03 satisfaction.
     mod alloc_status_snapshot;
 
+    // service-health-check-probes (US-06 / K4; EDD O02) — `GET /v1/allocs`
+    // carries the probe surface: the intent-side declarations and the
+    // observation-side rows the CLI joins into the `Probes:` section.
+    // Pinned at the control-plane port so the handler's own contract has
+    // its own killer (the operator-facing proof lives in
+    // `overdrive-cli::integration::workload_describe_probes`, in a
+    // package this crate's mutation run does not execute).
+    mod alloc_status_probes;
+
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
 
@@ -279,6 +288,12 @@ mod acceptance {
     /// `Arc<ProbeRunner>` into an underscore-binding. See
     /// `.context/01-03-structural-gap-audit.md`.
     mod probe_runner_composition;
+    // ADR-0080 § D4 / § D7 items 4 + 5 — `Stable` is NON-terminal, so
+    // the action shim routes it to `on_alloc_stable` (retire the
+    // startup role, keep the supervisor) rather than
+    // `on_alloc_terminal` (tear everything down). A genuine terminal
+    // and a `StopAllocation` still stop the whole supervisor.
+    mod stable_does_not_stop_probe_supervision;
     // GAP-1 corrective patch — real ServiceLifecycle hydrate impls
     // (`hydrate_desired` / `hydrate_actual` join intent + observation
     // + LWW probe projection per the Phase 01 structural gap audit).

@@ -1,0 +1,2 @@
+# probe: loopback POST-TEARDOWN (after sweep)
+HEALTHY: loopback refused fast (no leaked XDP swallowing lo traffic)

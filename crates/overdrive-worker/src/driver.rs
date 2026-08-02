@@ -28,6 +28,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
 use overdrive_core::id::AllocationId;
+use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
@@ -765,6 +766,23 @@ impl Driver for ExecDriver {
     fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
         if let Some(ref runner) = self.probe_runner {
             runner.stop_alloc(alloc_id);
+        }
+    }
+
+    /// Per ADR-0080 § D4: `Stable` is NON-terminal (ADR-0055), so it
+    /// retires only the startup role. Readiness and liveness keep
+    /// ticking under the surviving supervisor — they are continuous
+    /// post-Stable by `ProbeRole`'s own contract, and cancelling them
+    /// here is what made `Backend.healthy` a constant rather than a
+    /// function of observation.
+    ///
+    /// Per-role teardown rather than "leave everything running"
+    /// because `supervised_probe_loop` is unbounded: it ticks until
+    /// cancelled, so a surviving startup task would keep writing
+    /// post-Stable startup rows that LWW into `latest`.
+    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+        if let Some(ref runner) = self.probe_runner {
+            runner.stop_role(alloc_id, ProbeRole::Startup);
         }
     }
 }
