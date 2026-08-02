@@ -176,12 +176,17 @@ jobs:
   - id: J-OPS-003
     title: "Run my actual workload on the walking-skeleton control plane and trust the platform to converge to the declared replica count"
     situation: >
-      When I, an Overdrive platform engineer, submit a process job
-      through the walking-skeleton control plane on my single-node dev
-      host (control plane and worker co-located on one machine),
+      When I, an Overdrive platform engineer, submit a workload through
+      the walking-skeleton control plane on my single-node dev host
+      (control plane and worker co-located on one machine) — a host
+      process today, or a workload that cannot BE a host process because
+      it needs its own kernel, its own OS, or hardware-level isolation
+      (whitepaper §6 / vision.md design principle 4: "all workload types
+      are first class ... one control plane"),
     motivation: >
       I want the platform to schedule the job onto the local host, start
-      a real OS process under cgroup-isolated supervision, and converge
+      it under cgroup-isolated supervision (a real OS process for the exec
+      driver; a real Cloud Hypervisor VM for the vm driver), and converge
       the running set to the declared replica count — across the FULL set
       of lifecycle transitions: starting on submit, restarting on crash,
       stopping cleanly on `overdrive job stop`, AND replacing the current
@@ -203,7 +208,28 @@ jobs:
       transition: `job stop` writes a sticky/overriding stop sentinel a
       same-spec re-deploy cannot clear, crash-restart reuses the
       alloc_id/slot, and deletion (#211) withdraws intent entirely.
-    source: whitepaper §6 (Process driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition)
+      AND so that honesty survives a workload class the platform cannot
+      DIRECTLY observe: for a VM-class workload the host sees only a
+      `cloud-hypervisor` process, never the guest's workload, so every
+      lifecycle signal above (Running, Terminated{Completed{exit_code}},
+      Failed{exit_code}, restart/backoff) must be re-earned across the
+      hardware boundary or it silently becomes a lie the operator cannot
+      detect — a VMM that accepted a boot request is NOT operator-
+      meaningful liveness (the VM-class analogue of J-OPS-004's
+      "kernel-accepted exec is not liveness"), and a host hypervisor
+      process exiting 0 is NOT the guest workload succeeding (GH #42).
+      That honesty rule binds EVERY process the platform supervises on a
+      workload's behalf, not only the hypervisor: a storage daemon
+      serving a declared volume is not the workload either, so its exit
+      status is not evidence about the workload's — in either direction
+      (a clean daemon exit is not a crash; a daemon dying mid-run is not
+      a clean run over a truncated output file). And so that running my
+      actual workload means it can PRODUCE something: a VM-class job
+      writes into a declared volume and I read those bytes on the host
+      afterwards, because its rootfs copy is discarded at terminal by
+      design (feature-delta [D8] / intake I-6).
+    source: whitepaper §6 (Process driver + VM driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); vision.md design principle 4 (all workload types are first class); phase-1-first-workload scope; GH #249 (backend-instance-replacement — the replace/restart-after-stop lifecycle transition); GH #42 (Cloud Hypervisor `vm` driver — the workload-class dimension)
+    relates_to: J-OPS-004
     served_by_phase: 1
     status: active
 
@@ -942,3 +968,118 @@ changelog:
       + grounded reconciler/handler/AT code, not from user interviews (per the
       header precedent). Existing entries otherwise unmodified. See
       docs/feature/backend-instance-replacement/.
+  - date: 2026-08-01
+    change: >
+      EXTENDED J-OPS-003 for the microvm-driver-cloud-hypervisor feature (GH
+      #42), authored by the DISCUSS wave. VERDICT: EXTEND J-OPS-003, do NOT
+      mint a new job. Justification: running a VM-class workload is the SAME
+      convergence job along the WORKLOAD-CLASS dimension — same progress
+      ("converge declared intent into running workloads AND report state
+      honestly"), same actor-circumstance (Ana running her actual workload on
+      the single-node control plane), same failure-mode class (intent not
+      converged, or state dishonestly reported). This follows the udp-sendmsg4
+      ELEVATION precedent (2026-06-05, "one job spans the protocol/syscall-idiom
+      dimension; a per-idiom job would fragment J-OPS-004") — a per-driver-class
+      job would fragment J-OPS-003 identically — and vision.md design principle 4
+      ("all workload types are first class ... one control plane, one identity
+      model") states outright that workload class is a DIMENSION of one job.
+      TWO mint framings were considered and REJECTED: (a) "run a VM workload"
+      would carry J-OPS-003's exact outcome statement and fails the J-SEC-002
+      mint bar (genuinely distinct progress + failure mode, independently
+      satisfiable and independently failable) — if the VM does not converge,
+      J-OPS-003 has already failed; (b) "run an untrusted / OS-divergent workload
+      with hardware-level ISOLATION" WOULD be a distinct progress with a distinct
+      failure mode (escape). AMENDED 2026-08-02 — the feature DOES deliver a
+      bounded, named isolation POSTURE (feature-delta decision [D7]: "KVM boundary
+      + default-on seccomp + Landlock + cgroup/netns confinement, and no
+      jailer-equivalent chroot or PID namespace") — STAGED: the Landlock/uid/rlimit
+      half lands with US-VM-7 in slice 03, and until it does only the delivered half
+      (KVM + default-on seccomp + cgroup/netns) may be asserted anywhere — but NOT
+      an isolation GUARANTEE:
+      Cloud Hypervisor ships no jailer, and the written guest→VMM→host threat model
+      is GH #258. A job whose progress is "escape does not happen" cannot be minted
+      against a posture whose own threat model is unwritten, so (b) remains a
+      GENUINE FUTURE MINT — now gated on #258 closing rather than on scoping.
+      (Superseded wording, recorded for audit: this entry previously described the
+      feature as delivering only "the same cgroup treatment ExecDriver gives
+      workloads" and the security-posture work as "currently untracked — surfaced
+      as a DISCUSS blocker". Both became false when DISCUSS blocker [B3] was
+      approved-and-rescoped and filed as #258 — the second was also a forward
+      pointer without an issue number, which CLAUDE.md forbids.) Enriched
+      J-OPS-003's situation (workloads that cannot BE a host process) and outcome
+      (honesty must survive a workload class the platform cannot directly observe:
+      a VMM that accepted a boot request is not liveness; a hypervisor exiting 0 is
+      not the guest succeeding), extended source, and added relates_to: J-OPS-004
+      (the honesty sibling — this is J-OPS-004's "kernel-accepted exec is not
+      operator-meaningful liveness" one workload class over; a relates_to link
+      rather than an elevation target because J-OPS-004 is Service-kind + probes
+      and this feature's slices are Job-kind). J-OPS-003 served_by_phase unchanged
+      (1). SCOPE recorded in DISCUSS: Job-kind and Schedule-kind only —
+      `[vm]` + `[service]` is REJECTED at deploy time with an honest error, because
+      guest-stack mTLS interception (#222) is unbuilt, and tap-in-netns provisioning
+      plus guest-reachable probes (#257, filed 2026-08-02) do not exist — the
+      rejection message cites a real issue for every gap it names. Created the
+      journey docs/product/journeys/run-a-vm-workload.yaml;
+      personas untouched (Ana referenced inline). Distilled from the issue + three
+      commissioned research documents + grounded driver/shim/parser code, not from
+      user interviews (per the header precedent). Existing entries otherwise
+      unmodified. See docs/feature/microvm-driver-cloud-hypervisor/.
+  - date: 2026-08-02
+    change: >
+      EXTENDED J-OPS-003 again for microvm-driver-cloud-hypervisor (GH #42),
+      DISCUSS amendment 2, on the recovery of a DROPPED USER INPUT. The user's
+      intake message named two reference-implementation decisions — "speak with
+      CH over unix socket and use virtiofsd for storage". The first was captured
+      as intake I-2; the SECOND WAS DROPPED and never recorded, after which
+      research recommended ext4 + virtio-blk, DISCUSS scoped that, and the
+      reversal was never surfaced to the user. Now recorded as intake I-6 and
+      feature-delta [D8]: STORAGE SPLITS BY ROLE — ext4 over virtio-blk for the
+      ROOTFS, virtiofs (virtiofsd, --memory shared=on) for VOLUMES / shared
+      writable storage. This is NOT a compromise: the reference implementation
+      shipped exactly this split (architecture.md:196 — block devices for
+      code.ext4/deps.ext4; virtiofs only for the writable /output share), so the
+      research and the reference agree. The apparent conflict was an ARTIFACT OF
+      SCOPING — DISCUSS scoped the rootfs and never scoped volumes at all, so
+      virtiofs fell out by omission rather than by decision. Two misattributions
+      are corrected and now forbidden feature-wide: CVE-2026-24834 concerns
+      virtio-pmem + DAX and may NOT be cited as evidence about virtiofs; and
+      "the reference used virtiofsd, the option the most experienced team
+      retreated from" fused two unrelated facts (Kata retreated from
+      virtio-pmem, and the reference never put its rootfs on virtiofs).
+      J-OPS-003's OUTCOME is extended on two axes, both lifecycle-honesty
+      dimensions of the same convergence job rather than a new job: (1) the
+      supervised-process honesty rule is generalised beyond the hypervisor —
+      a storage daemon is not the workload either, so its exit status is not
+      evidence about the workload's, in EITHER direction (the reference
+      implementation got both wrong at once: it treated ANY virtiofsd exit
+      INCLUDING A CLEAN ONE as VmmError::Crash and force-killed the VM, and
+      never made a mid-run death reach ExitKind at all); and (2) running my
+      actual workload must mean it can PRODUCE something — a VM job writes into
+      a declared volume and the operator reads those bytes on the host, because
+      the per-launch rootfs copy is discarded at terminal by design (which is
+      what makes restart honest). NO NEW JOB MINTED and no new job considered:
+      both additions are the same progress ("converge declared intent into
+      running workloads AND report state honestly") for the same actor in the
+      same circumstance, following the udp-sendmsg4 ELEVATION precedent as the
+      2026-08-01 entry did. Delivery: new slice 04 (stories US-VM-8 — the
+      [[vm.volume]] capability — and US-VM-9 — the daemon's lifecycle honesty;
+      they must land together, since volumes shipped alongside a misclassified
+      daemon death is a slice whose deliverable is a lie); the resources slice
+      renumbered 04 to 05. Feature re-assessed as right-sized but AT ITS UPPER
+      EDGE — 6 slices, 9 stories, 5 modules (unchanged), walking skeleton
+      untouched; a 7th slice or 10th story is the pre-committed trigger to split
+      into two features. GH #258 reconciled after its two 2026-08-02 amendments:
+      the mount namespace moved OUT of this feature into #258 (a bare
+      unshare(CLONE_NEWNS) buys ~nothing; the security value is in the
+      pivot_root half that #258 owns and Landlock was chosen instead of), and
+      virtiofsd hardening in #258 is now UNCONDITIONAL rather than contingent on
+      adopting virtiofs — with an explicit boundary: the daemon's LIFECYCLE is
+      this feature's, its POSTURE (seccomp set, uid, xattr surface, threat
+      model) is #258's. Also pinned: the JobEnvelope V1 to V2 rkyv bump is
+      user-ruled, full six-step single-commit procedure, no longer a DESIGN
+      judgement call — mutating V1 in place was rejected because it requires
+      regenerating a golden fixture, which .claude/rules/testing.md forbids.
+      EXTENDED docs/product/journeys/run-a-vm-workload.yaml with a storage_note,
+      the [[vm.volume]] surface on step 1, a new step 5 "Collect its output"
+      (stop/restart renumbered to 6), and three shared artifacts. Personas
+      untouched. Existing entries otherwise unmodified.
