@@ -3955,10 +3955,26 @@ moving `ServiceBackendRow` to sole bridge ownership; that stage is
 **not implemented**.
 
 The `Stable` predicate is recomputed
-every tick from observation inputs (`probe_results` + spec); it is
-NEVER persisted as a derived field. The `stable_announced` set is
-the publication-side dedup gate that prevents the deciding-tick
-emission from re-firing every subsequent tick.
+every tick from the per-alloc facts on `actual` — the alloc's
+observed `state` plus `ServiceAllocFact.latest_startup_probe`
+(`service_lifecycle.rs:581`) — and is NEVER persisted as a derived
+field.
+
+The two state layers stay separated here, and an earlier phrasing of
+this paragraph ("observation inputs (`probe_results` + spec)") blurred
+them: a spec is **intent**, not observation. `reconcile` binds
+`_desired` (`service_lifecycle.rs:489-491`) and does not read intent
+at decision time at all. The spec's probe thresholds enter one step
+earlier, in the runtime's `hydrate_actual` pass
+(`reconciler_runtime.rs` — `spec_facts_for_service` /
+`readiness_facts_for_service` / `liveness_facts_for_service`), which
+joins them against the observed `probe_results` rows to produce the
+per-alloc facts. So "recomputed every tick" means recomputed from that
+projection, not re-derived from the spec inside `reconcile`.
+
+The `stable_announced` set is the publication-side dedup gate that
+prevents the deciding-tick emission from re-firing every subsequent
+tick.
 
 `reconcile` is pure sync per `.claude/rules/development.md` §
 "Reconciler I/O" — no `.await`, no I/O, no wall-clock outside
