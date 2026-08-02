@@ -761,8 +761,7 @@ impl Driver for ExecDriver {
     /// `AllocStatusRow` write commits. Dispatches to
     /// `probe_runner.stop_alloc(alloc_id)` so every per-probe task
     /// spawned under this allocation's supervisor is cooperatively
-    /// shut down — no `JoinHandle::abort()` per
-    /// `.claude/rules/testing.md` § cooperative-shutdown discipline.
+    /// shut down — no `JoinHandle::abort()`.
     fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
         if let Some(ref runner) = self.probe_runner {
             runner.stop_alloc(alloc_id);

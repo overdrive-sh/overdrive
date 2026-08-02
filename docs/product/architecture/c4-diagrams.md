@@ -418,9 +418,11 @@ The diagram makes six architectural properties visually explicit:
 1. **Reconciler is a pure consumer of observation rows** (per
    `.claude/rules/development.md` § "Reconciler I/O"). The
    `ServiceLifecycleReconciler` has no edge to `ProbeRunner`,
-   `TcpProber`, `HttpProber`, or `ExecProber` — it reads from
-   `actual.probe_results` only. Probe execution is observation
-   production; the reconciler is the pure decision boundary.
+   `TcpProber`, `HttpProber`, or `ExecProber` — it reads only the
+   per-alloc probe facts the runtime projects into `actual.allocs`
+   (`ServiceAllocFact.latest_{startup,readiness,liveness}_probe`).
+   Probe execution is observation production; the reconciler is the
+   pure decision boundary.
 2. **Per-alloc-per-probe failure isolation** (per ADR-0054 §2 +
    feature-delta Risk #1). Each per-probe-instance task owns its
    own `clock.sleep(interval)` and `probe.probe()` call; no

@@ -6,8 +6,7 @@
 //! Per ADR-0054 §2: each allocation gets ONE supervisor; that
 //! supervisor spawns ONE task per declared/inferred probe. Tasks
 //! observe their cancellation token on every `select!` round and exit
-//! cooperatively — no [`tokio::task::JoinHandle::abort`] per
-//! `.claude/rules/testing.md` § cooperative-shutdown discipline. The
+//! cooperatively — no [`tokio::task::JoinHandle::abort`]. The
 //! supervisor holds no [`tokio::task::JoinSet`]; cancellation alone is
 //! sufficient because every probe task self-terminates on observing
 //! its token.
