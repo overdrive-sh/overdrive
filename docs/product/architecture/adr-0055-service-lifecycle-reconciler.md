@@ -80,24 +80,32 @@ variant, separate `AnyReconcilerView` variant.** Rationale:
 ### 2. Typed `State`, `View`, `AnyState` / `AnyReconcilerView` variants
 
 ```rust
-// crates/overdrive-core/src/reconcilers/service_lifecycle.rs (new)
+// crates/overdrive-core/src/service_lifecycle.rs
+// (path corrected 2026-08-02 — the module landed at the crate root,
+//  not under `reconcilers/` as originally sketched)
 
 /// `desired`/`actual` projection for the Service-kind reconciler.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Shape corrected 2026-08-02 to the implemented fact-bundle — see the
+/// amendment immediately below this block.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceLifecycleState {
-    /// `desired`: the ServiceSpec from the IntentStore (per ADR-0050).
-    /// `actual`: empty placeholder; not used (per ADR-0021 the projection
-    /// is per-reconciler).
-    pub spec: Option<ServiceSpec>,
+    /// Per-alloc PRE-JOINED fact bundle: the alloc-status projection
+    /// (`state` / `started_at` / `exit_code`), the LWW probe
+    /// projection per role, and the spec-derived policy inputs for
+    /// that alloc, all flattened onto one struct by the runtime's
+    /// hydrate pass.
+    pub allocs: BTreeMap<AllocationId, ServiceAllocFact>,
 
-    /// Observation: per-alloc status rows.
-    pub allocations: BTreeMap<AllocationId, AllocStatusRow>,
+    /// Service-level dataplane identity (`service_id` / `vip` /
+    /// `writer`) the readiness branch composes its `ServiceBackendRow`
+    /// from. One-per-Service, so it does not live on the per-alloc
+    /// fact. `None` when the Service has no VIP yet.
+    pub service_dataplane: Option<ServiceDataplaneIdentity>,
 
-    /// Observation: latest probe results per alloc, keyed by probe_idx.
-    pub probe_results: BTreeMap<AllocationId, BTreeMap<ProbeIdx, ProbeResultRow>>,
-
-    /// Observation: per-alloc backend rows (consumed by readiness branch).
-    pub service_backends: BTreeMap<AllocationId, ServiceBackendRow>,
+    /// LWW stamp of the currently-stored `service_backends` row, or
+    /// `None` when no row exists. Observed input for the readiness
+    /// branch's write; never persisted in the View.
+    pub prior_backend_row_at: Option<LogicalTimestamp>,
 }
 
 /// Typed `View` — persisted by the runtime via `ViewStore::write_through`.
@@ -112,14 +120,14 @@ pub struct ServiceLifecycleView {
     /// recomputed every tick from this map plus the live
     /// `failure_threshold` from the spec.
     pub liveness_consecutive_failures:
-        BTreeMap<AllocationId, BTreeMap<ProbeIdx, u32>>,
+        BTreeMap<(AllocationId, ProbeIdx), u32>,
 
     /// Per-alloc readiness probe consecutive-success counters.
     /// INPUT (consumed by the readiness `successThreshold` gate per
     /// P2-Q8). The flap-protection predicate is recomputed from this
     /// counter plus the live `success_threshold`.
     pub readiness_consecutive_successes:
-        BTreeMap<AllocationId, BTreeMap<ProbeIdx, u32>>,
+        BTreeMap<(AllocationId, ProbeIdx), u32>,
 
     /// Per-alloc record of "Stable was announced for this alloc".
     /// INPUT — distinguishes the deciding-tick announcement from
@@ -135,6 +143,92 @@ pub struct ServiceLifecycleView {
     pub startup_attempts_per_alloc: BTreeMap<AllocationId, u32>,
 }
 ```
+
+**Amendment 2026-08-02 — `ServiceLifecycleState` corrected to the
+implemented fact-bundle projection. This is a STRUCTURAL correction,
+not an accuracy annotation — the implementation deliberately built a
+different `State` shape from the one sketched above, and that
+divergence was until now recorded nowhere.** The decision this ADR
+records is unaffected (see "What does NOT change" below).
+
+The sketch above previously declared four parallel maps holding raw
+observation rows:
+
+```rust
+pub spec:            Option<ServiceSpec>,
+pub allocations:     BTreeMap<AllocationId, AllocStatusRow>,
+pub probe_results:   BTreeMap<AllocationId, BTreeMap<ProbeIdx, ProbeResultRow>>,
+pub service_backends: BTreeMap<AllocationId, ServiceBackendRow>,
+```
+
+None of those four fields exists. The implemented struct
+(`crates/overdrive-core/src/service_lifecycle.rs:231-254`) carries
+`allocs` / `service_dataplane` / `prior_backend_row_at` as shown. The
+projection was inverted: instead of the reconciler joining four
+row-keyed maps at decision time, **the runtime's hydrate pass
+pre-joins everything into one `ServiceAllocFact` per alloc**
+(`:70-216`) and the reconciler iterates `actual.allocs` once
+(`:500`, `:697`, `:843`). The four sketched fields map across as:
+
+| Sketched field | Implemented replacement |
+|---|---|
+| `spec: Option<ServiceSpec>` | Spec-derived policy flattened onto each fact: `max_attempts`, `startup_deadline`, `mechanic_summary`, `inferred`, `startup_probes_empty` (`:118-137`), `has_readiness_probe`, `readiness_success_threshold` (`:156`, `:162`), `has_liveness_probe`, `liveness_failure_threshold`, `restart_spec` (`:187`, `:193`, `:215`) |
+| `allocations: …<AllocStatusRow>` | `ServiceAllocFact::{state, started_at, exit_code}` (`:74`, `:108`, `:111`) |
+| `probe_results: …<BTreeMap<ProbeIdx, ProbeResultRow>>` | Three flat `Option<ProbeStatus>` fields — `latest_startup_probe` (`:114`), `latest_readiness_probe` (`:150`), `latest_liveness_probe` (`:181`) |
+| `service_backends: …<ServiceBackendRow>` | `ServiceLifecycleState::{service_dataplane, prior_backend_row_at}` (`:247`, `:253`) |
+
+**The probe row-set became a single status per role.** This is the
+consequential half of the correction and it *strengthens* the
+multi-probe gap recorded in the two amendments below (§ 3, § 5).
+Those amendments locate the gap in the projection logic — the
+hydrate filter pins `ProbeIdx::new(0)`
+(`crates/overdrive-control-plane/src/reconciler_runtime.rs:3052-3056`,
+`:3061-3065`, `:3069-3073`) and the spec side reads
+`startup_probes[0]` / `.first()` (`:1963`, `:1981`, `:1996`). The
+`State` shape shows the gap is **structural in the type**: a
+`BTreeMap<ProbeIdx, …>` could hold probes `1..N`; an
+`Option<ProbeStatus>` has nowhere to put them. Widening the hydrate
+filter alone would therefore NOT close § 5 — closing it requires
+changing `ServiceAllocFact` back to a per-role collection. That is a
+larger change than the two amendments below imply, and it is recorded
+here so the next reader costs it correctly.
+
+**The unused argument is `desired`, not `actual`.** The old sketch's
+first field said "`actual`: empty placeholder; not used". The
+implementation inverted this: `reconcile` binds `_desired`
+(`crates/overdrive-core/src/service_lifecycle.rs:491`) and reads
+`actual` exclusively. Both projections are populated by the runtime
+(desired at `crates/overdrive-control-plane/src/reconciler_runtime.rs:1880`,
+actual at `:2963`), but every decision path reads `actual` because
+the spec-derived policy inputs are flattened onto the actual-side
+facts.
+
+**What does NOT change.** Every decision in this ADR stands: § 1
+(ServiceLifecycle is its own typed reconciler with disjoint
+`State`/`View`), § 4 (`Stable` non-terminal, deduplicated
+structurally via `View::stable_announced`), § 5 (AND-of-all —
+specified, not implemented, per its own amendment), § 6
+(`successThreshold` recomputed from the live spec), § 7 (no Phase 1
+governor), § 8 (no port dependencies). The persist-inputs discipline
+this section argues for is likewise preserved and is in fact carried
+further than sketched: `ServiceAllocFact` re-derives every spec-side
+threshold each tick rather than reading a persisted spec snapshot.
+
+**Also corrected in the `View` sketch above:** the two per-probe
+counters are flat tuple-keyed maps —
+`BTreeMap<(AllocationId, ProbeIdx), u32>` (`:297`, `:303`) — not the
+nested `BTreeMap<AllocationId, BTreeMap<ProbeIdx, u32>>` previously
+shown. The keying is semantically the same per-`(alloc, probe_idx)`
+pair the amendment below describes; only the container nesting
+differed. Note further that the `View` sketch above is **abridged**:
+the implemented struct carries four fields the sketch omits —
+`startup_last_fail_seen_at` (`:316`), `observed` (`:338`),
+`terminal_announced` (`:368`), and
+`last_emitted_backend_fingerprint` (`:387`). The first three are
+GAP-9/GAP-10 additions; the fourth is the emit-time fingerprint
+ADR-0079 § D4 deliberately excludes from its convergence fix. They
+are named here rather than folded into the sketch because each was
+introduced by a decision recorded elsewhere, not by this ADR.
 
 **Amendment 2026-08-02 — fourth field's name and key shape corrected.**
 The field is `startup_attempts_per_alloc`, keyed
@@ -158,17 +252,43 @@ tick. Note that `probe_idx` on the `StartupProbeFailed` payload (§ 3
 step 2, § 4) is a distinct reporting field, not a key of this counter.
 
 `Stable` IS NOT persisted as a derived field. The "Stable predicate"
-is recomputed every tick from:
+is recomputed every tick. As specified by § 5 (AND-of-all), the
+predicate is:
 
 ```
-is_stable(alloc) =
+is_stable(alloc) =                                   // SPECIFIED
     spec.startup_probes.iter().all(|probe|
         actual.probe_results[alloc][probe.idx].status == Pass)
 ```
 
-— pure function of `actual` + `spec`. The `stable_announced` set
-records only "did we already emit the deciding action?" — a
-publication-side invariant, not a derived state cache.
+**As implemented it is a disjunction of two single-probe branches,
+not a conjunction over declared probes:**
+
+```
+is_stable(alloc) =                                   // IMPLEMENTED
+       (fact.startup_probes_empty && fact.state == Running)   // opt-out
+    || (fact.state == Running
+        && fact.latest_startup_probe == Some(Pass))           // single probe
+```
+
+— `crates/overdrive-core/src/service_lifecycle.rs:557` (the ADR-0058
+§4 / ADR-0059 Q5 empty-probes opt-out) and `:580-581`, whose own
+comment reads "Running + **any** startup probe Pass". The AND-of-all
+decision of § 5 stands and is unchanged; its non-implementation is
+recorded in § 5's own amendment and, structurally, in the `State`
+amendment above — `latest_startup_probe` is one `Option<ProbeStatus>`,
+so no conjunction over ≥2 probes is expressible at this call site.
+
+The load-bearing claim of this passage survives both corrections
+intact: the predicate remains a **pure function of inputs recomputed
+every tick, never a persisted derived field**. Only its arity and its
+argument source change — it is a pure function of `actual` + `tick`,
+because the spec-side inputs it would otherwise read from `desired`
+are flattened onto `actual.allocs[alloc]` by the hydrate pass (see
+the `State` amendment above). The `stable_announced` set continues to
+record only "did we already emit the deciding action?" — a
+publication-side invariant, not a derived state cache
+(`:501-506`, `:597`).
 
 `AnyState` and `AnyReconcilerView` gain new variants (additive
 per `overdrive-core::reconcilers::mod`):
@@ -194,37 +314,48 @@ pub enum AnyReconciler {
 ### 3. `reconcile` body — pure decision tree
 
 ```rust
-impl Reconciler for ServiceLifecycle {
+// Body shape corrected 2026-08-02 to the implemented iteration —
+// see the `State` amendment in § 2.
+impl Reconciler for ServiceLifecycleReconciler {
     const NAME: &'static str = "service-lifecycle";
     type State = ServiceLifecycleState;
     type View  = ServiceLifecycleView;
 
     fn reconcile(
         &self,
-        desired: &ServiceLifecycleState,
-        actual:  &ServiceLifecycleState,
-        view:    &ServiceLifecycleView,
-        tick:    &TickContext,
-    ) -> (Vec<Action>, ServiceLifecycleView) {
+        _desired: &Self::State,   // unused — spec inputs ride on `actual`
+        actual:   &Self::State,
+        view:     &Self::View,
+        tick:     &TickContext,
+    ) -> (Vec<Action>, Self::View) {
         let mut actions = Vec::new();
         let mut next = view.clone();
 
-        let Some(spec) = desired.spec.as_ref() else {
-            return (actions, next); // Service deleted; cleanup by GC reconciler
-        };
-
-        for (alloc_id, alloc_row) in &actual.allocations {
-            decide_per_alloc(
-                spec, alloc_row,
-                actual.probe_results.get(alloc_id).unwrap_or(&BTreeMap::new()),
-                view, &mut next, &mut actions, tick,
-            );
+        // No `desired.spec` guard: a Service whose intent is absent
+        // hydrates to `allocs: BTreeMap::new()`, so the loop is empty
+        // and the tick is a no-op by construction.
+        for (alloc_id, fact) in &actual.allocs {
+            // dedup guards, then the per-alloc branch ladder
+            // (opt-out Stable / Stable / EarlyExit / StartupProbeFailed);
+            // readiness + liveness run in their own passes over the
+            // same `actual.allocs` map.
         }
 
         (actions, next)
     }
 }
 ```
+
+The reconciler struct is `ServiceLifecycleReconciler`
+(`crates/overdrive-core/src/service_lifecycle.rs:480`); the
+`AnyReconciler` / `AnyState` / `AnyReconcilerView` variants are all
+spelled `ServiceLifecycle(…)` and wrap it
+(`crates/overdrive-core/src/reconcilers/mod.rs:812`, `:354`, `:947`).
+The empty-intent case is handled on the hydrate side rather than by a
+guard in the body — `hydrate_actual` returns
+`ServiceLifecycleState { allocs: BTreeMap::new(), .. }` when the
+Service's intent is absent
+(`crates/overdrive-control-plane/src/reconciler_runtime.rs:2915-2919`).
 
 `decide_per_alloc` follows the per-role priority order:
 
@@ -271,13 +402,15 @@ impl Reconciler for ServiceLifecycle {
 **Amendment 2026-08-02 — the per-probe iteration in steps 2–4 is
 specified but not implemented.** Those steps describe reading a result
 for each declared probe (`for each probe in spec.startup_probes` /
-`readiness_probes` / `liveness_probes`). The implemented hydrate path
-consults exactly ONE row per role: the three projections in
-`hydrate_service_alloc_facts` filter on `probe_idx ==
-ProbeIdx::new(0)` and reduce with `max_by_key` on
-`last_observed_at_unix_ms` — startup at
-`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
-readiness at `:3035-3042`, liveness at `:3046-3053`. The spec-side
+`readiness_probes` / `liveness_probes`), indexed as
+`actual.probe_results[alloc_id][probe.idx]` — a field that does not
+exist; see the `State` amendment in § 2 for the shape that shipped in
+its place. The implemented hydrate path consults exactly ONE row per
+role: the three `latest_probe_status` projections in
+`hydrate_service_alloc_facts` filter on `(role, ProbeIdx::new(0))` and
+reduce with `max_by_key` on `last_observed_at_unix_ms` — startup at
+`crates/overdrive-control-plane/src/reconciler_runtime.rs:3052-3056`,
+readiness at `:3061-3065`, liveness at `:3069-3073`. The spec-side
 threshold projections are single-probe for the same reason:
 `spec_facts_for_service` reads `svc.startup_probes[0]` (`:1963`),
 `readiness_facts_for_service` reads `.first()` (`:1981`), and
@@ -296,10 +429,16 @@ The decision recorded above is unchanged; only its implementation
 status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
 ADR deliberately does NOT address" is where the decision not to close
 this gap as part of that ADR's scope is recorded. ADR-0080 is accepted
-(2026-08-02) and not yet implemented; its Stage 1 (D1 + D2) makes
-`ProbeIdx` per-role and parser-assigned and adds `role` to the durable
-composite key, so per-role probes `1..N` are stored distinctly rather
-than sharing one key space across roles.
+(2026-08-02); its **Stage 1 (D1–D4) is implemented**, making `ProbeIdx`
+per-role and parser-assigned and adding `role` to the durable composite
+key, so per-role probes `1..N` are stored distinctly rather than
+sharing one key space across roles — the `(role, probe_idx)` filter at
+`:3052-3056` / `:3061-3065` / `:3069-3073` is that Stage-1 shape.
+**Stage 2 (D5 — the bridge taking sole ownership of
+`ServiceBackendRow`) is NOT implemented.** Neither stage closes the
+multi-probe gap: Stage 1 makes probes `1..N` addressable in the store
+without making them readable by the reconciler, which per the `State`
+amendment in § 2 has no field to receive them.
 
 The function is < 200 LOC, pure, sync, no `.await`, no I/O.
 
@@ -407,7 +546,7 @@ default `"all"`); out of scope for Phase 1.
 No implemented decision path evaluates a conjunction over ≥2 startup
 probes. The startup projection consults a single row, the one at
 `probe_idx == ProbeIdx::new(0)`
-(`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`),
+(`crates/overdrive-control-plane/src/reconciler_runtime.rs:3052-3056`),
 and `spec_facts_for_service` derives the startup thresholds from
 `svc.startup_probes[0]` alone (`:1963`). A second declared startup
 probe is spawned
@@ -415,6 +554,18 @@ probe is spawned
 durable rows (`:543`, `:551`) that no `Stable` predicate reads, so the
 `witness` rule in the third bullet above — "the LAST probe to cross its
 threshold" — has no implemented counterpart either.
+
+**The gap is structural, not merely a projection choice.** The
+implemented `Stable` branch is a single-`Option` test, not a
+conjunction that happens to be evaluated over one element:
+`fact.state == Running && matches!(fact.latest_startup_probe,
+Some(ProbeStatus::Pass))`
+(`crates/overdrive-core/src/service_lifecycle.rs:580-581`), whose own
+comment reads "Running + **any** startup probe Pass". Because
+`ServiceAllocFact` carries `latest_startup_probe: Option<ProbeStatus>`
+(`:114`) rather than a per-probe collection, closing this section
+requires **changing the `State` type**, not just widening the hydrate
+filter — see the `State` amendment in § 2.
 
 The AND-of-all decision itself is unchanged; only its implementation
 status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
@@ -527,10 +678,10 @@ without a real use case.
 
 - **One new reconciler + new AnyState / AnyReconcilerView variants**
   to maintain. Each AnyReconciler match arm adds ~5 LOC; bounded.
-- **`ServiceLifecycleView` carries five maps** (liveness counters,
-  readiness counters, stable-announced set, startup-attempt
-  counters). Memory cost: O(allocs × probes) per node; for Phase 1
-  single-node single-replica + 3 probes = ~100 B. Bounded.
+- **`ServiceLifecycleView` carries per-alloc counter maps and dedup
+  sets** (liveness counters, readiness counters, stable-announced set,
+  startup-attempt counters). Memory cost: O(allocs × probes) per node;
+  for Phase 1 single-node single-replica + 3 probes = ~100 B. Bounded.
 - **TerminalCondition gains 2 variants** (`Stable`, `Failed`); per
   ADR-0037 §5 additive minor SemVer; existing fixtures unaffected
   (Service kind is greenfield at this ADR).
@@ -595,3 +746,52 @@ without a real use case.
   This ADR was the normative origin of the wrong name: `brief.md`
   carried it (corrected 2026-08-02) while ADR-0080 § D5 already cited
   the correct one, leaving two accepted ADRs in contradiction until now.
+- 2026-08-02 — **Amendment** — **structural correction**; no decision
+  changed. Unlike the two entries above (which corrected a field name
+  and a stale status), this one replaces a whole type: § 2's
+  `ServiceLifecycleState` sketch declared four parallel row-keyed maps
+  (`spec`, `allocations`, `probe_results`, `service_backends`), none of
+  which exists. The implementation deliberately built a **pre-joined
+  per-alloc fact bundle** — `allocs: BTreeMap<AllocationId,
+  ServiceAllocFact>` plus `service_dataplane` and
+  `prior_backend_row_at`
+  (`crates/overdrive-core/src/service_lifecycle.rs:231-254`;
+  `ServiceAllocFact` at `:70-216`) — and the probe row-set collapsed to
+  three flat `Option<ProbeStatus>` fields (`:114`, `:150`, `:181`).
+  Corrected in § 2 (the `State` sketch, the two `View` counter key
+  types, and the `is_stable` pseudocode) and § 3 (the `reconcile` body
+  sketch), each annotated with the implemented shape. Three
+  consequences are recorded rather than silently reinterpreted: (a) the
+  multi-probe gap already noted in § 3 and § 5 is **structural in the
+  `State` type**, not merely a hydrate-filter choice, so closing § 5
+  costs a type change; (b) the unused `reconcile` argument is
+  `_desired`, not `actual` as the old sketch claimed (`:491`) — the
+  spec-derived policy inputs ride on the actual-side facts; (c) the
+  `View` sketch is abridged, omitting four implemented fields
+  (`startup_last_fail_seen_at`, `observed`, `terminal_announced`,
+  `last_emitted_backend_fingerprint`) introduced by decisions recorded
+  elsewhere. Also refreshed in this pass: the hydrate-projection line
+  citations in the § 3 and § 5 amendments, stale after commits
+  `3468ccda` / `75a62400` (`:3023-3030` / `:3035-3042` / `:3046-3053` →
+  `:3052-3056` / `:3061-3065` / `:3069-3073`), and the § 3 amendment's
+  claim that ADR-0080 is "not yet implemented" — its Stage 1 (D1–D4) is
+  implemented; Stage 2 (D5) is not.
+- 2026-08-02 — **Amendment** — accuracy correction only; no decision
+  changed. Dropped the field count from the Consequences → Negative
+  entry that read "**`ServiceLifecycleView` carries five maps**". The
+  implemented View has **eight** fields
+  (`crates/overdrive-core/src/service_lifecycle.rs:289-388`): five
+  `BTreeMap`s (`startup_attempts_per_alloc`,
+  `liveness_consecutive_failures`, `readiness_consecutive_successes`,
+  `startup_last_fail_seen_at`, `last_emitted_backend_fingerprint`) and
+  three `BTreeSet`s (`stable_announced`, `terminal_announced`,
+  `observed`). "Five" was *accidentally* defensible — it is the exact
+  count of the `BTreeMap`s, the rest being `BTreeSet`s — while reading
+  as a field count that is off by three. A number that resists
+  correction is worse than one plainly wrong, so the count was dropped
+  rather than restated; the parenthetical that follows it was already
+  illustrative rather than exhaustive, and the O(allocs × probes)
+  sizing argument it supports is unaffected. The full eight-field
+  inventory is carried in `brief.md` § 77, which enumerates the five
+  maps and three sets explicitly; this entry is the ADR-side
+  reconciliation with it.

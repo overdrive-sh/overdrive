@@ -2392,6 +2392,42 @@ path structurally impossible.
 - **Cancellation safety.** Async tasks must tolerate being cancelled at
   any `.await` point. A task holding a partially-applied mutation
   across an `.await` is a bug.
+- **`JoinHandle::abort()` is never the shutdown mechanism — a cooperative
+  signal is.** `abort()` stops a task at its next yield point. A task
+  doing blocking work — anything on `spawn_blocking`, a blocking
+  `accept()` / `poll()` / `recv()` — has no yield point until the syscall
+  returns, so `abort()` does **not** interrupt it. The task keeps running,
+  and keeps holding whatever it owns: a bound socket, a netns handle, a
+  cgroup scope. Shutdown must therefore be driven by something the task
+  itself observes — a `CancellationToken`, or an `AtomicBool` checked
+  between bounded slices — and `abort()` is at most a backstop that stops
+  the task being re-polled once it has already yielded.
+
+  Two shapes, both live in tree:
+
+  - **Fully async task tree → tokens alone; no `abort()`, no `JoinSet`.**
+    `probe_runner` owns a root `CancellationToken` plus one intermediate
+    token per `ProbeRole` (`crates/overdrive-worker/src/probe_runner/supervisor.rs`),
+    and each task's body is a `tokio::select!` with `biased;` on its
+    token. Cancelling the root drains every task; cancelling one role
+    token retires exactly that role — which is what lets a non-terminal
+    `Stable` stop startup supervision while readiness and liveness keep
+    ticking (ADR-0080 § D4). Handles are detached; nothing is collected.
+  - **Blocking task → cooperative flag first, `abort()` as backstop
+    only.** `MtlsInterceptWorker::stop_alloc`
+    (`crates/overdrive-worker/src/mtls_intercept_worker.rs`) stores
+    `stop = true`, which the accept loops observe between 200 ms poll
+    slices, *then* aborts. The comment there states the reason plainly:
+    `abort` alone cannot interrupt a blocking `accept()`. The DNS
+    responder shutdown (`crates/overdrive-control-plane/src/lib.rs`) has
+    the same shape — `responder.stop()` is the mechanism, `abort()` is
+    "belt-and-braces".
+
+  **Symptom during review:** a `.abort()` with no accompanying flag or
+  token, on a task that does blocking I/O. It reads as shutdown and is
+  not — the socket stays bound and runtime teardown hangs. Also: an
+  `abort()` whose comment claims it *stops* the task rather than
+  preventing a re-poll.
 - **Never hold a lock across `.await`.** Grab the lock, mutate or clone,
   drop the guard, then `await`. Holding `parking_lot` across `.await` is
   a deadlock waiting for an unfair scheduler tick; holding `tokio::sync`
