@@ -20,7 +20,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::backend_key::Proto;
-use overdrive_core::observation::ProbeRole;
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 
 use super::harness::assert_envelope_v_roundtrip;
 
@@ -54,6 +54,7 @@ fn canonical_v2_payload() -> ServiceSpecLatest {
             protocol: Proto::Tcp,
         }],
         startup_probes: vec![ProbeDescriptor {
+            idx: ProbeIdx::new(0),
             role: ProbeRole::Startup,
             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: 9090 },
             timeout_seconds: 5,
@@ -79,7 +80,22 @@ const FIXTURE_V1: &str = "7376632d7072652d70726f6265732f7573722f62696e2f73657276
 /// Hex-encoded rkyv-archived bytes of
 /// `ServiceSpecEnvelope::V2(canonical_v2_payload())`. Pinned on the
 /// GREEN landing of step 01-02.
-const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f736572766572000000822300000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e00000000000000000000000000000000000000010000000000000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b4ffffff00000000acffffff00000000";
+///
+/// **Regenerated for ADR-0080 § D1** (2026-08-02) — `ProbeDescriptor`
+/// gained the per-role `idx: ProbeIdx` field ADR-0057:172 specified and
+/// the original implementation dropped. The archived layout of
+/// `ProbeDescriptor` is positional, and this fixture's `startup_probes`
+/// vector is POPULATED, so the added field shifts its offsets. Under
+/// the Phase-1 greenfield single-cut migration policy (per
+/// `feedback_single_cut_greenfield_migrations.md`: "delete the on-disk
+/// redb file" is the official upgrade path) the new field set is
+/// admitted in-place rather than minting `ServiceSpecV3`; the fixture is
+/// regenerated in the SAME commit so the structural defense — every
+/// persisted layout has a pinned golden-bytes fixture — is preserved.
+/// `FIXTURE_V1` above is deliberately NOT regenerated: `ServiceSpecV1`
+/// carries no `ProbeDescriptor`, so its layout provably did not move
+/// (verified — the regeneration tool emits byte-identical V1 hex).
+const FIXTURE_V2: &str = "7376632d776974682d70726f62652f7573722f62696e2f73657276657200000082230000000000000000000000000000302e302e302e30ff8223000000000000000000000000000005000000020000001e000000000000000000000000000000000000000100000001000000000000008e00000090ffffff010000008f00000092ffffff9cffffff00000000000000006400000000000000000000080000000080ffffff010000007cffffff01000000b8ffffff00000000b0ffffff00000000";
 
 /// V1 fixture decodes through the bumped envelope and projects to the
 /// canonical V2 `Latest` (with three empty probe vectors). This is the

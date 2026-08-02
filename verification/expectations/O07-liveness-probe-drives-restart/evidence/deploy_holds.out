@@ -1,0 +1,7 @@
+Accepted.
+Workload ID:   liveness-holds
+Intent key:    workloads/liveness-holds
+Spec digest:   4a4aedda33f27eb41930abadac028ff34c9ca362c34eaa56454f7a57622cd45b
+Outcome:       created
+Endpoint:      https://127.0.0.1:7443/
+Next: overdrive workload describe liveness-holds

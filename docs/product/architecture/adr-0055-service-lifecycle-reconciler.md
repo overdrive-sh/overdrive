@@ -248,6 +248,39 @@ impl Reconciler for ServiceLifecycle {
      downstream actions. This ADR does not implement the
      rate-limiter; it makes its addition non-breaking.
 
+**Amendment 2026-08-02 — the per-probe iteration in steps 2–4 is
+specified but not implemented.** Those steps describe reading a result
+for each declared probe (`for each probe in spec.startup_probes` /
+`readiness_probes` / `liveness_probes`). The implemented hydrate path
+consults exactly ONE row per role: the three projections in
+`hydrate_service_alloc_facts` filter on `probe_idx ==
+ProbeIdx::new(0)` and reduce with `max_by_key` on
+`last_observed_at_unix_ms` — startup at
+`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
+readiness at `:3035-3042`, liveness at `:3046-3053`. The spec-side
+threshold projections are single-probe for the same reason:
+`spec_facts_for_service` reads `svc.startup_probes[0]` (`:1963`),
+`readiness_facts_for_service` reads `.first()` (`:1981`), and
+`liveness_facts_for_service` reads `.first()` (`:1996`).
+
+Probes `1..N` of every role are nonetheless spawned and do write
+durable rows — `project_probe_descriptors`
+(`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:1253-1269`)
+concatenates all three vectors in full, and `ProbeRunner::start_alloc`
+spawns one task per descriptor via `iter().enumerate()`
+(`crates/overdrive-worker/src/probe_runner/mod.rs:323`), each writing a
+`ProbeResultRow` per tick (`:543`, `:551`; adapter-failure rows at
+`:520`, `:528`). No decision path consults those rows.
+
+The decision recorded above is unchanged; only its implementation
+status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
+ADR deliberately does NOT address" is where the decision not to close
+this gap as part of that ADR's scope is recorded. ADR-0080 is accepted
+(2026-08-02) and not yet implemented; its Stage 1 (D1 + D2) makes
+`ProbeIdx` per-role and parser-assigned and adds `role` to the durable
+composite key, so per-role probes `1..N` are stored distinctly rather
+than sharing one key space across roles.
+
 The function is < 200 LOC, pure, sync, no `.await`, no I/O.
 
 ### 4. `Stable` as non-terminal condition — extension to ADR-0037
@@ -349,6 +382,26 @@ have `status == Pass`). Rationale:
 OR-semantics is reserved for a future operator-configurable knob
 (e.g. `[health_check].startup_combinator = "any" | "all"` with
 default `"all"`); out of scope for Phase 1.
+
+**Amendment 2026-08-02 — AND-of-all is specified but not implemented.**
+No implemented decision path evaluates a conjunction over ≥2 startup
+probes. The startup projection consults a single row, the one at
+`probe_idx == ProbeIdx::new(0)`
+(`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`),
+and `spec_facts_for_service` derives the startup thresholds from
+`svc.startup_probes[0]` alone (`:1963`). A second declared startup
+probe is spawned
+(`crates/overdrive-worker/src/probe_runner/mod.rs:323`) and writes
+durable rows (`:543`, `:551`) that no `Stable` predicate reads, so the
+`witness` rule in the third bullet above — "the LAST probe to cross its
+threshold" — has no implemented counterpart either.
+
+The AND-of-all decision itself is unchanged; only its implementation
+status is corrected here. ADR-0080 § "A fourth, pre-existing gap this
+ADR deliberately does NOT address" is where the decision not to close
+this gap as part of that ADR's scope is recorded, and it names
+ratifying the readiness and liveness combinators this section leaves
+specified for startup only as part of what closing it would require.
 
 ### 6. `successThreshold` for readiness (P2-Q8 resolution)
 
@@ -495,3 +548,15 @@ without a real use case.
 - 2026-05-24 — Initial accepted version. Resolves P1-Q3 (in part),
   P2-Q7, P2-Q8, P2-Q9 from
   `docs/feature/service-health-check-probes/feature-delta.md`.
+- 2026-08-02 — **Amendment** — accuracy annotation only; no decision
+  changed. Marked the multi-probe-per-role behaviour in § 3 (steps 2–4,
+  the per-probe iteration) and § 5 (AND-of-all for multi-startup-probe
+  `Stable`) as **specified but not implemented**. Every implemented
+  consumer reads per-role index 0 only
+  (`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
+  `:3035-3042`, `:3046-3053`, and `:1963` / `:1981` / `:1996`), while
+  probes `1..N` are spawned and write durable rows
+  (`crates/overdrive-worker/src/probe_runner/mod.rs:323`, `:543`) that
+  nothing consults. ADR-0080 § "A fourth, pre-existing gap this ADR
+  deliberately does NOT address" records the decision not to close the
+  gap within that ADR's scope.

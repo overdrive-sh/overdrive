@@ -425,6 +425,50 @@ components:
 
             Additive-safe: `skip_serializing_if = "Vec::is_empty"` keeps the
             JSON wire backward-compatible for non-Service reads.
+        probe_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeResultRowJson'
+          description: |-
+            Latest OBSERVED probe outcome per `(alloc_id, role, probe_idx)`
+            across every allocation of this workload — the observation-side
+            half that joins against [`Self::probes`].
+
+            Projected from `ObservationStore::list_probe_results_for_alloc`
+            per allocation (which returns exactly the LWW winner per
+            `(role, probe_idx)`), in `Self::rows` order. A declared probe
+            with NO row here has not yet ticked — row ABSENCE is the
+            `pending` state per ADR-0054 §5; adapters never write a
+            `Pending` status.
+
+            Additive + skip-if-empty, same as [`Self::issued_certificates`].
+        probes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProbeDescriptor'
+          description: |-
+            Probe DECLARATIONS carried by the persisted `WorkloadIntent::
+            Service` aggregate — the operator's `[[health_check.*]]` rows
+            plus any ADR-0058-synthesised default-TCP startup probe. Empty
+            for `Job` / `Schedule` reads (probes are Service-only per US-07)
+            and for a Service whose operator wrote the explicit
+            `[[health_check.startup]] = []` opt-out.
+
+            Same convention as [`Self::listeners`]: an INTENT property
+            projected verbatim from the typed core aggregate (the type
+            already carries `Serialize`/`Deserialize`/`ToSchema`), rendered
+            at ANY allocation count so a pre-convergence Service still
+            surfaces its declared probes as `last=pending`.
+
+            Ordered `(role, idx)` ascending — `startup_probes` then
+            `readiness_probes` then `liveness_probes`, matching
+            [`ProbeRole`](overdrive_core::observation::probe_result_row::ProbeRole)'s
+            derived `Ord` and the deterministic iteration order
+            `ObservationStore::list_probe_results_for_alloc` guarantees, so
+            the CLI join is order-stable on both sides.
+
+            Additive-safe: `skip_serializing_if = "Vec::is_empty"` keeps the
+            JSON wire backward-compatible for non-Service reads.
         replicas_desired:
           type: integer
           format: int32
@@ -1021,6 +1065,7 @@ components:
         (per ADR-0058) from operator-declared probes. Renderer surfaces
         as `(inferred)` suffix per US-06 AC.
       required:
+      - idx
       - role
       - mechanic
       - timeout_seconds
@@ -1035,6 +1080,19 @@ components:
           format: int32
           description: Liveness only. `None` for startup / readiness.
           minimum: 0
+        idx:
+          $ref: '#/components/schemas/ProbeIdx'
+          description: |-
+            0-indexed position within THIS descriptor's role array
+            (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
+            construction and carried verbatim into `ServiceV1`; never
+            re-derived downstream.
+
+            Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
+            the original implementation dropped. `ProbeRunner::start_alloc`
+            consumes it verbatim — it MUST NOT derive an index from the
+            flat concatenated descriptor vector, whose position carries no
+            index semantics.
         inferred:
           type: boolean
           description: |-
@@ -1064,6 +1122,17 @@ components:
           type: integer
           format: int32
           minimum: 0
+    ProbeIdx:
+      type: integer
+      format: int32
+      description: |-
+        0-indexed position of a probe within its role's TOML array (or
+        `0` for the inferred default probe per ADR-0058 / C4).
+
+        `ProbeIdx` is the load-bearing cross-step variable per
+        `discuss/shared-artifacts-registry.md`: it MUST match across
+        (parser → ProbeResultRow PK → CLI render → wire payloads).
+      minimum: 0
     ProbeMechanic:
       oneOf:
       - type: object
@@ -1134,6 +1203,53 @@ components:
         lands the `Tcp` variant; `Http` lands in step 02-01 and `Exec`
         in step 02-02 — all three are part of the enum so the
         `ServiceSpec` envelope shape is stable across slices.
+    ProbeResultRowJson:
+      type: object
+      description: |-
+        Wire-only mirror of
+        `overdrive-core::observation::probe_result_row::ProbeResultRow`.
+
+        `ProbeResultRow` is rkyv-persisted (carries `rkyv::Archive` /
+        `rkyv::Serialize` / `rkyv::Deserialize`); this wire struct carries
+        only the JSON-shape derives (`Serialize` / `Deserialize` /
+        `ToSchema`) and projects from the typed row via
+        [`From<&ProbeResultRow>`].
+
+        Per ADR-0048: rkyv-persisted types follow the per-type versioned
+        envelope discipline; wire-only types use serde directly. This
+        separation keeps storage and wire concerns decoupled.
+      required:
+      - alloc_id
+      - probe_idx
+      - role
+      - status
+      - last_observed_at_unix_ms
+      - inferred
+      properties:
+        alloc_id:
+          type: string
+          description: Allocation this probe targets.
+        inferred:
+          type: boolean
+          description: Whether this probe was inferred by the platform per ADR-0058.
+        last_observed_at_unix_ms:
+          type: integer
+          format: int64
+          description: |-
+            Wall-clock at which the probe attempt completed. UNIX-epoch
+            milliseconds; sourced from the ProbeRunner's injected clock.
+          minimum: 0
+        probe_idx:
+          type: integer
+          format: int32
+          description: 0-indexed position within the role array.
+          minimum: 0
+        role:
+          type: string
+          description: Which role this probe is (`startup` / `readiness` / `liveness`).
+        status:
+          $ref: '#/components/schemas/ProbeStatusJson'
+          description: Latest observed outcome — `pass` or `fail` with last_fail_reason.
     ProbeRole:
       type: string
       description: |-
@@ -1149,6 +1265,35 @@ components:
       - startup
       - readiness
       - liveness
+    ProbeStatusJson:
+      oneOf:
+      - type: object
+        required:
+        - status
+        properties:
+          status:
+            type: string
+            enum:
+            - pass
+      - type: object
+        required:
+        - data
+        - status
+        properties:
+          data:
+            type: object
+            required:
+            - last_fail_reason
+            properties:
+              last_fail_reason:
+                type: string
+          status:
+            type: string
+            enum:
+            - fail
+      description: |-
+        Wire projection of `overdrive-core::observation::probe_result_row::
+        ProbeStatus` — `pass` / `fail { last_fail_reason }`.
     ProbeWitness:
       type: object
       description: |-

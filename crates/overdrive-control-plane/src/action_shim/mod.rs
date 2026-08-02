@@ -1189,18 +1189,27 @@ async fn dispatch_single(
                 Some(&prior_row),
             );
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
-            // Service-health-check-probes step 01-03d / ADR-0054 § 2:
-            // FinalizeFailed is a terminal claim (BackoffExhausted /
-            // Completed / Failed) — fire the terminal lifecycle hook
-            // so any probe supervisor spawned earlier in the alloc's
-            // lifetime is cleaned up. Default no-op when no
-            // ProbeRunner is wired.
-            // Probe-supervisor cleanup is correct for BOTH a Stable and a
-            // genuine terminal (a Stable alloc has indeed passed startup, so
-            // its supervisor hook is benign-or-correct) — NOT gated on
-            // `is_stable`. Only the two DESTRUCTIVE infrastructure teardowns
-            // below are gated (canonical-address inbound RCA §9, GH #241).
-            driver.on_alloc_terminal(&row.alloc_id);
+            // Service-health-check-probes step 01-03d / ADR-0054 § 2 +
+            // ADR-0080 § D4: fire the probe lifecycle hook matching what
+            // this FinalizeFailed actually claims.
+            //
+            // `Stable` is NON-TERMINAL (ADR-0055): the alloc stays Running
+            // and keeps serving, and readiness / liveness are continuous
+            // post-Stable per `ProbeRole`'s contract. Routing it through
+            // `on_alloc_terminal` tore the whole supervisor down and
+            // cancelled every role — which made readiness and liveness
+            // structurally unreachable for their entire intended lifetime
+            // and left `Backend.healthy` a constant. `on_alloc_stable`
+            // retires the startup role only; the supervisor survives.
+            //
+            // A genuine terminal (BackoffExhausted / Completed / Failed)
+            // still tears the whole supervisor down. Both hooks default to
+            // no-op when no ProbeRunner is wired.
+            if is_stable {
+                driver.on_alloc_stable(&row.alloc_id);
+            } else {
+                driver.on_alloc_terminal(&row.alloc_id);
+            }
             // The mTLS-intercept detach and the C3 netns teardown are both
             // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
             // claim (the alloc stays Running and keeps serving on leg-C / its

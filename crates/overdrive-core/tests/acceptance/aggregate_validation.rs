@@ -506,10 +506,11 @@ fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_
 // ---------------------------------------------------------------------------
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::observation::ProbeRole;
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 
 fn make_http_probe(path: &str) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Http { path: path.to_owned(), port: 8080, host: None },
         timeout_seconds: 5,
@@ -573,6 +574,7 @@ fn service_from_submit_rejects_https_in_probe_path() {
 fn service_from_submit_rejects_http_probe_with_zero_port() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Http { path: "/healthz".to_owned(), port: 0, host: None },
         timeout_seconds: 5,
@@ -597,6 +599,7 @@ fn service_from_submit_rejects_http_probe_with_zero_port() {
 fn service_from_submit_rejects_tcp_probe_with_zero_port() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port: 0 },
         timeout_seconds: 5,
@@ -621,6 +624,7 @@ fn service_from_submit_rejects_tcp_probe_with_zero_port() {
 fn service_from_submit_rejects_exec_probe_with_empty_command() {
     let mut spec = canonical_service_spec();
     spec.startup_probes = vec![ProbeDescriptor {
+        idx: ProbeIdx::new(0),
         role: ProbeRole::Startup,
         mechanic: ProbeMechanic::Exec { command: vec![] },
         timeout_seconds: 5,

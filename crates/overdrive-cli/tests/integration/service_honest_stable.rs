@@ -228,10 +228,14 @@ async fn given_in_process_composition_root_when_spawn_server_then_probe_gate_pas
 
 /// S-SHCP-INT-CLI-02 (US-01 WS Fixture B — happy path / K1) —
 /// `examples/quick-bind-service.toml` declares a Service that binds
-/// 127.0.0.1:8080 within ~600ms via `bash -c "sleep 0.5 && nc -l
-/// 127.0.0.1 8080 & sleep 60"`. The ADR-0058-inferred default-TCP
-/// startup probe attempts every 2s; the first attempt at t≈2s sees
-/// the bound listener; the reconciler emits `Stable { settled_in_ms,
+/// the WILDCARD address `0.0.0.0:8080` within ~600ms via
+/// `/bin/bash -c "sleep 0.5 && (nc -l 0.0.0.0 8080 &) && sleep 60"`.
+/// The wildcard bind is load-bearing, not incidental: the
+/// ADR-0058-inferred default-TCP startup probe connects to
+/// `tcp 0.0.0.0:8080`, and a listener bound only to `127.0.0.1`
+/// would refuse it (see the fixture header for the empirical note).
+/// That probe attempts every 2s; the first attempt at t≈2s sees the
+/// bound listener; the reconciler emits `Stable { settled_in_ms,
 /// witness }` per ADR-0055.
 ///
 /// Assertions:

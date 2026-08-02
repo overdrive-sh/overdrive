@@ -2,9 +2,14 @@
 # O02 — workload describe Probes section render. Needs a reachable control plane.
 source "$REPO_ROOT/verification/harness/lima-helpers.sh"
 
-SVC_SPEC="crates/overdrive-cli/examples/quick-bind-service.toml"
-JOB_SPEC="crates/overdrive-cli/examples/coinflip.toml"
-SVC_JOB="payments"   # job name to query; confirm against the spec's [service].name
+# Fixture paths are repo-root `examples/`, NOT `crates/overdrive-cli/examples/`
+# (that directory does not exist). Verified 2026-08-02 against the tree.
+SVC_SPEC="examples/quick-bind-service.toml"
+JOB_SPEC="examples/coinflip.toml"
+# Workload id to query. Every fixture declares it as `[service] id = "…"` /
+# `[job] id = "…"` — there is no `name` key anywhere in `examples/*.toml`, so
+# the extraction below greps `^id`, and this fallback matches the spec above.
+SVC_JOB="quick-bind"
 
 if ! capture preflight_cluster od cluster status; then
   cat <<MSG
@@ -23,8 +28,8 @@ rc=0
 
 # Ensure the Service is deployed (detached), then read its workload describe.
 capture deploy_service od deploy "$SVC_SPEC" --detach || true
-# Confirm the queried job name; the spec's [service].name is authoritative.
-svc_name="$(grep -E '^name[[:space:]]*=' "$REPO_ROOT/$SVC_SPEC" | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+# Confirm the queried workload id; the spec's `[service] id` is authoritative.
+svc_name="$(grep -E '^id[[:space:]]*=' "$REPO_ROOT/$SVC_SPEC" | head -1 | sed -E 's/.*"(.*)".*/\1/')"
 [[ -n "$svc_name" ]] && SVC_JOB="$svc_name"
 
 capture svc_status od workload describe "$SVC_JOB" || true
@@ -35,7 +40,7 @@ grep -qE 'tcp |http |exec ' "$EVIDENCE_DIR/svc_status.out" \
 
 # Negative case: a Job-kind alloc has NO Probes section.
 capture deploy_job od deploy "$JOB_SPEC" --detach || true
-job_name="$(grep -E '^name[[:space:]]*=' "$REPO_ROOT/$JOB_SPEC" | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+job_name="$(grep -E '^id[[:space:]]*=' "$REPO_ROOT/$JOB_SPEC" | head -1 | sed -E 's/.*"(.*)".*/\1/')"
 capture job_status od workload describe "${job_name:-coinflip}" || true
 evidence_absent job_status "Probes" || rc=1
 

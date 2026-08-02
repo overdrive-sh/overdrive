@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::observation::ProbeRole;
+use crate::observation::{ProbeIdx, ProbeRole};
 
 /// Per-kind guidance text surfaced on
 /// [`crate::aggregate::workload_spec::ParseError::ProbesNotAllowedOnKind`]
@@ -145,6 +145,17 @@ impl ProbeMechanic {
     utoipa::ToSchema,
 )]
 pub struct ProbeDescriptor {
+    /// 0-indexed position within THIS descriptor's role array
+    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
+    /// construction and carried verbatim into `ServiceV1`; never
+    /// re-derived downstream.
+    ///
+    /// Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
+    /// the original implementation dropped. `ProbeRunner::start_alloc`
+    /// consumes it verbatim — it MUST NOT derive an index from the
+    /// flat concatenated descriptor vector, whose position carries no
+    /// index semantics.
+    pub idx: ProbeIdx,
     pub role: ProbeRole,
     pub mechanic: ProbeMechanic,
     pub timeout_seconds: u32,

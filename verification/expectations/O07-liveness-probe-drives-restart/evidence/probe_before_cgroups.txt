@@ -1,0 +1,2 @@
+# probe: workload cgroups BEFORE run
+(no alloc-*.scope)

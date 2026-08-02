@@ -1,7 +1,9 @@
 # Walking-skeleton Fixture B (S-SHCP-INT-CLI-02) — quick-bind happy path.
 #
-# A Service whose listener binds 127.0.0.1:8080 within ~600ms. The
-# `ServiceLifecycleReconciler` Stable path requires:
+# A Service whose listener binds the WILDCARD address `0.0.0.0:8080`
+# within ~600ms (see the `[exec]` comment below for why the wildcard,
+# not loopback, is load-bearing). The `ServiceLifecycleReconciler`
+# Stable path requires:
 #   1. The alloc reaches `Running`.
 #   2. The startup probe `tcp 0.0.0.0:8080` returns Pass.
 #
@@ -10,19 +12,64 @@
 # startup probe (`tcp 0.0.0.0:8080`, interval 2s, timeout 5s,
 # max_attempts 30, deadline = 60s).
 #
-# Once upstream wiring closes (slice 02-01 + 02-02), this fixture
-# drives S-SHCP-INT-CLI-02:
-#   * The CLI's `submit_streaming` routes the Service-kind TOML to
-#     `submit_streaming_service`.
-#   * The reconciler observes `Running + ProbeStatus::Pass` and emits
-#     `Action::FinalizeFailed { terminal: Some(Stable { settled_in_ms,
-#     witness }) }`.
-#   * `settled_in_ms ∈ [500ms, 2000ms]`.
+# WHERE THIS FIXTURE REACHES `Stable` — AND WHERE IT DOES NOT
+# -----------------------------------------------------------
+# The distinction is load-bearing; do not read the green integration
+# tests as a claim about the production path.
 #
-# Pre-wiring state (today): the fixture parses cleanly via
-# `WorkloadSpecInput::from_toml_str`; the integration test's
-# `#[should_panic(expected = "RED scaffold")]` marker remains in
-# place until the upstream gap closes.
+# IN-PROCESS INTEGRATION TESTS — reaches `Stable`. This fixture drives
+# S-SHCP-INT-CLI-02 today, live and passing (no `should_panic` marker
+# remains):
+#   * `crates/overdrive-cli/tests/integration/service_honest_stable.rs`
+#     — the CLI's `submit_streaming` routes the Service-kind TOML to
+#     `submit_streaming_service`; the reconciler observes
+#     `Running + ProbeStatus::Pass` and emits the terminal
+#     `Stable { settled_in_ms, witness }` per ADR-0055, with
+#     `witness.role = "startup"`, `probe_idx = 0`, `inferred = true`.
+#   * `crates/overdrive-cli/tests/integration/workload_describe_probes.rs`
+#     — the ADR-0058-inferred descriptor on the describe surface.
+#
+# It reaches `Stable` there because those tests boot via
+# `serve::run_with_dataplane(.., SimDataplane, ..)`. That sets
+# `dataplane_override`, so `compose_mtls` is FALSE
+# (`overdrive-control-plane/src/lib.rs:1921`) and NO per-allocation
+# network namespace is created. Workload and probe runner share one
+# namespace, so the probe's connect reaches the listener.
+#
+# PRODUCTION `overdrive serve` + `overdrive deploy` — does NOT reach
+# `Stable`. It is driven to `Failed { StartupProbeFailed }` when the
+# 60s startup deadline elapses. Two facts compose:
+#   * Production `serve` composes mTLS unconditionally
+#     (`dataplane_override` is `None`), so `provision_and_inject_netns`
+#     assigns each alloc its own `ovd-ns-NNNN` and the `nc` listener
+#     binds INSIDE it.
+#   * The probe runner issues its TCP connect from the CONTROL PLANE's
+#     namespace and performs no `setns`
+#     (`crates/overdrive-worker/src/probe_runner/mod.rs` — no `setns`
+#     call exists; `http_probe_host` at :451 folds `None` and the
+#     bind-side wildcard `"0.0.0.0"` to `127.0.0.1`, and the TCP
+#     mechanic goes through it at :511).
+#
+# Measured, black-box, on the Lima dev VM (2026-08-02):
+# `verification/expectations/O07-liveness-probe-drives-restart/`
+# `evidence/namespace_reachability.txt` — `ss` shows each workload
+# LISTENing on `0.0.0.0:<port>` inside its own `ovd-ns-NNNN` while a
+# host-namespace connect to the same port is REFUSED. On that
+# composition a TCP probe cannot express "my workload is healthy": it
+# fails identically for a serving workload and for a port that does
+# not exist.
+#
+# THIS FIXTURE IS DELIBERATELY NOT "FIXED" INTO PASSING. The namespace
+# gap is a real, unrepaired defect; a fixture that documents it
+# honestly is worth more than one that hides it. Root-cause chain and
+# remedy options:
+# `docs/analysis/root-cause-analysis-probe-runner-exec-inert-and-ungated-restart-loop.md`
+# (§ 2.2 establishes that an EXEC-mechanic probe crosses no network
+# namespace and IS scored correctly end-to-end today — so exec is the
+# only mechanic that can currently express workload health on the
+# production path). The sibling fixtures
+# `examples/liveness-{absent,fails,holds}-service.toml` carry the same
+# boundary from the liveness side.
 
 [service]
 id = "quick-bind"

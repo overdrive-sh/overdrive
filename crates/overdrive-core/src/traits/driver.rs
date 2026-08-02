@@ -510,4 +510,23 @@ pub trait Driver: Send + Sync + 'static {
     ///
     /// Default no-op — symmetric with [`Self::on_alloc_running`].
     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
+
+    /// Lifecycle hook fired by the action shim when an allocation is
+    /// announced `Stable` (ADR-0055 — a NON-terminal condition).
+    ///
+    /// Startup probing is bounded by the startup window and is
+    /// complete at Stable; readiness and liveness are continuous
+    /// post-Stable per [`crate::observation::ProbeRole`]'s contract.
+    /// Implementations stop ONLY the startup-role tasks and leave the
+    /// supervisor alive.
+    ///
+    /// Per ADR-0080 § D4 this hook exists because routing `Stable`
+    /// through [`Self::on_alloc_terminal`] was a category error: it
+    /// tore down the whole probe supervisor, making readiness and
+    /// liveness structurally unreachable for their entire intended
+    /// lifetime.
+    ///
+    /// Default no-op — symmetric with [`Self::on_alloc_running`] /
+    /// [`Self::on_alloc_terminal`].
+    fn on_alloc_stable(&self, _alloc_id: &AllocationId) {}
 }

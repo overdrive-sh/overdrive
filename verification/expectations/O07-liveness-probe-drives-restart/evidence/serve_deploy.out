@@ -1,0 +1,264 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask lima run -- bash -c 'set -uo pipefail
+EVID="/Users/marcus/conductor/workspaces/helios/pyongyang/verification/expectations/O07-liveness-probe-drives-restart/evidence"
+REPO="/Users/marcus/conductor/workspaces/helios/pyongyang"
+SEED="1"
+OBSERVE_PRIMARY_S="20"
+OBSERVE_CONTEXT_S="40"
+ABSENT_SPEC="/Users/marcus/conductor/workspaces/helios/pyongyang/examples/liveness-absent-service.toml"
+FAILS_SPEC="/Users/marcus/conductor/workspaces/helios/pyongyang/examples/liveness-fails-service.toml"
+HOLDS_SPEC="/Users/marcus/conductor/workspaces/helios/pyongyang/examples/liveness-holds-service.toml"
+cd "$REPO"
+
+BIND="127.0.0.1:7443"
+LOOPBACK_PROBE_PORT="1"   # nothing listens here; a healthy loopback refuses fast
+CFG_DIR="$(mktemp -d /tmp/od-o07-cfg.XXXXXX)"
+DATA_DIR="$(mktemp -d /tmp/od-o07-data.XXXXXX)"
+CREDS_DIR="$(mktemp -d /tmp/od-o07-creds.XXXXXX)"
+SERVE_PID=""
+
+# ---- kernel-surface probe helpers (black-box; ip/bpftool/cgroupfs) ----------
+probe_xdp() {
+  for i in $(ip -br link show | awk '\''{print $1}'\''); do
+    info="$(ip link show "$i")"
+    case "$info" in
+      *xdpgeneric*|*xdpdrv*|*xdp\ *)
+        echo "=== $i ==="
+        echo "$info" | grep -E '\''xdp(generic|drv)?'\''
+        ;;
+    esac
+  done
+  echo "--- bpftool prog show (xdp/sched_cls only) ---"
+  bpftool prog show 2>/dev/null | grep -E '\''(xdp|sched_cls)'\'' || echo "(none)"
+}
+probe_loopback() {
+  if timeout 3 bash -c "echo > /dev/tcp/127.0.0.1/$LOOPBACK_PROBE_PORT" 2>/dev/null; then
+    echo "UNEXPECTED: 127.0.0.1:$LOOPBACK_PROBE_PORT accepted (something is listening?)"
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      echo "HANG: loopback connect timed out after 3s -> probable leaked XDP on lo"
+    else
+      echo "HEALTHY: loopback refused fast (no leaked XDP swallowing lo traffic)"
+    fi
+  fi
+}
+probe_cgroups() {
+  ls /sys/fs/cgroup/overdrive.slice/workloads.slice/ 2>/dev/null | grep '\''^alloc-'\'' || echo "(no alloc-*.scope)"
+}
+
+# ---- teardown sweep: fires on EVERY exit path, then a post-probe ------------
+sweep() {
+  [ -n "$SERVE_PID" ] && kill "$SERVE_PID" 2>/dev/null
+  # cgroup mass-kill + rmdir (testing.md "Leaked workload cgroups"). cgroup.kill
+  # SIGKILLs every PID inside each workload scope, including the socat backends.
+  # Deliberately NO broad `pgrep -f socat`: this runner'\''s own argv carries the
+  # literal socat command string from the fixtures, so a `pgrep -f` on it would
+  # match (and kill) this very shell. cgroup.kill is the scoped primitive.
+  if cd /sys/fs/cgroup/overdrive.slice/workloads.slice 2>/dev/null; then
+    for d in alloc-*.scope; do
+      [ -d "$d" ] && { echo 1 > "$d/cgroup.kill" 2>/dev/null; rmdir "$d" 2>/dev/null; }
+    done
+    cd "$REPO" 2>/dev/null || true
+  fi
+  # XDP detach (debugging.md "Leftover XDP attachments")
+  for i in $(ip -br link show | awk '\''{print $1}'\''); do
+    ip link set dev "$i" xdpgeneric off 2>/dev/null
+    ip link set dev "$i" xdpdrv off 2>/dev/null
+    ip link set dev "$i" xdp off 2>/dev/null
+  done
+  # Per-allocation network namespaces. The mTLS gate creates one
+  # `ovd-ns-NNNN` per alloc on the production path, and this expectation
+  # deliberately churns allocations, so it leaks them faster than anything else
+  # in the catalogue. Same discipline as the cgroup and XDP sweeps: an orphan
+  # here is state the next run inherits.
+  #
+  # ONLY empty namespaces are removed. This VM is shared across Conductor
+  # workspaces, so a namespace still holding a PID may belong to somebody
+  # else'\''s live `serve` — deleting it would break their run. `ip netns pids`
+  # is the guard.
+  for ns in $(ip netns list 2>/dev/null | awk '\''{print $1}'\''); do
+    case "$ns" in
+      ovd-ns-*)
+        if [ -z "$(ip netns pids "$ns" 2>/dev/null)" ]; then
+          ip netns delete "$ns" 2>/dev/null
+        fi
+        ;;
+    esac
+  done
+  return 0
+}
+on_exit() {
+  sweep
+  { echo "# probe: XDP attachments POST-TEARDOWN (after sweep)"; probe_xdp; }      > "$EVID/probe_post_teardown_xdp.txt"      2>&1
+  { echo "# probe: loopback POST-TEARDOWN (after sweep)";        probe_loopback; } > "$EVID/probe_post_teardown_loopback.txt" 2>&1
+  { echo "# probe: workload cgroups POST-TEARDOWN (after sweep)"; probe_cgroups; } > "$EVID/probe_post_teardown_cgroups.txt"  2>&1
+  {
+    echo "# probe: per-alloc network namespaces POST-TEARDOWN (after sweep)"
+    ip netns list 2>/dev/null | grep '\''^ovd-ns-'\'' || echo "(no ovd-ns-* namespaces)"
+  } > "$EVID/probe_post_teardown_netns.txt" 2>&1
+  return 0
+}
+trap on_exit EXIT
+
+# ---- BEFORE probes (proof of clean start) -----------------------------------
+{ echo "# probe: XDP attachments BEFORE run"; probe_xdp; }       > "$EVID/probe_before_xdp.txt"      2>&1
+{ echo "# probe: loopback BEFORE run";        probe_loopback; }  > "$EVID/probe_before_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups BEFORE run"; probe_cgroups; }  > "$EVID/probe_before_cgroups.txt"  2>&1
+# Stale alloc scopes from a prior interrupted run make a fresh alloc fail EEXIST
+# and read as a regression in whatever is under audit. Clean before serving.
+if '\!' grep -q '\''(no alloc'\'' "$EVID/probe_before_cgroups.txt"    || grep -q '\''HANG'\'' "$EVID/probe_before_loopback.txt"; then
+  echo "PRE-EXISTING LEAK detected at runner start; cleaning before serve." >> "$EVID/probe_before_cgroups.txt"
+  sweep
+fi
+
+# ---- compile the binary once so serve + deploys share one build -------------
+echo "# building the overdrive binary (single compile shared by serve+deploy+describe)"
+if '\!' cargo build -q -p overdrive-cli --bin overdrive 2> "$EVID/build.log"; then
+  echo "BUILD_FAILED"; tail -40 "$EVID/build.log"
+  echo "INNER_DONE serve_status=build-failed"
+  exit 0
+fi
+BIN="$CARGO_TARGET_DIR/debug/overdrive"
+[ -x "$BIN" ] || { echo "BIN_MISSING: $BIN"; echo "INNER_DONE serve_status=bin-missing"; exit 0; }
+
+# ---- KEK via the PRODUCTION systemd-creds delivery path ---------------------
+# `SystemdCredsKeyring` reads $CREDENTIALS_DIRECTORY/<kek-id>; the root KEK id
+# is `overdrive-ca-root`. Any byte string is accepted (folded to 256 bits when
+# it is not already exactly 32 bytes), so a passphrase file is a legitimate
+# production-shaped delivery — not a test seam.
+printf '\''o07-verification-kek-not-a-production-secret'\'' > "$CREDS_DIR/overdrive-ca-root"
+
+# ---- background the ephemeral serve -----------------------------------------
+echo "# starting ephemeral serve: bind=$BIND cfg=$CFG_DIR data=$DATA_DIR creds=$CREDS_DIR"
+CREDENTIALS_DIRECTORY="$CREDS_DIR" OVERDRIVE_CONFIG_DIR="$CFG_DIR"   "$BIN" serve --bind "$BIND" --data-dir "$DATA_DIR" > "$EVID/serve.log" 2>&1 &
+SERVE_PID=$'\!'
+
+# serve writes the trust-triple config AFTER it binds the TLS listener.
+CFG_FILE="$CFG_DIR/.overdrive/config"
+ready=0
+for _ in $(seq 1 60); do
+  if [ -f "$CFG_FILE" ]; then ready=1; break; fi
+  if '\!' kill -0 "$SERVE_PID" 2>/dev/null; then break; fi
+  sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then
+  echo "SERVE_NOT_READY: trust-triple config never appeared at $CFG_FILE"
+  echo "--- serve.log tail ---"; tail -30 "$EVID/serve.log"
+  echo "INNER_DONE serve_status=not-ready"
+  exit 0   # the on_exit trap writes the post-teardown no-leak proof
+fi
+echo "# serve ready: trust triple written at $CFG_FILE (pid $SERVE_PID)"
+
+# ---- deploy all three, capturing each accept render verbatim ----------------
+deploy_one() {
+  label="$1"; spec="$2"
+  {
+    echo "# command: overdrive deploy $spec --detach"
+    echo "# seed:    $SEED"
+    echo "# started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$EVID/deploy_$label.meta"
+  rc=0
+  OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" deploy "$spec" --detach     > "$EVID/deploy_$label.out" 2>&1 || rc=$?
+  echo "# exit:    $rc" >> "$EVID/deploy_$label.meta"
+  echo "# deploy $label exit: $rc"
+}
+deploy_one absent "$ABSENT_SPEC"
+deploy_one fails  "$FAILS_SPEC"
+deploy_one holds  "$HOLDS_SPEC"
+
+# ---- namespace-reachability measurement (the diagnostic for the control) ----
+# Recorded BEFORE the long observation sleep, while the first generation of
+# backends is still up. Pure kernel surface (ip / ss / /dev/tcp) — this is what
+# a probe runner in the control plane'\''s namespace can and cannot see.
+sleep 8
+{
+  echo "# What can a connect from the CONTROL PLANE'\''s namespace reach?"
+  echo "# Each fixture'\''s workload binds 0.0.0.0:<its listener port> — 8091 / 8092 / 8093."
+  echo
+  echo "=== ip netns list ==="
+  ip netns list 2>/dev/null || echo "(none)"
+  echo
+  echo "=== host-namespace TCP listeners on the fixture ports ==="
+  ss -tlnp 2>/dev/null | grep -E '\'':(8091|8092|8093|9192) '\'' || echo "(none of 8091/8092/8093/9192 listening in the host namespace)"
+  echo
+  for ns in $(ip netns list 2>/dev/null | awk '\''{print $1}'\''); do
+    echo "=== netns $ns TCP listeners ==="
+    ip netns exec "$ns" ss -tlnp 2>/dev/null | grep -E '\'':(8091|8092|8093) '\'' || echo "  (none)"
+  done
+  echo
+  echo "=== host-namespace connect attempts (what a TCP probe would do) ==="
+  for p in 8091 8092 8093 9192; do
+    if timeout 3 bash -c "echo > /dev/tcp/0.0.0.0/$p" 2>/dev/null; then
+      echo "  0.0.0.0:$p CONNECTED"
+    else
+      echo "  0.0.0.0:$p REFUSED-OR-UNREACHABLE"
+    fi
+  done
+} > "$EVID/namespace_reachability.txt" 2>&1
+
+# ---- observe ----------------------------------------------------------------
+# The 8s reachability measurement above already consumed part of the window;
+# subtract it so the snapshot timestamps mean what they say.
+snapshot() {
+  suffix="$1"
+  for pair in "absent:liveness-absent" "fails:liveness-fails" "holds:liveness-holds"; do
+    label="${pair%%:*}"; wl="${pair##*:}"
+    rc=0
+    OVERDRIVE_CONFIG_DIR="$CFG_DIR" "$BIN" workload describe "$wl"       > "$EVID/describe_$label$suffix.out" 2>&1 || rc=$?
+    echo "# workload describe $wl ($suffix) exit: $rc"
+  done
+}
+
+echo "# PRIMARY snapshot at T+${OBSERVE_PRIMARY_S}s (gates sub-claims 2-4)"
+sleep $(( OBSERVE_PRIMARY_S - 8 ))
+snapshot ""
+
+echo "# CONTEXT snapshot at T+${OBSERVE_CONTEXT_S}s (ungated; shows the startup cliff)"
+sleep $(( OBSERVE_CONTEXT_S - OBSERVE_PRIMARY_S ))
+snapshot "_t${OBSERVE_CONTEXT_S}s"
+
+# ---- AFTER probes (steady state the run produced, pre-teardown) -------------
+{ echo "# probe: XDP attachments AFTER observation (pre-teardown)"; probe_xdp; } > "$EVID/probe_after_xdp.txt"      2>&1
+{ echo "# probe: loopback AFTER observation";  probe_loopback; }                 > "$EVID/probe_after_loopback.txt" 2>&1
+{ echo "# probe: workload cgroups AFTER observation"; probe_cgroups; }           > "$EVID/probe_after_cgroups.txt"  2>&1
+
+# Keep the serve log bounded: liveness-fails restarts continuously, so the
+# recovery lines dominate. Preserve the head (boot + first transitions) and the
+# tail (steady state) rather than a multi-MB middle.
+if [ -f "$EVID/serve.log" ]; then
+  {
+    echo "# serve.log HEAD (boot + first transitions) — ANSI stripped"
+    sed -e '\''s/\x1b\[[0-9;]*m//g'\'' "$EVID/serve.log" | head -60
+    echo
+    echo "# ... ($(wc -l < "$EVID/serve.log") total lines) ..."
+    echo
+    echo "# serve.log TAIL (steady state) — ANSI stripped"
+    sed -e '\''s/\x1b\[[0-9;]*m//g'\'' "$EVID/serve.log" | tail -40
+  } > "$EVID/serve_log_excerpt.txt" 2>&1
+  # Restart-recovery lines are the platform'\''s own account of the churn.
+  sed -e '\''s/\x1b\[[0-9;]*m//g'\'' "$EVID/serve.log"     | grep -c '\''recovered from a terminal observation'\''     > "$EVID/serve_restart_recovery_count.txt" 2>/dev/null || echo 0 > "$EVID/serve_restart_recovery_count.txt"
+fi
+
+kill "$SERVE_PID" 2>/dev/null
+wait "$SERVE_PID" 2>/dev/null
+echo "INNER_DONE serve_status=ready"
+exit 0'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+# building the overdrive binary (single compile shared by serve+deploy+describe)
+# starting ephemeral serve: bind=127.0.0.1:7443 cfg=/tmp/od-o07-cfg.jwEqBV data=/tmp/od-o07-data.16YmAc creds=/tmp/od-o07-creds.aLEyOI
+# serve ready: trust triple written at /tmp/od-o07-cfg.jwEqBV/.overdrive/config (pid 2911399)
+# deploy absent exit: 0
+# deploy fails exit: 0
+# deploy holds exit: 0
+# PRIMARY snapshot at T+20s (gates sub-claims 2-4)
+# workload describe liveness-absent () exit: 0
+# workload describe liveness-fails () exit: 0
+# workload describe liveness-holds () exit: 0
+# CONTEXT snapshot at T+40s (ungated; shows the startup cliff)
+# workload describe liveness-absent (_t40s) exit: 0
+# workload describe liveness-fails (_t40s) exit: 0
+# workload describe liveness-holds (_t40s) exit: 0
+INNER_DONE serve_status=ready

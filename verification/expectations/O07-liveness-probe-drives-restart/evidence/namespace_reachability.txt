@@ -1,0 +1,23 @@
+# What can a connect from the CONTROL PLANE's namespace reach?
+# Each fixture's workload binds 0.0.0.0:<its listener port> — 8091 / 8092 / 8093.
+
+=== ip netns list ===
+ovd-ns-0002 (id: 74)
+ovd-ns-0001 (id: 1)
+ovd-ns-0000 (id: 0)
+
+=== host-namespace TCP listeners on the fixture ports ===
+(none of 8091/8092/8093/9192 listening in the host namespace)
+
+=== netns ovd-ns-0002 TCP listeners ===
+LISTEN 0      5            0.0.0.0:8093      0.0.0.0:*    users:(("socat",pid=2912655,fd=5))
+=== netns ovd-ns-0001 TCP listeners ===
+LISTEN 0      5            0.0.0.0:8092      0.0.0.0:*    users:(("socat",pid=2912614,fd=5))
+=== netns ovd-ns-0000 TCP listeners ===
+LISTEN 0      5            0.0.0.0:8091      0.0.0.0:*    users:(("socat",pid=2911538,fd=5))
+
+=== host-namespace connect attempts (what a TCP probe would do) ===
+  0.0.0.0:8091 REFUSED-OR-UNREACHABLE
+  0.0.0.0:8092 REFUSED-OR-UNREACHABLE
+  0.0.0.0:8093 REFUSED-OR-UNREACHABLE
+  0.0.0.0:9192 REFUSED-OR-UNREACHABLE

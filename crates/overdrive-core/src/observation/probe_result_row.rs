@@ -1,9 +1,13 @@
 //! `ProbeResultRow` — per-probe observation row, LWW per
-//! `(alloc_id, probe_idx)`.
+//! `(alloc_id, role, probe_idx)`.
 //!
-//! Per ADR-0054 §5: a probe's latest observed outcome is durable
-//! observation, never intent. Row identity is the composite PK
-//! `(alloc_id, probe_idx)`; latest-writer-wins. NOT append-mode —
+//! Per ADR-0054 §5 as amended by ADR-0080 § D2: a probe's latest
+//! observed outcome is durable observation, never intent. Row identity
+//! is the composite PK `(alloc_id, role, probe_idx)`;
+//! latest-writer-wins. `role` is load-bearing in the key — `probe_idx`
+//! is 0-indexed **within its own role array**, so without `role` the
+//! three roles' probe 0 would collide on one key and clobber each
+//! other under LWW. NOT append-mode —
 //! per-tick history is recomputed at read time from this latest row
 //! plus the live spec policy, NEVER persisted (per
 //! `.claude/rules/development.md` § "Persist inputs, not derived
@@ -50,6 +54,7 @@ use crate::id::AllocationId;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(transparent)]
 pub struct ProbeIdx(pub u32);
@@ -110,6 +115,26 @@ impl ProbeRole {
             Self::Liveness => "liveness",
         }
     }
+
+    /// Stable durable-key discriminant per ADR-0080 § D2. Values are
+    /// PERSISTED as the `role_byte` segment of the probe-result
+    /// composite key (`alloc_id || 0x00 || role_byte || probe_idx LE
+    /// u32`) — **never renumber; append only**.
+    ///
+    /// The byte order MUST agree with this enum's derived [`Ord`]
+    /// (declaration order `Startup < Readiness < Liveness`) so the
+    /// byte-keyed `LocalObservationStore` and the tuple-keyed
+    /// `SimObservationStore` iterate a given alloc's rows in the same
+    /// order, per `.claude/rules/development.md` § "Trait definitions
+    /// specify behavior, not just signature".
+    #[must_use]
+    pub const fn as_key_byte(self) -> u8 {
+        match self {
+            Self::Startup => 0,
+            Self::Readiness => 1,
+            Self::Liveness => 2,
+        }
+    }
 }
 
 /// Observed outcome of a probe attempt as durable observation.
@@ -139,9 +164,9 @@ pub enum ProbeStatus {
 /// `ProbeResultRow` V1 payload — the latest-observed outcome of a
 /// single probe for a single allocation.
 ///
-/// Composite PK: `(alloc_id, probe_idx)`. LWW resolution per
-/// `last_observed_at` (logical timestamp inherited from the
-/// `ObservationRow` envelope; not duplicated here).
+/// Composite PK: `(alloc_id, role, probe_idx)` per ADR-0080 § D2.
+/// LWW resolution per `last_observed_at` (logical timestamp inherited
+/// from the `ObservationRow` envelope; not duplicated here).
 #[derive(
     Debug,
     Clone,

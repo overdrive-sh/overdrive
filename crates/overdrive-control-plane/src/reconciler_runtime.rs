@@ -2967,6 +2967,35 @@ async fn hydrate_service_lifecycle_actual(
     }))
 }
 
+/// LWW-latest projection of one probe's observed status out of an
+/// alloc's probe-result rows, selecting on the full
+/// `(role, probe_idx)` identity.
+///
+/// Per ADR-0080 § D3 this is the SINGLE projection every consumer of a
+/// probe observation calls. It was extracted from the three
+/// copy-pasted filter chains in [`hydrate_service_alloc_facts`] so the
+/// readers cannot drift — the defect this ADR fixes was precisely a
+/// producer and its consumers disagreeing about what `probe_idx`
+/// indexes.
+///
+/// BOTH clauses are load-bearing. `role` alone would, for a Service
+/// declaring several probes of one role, silently return whichever row
+/// happens to be LWW-latest across the whole role; `probe_idx` alone
+/// would cross roles, since the index is per-role. The rows are
+/// already one-per-`(role, probe_idx)` at the store (the composite PK,
+/// § D2), so `max_by_key` is a defensive tie-break over what is
+/// normally a single element.
+fn latest_probe_status(
+    rows: &[overdrive_core::observation::ProbeResultRow],
+    role: overdrive_core::observation::ProbeRole,
+    probe_idx: overdrive_core::observation::ProbeIdx,
+) -> Option<overdrive_core::observation::ProbeStatus> {
+    rows.iter()
+        .filter(|p| p.role == role && p.probe_idx == probe_idx)
+        .max_by_key(|p| p.last_observed_at_unix_ms)
+        .map(|p| p.status.clone())
+}
+
 /// Per-workload projection of every `AllocStatusRow` belonging to
 /// `workload_id` into a `BTreeMap<AllocationId, ServiceAllocFact>`,
 /// joining each row with its per-`(alloc_id, probe_idx=0,
@@ -3020,37 +3049,28 @@ async fn hydrate_service_alloc_facts(
         // Per-alloc LWW projection of probe results — latest status at
         // startup-role probe_idx 0 (the only probe the Slice-01
         // reconciler branches consult).
-        let latest_startup_probe = probe_rows
-            .iter()
-            .filter(|p| {
-                p.role == overdrive_core::observation::ProbeRole::Startup
-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
-            })
-            .max_by_key(|p| p.last_observed_at_unix_ms)
-            .map(|p| p.status.clone());
+        let latest_startup_probe = latest_probe_status(
+            &probe_rows,
+            overdrive_core::observation::ProbeRole::Startup,
+            overdrive_core::observation::ProbeIdx::new(0),
+        );
         // Slice 04 — per-alloc LWW projection of the readiness-role
         // probe at idx 0. `None` (no row yet) is the load-bearing
         // initial state: `Backend.healthy = false` until first Pass
         // (S-SHCP-RECON-08c, avoids the inverse race).
-        let latest_readiness_probe = probe_rows
-            .iter()
-            .filter(|p| {
-                p.role == overdrive_core::observation::ProbeRole::Readiness
-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
-            })
-            .max_by_key(|p| p.last_observed_at_unix_ms)
-            .map(|p| p.status.clone());
+        let latest_readiness_probe = latest_probe_status(
+            &probe_rows,
+            overdrive_core::observation::ProbeRole::Readiness,
+            overdrive_core::observation::ProbeIdx::new(0),
+        );
         // Slice 05 — per-alloc LWW projection of the liveness-role probe
         // at idx 0. `None` (no row yet) leaves the consecutive-failure
         // counter untouched in the reconciler (no observation this tick).
-        let latest_liveness_probe = probe_rows
-            .iter()
-            .filter(|p| {
-                p.role == overdrive_core::observation::ProbeRole::Liveness
-                    && p.probe_idx == overdrive_core::observation::ProbeIdx::new(0)
-            })
-            .max_by_key(|p| p.last_observed_at_unix_ms)
-            .map(|p| p.status.clone());
+        let latest_liveness_probe = latest_probe_status(
+            &probe_rows,
+            overdrive_core::observation::ProbeRole::Liveness,
+            overdrive_core::observation::ProbeIdx::new(0),
+        );
 
         // Backend identity for the dataplane backend set this alloc
         // contributes to. Delegates to `SpiffeId::for_allocation` — the
@@ -3991,6 +4011,451 @@ mod tests {
                 "a host-netns alloc (workload_addr == None) MUST fall back to \
                  host_ipv4:port — byte-identical to the bridge's fallback, which is \
                  what keeps the two writers in agreement on BOTH branches",
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0080 § D7 item 1 — the hydrate-boundary regression guard, and
+    // the end-to-end proof that `Backend.healthy` tracks OBSERVATION.
+    //
+    // Before ADR-0080 `Backend.healthy` was a constant function of
+    // INTENT, never of observation:
+    //
+    //   no readiness probe  -> `true`, always
+    //   >=1 readiness probe -> `false`, PERMANENTLY
+    //
+    // and `false` is consumed fail-closed at three live seams
+    // (`mtls_resolve_adapter::classify_by_addr` -> `MeshUnreachable`,
+    // `first_healthy_backend_for` -> no frontend re-key, and
+    // `dns_responder/name_index.rs` -> the name is WITHHELD ->
+    // NXDOMAIN). Net operator-visible behaviour: declaring a readiness
+    // probe made a Service permanently unreachable.
+    //
+    // Mechanism 1 (this module's target): `ProbeRunner::start_alloc`
+    // assigned `probe_idx` from the flat position in the concatenated
+    // `startup ++ readiness ++ liveness` TRANSPORT vector, while every
+    // consumer filtered on PER-ROLE index 0. Readiness probe 0
+    // therefore landed at flat index `startup_probes.len()` and was
+    // never read — for the dominant production shape, since ADR-0058's
+    // inference fills `startup_probes` unless the operator explicitly
+    // opts out.
+    //
+    // WHY THE PRE-EXISTING TESTS DID NOT CATCH IT: every readiness test
+    // constructed `ServiceAllocFact` BY HAND, setting
+    // `latest_readiness_probe: Some(..)` alongside
+    // `startup_probes_empty: false` — a combination the production
+    // hydrate could not produce. Those stay valid as reconcile-branch
+    // unit tests (production can produce that state now), but they can
+    // never catch a producer/consumer index disagreement, because they
+    // skip the producer.
+    //
+    // This module therefore builds NO `ServiceAllocFact`. It writes
+    // `ProbeResultRow`s into a REAL redb `LocalObservationStore` and
+    // enters through the production `hydrate_actual` and the production
+    // `ServiceLifecycleReconciler::reconcile`, asserting on the
+    // `healthy` flag of the emitted `Action::WriteServiceBackendRow` —
+    // the driven-port boundary the dataplane and the withhold seams
+    // consume.
+    //
+    // Homed in-src rather than under `tests/integration/` (where
+    // ADR-0080 § D7 item 1 sketches it) because `AnyReconciler` /
+    // `AnyState` are `pub(crate)`; reaching `hydrate_actual_for_test`
+    // from an external test crate would require widening the crate's
+    // public API, which the design does not sanction.
+    // -----------------------------------------------------------------
+    mod readiness_gates_backend_healthy {
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        use overdrive_core::UnixInstant;
+        use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+        use overdrive_core::aggregate::{
+            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent,
+            WorkloadKind,
+        };
+        use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+        use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+        use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+        use overdrive_core::reconcilers::{
+            Action, AnyReconciler, AnyState, Reconciler, TargetResource, TickContext,
+        };
+        use overdrive_core::service_lifecycle::{
+            ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
+        };
+        use overdrive_core::traits::driver::DriverType;
+        use overdrive_core::traits::intent_store::IntentStore;
+        use overdrive_core::traits::observation_store::{
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+        };
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::adapters::dataplane::SimDataplane;
+        use overdrive_sim::adapters::driver::SimDriver;
+        use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
+        use tempfile::TempDir;
+
+        use crate::AppState;
+        use crate::reconciler_runtime::{ReconcilerRuntime, hydrate_actual_for_test};
+
+        const WORKLOAD: &str = "readiness-gate-svc";
+        const ALLOC: &str = "readiness-gate-svc-0";
+
+        fn workload_id() -> WorkloadId {
+            WorkloadId::new(WORKLOAD).expect("valid workload id")
+        }
+
+        fn writer_node() -> NodeId {
+            NodeId::new("writer-1").expect("valid NodeId")
+        }
+
+        fn alloc_id() -> AllocationId {
+            AllocationId::new(ALLOC).expect("valid alloc id")
+        }
+
+        fn target() -> TargetResource {
+            TargetResource::new(&format!("workload/{WORKLOAD}")).expect("valid target")
+        }
+
+        /// The production-typical Service shape: ONE startup probe AND
+        /// ONE readiness probe.
+        ///
+        /// The startup probe is load-bearing for this guard. It is what
+        /// makes `startup_probes.len() == 1`, which under the
+        /// pre-ADR-0080 flat indexing put readiness probe 0 at flat
+        /// index 1 — invisible to a consumer filtering on
+        /// `probe_idx == 0`. A fixture with an empty startup array
+        /// would pass even against the broken producer, which is
+        /// exactly why the defect survived. ADR-0058's inference gives
+        /// real Services a startup probe unless the operator opts out,
+        /// so this is the shape that matters.
+        fn service_intent_with_startup_and_readiness() -> WorkloadIntent {
+            let tcp_probe = |role: ProbeRole| ProbeDescriptor {
+                // BOTH probes sit at per-role index 0 — that is the
+                // point: they are DISTINCT probes that share an index
+                // and are separated by `role`, in the descriptor
+                // (§ D1) and in the durable key (§ D2) alike.
+                idx: ProbeIdx::new(0),
+                role,
+                mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_owned(), port: 8080 },
+                timeout_seconds: 5,
+                interval_seconds: 2,
+                max_attempts: 30,
+                failure_threshold: None,
+                success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
+                inferred: false,
+            };
+
+            let svc = ServiceV1::from_submit(ServiceSpecInput {
+                id: WORKLOAD.to_owned(),
+                replicas: 1,
+                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+                driver: DriverInput::Exec(ExecInput {
+                    command: "/bin/serve".to_owned(),
+                    args: vec![],
+                }),
+                listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
+                startup_probes: vec![tcp_probe(ProbeRole::Startup)],
+                readiness_probes: vec![tcp_probe(ProbeRole::Readiness)],
+                liveness_probes: vec![],
+            })
+            .expect("canonical Service spec is valid");
+            WorkloadIntent::Service(svc)
+        }
+
+        /// Build an `AppState` whose observation store is a REAL redb
+        /// [`LocalObservationStore`] — not the in-memory sim adapter.
+        /// The composite probe-result key this guard depends on is
+        /// byte-encoded only in the redb backend, so the real store is
+        /// what makes the assertion meaningful.
+        async fn build_state(tmp: &TempDir, intent: &WorkloadIntent) -> AppState {
+            let runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
+                .expect("runtime new");
+            let store_path = tmp.path().join("intent.redb");
+            let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
+            let obs: Arc<dyn ObservationStore> = Arc::new(
+                LocalObservationStore::open(tmp.path().join("observation.redb"))
+                    .expect("open observation store"),
+            );
+
+            let key = IntentKey::for_workload(&workload_id());
+            let archived = intent.archive_for_store().expect("rkyv archive");
+            store.put(key.as_bytes(), archived.as_ref()).await.expect("put intent");
+            let kind_key = IntentKey::for_workload_kind(&workload_id());
+            store
+                .put(kind_key.as_bytes(), &[WorkloadKind::Service.discriminator_byte()])
+                .await
+                .expect("put kind");
+
+            let allocator =
+                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            AppState::new(
+                store,
+                store_path,
+                obs,
+                Arc::new(runtime),
+                Arc::new(SimDriver::new(DriverType::Exec)),
+                Arc::new(SimClock::new()),
+                Arc::new(SimDataplane::new()),
+                Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
+                ))),
+                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+                writer_node(),
+                allocator,
+                crate::test_empty_listener_facts(),
+                std::net::Ipv4Addr::LOCALHOST,
+            )
+        }
+
+        /// Allocate the Service's VIP through the production allocator
+        /// path — without it `service_dataplane_identity` returns
+        /// `None` and the readiness branch is a no-op (no row to write).
+        async fn allocate_vip(state: &AppState, intent: &WorkloadIntent) {
+            let digest = intent.spec_digest().expect("spec_digest");
+            let bytes: [u8; 32] = *digest.as_bytes();
+            let mut guard = state.allocator.lock().await;
+            guard.allocate(bytes).await.expect("allocate vip");
+            drop(guard);
+        }
+
+        async fn write_running_alloc(state: &AppState) {
+            let row = AllocStatusRow {
+                alloc_id: alloc_id(),
+                workload_id: workload_id(),
+                node_id: NodeId::new("local").expect("node id"),
+                state: AllocState::Running,
+                updated_at: LogicalTimestamp { counter: 1, writer: writer_node() },
+                reason: None,
+                detail: None,
+                terminal: None,
+                stderr_tail: None,
+                kind: WorkloadKind::Service,
+                listeners: Vec::new(),
+                started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
+                    1_700_000_000,
+                ))),
+                workload_addr: None,
+                last_terminated: None,
+                restart_count: 0,
+            };
+            state
+                .obs
+                .write(ObservationRow::AllocStatus(Box::new(row)))
+                .await
+                .expect("write Running alloc row");
+        }
+
+        /// Write one probe observation exactly as `ProbeRunner`'s
+        /// `supervised_probe_loop` does — through `write_probe_result`,
+        /// at the descriptor's per-role `idx`.
+        async fn write_probe(
+            state: &AppState,
+            role: ProbeRole,
+            status: ProbeStatus,
+            observed_at: u64,
+        ) {
+            state
+                .obs
+                .write_probe_result(ProbeResultRow {
+                    alloc_id: alloc_id(),
+                    probe_idx: ProbeIdx::new(0),
+                    role,
+                    status,
+                    last_observed_at_unix_ms: observed_at,
+                    inferred: false,
+                })
+                .await
+                .expect("write probe result");
+        }
+
+        fn tick_at(counter: u64) -> TickContext {
+            let now = Instant::now();
+            TickContext {
+                now,
+                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(
+                    1_700_000_000 + counter,
+                )),
+                tick: counter,
+                deadline: now + Duration::from_secs(1),
+            }
+        }
+
+        /// Hydrate through the production path and return the
+        /// `ServiceLifecycleState` the reconciler consumes.
+        async fn hydrate(state: &AppState) -> ServiceLifecycleState {
+            let reconciler = AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new());
+            let hydrated = hydrate_actual_for_test(&reconciler, &target(), state)
+                .await
+                .expect("hydrate_actual must succeed");
+            let AnyState::ServiceLifecycle(s) = hydrated else {
+                panic!("expected AnyState::ServiceLifecycle");
+            };
+            s
+        }
+
+        /// Reconcile through the production reconciler and extract the
+        /// `healthy` flag of the single backend on the emitted
+        /// `WriteServiceBackendRow` — the driven-port boundary the
+        /// dataplane and the DNS / mesh withhold seams consume.
+        fn reconcile_backend_healthy(
+            actual: &ServiceLifecycleState,
+            view: &ServiceLifecycleView,
+            tick: &TickContext,
+        ) -> (Option<bool>, ServiceLifecycleView) {
+            let reconciler = ServiceLifecycleReconciler::new();
+            // `ServiceLifecycleReconciler::reconcile` ignores its
+            // `desired` parameter (`_desired`), so passing `actual`
+            // twice is the honest call shape here.
+            let (actions, next_view) = reconciler.reconcile(actual, actual, view, tick);
+            let healthy = actions.iter().find_map(|a| match a {
+                Action::WriteServiceBackendRow { row, .. } => {
+                    Some(row.backends.first().expect("one Running backend").healthy)
+                }
+                _ => None,
+            });
+            (healthy, next_view)
+        }
+
+        /// **The guard.** `Backend.healthy` is a function of the
+        /// readiness OBSERVATION, driven end-to-end through the
+        /// production path.
+        ///
+        /// 1. A Service declaring one startup AND one readiness probe,
+        ///    with an allocated VIP and one `Running` alloc.
+        /// 2. `startup/0 = Pass`, `readiness/0 = Fail` written through
+        ///    the real store -> hydrate -> the fact carries
+        ///    `latest_readiness_probe = Some(Fail)` (§ D7 item 1: this
+        ///    is `None` under the broken producer, because readiness
+        ///    landed at flat index 1) -> reconcile emits
+        ///    `healthy: false`.
+        /// 3. `readiness/0 = Pass` at a later timestamp -> hydrate ->
+        ///    reconcile emits `healthy: true`.
+        ///
+        /// Step 3 is what proves the flag TRACKS observation rather
+        /// than merely being derivable as `false`: pre-fix `healthy`
+        /// was permanently `false` for any Service with a readiness
+        /// probe, so a recovery could never flip it back.
+        #[tokio::test]
+        async fn readiness_observation_drives_backend_healthy_false_then_true() {
+            let tmp = TempDir::new().expect("tempdir");
+            let intent = service_intent_with_startup_and_readiness();
+            let state = build_state(&tmp, &intent).await;
+            allocate_vip(&state, &intent).await;
+            write_running_alloc(&state).await;
+
+            // ---- Tick 1: startup Pass, readiness FAIL.
+            write_probe(&state, ProbeRole::Startup, ProbeStatus::Pass, 1_000).await;
+            write_probe(
+                &state,
+                ProbeRole::Readiness,
+                ProbeStatus::Fail { last_fail_reason: "backend still warming".to_owned() },
+                1_000,
+            )
+            .await;
+
+            let actual = hydrate(&state).await;
+            let fact =
+                actual.allocs.get(&alloc_id()).expect("the Running alloc must hydrate to a fact");
+
+            // § D7 item 1 — the direct hydrate-boundary assertion.
+            // Under the pre-ADR-0080 producer this is `None`: the
+            // readiness descriptor was written at flat index 1 (because
+            // `startup_probes.len() == 1`) while the consumer filters
+            // on per-role index 0.
+            assert_eq!(
+                fact.latest_readiness_probe,
+                Some(ProbeStatus::Fail { last_fail_reason: "backend still warming".to_owned() }),
+                "the readiness observation MUST reach the hydrated fact. `None` here means \
+                 the producer and the consumer disagree about what `probe_idx` indexes — the \
+                 defect ADR-0080 § D1 fixes by carrying the parser-assigned per-role index \
+                 verbatim into ProbeRunner::start_alloc",
+            );
+            assert!(fact.has_readiness_probe, "the spec declares a readiness probe");
+            assert!(
+                !fact.startup_probes_empty,
+                "the fixture declares a startup probe — the production-typical shape under \
+                 ADR-0058 inference, and the shape the flat index broke",
+            );
+
+            let (healthy_on_fail, view_after_fail) =
+                reconcile_backend_healthy(&actual, &ServiceLifecycleView::default(), &tick_at(1));
+            assert_eq!(
+                healthy_on_fail,
+                Some(false),
+                "a readiness Fail must gate traffic off: healthy=false. The flag is consumed \
+                 fail-closed — MeshUnreachable on dial, and the name withheld from DNS",
+            );
+
+            // ---- Tick 2: readiness recovers.
+            write_probe(&state, ProbeRole::Readiness, ProbeStatus::Pass, 2_000).await;
+
+            let actual = hydrate(&state).await;
+            let fact = actual
+                .allocs
+                .get(&alloc_id())
+                .expect("the Running alloc must still hydrate to a fact");
+            assert_eq!(
+                fact.latest_readiness_probe,
+                Some(ProbeStatus::Pass),
+                "the later Pass wins LWW at (alloc, Readiness, 0)",
+            );
+
+            let (healthy_on_pass, _) =
+                reconcile_backend_healthy(&actual, &view_after_fail, &tick_at(2));
+            assert_eq!(
+                healthy_on_pass,
+                Some(true),
+                "a readiness Pass at or above the success threshold must admit traffic: \
+                 healthy=true. Pre-ADR-0080 `healthy` was PERMANENTLY false for any Service \
+                 declaring a readiness probe, so recovery was unrepresentable",
+            );
+        }
+
+        /// The startup probe's own observation is unaffected by the
+        /// readiness row that shares its `probe_idx` — the two are
+        /// separated by `role` in the descriptor and in the durable key
+        /// alike.
+        ///
+        /// Consumer-side companion to the store-level § A2 guard: it
+        /// fails if `role` is dropped from the key (the LATER readiness
+        /// Fail would clobber the startup row and surface as
+        /// `latest_startup_probe`), and it fails if the per-role index
+        /// is reverted to a flat one (startup would still match by
+        /// accident of ordering, but readiness would go `None`).
+        #[tokio::test]
+        async fn startup_and_readiness_observations_at_index_zero_do_not_shadow_each_other() {
+            let tmp = TempDir::new().expect("tempdir");
+            let intent = service_intent_with_startup_and_readiness();
+            let state = build_state(&tmp, &intent).await;
+            allocate_vip(&state, &intent).await;
+            write_running_alloc(&state).await;
+
+            // Startup Pass FIRST, readiness Fail LATER — so a key that
+            // omits `role` would let the readiness Fail win LWW and be
+            // surfaced as the startup status.
+            write_probe(&state, ProbeRole::Startup, ProbeStatus::Pass, 1_000).await;
+            write_probe(
+                &state,
+                ProbeRole::Readiness,
+                ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
+                9_000,
+            )
+            .await;
+
+            let actual = hydrate(&state).await;
+            let fact =
+                actual.allocs.get(&alloc_id()).expect("the Running alloc must hydrate to a fact");
+
+            assert_eq!(
+                fact.latest_startup_probe,
+                Some(ProbeStatus::Pass),
+                "the startup observation is untouched by a LATER readiness write at the same \
+                 probe_idx; surfacing the readiness Fail here means `role` left the durable key",
+            );
+            assert_eq!(
+                fact.latest_readiness_probe,
+                Some(ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() }),
+                "and the readiness observation survives alongside it",
             );
         }
     }

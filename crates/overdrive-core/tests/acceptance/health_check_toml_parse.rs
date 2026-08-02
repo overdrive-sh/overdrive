@@ -829,3 +829,138 @@ fn liveness_failure_threshold_zero_yields_named_parse_error() {
         other => panic!("expected ProbeFailureThresholdZero, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------
+// ADR-0080 § D7 item 6 — `ProbeDescriptor.idx` round-trip.
+//
+// `idx` is the parser-assigned 0-based position within the descriptor's
+// OWN role array (ADR-0057:132-134; `ProbeResultRow::probe_idx`'s
+// docstring; `discuss/shared-artifacts-registry.md`). ADR-0057:172
+// specified the field and the original implementation dropped it, which
+// forced `ProbeRunner::start_alloc` to invent an index from the only one
+// available at that call site — the flat position in the concatenated
+// `startup ++ readiness ++ liveness` transport vector. Readiness probe 0
+// then landed at flat index `startup_probes.len()` while every consumer
+// filtered on per-role index 0.
+//
+// The two properties below are what make the durable composite key
+// `(alloc_id, role, probe_idx)` (§ D2) a valid identity:
+//
+//   1. per-role positional — `probes[i].idx == i` for each role array;
+//   2. globally pairwise-distinct — no two descriptors ANYWHERE in the
+//      spec share a `(role, idx)` pair, so no two probes can collide on
+//      one durable key.
+//
+// Property 2 does not follow from property 1 alone: it additionally
+// requires each parser to stamp its own role, which is what keeps the
+// three per-role sequences from overlapping.
+// ---------------------------------------------------------------------
+
+/// Render `n` TCP probe entries under `[[health_check.<section>]]`.
+/// Each carries a distinct port so the descriptors are distinguishable
+/// beyond their index.
+fn tcp_probe_block(section: &str, n: usize) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    for i in 0..n {
+        let port = 9000 + u16::try_from(i).unwrap_or(0);
+        writeln!(out, "[[health_check.{section}]]\ntype = \"tcp\"\nport = {port}")
+            .expect("writing into a String is infallible");
+    }
+    out
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// For ANY combination of declared probe counts (including >1 per
+    /// role and 0 for a role), every descriptor's `idx` equals its
+    /// position in its OWN role array, and every `(role, idx)` pair is
+    /// unique across the concatenation of all three arrays.
+    ///
+    /// `startup` is drawn from `1..=3` because an omitted startup
+    /// section triggers ADR-0058 default inference, which is covered by
+    /// its own case below — here we want the operator-declared array.
+    #[test]
+    fn parser_assigns_per_role_positional_indices_that_are_globally_unique(
+        startup_n in 1usize..=3,
+        readiness_n in 0usize..=3,
+        liveness_n in 0usize..=3,
+    ) {
+        let toml = format!(
+            "{SERVICE_PRELUDE}\n{}{}{}",
+            tcp_probe_block("startup", startup_n),
+            tcp_probe_block("readiness", readiness_n),
+            tcp_probe_block("liveness", liveness_n),
+        );
+        let spec = unwrap_service(
+            WorkloadSpecInput::from_toml_str(&toml).expect("multi-probe spec parses"),
+        );
+
+        prop_assert_eq!(spec.startup_probes.len(), startup_n);
+        prop_assert_eq!(spec.readiness_probes.len(), readiness_n);
+        prop_assert_eq!(spec.liveness_probes.len(), liveness_n);
+
+        // Property 1 — per-role positional.
+        for (role, probes) in [
+            (ProbeRole::Startup, &spec.startup_probes),
+            (ProbeRole::Readiness, &spec.readiness_probes),
+            (ProbeRole::Liveness, &spec.liveness_probes),
+        ] {
+            for (position, probe) in probes.iter().enumerate() {
+                prop_assert_eq!(
+                    probe.idx.get(),
+                    u32::try_from(position).expect("test vectors are tiny"),
+                    "{:?} probe at array position {} must carry idx {}",
+                    role,
+                    position,
+                    position,
+                );
+                prop_assert_eq!(
+                    probe.role,
+                    role,
+                    "each parser stamps its own role — without that, property 2 below cannot \
+                     hold",
+                );
+            }
+        }
+
+        // Property 2 — globally pairwise-distinct `(role, idx)`. This is
+        // the precondition for `(alloc_id, role, probe_idx)` being an
+        // identity: a duplicate pair means two probes clobber each
+        // other's durable row under LWW.
+        let flat: Vec<(ProbeRole, u32)> = spec
+            .startup_probes
+            .iter()
+            .chain(spec.readiness_probes.iter())
+            .chain(spec.liveness_probes.iter())
+            .map(|p| (p.role, p.idx.get()))
+            .collect();
+        let distinct: std::collections::BTreeSet<(ProbeRole, u32)> = flat.iter().copied().collect();
+        prop_assert_eq!(
+            distinct.len(),
+            flat.len(),
+            "every (role, idx) pair must be unique across all three role arrays; got {:?}",
+            flat,
+        );
+    }
+}
+
+/// The ADR-0058 default-inference site assigns `idx = 0` — it
+/// synthesises the sole member of the startup array.
+#[test]
+fn inferred_default_startup_probe_carries_per_role_index_zero() {
+    let spec = unwrap_service(
+        WorkloadSpecInput::from_toml_str(SERVICE_PRELUDE).expect("bare service parses"),
+    );
+    assert_eq!(spec.startup_probes.len(), 1, "ADR-0058 infers one default startup probe");
+    let inferred = &spec.startup_probes[0];
+    assert!(inferred.inferred, "the synthesised probe is flagged inferred");
+    assert_eq!(
+        inferred.idx,
+        overdrive_core::observation::ProbeIdx::new(0),
+        "the inferred probe is the sole member of the startup array, so its per-role index \
+         is 0",
+    );
+}

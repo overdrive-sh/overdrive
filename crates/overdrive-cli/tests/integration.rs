@@ -89,6 +89,14 @@ mod integration {
     // RED scaffold — production bodies land in slice 01 + slice 08.
     mod service_honest_stable;
 
+    // service-health-check-probes — probe state is operator-observable
+    // through `overdrive workload describe` (US-06 / K4; EDD O02).
+    // Drives the whole store → API type → handler → CLI chain against a
+    // real `serve` + a real deployed Service, because a renderer unit
+    // test is green whether or not any production caller exists — which
+    // is exactly how `render::probes_section` shipped dead.
+    mod workload_describe_probes;
+
     // service-health-check-probes step 01-03e3-fix — CLI submit-side
     // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
     // TOML through `deploy_streaming` must route to the new

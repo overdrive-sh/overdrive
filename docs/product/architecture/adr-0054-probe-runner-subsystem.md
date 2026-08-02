@@ -344,6 +344,31 @@ iterates it (deciding tick for `Stable` walks every startup probe to
 find the witness; `alloc status` render walks every probe to emit
 the Probes section in stable order).
 
+**Amendment 2026-08-02 — the reconciler half of that rationale
+describes behaviour that is specified but not implemented.** The
+ordered-collection choice stands; the justification for it does not
+describe the implemented deciding tick. That tick does not walk every
+startup probe — it consults exactly one row per role, selected by
+`probe_idx == ProbeIdx::new(0)` and reduced with `max_by_key` on
+`last_observed_at_unix_ms`: startup at
+`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
+readiness at `:3035-3042`, liveness at `:3046-3053`.
+`spec_facts_for_service` likewise derives the startup thresholds from
+`svc.startup_probes[0]` alone (`:1963`). Probes `1..N` are spawned one
+task per descriptor
+(`crates/overdrive-worker/src/probe_runner/mod.rs:323`) and write
+durable `ProbeResultRow`s per tick (`:543`, `:551`), but no decision
+path consults them. (The render clause of the same sentence is not
+assessed by this annotation.)
+
+ADR-0080 § "A fourth, pre-existing gap this ADR deliberately does NOT
+address" is where the decision not to close this gap within that ADR's
+scope is recorded. ADR-0080 is accepted (2026-08-02) and not yet
+implemented; its Stage 1 (D1 + D2) makes `ProbeIdx` per-role and
+parser-assigned and adds `role` to the composite key described above,
+so per-role probes `1..N` are stored distinctly rather than sharing one
+key space across roles.
+
 Per ADR-0048 § "Version-bump procedure" the new row ships as
 `ProbeResultRowEnvelope::V1(ProbeResultRowV1)`; the public alias is
 `type ProbeResultRow = ProbeResultRowV1`. Existing fixtures are
@@ -582,3 +607,15 @@ table for forensic audit; out of scope here.
   `GET /v1/allocs` endpoint and the Probes-section rendered output
   are unchanged; only the CLI verb changed. The `alloc_status` /
   `ProbeResultRow` identifiers are unrelated and unchanged.
+- 2026-08-02 — **Amendment** — accuracy annotation only; no decision
+  changed. Marked the reconciler-side half of the `BTreeMap`
+  ordered-collection rationale ("deciding tick for `Stable` walks every
+  startup probe to find the witness") as **specified but not
+  implemented**: the deciding tick consults one row per role at
+  `probe_idx == ProbeIdx::new(0)`
+  (`crates/overdrive-control-plane/src/reconciler_runtime.rs:3023-3030`,
+  `:3035-3042`, `:3046-3053`), while probes `1..N` are spawned and write
+  durable rows (`crates/overdrive-worker/src/probe_runner/mod.rs:323`,
+  `:543`) that nothing consults. ADR-0080 § "A fourth, pre-existing gap
+  this ADR deliberately does NOT address" records the decision not to
+  close the gap within that ADR's scope.

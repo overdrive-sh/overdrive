@@ -16,6 +16,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [O04](O04-ca-refuse-to-start-actionable-error/) | O | control plane refuses to start on root-key decrypt failure with an actionable, cause-distinct error (no silent re-mint) | K3 | S-02-06/07, ADR-0063 D3/Earned-Trust, journey error_paths step 1 | `pending` |
 | [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `workload describe`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
+| [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
 
 ## Feature coverage
 
@@ -73,6 +74,29 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   E04. The example specs `examples/dial-by-name-responder/{a,b}.toml` + a real
   on-disk staged Rust ping-pong bin are READY for the capture; neither harness
   has landed, so E05 cannot be captured against the built binary yet.
+
+- **probe-idx-per-role / ADR-0080 Stage 1** — O07 (a declared liveness probe
+  reaches the reconciler's restart decision, observed black-box through
+  `overdrive deploy` + `overdrive workload describe`). The three fixtures
+  `examples/liveness-{absent,fails,holds}-service.toml` differ from each other by
+  ONE input each, so the diff is attributable: no liveness probe → not
+  restarted; a declared failing one → restarted. That is ADR-0080 § D1 seen from
+  outside the binary, and it is the surface the in-process tiers structurally
+  could not cover — the readiness/liveness acceptance suites hand-build a
+  `ServiceAllocFact` the production hydrate cannot produce (ADR-0080 § "Why
+  nothing caught it"). Status `pending` **by design**: evidence IS captured
+  (`executed_in_lima: true`, SHA `86d6331b`), but sub-claims 1–3 pass while
+  sub-claim 4 is **refuted** — a Service whose liveness probe targets its own
+  demonstrably-serving listener is restarted too, because TCP probes are issued
+  from the control plane's network namespace and the workload's socket lives in
+  the allocation's own `ovd-ns-NNNN`. That reachability gap **predates ADR-0080**
+  and Stage 1 did not cause it; Stage 1 is what makes it operator-visible. The
+  verdict is left to a different-fox adversarial audit rather than self-stamped,
+  and `partial`/`broken` are not claimed because the legend requires a linked
+  issue and issue creation needs explicit user approval (CLAUDE.md § "Deferrals
+  require GitHub issues"). O07 deliberately does NOT claim ADR-0080 § D4
+  (`Stable` stops only the startup role): no allocation reaches `Stable` here,
+  since the startup probe is unreachable for the same reason.
 
 ## Adding an expectation
 

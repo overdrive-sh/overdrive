@@ -36,7 +36,7 @@ use overdrive_core::aggregate::{DriverInput, ExecInput, ResourcesInput, ServiceV
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadIntent, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
-use overdrive_core::observation::ProbeRole;
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{
     Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
     WorkloadLifecycleView, project_probe_descriptors,
@@ -94,7 +94,19 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 }
 
 fn tcp_descriptor(role: ProbeRole, port: u16) -> ProbeDescriptor {
+    tcp_descriptor_at(role, 0, port)
+}
+
+/// As [`tcp_descriptor`], with an explicit per-role array position.
+///
+/// ADR-0080 § D1 — `idx` is the descriptor's 0-based position within
+/// its OWN role array, so a fixture declaring two probes of one role
+/// must carry `0` and `1`. Two descriptors of one role sharing an
+/// index would collide on the durable `(alloc_id, role, probe_idx)`
+/// key (§ D2).
+fn tcp_descriptor_at(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
+        idx: ProbeIdx::new(idx),
         role,
         mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port },
         timeout_seconds: 1,
@@ -143,9 +155,12 @@ fn alloc_failed_with_budget(alloc_id: &str, workload_id: &str, node_id: &str) ->
 fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
     let nodes = one_node_map("local");
 
-    // Two TCP startup descriptors — the operator's declared probe set.
-    let descriptors =
-        vec![tcp_descriptor(ProbeRole::Startup, 8080), tcp_descriptor(ProbeRole::Startup, 9090)];
+    // Two TCP startup descriptors — the operator's declared probe set,
+    // at per-role positions 0 and 1 (ADR-0080 § D1).
+    let descriptors = vec![
+        tcp_descriptor_at(ProbeRole::Startup, 0, 8080),
+        tcp_descriptor_at(ProbeRole::Startup, 1, 9090),
+    ];
 
     let desired = WorkloadLifecycleState {
         workload_id: jid("svc"),
@@ -196,6 +211,18 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
     assert_eq!(
         start.probe_descriptors, descriptors,
         "spec.probe_descriptors must byte-equal desired.probe_descriptors",
+    );
+    // ADR-0080 § D1 — the projection carries the parser-assigned
+    // per-role `idx` VERBATIM. `project_probe_descriptors` concatenates
+    // startup ++ readiness ++ liveness into a transport vector whose
+    // positions carry no index semantics; a projection that re-derived
+    // the index from flat position would be indistinguishable here for
+    // startup (which sorts first) but would silently mis-index every
+    // readiness and liveness probe downstream.
+    assert_eq!(
+        start.probe_descriptors.iter().map(|d| d.idx.get()).collect::<Vec<_>>(),
+        vec![0, 1],
+        "two startup probes must reach the AllocationSpec at per-role indices 0 and 1",
     );
 }
 

@@ -164,7 +164,7 @@ mod tests {
     }
 
     use crate::aggregate::probe_descriptor::ProbeMechanic;
-    use crate::observation::ProbeRole;
+    use crate::observation::{ProbeIdx, ProbeRole};
 
     /// Strategy producing a valid `ProbeDescriptor` with a TCP mechanic
     /// (the only mechanic the round-trip needs to exercise; the wire
@@ -172,6 +172,10 @@ mod tests {
     /// descriptor passes `ProbeMechanic::validate`.
     fn probe_descriptor_strategy() -> impl Strategy<Value = ProbeDescriptor> {
         (
+            // ADR-0080 § D1 — the describe wire shape carries the
+            // per-role `idx`; the round-trip must preserve every
+            // representable value, not just 0.
+            any::<u32>(),
             prop_oneof![
                 Just(ProbeRole::Startup),
                 Just(ProbeRole::Readiness),
@@ -188,6 +192,7 @@ mod tests {
         )
             .prop_map(
                 |(
+                    idx,
                     role,
                     host,
                     port,
@@ -198,6 +203,7 @@ mod tests {
                     success_threshold,
                     inferred,
                 )| ProbeDescriptor {
+                    idx: ProbeIdx::new(idx),
                     role,
                     mechanic: ProbeMechanic::Tcp { host, port },
                     timeout_seconds,
@@ -290,13 +296,14 @@ mod tests {
     #[test]
     fn service_to_describe_carries_passed_vip_and_maps_listeners() {
         use crate::aggregate::probe_descriptor::ProbeMechanic;
-        use crate::observation::ProbeRole;
+        use crate::observation::{ProbeIdx, ProbeRole};
 
         // An operator-declared startup probe — `ServiceV1::from_submit`
         // passes probe vecs through unchanged (validation only; default-
         // TCP synthesis happens at the TOML parser, NOT in `from_submit`),
         // so the describe round-trip is exact equality with this input.
         let startup_probe = ProbeDescriptor {
+            idx: ProbeIdx::new(0),
             role: ProbeRole::Startup,
             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
             timeout_seconds: 5,

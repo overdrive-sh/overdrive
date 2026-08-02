@@ -43,7 +43,7 @@ use std::time::Duration;
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::id::AllocationId;
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeStatus};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{
@@ -320,8 +320,18 @@ impl ProbeRunner {
             return root_token;
         }
         supervisor.mark_started();
-        for (idx, descriptor) in probe_descriptors.into_iter().enumerate() {
-            let handle = supervisor.spawn_probe_task();
+        for descriptor in probe_descriptors {
+            // ADR-0080 § D1 — consume the parser-assigned per-role
+            // index verbatim. The flat vector `project_probe_descriptors`
+            // hands us is a TRANSPORT concatenating startup ++ readiness
+            // ++ liveness; its positions carry no index semantics, so
+            // deriving an index from `enumerate()` here (as this site
+            // previously did) put readiness probe 0 at flat index
+            // `startup_probes.len()` while every consumer filtered on
+            // per-role index 0 — the read-miss that made readiness and
+            // liveness structurally unobservable.
+            let probe_idx = descriptor.idx;
+            let handle = supervisor.spawn_probe_task(descriptor.role);
             let child_token = handle.cancellation_token();
             let tcp_prober = Arc::clone(&self.tcp_prober);
             let http_prober = Arc::clone(&self.http_prober);
@@ -329,12 +339,6 @@ impl ProbeRunner {
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
             let alloc_id_for_task = alloc_id.clone();
-            // ProbeIdx is 0-indexed across the descriptor vector
-            // per the `discuss/shared-artifacts-registry.md`
-            // contract — saturating cast keeps this safe past
-            // u32::MAX descriptors (operationally impossible; the
-            // max-attempts ceiling is 30).
-            let probe_idx = ProbeIdx::new(u32::try_from(idx).unwrap_or(u32::MAX));
             tokio::spawn(async move {
                 supervised_probe_loop(
                     tcp_prober,
@@ -372,6 +376,36 @@ impl ProbeRunner {
         if let Some(supervisor) = supervisor {
             supervisor.cancel();
         }
+    }
+
+    /// Cancel every probe task of `role` under `alloc_id`, leaving the
+    /// supervisor and all other roles running.
+    ///
+    /// Cooperative shutdown only, same discipline as [`Self::stop_alloc`].
+    /// Idempotent: an unknown alloc, or a role with no live tasks, is
+    /// a no-op.
+    ///
+    /// Per ADR-0080 § D4 this is what `Stable` drives — `Stable` is a
+    /// NON-terminal condition (ADR-0055), so it retires the startup
+    /// role only and leaves readiness / liveness supervision intact.
+    /// [`Self::active_alloc_count`] still reports the alloc afterwards;
+    /// the supervisor is alive, only one role's tasks are cancelled.
+    pub fn stop_role(&self, alloc_id: &AllocationId, role: ProbeRole) {
+        let supervisors = self.supervisors.lock();
+        if let Some(supervisor) = supervisors.get(alloc_id) {
+            supervisor.cancel_role(role);
+        }
+    }
+
+    /// Whether `role` is still supervised for `alloc_id`. Inspection
+    /// surface for tests and operator diagnostics, beside
+    /// [`Self::active_alloc_count`].
+    ///
+    /// `false` for an unknown alloc, and for a role that never spawned
+    /// a task (an undeclared role has no token).
+    #[must_use]
+    pub fn is_role_live(&self, alloc_id: &AllocationId, role: ProbeRole) -> bool {
+        self.supervisors.lock().get(alloc_id).is_some_and(|s| s.is_role_live(role))
     }
 
     /// Count of live per-alloc supervisors — exposed for inspection

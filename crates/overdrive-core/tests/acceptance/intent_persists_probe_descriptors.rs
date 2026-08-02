@@ -42,7 +42,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::codec::decode_envelope_bytes;
-use overdrive_core::observation::ProbeRole;
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,13 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
 
 fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
     (
+        // ADR-0080 § D1 — `idx` is drawn ARBITRARILY here, deliberately
+        // modelling a hostile wire client. `ServiceV1::from_submit` is
+        // the API/wire ingress and does not trust a caller-supplied
+        // index: it re-assigns from vector position, so a client cannot
+        // inject a duplicate `(role, idx)` pair and collide two probes'
+        // durable rows under the composite key (§ D2).
+        0u32..=9,
         arb_probe_role(),
         arb_mechanic(),
         1u32..=60,
@@ -77,6 +84,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
     )
         .prop_map(
             |(
+                idx,
                 role,
                 mechanic,
                 timeout_seconds,
@@ -86,6 +94,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 success_threshold,
                 inferred,
             )| ProbeDescriptor {
+                idx: ProbeIdx::new(idx),
                 role,
                 mechanic,
                 timeout_seconds,
@@ -96,6 +105,20 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 inferred,
             },
         )
+}
+
+/// The projection `from_submit` is expected to apply to one probe
+/// vector: every field carried verbatim, `idx` re-assigned from the
+/// 0-based position (ADR-0080 § D1).
+fn expected_after_from_submit(input: &[ProbeDescriptor]) -> Vec<ProbeDescriptor> {
+    input
+        .iter()
+        .enumerate()
+        .map(|(position, probe)| ProbeDescriptor {
+            idx: ProbeIdx::new(u32::try_from(position).expect("test vectors are tiny")),
+            ..probe.clone()
+        })
+        .collect()
 }
 
 fn arb_probe_vec() -> impl Strategy<Value = Vec<ProbeDescriptor>> {
@@ -158,13 +181,20 @@ proptest! {
     /// validating constructor MUST NOT drop probe data on the way
     /// through. This is the gap that produced the bug: the legacy
     /// `from_submit` had ZERO probe-related code.
+    ///
+    /// Every field is carried verbatim EXCEPT `idx`, which ADR-0080
+    /// § D1 re-assigns from the descriptor's 0-based position in its
+    /// own vector. The generator draws `idx` arbitrarily, so this
+    /// assertion is what pins the re-assignment: a `from_submit` that
+    /// trusted the caller's index would fail here for every case whose
+    /// drawn index differs from its position.
     #[test]
     fn at_02_from_submit_projects_all_three_probe_vecs(
         input in arb_service_spec_input(),
     ) {
-        let expected_startup = input.startup_probes.clone();
-        let expected_readiness = input.readiness_probes.clone();
-        let expected_liveness = input.liveness_probes.clone();
+        let expected_startup = expected_after_from_submit(&input.startup_probes);
+        let expected_readiness = expected_after_from_submit(&input.readiness_probes);
+        let expected_liveness = expected_after_from_submit(&input.liveness_probes);
 
         let svc = ServiceV1::from_submit(input)
             .expect("canonical ServiceSpecInput is valid");
@@ -172,6 +202,49 @@ proptest! {
         prop_assert_eq!(&svc.startup_probes, &expected_startup);
         prop_assert_eq!(&svc.readiness_probes, &expected_readiness);
         prop_assert_eq!(&svc.liveness_probes, &expected_liveness);
+    }
+
+    /// ADR-0080 § D1 regression guard — the API/wire ingress never
+    /// admits two descriptors of one vector carrying the same `idx`.
+    ///
+    /// A duplicate `(role, idx)` pair would make two probes share one
+    /// durable `(alloc_id, role, probe_idx)` key (§ D2) and silently
+    /// clobber each other under LWW. The generator can and does draw
+    /// duplicate indices; `from_submit` MUST normalise them away.
+    #[test]
+    fn from_submit_normalises_indices_so_no_two_probes_of_a_role_collide(
+        input in arb_service_spec_input(),
+    ) {
+        let startup_len = input.startup_probes.len();
+        let readiness_len = input.readiness_probes.len();
+        let liveness_len = input.liveness_probes.len();
+
+        let svc = ServiceV1::from_submit(input)
+            .expect("canonical ServiceSpecInput is valid");
+
+        for (label, probes, expected_len) in [
+            ("startup", &svc.startup_probes, startup_len),
+            ("readiness", &svc.readiness_probes, readiness_len),
+            ("liveness", &svc.liveness_probes, liveness_len),
+        ] {
+            let indices: std::collections::BTreeSet<u32> =
+                probes.iter().map(|p| p.idx.get()).collect();
+            prop_assert_eq!(
+                indices.len(),
+                expected_len,
+                "{} probe indices must be pairwise distinct after from_submit; got {:?}",
+                label,
+                probes.iter().map(|p| p.idx.get()).collect::<Vec<_>>(),
+            );
+            for (position, probe) in probes.iter().enumerate() {
+                prop_assert_eq!(
+                    probe.idx.get(),
+                    u32::try_from(position).expect("test vectors are tiny"),
+                    "{} probe idx must equal its 0-based position",
+                    label,
+                );
+            }
+        }
     }
 }
 

@@ -1,0 +1,9 @@
+Service 'liveness-absent' (kind: Service)
+Spec digest: 65dc095aba22119cc94e3866b696ec750a92c9d7cac52730c909fbef08f3b64a
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+alloc-liveness-absent-0  Failed       0          (c=142,w=local)     
+    reason: driver started
+VIP:           10.96.0.2
+Listeners:
+  8091/tcp

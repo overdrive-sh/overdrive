@@ -1047,7 +1047,20 @@ fn format_listener_pair(l: Listener) -> String {
 // ---------------------------------------------------------------------------
 
 use crate::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use crate::observation::ProbeRole;
+use crate::observation::{ProbeIdx, ProbeRole};
+
+/// Project a parser-loop 0-based position into the `ProbeIdx` carried
+/// on the emitted [`ProbeDescriptor`], per ADR-0080 § D1.
+///
+/// The index is **per-role**: each `[[health_check.<role>]]` array
+/// restarts at 0, which is exactly the contract ADR-0057:132-134 and
+/// `ProbeResultRow::probe_idx`'s docstring state. The saturating cast
+/// is unreachable in practice (a TOML array of >4 billion probe
+/// entries), and saturating rather than panicking keeps the parser
+/// total.
+fn probe_idx_from_position(position: usize) -> ProbeIdx {
+    ProbeIdx::new(u32::try_from(position).unwrap_or(u32::MAX))
+}
 
 /// ADR-0057 §2 default values for a startup probe — operator omits
 /// `timeout_seconds` / `interval_seconds` / `max_attempts` → these apply.
@@ -1109,6 +1122,8 @@ fn parse_startup_probes(
     if !was_explicit && !listeners.is_empty() {
         let first = &listeners[0];
         let inferred = ProbeDescriptor {
+            // Sole member of the synthesised startup array (ADR-0058).
+            idx: ProbeIdx::new(0),
             role: ProbeRole::Startup,
             mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: first.port.get() },
             timeout_seconds: STARTUP_TIMEOUT_DEFAULT_S,
@@ -1152,6 +1167,7 @@ fn parse_one_startup_probe(
             .map_err(|err| map_zero_to_named_error(err, "max_attempts", probe_idx))?;
 
     Ok(ProbeDescriptor {
+        idx: probe_idx_from_position(probe_idx),
         role: ProbeRole::Startup,
         mechanic,
         timeout_seconds,
@@ -1283,6 +1299,7 @@ fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescrip
         .map_err(|err| map_zero_to_named_error(err, "success_threshold", probe_idx))?;
 
         out.push(ProbeDescriptor {
+            idx: probe_idx_from_position(probe_idx),
             role: ProbeRole::Readiness,
             mechanic,
             timeout_seconds,
@@ -1381,6 +1398,7 @@ fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescript
         .map_err(|err| map_zero_to_named_error(err, "failure_threshold", probe_idx))?;
 
         out.push(ProbeDescriptor {
+            idx: probe_idx_from_position(probe_idx),
             role: ProbeRole::Liveness,
             mechanic,
             timeout_seconds,

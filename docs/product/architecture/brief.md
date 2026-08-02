@@ -3830,8 +3830,20 @@ holds an `Arc` shared across every Service-kind alloc on the node;
 when an alloc reaches `Running`, the runner spawns a per-alloc
 supervisor task that in turn spawns one per-probe-instance tokio
 task per declared probe. Per-task isolation via
-`tokio_util::sync::CancellationToken`; supervisor cancellation
-aborts every per-probe task via `JoinSet` drop.
+`tokio_util::sync::CancellationToken`, arranged as a two-level
+token graph — `root → per-role → per-task` (ADR-0080 § D4).
+
+The supervisor holds **no** `JoinSet` and never calls
+`JoinHandle::abort()`: each spawned task's handle is detached, and
+shutdown is cooperative — every task body observes its token in a
+biased `select!` arm and returns on the next async yield.
+Cancellation alone is therefore sufficient to drain the task set.
+Cancelling the root propagates through every role token in the same
+instant, so whole-supervisor teardown stays atomic; cancelling a
+single role token retires only that role's tasks. That per-role
+level is what lets `Stable` — a NON-terminal condition per
+ADR-0055 — retire startup probing while readiness and liveness
+supervision keep ticking.
 
 The task graph shape ("per-alloc-per-probe tokio task") matches
 Kubernetes' `prober.Manager` design (research § 3.3 D5) and was
@@ -3867,15 +3879,39 @@ startup via `health.startup.refused` structured event (per ADR-0035
 
 ### 76. ProbeResultRow — LWW observation, additive ObservationStore row
 
-Per ADR-0054 §5. A new rkyv-archived row `ProbeResultRow` lives in
-`crates/overdrive-core/src/observation/probe_result.rs` (new) with
-composite primary key `(alloc_id, probe_idx)` — LWW per
+Per ADR-0054 §5 as amended by ADR-0080 § D2. A new rkyv-archived
+row `ProbeResultRow` lives in
+`crates/overdrive-core/src/observation/probe_result_row.rs` (new)
+with composite primary key `(alloc_id, role, probe_idx)` — LWW per
 `.claude/rules/development.md` § "Persist inputs, not derived
-state". The `ObservationStore` trait gains two methods
-(`write_probe_result`, `list_probe_results_for_alloc`); the return
-type is `BTreeMap<ProbeIdx, ProbeResultRow>` per
-`.claude/rules/development.md` § "Ordered-collection choice"
-(iterated by reconciler + render).
+state".
+
+`role` is load-bearing in that key, not decoration. `probe_idx` is
+0-indexed **within its own role array** (ADR-0057:132-134, ADR-0080
+§ D1), so a key omitting `role` makes `(alloc, Startup, 0)`,
+`(alloc, Readiness, 0)` and `(alloc, Liveness, 0)` encode
+identically and clobber one another under LWW — silent durable data
+loss, not a read-miss. ADR-0080 § A2 records that two-part shape as
+rejected-as-actively-dangerous, and § D7 item 2 is its regression
+guard. The encoder (`encode_probe_result_key`,
+`crates/overdrive-store-local/src/observation_backend.rs`) lays the
+key out as `alloc_id_bytes || 0x00 || role_byte || probe_idx LE
+u32`, with `role_byte` from `ProbeRole::as_key_byte` — a PERSISTED
+discriminant, never renumbered. The role byte sits after the NUL, so
+the per-alloc prefix scan still captures every role in one range
+read.
+
+The `ObservationStore` trait gains two methods
+(`write_probe_result`, `list_probe_results_for_alloc`); the latter
+returns `Vec<ProbeResultRow>`. Ordering is a documented
+postcondition on the method, NOT encoded in the return type: rows
+come grouped by `role` in `ProbeRole::as_key_byte` order (which
+agrees with the enum's derived `Ord`), and within a role ascending
+by `probe_idx`, per `.claude/rules/development.md`
+§ "Ordered-collection choice". Every adapter MUST agree on that
+order — the byte-keyed `LocalObservationStore` inherits it from the
+key layout, the tuple-keyed `SimObservationStore` from its
+`BTreeMap<(AllocationId, ProbeRole, ProbeIdx), ProbeResultRow>`.
 
 Per ADR-0048 § "Version-bump procedure", `ProbeResultRow` ships as
 `ProbeResultRowEnvelope::V1(ProbeResultRowV1)` with its own
@@ -4136,7 +4172,7 @@ C4Component
 
   Container_Boundary(worker, "overdrive-worker (adapter-host)") {
     Component(runner, "ProbeRunner", "Rust struct (Arc-shared per node)", "start_alloc / stop_alloc / probe() Earned Trust gate; holds CancellationTokens per alloc")
-    Component(supervisor, "Per-alloc supervisor task", "tokio::task", "Spawns N per-probe tasks via JoinSet; cancels on alloc terminal")
+    Component(supervisor, "Per-alloc supervisor", "root + per-role CancellationTokens (no JoinSet)", "Spawns N detached per-probe tasks; cancels root on alloc terminal, one role token on Stable (ADR-0080 D4)")
     Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
     Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
     Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
@@ -4145,7 +4181,7 @@ C4Component
   }
 
   Container(core_traits, "overdrive-core::traits::prober", "Three port traits — TcpProber / HttpProber / ExecProber — declared with rustdoc preconditions, postconditions, edge cases, invariants per development.md")
-  Container(core_obs, "overdrive-core::observation::probe_result", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
+  Container(core_obs, "overdrive-core::observation::probe_result_row", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
   Container(obs_store, "LocalObservationStore", "redb-backed; write_probe_result + list_probe_results_for_alloc")
   Container(reconciler_runtime, "ReconcilerRuntime", "Reads probe_results into ServiceLifecycleState.actual on hydrate_actual")
   Container(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile; consumes ProbeResultRow via actual; emits Stable/Failed/WriteServiceBackendRow/RestartAllocation Actions")
@@ -4153,12 +4189,12 @@ C4Component
 
   Rel(exec_driver, runner, "on_alloc_running(alloc_id, probe_descriptors) / on_alloc_terminal(alloc_id)")
   Rel(runner, supervisor, "spawn per-alloc supervisor task; pass CancellationToken")
-  Rel(supervisor, probe_task, "spawn N per-probe tasks via JoinSet")
+  Rel(supervisor, probe_task, "spawn N detached per-probe tasks, each under a child of its role token")
   Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
   Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
   Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
   Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
-  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, probe_idx)")
+  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, role, probe_idx)")
   Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
   Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
   Rel(core_traits, runner, "Trait surface (Arc<dyn TcpProber/HttpProber/ExecProber>)")
@@ -4189,8 +4225,8 @@ To DEVOPS (platform-architect, parallel with DISTILL):
   (cancel token → all per-probe tasks drop within 1s);
   `ServiceLifecycleStableIsDeduplicated` (multiple ticks after
   Stable do NOT re-emit deciding action);
-  `ProbeResultRowIsLww` (latest write per `(alloc_id, probe_idx)`
-  wins; no append-mode)
+  `ProbeResultRowIsLww` (latest write per
+  `(alloc_id, role, probe_idx)` wins; no append-mode)
 - **K2a — ProbeRunner memory footprint guardrail (regression-only,
   not a leading KPI).** K2 above measures CPU only (≤ 0.5 % per
   Service-alloc-with-3-probes); it does not catch growth in

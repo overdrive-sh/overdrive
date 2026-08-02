@@ -56,6 +56,10 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
 
 fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
     (
+        // ADR-0080 § D1 — `idx` is the per-role array position. The
+        // roundtrip property must hold for every representable index,
+        // not just 0, so the generator spans a multi-probe range.
+        0u32..=3,
         arb_probe_role(),
         arb_mechanic(),
         1u32..=60,
@@ -67,6 +71,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
     )
         .prop_map(
             |(
+                idx,
                 role,
                 mechanic,
                 timeout_seconds,
@@ -77,6 +82,7 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 inferred,
             )| {
                 ProbeDescriptor {
+                    idx: ProbeIdx::new(idx),
                     role,
                     mechanic,
                     timeout_seconds,

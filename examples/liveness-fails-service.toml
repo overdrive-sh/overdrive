@@ -1,0 +1,101 @@
+# liveness-fails-service.toml — ADR-0080 Stage 1 / O07 verification fixture
+# (the POSITIVE half of the O07 three-population diff).
+#
+# Identical to `liveness-absent-service.toml` except that it appends a
+# `[[health_check.liveness]]` probe targeting a port NOTHING ever binds. The
+# platform is expected to observe the liveness failures and RESTART the
+# allocation.
+#
+# WHY THIS SHAPE PROVES ADR-0080 § D1
+# -----------------------------------
+# Before Stage 1 this spec produced NO restart, ever, and the reason is the
+# declared startup probe below — which is therefore LOAD-BEARING, not
+# decoration.
+#
+# `project_probe_descriptors` concatenates the three role vectors in a fixed
+# order (startup ++ readiness ++ liveness), and `ProbeRunner::start_alloc` used
+# to assign each descriptor's `probe_idx` from the FLAT enumerate index over
+# that concatenation. Every consumer, meanwhile, filters per-role: the liveness
+# filter matches `role == Liveness && probe_idx == 0`. This spec declares ONE
+# startup probe, so the liveness probe landed at flat index 1 and the filter
+# never matched it — ADR-0080 § "A third instance, same class". With
+# `startup_probes` EMPTY the liveness probe would have landed at flat 0 and
+# matched by accident, and the fixture would prove nothing.
+#
+# ADR-0080 § D1 restores the parser-assigned per-role `ProbeDescriptor.idx`;
+# § D2 puts `role` in the durable observation key so the three roles' index-0
+# rows stop colliding under LWW. Together they make `probe_idx == 0` mean what
+# every consumer already assumed — "this role's first declared probe" — so the
+# liveness observation finally reaches the restart decision.
+#
+# WHAT THIS SHAPE DOES **NOT** PROVE
+# ----------------------------------
+# It does not exercise ADR-0080 § D4 (`Stable` stops only the startup role).
+# Reaching `Stable` requires the startup probe to PASS, and on this composition
+# a TCP probe cannot reach the workload at all (see the note below), so no
+# allocation here crosses the `Stable` boundary. The O07 README records that
+# limit rather than claiming past it.
+#
+# Nor does it prove the liveness verdict is CORRECT — only that it is consulted.
+# The paired `liveness-holds-service.toml` is what tests correctness, and its
+# captured evidence refutes it.
+#
+# PROBE REACHABILITY — READ BEFORE REUSING THIS FIXTURE
+# ----------------------------------------------------
+# Measured in the Lima dev VM on 2026-08-02 (see the O07 evidence): the
+# workload's socket is bound inside its own network namespace (`ovd-ns-NNNN`,
+# created by the mTLS netns gate), while the probe runner connects from the
+# control plane's namespace. A host-namespace connect to the workload's bound
+# port is REFUSED while `socat` is demonstrably listening on it inside the
+# workload namespace. So on this composition EVERY TCP probe fails regardless of
+# the workload's actual health. That is what makes this fixture's restart fire
+# quickly and reliably — and it is also why its sibling control fails.
+#
+# Port choice: 8091..8093 are free unprivileged ports in the Lima dev VM,
+# deliberately away from 8080/9090 (used by `quick-bind-service.toml` /
+# `never-binds-service.toml`) and away from 5353, which `systemd-resolved` owns
+# (see `dns-resolver.toml`).
+#
+# Consumed black-box (CLI only, no crate link) by:
+#   verification/expectations/O07-liveness-probe-drives-restart/runner.sh
+
+[service]
+id = "liveness-fails"
+replicas = 1
+
+[[listener]]
+port = 8092
+protocol = "tcp"
+
+[exec]
+# Identical shape to the baseline: a real /usr/bin/socat binding the WILDCARD
+# address with `fork` so it survives unbounded probe connects, and never exiting
+# on its own. Any restart observed on this allocation is therefore
+# platform-driven, never a self-inflicted workload exit.
+command = "/usr/bin/socat"
+args    = ["TCP-LISTEN:8092,fork,reuseaddr", "PIPE"]
+
+# Same explicit startup probe as the baseline. NON-EMPTY `startup_probes` is the
+# Mechanism-1 precondition described in the header — do not delete this block to
+# "simplify" the fixture; doing so silently destroys what it proves.
+[[health_check.startup]]
+type = "tcp"
+port = 8092
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+# THE DIFFERENCE FROM THE BASELINE: a declared liveness probe. It targets 9192 —
+# a port nothing binds — so it fails on every tick for an unambiguous reason
+# ("connection refused"), independent of the namespace hazard above. Two
+# consecutive failures at a 2s interval trip the restart predicate.
+[[health_check.liveness]]
+type = "tcp"
+port = 9192
+interval_seconds = 2
+timeout_seconds = 1
+failure_threshold = 2
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
