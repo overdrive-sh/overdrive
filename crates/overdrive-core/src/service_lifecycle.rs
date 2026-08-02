@@ -245,6 +245,12 @@ pub struct ServiceLifecycleState {
     /// `ServiceSpec` identity (intent side); projected by the runtime's
     /// hydrate pass. Carries no derived state.
     pub service_dataplane: Option<ServiceDataplaneIdentity>,
+
+    /// LWW stamp of the `service_backends` row currently stored for this
+    /// service, or `None` when no row exists yet. An OBSERVED INPUT,
+    /// hydrated by the runtime from `service_backends_rows(&service_id)`
+    /// — never derived, never persisted in the View.
+    pub prior_backend_row_at: Option<LogicalTimestamp>,
 }
 
 /// Service-level dataplane identity for the readiness branch's
@@ -364,8 +370,19 @@ pub struct ServiceLifecycleView {
     /// Per-service fingerprint of the last `ServiceBackendRow` the
     /// readiness branch emitted. Compared against the freshly-computed
     /// fingerprint each tick; the branch emits
-    /// `Action::WriteServiceBackendRow` only on drift (same dedup
-    /// pattern as `BackendDiscoveryBridgeView::last_written_fingerprint`).
+    /// `Action::WriteServiceBackendRow` only on drift.
+    ///
+    /// **This is an emit-time marker consulted as the diff** — the
+    /// `.claude/rules/reconcilers.md` § "Symptoms during review"
+    /// anti-pattern. The bridge carried the identical defect in
+    /// `BackendDiscoveryBridgeView::last_written_fingerprint`; ADR-0079
+    /// § D2 deleted it there by converging on the observed row. It is
+    /// deliberately NOT fixed here (§ D4): `ServiceLifecycle` authors
+    /// only `healthy` on a row it SHARES with the bridge, so "diff
+    /// desired against the stored row" is unavailable to it until
+    /// ownership is resolved (§ D9) — converging it on the whole row
+    /// would make it fight the bridge. Consequence: a dropped readiness
+    /// write is still permanently forgotten.
     #[serde(default)]
     pub last_emitted_backend_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
@@ -857,10 +874,14 @@ fn readiness_backend_row_action(
             service_id: dataplane.service_id,
             vip,
             backends,
-            updated_at: LogicalTimestamp {
-                counter: tick.tick.saturating_add(1),
-                writer: dataplane.writer.clone(),
-            },
+            // ADR-0077 § D2 site 10: derive the LWW counter from the
+            // prior row, not from the tick, so a post-restart write
+            // dominates whatever survived.
+            updated_at: LogicalTimestamp::dominating(
+                tick.tick,
+                dataplane.writer.clone(),
+                actual.prior_backend_row_at.as_ref(),
+            ),
         },
         correlation,
     })

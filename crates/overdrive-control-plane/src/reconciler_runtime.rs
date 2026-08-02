@@ -102,6 +102,16 @@ enum AnyViewMap {
     /// BackendDiscoveryBridgeView`; the map holds per-target persisted
     /// views per ADR-0035 §5. Phase 2.2
     /// (`backend-discovery-bridge-service-reachability` step 01-01).
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "BackendDiscoveryBridgeView is deliberately field-less since ADR-0079 § D3 — \
+                  the bridge converges by diffing against the `service_backends` rows it \
+                  manages, so it holds no per-tick memory. The per-target map shape mirrors \
+                  every other reconciler kind so the runtime dispatch stays uniform (§ D3 \
+                  rejects `type View = ()` for that reason); the View gains a field (and this \
+                  expect self-removes) if a bridge-side retry/backoff policy ever lands. \
+                  Same precedent as AnyViewMap::WorkflowLifecycle above."
+    )]
     BackendDiscoveryBridge(BTreeMap<TargetResource, BackendDiscoveryBridgeView>),
     /// `ServiceLifecycle` carries `View = ServiceLifecycleView`;
     /// the map holds per-target persisted views per ADR-0035 §5 /
@@ -303,6 +313,12 @@ impl ReconcilerRuntime {
             // Shape mirrors `ServiceMapHydrator` exactly; the production
             // hydrate / persist paths land in step 01-03.
             AnyReconciler::BackendDiscoveryBridge(_) => {
+                #[expect(
+                    clippy::zero_sized_map_values,
+                    reason = "BackendDiscoveryBridgeView is deliberately field-less (ADR-0079 \
+                              § D3); self-removes when the View gains a field. See \
+                              AnyViewMap::BackendDiscoveryBridge."
+                )]
                 let loaded: BTreeMap<TargetResource, BackendDiscoveryBridgeView> =
                     self.view_store.bulk_load(static_name).await.map_err(|e| {
                         ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
@@ -1005,6 +1021,12 @@ impl ReconcilerRuntime {
     /// for the BackendDiscoveryBridge variant. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "BackendDiscoveryBridgeView is deliberately field-less (ADR-0079 § D3); \
+                  self-removes when the View gains a field. See \
+                  AnyViewMap::BackendDiscoveryBridge."
+    )]
     pub fn loaded_backend_discovery_bridge_views_for_test(
         &self,
         name: &ReconcilerName,
@@ -1609,10 +1631,14 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // memory recorded" predicate ships alongside.
         AnyReconcilerView::Unit
         | AnyReconcilerView::ServiceMapHydrator(_)
-        // backend-discovery-bridge-service-reachability step 01-01 —
-        // the bridge's view carries dedup-fingerprint memory (per
-        // ADR-0035 / Persist inputs); it does not carry a
-        // backoff-pending signal, so this arm returns false. A future
+        // The bridge's view is field-less since ADR-0079 § D3 — it
+        // converges by diffing against the `service_backends` row it
+        // manages, so it holds no memory at all and certainly no
+        // backoff-pending signal. This arm MUST stay `false`: retry
+        // after a dropped write is carried by `has_work`, which is true
+        // on exactly the ticks that emitted a write. A converged tick
+        // emits nothing, `has_work` is false, and the broker correctly
+        // drains — returning `true` here would busy-loop. A future
         // bridge-side retry policy would extend this match.
         | AnyReconcilerView::BackendDiscoveryBridge(_)
         // The workflow-lifecycle view is Phase-1 empty (ADR-0064 §5) and
@@ -1815,6 +1841,9 @@ async fn hydrate_desired(
                         workload_id,
                         running: BTreeMap::new(),
                     },
+                    // ADR-0079 § D1: the managed rows are an actual-side
+                    // projection only; the desired arm leaves them empty.
+                    service_backends: BTreeMap::new(),
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
         }
@@ -1851,6 +1880,9 @@ async fn hydrate_desired(
             Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
                 allocs,
                 service_dataplane: None,
+                // ADR-0077 § D2 site 10 — the prior LWW stamp is an
+                // OBSERVED input; the desired side carries none.
+                prior_backend_row_at: None,
             }))
         }
     }
@@ -2751,6 +2783,29 @@ async fn hydrate_actual(
                 })
                 .map(|r| (r.alloc_id, r.workload_addr))
                 .collect();
+            // ADR-0079 § D1 — the rows the bridge MANAGES, its genuine
+            // `actual`. Keys come from the SAME derivation the desired
+            // arm uses (`hydrate_bridge_desired_listeners`), so the two
+            // halves cannot drift: when intent is absent or the
+            // allocator memo is missing, BOTH arms yield empty and the
+            // tick is a correct no-op.
+            let listeners = hydrate_bridge_desired_listeners(state, &workload_id).await?;
+            let mut service_backends: BTreeMap<
+                overdrive_core::id::ServiceId,
+                overdrive_core::traits::observation_store::ServiceBackendRow,
+            > = BTreeMap::new();
+            for service_id in listeners.keys() {
+                let backend_rows = state
+                    .obs
+                    .service_backends_rows(service_id)
+                    .await
+                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+                // `service_backends_rows` returns at most one row per
+                // ServiceId (the LWW winner) per its rustdoc.
+                if let Some(row) = backend_rows.into_iter().next() {
+                    service_backends.insert(*service_id, row);
+                }
+            }
             let s =
                 overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeState {
                     desired:
@@ -2762,6 +2817,7 @@ async fn hydrate_actual(
                         workload_id,
                         running,
                     },
+                    service_backends,
                 };
             Ok(AnyState::BackendDiscoveryBridge(s))
         }
@@ -2859,6 +2915,7 @@ async fn hydrate_service_lifecycle_actual(
         return Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
             allocs: BTreeMap::new(),
             service_dataplane: None,
+            prior_backend_row_at: None,
         }));
     };
     let spec_facts = spec_facts_for_service(&spec);
@@ -2877,6 +2934,22 @@ async fn hydrate_service_lifecycle_actual(
     // branch is a no-op until the VIP lands.
     let backend_port = spec.listeners.first().map_or(0, |l| l.port.get());
     let service_dataplane = service_dataplane_identity(state, workload_id, &spec).await?;
+    // ADR-0077 § D2 site 10 — the LWW stamp of the row this reconciler
+    // is about to overwrite. Gated on the `Option`: `service_dataplane`
+    // is `None` whenever the Service has no listener or no
+    // allocator-issued VIP, and there is no `ServiceId` to read by.
+    let prior_backend_row_at: Option<overdrive_core::traits::observation_store::LogicalTimestamp> =
+        match service_dataplane.as_ref() {
+            Some(dp) => state
+                .obs
+                .service_backends_rows(&dp.service_id)
+                .await
+                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?
+                .into_iter()
+                .next()
+                .map(|r| r.updated_at),
+            None => None,
+        };
     let allocs = hydrate_service_alloc_facts(
         state,
         workload_id,
@@ -2887,7 +2960,11 @@ async fn hydrate_service_lifecycle_actual(
         backend_port,
     )
     .await?;
-    Ok(AnyState::ServiceLifecycle(ServiceLifecycleState { allocs, service_dataplane }))
+    Ok(AnyState::ServiceLifecycle(ServiceLifecycleState {
+        allocs,
+        service_dataplane,
+        prior_backend_row_at,
+    }))
 }
 
 /// Per-workload projection of every `AllocStatusRow` belonging to
@@ -2980,11 +3057,28 @@ async fn hydrate_service_alloc_facts(
         // single canonical producer of the alloc-SVID string (ADR-0067 D5,
         // ADR-0075 consolidation) — so this convergence path no longer
         // hand-rolls the `spiffe://overdrive.local/workload/.../alloc/...`
-        // shape. The addr is `(host_ipv4, listener_port)` per the
-        // BackendDiscoveryBridge precedent.
+        // shape.
+        //
+        // The addr is the alloc's canonical per-workload `workload_addr`
+        // when present (Path-A mesh alloc), falling back to `host_ipv4`
+        // for a host-netns alloc — mirroring the `BackendDiscoveryBridge`
+        // (`backend_discovery_bridge.rs`). ADR-0079 § D8: `host_ipv4`
+        // alone was the PRE-MESH addressing model; the bridge was
+        // migrated to `workload_addr` (GH #241 / ADR-0071 Path A) and
+        // this site was not, so the two writers of the shared
+        // `service_backends` row disagreed on `addr` for every
+        // production mesh alloc.
+        //
+        // ADR-0079 § D8 standing constraint: the fallback expression is
+        // byte-identical to the bridge's `workload_addr.unwrap_or(...)`
+        // BY DESIGN — the two writers agree in both branches only while
+        // they stay identical. Changing one without the other silently
+        // reintroduces writer divergence.
         let backend_spiffe = overdrive_core::SpiffeId::for_allocation(workload_id, &row.alloc_id);
-        let backend_addr =
-            std::net::SocketAddr::new(std::net::IpAddr::V4(state.host_ipv4), backend_port);
+        let backend_addr = std::net::SocketAddr::new(
+            std::net::IpAddr::V4(row.workload_addr.unwrap_or(state.host_ipv4)),
+            backend_port,
+        );
 
         // `exit_code` is sourced from the row's `reason:
         // Option<TransitionReason>` — the `WorkloadCrashedImmediately`
@@ -3816,6 +3910,87 @@ mod tests {
                  later Startup/idx-1 Fail row must be excluded because BOTH role AND probe_idx \
                  must match (kills && → || mutant at reconciler_runtime.rs:1937); got {:?}",
                 fact.latest_startup_probe
+            );
+        }
+
+        /// T-SL-ADDR-1 (ADR-0079 § D8) —
+        /// `service_lifecycle_advertises_workload_addr_not_host_ipv4`.
+        ///
+        /// `hydrate_service_alloc_facts` builds `ServiceAllocFact.backend_addr`
+        /// from the alloc-status row's canonical per-workload
+        /// `workload_addr`, falling back to `state.host_ipv4` — an
+        /// expression byte-identical to the `BackendDiscoveryBridge`'s
+        /// (`backend_discovery_bridge.rs`). Before § D8 this site used
+        /// `state.host_ipv4` unconditionally, which is the PRE-MESH
+        /// addressing model: the two writers of the shared
+        /// `service_backends` row then disagreed on `addr` for every
+        /// production mesh alloc.
+        ///
+        /// Mirrors the bridge-side shape of
+        /// [`Self::hydrate_actual_populates_per_alloc_workload_addr`] with
+        /// the same `Some` / `None` pair. **The `None` half is the
+        /// regression guard that keeps the two writers' fallbacks
+        /// identical** — without it a future edit to one expression
+        /// silently diverges from the other. It is also what kills the
+        /// `unwrap_or` mutant: dropping the fallback and always taking
+        /// `workload_addr` fails the `None` assertion, while dropping the
+        /// field read and always taking `host_ipv4` fails the `Some` one.
+        #[tokio::test]
+        async fn service_lifecycle_advertises_workload_addr_not_host_ipv4() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let intent = service_intent(&[8080]);
+            let state = build_state(&tmp, Some(intent)).await;
+
+            let mesh_addr = std::net::Ipv4Addr::new(10, 99, 0, 6);
+            // Mesh (Path-A) alloc — carries the canonical workload_addr.
+            write_alloc_status_with_addr(
+                &state,
+                "payments-mesh",
+                AllocState::Running,
+                1,
+                Some(mesh_addr),
+            )
+            .await;
+            // Host-netns alloc — no canonical workload address.
+            write_alloc_status_with_addr(&state, "payments-host", AllocState::Running, 2, None)
+                .await;
+
+            let result = crate::reconciler_runtime::hydrate_actual_for_test(
+                &service_lifecycle_reconciler(),
+                &target(),
+                &state,
+            )
+            .await
+            .expect("hydrate_actual ok");
+
+            let AnyState::ServiceLifecycle(s) = result else {
+                panic!("expected AnyState::ServiceLifecycle variant");
+            };
+
+            let mesh = s
+                .allocs
+                .get(&AllocationId::new("payments-mesh").expect("alloc id"))
+                .expect("payments-mesh fact present");
+            assert_eq!(
+                mesh.backend_addr,
+                std::net::SocketAddr::new(std::net::IpAddr::V4(mesh_addr), 8080),
+                "a mesh alloc MUST advertise its canonical workload_addr:port, not \
+                 host_ipv4:port — the pre-mesh model ADR-0079 § D8 migrates off",
+            );
+
+            let host = s
+                .allocs
+                .get(&AllocationId::new("payments-host").expect("alloc id"))
+                .expect("payments-host fact present");
+            assert_eq!(
+                host.backend_addr,
+                std::net::SocketAddr::new(
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                    8080
+                ),
+                "a host-netns alloc (workload_addr == None) MUST fall back to \
+                 host_ipv4:port — byte-identical to the bridge's fallback, which is \
+                 what keeps the two writers in agreement on BOTH branches",
             );
         }
     }

@@ -569,7 +569,8 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual = ServiceLifecycleState { allocs, service_dataplane: None };
+    let actual =
+        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -674,7 +675,8 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
-    let actual = ServiceLifecycleState { allocs, service_dataplane: None };
+    let actual =
+        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
     let now = Instant::now();
     let tick = TickContext {
         now,

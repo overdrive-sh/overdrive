@@ -432,24 +432,28 @@ pub enum Invariant {
     /// — always invariant. Once `obs.service_backends_rows(...).backends
     /// == expected` for every Service workload, the bridge emits zero
     /// `Action::WriteServiceBackendRow` actions on subsequent ticks
-    /// given unchanged inputs. Also exercises the View `retain` GC
-    /// clause (S-BDB-07). The evaluator body lives in
+    /// given unchanged inputs. The View `retain` GC half (S-BDB-07) is
+    /// retired with the field it swept (ADR-0079 § D3 / § D7). The
+    /// evaluator body lives in
     /// `crate::invariants::backend_discovery_bridge`.
     BridgeIdempotentSteadyState,
-    /// `backend-discovery-bridge-service-reachability` (Atlas Q2)
-    /// Slice 1 — always invariant under the crash-recovery scenario
-    /// family. Models a crash between `SimViewStore::write_through`
-    /// fsync and the runtime's in-memory `BTreeMap::insert`; after
-    /// the restart-equivalent `bulk_load`, asserts the bridge's
-    /// first post-restart tick re-projects from fresh inputs and
-    /// either emits zero actions (idempotent) or emits
-    /// `Action::WriteServiceBackendRow` with the new fingerprint (no
-    /// silent skip on cached stale state). Proves the
-    /// fsync-then-memory ordering rule in
-    /// `.claude/rules/development.md` § "Reconciler I/O" is honored
-    /// by the bridge's reconcile body. The evaluator body lives in
-    /// `crate::invariants::backend_discovery_bridge`. Closes S-BDB-06.
-    BridgeRecomputesFingerprintOnReplay,
+    /// `backend-discovery-bridge-service-reachability` (ADR-0079 § D7)
+    /// — always invariant. Seeds the observation store with a
+    /// `ServiceBackendRow` that does NOT match desired, ticks, and
+    /// asserts the bridge re-emits; withholds the write (modelling a
+    /// drop) and asserts it re-emits AGAIN; then applies the write and
+    /// asserts the next tick emits zero. This is the convergence
+    /// property `.claude/rules/reconcilers.md` Bar 1 requires, and the
+    /// DST form of ADR-0079's central falsifiable claim. The evaluator
+    /// body lives in `crate::invariants::backend_discovery_bridge`.
+    ///
+    /// Replaces the retired `BridgeRecomputesFingerprintOnReplay`
+    /// (S-BDB-06 / Atlas Q2): that scenario defended against a silent
+    /// skip on a cached stale fingerprint after a crash, and with the
+    /// emit-time fingerprint deleted (ADR-0079 § D2 / § D3) there is no
+    /// cache — the failure mode is structurally impossible, so the
+    /// scenario is retired rather than rewritten.
+    BridgeReconvergesAfterDroppedWrite,
     /// `backend-discovery-bridge-service-reachability` step 02-04 —
     /// always invariant. Drives the in-process bridge → hydrator
     /// handoff at Tier 1: ticks `BackendDiscoveryBridge::reconcile`
@@ -668,14 +672,14 @@ impl Invariant {
         // production reconciler.
         Self::WorkloadGcOrphanConverges,
         Self::WorkloadGcResubmitCreatesFresh,
-        // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
-        // Slice 1 — three evaluators land in
+        // backend-discovery-bridge-service-reachability (#174) Slice 1
+        // + ADR-0079 § D7 — three evaluators land in
         // `crate::invariants::backend_discovery_bridge::
         // evaluate_bridge_{eventually_writes_backend_row,
-        // idempotent_steady_state, recomputes_fingerprint_on_replay}`.
+        // idempotent_steady_state, reconverges_after_dropped_write}`.
         Self::BridgeEventuallyWritesBackendRow,
         Self::BridgeIdempotentSteadyState,
-        Self::BridgeRecomputesFingerprintOnReplay,
+        Self::BridgeReconvergesAfterDroppedWrite,
         // backend-discovery-bridge-service-reachability step 02-04 —
         // bridge → hydrator handoff (S-BDB-19). The evaluator body
         // lives in
@@ -766,11 +770,11 @@ impl Invariant {
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
             Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",
-            // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
-            // DISTILL — RED scaffolds.
+            // backend-discovery-bridge-service-reachability (#174)
+            // + ADR-0079 § D7.
             Self::BridgeEventuallyWritesBackendRow => "bridge-eventually-writes-backend-row",
             Self::BridgeIdempotentSteadyState => "bridge-idempotent-steady-state",
-            Self::BridgeRecomputesFingerprintOnReplay => "bridge-recomputes-fingerprint-on-replay",
+            Self::BridgeReconvergesAfterDroppedWrite => "bridge-reconverges-after-dropped-write",
             // backend-discovery-bridge-service-reachability step 02-04 (S-BDB-19).
             Self::BridgeToHydratorHandoff => "bridge-to-hydrator-handoff",
             // workflow-primitive step 01-07.

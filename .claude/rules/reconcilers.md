@@ -187,26 +187,87 @@ The shapes that signal Bar 1 is being violated:
   that is the resource it manages (`ServiceHydrationStatus`), with
   `RetryMemory` sitting *beside* that real diff rather than standing in
   for it (`service_map_hydrator.rs:143-157`).
-- **A `Reconciler` impl that does NOT converge (the fingerprint
-  anti-pattern above, live in tree):** `BackendDiscoveryBridge`
-  (`crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:309`).
-  It is a `Reconciler` by trait and apply-once by structure — do not read
-  it as a Bar-2 exemplar. `BackendDiscoveryBridgeState` (`:170`) holds
-  `actual: RunningAllocSet`, but that is a second *input* it cross-products
-  with `desired.listeners`; the resource it manages is the
-  `service_backends` rows, which it never reads (`hydrate_actual`,
-  `reconciler_runtime.rs:2688-2696`, calls `alloc_status_rows()`; the
-  runtime's only `service_backends_rows` call, `:1698`, belongs to the
-  hydrator). So `view.last_written_fingerprint` (`:249`) IS its diff
-  (`:376`), stamped on emit (`:428`), while `obs.write` returns `Ok(())`
-  on a dropped write — and its docstring (`:203-211`) cites "Persist
-  inputs, not derived state" as justification. Consequence, reproduced
-  2026-08-01: a write silently dropped by observation-store LWW is never
-  retried and the stale row stands indefinitely, where the same drop
-  against `WorkloadLifecycle` (which guards on the observed row, not a
-  view marker) self-heals on the next tick. Full analysis:
+- **A `Reconciler` impl that did NOT converge — the fingerprint
+  anti-pattern above, worked end to end.** `BackendDiscoveryBridge`
+  (`crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs`).
+  **Fixed by ADR-0079 (2026-08-02) — the defect is described below in the
+  past tense and is no longer live at this site.** Kept because it remains
+  the clearest in-tree account of the shape, and because the shape is not
+  extinct (next bullet).
+
+  *What it was.* A `Reconciler` by trait and apply-once by structure.
+  `BackendDiscoveryBridgeState` held `desired: ServiceListenerSet` and
+  `actual: RunningAllocSet` — but that `actual` was a second *input*,
+  cross-producted with `desired.listeners` to compute the row to write.
+  The resource it manages is the `service_backends` rows, and it never
+  read them: the runtime's bridge `hydrate_actual` arm called
+  `alloc_status_rows()`, and the runtime's only `service_backends_rows`
+  call belonged to `ServiceMapHydrator`'s *desired* arm. So
+  `view.last_written_fingerprint` WAS the diff.
+
+  *Two defects hid in it, independent of each other.* **(1) It was not
+  `actual`.** The bridge could observe drift in its own intent and
+  nothing else. Its populated `State.actual` field was not evidence to
+  the contrary — it was the wrong resource. **(2) "Last written" was
+  unverifiable.** The marker was stamped on the *emit* path, and the
+  write surface reports success either way: the LWW merge helper
+  `apply_service_backends_lww`
+  (`crates/overdrive-store-local/src/observation_backend.rs:1141-1172`)
+  *does* compute the verdict and return it at `:1171`, and `write`
+  discards it (`:500-503` — `if accepted { self.emit(row); } Ok(())`).
+  The View docstring nevertheless claimed to record the row the bridge
+  "successfully wrote", citing § "Persist inputs, not derived state" as
+  its justification — false on both halves. And per the fsync-then-
+  dispatch ordering named in the symptom bullet above, the marker
+  outlived the effect it claimed to record, across crashes and restarts.
+
+  *How it was found.* Not by reading the code — by a reproduction, and
+  by a **contrast between two reconcilers under one fault**. While
+  investigating a cross-restart LWW counter regression, a
+  `ServiceBackendRow` write silently dropped by the observation store was
+  never retried and the stale row stood indefinitely; the *same* drop
+  against `WorkloadLifecycle` — which guards on the observed row, not on
+  a view marker — self-healed on the next tick. That asymmetry is what
+  localised the defect. Reproduced 2026-08-01; full analysis in
   `docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
-  § 4.3.
+  § 4.2–4.3.
+
+  *What fixed it (ADR-0079).* The state gained `service_backends:
+  BTreeMap<ServiceId, ServiceBackendRow>`
+  (`backend_discovery_bridge.rs:186`), hydrated by reading
+  `service_backends_rows` under the *same* `ServiceId` derivation the
+  desired arm uses, so the two halves cannot drift
+  (`reconciler_runtime.rs:2792-2806`). The diff became structural
+  equality against that observed row (`backend_discovery_bridge.rs:410-415`),
+  and `last_written_fingerprint` was deleted — `BackendDiscoveryBridgeView`
+  is now a field-less struct (`:256`). Retry falls out of the runtime's
+  `has_work` self-re-enqueue; no View field, no backoff memo, and no
+  write receipt on the store trait.
+
+  *Two rulings worth carrying to the next instance.* **Converge only on
+  what you author.** `ServiceBackendRow` has a second writer —
+  `ServiceLifecycle` authors `healthy` — so whole-row convergence would
+  have made the bridge the deterministic winner of every arbitration and
+  erased the readiness signal. The bridge instead carries `healthy`
+  through from the observed row, which also makes that field diff-inert:
+  no convergence decision can be derived from a field the reconciler does
+  not own. **A fingerprint is fine as a content-address and fatal as a
+  diff.** `fingerprint()` survives verbatim at the correlation-key site
+  (`backend_discovery_bridge.rs:419-423`); only its use as the dedup was
+  removed.
+
+- **The same shape, still live in tree:**
+  `ServiceLifecycleView::last_emitted_backend_fingerprint`
+  (`crates/overdrive-core/src/service_lifecycle.rs:370-387`, read at
+  `:861`, stamped on emit at `:865`). Its own docstring names the bridge
+  field above as the pattern it copies. It is deliberately not fixed:
+  `ServiceLifecycle` authors only `healthy` on a row it *shares* with the
+  bridge, so "diff desired against the stored row" is unavailable to it
+  until row ownership is resolved — converging it on the whole row would
+  make it fight the bridge, reintroducing on the health side exactly the
+  clobbering the bridge fix removed on the membership side. ADR-0079 § D4
+  records the exclusion and § D9 the ownership decision. Consequence, and
+  it is real: a dropped readiness write is still permanently forgotten.
 - **Executor, NOT a reconciler:** `EbpfDataplane` map writes — driven by
   `ServiceMapHydrator` via `Action::DataplaneUpdateService`. The
   dataplane is the executor; the hydrator owns the diff.

@@ -19,24 +19,23 @@
 //!   alloc set for the workload, sourced from
 //!   `ObservationStore::alloc_status_rows_for_workload`.
 //! - [`BackendDiscoveryBridgeView`] — runtime-persisted typed memory
-//!   per ADR-0035 § 1. Persists *inputs* per
-//!   `.claude/rules/development.md` § "Persist inputs, not derived
-//!   state": the per-service fingerprint of the last row the bridge
-//!   successfully wrote. The dedup decision is recomputed every tick
-//!   from this input + the freshly-computed current fingerprint —
-//!   never persisted as a derived "needs write" boolean.
-//! - [`BackendDiscoveryBridge`] — empty struct placeholder so the
-//!   `AnyReconciler::BackendDiscoveryBridge(_)` variant has a
-//!   concrete inner type to carry. The `Reconciler` trait impl,
-//!   the `reconcile` body, and the `host_ipv4` constructor parameter
-//!   land in step 01-02 alongside the dedup loop.
+//!   per ADR-0035 § 1. **Deliberately field-less** since ADR-0079
+//!   § D3: the bridge converges by diffing `desired` against the
+//!   `service_backends` rows it manages, so it holds no per-tick
+//!   memory. The former `last_written_fingerprint` was an emit-time
+//!   marker consulted as the diff — the
+//!   `.claude/rules/reconcilers.md` § "Symptoms during review"
+//!   anti-pattern — and is deleted, not relocated.
+//! - [`BackendDiscoveryBridge`] — the reconciler itself. Both
+//!   `host_ipv4` and `writer_node_id` are mandatory constructor
+//!   parameters.
 //!
 //! Per ADR-0035 § 1 the View derives the four mandatory bounds
 //! (`Serialize + Deserialize + Default + Clone`) plus `PartialEq + Eq`
 //! for the runtime's Eq-diff skip and for DST equality assertions.
 //! The CBOR codec is the runtime's choice (ADR-0035 § 3); the test
 //! surface at `crates/overdrive-core/tests/backend_discovery_bridge_types.rs`
-//! pins the round-trip property.
+//! pins that a legacy blob carrying the removed field still decodes.
 //!
 //! `BTreeMap` / `BTreeSet` per `.claude/rules/development.md` §
 //! "Ordered-collection choice" — every keyed map in this module is
@@ -52,7 +51,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::SpiffeId;
 use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
+use crate::dataplane::fingerprint::fingerprint;
 use crate::id::{
     AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
 };
@@ -159,19 +158,32 @@ pub struct RunningAllocSet {
 /// Merged state per ADR-0036 — the runtime stitches the desired and
 /// actual projections into one struct before calling `reconcile`.
 ///
-/// The fields' shapes mirror the desired / actual hydration sites in
-/// the runtime: [`ServiceListenerSet`] is the desired-side output of
-/// `hydrate_desired`, [`RunningAllocSet`] is the actual-side output
-/// of `hydrate_actual`. The bridge's `reconcile` body (lands in
-/// step 01-02) reads `desired.listeners` cross-producted with
-/// `actual.running` to emit one `Action::WriteServiceBackendRow` per
-/// drift-detected `(service_id, backend-set)` pair.
+/// The bridge's `reconcile` body reads `desired.listeners`
+/// cross-producted with `actual.running` to compute the row each
+/// service should carry, then diffs that against the OBSERVED row in
+/// [`Self::service_backends`] — the resource the bridge actually
+/// manages (ADR-0079 § D1 / `.claude/rules/reconcilers.md` Bar 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendDiscoveryBridgeState {
     /// Desired-side projection — declared listener set.
     pub desired: ServiceListenerSet,
-    /// Actual-side projection — Running alloc set.
+    /// Second desired-side INPUT — the Running alloc set. Despite the
+    /// name this is not the resource the bridge manages; it is one of
+    /// the two inputs from which `desired` is computed. Retained
+    /// unchanged so the field's meaning is not silently redefined.
     pub actual: RunningAllocSet,
+    /// The `service_backends` rows this bridge manages, keyed by
+    /// `ServiceId` — the genuine `actual` per
+    /// `.claude/rules/reconcilers.md` Bar 1.
+    ///
+    /// Populated ONLY in the `actual` projection (ADR-0021 uses one
+    /// type for both halves; the `desired` projection leaves this
+    /// empty, exactly as `hydrate_actual` leaves `desired.listeners`
+    /// empty).
+    ///
+    /// `BTreeMap` per `.claude/rules/development.md` §
+    /// "Ordered-collection choice".
+    pub service_backends: BTreeMap<ServiceId, ServiceBackendRow>,
 }
 
 impl BackendDiscoveryBridgeState {
@@ -196,19 +208,25 @@ impl BackendDiscoveryBridgeState {
                 listeners: BTreeMap::new(),
             },
             actual: RunningAllocSet { workload_id, running: BTreeMap::new() },
+            service_backends: BTreeMap::new(),
         }
     }
 }
 
 /// Runtime-persisted typed memory for the bridge per ADR-0035 § 1.
 ///
-/// Carries the per-service fingerprint of the last row the bridge
-/// successfully wrote — the canonical *input* per
-/// `.claude/rules/development.md` § "Persist inputs, not derived
-/// state". The dedup decision ("do we need to write a row this
-/// tick?") is recomputed on every tick from this input + the
-/// freshly-computed current fingerprint; the bridge never persists
-/// a derived "needs write" / "next-write-due-at" boolean.
+/// **Deliberately empty.** The bridge converges by diffing `desired`
+/// against the `service_backends` rows it manages (ADR-0079 § D2), so
+/// it holds no per-tick memory. The former
+/// `last_written_fingerprint` was an emit-time marker consulted as the
+/// diff — the `.claude/rules/reconcilers.md` § "Symptoms during
+/// review" anti-pattern — and is deleted, not relocated.
+///
+/// The type is retained rather than collapsed to `()` so a future
+/// bridge-side retry or backoff policy lands without re-wiring the
+/// runtime's `AnyViewMap` / `AnyReconcilerView` variants. Precedent:
+/// `WorkflowLifecycleView`, which is likewise zero-sized and fully
+/// wired.
 ///
 /// # Derives
 ///
@@ -221,33 +239,21 @@ impl BackendDiscoveryBridgeState {
 ///
 /// - The runtime's Eq-diff skip elides the per-tick `write_through`
 ///   fsync when the returned `next_view` is equal to the in-memory
-///   view — saves one fsync per converged tick.
+///   view. With a field-less View that gate now always
+///   short-circuits, so the bridge never writes through again;
+///   legacy rows stay on disk, inert.
 /// - DST equality assertions (twin-invocation purity checks per
 ///   ADR-0017 / the `ReconcilerIsPure` invariant) compare returned
 ///   views directly.
 ///
-/// `#[serde(default)]` on the field is the load-bearing escape hatch
-/// for additive schema evolution per ADR-0035 § 6: a V1 reader of a
-/// V2-written file (where V2 added a new optional field) MUST
-/// tolerate the missing field without error. The CBOR-roundtrip
-/// test at `crates/overdrive-core/tests/backend_discovery_bridge_types.rs`
-/// pins both properties.
+/// Removing the field is the *removal* direction of serde's
+/// unknown-field tolerance (ciborium encodes a struct as a
+/// string-keyed map and this type does not set `deny_unknown_fields`),
+/// so a persisted `{"last_written_fingerprint": {...}}` blob still
+/// decodes. Pinned by `legacy_bridge_view_blob_decodes_to_empty_view`
+/// in `crates/overdrive-core/tests/backend_discovery_bridge_types.rs`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BackendDiscoveryBridgeView {
-    /// Per-service fingerprint of the last `ServiceBackendRow` the
-    /// bridge successfully wrote. The bridge's reconcile body
-    /// (lands 01-02) compares this against the freshly-computed
-    /// fingerprint for the current `(desired, actual)` pair and
-    /// emits `Action::WriteServiceBackendRow` only on drift.
-    ///
-    /// `BTreeMap` per `.claude/rules/development.md` §
-    /// "Ordered-collection choice" — iterated by the reconcile
-    /// body's GC sweep at the end of each tick (stale `ServiceId`
-    /// entries — listeners removed from intent — are dropped) and
-    /// observed by DST invariants on every tick.
-    #[serde(default)]
-    pub last_written_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
-}
+pub struct BackendDiscoveryBridgeView {}
 
 /// The bridge reconciler — step 01-02 lands the full struct +
 /// `impl Reconciler` body per architecture.md § 4.2.
@@ -320,17 +326,23 @@ impl Reconciler for BackendDiscoveryBridge {
     /// `SystemTime::now()`, NO direct IntentStore / ObservationStore
     /// / ViewStore writes, NO DB handle.
     ///
-    /// Per architecture.md § 4.2:
+    /// Per ADR-0079 § D2 the bridge CONVERGES — it diffs against the
+    /// row it manages, never against a memo of what it emitted:
     ///
     /// 1. Loop over `desired.desired.listeners`.
-    /// 2. Build `backends: Vec<Backend>` from `actual.actual.running`
-    ///    (one `Backend` per Running alloc; every alloc resolves to
-    ///    `self.host_ipv4` in Phase 2.2 single-node).
-    /// 3. Compute `new_fp = fingerprint(&listener.vip, &backends)`.
-    /// 4. Dedup against `view.last_written_fingerprint.get(service_id)`;
-    ///    emit `Action::WriteServiceBackendRow` if different.
-    /// 5. GC: shrink `next_view.last_written_fingerprint` to the
-    ///    service-ids still present in `desired.listeners`.
+    /// 2. Look up the OBSERVED row at `actual.service_backends`.
+    /// 3. Build `backends: Vec<Backend>` from `actual.actual.running`,
+    ///    carrying each backend's `healthy` through from the observed
+    ///    row (the bridge does not author that field).
+    /// 4. `continue` when the observed row already equals
+    ///    `(vip, backends)`; otherwise emit
+    ///    `Action::WriteServiceBackendRow` + the UI-05
+    ///    `EnqueueEvaluation` handoff.
+    ///
+    /// The View is field-less and returned unchanged (§ D3); retry
+    /// after a dropped write is carried by the runtime's `has_work`
+    /// self-re-enqueue, which is true on exactly the ticks that
+    /// emitted a write.
     fn reconcile(
         &self,
         desired: &Self::State,
@@ -339,12 +351,13 @@ impl Reconciler for BackendDiscoveryBridge {
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         let mut actions: Vec<Action> = Vec::new();
-        let mut next_view = view.clone();
 
         for (service_id, listener) in &desired.desired.listeners {
-            // Build backend set — one `Backend` per Running alloc.
-            // Phase 2.2 single-node: every alloc resolves to
-            // `self.host_ipv4`. The SpiffeId derives from the canonical
+            // The genuine `actual`: the row this bridge manages, or None.
+            let observed: Option<&ServiceBackendRow> = actual.service_backends.get(service_id);
+
+            // Build backend set — one `Backend` per Running alloc. The
+            // SpiffeId derives from the canonical
             // `SpiffeId::for_allocation(workload, alloc)` constructor
             // (ADR-0067 D5) — the single derivation the reconciler module
             // routes through.
@@ -352,35 +365,60 @@ impl Reconciler for BackendDiscoveryBridge {
                 .actual
                 .running
                 .iter()
-                .map(|(alloc_id, workload_addr)| Backend {
-                    alloc: SpiffeId::for_allocation(&actual.actual.workload_id, alloc_id),
-                    // D-B2 (GH #241): advertise the canonical per-alloc
-                    // `workload_addr` when present (Path-A mesh alloc),
-                    // else fall back to `host_ipv4` (host-netns /
-                    // non-Path-A alloc — fallback UNCHANGED). The addr is
-                    // the materialized value read off the V2 observation
-                    // row at hydrate time (D-BLOCKER2); the bridge never
-                    // recomputes it from `NetSlot`.
-                    addr: SocketAddr::new(
-                        IpAddr::V4(workload_addr.unwrap_or(self.host_ipv4)),
-                        listener.port.get(),
-                    ),
-                    weight: 1,
-                    healthy: true, // GH #170 ships real health
+                .map(|(alloc_id, workload_addr)| {
+                    let alloc = SpiffeId::for_allocation(&actual.actual.workload_id, alloc_id);
+                    // `healthy` is authored by ServiceLifecycle's readiness
+                    // branch (`service_lifecycle.rs`), NOT by this bridge.
+                    // Carry the observed value through so convergence does
+                    // not erase it; default `true` for an alloc with no
+                    // observed entry, preserving the backward-compat value
+                    // for a newly-Running alloc (ADR-0079 § D2; ownership
+                    // of the field is recorded in § D9).
+                    let healthy = observed
+                        .and_then(|row| row.backends.iter().find(|b| b.alloc == alloc))
+                        .is_none_or(|b| b.healthy);
+                    Backend {
+                        // D-B2 (GH #241): advertise the canonical per-alloc
+                        // `workload_addr` when present (Path-A mesh alloc),
+                        // else fall back to `host_ipv4` (host-netns /
+                        // non-Path-A alloc). The addr is the materialized
+                        // value read off the observation row at hydrate
+                        // time (D-BLOCKER2); the bridge never recomputes it
+                        // from `NetSlot`.
+                        //
+                        // ADR-0079 § D8 standing constraint: this
+                        // expression is mirrored byte-for-byte by
+                        // `hydrate_service_alloc_facts` in
+                        // `reconciler_runtime.rs`. The two writers agree on
+                        // `addr` only while they stay identical — change
+                        // one and you MUST change the other.
+                        alloc,
+                        addr: SocketAddr::new(
+                            IpAddr::V4(workload_addr.unwrap_or(self.host_ipv4)),
+                            listener.port.get(),
+                        ),
+                        weight: 1,
+                        healthy,
+                    }
                 })
                 .collect();
 
-            let new_fp = fingerprint(&listener.vip, &backends);
-            let prev_fp = view.last_written_fingerprint.get(service_id).copied();
+            let vip_v4 = vip_to_ipv4(&listener.vip);
 
-            if Some(new_fp) == prev_fp {
-                // Dedup: no change since last successful write.
+            // Converge: diff desired against the OBSERVED row. `updated_at`
+            // is excluded — it is the LWW stamp, not part of desired.
+            if let Some(row) = observed
+                && row.vip == vip_v4
+                && row.backends == backends
+            {
                 continue;
             }
 
-            let vip_v4 = vip_to_ipv4(&listener.vip);
+            // `fingerprint` survives as the correlation content-address
+            // (its documented role), NOT as the diff.
+            let fp = fingerprint(&listener.vip, &backends);
             let target = format!("backend-discovery-bridge/{service_id}");
-            let spec_hash = ContentHash::of(new_fp.to_le_bytes().as_slice());
+            let spec_hash = ContentHash::of(fp.to_le_bytes().as_slice());
             let correlation =
                 CorrelationKey::derive(&target, &spec_hash, "write-service-backend-row");
 
@@ -389,10 +427,14 @@ impl Reconciler for BackendDiscoveryBridge {
                     service_id: *service_id,
                     vip: vip_v4,
                     backends,
-                    updated_at: LogicalTimestamp {
-                        counter: tick.tick.saturating_add(1),
-                        writer: self.writer_node_id.clone(),
-                    },
+                    // ADR-0077 § D2 site 9: derive the LWW counter from the
+                    // prior row, not from the tick, so a post-restart write
+                    // dominates whatever survived.
+                    updated_at: LogicalTimestamp::dominating(
+                        tick.tick,
+                        self.writer_node_id.clone(),
+                        observed.map(|r| &r.updated_at),
+                    ),
                 },
                 correlation,
             });
@@ -425,15 +467,9 @@ impl Reconciler for BackendDiscoveryBridge {
                     target: hydrator_target,
                 });
             }
-            next_view.last_written_fingerprint.insert(*service_id, new_fp);
         }
 
-        // GC: drop dedup entries for services no longer in desired.
-        next_view
-            .last_written_fingerprint
-            .retain(|sid, _| desired.desired.listeners.contains_key(sid));
-
-        (actions, next_view)
+        (actions, view.clone())
     }
 }
 
@@ -566,63 +602,126 @@ mod tests {
             SocketAddr::new(IpAddr::V4(host_ip()), 8080),
             "backend addr must be host_ipv4:listener.port"
         );
-        assert_eq!(row.updated_at.counter, 8, "counter = tick.tick + 1");
+        assert_eq!(row.updated_at.counter, 8, "counter = tick.tick + 1 with no prior row");
         assert_eq!(row.updated_at.writer, node_id());
-        assert!(
-            next_view.last_written_fingerprint.contains_key(&sid),
-            "next_view must record fingerprint for the written service"
+        assert_eq!(
+            next_view,
+            BackendDiscoveryBridgeView::default(),
+            "the field-less View is returned unchanged (ADR-0079 § D3)"
         );
     }
 
-    /// S-BDB-05 unit-level proxy — dedup branch. Same inputs + a
-    /// view-from-prior-call emits zero actions.
+    /// T-BDB-CONV-1 — **the whole ADR's falsifiable claim.** A write
+    /// the store discarded is retried on the next tick.
+    ///
+    /// The dropped write is modelled exactly as it appears to the
+    /// reconciler: `actual.service_backends` still shows no row. Under
+    /// the deleted emit-fingerprint design the second call emitted
+    /// ZERO actions and the drop was permanently forgotten
+    /// (ADR-0079 § Context / RCA § 4.3).
     #[test]
-    fn reconcile_dedup_branch_emits_zero_actions_on_unchanged_inputs() {
+    fn bridge_reemits_when_observed_row_does_not_match_desired() {
         let bridge = bridge();
         let sid = service_id(2);
         let mut state = empty_state();
         state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 2), 9000));
         state.actual.running.insert(alloc_id("alloc-b"), None);
 
-        // First tick — write happens, next_view records fingerprint.
-        // UI-05: dual emit — one WriteServiceBackendRow + one
-        // EnqueueEvaluation per drifted service.
-        let (actions_first, view_after_first) =
-            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
+        let view = BackendDiscoveryBridgeView::default();
+
+        let (actions_first, view_after_first) = bridge.reconcile(&state, &state, &view, &tick(1));
         assert_eq!(actions_first.len(), 2, "first call must emit two actions (UI-05 dual emit)");
 
-        // Second tick — feed prior next_view back in; expect zero
-        // emissions (dedup).
-        let (actions_second, view_after_second) =
-            bridge.reconcile(&state, &state, &view_after_first, &tick(2));
+        // The store discarded the write — `actual.service_backends` is
+        // STILL empty. Identical state, identical (empty) view.
+        let (actions_second, _) = bridge.reconcile(&state, &state, &view_after_first, &tick(2));
 
-        assert!(
-            actions_second.is_empty(),
-            "second call with unchanged inputs + prior view must emit zero actions"
+        assert_eq!(
+            actions_second.len(),
+            2,
+            "a dropped write MUST be retried on the next tick; got {} action(s): {:?}",
+            actions_second.len(),
+            actions_second
         );
-        assert_eq!(view_after_first, view_after_second, "dedup must not mutate the view");
     }
 
-    /// S-BDB-07 unit-level proxy — GC branch. Removing a service
-    /// from `desired.listeners` shrinks `next_view.last_written_fingerprint`.
+    /// T-BDB-CONV-2 — convergence terminates. With the observed row
+    /// equal to what the bridge would emit, zero actions are emitted.
+    /// Pins the absence of a busy loop (the runtime's `has_work`
+    /// self-re-enqueue is driven by action emission).
     #[test]
-    fn reconcile_gc_branch_drops_removed_service_id() {
+    fn bridge_emits_nothing_when_observed_row_matches_desired() {
         let bridge = bridge();
-        let stale_sid = service_id(99);
+        let sid = service_id(2);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 2), 9000));
+        state.actual.running.insert(alloc_id("alloc-b"), None);
 
-        // Seed the view with a fingerprint for a service no longer in
-        // desired.
-        let mut view = BackendDiscoveryBridgeView::default();
-        view.last_written_fingerprint.insert(stale_sid, 0xdead_beef_u64);
+        // Seed `actual` with the row the bridge computed on tick 1.
+        let (first, _) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
+        let Action::WriteServiceBackendRow { row, .. } = &first[0] else {
+            panic!("expected WriteServiceBackendRow at index 0, got {:?}", first[0]);
+        };
+        state.service_backends.insert(sid, row.clone());
 
-        let state = empty_state(); // no listeners
+        let (actions, _) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(2));
 
-        let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick(1));
-
-        assert!(actions.is_empty(), "no listeners means no actions");
         assert!(
-            !next_view.last_written_fingerprint.contains_key(&stale_sid),
-            "GC must drop fingerprint entries for services no longer in desired"
+            actions.is_empty(),
+            "an observed row matching desired must emit zero actions; got {actions:?}"
+        );
+    }
+
+    /// T-BDB-CONV-3 — the § D2 regression guard. The bridge must not
+    /// clobber the `healthy` value it does not author.
+    ///
+    /// The observed row carries `healthy: false` at an `addr` of
+    /// `host_ipv4` — the shape `ServiceLifecycle`'s readiness branch
+    /// writes. The bridge rewrites (the addr drifted), and the
+    /// rewritten row MUST still carry `healthy: false`.
+    #[test]
+    fn bridge_carries_observed_healthy_through_on_rewrite() {
+        let bridge = bridge();
+        let sid = service_id(6);
+        let alloc = alloc_id("alloc-h");
+        let mesh_addr = Ipv4Addr::new(10, 99, 0, 6);
+        let mut state = empty_state();
+        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 6), 8080));
+        state.actual.running.insert(alloc.clone(), Some(mesh_addr));
+
+        state.service_backends.insert(
+            sid,
+            ServiceBackendRow {
+                service_id: sid,
+                vip: Ipv4Addr::new(10, 1, 0, 6),
+                backends: vec![Backend {
+                    alloc: SpiffeId::for_allocation(&workload_id(), &alloc),
+                    // `host_ipv4`, not the mesh addr — the drift trigger.
+                    addr: SocketAddr::new(IpAddr::V4(host_ip()), 8080),
+                    weight: 1,
+                    healthy: false,
+                }],
+                updated_at: LogicalTimestamp::dominating(0, node_id(), None),
+            },
+        );
+
+        let (actions, _) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(5));
+
+        assert_eq!(actions.len(), 2, "addr drift must trigger a rewrite; got {actions:?}");
+        let Action::WriteServiceBackendRow { row, .. } = &actions[0] else {
+            panic!("expected WriteServiceBackendRow at index 0, got {:?}", actions[0]);
+        };
+        assert_eq!(
+            row.backends[0].addr,
+            SocketAddr::new(IpAddr::V4(mesh_addr), 8080),
+            "the rewrite must advertise the canonical workload_addr"
+        );
+        assert!(
+            !row.backends[0].healthy,
+            "the observed `healthy: false` MUST be carried through, not clobbered with `true`"
         );
     }
 
@@ -667,14 +766,20 @@ mod tests {
         state.actual.running.insert(alloc_id("alloc-n"), None);
 
         // First tick — write with two backends. UI-05 dual emit.
-        let (actions_first, view_after_first) =
+        let (actions_first, _) =
             bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
         assert_eq!(actions_first.len(), 2, "first tick emits write + enqueue");
+        let Action::WriteServiceBackendRow { row: first_row, .. } = &actions_first[0] else {
+            panic!("expected WriteServiceBackendRow at index 0");
+        };
+        // The write landed — the bridge now observes its own row.
+        state.service_backends.insert(sid, first_row.clone());
 
         // Second tick — one alloc terminated; expect a fresh row
         // with one backend plus the paired enqueue.
         state.actual.running.remove(&alloc_id("alloc-n"));
-        let (actions_second, _) = bridge.reconcile(&state, &state, &view_after_first, &tick(2));
+        let (actions_second, _) =
+            bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(2));
 
         assert_eq!(actions_second.len(), 2, "removed alloc must trigger a fresh write + enqueue");
         let Action::WriteServiceBackendRow { row, .. } = &actions_second[0] else {
@@ -684,28 +789,6 @@ mod tests {
         assert!(
             matches!(&actions_second[1], Action::EnqueueEvaluation { .. }),
             "second action must be EnqueueEvaluation for hydrator handoff"
-        );
-    }
-
-    /// Fingerprint determinism — same inputs across multiple
-    /// invocations produce the same fingerprint. Proxy for the
-    /// architecture-mandated "deterministic across runs" property.
-    #[test]
-    fn fingerprint_deterministic_across_runs() {
-        let bridge = bridge();
-        let sid = service_id(5);
-        let mut state = empty_state();
-        state.desired.listeners.insert(sid, listener(Ipv4Addr::new(10, 1, 0, 5), 8080));
-        state.actual.running.insert(alloc_id("alloc-determ"), None);
-        let view = BackendDiscoveryBridgeView::default();
-
-        let (_, view_a) = bridge.reconcile(&state, &state, &view, &tick(1));
-        let (_, view_b) = bridge.reconcile(&state, &state, &view, &tick(1));
-
-        assert_eq!(
-            view_a.last_written_fingerprint.get(&sid),
-            view_b.last_written_fingerprint.get(&sid),
-            "fingerprint MUST be deterministic across reconcile invocations"
         );
     }
 }

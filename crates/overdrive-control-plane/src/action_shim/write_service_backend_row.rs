@@ -4,15 +4,14 @@
 //!
 //! Dispatch writes the embedded [`ServiceBackendRow`] to the
 //! ObservationStore via `ObservationRow::ServiceBackend(row)`. No
-//! correlation-driven follow-up is needed at the shim level — the
-//! bridge's next tick reads the row stream (transitively through the
-//! runtime's hydrate path) and observes its own write via the dedup
-//! fingerprint persisted in the bridge's
-//! [`BackendDiscoveryBridgeView`].
+//! correlation-driven follow-up is needed at the shim level — since
+//! ADR-0079 § D2 the bridge's next tick observes THE ROW ITSELF
+//! (hydrated into `BackendDiscoveryBridgeState::service_backends`) and
+//! re-emits whenever it does not match desired. A write this shim
+//! reports as `Ok(())` but the store silently discarded is therefore
+//! self-healing: the bridge sees the stale row and retries.
 //!
 //! [`ServiceBackendRow`]: overdrive_core::traits::observation_store::ServiceBackendRow
-//! [`BackendDiscoveryBridgeView`]:
-//!     overdrive_core::reconcilers::backend_discovery_bridge::BackendDiscoveryBridgeView
 
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{
@@ -32,12 +31,12 @@ use overdrive_core::traits::observation_store::{
 /// # Errors
 ///
 /// Returns the underlying [`ObservationStoreError`] when the
-/// ObservationStore rejects the write itself. Per architecture.md
-/// § 4.4 there is no other failure surface — the bridge's reconcile
-/// loop observes its own write via the dedup fingerprint on the
-/// next tick, so a write that succeeds at the obs-store boundary is
-/// always sufficient (no follow-up correlation is required at the
-/// shim).
+/// ObservationStore rejects the write itself. There is no other
+/// failure surface at this layer — per ADR-0079 § D2 the bridge's
+/// reconcile loop diffs against the observed row on the next tick, so
+/// a write that is silently dropped downstream (LWW rejection, a
+/// future merge rule, a peer's gossip) is retried without the shim
+/// needing to report it.
 ///
 /// # Panics
 ///

@@ -103,7 +103,7 @@ fn liveness_fact(
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState { allocs, service_dataplane: None }
+    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
 }
 
 fn tick() -> TickContext {

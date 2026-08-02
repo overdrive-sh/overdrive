@@ -140,7 +140,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `crate::invariants::backend_discovery_bridge`.
     "bridge-eventually-writes-backend-row",
     "bridge-idempotent-steady-state",
-    "bridge-recomputes-fingerprint-on-replay",
+    "bridge-reconverges-after-dropped-write",
     // backend-discovery-bridge-service-reachability Slice 2 step 02-04
     // — S-BDB-19 Tier 1 DST evidence. Extends the existing
     // `service_map_hydrator` invariant module to drive the hydrator

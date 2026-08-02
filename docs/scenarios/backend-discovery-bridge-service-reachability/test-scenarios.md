@@ -2,6 +2,25 @@
 
 **Wave**: DISTILL | **Mode**: PROPOSE | **Designer**: Quinn | **Date**: 2026-05-20
 
+> **SUPERSEDED IN PART — ADR-0079 (2026-08-02).** The bridge no longer
+> dedups against an emit-time fingerprint; it converges by diffing
+> against the `service_backends` row it manages, and
+> `BackendDiscoveryBridgeView` is now field-less. Consequently:
+>
+> - **S-BDB-05** survives as a convergence property, but its
+>   `last_written_fingerprint`-stability clause is retired.
+> - **S-BDB-06 (Atlas Q2)** is **RETIRED**: it defended against a
+>   silent skip on a cached stale fingerprint after a crash, and with
+>   no cache that failure mode is structurally impossible. It is
+>   replaced by the DST invariant
+>   `bridge-reconverges-after-dropped-write`.
+> - **S-BDB-07 (View GC)** is **RETIRED**: the map it swept no longer
+>   exists. The zero-actions assertion beside it survives.
+>
+> Every `last_written_fingerprint` reference below describes the
+> PRE-ADR-0079 design and is kept as history. See
+> `docs/product/architecture/adr-0079-backend-discovery-bridge-converges-on-the-rows-it-manages.md`.
+
 **Scope**: joint executable spec for GH #174 (backend discovery bridge)
 + GH #175 (wire `EbpfDataplane` into production single-mode boot).
 

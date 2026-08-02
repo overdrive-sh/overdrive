@@ -9,14 +9,13 @@
 //! Scope per `docs/feature/backend-discovery-bridge-service-reachability/
 //! deliver/roadmap.json` § step 01-01:
 //!
-//! - `backend_discovery_bridge_view_cbor_roundtrip` — runtime owns
-//!   CBOR persistence end-to-end (ADR-0035 § 3); the View MUST
-//!   round-trip via `ciborium` so the runtime can persist + reload.
-//! - `backend_discovery_bridge_view_serde_default_tolerates_unknown_fields`
-//!   — additive serde evolution per ADR-0035 § 6 / Reconciler I/O
-//!   schema-evolution. The View MUST tolerate unknown fields without
-//!   error so a forward-compat reader can accept new optional fields
-//!   without a versioned-envelope bump.
+//! - `legacy_bridge_view_blob_decodes_to_empty_view` (T-BDB-VIEW-1,
+//!   ADR-0079 § D3 / § D7) — the runtime owns CBOR persistence
+//!   end-to-end (ADR-0035 § 3), and § D3 REMOVED the View's only
+//!   field. This asserts the removal direction of serde's
+//!   unknown-field tolerance against a payload that names the removed
+//!   field deliberately, rather than arguing from serde's documented
+//!   default.
 //! - `action_write_service_backend_row_variant_constructs` — the
 //!   `Action::WriteServiceBackendRow { row, correlation }` variant
 //!   exists with the documented field shape per architecture.md § 4.3.
@@ -27,6 +26,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use overdrive_core::id::{CorrelationKey, NodeId, ServiceId};
@@ -36,54 +36,48 @@ use overdrive_core::reconcilers::backend_discovery_bridge::{
 use overdrive_core::reconcilers::{Action, AnyReconciler};
 use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
 
+/// T-BDB-VIEW-1 (ADR-0079 § D3 / § D7) — a CBOR blob written by a
+/// PRE-ADR-0079 binary, carrying a populated `last_written_fingerprint`
+/// map, still decodes into the now-field-less
+/// `BackendDiscoveryBridgeView`.
+///
+/// This is the substrate-level proof of § D3's field-removal claim,
+/// asserted rather than assumed: ciborium encodes a struct as a
+/// string-keyed map and this type does not set `deny_unknown_fields`,
+/// so the removed key is simply ignored on read. Legacy rows in the
+/// bridge's redb table therefore stay inert instead of failing
+/// `bulk_load` at boot.
+///
+/// It replaces `backend_discovery_bridge_view_cbor_roundtrip` (which
+/// degenerates to a tautology once the type has no fields) and folds in
+/// `backend_discovery_bridge_view_serde_default_tolerates_unknown_fields`
+/// — that sibling still compiled and passed verbatim after the removal,
+/// and THAT is the problem: it silently stopped testing what its name
+/// claimed, because `last_written_fingerprint` had become just another
+/// unknown key. This test names the removed field deliberately.
 #[test]
-fn backend_discovery_bridge_view_cbor_roundtrip() {
-    // GIVEN: a `BackendDiscoveryBridgeView` carrying a single
-    // fingerprint entry — exercise the non-default path so the
-    // BTreeMap field's serde shape is observed end-to-end.
+fn legacy_bridge_view_blob_decodes_to_empty_view() {
+    // GIVEN: the exact CBOR a pre-ADR-0079 binary persisted — a map
+    // keyed by the now-deleted field name, carrying a real entry.
     let service_id = ServiceId::new(42).expect("any u64 is a valid ServiceId");
-    let mut view = BackendDiscoveryBridgeView::default();
-    view.last_written_fingerprint.insert(service_id, 0xdead_beef_cafe_babe_u64);
-
-    // WHEN: serialize via the runtime's CBOR codec (ciborium, per
-    // ADR-0035 § 3) and deserialize back.
+    let legacy: BTreeMap<&str, BTreeMap<ServiceId, u64>> = BTreeMap::from([(
+        "last_written_fingerprint",
+        BTreeMap::from([(service_id, 0xdead_beef_cafe_babe_u64)]),
+    )]);
     let mut buf = Vec::<u8>::new();
-    ciborium::into_writer(&view, &mut buf).expect("ciborium serialize");
+    ciborium::into_writer(&legacy, &mut buf).expect("ciborium serialize the legacy blob");
+
+    // WHEN: the current binary's `bulk_load` decodes it.
     let decoded: BackendDiscoveryBridgeView =
-        ciborium::from_reader(buf.as_slice()).expect("ciborium deserialize");
+        ciborium::from_reader(buf.as_slice()).expect("legacy blob MUST still decode");
 
-    // THEN: equal to the original — CBOR roundtrip preserves the
-    // fingerprint map exactly. This is the load-bearing property the
-    // runtime's per-tick persist-view path relies on.
-    assert_eq!(view, decoded, "BackendDiscoveryBridgeView MUST CBOR-roundtrip exactly");
-}
-
-#[test]
-fn backend_discovery_bridge_view_serde_default_tolerates_unknown_fields() {
-    // GIVEN: a JSON shape carrying an unknown future field alongside
-    // the canonical V1 surface. Forward-compat readers (V1 binary
-    // reading a V2-written file) MUST decode without error rather
-    // than reject — per ADR-0035 § 6 additive serde evolution.
-    //
-    // Use serde_json here (already a regular dep) — both ciborium
-    // and serde_json honor the same `#[serde(default)]` /
-    // ignore-unknown-fields semantics, and JSON is human-readable
-    // for the test fixture.
-    let json = serde_json::json!({
-        "last_written_fingerprint": {},
-        "future_optional_knob": "ignored",
-    });
-
-    // WHEN: deserialize the json-with-unknown-field into V1 shape.
-    let decoded: BackendDiscoveryBridgeView =
-        serde_json::from_value(json).expect("V1 reader tolerates unknown fields");
-
-    // THEN: equal to the default — unknown fields are silently
-    // dropped; known fields decode to their default when omitted.
+    // THEN: the removed field is dropped and the View is the empty
+    // default — no error, no versioned envelope, no migration.
     assert_eq!(
         decoded,
         BackendDiscoveryBridgeView::default(),
-        "unknown fields MUST NOT block deserialization (additive evolution)",
+        "a persisted `last_written_fingerprint` blob MUST decode into the \
+         field-less View (ADR-0079 § D3 field-removal tolerance)",
     );
 }
 

@@ -1,8 +1,9 @@
 //! DST invariants for `backend-discovery-bridge-service-reachability` (joint #174 + #175).
 //!
 //! Per `docs/feature/backend-discovery-bridge-service-reachability/distill/test-scenarios.md`
-//! S-BDB-02..S-BDB-10 and Atlas Q2 (S-BDB-06). Tier 1 — pure-Rust under sim
-//! adapters; runs via `cargo dst` on every PR.
+//! S-BDB-02..S-BDB-10, as amended by ADR-0079 (S-BDB-06 / Atlas Q2 and the
+//! S-BDB-07 View-GC half are retired — see below). Tier 1 — pure-Rust under
+//! sim adapters; runs via `cargo dst` on every PR.
 //!
 //! Three evaluators, all returning [`InvariantResult`] from the shared
 //! harness dispatch in `crate::harness`:
@@ -12,40 +13,36 @@
 //!   ≥ 1 listener AND allocator-issued VIP AND ≥ 1 Running alloc, the
 //!   harness's `SimObservationStore` eventually carries a
 //!   `ServiceBackendRow` whose `backends` matches the Running alloc set.
-//! - [`evaluate_bridge_idempotent_steady_state`] (S-BDB-05 / S-BDB-07) —
-//!   always: once steady state, subsequent ticks with unchanged inputs
-//!   produce zero `Action::WriteServiceBackendRow` actions AND the View's
-//!   `last_written_fingerprint` map is stable; the View GC `retain`
-//!   clause drops removed `ServiceId` entries when the listener set
-//!   shrinks.
-//! - [`evaluate_bridge_recomputes_fingerprint_on_replay`] (S-BDB-06 /
-//!   Atlas Q2) — always under the crash-recovery scenario family: the
-//!   harness injects a crash between `SimViewStore::write_through` fsync
-//!   and the runtime's in-memory `BTreeMap::insert`, then drives a
-//!   restart-equivalent `bulk_load` + first-tick re-projection. The
-//!   bridge MUST recompute the fingerprint from inputs — never silent-
-//!   skip on cached stale state.
+//! - [`evaluate_bridge_idempotent_steady_state`] (S-BDB-05) — always:
+//!   once the observed `service_backends` row matches desired,
+//!   subsequent ticks with unchanged inputs produce zero
+//!   `Action::WriteServiceBackendRow` actions and leave the (field-less)
+//!   View untouched.
+//! - [`evaluate_bridge_reconverges_after_dropped_write`] (ADR-0079
+//!   § D7) — always: seed the store with a `ServiceBackendRow` that does
+//!   NOT match desired, tick, and assert the bridge re-emits; then apply
+//!   the write and assert the next tick emits zero. This is the
+//!   convergence property that replaces the retired S-BDB-06 (Atlas Q2)
+//!   evaluator — the cache whose stale-skip that scenario defended
+//!   against no longer exists, so the failure mode is structurally
+//!   impossible rather than merely untriggered.
 //!
-//! Per `.claude/rules/development.md` § "Reconciler I/O" the runtime's
-//! fsync-then-memory ordering rule is structurally load-bearing for
-//! crash recovery; the Atlas Q2 invariant proves the bridge honors it.
-//!
-//! Production code these invariants guard (per Atlas Q3 mutation-scope
-//! mapping in `docs/feature/backend-discovery-bridge-service-reachability/distill/wave-decisions.md`):
+//! Production code these invariants guard:
 //!
 //! - `BackendDiscoveryBridge::reconcile` body — main loop
-//! - `BackendDiscoveryBridge::reconcile` dedup branch
-//! - `BackendDiscoveryBridge::reconcile` View GC `retain` clause
-//! - `fingerprint(&vip, &backends)` call site
+//! - `BackendDiscoveryBridge::reconcile` convergence diff against the
+//!   observed row (ADR-0079 § D2)
+//! - `fingerprint(&vip, &backends)` correlation content-address
 //! - `hydrate_desired` allocator-lookup arm
-//! - `hydrate_actual` Running-filter arm
+//! - `hydrate_actual` Running-filter arm + the `service_backends`
+//!   projection
 //! - `Action::WriteServiceBackendRow` action shim dispatch
-//! - `ViewStore` crash-recovery semantics (fsync-then-memory ordering)
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
 use std::time::{Duration, Instant};
 
+use overdrive_core::SpiffeId;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::reconcilers::backend_discovery_bridge::{
@@ -53,7 +50,10 @@ use overdrive_core::reconcilers::backend_discovery_bridge::{
     ProjectedListener,
 };
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::traits::observation_store::{ObservationRow, ObservationStore};
+use overdrive_core::traits::dataplane::Backend;
+use overdrive_core::traits::observation_store::{
+    LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+};
 use overdrive_core::wall_clock::UnixInstant;
 
 use crate::adapters::observation_store::SimObservationStore;
@@ -165,6 +165,28 @@ async fn apply_actions(obs: &SimObservationStore, actions: &[Action]) -> Result<
     Ok(written)
 }
 
+/// Re-project the store's LWW-winner `service_backends` row for `sid`
+/// into `state.service_backends` — the in-evaluator simulation of the
+/// runtime's `hydrate_actual` bridge arm (ADR-0079 § D1). Without this
+/// the bridge never observes its own write and cannot converge.
+async fn refresh_observed(
+    obs: &SimObservationStore,
+    sid: ServiceId,
+    state: &mut BackendDiscoveryBridgeState,
+) -> Result<(), String> {
+    let rows =
+        obs.service_backends_rows(&sid).await.map_err(|e| format!("service_backends_rows: {e}"))?;
+    match rows.into_iter().next() {
+        Some(row) => {
+            state.service_backends.insert(sid, row);
+        }
+        None => {
+            state.service_backends.remove(&sid);
+        }
+    }
+    Ok(())
+}
+
 /// Eventual-convergence evaluator — closes S-BDB-02 / S-BDB-03 /
 /// S-BDB-04 / S-BDB-10.
 ///
@@ -225,6 +247,7 @@ async fn scenario_single_alloc() -> Result<(), String> {
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick);
         let _ = apply_actions(&obs, &actions).await?;
         view = next_view;
+        refresh_observed(&obs, sid, &mut state).await?;
 
         let rows = obs
             .service_backends_rows(&sid)
@@ -242,8 +265,8 @@ async fn scenario_single_alloc() -> Result<(), String> {
 
     Err(format!(
         "single-alloc scenario did not converge within {CONVERGENCE_TICK_BUDGET} ticks; \
-         final view fingerprints={:?}",
-        view.last_written_fingerprint.keys().collect::<Vec<_>>()
+         observed row={:?}",
+        state.service_backends.get(&sid)
     ))
 }
 
@@ -270,6 +293,7 @@ async fn scenario_multi_alloc() -> Result<(), String> {
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick);
         let _ = apply_actions(&obs, &actions).await?;
         view = next_view;
+        refresh_observed(&obs, sid, &mut state).await?;
 
         let rows = obs
             .service_backends_rows(&sid)
@@ -308,6 +332,7 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
     let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick);
     let _ = apply_actions(&obs, &actions).await?;
     view = next_view;
+    refresh_observed(&obs, sid, &mut state).await?;
     let first_counter = obs
         .service_backends_rows(&sid)
         .await
@@ -324,6 +349,7 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
         let (actions, next_view) = bridge.reconcile(&state, &state, &view, &tick);
         let _ = apply_actions(&obs, &actions).await?;
         view = next_view;
+        refresh_observed(&obs, sid, &mut state).await?;
 
         let rows = obs
             .service_backends_rows(&sid)
@@ -343,16 +369,20 @@ async fn scenario_alloc_replacement() -> Result<(), String> {
     ))
 }
 
-/// Idempotent-steady-state + View-GC evaluator — closes S-BDB-05 +
-/// S-BDB-07.
+/// Idempotent-steady-state evaluator — closes S-BDB-05.
 ///
-/// 1. Reach steady state on a single service.
+/// 1. Reach steady state on a single service: tick, apply the emitted
+///    write, re-project the stored row into `actual.service_backends`
+///    (what the runtime's `hydrate_actual` does).
 /// 2. Tick K=[`STEADY_STATE_TICKS`] more times with unchanged inputs.
 ///    Every tick MUST emit zero actions AND the `next_view` MUST
 ///    equal the prior view.
-/// 3. Shrink `desired.listeners` to empty. Tick once. The View's
-///    `last_written_fingerprint` MUST shed the removed `ServiceId`
-///    (the GC `retain` clause).
+/// 3. Shrink `desired.listeners` to empty. Tick once — still zero
+///    actions, because removing a listener must not trigger a write.
+///
+/// ADR-0079 § D7 retires the S-BDB-07 half of step 3 (the View GC
+/// `retain` assertion): the field it swept is deleted. The zero-actions
+/// assertion beside it is a convergence property and stays.
 pub async fn evaluate_bridge_idempotent_steady_state() -> InvariantResult {
     const NAME: &str = "bridge-idempotent-steady-state";
 
@@ -406,8 +436,13 @@ pub async fn evaluate_bridge_idempotent_steady_state() -> InvariantResult {
     if let Err(cause) = apply_actions(&obs, &actions0).await {
         return fail(NAME, cause);
     }
-    if !view_after_seed.last_written_fingerprint.contains_key(&sid) {
-        return fail(NAME, "seed tick must record fingerprint for the written service".to_owned());
+    // The runtime's `hydrate_actual` re-projection — without it the
+    // bridge cannot observe its own write and never converges.
+    if let Err(cause) = refresh_observed(&obs, sid, &mut state).await {
+        return fail(NAME, cause);
+    }
+    if !state.service_backends.contains_key(&sid) {
+        return fail(NAME, "seed tick's write must be observable in the store".to_owned());
     }
     view = view_after_seed;
 
@@ -439,74 +474,53 @@ pub async fn evaluate_bridge_idempotent_steady_state() -> InvariantResult {
         view = next_view;
     }
 
-    // STEP 3 — shrink the listener set to empty. Tick once. The
-    // View GC `retain` clause must drop the removed ServiceId.
+    // STEP 3 — shrink the listener set to empty. Tick once: the loop
+    // has nothing to iterate, so zero actions. (The S-BDB-07 View-GC
+    // assertion that used to sit here is retired with the field —
+    // ADR-0079 § D7.)
     state.desired.listeners.clear();
     let gc_tick = make_tick(STEADY_STATE_TICKS + 1);
-    let (gc_actions, gc_view) = bridge.reconcile(&state, &state, &view, &gc_tick);
+    let (gc_actions, _) = bridge.reconcile(&state, &state, &view, &gc_tick);
     if !gc_actions.is_empty() {
         return fail(
             NAME,
             format!(
-                "GC tick emitted {} action(s); expected zero — removing a listener \
-                 should not trigger a new write",
+                "removed-listener tick emitted {} action(s); expected zero — removing \
+                 a listener should not trigger a new write",
                 gc_actions.len()
             ),
-        );
-    }
-    if gc_view.last_written_fingerprint.contains_key(&sid) {
-        return fail(
-            NAME,
-            "View GC `retain` clause failed to drop fingerprint for removed ServiceId \
-             — S-BDB-07 violation"
-                .to_owned(),
         );
     }
 
     pass(NAME)
 }
 
-/// Atlas Q2 evaluator — closes S-BDB-06.
+/// Convergence-after-dropped-write evaluator — ADR-0079 § D7.
 ///
-/// Models the fsync-then-memory ordering contract from
-/// `.claude/rules/development.md` § "Reconciler I/O" → "Steady-state
-/// tick" at the bridge level. The runtime's in-memory `BTreeMap`
-/// update happens AFTER `ViewStore::write_through` returns Ok; if the
-/// process crashes between fsync and the in-memory insert, the next
-/// boot's `bulk_load` MUST see the persisted view, and the bridge's
-/// first post-restart `reconcile` MUST recompute the fingerprint from
-/// fresh inputs — never silent-skip on the cached old fingerprint.
+/// This is the DST form of the ADR's central falsifiable claim, and it
+/// replaces the retired S-BDB-06 (Atlas Q2) evaluator. Atlas Q2
+/// defended against a "silent skip on a cached stale fingerprint after
+/// a crash"; with the emit-time fingerprint deleted (§ D2 / § D3) there
+/// is no cache, so that failure mode is structurally impossible rather
+/// than merely untriggered. The property worth holding now is the one
+/// convergence buys: a write the store discarded is retried.
 ///
 /// # Scenario
 ///
-/// 1. Reach steady state — the bridge has emitted one action and
-///    recorded the fingerprint in the (returned) View. Call this
-///    `persisted_view` — it is what a hypothetical `bulk_load` would
-///    see after the crash.
-/// 2. Simulate the crash: discard the runtime's in-memory map by
-///    constructing a fresh `view = persisted_view.clone()` (as
-///    `bulk_load` would return) — there is no separate in-memory
-///    state at this layer; the discipline is that `reconcile` MUST
-///    re-derive every value from the inputs + view, never from
-///    process-local cached state.
-/// 3. Branch A (idempotent path): inputs unchanged. Tick once. The
-///    bridge MUST emit zero actions (the persisted fingerprint
-///    matches the freshly-recomputed fingerprint).
-/// 4. Branch B (drift path): inputs change (a Running alloc was
-///    added). Tick once. The bridge MUST emit one
-///    `Action::WriteServiceBackendRow` (the freshly-recomputed
-///    fingerprint differs from the persisted one — no silent skip).
-/// 5. After Branch B's action is applied, Branch B's next tick MUST
-///    reach steady state again (zero actions emitted).
-#[allow(clippy::too_many_lines)]
-// Justification: every match block is a structured-cause early-return
-// with a distinct error message. Splitting into helpers would force
-// passing `name` + captured fixture values through extra arguments
-// without making the seed → crash → recover → drift flow clearer.
-// Matches the `evaluate_write_through_ordering` precedent at
-// `crates/overdrive-sim/src/invariants/evaluators.rs:1626`.
-pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResult {
-    const NAME: &str = "bridge-recomputes-fingerprint-on-replay";
+/// 1. Seed the `SimObservationStore` with a `ServiceBackendRow` that
+///    does NOT match desired (a stale single-backend row while two
+///    allocs are Running), and project it into
+///    `actual.service_backends` as `hydrate_actual` would.
+/// 2. Tick. The bridge MUST emit the UI-05 pair — it observes the row
+///    it manages and sees drift.
+/// 3. Model the dropped write: do NOT apply the actions. `actual` still
+///    shows the stale row. Tick again — the bridge MUST emit again.
+///    Under the deleted design this second tick emitted ZERO and the
+///    drop was permanently forgotten.
+/// 4. Now apply the write and re-project. The next tick MUST emit zero
+///    — convergence terminates.
+pub async fn evaluate_bridge_reconverges_after_dropped_write() -> InvariantResult {
+    const NAME: &str = "bridge-reconverges-after-dropped-write";
 
     let bridge = BackendDiscoveryBridge::new(host_ipv4(), writer_node_id());
     let obs = SimObservationStore::single_peer(writer_node_id(), 0);
@@ -528,125 +542,81 @@ pub async fn evaluate_bridge_recomputes_fingerprint_on_replay() -> InvariantResu
         Err(cause) => return fail(NAME, cause),
     };
 
-    let mut state = BackendDiscoveryBridgeState::empty_for_workload(wid);
+    let mut state = BackendDiscoveryBridgeState::empty_for_workload(wid.clone());
     state.desired.listeners.insert(sid, lst);
     let alloc_a = match alloc_id("alloc-a") {
         Ok(a) => a,
         Err(cause) => return fail(NAME, cause),
     };
-    state.actual.running.insert(alloc_a, None);
-
-    // STEP 1 — reach steady state. The returned `next_view` is what
-    // would be persisted by `ViewStore::write_through` before the
-    // simulated crash.
-    let seed_tick = make_tick(0);
-    let (seed_actions, persisted_view) =
-        bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &seed_tick);
-    // UI-05 dual-emit: WriteServiceBackendRow + EnqueueEvaluation.
-    if seed_actions.len() != 2 {
-        return fail(
-            NAME,
-            format!(
-                "seed tick must emit two actions (WriteServiceBackendRow + \
-                 EnqueueEvaluation per UI-05); got {}",
-                seed_actions.len()
-            ),
-        );
-    }
-    if let Err(cause) = apply_actions(&obs, &seed_actions).await {
-        return fail(NAME, cause);
-    }
-    let Some(prev_fp) = persisted_view.last_written_fingerprint.get(&sid).copied() else {
-        return fail(NAME, "seed tick must record fingerprint for the written service".to_owned());
-    };
-
-    // STEP 2 — simulate crash + bulk_load: the next boot's view IS
-    // `persisted_view` (the value fsync'd before the crash).
-
-    // BRANCH A — idempotent path: inputs unchanged.
-    // Reconcile MUST emit zero actions; the freshly-computed
-    // fingerprint matches `persisted_view.last_written_fingerprint`.
-    let recovery_tick_idle = make_tick(1);
-    let (idle_actions, idle_view) =
-        bridge.reconcile(&state, &state, &persisted_view, &recovery_tick_idle);
-    if !idle_actions.is_empty() {
-        return fail(
-            NAME,
-            format!(
-                "recovery tick (unchanged inputs) must emit zero actions; got {} — \
-                 bridge silently re-emitted writes against the persisted view",
-                idle_actions.len()
-            ),
-        );
-    }
-    let idle_fp = idle_view.last_written_fingerprint.get(&sid).copied();
-    if idle_fp != Some(prev_fp) {
-        return fail(
-            NAME,
-            format!(
-                "recovery tick (unchanged inputs) must preserve the persisted fingerprint; \
-                 got {idle_fp:?}, expected {prev_fp:?}"
-            ),
-        );
-    }
-
-    // BRANCH B — drift path: add a second Running alloc. The
-    // freshly-recomputed fingerprint differs from the persisted one;
-    // the bridge MUST NOT silently skip — it MUST emit a new
-    // WriteServiceBackendRow action carrying the new fingerprint.
     let alloc_b = match alloc_id("alloc-b") {
         Ok(a) => a,
         Err(cause) => return fail(NAME, cause),
     };
+    state.actual.running.insert(alloc_a.clone(), None);
     state.actual.running.insert(alloc_b, None);
 
-    let drift_tick = make_tick(2);
-    let (drift_actions, drift_view) =
-        bridge.reconcile(&state, &state, &persisted_view, &drift_tick);
-    // UI-05 dual-emit: WriteServiceBackendRow + EnqueueEvaluation.
-    if drift_actions.len() != 2 {
-        return fail(
-            NAME,
-            format!(
-                "recovery tick (drifted inputs) must emit exactly two actions \
-                 (WriteServiceBackendRow + EnqueueEvaluation per UI-05); got {} — \
-                 silent skip on cached stale fingerprint is the Atlas Q2 failure mode",
-                drift_actions.len()
-            ),
-        );
+    // STEP 1 — seed a STALE row: one backend, while two allocs run.
+    let stale_row = ServiceBackendRow {
+        service_id: sid,
+        vip: Ipv4Addr::new(10, 1, 0, 1),
+        backends: vec![Backend {
+            alloc: SpiffeId::for_allocation(&wid, &alloc_a),
+            addr: SocketAddr::new(IpAddr::V4(host_ipv4()), 8080),
+            weight: 1,
+            healthy: true,
+        }],
+        updated_at: LogicalTimestamp::dominating(0, writer_node_id(), None),
+    };
+    if let Err(e) = obs.write(ObservationRow::ServiceBackend(stale_row)).await {
+        return fail(NAME, format!("seeding the stale row failed: {e}"));
     }
-    let drift_fp = drift_view.last_written_fingerprint.get(&sid).copied();
-    match drift_fp {
-        Some(fp) if fp == prev_fp => {
-            return fail(
-                NAME,
-                "drift tick must update the View's fingerprint to the new value; \
-                 the recorded fingerprint still equals the persisted (stale) one"
-                    .to_owned(),
-            );
-        }
-        None => {
-            return fail(
-                NAME,
-                "drift tick must record a fingerprint for the written service".to_owned(),
-            );
-        }
-        Some(_) => {}
-    }
-    if let Err(cause) = apply_actions(&obs, &drift_actions).await {
+    if let Err(cause) = refresh_observed(&obs, sid, &mut state).await {
         return fail(NAME, cause);
     }
 
-    // STEP 3 — eventually steady state again. One more tick under
-    // unchanged inputs against `drift_view` MUST emit zero actions.
-    let steady_tick = make_tick(3);
-    let (steady_actions, _) = bridge.reconcile(&state, &state, &drift_view, &steady_tick);
-    if !steady_actions.is_empty() {
+    // STEP 2 — the bridge observes drift and emits.
+    let view = BackendDiscoveryBridgeView::default();
+    let (first, _) = bridge.reconcile(&state, &state, &view, &make_tick(1));
+    if first.len() != 2 {
         return fail(
             NAME,
             format!(
-                "post-recovery steady-state tick must emit zero actions; got {}",
-                steady_actions.len()
+                "a stale observed row must trigger the UI-05 pair \
+                 (WriteServiceBackendRow + EnqueueEvaluation); got {}",
+                first.len()
+            ),
+        );
+    }
+
+    // STEP 3 — the write was DROPPED: `actual` is unchanged. The bridge
+    // MUST re-emit rather than dedup itself into silence.
+    let (second, _) = bridge.reconcile(&state, &state, &view, &make_tick(2));
+    if second.len() != 2 {
+        return fail(
+            NAME,
+            format!(
+                "a DROPPED write must be retried on the next tick; got {} action(s) — \
+                 the bridge has gone quiet on an unconverged row (RCA § 4.3)",
+                second.len()
+            ),
+        );
+    }
+
+    // STEP 4 — the retry lands; convergence terminates.
+    if let Err(cause) = apply_actions(&obs, &second).await {
+        return fail(NAME, cause);
+    }
+    if let Err(cause) = refresh_observed(&obs, sid, &mut state).await {
+        return fail(NAME, cause);
+    }
+    let (third, _) = bridge.reconcile(&state, &state, &view, &make_tick(3));
+    if !third.is_empty() {
+        return fail(
+            NAME,
+            format!(
+                "once the write lands the bridge must converge and emit zero actions; \
+                 got {} — convergence does not terminate",
+                third.len()
             ),
         );
     }
@@ -705,9 +675,9 @@ impl Default for BridgeIdempotentSteadyState {
 }
 
 /// Marker struct — see [`BridgeEventuallyWritesBackendRow`].
-pub struct BridgeRecomputesFingerprintOnReplay;
+pub struct BridgeReconvergesAfterDroppedWrite;
 
-impl BridgeRecomputesFingerprintOnReplay {
+impl BridgeReconvergesAfterDroppedWrite {
     /// Construct the marker.
     #[must_use]
     pub const fn new() -> Self {
@@ -715,7 +685,7 @@ impl BridgeRecomputesFingerprintOnReplay {
     }
 }
 
-impl Default for BridgeRecomputesFingerprintOnReplay {
+impl Default for BridgeReconvergesAfterDroppedWrite {
     fn default() -> Self {
         Self::new()
     }
