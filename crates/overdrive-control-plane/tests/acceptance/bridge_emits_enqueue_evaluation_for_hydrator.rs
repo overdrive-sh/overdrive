@@ -106,16 +106,20 @@ fn bridge_reconcile_emits_paired_write_and_enqueue_for_hydrator() {
     );
 }
 
-/// GIVEN a `BackendDiscoveryBridge` with the dedup branch primed
-/// (the View already carries the fingerprint matching the
-/// current `(vip, backends)` shape) —
-/// WHEN `reconcile` ticks against the same state —
-/// THEN zero actions are emitted — the dedup branch suppresses
-/// both the `WriteServiceBackendRow` AND the paired
-/// `EnqueueEvaluation`. The handoff is paired with the WRITE, not
-/// emitted unconditionally per tick.
+/// GIVEN a `BackendDiscoveryBridge` whose OBSERVED
+/// `service_backends` row already matches the desired
+/// `(vip, backends)` shape —
+/// WHEN `reconcile` ticks against that state —
+/// THEN zero actions are emitted — convergence suppresses both the
+/// `WriteServiceBackendRow` AND the paired `EnqueueEvaluation`. The
+/// handoff is paired with the WRITE, not emitted unconditionally per
+/// tick.
+///
+/// ADR-0079 § D7: this was previously expressed by feeding the prior
+/// View back in (the emit-time fingerprint memo). That memo is deleted;
+/// the suppression is now driven by the row the bridge manages.
 #[test]
-fn bridge_dedup_branch_emits_zero_actions_including_no_enqueue() {
+fn bridge_converged_row_emits_zero_actions_including_no_enqueue() {
     let writer_node = NodeId::new("host-0").expect("valid NodeId");
     let host_ipv4 = Ipv4Addr::new(10, 0, 0, 5);
     let workload_id = WorkloadId::new("payments").expect("valid WorkloadId");
@@ -133,16 +137,23 @@ fn bridge_dedup_branch_emits_zero_actions_including_no_enqueue() {
     state.actual.running.insert(alloc, None);
 
     // First tick — write happens; expect dual emission.
-    let (actions_first, view_after_first) =
+    let (actions_first, _) =
         bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(1));
     assert_eq!(actions_first.len(), 2, "first tick must emit dual actions");
+    let Action::WriteServiceBackendRow { row, .. } = &actions_first[0] else {
+        panic!("action[0] must be WriteServiceBackendRow, got {:?}", actions_first[0]);
+    };
 
-    // Second tick — feed prior view back in; dedup must fire and
-    // suppress BOTH the write AND the paired enqueue.
-    let (actions_second, _) = bridge.reconcile(&state, &state, &view_after_first, &tick(2));
+    // The write landed — the bridge now OBSERVES its own row.
+    state.service_backends.insert(service_id, row.clone());
+
+    // Second tick — convergence must suppress BOTH the write AND the
+    // paired enqueue.
+    let (actions_second, _) =
+        bridge.reconcile(&state, &state, &BackendDiscoveryBridgeView::default(), &tick(2));
     assert!(
         actions_second.is_empty(),
-        "dedup branch must suppress both WriteServiceBackendRow AND the paired \
+        "a converged row must suppress both WriteServiceBackendRow AND the paired \
          EnqueueEvaluation; got {} action(s): {:?}",
         actions_second.len(),
         actions_second

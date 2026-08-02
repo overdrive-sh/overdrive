@@ -47,6 +47,14 @@ const ALL_VARIANTS: &[Invariant] = &[
     // workflow-primitive step 01-07 — sibling workflow durability invariants.
     Invariant::WorkflowJournalWriteOrdering,
     Invariant::WorkflowExactlyOnceEffectOnResume,
+    // ADR-0079 § D7 — the bridge-convergence invariant. Added
+    // DELIBERATELY: nothing ties this list to `Invariant::ALL` (no
+    // length assertion, no exhaustive match), so a newly registered
+    // variant otherwise lands silently uncovered by the round-trip
+    // property while the suite stays green. NOTE: this list is ALREADY
+    // stale for other variants; that pre-existing gap is out of scope
+    // here, and a green suite is not evidence of full coverage.
+    Invariant::BridgeReconvergesAfterDroppedWrite,
 ];
 
 fn variant_strategy() -> impl Strategy<Value = Invariant> {
@@ -75,6 +83,8 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         // workflow-primitive step 01-07 — sibling workflow invariants.
         Just(Invariant::WorkflowJournalWriteOrdering),
         Just(Invariant::WorkflowExactlyOnceEffectOnResume),
+        // ADR-0079 § D7 — see the note on `ALL_VARIANTS`.
+        Just(Invariant::BridgeReconvergesAfterDroppedWrite),
     ]
 }
 

@@ -6,6 +6,20 @@ reconciler, ObservationStore row shapes) is settled in ADRs 40–48.
 
 **Wave**: DESIGN | **Date**: 2026-05-13 (revised 2026-05-20 for ADR-0049 / 0050 / 0051 landing) | **Architect**: Morgan
 
+> **SUPERSEDED IN PART — ADR-0079 (2026-08-02).** The bridge's
+> emit-time dedup fingerprint (`BackendDiscoveryBridgeView::
+> last_written_fingerprint`) described in § 3 step 7 and § 4.2 is
+> **deleted**. The bridge now CONVERGES: it hydrates the
+> `service_backends` rows it manages into
+> `BackendDiscoveryBridgeState::service_backends` and diffs
+> `(vip, backends)` against the observed row, carrying each backend's
+> `healthy` through from that row rather than hardcoding `true`. The
+> View is retained as a field-less struct. Every reference below to
+> `last_written_fingerprint`, to the dedup branch, or to the View GC
+> `retain` sweep describes the PRE-ADR-0079 design and is kept as
+> history, not as current behaviour. See
+> `docs/product/architecture/adr-0079-backend-discovery-bridge-converges-on-the-rows-it-manages.md`.
+
 **Companion artifacts**:
 
 - `wave-decisions.md` — option analysis + recommendations + deferrals

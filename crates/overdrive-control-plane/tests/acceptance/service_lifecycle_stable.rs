@@ -142,7 +142,7 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     for fact in facts {
         allocs.insert(fact.alloc_id.clone(), fact);
     }
-    ServiceLifecycleState { allocs, service_dataplane: None }
+    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
 }
 
 /// S-SHCP-RECON-01 (US-01 / K1 / DDD-7 AND-of-all) — Service alloc

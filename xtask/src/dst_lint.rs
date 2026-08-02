@@ -204,7 +204,8 @@ pub enum BannedKind {
     /// Exempt: `#[cfg(test)]` items and the defining
     /// `impl LogicalTimestamp` block. See
     /// [`logical_timestamp_literal_path_in_scope`] for the scanned
-    /// scope and why it is incremental rather than exemption-based.
+    /// scope — both crates' `src/` trees since ADR-0079 § D6 completed
+    /// the staging.
     LogicalTimestampStructLiteral,
     /// A `LastTerminated { .. }`, `CrashFacts { .. }`,
     /// `AllocStatusRow { .. }` or `AllocStatusRowV3 { .. }` struct literal
@@ -2023,24 +2024,20 @@ pub fn scan_source_logical_timestamp_literal(
 /// Is `rel_path` (relative to the workspace root) inside the scanned
 /// scope for the ADR-0077 § D7 Layer-2 clause?
 ///
-/// **Scope is deliberately incremental, tracking ADR-0077 § D9's A → B
-/// implementation ordering.** § D7 names both
+/// **The staging is complete.** § D7 names both
 /// `crates/overdrive-core/src/**` and
-/// `crates/overdrive-control-plane/src/**` as the eventual scope, and
-/// § D7 explicitly forbids inventing an exemption for a defective site.
-/// Unit A migrates sites 1–8, all of which live in the control-plane
-/// crate; sites 9 (`backend_discovery_bridge.rs`) and 10
-/// (`service_lifecycle.rs`) live in `overdrive-core` and are Unit B,
-/// blocked on the bridge-convergence step (§ D2 dependency contract).
+/// `crates/overdrive-control-plane/src/**` as the scope. Unit A
+/// migrated sites 1–8 (all in the control-plane crate) and scoped this
+/// predicate to that crate while sites 9
+/// (`backend_discovery_bridge.rs`) and 10 (`service_lifecycle.rs`)
+/// still carried literals — deliberately narrow rather than green over
+/// a known-defective site, and never a per-site allowlist. ADR-0079
+/// § D4 landed both Unit-B sites on `LogicalTimestamp::dominating`, and
+/// § D6 widens the scope here in that same change.
 ///
-/// Scoping the clause to the crate whose sites are actually migrated is
-/// **not** the exemption § D7 forbids: an exemption permanently
-/// whitelists a known-defective site and would still be there after the
-/// site is fixed, whereas the scope here widens to
-/// `crates/overdrive-core/src/**` in the same change that lands sites 9
-/// and 10. It keeps the gate green-and-meaningful instead of red-and-
-/// ignored, and it adds no per-site allowlist, no `#[allow]`, and no
-/// named exception.
+/// Both crates' `src/` trees are now in scope; `tests/**` never is (the
+/// clause guards production source only), and `src/testing/**` is
+/// excluded for the scanner-capability reason below.
 fn logical_timestamp_literal_path_in_scope(rel_path: &Path) -> bool {
     let s = rel_path.to_string_lossy().replace('\\', "/");
     if !rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
@@ -2055,13 +2052,17 @@ fn logical_timestamp_literal_path_in_scope(rel_path: &Path) -> bool {
     // the declaring `lib.rs`) therefore cannot see the gate and would
     // flag e.g. `src/testing/observation_store.rs`'s `fn ts(..)` fixture
     // helper as production code. The path exclusion encodes what the
-    // declaration already guarantees. (Unreachable while the scope below
-    // is control-plane-only; it lands now so widening to `overdrive-core`
-    // in Unit B is a one-line change.)
+    // declaration already guarantees. It was unreachable while the scope
+    // below was control-plane-only; with `overdrive-core` now in scope
+    // (ADR-0079 § D6) it is LOAD-BEARING — it is the only thing keeping
+    // `src/testing/observation_store.rs` out of the census.
     if s.contains("/src/testing/") {
         return false;
     }
-    s.contains("crates/overdrive-control-plane/src/") || s.contains("overdrive-control-plane/src/")
+    s.contains("crates/overdrive-control-plane/src/")
+        || s.contains("overdrive-control-plane/src/")
+        || s.contains("crates/overdrive-core/src/")
+        || s.contains("overdrive-core/src/")
 }
 
 /// Dispatch the ADR-0077 § D7 Layer-2 `LogicalTimestamp { .. }` clause
@@ -4278,20 +4279,23 @@ mod tests {
         assert_eq!(violations.len(), 1, "unrelated impl must not be exempt; got {violations:?}");
     }
 
-    /// (g) Path scoping — the Unit-A scope ruling, made falsifiable.
+    /// (g) Path scoping — the post-staging scope ruling, made
+    /// falsifiable.
     ///
-    /// Control-plane `src/` is in scope; `overdrive-core/src/` is NOT
-    /// (sites 9 and 10 are Unit B, § D9); `tests/` trees are NOT (the
-    /// clause guards production source only); and `src/testing/**` is
-    /// excluded because it is gated at its declaration in `lib.rs`
-    /// rather than in-file.
+    /// Both `overdrive-control-plane/src/` and `overdrive-core/src/`
+    /// are in scope since ADR-0079 § D6 landed Unit B (sites 9 and 10);
+    /// `tests/` trees are NOT (the clause guards production source
+    /// only); and `src/testing/**` is excluded because it is gated at
+    /// its declaration in `lib.rs` rather than in-file.
     #[test]
-    fn logical_timestamp_literal_path_scope_is_unit_a() {
-        let in_scope = ["crates/overdrive-control-plane/src/action_shim/mod.rs"];
-        let out_of_scope = [
-            // Unit B — widens here when sites 9 and 10 land.
+    fn logical_timestamp_literal_path_scope_covers_both_crates() {
+        let in_scope = [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            // Unit B — widened here when sites 9 and 10 landed.
             "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
             "crates/overdrive-core/src/service_lifecycle.rs",
+        ];
+        let out_of_scope = [
             // Declaration-gated test-support code (see the exclusion comment).
             "crates/overdrive-core/src/testing/observation_store.rs",
             // Test trees are never production source.
@@ -4310,33 +4314,50 @@ mod tests {
         }
     }
 
-    /// (h) The scope ruling is honest about *why* `overdrive-core/src`
-    /// is excluded: sites 9 and 10 still carry literals today. If a
-    /// future change migrates them, this test fails and is the prompt to
-    /// widen [`logical_timestamp_literal_path_in_scope`] to
-    /// `crates/overdrive-core/src/**` (ADR-0077 § D9, Unit B) rather
-    /// than leaving a silently-narrow gate.
+    /// (h) The positive census for the WIDENED scope: the **real**
+    /// `crates/overdrive-core/src/` tree must scan clean.
+    ///
+    /// This replaces the Unit-A-era tripwire
+    /// (`logical_timestamp_unit_b_sites_still_carry_literals`), which
+    /// asserted sites 9 and 10 *still carried literals* so that
+    /// migrating them would go red and prompt the widening. ADR-0079
+    /// § D4 migrated both and § D6 widened the scope in the same change,
+    /// so the tripwire has discharged its purpose and is DELETED rather
+    /// than rewritten to assert something else — the condition it
+    /// defended (a silently-narrow gate) no longer exists
+    /// (`.claude/rules/development.md` § "Deletion discipline").
+    ///
+    /// This test is written from scratch against the new requirement —
+    /// "the widened scope stays clean" — mirroring
+    /// `logical_timestamp_literal_real_control_plane_src_is_clean` above
+    /// and `crash_observability_literal_real_src_is_clean` below, which
+    /// are the established shape for exactly this obligation.
     #[test]
-    fn logical_timestamp_unit_b_sites_still_carry_literals() {
-        let root = workspace_root();
-        let unit_b = [
-            "crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs",
-            "crates/overdrive-core/src/service_lifecycle.rs",
-        ];
-        let mut remaining = 0usize;
-        for rel in unit_b {
-            let abs = root.join(rel);
-            let source =
-                std::fs::read_to_string(&abs).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-            remaining += scan_source_logical_timestamp_literal(&source, Path::new(rel))
-                .unwrap_or_else(|e| panic!("parse {rel}: {e}"))
-                .len();
+    fn logical_timestamp_literal_real_core_src_is_clean() {
+        let src = workspace_root().join("crates/overdrive-core/src");
+        let files = collect_rs_files(&src).expect("overdrive-core src must be walkable");
+        assert!(!files.is_empty(), "overdrive-core src must contain .rs files");
+        let mut scanned = 0usize;
+        let mut violations = Vec::new();
+        for rs in files {
+            let rel = rs.strip_prefix(workspace_root()).unwrap_or(&rs).to_path_buf();
+            if !logical_timestamp_literal_path_in_scope(&rel) {
+                continue;
+            }
+            scanned += 1;
+            let source = std::fs::read_to_string(&rs)
+                .unwrap_or_else(|e| panic!("read {}: {e}", rs.display()));
+            violations.extend(
+                scan_source_logical_timestamp_literal(&source, &rel)
+                    .unwrap_or_else(|e| panic!("parse {}: {e}", rs.display())),
+            );
         }
+        assert!(scanned > 0, "the widened census must actually scan files");
         assert!(
-            remaining > 0,
-            "Unit B sites 9/10 no longer construct LogicalTimestamp literals — \
-             widen `logical_timestamp_literal_path_in_scope` to include \
-             crates/overdrive-core/src/** (ADR-0077 § D7 / § D9)"
+            violations.is_empty(),
+            "crates/overdrive-core/src must construct every LogicalTimestamp via \
+             `LogicalTimestamp::dominating` (ADR-0077 § D1 / ADR-0079 § D6); \
+             got {violations:?}"
         );
     }
 

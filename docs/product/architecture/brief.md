@@ -2865,33 +2865,50 @@ Per-target keying = `WorkloadId`. The bridge:
 | `desired.listeners` (intent listeners) | `WorkloadIntent::Service(ServiceV1).listeners` per ADR-0050 — read via `IntentKey::for_workload(&workload_id)` + `WorkloadIntent::from_store_bytes`. `Listener` is `(port, protocol)` only per ADR-0049 § 5 (parser-level removal of `vip`). | New match arm in `hydrate_desired` |
 | `desired.assigned_vip` | `ServiceVipAllocator::get(&spec_digest)` per ADR-0049 § 5a, where `spec_digest = WorkloadIntent::spec_digest(&intent)?`. Sync in-memory lookup against `state.allocator: Arc<Mutex<PersistentServiceVipAllocator>>` (added by ADR-0049). | Same `hydrate_desired` arm |
 | `actual.running` | `ObservationStore::alloc_status_rows_for_workload(workload_id)` filtered to `state == Running` | New match arm in `hydrate_actual` |
-| `view.last_written_fingerprint` | `BTreeMap<ServiceId, BackendSetFingerprint>` — runtime-owned ViewStore | `RedbViewStore::bulk_load` at register; `write_through` after each tick |
+| `actual.service_backends` — the rows the bridge MANAGES, its genuine `actual` | `ObservationStore::service_backends_rows(&service_id)`, one keyed read per derived `ServiceId` | Same `hydrate_actual` arm (ADR-0079 § D1, `crates/overdrive-control-plane/src/reconciler_runtime.rs:2792-2806`) |
+| `view` | field-less — the bridge holds no per-tick memory (ADR-0079 § D3) | still registered in the runtime's `AnyViewMap`; the Eq-diff gate now always short-circuits, so `write_through` never fires for it |
 
-~~The View carries **inputs only** per `.claude/rules/development.md`
-§ "Persist inputs, not derived state" — the persisted fingerprint
-is the content-hash of inputs (covering both `assigned_vip` and
-`backends`), and the dedup decision is recomputed every tick from the
-fresh fingerprint vs the persisted value.~~
+**The View carries nothing, and the strike is resolved. Rewritten
+2026-08-02 (ADR-0079).** This paragraph originally claimed the View held
+"inputs only" per `.claude/rules/development.md` § "Persist inputs, not
+derived state"; that claim was struck as false on 2026-08-01 with the
+remedy left to a then-undesigned "bridge-convergence step". ADR-0079 is
+that step, and it has been implemented — so the strike is replaced by
+what is now true, rather than left dangling.
 
-**Struck 2026-08-01 — the "inputs only" claim is false.**
-`last_written_fingerprint` is **derived state**, not an input: it is a
-cached hash of `(vip, backends)` that the bridge itself computed, and it
-is stamped on the **emit** path (`backend_discovery_bridge.rs:428`), not
-on a confirmed write — `ObservationStore::write` returns `Ok(())` on a
-dropped write, so there is no success signal to record. The genuine
-input is the observed `ServiceBackendRow`, which the bridge declines to
-read: `hydrate_actual` reads `alloc_status_rows()`, never
-`service_backends_rows` (RCA § 4.2–4.3). The fingerprint therefore *is*
-the diff, which is the `.claude/rules/reconcilers.md` adopt-and-skip
-symptom — Bar 1 ("converge, don't apply-once") is not met, and a dropped
-write is never retried.
+*Why the original claim was false.* `last_written_fingerprint` was
+**derived state**, not an input: a hash of `(vip, backends)` the bridge
+itself computed, stamped on the **emit** path rather than on a confirmed
+write — and `ObservationStore::write` returns `Ok(())` on a dropped
+write, so there was no success signal to record. The genuine input was
+the observed `ServiceBackendRow`, which the bridge declined to read: its
+`hydrate_actual` arm read `alloc_status_rows()`, never
+`service_backends_rows`. The fingerprint therefore *was* the diff — the
+`.claude/rules/reconcilers.md` § "Symptoms during review" marker
+anti-pattern — so Bar 1 ("converge, don't apply-once") was not met and a
+dropped write was never retried
+(`docs/analysis/root-cause-analysis-cross-restart-lww-counter-regression.md`
+§ 4.2–4.3).
 
-The remedy is the **bridge-convergence step**, which hydrates the
-managed rows into `actual` and deletes this field; the same step site 9
-below waits on. Recorded here so the claim is not trusted in the
-interim — this brief does not assert a fix that has not been designed or
-landed. ADR-0077 § D8 carries the identical correction for the code-side
-View docstring (`backend_discovery_bridge.rs:203-211`, `:237-241`).
+*What is true now.* The bridge hydrates the `service_backends` rows it
+manages into `actual` and diffs structurally against the observed row on
+`(vip, membership, addr, weight)`
+(`crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:410-415`).
+`Backend.healthy` is **carried through** from that row rather than
+recomputed, because `ServiceLifecycle` — not the bridge — authors it
+(`:377-379`); carrying it through both stops the bridge erasing the
+readiness verdict and makes the field diff-inert, so no convergence
+decision can derive from a field the bridge does not own.
+`last_written_fingerprint` is deleted and `BackendDiscoveryBridgeView` is
+a field-less struct (`:256`); `fingerprint()` survives only as the
+correlation content-address (`:419-423`). Retry after a dropped write
+falls out of the runtime's `has_work` self-re-enqueue — no View field, no
+backoff memo, no write receipt on the `ObservationStore` trait.
+
+**Landed status:** the ADR-0079 implementation is complete in the working
+tree and **not yet committed** as of 2026-08-02. ADR-0077 § D8 carries
+the identical correction for the code-side View docstring, which is
+applied in the same uncommitted change.
 
 
 New action variant `Action::WriteServiceBackendRow { row, correlation }`
@@ -2936,19 +2953,30 @@ compat claim true rather than aspirational.
 `LogicalTimestamp::dominating(tick_floor, writer, prior)` — the counter
 derives from the row the write replaces; the tick is only a floor.
 
-**Per-site status — the two sites the old text equated are in different
-implementation units and must not be read as one:**
+**Per-site status — updated 2026-08-02.** The three sites that touch this
+row sit in two implementation units and must not be read as one. All
+three are now migrated; they differ in whether they are committed.
 
-| Site | ADR-0077 | State at time of writing |
+| Site | ADR-0077 | Status (2026-08-02) |
 |---|---|---|
-| The bridge's `WriteServiceBackendRow` stamp — `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:392-395` | site 9, **Unit B** | **Still tick-derived; carries the defect.** Not implemented. `reconcile` is pure-sync with no store handle (ADR-0035/0036), so the prior stamp must arrive through `actual` — which makes site 9 **blocked on the bridge-convergence step** that adds `service_backends` to `BackendDiscoveryBridgeState` (ADR-0077 § D2 dependency contract, § D9). |
-| The action shim's service-hydration write — `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs` | sites 6/7, **Unit A** | Migration authored, **not landed** — uncommitted, and its clippy/mutation gates have not run. Do not cite it as precedent until it lands. |
+| The action shim's service-hydration write — `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs` | sites 6/7, **Unit A** | **Migrated and committed** in `e2a8cb07` ("derive LWW counters from the prior row; make crash-and-recover observable"), alongside ADR-0078. Citable as precedent. |
+| The bridge's `WriteServiceBackendRow` stamp — `crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs:433-437` | site 9, **Unit B** | **Migrated to `LogicalTimestamp::dominating`; uncommitted.** `reconcile` is pure-sync with no store handle (ADR-0035/0036), so the prior stamp arrives through `actual` — supplied by the `service_backends` map ADR-0079 § D1 adds to `BackendDiscoveryBridgeState`. The dependency ADR-0077 § D2 named is discharged by ADR-0079, not still pending. |
+| `ServiceLifecycle`'s readiness `WriteServiceBackendRow` — `crates/overdrive-core/src/service_lifecycle.rs:880-884` | site 10, **Unit B** | **Migrated to `LogicalTimestamp::dominating`; uncommitted.** The prior stamp is hydrated into `ServiceLifecycleState::prior_backend_row_at` (`:253`) from `service_backends_rows` (`reconciler_runtime.rs:2943-2948`). Landed with site 9 because the enforcement lint is crate-scoped, not file-scoped (ADR-0079 § D6). |
 
-The bridge additionally does not converge — its dedup diffs against a
-fingerprint of what it *emitted* rather than against the rows it
-manages, so a dropped write is never retried (RCA § 4.2–4.3). That is a
-`.claude/rules/reconcilers.md` Bar 1 violation independent of the
-counter, and it is the same bridge-convergence step site 9 waits on.
+Enforcement caught up in the same change: the `LogicalTimestamp`
+struct-literal lint scope widened from control-plane-only to include
+`crates/overdrive-core/src/` (`xtask/src/dst_lint.rs:2064-2065`), so a
+regression at site 9 or 10 fails CI rather than relying on review.
+
+The bridge's independent Bar 1 violation — its dedup diffed against a
+fingerprint of what it *emitted* rather than against the rows it manages,
+so a dropped write was never retried — is **also resolved by ADR-0079**;
+see the corrected View paragraph above. `ServiceLifecycle` still carries
+the same emit-time-marker-as-diff defect in
+`ServiceLifecycleView::last_emitted_backend_fingerprint`
+(`service_lifecycle.rs:370-387`), deliberately not fixed (ADR-0079 § D4)
+because it authors only `healthy` on a row it shares with the bridge;
+converging it on the whole row would make the two writers fight.
 
 VIP handling (revised 2026-05-20 for ADR-0049): VIPs are
 **platform-issued**. The operator cannot supply a VIP — the field

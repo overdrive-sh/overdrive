@@ -619,15 +619,19 @@ impl Harness {
                 crate::invariants::workload_gc_absent_intent::evaluate_resubmit_after_gc_creates_fresh_alloc()
                     .await
             }
-            // backend-discovery-bridge-service-reachability (#174 + Atlas Q2)
-            // GREEN — Slice 1 (closes #174). The three evaluators drive
-            // the real `BackendDiscoveryBridge::reconcile` against a
+            // backend-discovery-bridge-service-reachability (#174)
+            // GREEN — Slice 1 (closes #174), as amended by ADR-0079.
+            // The three evaluators drive the real
+            // `BackendDiscoveryBridge::reconcile` against a
             // `SimObservationStore`, applying emitted
             // `Action::WriteServiceBackendRow` actions via the action
-            // shim simulation (`apply_actions` helper inside the module).
-            // The Atlas Q2 evaluator (S-BDB-06) additionally exercises
-            // the fsync-then-memory ordering contract from
-            // `.claude/rules/development.md` § "Reconciler I/O".
+            // shim simulation (`apply_actions` helper inside the module)
+            // and re-projecting the stored row back into
+            // `actual.service_backends` (`refresh_observed`) exactly as
+            // the runtime's `hydrate_actual` does. The third evaluator
+            // is the convergence property from ADR-0079 § D7 — it
+            // replaces the retired Atlas Q2 (S-BDB-06) scenario, whose
+            // cached-fingerprint failure mode no longer exists.
             Invariant::BridgeEventuallyWritesBackendRow => {
                 crate::invariants::backend_discovery_bridge::evaluate_bridge_eventually_writes_backend_row()
                     .await
@@ -636,8 +640,8 @@ impl Harness {
                 crate::invariants::backend_discovery_bridge::evaluate_bridge_idempotent_steady_state()
                     .await
             }
-            Invariant::BridgeRecomputesFingerprintOnReplay => {
-                crate::invariants::backend_discovery_bridge::evaluate_bridge_recomputes_fingerprint_on_replay()
+            Invariant::BridgeReconvergesAfterDroppedWrite => {
+                crate::invariants::backend_discovery_bridge::evaluate_bridge_reconverges_after_dropped_write()
                     .await
             }
             // backend-discovery-bridge-service-reachability step 02-04 —

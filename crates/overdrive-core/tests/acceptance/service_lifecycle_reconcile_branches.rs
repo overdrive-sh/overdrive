@@ -115,7 +115,7 @@ fn liveness_restart_spec_default() -> overdrive_core::traits::driver::Allocation
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
     let mut allocs = BTreeMap::new();
     allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState { allocs, service_dataplane: None }
+    ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
 }
 
 fn tick_at_ms(now_unix_ms: u64) -> TickContext {
@@ -1265,7 +1265,11 @@ fn readiness_state(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     for f in facts {
         allocs.insert(f.alloc_id.clone(), f);
     }
-    ServiceLifecycleState { allocs, service_dataplane: Some(readiness_dataplane()) }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: Some(readiness_dataplane()),
+        prior_backend_row_at: None,
+    }
 }
 
 fn readiness_tick(now_ms: u64) -> TickContext {
@@ -1381,7 +1385,8 @@ fn readiness_no_dataplane_identity_emits_no_row() {
     let mut allocs = BTreeMap::new();
     let f = readiness_fact(0, Some(ProbeStatus::Pass), true, 1);
     allocs.insert(f.alloc_id.clone(), f);
-    let state = ServiceLifecycleState { allocs, service_dataplane: None };
+    let state =
+        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None };
     let (actions, _v) = reconciler.reconcile(
         &state,
         &state,

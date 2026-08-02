@@ -371,23 +371,28 @@ async fn runtime_skips_write_through_when_service_map_hydrator_view_equals_in_me
 }
 
 /// Same Eq-diff contract as the two preceding variants, but for
-/// `BackendDiscoveryBridgeView`. The `persist_view` arm at
-/// `crates/overdrive-control-plane/src/reconciler_runtime.rs:582:28`
-/// carries `if current == view { return Ok(()); }`. The
-/// mutation-test catalogue flips that `==` to `!=`, which would (a)
-/// elide `write_through` when the view CHANGED and (b) fsync on every
-/// equal tick. The two assertion pairs below catch both halves of
-/// the mutation in a single test:
+/// `BackendDiscoveryBridgeView`. The `persist_view` arm carries
+/// `if current == view { return Ok(()); }`, and the mutation-test
+/// catalogue flips that `==` to `!=`.
 ///
-/// 1. equal-view path — `write_through_count` must remain at 0 and
-///    the in-memory map must still carry the seeded view.
-/// 2. changed-view path — `write_through_count` must advance by
-///    exactly one and the in-memory map must reflect the new view.
+/// **Reduced to the equal-view half by ADR-0079 § D3.** The bridge's
+/// View is now field-less, so there are no two distinguishable values
+/// and the changed-view half is unrepresentable — `{} == {}` always
+/// holds and the gate always short-circuits. The remaining assertion
+/// still kills the mutant: under `!=` the comparison is always FALSE,
+/// the arm falls through, and `write_through` fires on a tick where the
+/// counter must stay at 0.
 ///
-/// With `==` flipped to `!=`, the equal-view assertion fails first
-/// (counter becomes 1, not 0). Even if the equal-view assertion
-/// somehow missed the regression, the changed-view assertion would
-/// then fail (counter stays at 0, map still carries `seeded`).
+/// The ADR directed retargeting this test to a View that still has
+/// fields (`WorkloadLifecycleView` / `ServiceMapHydratorView`). That is
+/// deliberately NOT done, because both already carry complete equal +
+/// changed coverage
+/// (`runtime_skips_write_through_when_next_view_equals_in_memory` and
+/// `runtime_skips_write_through_when_service_map_hydrator_view_equals_in_memory`),
+/// so a retarget would be a pure duplicate and would defend a DIFFERENT
+/// arm than the one this test names. Keeping the bridge arm covered is
+/// what the ADR's stated intent ("the gate it defends still exists")
+/// actually asks for.
 #[tokio::test]
 async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_in_memory() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -410,8 +415,7 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
 
     // Seed an in-memory view directly via the test-only seeder
     // (bypasses the very `persist_view` gate this test asserts on).
-    let mut seeded = BackendDiscoveryBridgeView::default();
-    seeded.last_written_fingerprint.insert(service_id(1), 0xDEAD_BEEF_u64);
+    let seeded = BackendDiscoveryBridgeView::default();
     runtime.seed_backend_discovery_bridge_view_for_test(&t, seeded.clone());
 
     // Reset the counter — `register` calls `probe()` which itself
@@ -419,8 +423,8 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
     sim.reset_write_through_count();
     assert_eq!(sim.write_through_count(), 0, "counter must be zero after reset");
 
-    // (1) Equal-view path — `next_view == in-memory view`. The
-    //     Eq-diff gate MUST elide the fsync; the call still returns Ok.
+    // Equal-view path — `next_view == in-memory view`. The Eq-diff gate
+    // MUST elide the fsync; the call still returns Ok.
     let result =
         runtime.apply_next_backend_discovery_bridge_view_for_test(&n, &t, seeded.clone()).await;
     assert!(result.is_ok(), "Eq-diff skip must return Ok, got {result:?}");
@@ -437,25 +441,6 @@ async fn runtime_skips_write_through_when_backend_discovery_bridge_view_equals_i
         .loaded_backend_discovery_bridge_views_for_test(&n)
         .expect("backend-discovery-bridge map must exist");
     assert_eq!(after.get(&t), Some(&seeded), "in-memory map must be unchanged");
-
-    // (2) Changed-view path — `next_view != in-memory view`. The
-    //     gate MUST fall through; write_through fires exactly once.
-    //     Pinning this in the same test prevents the dual regression
-    //     where the gate short-circuits on every call.
-    let mut changed = seeded.clone();
-    changed.last_written_fingerprint.insert(service_id(1), 0xCAFE_BABE_u64);
-    runtime
-        .apply_next_backend_discovery_bridge_view_for_test(&n, &t, changed.clone())
-        .await
-        .expect("changed view must persist");
-    assert_eq!(
-        sim.write_through_count(),
-        1,
-        "a non-equal next_view MUST write through exactly once; observed {} fsync(s)",
-        sim.write_through_count(),
-    );
-    let after2 = runtime.loaded_backend_discovery_bridge_views_for_test(&n).expect("map present");
-    assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
 }
 
 /// Same Eq-diff contract as the three preceding variants, but for

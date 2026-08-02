@@ -175,7 +175,11 @@ fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
     for fact in facts {
         allocs.insert(fact.alloc_id.clone(), fact);
     }
-    ServiceLifecycleState { allocs, service_dataplane: Some(dataplane_identity()) }
+    ServiceLifecycleState {
+        allocs,
+        service_dataplane: Some(dataplane_identity()),
+        prior_backend_row_at: None,
+    }
 }
 
 /// Extract the single `WriteServiceBackendRow` from a reconcile's

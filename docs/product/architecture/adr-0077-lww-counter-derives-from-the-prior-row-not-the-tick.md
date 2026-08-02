@@ -16,6 +16,22 @@ not supersede it: ADR-0076's decision stands, and its § 7b
 `superseding_timestamp` fix is the shape this ADR generalises. ADR-0076 § 7d
 explicitly deferred this decision to "its own ADR"; this is that ADR.
 
+**Amendment 2026-08-01 (iv) — "the bridge-convergence step" is
+[ADR-0079](adr-0079-backend-discovery-bridge-converges-on-the-rows-it-manages.md).**
+This ADR names that step as a dependency in § D2 (site 9), § D3 (C2), § D5
+reason 3, § D7 (Layer-2 scope staging), § D8 and § D9 (Unit B) without pointing
+at a document, because none existed. ADR-0079 is it, and it lands **Unit B in
+full** — sites 9 and 10, their hydration, T3, and the § D7 widening of the
+Layer-2 clause to `crates/overdrive-core/src/**` — in one change, because the
+crate-scoped lint couples them. **No decision in this ADR changes.** ADR-0079
+confirms § D2 site 9's `service_backends: BTreeMap<ServiceId, ServiceBackendRow>`
+field verbatim, so the § D2 dependency contract ("a crafter implementing site 9
+MUST NOT invent an alternative field") is satisfied without amendment. One
+finding there is worth reading back into § D3's two-owner note: the two writers
+diverge on `Backend.addr` as well as `healthy`, so making the bridge converge
+naively would have erased the readiness health signal — ADR-0079 § D2 is the
+containment.
+
 Depends on `.claude/rules/reconcilers.md`,
 `.claude/rules/development.md` § "Reconciler I/O", § "Persist inputs, not
 derived state", § "Check-and-act must be atomic", § "Errors".

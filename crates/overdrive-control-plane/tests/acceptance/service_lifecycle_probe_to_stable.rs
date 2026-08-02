@@ -269,7 +269,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
     let actual = {
         let mut allocs = BTreeMap::new();
         allocs.insert(fact.alloc_id.clone(), fact.clone());
-        ServiceLifecycleState { allocs, service_dataplane: None }
+        ServiceLifecycleState { allocs, service_dataplane: None, prior_backend_row_at: None }
     };
     let desired = actual.clone();
     let view = ServiceLifecycleView::default();
