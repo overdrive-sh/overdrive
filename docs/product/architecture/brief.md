@@ -3927,11 +3927,34 @@ enums (per §§ 34–35) gain a `ServiceLifecycle(...)` variant each;
 match arms in `AnyReconciler::reconcile` and `AnyReconciler::name`
 gain corresponding cases.
 
-The typed `ServiceLifecycleView` carries five maps (per
-`.claude/rules/development.md` § "Persist inputs, not derived
-state"): `liveness_consecutive_failures`,
-`readiness_consecutive_successes`, `stable_announced` set,
-`startup_attempts_per_probe`. The `Stable` predicate is recomputed
+The typed `ServiceLifecycleView`
+(`crates/overdrive-core/src/service_lifecycle.rs:289-388`) carries
+inputs — per `.claude/rules/development.md` § "Persist inputs, not
+derived state", with one deliberate exception noted below — from
+which every threshold verdict and deadline is recomputed each tick.
+Five `BTreeMap`s: `startup_attempts_per_alloc`, keyed per **alloc**
+(not per probe); `liveness_consecutive_failures` and
+`readiness_consecutive_successes`, both keyed per `(alloc,
+probe_idx)`; `startup_last_fail_seen_at`, the UNIX-epoch-ms of the
+most recent startup Fail from which the startup deadline is
+recomputed; and `last_emitted_backend_fingerprint`. Three
+`BTreeSet<AllocationId>`s: `stable_announced`; `terminal_announced`,
+the same dedup for the non-Stable terminals (`EarlyExit` /
+`StartupProbeFailed`); and `observed`, the allocs the reconciler has
+seen in a non-terminal state — which, differenced against the two
+terminal sets by `has_alloc_mid_startup_window` (`:403`), is what the
+runtime's `view_has_backoff_pending` arm consults to keep the
+reconciler ticking through a startup window in which it emits no
+actions at all.
+
+`last_emitted_backend_fingerprint` is the one field that is not an
+input: it is the emit-time-marker-as-diff anti-pattern that ADR-0079
+§ D2 deleted from the bridge and § D4 deliberately left live here
+(see § 63 above). ADR-0080 § D5 would delete it by construction, by
+moving `ServiceBackendRow` to sole bridge ownership; that stage is
+**not implemented**.
+
+The `Stable` predicate is recomputed
 every tick from observation inputs (`probe_results` + spec); it is
 NEVER persisted as a derived field. The `stable_announced` set is
 the publication-side dedup gate that prevents the deciding-tick

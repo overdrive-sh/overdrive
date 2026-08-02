@@ -46,7 +46,8 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationRow, ObservationStore, ServiceBackendRow,
+    ConflictRoute, LogicalTimestamp, ObservationRow, ObservationStore, ReconcileConflictRow,
+    ServiceBackendRow,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -260,5 +261,162 @@ async fn genuine_same_slot_conflict_produces_queryable_observation_row() {
         hydration.is_empty(),
         "dispatch must be skipped on a genuine conflict; no service-hydration row should land, \
          got {hydration:?}"
+    );
+}
+
+/// Seeded LWW counter on the prior row at the CONFLICTING slot — the
+/// only one the production lookup may consult.
+const PRIOR_AT_SLOT: u64 = 100;
+/// Seeded counters on the three decoy slots, each one key field away
+/// from the conflicting slot. Distinct so the row a corrupted lookup
+/// predicate selects is identifiable from the resulting counter alone.
+const PRIOR_DECOY_VIP: u64 = 200;
+const PRIOR_DECOY_PORT: u64 = 300;
+const PRIOR_DECOY_PROTO: u64 = 400;
+
+/// Prior `reconcile_conflict` row at an arbitrary slot, used to seed the
+/// LWW floor. Routes are fixed (cgroup-vs-cgroup, the only surviving
+/// conflict class); only the slot and the counter vary per seed.
+fn seeded_conflict_row(
+    service_id: ServiceId,
+    vip: Ipv4Addr,
+    port: u16,
+    proto: Proto,
+    counter: u64,
+) -> ReconcileConflictRow {
+    ReconcileConflictRow {
+        service_id,
+        vip,
+        port,
+        proto,
+        first_route: ConflictRoute::Cgroup,
+        second_route: ConflictRoute::Cgroup,
+        updated_at: LogicalTimestamp { counter, writer: node_id("seed-writer") },
+    }
+}
+
+/// ADR-0077 § D2 site 8: the conflict row's LWW counter derives from the
+/// prior row at **this exact `(vip, port, proto)` slot** — never from a
+/// neighbouring slot, and never from the tick alone when a prior exists.
+///
+/// GIVEN four prior `reconcile_conflict` rows for the SAME service — one
+/// at the conflicting slot and three decoys differing in exactly one key
+/// field each (vip, port, proto), every decoy carrying a distinct counter
+/// — WHEN a genuine same-slot conflict is surfaced, THEN the new row's
+/// counter is derived from the row at the conflicting slot alone
+/// (`max(tick+1, prior.counter+1)`), and every decoy row is left
+/// untouched.
+///
+/// This is the assertion that exercises the prior-row lookup predicate
+/// `r.vip == vip && r.port == port && r.proto == proto`. The sibling test
+/// above seeds NO prior rows, so `find` runs over an empty iterator and
+/// the predicate is never evaluated — every comparison in it could be
+/// inverted with no observable effect. Here each decoy is reachable by
+/// exactly one corruption of that predicate, and each yields a different
+/// counter:
+///
+/// | predicate corruption      | row selected | resulting counter |
+/// |---------------------------|--------------|-------------------|
+/// | (none — correct)          | true slot    | 101               |
+/// | `vip ==` → `vip !=`       | decoy vip    | 201               |
+/// | `port ==` → `port !=`     | decoy port   | 301               |
+/// | `proto ==` → `proto !=`   | decoy proto  | 401               |
+/// | either `&&` → `\|\|`      | decoy vip    | 201               |
+///
+/// The two `&&` → `||` cases land on the decoy-vip row because it sorts
+/// FIRST in the store's `(service_id, vip, port, proto)` `BTreeMap` order
+/// (its vip is one below the real one) and `Iterator::find` short-circuits
+/// on the first match — under either disjunction every seeded row matches,
+/// so the first one wins.
+#[tokio::test]
+async fn conflict_lww_counter_derives_from_the_prior_row_at_the_exact_slot() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 7));
+    let state = build_state(&tmp, obs.clone() as Arc<dyn ObservationStore>).await;
+
+    // Same conflict shape as the sibling test: a UDP:53 listener whose
+    // backend set carries two LOCAL backends → two cgroup writes to one
+    // `(vip, 53, udp)` slot.
+    let (vip, port, sid) = persist_service_and_allocate_vip(&state, 53, "udp").await;
+    let vip_v4 = vip.try_as_ipv4().expect("allocator issues IPv4");
+
+    // Decoy slots, each one key field away from the conflicting slot.
+    // `lower_vip` is strictly BELOW the real vip so the decoy-vip row
+    // sorts first in the store's key order (see the table above).
+    let lower_vip = Ipv4Addr::from(u32::from(vip_v4).saturating_sub(1));
+    let other_port = port.saturating_add(1);
+
+    for row in [
+        seeded_conflict_row(sid, lower_vip, port, Proto::Udp, PRIOR_DECOY_VIP),
+        seeded_conflict_row(sid, vip_v4, port, Proto::Udp, PRIOR_AT_SLOT),
+        seeded_conflict_row(sid, vip_v4, other_port, Proto::Udp, PRIOR_DECOY_PORT),
+        seeded_conflict_row(sid, vip_v4, port, Proto::Tcp, PRIOR_DECOY_PROTO),
+    ] {
+        obs.write(ObservationRow::ReconcileConflict(row)).await.expect("seed prior conflict row");
+    }
+
+    let backends = vec![
+        local_backend(&format!("{HOST_IPV4}:9090"), "a1"),
+        local_backend(&format!("{HOST_IPV4}:9091"), "a2"),
+    ];
+    obs.write(ObservationRow::ServiceBackend(ServiceBackendRow {
+        service_id: sid,
+        vip: vip_v4,
+        backends,
+        updated_at: LogicalTimestamp { counter: 1, writer: node_id("writer-1") },
+    }))
+    .await
+    .expect("write service_backends");
+
+    let target = TargetResource::new(&format!("service/{sid}")).expect("target");
+    let reconciler_name = ReconcilerName::new("service-map-hydrator").expect("name");
+    let now = std::time::Instant::now();
+    // Deliberately LOW so `tick + 1` (= 4) never masks a prior-derived
+    // counter: every expected outcome below is driven by the prior row,
+    // not by the tick floor.
+    let tick_n = 3_u64;
+    let deadline = now + Duration::from_millis(100);
+
+    run_convergence_tick(&state, &reconciler_name, &target, now, tick_n, deadline)
+        .await
+        .expect("convergence tick must NOT error/stop on a genuine conflict");
+
+    let conflicts = obs.reconcile_conflict_rows(&sid).await.expect("read conflict rows");
+    let slot_of = |r: &ReconcileConflictRow| (r.vip, r.port, r.proto);
+    let counter_at = |v: Ipv4Addr, p: u16, pr: Proto| -> u64 {
+        conflicts
+            .iter()
+            .find(|r| slot_of(r) == (v, p, pr))
+            .unwrap_or_else(|| panic!("no reconcile_conflict row at slot ({v}, {p}, {pr:?})"))
+            .updated_at
+            .counter
+    };
+
+    // The conflicting slot: counter derived from ITS prior row
+    // (`max(tick+1, 100+1)` = 101). Any corruption of the prior-row
+    // lookup predicate selects a decoy instead and lands 201 / 301 / 401.
+    assert_eq!(
+        counter_at(vip_v4, port, Proto::Udp),
+        PRIOR_AT_SLOT + 1,
+        "the conflict row's LWW counter MUST derive from the prior row at the exact \
+         conflicting (vip, port, proto) slot — got a counter that can only come from a \
+         neighbouring slot's row, so the prior-row lookup matched the wrong slot"
+    );
+
+    // Every decoy is untouched — the tick writes exactly one slot.
+    assert_eq!(
+        counter_at(lower_vip, port, Proto::Udp),
+        PRIOR_DECOY_VIP,
+        "the decoy-vip row must be left untouched by the conflict write"
+    );
+    assert_eq!(
+        counter_at(vip_v4, other_port, Proto::Udp),
+        PRIOR_DECOY_PORT,
+        "the decoy-port row must be left untouched by the conflict write"
+    );
+    assert_eq!(
+        counter_at(vip_v4, port, Proto::Tcp),
+        PRIOR_DECOY_PROTO,
+        "the decoy-proto row must be left untouched by the conflict write"
     );
 }

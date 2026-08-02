@@ -259,8 +259,7 @@ impl ProbeRunner {
     /// `ObservationStore`. Cooperative shutdown via the supervisor's
     /// child [`CancellationToken`] — task bodies observe the token
     /// in a `select!` arm and exit on the next async yield. No
-    /// `JoinHandle::abort()` per `.claude/rules/testing.md`
-    /// § cooperative-shutdown discipline.
+    /// `JoinHandle::abort()`.
     ///
     /// Tick ordering: **tick-then-sleep** (K8s `prober.Manager`
     /// precedent). The first probe attempt fires after the FIRST
@@ -361,10 +360,7 @@ impl ProbeRunner {
     /// Cancel every probe task spawned under `alloc_id` and drop the
     /// per-alloc supervisor. Cooperative shutdown only — task bodies
     /// observe the cancellation on their next `select!` round and
-    /// return. No `JoinHandle::abort()` per
-    /// `.claude/rules/testing.md` § "Leaked workload cgroups across
-    /// runs" / the equivalent cooperative-shutdown rule for
-    /// network-bound probes.
+    /// return. No `JoinHandle::abort()`.
     ///
     /// Idempotent: stopping an unknown / already-stopped alloc is a
     /// no-op.

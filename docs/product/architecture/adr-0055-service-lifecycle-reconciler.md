@@ -132,10 +132,30 @@ pub struct ServiceLifecycleView {
 
     /// Per-alloc startup attempt counter (informational + drives
     /// `StartupProbeFailed { attempts }` reporting).
-    pub startup_attempts_per_probe:
-        BTreeMap<AllocationId, BTreeMap<ProbeIdx, u32>>,
+    pub startup_attempts_per_alloc: BTreeMap<AllocationId, u32>,
 }
 ```
+
+**Amendment 2026-08-02 — fourth field's name and key shape corrected.**
+The field is `startup_attempts_per_alloc`, keyed
+`BTreeMap<AllocationId, u32>` — ONE counter per alloc, not one per
+`(alloc, probe_idx)`. Verified at
+`crates/overdrive-core/src/service_lifecycle.rs:292`; the writer
+`update_startup_attempts` takes `&mut BTreeMap<AllocationId, u32>` plus
+an `alloc_id` with no `ProbeIdx` in scope (`:939-954`), and the
+`StartupProbeFailed` gate reads it per alloc (`:650`). The sketch above
+previously spelled the field `startup_attempts_per_probe:
+BTreeMap<AllocationId, BTreeMap<ProbeIdx, u32>>`, which contradicted its
+own "Per-alloc startup attempt counter" docstring and read as the
+per-`(alloc, probe_idx)` keying that `liveness_consecutive_failures` and
+`readiness_consecutive_successes` genuinely carry (`:297`, `:303`). That
+distinction is live under ADR-0080 § D1 (`ProbeIdx` is per-role), so the
+wrong name misdescribed the data model rather than merely mislabelling a
+field. The decision is unchanged: `attempts` is the per-alloc
+CONSECUTIVE startup-probe-failure streak per ADR-0057 §2 — incremented
+on Fail, reset to 0 on Pass, untouched when no probe was observed this
+tick. Note that `probe_idx` on the `StartupProbeFailed` payload (§ 3
+step 2, § 4) is a distinct reporting field, not a key of this counter.
 
 `Stable` IS NOT persisted as a derived field. The "Stable predicate"
 is recomputed every tick from:
@@ -560,3 +580,18 @@ without a real use case.
   nothing consults. ADR-0080 § "A fourth, pre-existing gap this ADR
   deliberately does NOT address" records the decision not to close the
   gap within that ADR's scope.
+- 2026-08-02 — **Amendment** — accuracy correction only; no decision
+  changed. Corrected the fourth `ServiceLifecycleView` field in § 2 from
+  `startup_attempts_per_probe: BTreeMap<AllocationId, BTreeMap<ProbeIdx,
+  u32>>` to the implemented `startup_attempts_per_alloc:
+  BTreeMap<AllocationId, u32>`
+  (`crates/overdrive-core/src/service_lifecycle.rs:292`; writer
+  `update_startup_attempts` at `:939-954`, read at `:650`). The old name
+  inverted the key shape — it read as the per-`(alloc, probe_idx)`
+  keying that `liveness_consecutive_failures` and
+  `readiness_consecutive_successes` genuinely carry (`:297`, `:303`) —
+  and contradicted the field's own "Per-alloc" docstring, so it
+  misdescribed the data model rather than merely mislabelling a field.
+  This ADR was the normative origin of the wrong name: `brief.md`
+  carried it (corrected 2026-08-02) while ADR-0080 § D5 already cited
+  the correct one, leaving two accepted ADRs in contradiction until now.
