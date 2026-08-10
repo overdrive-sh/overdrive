@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f, g, h (P1, P2, P4, P5, P6, P7, P8, P9, P10)
+# SPIKE findings — increments a, c, d, e, f, g, h, i, j (P1, P2, P4, P5, P6, P7, P8, P9, P10, P11, P12)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -15,9 +15,11 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P8** snapshot / restore (S-1, S-6, S-7) | **WORKS on v53** — via the API; the CLI `--restore` is a silent no-op. **CPU hotplug composes with restore.** |
 | **P9** S-2 volumes across restore | **BOTH SURVIVE** — virtiofs included, with a fresh daemon. Overturns the research's checkpoint argument. |
 | **P10** S-8 `vhost-user-blk` | **WORKS** — but requires `shared=on` and forfeits rate limiting, exactly like `vhost-user-fs`. Its real edge: the backend survives the VMM. |
+| **P11** what `vhost-user-blk` COSTS | **THE TRANSPORT IS FREE** — matched on memory backing and caching, it ties plain `--disk` (622.7 vs 622.5 MiB/s, ranges overlap). `shared=on` costs 55%, and that is a **host THP tunable**, not a vhost-user property. Two corrections fall out: qemu's default export is **not flush-durable**, and P7's "~42% faster" is really ~11%. |
+| **P12** S-3 vsock across snapshot/restore | **THE VM RESTORES, THE CONNECTION DOES NOT** — and the reset is **one tick late**: 13/16 runs the guest got a successful `send()` the host never received. New connections work immediately, so the Running gate is recoverable *if the guest re-dials*. Restore **fails** on a stale socket (`EADDRINUSE`) or a missing directory (`ENOENT`) — recoverable in place. |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h,i,j}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -705,6 +707,17 @@ Raw evidence: `spike-scratch/increment-f/` — `vs-virtiofs.txt`, `run-blk.txt`,
 | 256 MiB streaming write | 2247.6 / 2277.8 / 2270.3 / 2325.7 MiB/s | **3243.7 / 3242.1 / 3211.1 / 3189.1 MiB/s** | **block, ~42% faster** |
 | 1000 files, open+write+fsync+close | **0.48 / 0.49 / 0.42 / 0.41 ms/file** | 0.56 / 0.56 / 0.56 / 0.59 ms/file | **virtiofs, ~25% faster** |
 
+> **CORRECTED 2026-08-10 by P11 — the streaming row overstates the gap by ~4×.**
+> Those are **write-only** MiB/s, and write-only is not comparable across
+> mechanisms: it measures how much work each one defers past the timer, not how
+> fast it is. Recomputed from **this section's own evidence file**
+> (`vs-virtiofs.txt`, untouched), the durable `write + fsync` figure gives
+> **blk ÷ virtiofs = 1.110**, not 1.419 — a **~11%** streaming advantage, not
+> ~42%. increment-i reproduces 1.114 independently. The *direction* of this
+> table stands and so does its conclusion ("performance does not decide this");
+> only the magnitude was wrong. The per-file row is unaffected — it was always
+> end-to-end. See § P11 → "What this corrects in P7".
+
 Against the matched host baseline (0.220–0.225 s streaming, 0.15 ms/file on the same XFS):
 
 | Mechanism | Streaming overhead | Per-file overhead |
@@ -826,6 +839,7 @@ the question was boot reliability, not throughput.
   concurrent VMs competing for the same device or daemon.
 - **`vhost-user-blk` was not measured** (`--disk vhost_user=on,socket=`). It is a third
   option that keeps the block model and moves the backend to userspace.
+  **CLOSED 2026-08-10 by P10 (does it work) and P11 (what it costs).**
 - **No durability/crash testing.** "Clean unmount matters" is established; what a
   power-cut mid-write actually costs on either mechanism is not.
 - **The rate-limit measurement is one sample** at one setting. It shows the knob works and
@@ -1026,7 +1040,13 @@ nothing here proves the bytes reached the platter.
 - **vsock across restore (S-3) was not tested.** Deliberately: increment-g uses the
   serial console precisely so "did restore work" is not entangled with "did the vsock
   peer reconnect".
+  **CLOSED 2026-08-10 by P12 (increment-j).** The device survives and *new* connections
+  work on the first post-restore tick; the *established* connection is destroyed, and the
+  reset arrives one tick after the guest has already written into it successfully.
 - **Restore onto a DIFFERENT host was not tested.** Everything here is same-host.
+  **Still open, and P12 raised the price:** the snapshot's `config.json` records the vsock
+  socket as an absolute path too, and restore fails hard if that path is occupied
+  (`EADDRINUSE`) or its directory is missing (`ENOENT`).
 - **No durability claim.** See the 0.05 s note above.
 - **Clock behaviour is only partly characterised.** `CLOCK_MONOTONIC` continued smoothly
   across the gap (5322 ms → 5840 ms, one tick's worth) rather than accounting for the
@@ -1203,6 +1223,15 @@ volume served by `overdrive-fs` pays `shared=on` and forfeits rate limiting **wh
 vhost-user transport it picks. A volume that does **not** need a custom backend should use
 plain `--disk`, which keeps both.
 
+> **P11 amends what `shared=on` actually costs (2026-08-10).** The row above is
+> still accurate about *which* mechanisms require it. But increment-i measured
+> the price and found it is **55% of durable streaming throughput at the distro
+> default — and recoverable to within ~2% by setting
+> `/sys/kernel/mm/transparent_hugepage/shmem_enabled=advise` on the host.** The
+> penalty is missing transparent huge pages behind the memfd, not vhost-user.
+> So "pays `shared=on`" is a much weaker objection than it reads here, provided
+> the appliance image sets that knob. See § P11.
+
 Between the two vhost-user seams, the measured discriminators are: **daemon lifetime**
 (blk wins clearly), **semantics vs the single-writer constraint** (blk matches it; a
 block device is inherently single-writer), and **hydrate-on-access granularity** (fs gives
@@ -1214,20 +1243,652 @@ file-level semantic knowledge; blk gives block-level, which is what Sprites chos
   `qemu-storage-daemon` standing in for a future `overdrive-fs`; benchmarking it would
   measure QEMU's block layer, not ours. The per-file overhead comparison is therefore
   still open for this transport.
+  **CLOSED 2026-08-10 by P11 (increment-i).** The framing above is right that it
+  cannot bound `overdrive-fs` — but it is wrong that the measurement buys
+  nothing. Plain `--disk` and `vhost-user-blk` write the *same image file* on the
+  *same filesystem*, so their delta isolates the transport, and it is **zero**.
+  P11 also found the default qemu export is not flush-durable.
 - **`qemu-storage-daemon` is not the proposed backend.** It proves the *transport*
   composes; it says nothing about what a Rust chunk-store backend would cost.
 - **Backend survival was observed once**, not stress-tested across repeated
   checkpoint cycles, and not with the backend itself restarted mid-flight.
+  **UPDATE 2026-08-10 (P11):** re-observed in 5/5 further trials — every
+  increment-i `vublk` run logs `backend still alive after the VMM died: 1`.
+  Still not stress-tested across repeated checkpoint cycles.
+
+## P11 — what `vhost-user-blk` COSTS (increment-i)
+
+### Verdict: **the transport is FREE. `--memory shared=on` is what costs — and it is a host tunable, not a property of vhost-user.**
+
+Measured on env B, CH **v53.0**, backend `qemu-storage-daemon` (QEMU 10.2.1),
+`virtiofsd` 1.13.2 — increment-i. Closes the one thing P10 named as not
+established: *"No throughput number for `vhost-user-blk`. [...] The per-file
+overhead comparison is therefore still open for this transport."*
+
+**The instrument is not new.** increment-i reuses increment-f's kernel, rootfs,
+guest binary (`guest-init-blk`) and 1 GiB volume master unchanged, and drives the
+virtiofs arm by invoking increment-e's `run.sh full` verbatim — the same thing
+`vs-virtiofs.sh` did for P7. The payload functions in the two guest binaries are
+**byte-identical** (`diff` of `measure_throughput` / `measure_per_file_latency` /
+`write_file_bytes` returns empty), so every arm is measured with the same
+instrument at the same syscall level. Payload is P7's: 256 MiB streamed in 1 MiB
+chunks then one `fsync`, plus 1000 files each `open`+`write`+`fsync`+`close`.
+Every arm reflink-clones the same pristine master per launch, runs the full P5
+confinement stack, and is measured on the same XFS(reflink=1) NVMe.
+
+Raw evidence: `spike-scratch/increment-i/` — `bench-5trial-full.txt`,
+`thp-probe-full.txt`, `durability-probe-full.txt`, `matched-direct.txt`,
+`mem-{plain,plain-shared,vublk}.txt`.
+
+### The four arms, and why there are four rather than three
+
+`vhost-user-blk` is **refused** without `--memory shared=on`
+(`VhostUserRequiresSharedMemory`, P10). Plain `--disk` does not need it. So a
+bare plain-vs-vublk comparison silently crosses a memory-backing change as well
+as a transport change. The plain arm is therefore run **both ways**, and that
+decision turned out to be the whole finding rather than a hygiene footnote.
+
+| Arm | volume attachment | `--memory` |
+|---|---|---|
+| `plain` | `--disk path=…,image_type=raw` | `size=512M` |
+| `plain-shared` | `--disk path=…,image_type=raw` | `size=512M,shared=on` |
+| `vublk` | `--disk vhost_user=on,socket=…` | `size=512M,shared=on` |
+| `virtiofs` | `--fs tag=…,socket=…` + virtiofsd `--cache=never` | `size=512M,shared=on` |
+
+### 5 interleaved trials per arm — every sample, nothing averaged away
+
+20/20 runs completed; **no trial was discarded**. Distro-default host settings,
+CH and qemu default caching.
+
+```
+=== 256 MiB DURABLE write, MiB/s incl. fsync  <-- the headline
+    plain         999.6 982.2 977.4 979.7 993.4
+    plain-shared  455.9 451.0 436.5 444.8 446.4
+    vublk         671.0 637.8 657.5 637.0 648.0
+    virtiofs      885.6 886.1 888.5 879.0 886.9
+
+=== 256 MiB write-only, MiB/s  (what P7 quotes; deferral-sensitive)
+    plain         3431.1 3210.7 3191.0 3211.5 3377.0
+    plain-shared  675.1 664.8 632.9 651.0 654.7
+    vublk         684.0 650.3 668.6 648.8 659.0
+    virtiofs      2292.9 2311.1 2321.4 2259.5 2318.3
+
+=== 1000 files, mean ms/file
+    plain         0.56 0.54 0.58 0.56 0.59
+    plain-shared  0.61 0.63 0.60 0.60 0.60
+    vublk         0.36 0.30 0.34 0.34 0.33
+    virtiofs      0.41 0.40 0.42 0.42 0.41
+
+=== write/fsync split, seconds (why write-only is not comparable)
+    plain         0.075/0.181 0.080/0.181 0.080/0.182 0.080/0.182 0.076/0.182
+    plain-shared  0.379/0.182 0.385/0.183 0.404/0.182 0.393/0.182 0.391/0.182
+    vublk         0.374/0.007 0.394/0.008 0.383/0.006 0.395/0.007 0.388/0.007
+    virtiofs      0.112/0.177 0.111/0.178 0.110/0.178 0.113/0.178 0.110/0.178
+```
+
+Matched host baseline on the same XFS, 20 samples: 256 MiB `dd conv=fsync`
+**0.2187–0.2244 s** (≈1141–1171 MiB/s); 1000 files **0.15–0.16 ms/file**.
+
+**Do the ranges overlap? No — every pair is disjoint on both metrics.**
+
+| Metric | plain | plain-shared | vublk | virtiofs | overlap |
+|---|---|---|---|---|---|
+| durable MiB/s | 977.4–999.6 | 436.5–455.9 | 637.0–671.0 | 879.0–888.5 | **none, all 6 pairs disjoint** |
+| ms/file | 0.54–0.59 | 0.60–0.63 | 0.30–0.36 | 0.40–0.42 | **none, all 6 pairs disjoint** |
+
+The guest genuinely exercised the vhost-user device in every trial, and it is
+worth stating because a "slower" verdict against a device the guest never
+touched would be worthless: `FS-MOUNT dev=/dev/vdb -> OK`, `FS-RW-LISTING
+[from-host.txt,lost+found]` (the master's seeded content, so `vdb` *is* the
+vhost-user volume and not some other device), and after shutdown the host
+loop-mount finds `payload.bin : 268435456 bytes`, `small files : 1000`, and
+`from-guest.txt` byte-identical.
+
+### `shared=on` costs 55% of durable throughput, and here is the mechanism
+
+`plain` → `plain-shared` changes **one flag** and nothing else — same disk, same
+image, same filesystem, same payload — and durable throughput falls from
+977–1000 to 437–456 MiB/s, a **0.45×** collapse with disjoint ranges. The
+`/proc` capture at the beacon says why, and it is not subtle:
+
+```
+### plain                                   ### plain-shared
+RssAnon:         265108 kB                  RssAnon:            924 kB
+RssShmem:             4 kB                  RssShmem:        265452 kB
+memfd-ish mapping lines: 0                  memfd-ish mapping lines: 1
+AnonHugePages:   264192 kB                  AnonHugePages:        0 kB
+ShmemPmdMapped:       0 kB                  ShmemPmdMapped:       0 kB
+### --- host THP policy ---                 ### --- host THP policy ---
+  anon : always [madvise] never               anon : always [madvise] never
+  shmem: always within_size advise [never]    shmem: always within_size advise [never]
+```
+
+`shared=on` backs guest RAM with a **memfd** instead of anonymous memory. CH
+madvise's its guest RAM, so the anonymous case gets 2 MiB transparent huge pages
+for essentially all of it (264192 of 265108 kB). The shmem case gets **zero**,
+because Ubuntu's default for
+`/sys/kernel/mm/transparent_hugepage/shmem_enabled` is `never`. Every guest page
+fault in the write path then runs at 4 KiB granularity — and the cost lands
+exactly where the split predicts, on the **write** phase (0.078 s → 0.39 s)
+while `fsync` is untouched (0.182 s → 0.182 s).
+
+This also explains why `virtiofs` does **not** pay it despite also running
+`shared=on`: with `--cache=never` its writes go straight to the daemon and never
+stage 256 MiB in the guest page cache, so it never faults in that memory.
+
+**It is recoverable with a host setting.** 3 trials per cell:
+
+| `shmem_enabled` | `plain-shared` durable MiB/s | `vublk` durable MiB/s | `ShmemPmdMapped` kB |
+|---|---|---|---|
+| `never` (distro default) | 451.6 / 454.0 / 458.5 | 614.0 / 646.6 / 658.9 | 0 / 0 / 0 |
+| `advise` | **965.2 / 965.9 / 967.1** | 2936.1 / 2958.0 / 2968.7 | 272384 / 272384 / 266240 |
+| `force` | **965.2 / 969.0 / 977.0** | 2885.1 / 3003.3 / 3094.9 | 272384 / 272384 / 274432 |
+
+`advise` is enough — CH already madvise's the mapping — and it restores
+`plain-shared` to within ~2% of unshared `plain` (966.1 vs 986.5 MiB/s, 2.07%
+below). **The `shared=on` penalty is a
+host-configuration defect, not a property of vhost-user or of virtiofs.** Both
+mechanisms have been charged for it in this document until now.
+
+### The number I nearly published, and the control that killed it
+
+The `vublk` cells above (2936–3095 MiB/s "durable") are **not durable**, and
+this is the most important paragraph in P11. A guest cannot durably write
+256 MiB faster than the device beneath it. Measured on the same box, same
+filesystem:
+
+```
+--- single-threaded, buffered + fsync (the baseline every arm is quoted against):
+268435456 bytes (268 MB, 256 MiB) copied, 0.209147 s, 1.3 GB/s
+    -> 1163.32 MiB/s
+--- 4 concurrent writers, buffered + fsync (what a threaded backend can reach):
+    -> 1292.49 MiB/s aggregate
+```
+
+So ~3000 MiB/s was never physically available. The decisive experiment is the
+`cache.no-flush=on` **control**, which tells qemu to *discard* flush requests
+outright — if that changes nothing, the flush was already doing nothing:
+
+```
+=== durable MiB/s (incl. fsync)
+    writeback  3014.3 3189.0 2963.8      <- qemu-storage-daemon DEFAULT
+    noflush    2997.3 3023.4 2892.1      <- flushes explicitly DISCARDED
+    direct     1038.8 1041.1 1050.8      <- O_DIRECT
+=== write/fsync split, seconds
+    writeback  0.081/0.004 0.077/0.004 0.083/0.004
+    noflush    0.081/0.004 0.081/0.004 0.084/0.004
+    direct     0.223/0.024 0.221/0.025 0.218/0.025
+```
+
+`writeback` and `noflush` are indistinguishable. **At `qemu-storage-daemon`'s
+default `cache.direct=off`, the guest's `fsync` on a `vhost-user-blk` volume
+returns before the data is on the device.** That is a data-loss-on-host-crash
+hazard and a driver requirement, not a benchmark footnote: a `vhost-user-blk`
+volume must be exported with `cache.direct=on` (or an equivalent
+flush-honouring contract) or the guest's durability guarantee is fiction.
+
+Whether qemu is *dropping* the flush or never *advertising* a write cache for
+the guest to flush is **not determined here** — the observable is the same
+either way, and the `noflush` control settles the part that matters.
+
+The same defect inflates the `vublk` column of the headline table above
+(fsync 0.006–0.008 s). Its honest counterpart is in the next section.
+
+### The transport delta, matched on everything that can be matched
+
+`plain-shared` + `direct=on` and `vublk` + `cache.direct=on` write the **same
+image file** on the **same filesystem**, with the **same memory backing**
+(`shared=on`) and the **same caching contract** (O_DIRECT). The only remaining
+difference is the vhost-user transport. 5 trials each, distro-default THP:
+
+| Arm | durable MiB/s | ms/file |
+|---|---|---|
+| `plain` `direct=on`, **no** `shared=on` | 771.6 / 1005.1 / 1026.1 / 1028.0 / 1108.2 | 0.75–0.79 |
+| `plain-shared` `direct=on` | 592.6 / 621.2 / 632.1 / 632.6 / 633.9 | 0.74–0.85 |
+| `vublk` `cache.direct=on` | 595.0 / 611.8 / 623.4 / 631.8 / 651.4 | 0.51–0.77 |
+
+**`plain-shared+direct` 592.6–633.9 vs `vublk+direct` 595.0–651.4 — the ranges
+OVERLAP, and the means are 622.5 vs 622.7 MiB/s, a 0.03% difference.** Per-file
+also overlaps (0.74–0.85 vs 0.51–0.77). **No throughput difference is claimable
+between plain `--disk` and `vhost-user-blk` once the memory backing and the
+caching contract are held equal. The vhost-user transport overhead is not
+measurable at this payload.**
+
+(The unshared `plain+direct` row keeps its 4th trial, 771.6, which is a clear
+outlier — its `fsync` took 0.057 s against ~0.025 s everywhere else. It is
+printed, not dropped, and it does not change the verdict: even taking the
+range's *floor*, 771.6 still sits above `vublk`'s ceiling of 651.4.)
+
+### What this corrects in P7
+
+P7's headline — *"block, ~42% faster"* streaming — is a **write-only** figure,
+and write-only is not comparable across mechanisms because the arms defer
+different amounts of work past the timer. Recomputed from **P7's own pasted
+evidence** in `vs-virtiofs.txt` (6 trials, unchanged):
+
+| P7 metric | blk ÷ virtiofs |
+|---|---|
+| write-only MiB/s | 1.419 → *"~42% faster"*, as P7 states |
+| **incl. fsync (durable)** | **1.110 → the real advantage is ~11%** |
+
+increment-i reproduces this independently at 1.114 (`plain` 986.5 ÷ `virtiofs`
+885.2, means over 5 fresh trials). So P7's *direction* holds — block is faster
+streaming, virtiofs faster per small file, neither dominates — but the
+**magnitude of the streaming advantage is ~11%, not ~42%**. P7's per-file
+numbers are unaffected; those were always end-to-end.
+
+### Harness defects caught in myself
+
+Both are stated because the numbers above would have been wrong without them.
+
+1. **I quoted `write only` MiB/s as the headline in the first cut**, inheriting
+   P7's framing. The `plain` arm's write-only figure is high *precisely because*
+   its bytes are still dirty in the guest page cache when the timer stops
+   (0.078 s write / 0.182 s fsync); `vublk`'s is low because it defers almost
+   nothing (0.387 s / 0.007 s). Quoting write-only compares **how much each
+   transport defers**, not how fast it is. Fixed by making `total = write +
+   fsync` the headline and printing the split alongside it so the reader can
+   check the claim.
+2. **I nearly recorded 2958 MiB/s as a `vhost-user-blk` win.** It survived a
+   5-trial interleaved bench, a disjoint-ranges check, and a THP-recovery
+   probe — none of which can detect a dropped flush, because all three measure
+   the same lie consistently. What caught it was noticing the number exceeded
+   the host's own baseline and then running the `noflush` control. **Range
+   discipline and trial counts do not protect against a broken durability
+   contract; only a control that removes the mechanism does.**
+
+### Design implications
+
+- **`shared=on` is not the cost centre this document has been treating it as.**
+  Set `shmem_enabled=advise` on the appliance and the penalty largely vanishes
+  (`plain-shared` 454 → 966 MiB/s). This is a host-image setting for the
+  Overdrive appliance OS (ADR-0068 territory), and it applies to **every**
+  `shared=on` path — virtiofs volumes included, not just vhost-user.
+- **Any `vhost-user-blk` backend must honour flushes explicitly.** With
+  `qemu-storage-daemon` that is `cache.direct=on`. A future `overdrive-fs`
+  (#97) inherits the requirement: if its chunk store acknowledges a flush before
+  the bytes are durable, every guest on it has a silent data-loss window.
+- **Transport choice is not a throughput decision.** P10 established that
+  `shared=on` and the loss of rate limiting belong to *vhost-user*, not to
+  *block*. P11 adds that the transport itself is free. So the seam question for
+  #97 stays exactly where P10 left it — daemon lifetime, single-writer
+  semantics, hydrate-on-access granularity — with no performance tiebreak in
+  either direction.
+- **The per-file result mildly favours `vublk`** (0.30–0.36 vs plain's
+  0.54–0.59 at default caching), but that advantage lives in the same
+  non-durable regime as the streaming number; under matched O_DIRECT it becomes
+  an overlap. Do not carry it forward as a win.
+
+### What P11 does NOT establish
+
+- **Nothing about `overdrive-fs`.** `qemu-storage-daemon` is a stand-in. These
+  numbers are QEMU's block layer plus the vhost-user transport. The transferable
+  claim is narrow and stated above: *the transport adds no measurable
+  throughput cost*. What a Rust chunk store over Garage would cost is entirely
+  unmeasured, and the transport being free is not evidence that a backend
+  fronting it would be.
+- **One VM, no contention.** Same limitation P7 carried. Nothing here says how
+  any arm behaves with multiple VMs competing for one device, one backend
+  daemon, or one NVMe queue.
+- **One payload shape, one device.** 256 MiB sequential + 1000 small files on
+  one NVMe on one AMD EPYC box. No random I/O, no read path, no queue-depth
+  sweep, no `num_queues` tuning on either side — both were left at their
+  defaults, which is what a driver would get but not what a tuned deployment
+  would.
+- **The flush mechanism is not diagnosed** — dropped-flush vs
+  never-advertised-write-cache. The `noflush` control proves the flush
+  contributes nothing; it does not say which.
+- **No crash testing.** "The default caching contract is not durable" is
+  established by the control, not by pulling power mid-write and counting what
+  survived.
+- **aarch64 is unmeasured**, as everywhere else in this document. Same blocker
+  as P3's and P6's aarch64 halves.
+- **`shmem_enabled=advise` was measured, not qualified.** Three trials on one
+  box. Its memory-fragmentation and RSS consequences under many concurrent VMs
+  — the usual reason distros default it to `never` — were not examined.
+
+## P12 — S-3: vsock across snapshot/restore (increment-j)
+
+### Verdict: **the VM restores, the DEVICE works, the CONNECTION does not — and the reset arrives one tick late.**
+
+Measured on env B, CH **v53.0**. This closes the item P8 deferred on purpose:
+increment-g used the serial console precisely so *"did the restore work"* could
+not be confounded with *"did the vsock peer reconnect"*. This probe is that
+confound, run deliberately. The driver's workload-Running gate rides on this
+channel (P2), so it needed its own answer.
+
+Raw evidence: `spike-scratch/increment-j/evidence/`.
+
+Four answers, and the third and fourth are the ones that bind the driver:
+
+| Question | Answer |
+|---|---|
+| **Q1** does a VM with `--vsock` snapshot and restore at all? | **Yes.** `vm.snapshot` 204, `vm.restore` 204, memory genuinely restored. The vsock device is fully functional afterwards. |
+| **Q2** what happens to an ESTABLISHED connection? | **It is destroyed.** Guest sees `EPIPE (32)` on write and `EOF` on read; the host receives **zero** post-checkpoint bytes on it. But the teardown is **one tick late** — see the stale-write window. |
+| **Q3** does restore FAIL if the host-side socket path is gone? | **Yes, two distinct ways, both fatal and both typed.** Stale socket file → `EADDRINUSE (98)`. Missing directory → `ENOENT (2)`. Both are HTTP 500 at 0.07 s, and both are **recoverable on the same VMM** by fixing the path and retrying. |
+| **Q4** can a FRESH connection be made after restore? | **Yes, and immediately.** With a listener already bound it works on the *first* post-restore tick, end-to-end. With none bound the guest gets `ECONNRESET (104)` — **not** `ECONNREFUSED` — and recovers on the very next dial after a listener appears. |
+
+### How the probe avoids a false pass — twice over
+
+P8's RAM-only boot nonce carries forward unchanged: 16 bytes from `/dev/urandom`
+read once, never written, printed with a monotonic tick counter. Nonce identical
++ counter continued = memory really came back; anything else and every sentence
+above would be describing a fresh boot.
+
+The second gate is new, and it exists because this spike has twice recorded a
+confident **wrong negative** caused by a missing guest-side prerequisite (P8's
+`/proc/cpuinfo`-lists-only-online-CPUs near-miss; P9's unstaged `virtiofs.ko`).
+"vsock does not survive X" is exactly that shape of claim, so the guest proves it
+could exercise vsock *at all* before anything is measured, and the run **aborts**
+rather than reporting a negative if it could not:
+
+```
+init: /dev/vsock present BEFORE insmod = false
+init: insmod /modules/vsock.ko -> rc=0
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> rc=0
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> rc=0
+init: /dev/vsock present AFTER insmod = true
+init: PREREQ OK socket(AF_VSOCK) = fd 3
+init: HELD connect(cid=2,port=1234) OK fd=3 attempt=1
+...
+--- HELD lines host-side     = 11
+--- reconnects host-side     = 11
+    +++ PREREQ GATE PASSED: vsock demonstrably worked pre-snapshot.
+```
+
+All four arms passed it. And the payloads carry `n=<tick> nonce=<nonce>` so the
+**host** transcript, not the guest's return value, is what settles delivery —
+which is the only reason Q2's real shape was visible at all.
+
+### The four arms
+
+They differ **only** in what happens to the host side during the checkpoint gap,
+so anything they agree on is attributable to the checkpoint rather than to
+listener lifecycle. The VMM is always killed *before* the listeners, so a
+listener's death can never propagate into the guest's saved socket state.
+
+| Arm | host listeners | `ch.vsock` before restore |
+|---|---|---|
+| `drop` | killed with the VMM; fresh ones bound only **after** `vm.resume` | unlinked |
+| `keep` | the **same processes** survive the checkpoint | unlinked |
+| `stalesock` | killed | **left in place**, as the SIGKILL left it |
+| `nosockdir` | killed | the whole **directory deleted** |
+
+### Q1 — a VM with `--vsock` snapshots and restores
+
+```
+=== [2] vm.pause -> HTTP 204
+=== [3] vm.snapshot -> /srv/vm/p12j/snap
+    HTTP 204   elapsed .051589524s
+    PUT vm.restore -> HTTP 204
+=== [6] vm.resume -> HTTP 204
+
+  BOOT_NONCE before          1da1ee2679e76f5f917fc6c5ec71a095
+  BOOT_NONCE after           1da1ee2679e76f5f917fc6c5ec71a095
+  last tick before           10
+  first tick after           11
+  last tick after            28
+  boot banners after         0
+  +++ RESTORED FROM MEMORY: nonce identical, no boot banner, counter continued.
+```
+
+The vsock device costs nothing at the snapshot layer: 0.052 s for 512 MiB, the
+same page-cache-speed number P8 measured without it.
+
+### Q2 — the established connection is destroyed, and the errno is one tick late
+
+The connection is opened at boot, held across pause → snapshot → kill → restore →
+resume, and written + read every 500 ms. Here is the checkpoint boundary in one
+transcript (`drop`; the last two pre-snapshot ticks, then the first three after):
+
+```
+TICK n=9  nonce=1da1ee… mono_ms=4858 held_w=w=48 held_r=E11/EAGAIN new=ok(w=47)
+TICK n=10 nonce=1da1ee… mono_ms=5363 held_w=w=49 held_r=E11/EAGAIN new=ok(w=48)
+        <-- pause, snapshot, VMM killed, restore, resume -->
+TICK n=11 nonce=1da1ee… mono_ms=5877 held_w=w=49    held_r=E11/EAGAIN new=E104/ECONNRESET
+TICK n=12 nonce=1da1ee… mono_ms=6380 held_w=E32/EPIPE held_r=EOF     new=E104/ECONNRESET
+TICK n=13 nonce=1da1ee… mono_ms=6885 held_w=E32/EPIPE held_r=EOF     new=E104/ECONNRESET
+```
+
+From n=12 the guest sees `EPIPE (32)` writing and `EOF` reading — a clean
+peer-closed teardown, not a silent stale socket. **This confirms the expected
+consequence of cloud-hypervisor#7958** ("reset on snapshot restore to avoid stale
+half-open connections", reported in v52.0): the guest is told, promptly and
+unambiguously, that the connection is gone. Two details a driver must not
+generalise away: the read side reports **`EOF`, not `ECONNRESET`**, so a
+reader-side gate sees an orderly close; and the host's own view ends at the
+checkpoint, not at the restore —
+
+```
+[HELD t=+6.293s] conn#1 <- HELD n=10 nonce=964052c…
+[HELD t=+6.870s] conn#1 CLOSED after 12 lines (total 12)
+```
+
+`n=10` is the last tick before the snapshot. **In every one of 16 runs the host
+received exactly zero bytes carrying a post-checkpoint tick number.** The
+connection never delivers again.
+
+#### The stale-write window — and #7958's reset is *late*, not absent
+
+Look again at n=11 above: `held_w=w=49`. The guest's `send()` **returned success
+for 49 bytes**, and the host received none of them. That is a genuine
+silently-stale half-open write, on the exact socket #7958 is supposed to have
+reset. One observation cannot distinguish a deterministic window from a race, so
+each arm was run eight times:
+
+```
+MODE       ITER lastB  firstA first_held_w   stale_writes  host_after  verdict
+drop       1    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       2    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       3    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       4    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       5    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       6    10     11     held_w=E32/EPIPE 0           0           mem_ok=1
+drop       7    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+drop       8    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       1    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       2    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       3    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       4    10     11     held_w=E32/EPIPE 0           0           mem_ok=1
+keep       5    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       6    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       7    10     11     held_w=w=49    1             0           mem_ok=1 STALE-WRITE
+keep       8    10     11     held_w=E32/EPIPE 0           0           mem_ok=1
+```
+
+16/16 runs restored from memory; none contaminated. **13 of 16 (81%) swallowed
+exactly one write** before the reset landed; 3 reported `EPIPE` on the first tick.
+`stale_writes` never exceeded 1 and `host_after` was 0 in all 16, so the window is
+**bounded by one 500 ms tick and probabilistic, not deterministic**. `drop` (7/8)
+and `keep` (6/8) behave the same, which rules out listener lifecycle as the cause
+— it is the checkpoint.
+
+The precise claim, then: **#7958's reset fires, but the guest can get one
+successful-but-discarded write in ahead of it.** "The socket errors immediately"
+is wrong 81% of the time.
+
+### Q3 — restore FAILS if the host-side socket path is wrong, in two distinct ways
+
+The snapshot's `config.json` records an absolute path, and CH re-binds it on
+restore:
+
+```
+--- Q3 evidence: what the snapshot's config.json records for vsock (ABSOLUTE path):
+    {
+      "id": "_vsock1",
+      "pci_segment": 0,
+      "cid": 3,
+      "socket": "/run/spike-increment-j/vsock/ch.vsock"
+    }
+```
+
+**`stalesock` — the stale UDS a SIGKILLed VMM leaves behind is fatal:**
+
+```
+    PUT vm.restore -> HTTP 500
+    response body: ["Error from API","The VM could not be restored","Error from device manager",
+                    "Cannot create virtio-vsock backend","Error binding to the host-side Unix socket",
+                    "Address in use (os error 98)"]
+    cloud-hypervisor: 0.076461s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed:
+      DeviceManager(CreateVsockBackend(UnixBind(Os { code: 98, kind: AddrInUse, message: "Address in use" })))
+```
+
+**`nosockdir` — the directory must exist; CH will not create it:**
+
+```
+    PUT vm.restore -> HTTP 500
+    response body: [...,"Error binding to the host-side Unix socket","No such file or directory (os error 2)"]
+    cloud-hypervisor: 0.075510s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed:
+      DeviceManager(CreateVsockBackend(UnixBind(Os { code: 2, kind: NotFound, message: "No such file or directory" })))
+```
+
+So the driver owes the restoring host two things, and they pull in opposite
+directions: the **directory must exist** and the **socket file must not**.
+
+**Both are recoverable in place** — the VMM survives its own refusal, and a
+retry against the *same* process succeeds:
+
+```
+--- Q3 follow-up: remediate the path and retry vm.restore on the SAME VMM (pid 88079)
+    (mkdir -p the directory; unlink the stale ch.vsock)
+    retry PUT vm.restore -> HTTP 204
+```
+
+This is a much better failure mode than P8's `<api-socket>.lock`, which requires a
+fresh process. It fails fast (0.07 s), types the cause, and leaves the VMM usable.
+
+### Q4 — a fresh connection works, and the Running gate is recoverable
+
+This is the question that decides whether losing the established connection
+matters, and the answer is that it largely does not.
+
+**With a listener already bound (`keep`), a new connection succeeds on the FIRST
+post-restore tick** — the same tick whose *held* write was silently swallowed:
+
+```
+TICK n=11 … held_w=w=49    held_r=E11/EAGAIN new=ok(w=48) new_ok_total=12
+TICK n=12 … held_w=E32/EPIPE held_r=EOF     new=ok(w=48) new_ok_total=13
+```
+
+and the host received **17** `NEW` payloads carrying ticks 11–27, i.e. every
+single post-restore tick delivered end-to-end. The device is not damaged; only
+the pre-existing connection is.
+
+**With no listener bound (`drop`), the guest gets `ECONNRESET (104)`, not
+`ECONNREFUSED`** — worth pinning, because a driver branching on `ECONNREFUSED`
+would misclassify it. Recovery is immediate once a listener appears; the fresh
+listener was bound between n=16 and n=17:
+
+```
+n=11 new=E104/ECONNRESET      [RECON2 t=+0.000s] bound …/ch.vsock_1235 (pid=87690)
+…                             [RECON2 t=+0.016s] ACCEPT conn#1
+n=16 new=E104/ECONNRESET      [RECON2 t=+0.016s] conn#1 <- NEW n=17 nonce=1da1ee…
+n=17 new=ok(w=48)             [RECON2 t=+0.016s] conn#1 CLOSED after 1 lines (total 1)
+```
+
+The first dial after the bind lands, and its payload reaches the host 16 ms
+later. There is no settling period and no device re-initialisation.
+
+### Design implications — what this binds in the driver
+
+- **The Running gate survives checkpointing, but only if the guest re-dials.**
+  The channel is fine; the socket is not. A persistent workload that opened its
+  beacon once at boot and held it will never speak again after a restore. Either
+  the guest agent reconnects on error, or the gate must be re-established by the
+  platform after every restore.
+- **A successful `send()` is not delivery.** For up to one tick after restore the
+  guest can write into a connection the host has already lost, and get success
+  back. Any readiness signal that treats a local write as proof is wrong 81% of
+  the time in exactly the window that matters. **Readiness must be acknowledged
+  by the host, or observed on the host side.** This is the single most
+  driver-relevant thing in P12.
+- **Handle both `EPIPE` on write and `EOF` on read.** The teardown is an orderly
+  close from the reader's point of view, not a reset.
+- **`ECONNRESET`, not `ECONNREFUSED`, is "nothing is listening."** A retry loop
+  keyed on the wrong errno will not retry.
+- **The restoring host must `mkdir -p` the vsock socket directory and `unlink`
+  the socket file.** Two paths, opposite requirements, both fatal if wrong. This
+  sits alongside P8's `<api-socket>.lock` as a checkpoint-cleanup obligation —
+  but unlike the lock, a mistake here is recoverable on the same VMM.
+- **Cross-host restore inherits a new blocker.** The absolute vsock path joins
+  kernel, disk and serial in the snapshot's `config.json`. It must resolve, be
+  empty, and be writable on whichever host restores.
+
+### Harness defects caught in myself
+
+**The first `drop` run reported `HTTP 000` with an empty CH log, which reads
+exactly like a Q3 restore refusal. It was not.** A concurrent probe on this
+shared box — increments e and i, running under other sessions — SIGKILLed my
+restoring VMM through its own `pkill -9 -x cloud-hyperviso`. Written up as-is it
+would have been a fabricated finding: *"restore fails when the vsock socket is
+cleaned"*, the exact opposite of what `drop` actually does.
+
+Three things came out of that, all now in the probe:
+
+1. **This probe kills only PIDs it recorded.** No name-scoped sweeps — so it
+   cannot do to another probe what was done to it. This is a **fourth** `pkill`
+   trap on top of P8's three, and the nastiest, because it is invisible in the
+   probe's own source.
+2. **A quiet-box guard** refuses to start while a foreign probe is live, polling
+   rather than failing.
+3. **A liveness check distinguishes the two shapes of `HTTP 000`.** `curl` gets
+   no response both when CH refuses at the transport level and when the VMM was
+   killed underneath it; the probe now tests `kill -0` on the VMM and reports
+   `HARNESS DEFECT … this is NOT a Q3 result` rather than a verdict. It fired
+   once more during the first repetition sweep (`keep` iteration 1, "VMM died
+   during boot") and that row was discarded rather than averaged in.
+
+The clean 16-run sweep quoted above was taken after all three landed, and carries
+no contaminated rows.
+
+**`vm.restore` is not idempotent**, and the first draft called it twice — once to
+capture the response body, once for the status code. The second call would have
+failed against an already-restored VM and reported a bogus refusal. Fixed to one
+call before any arm was run.
+
+### What P12 does NOT establish
+
+- **Nothing about restarting the guest-side agent.** The probe holds one
+  connection and re-dials a second port; it does not model a real agent's
+  reconnect-with-backoff, nor how a workload that is *mid-request* on a lost
+  connection behaves.
+- **The stale-write window is bounded at 500 ms only because that is the tick
+  period.** The true window is somewhere in `(0, 500] ms` and was not measured
+  at finer resolution. A guest writing in a tight loop might swallow many more
+  than one write; 13/16 runs swallowed exactly one because they only *tried*
+  once.
+- **Host→guest is untested.** Only the guest→host direction was exercised — the
+  no-handshake path P2 established. The `CONNECT <port>` / `OK` handshake
+  direction across a restore is unmeasured.
+- **One port pair, one connection, no concurrency.** No test of many simultaneous
+  vsock connections across a checkpoint, and no test of what happens to a
+  connection with unread data buffered in either direction at snapshot time.
+- **Same-host only**, like P8 and P9. The absolute-path finding sharpens the
+  cross-host question but does not answer it.
+- **No repeated checkpoint cycles.** Each arm snapshots once. Whether a VM
+  restored twice, or restored from a snapshot taken of a restored VM, behaves the
+  same is untested.
+- **`--vsock` was never combined with volumes.** P9's `blk`/`fs` arms and this
+  probe's vsock arms are disjoint; a workload with both is the realistic shape and
+  was not run.
+- **aarch64 is unmeasured**, as everywhere else in this document. The mechanism is
+  a UNIX-domain socket on the host side (P2), so it is expected to transfer — but
+  expected is not measured.
 
 ## Still open
 
-- **S-3 — vsock across restore.** Not tested, deliberately: increment-g uses the serial
-  console so that "did the restore work" could not be confounded with "did the vsock peer
-  reconnect". Ours is the channel the driver's Running gate rides on, so it needs its own
-  answer.
-- **Cross-host restore.** Everything in P8 is same-host. A checkpoint that cannot move
-  between machines is a much weaker product primitive, and the snapshot embeds absolute
-  host paths (kernel, disk, serial) that must exist on the restoring host.
+- ~~**S-3 — vsock across restore.**~~ **ANSWERED 2026-08-10 by P12 (increment-j).** The
+  device and new connections survive; the established connection does not, and the reset
+  is one tick late. What P12 leaves open is narrower and listed in § What P12 does NOT
+  establish — chiefly the **host→guest** direction (only guest→host was exercised),
+  **concurrent connections**, **repeated checkpoint cycles**, and **`--vsock` combined
+  with volumes**, which is the realistic workload shape and has never been run as one VM.
+- **Cross-host restore.** Everything in P8, P9 and P12 is same-host. A checkpoint that
+  cannot move between machines is a much weaker product primitive, and the snapshot embeds
+  absolute host paths (kernel, disk, serial, **and — P12 — the vsock socket**) that must
+  exist on the restoring host. P12 sharpened the cost: the vsock path is the one entry
+  with *contradictory* requirements — its directory must exist and its socket file must
+  not — and getting either wrong is a hard `HTTP 500` restore failure.
 - **P6 on aarch64.** P6 is answered on x86_64 (increment-e). `shared=on` still cannot be
   measured on env A — it does not boot under nested virt — and no non-nested Arm hardware
   is available. Both arches ship, so the virtiofs + `shared=on` path is proven on **one of
@@ -1321,6 +1982,37 @@ truncating serial re-open, and two `pkill` shapes) are driver requirements, not 
 hygiene. What P8 does **not** settle is volumes across restore (S-2), which is now what
 I-6 waits on.
 
+**P11 — no gate, but two things must be carried into DESIGN as requirements.**
+Nothing here promotes or blocks a mechanism: the transport is free, so it
+supplies no tiebreak for #97's seam, and the P10 discriminators (daemon
+lifetime, single-writer semantics, hydrate granularity) remain the whole
+decision. Two findings are load-bearing regardless of which seam wins:
+**(1)** the appliance image should set
+`/sys/kernel/mm/transparent_hugepage/shmem_enabled=advise` — it is worth ~2×
+durable streaming throughput on *every* `shared=on` path, virtiofs volumes
+included, and is currently left at the distro default `never`; **(2)** any
+`vhost-user-blk` backend MUST honour flushes (`cache.direct=on` for
+`qemu-storage-daemon`), because the default export acknowledges the guest's
+`fsync` before the data is on the device. (1) is a host-image change; (2) is a
+correctness requirement on `overdrive-fs` (#97) itself.
+
+**P12 — PROMOTE, with one requirement the Running gate cannot be built without.**
+vsock and checkpointing compose: the device works after a restore and a fresh
+connection lands on the *first* post-restore tick, so the persistent-microVM
+lifecycle is not blocked. The established connection is destroyed, which is
+survivable — but **the reset is one tick late, and in 13 of 16 runs the guest got
+a successful `send()` the host never received.** So: **workload readiness must be
+acknowledged by the host or observed host-side; a local write returning success
+is not evidence of delivery.** That is a design constraint on the gate, not probe
+hygiene, and it is the one finding here that changes what gets built. Three
+smaller requirements ride along: handle `EPIPE` on write *and* `EOF` on read;
+treat **`ECONNRESET`**, not `ECONNREFUSED`, as "nothing is listening"; and on
+every restore `mkdir -p` the vsock socket directory while `unlink`-ing the socket
+file — contradictory requirements on one path, both fatal, though unlike P8's
+`<api-socket>.lock` a mistake is recoverable on the same VMM. What P12 does
+**not** cover is the shape a real workload actually has: `--vsock` together with
+volumes has never been run as one VM.
+
 **P3 — belongs on CI, not here.** See § Not run.
 
 Per the slice's own rule — *a failing probe never silently weakens a claim* — nothing above
@@ -1335,6 +2027,34 @@ and not because the deadline arrived; and the one thing env B cannot reach — a
 `f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
 guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
 Its README carries the operational traps found while building it.
+
+`spike-scratch/increment-j/` (gitignored, never committed) — **P12, S-3 vsock across
+snapshot/restore**: `probe/Cargo.toml`,
+`probe/src/bin/{guest_init_vsock_snap,vsock_listener}.rs`, `build.sh`, `run.sh`
+(four arms: `drop`, `keep`, `stalesock`, `nosockdir`), `repeat.sh` (the
+stale-write-window sweep). Captured evidence in `evidence/`:
+`run-{drop,keep,stalesock,nosockdir}.txt`,
+`console-{before,after}-<arm>.log`, `<arm>-{held,held-after,recon,recon-after,ch-after}.log`,
+`repeat-stale-window.txt`. The guest extends increment-g's snapshot init (RAM-only
+boot nonce + tick counter) with the P2 vsock mechanics rather than starting fresh,
+so "did it restore" and "did vsock survive" are answered by the same transcript.
+Payloads carry `n=<tick> nonce=<nonce>` so the **host** log, not the guest's return
+value, settles delivery — which is the only reason the stale-write window was
+visible. **`crates/` untouched.**
+
+`spike-scratch/increment-i/` (gitignored, never committed) — **P11, what
+`vhost-user-blk` costs**: `run.sh` (three block-shaped arms: `plain`,
+`plain-shared`, `vublk`; `VUB_CACHE=writeback|direct|noflush` and `DISK_DIRECT=1`
+select the caching contract), `bench.sh` (the four-arm interleaved benchmark; the
+virtiofs arm invokes increment-e's `run.sh full` verbatim), `thp-probe.sh` (the
+`shmem_enabled` recovery sweep, restores the knob on exit), `durability-probe.sh`
+(the `noflush` control + device-ceiling check). Captured evidence in
+`bench-5trial-full.txt`, `bench.txt`, `thp-probe-full.txt`,
+`durability-probe-full.txt`, `matched-direct.txt`,
+`mem-{plain,plain-shared,vublk}.txt`, `transcript-*.txt`, `console-*.txt`.
+**No probe binary of its own** — it reuses increment-f's kernel, rootfs and
+`guest-init-blk` unchanged so the instrument is identical to P7's.
+**`crates/` untouched.**
 
 `spike-scratch/increment-f/` (gitignored, never committed) — **P7, the virtio-blk volume
 counterfactual**: `probe/Cargo.toml`, `probe/src/bin/{guest_init_blk,host_collector}.rs`,
