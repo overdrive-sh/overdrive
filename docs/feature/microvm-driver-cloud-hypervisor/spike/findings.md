@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f (P1, P2, P4, P5, P6, P7)
+# SPIKE findings — increments a, c, d, e, f, g (P1, P2, P4, P5, P6, P7, P8)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -12,9 +12,10 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P5** `[D7]` confinement flags compose | **WORKS**, with three corrections `[D7]`/US-VM-7 must absorb |
 | **P6** virtiofsd + `--memory shared=on` | **WORKS** — on x86_64. `[D8g]` host-side `read_only` **verified**; aarch64 still unmeasured |
 | **P7** virtio-blk volumes — the I-6 counterfactual | **BOTH WORK** — neither wins on speed; live host sharing is the only real axis |
+| **P8** snapshot / restore (S-1, S-6, S-7) | **WORKS on v53** — via the API; the CLI `--restore` is a silent no-op. **CPU hotplug composes with restore.** |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e,f}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -905,6 +906,130 @@ shown the per-file ranges overlapping and reversed the P7 conclusion on noise.
   live host-shared filesystem into a checkpointable guest) is untouched. **Snapshot/restore
   has still never been run here at all** — that is probe S-1, and it is now the gating
   question for I-6.
+
+## P8 — snapshot / restore (S-1, S-6, S-7), increment-g
+
+### Verdict: **WORKS on v53** — via the API. The CLI path is a silent no-op.
+
+This is the probe everything downstream of I-6 was waiting on, and it had never
+been run. The research doc reasons about checkpoint/restore at length; nobody had
+executed it once. Measured on env B, CH **v53.0**.
+
+Raw evidence: `spike-scratch/increment-g/`.
+
+### How the probe avoids a false pass
+
+A restored VM and a *rebooted* VM look nearly identical from outside: both are alive,
+both tick, both serve. So the guest holds a **boot nonce that exists only in RAM** — 16
+bytes from `/dev/urandom`, read once, never written anywhere — and prints it with a
+monotonically increasing counter. Nonce identical + counter continued = memory really
+came back. Nonce changed or counter restarted = it rebooted, and "restore works" would
+have been a lie. That distinction is the whole probe, and it earned its keep: several
+intermediate attempts produced a *live VMM with no restored guest*, which without the
+nonce would have read as success.
+
+```
+BOOT_NONCE before   a1fbf271a5d10cc51ba547a6b5606e84
+BOOT_NONCE after    a1fbf271a5d10cc51ba547a6b5606e84
+last tick before    10
+last tick after     20        <- resumed at exactly n=11
+boot banners after  0
++++ RESTORED FROM MEMORY
+```
+
+### S-1 — the flow that works, and the one that does not
+
+**Works — the API:**
+
+```
+PUT /api/v1/vm.pause                                        -> 204
+PUT /api/v1/vm.snapshot {"destination_url":"file://<dir>"}  -> 204   (~0.05 s)
+# kill the VMM; remove BOTH the api socket and its .lock
+cloud-hypervisor --api-socket path=<sock>          # NO VM configured
+PUT /api/v1/vm.restore {"source_url":"file://<dir>"}        -> 204
+PUT /api/v1/vm.resume                                        -> 204
+```
+
+**Does NOT work — the CLI `--restore`.** It exists in v53, it parses, and it does
+nothing:
+
+- it demands `--kernel`/`--firmware` at clap level *even though the snapshot's own
+  `config.json` already names the payload*, and then
+- **exits with no error, no log line, and no guest.**
+
+A silent no-op is the worst available failure mode here, because "the VMM process is
+running" and "the VM was restored" are indistinguishable without something like the
+nonce. **The driver must implement the API flow.**
+
+### S-6 — CPU hotplug still works on a RESTORED VM
+
+**This was the highest-risk unknown in the whole feature.** CPU hotplug is the stated
+reason this feature chose Cloud Hypervisor over Firecracker; Firecracker forbids hotplug
+on restored VMs; CH's docs are silent. Nobody had checked the two compose.
+
+```
+TICK n=21 ... vcpu_online=1 vcpu_present=1
+TICK n=22 ... vcpu_online=2 vcpu_present=2 *ONLINED 1*
+TICK n=23 ... vcpu_online=2 vcpu_present=2
+```
+
+`PUT /api/v1/vm.resize {"desired_vcpus":2}` on the restored VM: the vCPU appears and is
+brought online. **They compose. The CH-over-Firecracker rationale survives.**
+
+**A near-miss worth recording.** The first S-6 run reported `vcpus=1` and looked like a
+clean negative. It was wrong: `/proc/cpuinfo` lists only **online** CPUs, and this
+minimal init has no udev to online a hot-plugged one. The probe now reports `present`
+(sysfs `cpuN` dirs) *and* `online` separately, and onlines offline CPUs itself. Without
+that split the finding would have been a confident, wrong *"CPU hotplug does not work on
+restored VMs"* — which would have argued for abandoning CH.
+
+### S-7 — snapshot size is exactly guest RAM, and it is NOT sparse
+
+| Artifact | Size |
+|---|---|
+| `config.json` | 1003 B |
+| `memory-ranges` | **536 870 912 B — exactly the 512 MiB guest RAM** |
+| `state.json` | ~39.9 KB |
+| directory total | **513 M apparent AND 513 M on disk** |
+
+Apparent equals on-disk, so **no sparseness on XFS**. Warm-pool storage is therefore
+`N × guest RAM`, undeduplicated, until something above CH does better. The snapshot call
+returns in ~0.05 s for 512 MiB — that is page-cache speed, not a durability guarantee;
+nothing here proves the bytes reached the platter.
+
+### Operational traps, all of which cost time and all of which bind the driver
+
+1. **`<api-socket>.lock`.** v53 keeps a lock file beside the API socket. A SIGKILLed VMM
+   leaves it, and the next VMM on that path refuses to start with
+   `StartVmmThread(ApiSocketInUse(...))`. Removing only the socket is **not** enough. A
+   driver that checkpoints by killing the VMM must clean both, or use a fresh socket path
+   per incarnation.
+2. **The restored VM re-opens the serial path from the SNAPSHOT's `config.json` and
+   TRUNCATES it.** The CLI `--serial` on the restore command is ignored. This destroyed
+   the pre-snapshot transcript and briefly read as "restore produced no output". Two
+   consequences: the serial path must still exist on the restoring host, and any
+   pre-snapshot log must be copied aside first.
+3. **`pkill -x cloud-hypervisor` never matches anything.** The kernel truncates `comm` to
+   15 chars — the process is `cloud-hyperviso`. Every such pkill was a silent no-op;
+   stale VMMs accumulated and surfaced much later as an inexplicable `ApiSocketInUse`.
+4. **`pkill -f "cloud-hypervisor --api-socket"` kills the invoking shell**, because the
+   pattern matches the ssh/bash command line that contains it.
+
+### What P8 does NOT establish
+
+- **Volumes across restore were not tested.** This probe is rootfs-only. Whether a
+  `--disk` volume, and separately a `--fs` virtiofs share, survive a restore on v53 is
+  S-2 and is still open — and S-2 is the one that could still move I-6, since
+  cloud-hypervisor#6931 is fixed in v52.0.
+- **vsock across restore (S-3) was not tested.** Deliberately: increment-g uses the
+  serial console precisely so "did restore work" is not entangled with "did the vsock
+  peer reconnect".
+- **Restore onto a DIFFERENT host was not tested.** Everything here is same-host.
+- **No durability claim.** See the 0.05 s note above.
+- **Clock behaviour is only partly characterised.** `CLOCK_MONOTONIC` continued smoothly
+  across the gap (5322 ms → 5840 ms, one tick's worth) rather than accounting for the
+  wall-clock time spent checkpointed. A proper before/after comparison of
+  `CLOCK_REALTIME` deserves its own probe; it is not claimed here.
 
 ## Still open
 
