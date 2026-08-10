@@ -715,10 +715,14 @@ decide this**, which is precisely why it should not be the argument.
 ### What virtio-blk gives that virtiofs does not
 
 - **No `--memory shared=on`.** Confirmed: `memfd-ish mapping lines: 0`, `RssShmem: 4 kB`.
-  Consequences: no memfd, so `RLIMIT_FSIZE` no longer has to cover guest RAM; and — the big
-  one — **no nested-virt boot blocker**. The virtiofs volume path is permanently
-  un-runnable on the Apple-Silicon dev host (`shared=on` is 0/12 there). A block volume path
-  runs in Lima.
+  So no memfd, and `RLIMIT_FSIZE` no longer has to cover guest RAM.
+
+  > **RETRACTED 2026-08-10, same day, before anyone relied on it.** This bullet
+  > originally continued: *"and — the big one — no nested-virt boot blocker. The virtiofs
+  > volume path is permanently un-runnable on the Apple-Silicon dev host; a block volume
+  > path runs in Lima."* **The second half was an inference, not a measurement** —
+  > extrapolated from increment-a booting a block *rootfs* under nesting. It was challenged,
+  > tested, and does not hold up. See § "Does the block path run on the dev host?" below.
 - **Rate limiting, demonstrated not asserted.** `--disk bw_size=33554432,bw_refill_time=1000`
   took the same write from **3189 MiB/s to 43.7 MiB/s** (per-file 0.56 → 1.01 ms).
   **`--fs` has no equivalent parameter at all.** For a multi-tenant platform that is a
@@ -777,6 +781,40 @@ With that fixed, cloning a 1 GiB + 64 MiB volume pair takes **~9 ms and 868 KiB 
 |---|---|---|
 | Volume not attached | `EINVAL` (22), on a nonexistent tag | `ENOENT` (2), on a nonexistent device |
 | Host-side read-only, guest mounts RW | mount OK, writes `EROFS` (30) | mount fails `EACCES` (13) |
+
+### Does the block path run on the dev host? UNKNOWN — and the dev host is worse than recorded
+
+The claim that a block volume path would run in Lima (where virtiofs + `shared=on` cannot)
+was an **inference from increment-a's block rootfs**, never a measurement of increment-f.
+Tested on 2026-08-10:
+
+| Arm | What | Boots (nested aarch64 Lima, kernel 7.0.0-28) |
+|---|---|---|
+| A | increment-a — rootfs only, no volumes, no `shared=on` | **0/3** |
+| F | increment-f — rootfs + 2 virtio-blk volumes, no `shared=on` | **0/3** |
+
+**Arm F's 0/3 is NOT evidence about block volumes, because the baseline is also 0/3.** Both
+stall identically: the guest kernel starts (serial console shows the banner and early boot)
+and never reaches `/init`. That is the same nested stall § "The nested-virt stall" describes
+— it is simply hitting 100% here rather than ~1/12.
+
+Two things follow, and the second is the more important one:
+
+1. **The "block runs in Lima" claim is withdrawn.** It is unsupported. It may still be
+   true — the mechanism argument (no `shared=on`, so no `MAP_SHARED` guest memory under
+   nested KVM) is untouched by this result — but it is not measured, and it must not be
+   used as an argument for block volumes until it is.
+2. **The dev-host situation is worse than this document previously recorded.** increment-a
+   was ~11/12 on the *old* Lima VM (kernel 6.8). On a freshly created one (Ubuntu 26.04,
+   kernel 7.0.0-28) it is 0/3 — no CH guest booted at all, with or without volumes. Whether
+   that is the newer guest kernel, the newer host image, or something in the rebuild is
+   **not diagnosed**. Until it is, *no* Lima-based CH result should be treated as
+   reproducible, including the ~11/12 figure and the 12/12 comparison that retired the
+   nested caveat for P1/P2 (that one was measured on bare metal and is unaffected).
+
+Evidence: `spike-scratch/increment-f/nested-check.sh` is the three-arm harness; the runs
+above were the arm-A and arm-F halves of it, at reduced payload (32 MiB / 200 files) since
+the question was boot reliability, not throughput.
 
 ### What this does NOT establish
 
