@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e (P1, P2, P4, P5, P6)
+# SPIKE findings — increments a, c, d, e, f (P1, P2, P4, P5, P6, P7)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -11,9 +11,10 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P4** per-launch rootfs copy cost | **WORKS — reflink is ~260× faster and free in space** |
 | **P5** `[D7]` confinement flags compose | **WORKS**, with three corrections `[D7]`/US-VM-7 must absorb |
 | **P6** virtiofsd + `--memory shared=on` | **WORKS** — on x86_64. `[D8g]` host-side `read_only` **verified**; aarch64 still unmeasured |
+| **P7** virtio-blk volumes — the I-6 counterfactual | **BOTH WORK** — neither wins on speed; live host sharing is the only real axis |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -673,6 +674,121 @@ Three, all of which would have produced a confidently wrong number:
 The first was inherited from env A, where `shared=on` never booted far enough for anyone to
 read the number.
 
+## P7 — the virtio-blk volume counterfactual (increment-f)
+
+### Verdict: **BOTH WORK.** The choice is not performance — it is live sharing vs everything else.
+
+**Why this exists.** I-6 splits storage by role: `virtio-blk` rootfs, `virtiofs` volumes.
+The rootfs half is argued from measurement (no DAX on CH, FUSE in the hot path). **The
+volume half was never measured against the block alternative** — it was carried from the
+reference implementation and from a whitepaper §6 citation, and the whitepaper is
+explicitly not SSOT. increment-f runs the same payload over a second `virtio-blk` device
+so the comparison is a number.
+
+Held identical to increment-e wherever it is not the thing under test: same kernel, same
+box, same XFS(reflink=1) volume filesystem, same 128 MiB pre-beacon touch, same payload,
+same P5 confinement, same beacon-synchronised `/proc` capture, same matched host baseline.
+Deliberate differences: `--disk` instead of `--fs`+virtiofsd, **no `--memory shared=on`**,
+and no daemon.
+
+Raw evidence: `spike-scratch/increment-f/` — `vs-virtiofs.txt`, `run-blk.txt`,
+`run-ratelimit.txt`, `mem-blk.txt`.
+
+### Throughput cuts both ways — 4 interleaved trials each, no overlap
+
+| Metric | virtiofs (`cache=never`) | virtio-blk | Winner |
+|---|---|---|---|
+| 256 MiB streaming write | 2247.6 / 2277.8 / 2270.3 / 2325.7 MiB/s | **3243.7 / 3242.1 / 3211.1 / 3189.1 MiB/s** | **block, ~42% faster** |
+| 1000 files, open+write+fsync+close | **0.48 / 0.49 / 0.42 / 0.41 ms/file** | 0.56 / 0.56 / 0.56 / 0.59 ms/file | **virtiofs, ~25% faster** |
+
+Against the matched host baseline (0.220–0.225 s streaming, 0.15 ms/file on the same XFS):
+
+| Mechanism | Streaming overhead | Per-file overhead |
+|---|---|---|
+| virtio-blk | **1.19×** | 3.7× |
+| virtiofs | 1.31× | **3.0×** |
+
+Neither mechanism dominates. This is the same shape as the `[D8c]` cache result: bulk
+throughput and metadata-heavy workloads pull in opposite directions. **Performance does not
+decide this**, which is precisely why it should not be the argument.
+
+### What virtio-blk gives that virtiofs does not
+
+- **No `--memory shared=on`.** Confirmed: `memfd-ish mapping lines: 0`, `RssShmem: 4 kB`.
+  Consequences: no memfd, so `RLIMIT_FSIZE` no longer has to cover guest RAM; and — the big
+  one — **no nested-virt boot blocker**. The virtiofs volume path is permanently
+  un-runnable on the Apple-Silicon dev host (`shared=on` is 0/12 there). A block volume path
+  runs in Lima.
+- **Rate limiting, demonstrated not asserted.** `--disk bw_size=33554432,bw_refill_time=1000`
+  took the same write from **3189 MiB/s to 43.7 MiB/s** (per-file 0.56 → 1.01 ms).
+  **`--fs` has no equivalent parameter at all.** For a multi-tenant platform that is a
+  real operational gap, not a nicety.
+- **No daemon.** No `virtiofsd` process, no socket-wait, no SIGTERM→SIGKILL lifecycle, and
+  no "crashed daemon must not look like a clean VM exit" failure mode. The reference
+  implementation's `VirtiofsdManager` was 415 lines.
+- **No module staging.** `CONFIG_EXT4_FS=y` and `CONFIG_VIRTIO_BLK=y` are built in;
+  virtiofs needed `virtiofs.ko` shipped inside the rootfs (`CONFIG_VIRTIO_FS=m`).
+- **`readonly=on` is enforced harder — it fails at MOUNT.** The guest could not even mount
+  it read-write: `errno=13 EACCES`. virtiofs allowed the mount and refused the individual
+  writes with `EROFS`. Both are genuine host-side enforcement; block fails earlier.
+
+### What virtiofs gives that virtio-blk does not — and this is the decision axis
+
+**The host can read and write the share while the guest is running.** A block volume is
+single-writer: increment-f's host-side verification has to **loop-mount the image after
+shutdown**. That is not a performance difference, it is a capability difference, and it is
+the only one that cannot be engineered around.
+
+Two consequences that fall out of it:
+
+- **Block volumes need clean-unmount discipline.** The first increment-f run powered off
+  without unmounting; the image was left with a dirty journal and a read-only loop-mount of
+  it **failed outright** (`cannot mount /dev/loop0 read-only`). The guest now unmounts
+  before power-off (`FS-UMOUNT /mnt/rw -> rc=0`). A real driver inherits this problem: an
+  ungracefully-killed VM leaves a volume that needs recovery on next attach. virtiofs has no
+  equivalent — the host directory is always consistent.
+- **Live log tailing / artifact collection during a run is virtiofs-only.** If nothing needs
+  that, block is the better default on every other axis.
+
+### Reflink is intra-filesystem — a constraint on the driver, found the hard way
+
+increment-f's first run put the per-VM disk images under `/run` (tmpfs) next to the
+sockets, and the clone failed:
+
+```
+cp: failed to clone '/run/.../x.ext4' from '/srv/vm/p6f/volro.ext4': Invalid cross-device link
+```
+
+**`--reflink=always` fails loudly. `--reflink=auto` — coreutils ≥9's default for plain
+`cp` — would have silently done a FULL COPY instead**, and P4's ~260× advantage would have
+evaporated with no error anywhere. So: **per-VM disk artifacts must be staged on the same
+filesystem as their master.** This binds the rootfs clone too, not just volumes — a driver
+that stages per-VM rootfs images into a tmpfs run directory silently loses P4's entire
+result. Sockets and logs on tmpfs, disk images on the volume filesystem.
+
+With that fixed, cloning a 1 GiB + 64 MiB volume pair takes **~9 ms and 868 KiB on disk**
+(`1.0G apparent / 868K actual`), confirming P4 in the volume context.
+
+### Errno table for the refuse-to-exec path — mechanism-dependent
+
+`overdrive-init` must match on different values depending on which mechanism a volume uses:
+
+| Failure | virtiofs | virtio-blk |
+|---|---|---|
+| Volume not attached | `EINVAL` (22), on a nonexistent tag | `ENOENT` (2), on a nonexistent device |
+| Host-side read-only, guest mounts RW | mount OK, writes `EROFS` (30) | mount fails `EACCES` (13) |
+
+### What this does NOT establish
+
+- **One VM, no contention.** Nothing here says how either mechanism behaves under
+  concurrent VMs competing for the same device or daemon.
+- **`vhost-user-blk` was not measured** (`--disk vhost_user=on,socket=`). It is a third
+  option that keeps the block model and moves the backend to userspace.
+- **No durability/crash testing.** "Clean unmount matters" is established; what a
+  power-cut mid-write actually costs on either mechanism is not.
+- **The rate-limit measurement is one sample** at one setting. It shows the knob works and
+  is roughly the right magnitude, not that it is precise.
+
 ## Still open
 
 - **P6 on aarch64.** P6 is answered on x86_64 (increment-e). `shared=on` still cannot be
@@ -749,6 +865,16 @@ constant; and **`RLIMIT_FSIZE` must be `max(rootfs image, guest RAM)`**, reprodu
 independently on x86_64. The open half is **aarch64**, which no available hardware can
 measure.
 
+**P7 — the I-6 volume decision goes back to the user, with numbers.** Both mechanisms
+work. Performance does not decide it: block is ~42% faster streaming, virtiofs ~25% faster
+per small file, neither overlapping. What *does* decide it is whether volumes need the host
+reading or writing them **while the guest runs** — the one thing block cannot do at any
+price. If they do, virtiofs, and the platform accepts a per-VM daemon, `shared=on`, no rate
+limiting, and a volume path that cannot run on the Apple-Silicon dev host. If they do not,
+block wins on every remaining axis. **That question was never asked during DISCUSS** — I-6
+recorded *which* mechanism before anything recorded *what volumes are for*. This is a
+scoping gap to close with the user, not a probe result to act on unilaterally.
+
 **P3 — belongs on CI, not here.** See § Not run.
 
 Per the slice's own rule — *a failing probe never silently weakens a claim* — nothing above
@@ -763,6 +889,12 @@ and not because the deadline arrived; and the one thing env B cannot reach — a
 `f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
 guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
 Its README carries the operational traps found while building it.
+
+`spike-scratch/increment-f/` (gitignored, never committed) — **P7, the virtio-blk volume
+counterfactual**: `probe/Cargo.toml`, `probe/src/bin/{guest_init_blk,host_collector}.rs`,
+`build.sh`, `run.sh`, `vs-virtiofs.sh`; captured evidence in `vs-virtiofs.txt`,
+`run-blk.txt`, `run-ratelimit.txt`, `mem-blk*.txt`, `transcript-blk*.txt`.
+**`crates/` untouched.**
 
 `spike-scratch/increment-e/` (gitignored, never committed) — **P6 on bare-metal x86_64**:
 `probe/Cargo.toml`, `probe/src/bin/{guest_init_fs,host_collector}.rs`, `build.sh`,
