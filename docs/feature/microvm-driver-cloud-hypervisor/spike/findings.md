@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f, g, h, i, j, k (P1, P2, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13)
+# SPIKE findings — increments a, c, d, e, f, g, h, i, j, k, l (P1, P2, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -18,9 +18,10 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P11** what `vhost-user-blk` COSTS | **THE TRANSPORT IS FREE** — matched on memory backing and caching, it ties plain `--disk` (622.7 vs 622.5 MiB/s, ranges overlap). `shared=on` costs 55%, and that is a **host THP tunable**, not a vhost-user property. Two corrections fall out: qemu's default export is **not flush-durable**, and P7's "~42% faster" is really ~11%. |
 | **P13** `memory_restore_mode=ondemand` | **WORKS — restore becomes O(1) in guest RAM** (12–17 ms at BOTH 2 and 4 GiB, vs `copy`'s 0.65–0.88 s / 1.65–1.74 s; ranges disjoint). But it is **asynchronous eager restore, not lazy paging**: a `uffd-handler` thread backfills all of guest RAM at ~900 MiB/s **whether or not the guest touches anything** (proved by a WALK=0 control), so **a warm pool still costs N × RAM** (`Pss ≈ Rss`, `Private_Dirty` = full guest RAM, both modes). **REFUSED under P5's uid-dropped shape** — `Failed to create userfaultfd / EPERM` — needing host `vm.unprivileged_userfaultfd=1`. `prefault` is a pure ~1.8× cost. |
 | **P12** S-3 vsock across snapshot/restore | **THE VM RESTORES, THE CONNECTION DOES NOT** — and the reset is **one tick late**: 13/16 runs the guest got a successful `send()` the host never received. New connections work immediately, so the Running gate is recoverable *if the guest re-dials*. Restore **fails** on a stale socket (`EADDRINUSE`) or a missing directory (`ENOENT`) — recoverable in place. |
+| **P14** memory-as-cache — is the FILESYSTEM authoritative? | **THE MODEL HOLDS, BUT ONLY WITH A GUEST-SIDE QUIESCE.** Delete a 2 GiB `memory-ranges` and the VM cold-boots onto a byte-exact volume — **if the guest fsynced**. Buffered, the same deletion loses **301/301 records at 6 s, 747/2001 at 40 s**, silently, with `e2fsck` clean afterwards. `syncfs`+`FIFREEZE` costs **1 ms** and is the only arm leaving `needs_recovery=false` (a self-contained, movable image). **So #100's guest agent is a PREREQUISITE, not a nicety.** Economics inverted: at 4 GiB **cold boot BEATS the shippable `copy` restore** (1178–1184 vs 1698–1731 ms, disjoint) and costs `N × RAM` less disk. |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h,i,j,k}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h,i,j,k,l}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -2382,6 +2383,402 @@ explicitly.
   permissions and semantics have changed across releases; the pinned 6.18
   appliance kernel (P3, still NOT RUN) is a different subject.
 
+## P14 — "memory is a cache, the filesystem is authoritative" (increment-l)
+
+### Verdict: **THE MODEL HOLDS — but ONLY with a guest-side quiesce. Without one it is false, and the failure is silent.** Delete a 2 GiB `memory-ranges` and the VM cold-boots onto a byte-exact volume — *if* the guest fsynced. If the guest was writing buffered, the same deletion loses **every record it ever wrote** (301/301 at 6 s, 747/2001 at 40 s), with no error anywhere. And the economics have flipped: at 4 GiB, **cold boot is already FASTER than the shippable `copy` restore** (1178–1184 ms vs 1698–1731 ms, disjoint), while costing 2 GiB / 4 GiB *less disk per suspended VM*.
+
+Measured on env B, CH **v53.0**, kernel `7.0.0-15-generic`, x86_64, not nested.
+2 GiB and 4 GiB guests, ext4 volume with mkfs defaults (`has_journal`,
+`data=ordered`). Raw evidence: `spike-scratch/increment-l/evidence/` —
+`arms-20260810T203659.txt` (27 arm trials), `bench-2048m-*.txt`,
+`bench-4096m-*.txt`, `confirm-fdflags-corrupt.txt`, `device-baseline.txt`,
+`device-baseline-parallel.txt`.
+
+This probe exists because the ratified direction — *"any design that makes the
+memory snapshot load-bearing for correctness has misread Sprites"* — was an
+**architectural assertion with no local evidence**. P13 made it urgent: `ondemand`
+buys O(1) restore latency but **zero** pool density (N restores share nothing,
+`Private_Dirty` = full guest RAM each), so if memory-as-cache is correct the
+density argument routes around that entirely.
+
+### The instrument: two counters whose correct polarity is OPPOSITE
+
+increment-g's RAM-only boot nonce is kept, and a second, **durable** counter is
+added beside it. The pair is what makes the claim falsifiable:
+
+| Counter | Lives in | Arm A (resume) must | Arms B/C/D (memory lost) must |
+|---|---|---|---|
+| `nonce` + `tick` | **RAM only** — 16 B of `/dev/urandom`, never written | be IDENTICAL / CONTINUE | be **DIFFERENT** / **RESTART** (it rebooted, on purpose) |
+| `seq` | **the volume** — 64-byte checksummed records | continue | **continue anyway** |
+
+That last conjunction *is* the memory-as-cache claim: the nonce changed, the RAM
+tick restarted, and the work state was still exactly right. An identical nonce in
+arm B would mean memory had accidentally been restored and nothing was measured.
+
+Records are fixed-width and self-checksummed rather than a bare number, because
+three failure modes have to stay separable: a **short tail** (loss), a **torn
+record** (`len % 64 != 0`), and a **hole in the middle** (out-of-order
+durability — a categorically worse story, so it is measured rather than assumed).
+That choice paid: it caught a fourth mode nobody had named (below).
+
+### The four arms — 3 repeats × 2 write modes, all 27 trials `polarity_ok=true`
+
+| Arm | The cut | `--sync 1` (fsync/write) | `--sync 0` (buffered) |
+|---|---|---|---|
+| **A resume** | pause → snapshot → kill → **restore** | 0 lost | 0 lost *(via RAM — see the control)* |
+| **B discard** | pause → snapshot → kill → **`rm memory-ranges`** → cold boot | **0 lost** | **301 of 301 lost** |
+| **C crash** | **SIGKILL mid-write**, no pause, no snapshot → cold boot | **0 lost** | **301 of 301 lost** |
+| **D quiesce** | guest `syncfs`+`FIFREEZE`, **then** SIGKILL → cold boot | **0 lost** | **0 lost** |
+| C + `direct=on` | as C | 0 lost | — |
+
+Every trial: `gaps=0`, `corrupt=0`, `fsck_after_rc=0`, `mounts_ok=true`. The
+recovered guest continued from the recovered `seq` and quiesced cleanly in all of
+them.
+
+### THE CONTROL — A-buffered vs B-buffered, identical up to one step
+
+P11 nearly published 2958 MiB/s on a 1163 MiB/s device; five trials and a
+disjoint-ranges check cannot detect a broken mechanism, only a control that
+removes it can. Here that control is exact: **A-buffered and B-buffered are the
+same run up to whether `memory-ranges` is restored or deleted.** At the cut both
+volumes are equally empty:
+
+```
+=== ARM A, sync=0 — at the cut, the volume holds NOTHING
+  claimed durable seq   300   (301 WORK lines)
+  scan rw (journal REPLAYED, i.e. an ORDINARY mount):
+      mount_ok=true present=true bytes=0 ok=0 corrupt=0 highest_seq=-1
+  ...
+  BOOT_NONCE before   394288b6703fded45dfcb54011adfc9c
+  BOOT_NONCE after    394288b6703fded45dfcb54011adfc9c   -> IDENTICAL
+  RAM tick, FIRST record after    301   -> CONTINUED mid-stream
+  boot banners after  0
+  durable seq at end  340   gaps 0        <- all 341 records, recovered FROM RAM
+```
+
+Restore the memory and every record comes back. Delete it and every record is
+gone. **The difference is attributable to the memory discard and to nothing else
+in this harness** — which is also the proof the harness is not simply broken in
+both directions.
+
+### C vs D — **`fs_quiesce` is MANDATORY, and it is the ONLY thing that makes the volume self-contained**
+
+C and D differ in exactly one step. The difference is not subtle:
+
+```
+=== ARM D, sync=0 — guest quiesced, THEN SIGKILLed
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0
+  dumpe2fs  Filesystem features:  has_journal ext_attr resize_inode dir_index
+                                  orphan_file filetype extent 64bit flex_bg ...
+  feature `needs_recovery` set: false
+  e2fsck -fn (journal NOT replayed) rc=0
+      Pass 1..5 ... spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED):
+      mount_ok=true present=true bytes=19264 ok=301 corrupt=0 highest_seq=300 gaps=0
+```
+
+versus arm C, same buffered writes, no quiesce:
+
+```
+=== ARM C, sync=0
+  feature `needs_recovery` set: true
+  e2fsck -fn (journal NOT replayed) rc=4
+      Entry 'work.log' in / (2) has deleted/unused inode 13.  Clear? no
+      Entry 'work.log' in / (2) has an incorrect filetype (was 1, should be 0).
+  scan ro,noload: work.log ABSENT (mount succeeded): Bad message (os error 74)
+```
+
+`syncfs` + `FIFREEZE` cost **1 ms** and buy three distinct things:
+
+1. **Durability of buffered writes.** D-buffered loses nothing; C-buffered and
+   B-buffered lose everything. Guest-side `fsync` per write buys the same, at a
+   per-write price a real workload will not always pay.
+2. **`needs_recovery = false`.** D is the *only* arm whose volume image is
+   readable with the journal ignored. Everywhere else the journal IS the durable
+   record and the image is not self-contained.
+3. **A structurally clean image**, `e2fsck -fn rc=0` with no replay.
+
+Point 2 is the one with teeth beyond durability. **A non-quiesced volume image
+cannot be safely copied, reflinked, shipped to another host, or handed to a
+different VM** — it carries a dirty journal that must be replayed by a compatible
+ext4 first, and `e2fsck -fn` on it reports rc=4 with a dangling directory entry.
+Any "the filesystem is authoritative, so just move the volume" design step needs
+the quiesce in front of it.
+
+**So GH [#100](https://github.com/overdrive-sh/overdrive/issues/100)'s guest agent
+is not a nicety. It is the load-bearing component of the memory-as-cache model.**
+Without it the model is only true for guests that happen to fsync every write.
+
+### The failure mode nobody had named: the lost tail is PRESENT and ZEROED
+
+The 6 s buffered arms lose everything, which says nothing about *where* the
+boundary is. Re-run at 40 s (`cut_at=2000`), crossing both jbd2's 5 s commit and
+`vm.dirty_expire_centisecs = 3000`:
+
+```
+### vm.dirty_expire_centisecs = 3000   vm.dirty_writeback_centisecs = 500
+### vm.dirty_ratio = 20                vm.dirty_background_ratio = 10
+
+  claimed durable seq   2000   (2001 WORK lines)
+  scan rw (journal REPLAYED):
+      bytes=81920 ok=1246 corrupt=34 torn_tail=0 highest_seq=1245 gaps=0
+      first_corrupt_at=1246 first_corrupt_all_zero=true
+      first_corrupt_hex=00000000000000000000000000000000
+```
+
+| Long-run arm (40 s buffered) | claimed | durable | lost |
+|---|---|---|---|
+| B discard, sync=0 | 2000 | 1288 | **712** |
+| C crash, sync=0 | 2000 | 1253 | **747** |
+| C crash, sync=0 (confirm run) | 2000 | 1245 | **755** |
+| D quiesce, sync=0 | 2000 | **2000** | **0** |
+
+Two things fall out. First, the loss is bounded by the writeback window, not
+unbounded — ~12–15 s of writes at this rate. Second, and this is the part a
+plain counter would have missed: **1280 chunks are on disk but only 1246 are
+records. The other 34 are 64 bytes of zeros each — provably, not inferred.**
+ext4's delayed allocation had allocated the blocks; the data never arrived; the
+extent reads back as zeros. So the tail is not *missing*, it is *present and
+blank*. A recovery routine that trusts file length, or that parses a plain text
+log, reads those as valid empty work and continues from the wrong place. The
+fixed-width checksum is what turns that into a detectable `corrupt=34`.
+
+The guest's own in-VM recovery scan, the host's post-replay scan, and the final
+scan all agree exactly (`records_ok=1246 corrupt=34 highest_seq=1245`) — three
+independent views of the same bytes.
+
+### Journal recovery: automatic, ~7 ms, and NOT signalled by `Filesystem state`
+
+The cold boot repairs itself with no operator and no `fsck` step:
+
+```
+=== ARM C cold boot
+  [    0.791597] EXT4-fs (vdb): recovery complete
+  [    0.792452] EXT4-fs (vdb): mounted filesystem ... r/w with ordered data mode.
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=7 mono_ms=613
+  init: RECOVER file_bytes=81920 records_ok=1254 corrupt=26 highest_seq=1253 gaps=0 scan_ms=1
+  init: CONTINUE epoch=2 next_seq=1254 append_off=81920
+```
+
+Two instrument traps here, both of the "error codes are taxonomy, not mechanism"
+shape, and both would have produced a wrong answer:
+
+- **`dumpe2fs` reports `Filesystem state: clean` on every unclean arm.** The
+  recovery signal is the *feature flag* `needs_recovery`, not the state line.
+  Reading the state line alone concludes "no recovery needed" in arms B and C.
+- **`e2fsck -fn` cannot see past a dirty journal.** It prints
+  `Warning: skipping journal recovery because doing a read-only filesystem check`
+  and exits **0** on a filesystem it has not actually checked. It only returned
+  the true rc=4 once the damage was in the *directory entry* rather than the
+  journal. The meaningful structural verdict is a second `e2fsck -fn` **after**
+  the journal is replayed — `rc=0` in all 27 arm trials.
+
+### Cold boot vs restore, to the SAME event — and the ranking INVERTS with guest RAM
+
+Observable for all three modes: **the guest's first post-start work-counter
+write**, timed from `spawn()` of the incarnation that will serve. P13 reported the
+`vm.restore` call; a pool driver must also spawn a VMM and wait for its socket,
+and cold boot has no other number to give, so `spawn_ready_ms` is the only
+apples-to-apples comparison. Both are printed. 5 interleaved trials per mode per
+size, cold page cache (`sync(2)` **then** `drop_caches`, delta printed), every
+sample below, none discarded.
+
+```
+=== 2 GiB, spawn_ready_ms (spawn -> first durable work record)
+  cold              1148.2  1158.5  1156.7  1151.7  1150.9
+  restore-copy       886.2   901.1   678.7   883.3   878.7
+  restore-ondemand   120.2   120.0   141.2   114.3   116.1
+
+=== 4 GiB, spawn_ready_ms
+  cold              1183.6  1182.2  1178.0  1179.0  1183.7
+  restore-copy      1697.9  1722.8  1716.3  1731.2  1709.2
+  restore-ondemand   158.6   120.4   125.2   115.5   129.2
+
+=== the vm.restore CALL alone (P13's number), 4 GiB
+  restore-copy      1675.8  1701.1  1694.5  1709.5  1687.3
+  restore-ondemand    19.9    12.0    16.5    12.6    20.5
+```
+
+| Comparison | Ranges | Overlap? |
+|---|---|---|
+| 2 GiB: cold 1148.2–1158.5 vs copy 678.7–901.1 | copy wins by ~250 ms | **DISJOINT** |
+| 2 GiB: ondemand 114.3–141.2 vs both | ondemand wins ~10× | **DISJOINT from both** |
+| **4 GiB: cold 1178.0–1183.7 vs copy 1697.9–1731.2** | **cold wins by ~520 ms** | **DISJOINT** |
+| 4 GiB: ondemand 115.5–158.6 vs both | ondemand wins ~10× | **DISJOINT from both** |
+| cold, 2 GiB vs 4 GiB | 1148.2–1158.5 vs 1178.0–1183.7 | disjoint, but only ~30 ms — **cold boot is O(1) in guest RAM** |
+
+**The ranking inverts between 2 and 4 GiB.** `copy` restore is O(guest RAM) —
+S-7's non-sparse `memory-ranges` guarantees it — while cold boot is flat. The
+crossover on this box is between 2 and 4 GiB, and every gigabyte past it widens
+cold boot's lead. For the 8–16 GiB agent sandbox P13 was reasoning about, `copy`
+restore is several seconds and cold boot is still ~1.2 s.
+
+`ondemand` remains ~10× faster than either at both sizes — but P13 established it
+is **refused under P5's uid-dropped launch shape** (`Failed to create userfaultfd
+/ EPERM`), so the mode that wins is not currently the mode that ships. That is
+what makes the cold-vs-`copy` inversion the operative comparison.
+
+Cold boot's internals, for anyone tempted to attribute the 1.15 s to the probe:
+
+```
+L-BENCH mode=cold mem_mib=4096 spawn_ready_ms=1183.7
+        guest_boot_to_ready_ms=16 mount_ms=4 scan_ms=0 recovered_high=300 first_seq=301
+```
+
+**16 ms of that is the guest.** Mount is 4 ms, the journal scan 0 ms, and the
+recovered work counter picks up at 301. The remaining ~1.17 s is VMM spawn plus
+kernel boot — i.e. the thing to optimise is the kernel/VMM startup path, not the
+guest.
+
+### The control that could have made the timing impossible
+
+One 2 GiB `restore-copy` sample (657.1 ms for 2 GiB = 3.27 GB/s) beat the
+single-stream device baseline, which is the exact P11 silhouette. Two checks:
+
+```
+### all five 2 GiB restore-copy cache drops — IDENTICAL, so not a cache artifact
+  [b1-restore-copy-2048] Cached 2308620 -> 177892 kB (delta 2130728)
+  [b2-restore-copy-2048] Cached 2308724 -> 177996 kB (delta 2130728)
+  [b3-restore-copy-2048] Cached 2308836 -> 178220 kB (delta 2130616)   <- the fast one
+  [b4-restore-copy-2048] Cached 2308880 -> 178208 kB (delta 2130672)
+  [b5-restore-copy-2048] Cached 2309048 -> 178320 kB (delta 2130728)
+
+###   1 O_DIRECT stream(s): 4 GiB in 1.673 s = 2.57 GB/s
+###   2 O_DIRECT stream(s): 4 GiB in 0.880 s = 4.88 GB/s
+###   4 O_DIRECT stream(s): 4 GiB in 0.879 s = 4.89 GB/s
+###   8 O_DIRECT stream(s): 4 GiB in 0.887 s = 4.84 GB/s
+```
+
+The device's real ceiling is **4.89 GB/s**, not the 2.57 GB/s a single `dd`
+reports. 3.27 GB/s is therefore possible, not impossible — the sample stands.
+The same numbers say something else worth carrying: `copy` restore runs at
+~2.5 GB/s against a 4.89 GB/s device, i.e. **it reads at roughly single-stream
+rate and leaves ~2× on the table.** A parallelised restore read is unexplored
+headroom, and it would move the crossover point.
+
+### The disk cost, measured by `df` delta (`du` cannot see reflinked extents)
+
+```
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46658 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 2147483648 B
+  snapshot dir now: ["config.json", "state.json"]
+```
+
+S-7 measured this at 512 MiB; it holds exactly at 2 GiB and 4 GiB
+(`snap_ondisk=4295020544` = 4 GiB + 53 KiB). Apparent equals on-disk: **not
+sparse**. A suspended VM costs its full guest RAM, on disk, per VM.
+
+| Suspended pool on this box (`/srv/vm` = 875 GiB free) | Memory-snapshot model | Memory-as-cache |
+|---|---|---|
+| 100 × 2 GiB VMs | 200 GiB | **0** |
+| 400 × 2 GiB VMs | 800 GiB — the device is full of nothing but memory images | **0** |
+| 100 × 4 GiB VMs | 400 GiB | **0** |
+| 218 × 4 GiB VMs | 875 GiB — full | **0** |
+
+Both models pay for the volume image; only the memory model pays `N × RAM` on top
+of it. Put beside P13 — where N simultaneous restores share **zero** memory, so
+the pool costs `N × RAM` in *RAM* as well — the memory-snapshot model is paying
+twice for density it does not deliver. What the residual `config.json` +
+`state.json` (53 KiB) shows is that the *device* state is cheap; it is only the
+memory image that is expensive, and arm B proves it is optional.
+
+### Harness defects caught in this probe, before they became findings
+
+Four, and the first three each produced a wrong number in the first full run:
+
+1. **The RAM-tick polarity check was inverted by long runs.** It compared the
+   *last* tick before the cut against the *last* tick after. A cold-booted guest
+   restarts its tick at 0 — correctly — then climbs past the pre-cut value, so
+   `tick_after > tick_before` reported "CONTINUED" for a guest that had plainly
+   rebooted, and flagged three genuinely-correct trials `polarity_ok=false`. Fixed
+   to read the tick on the **first** post-cut record: `0` = restarted.
+2. **A `ro,noload` loop mount poisons the loop device for the rw mount that
+   follows.** util-linux reuses `/dev/loopN` for the same backing file, and it is
+   read-only, so the replay mount failed with `cannot mount /dev/loop0
+   read-only` — and the trial's forensics read as **total data loss** on a
+   filesystem that was fine. Fixed with two separate copy files, a `mount_ok`
+   flag on every scan so a mount failure can never again be mistaken for an empty
+   filesystem, and a `losetup -j <file>`-scoped detach (never `losetup -D`, which
+   would detach a concurrent tenant's loops on this shared box).
+3. **`Scan::default()` gave `highest_seq = 0`**, which is a legitimate seq — so
+   "no records at all" and "one record, number zero" were the same row of numbers
+   in every downstream subtraction. Now `-1`.
+4. **The `O_DIRECT` probe sampled too early.** CH's API socket appears *before*
+   the block devices are opened, so `disk_fd_flags` returned `[]` and the
+   host-durability caveat would have rested on nothing. Moved to after the guest
+   reaches the cut, and it then reads the knob correctly:
+   ```
+   default:      ["fd=66 flags:\t02100002 O_DIRECT=no",  "fd=99 ... O_DIRECT=no"]
+   direct=on:    ["fd=65 flags:\t02140002 O_DIRECT=YES", "fd=99 ... O_DIRECT=YES"]
+   ```
+
+The guest also emits each line in **one** `write(2)` including the newline —
+increment-g/k used two, which was safe at `loglevel=4`; this probe runs at
+`loglevel=7` on purpose (the kernel's own `recovery complete` is the evidence) and
+printk lands between two writes.
+
+### What P14 does NOT establish
+
+- **SIGKILLing the VMM models losing the VM, NOT losing the HOST.** By default CH
+  opens the volume **without** `O_DIRECT` (measured above), so a guest `fsync`
+  lands in the host page cache and survives a dead VMM trivially. `direct=on`
+  flips the flag and changed nothing in arm C — because the loss in these arms is
+  guest-side — but **no arm here cut host power, so no claim is made about host
+  loss.** A driver that needs the stronger property must set `direct=on` *and*
+  verify CH's flush path, which this probe did not.
+- **ext4 with mkfs defaults, one filesystem, one volume, one file.** No XFS, no
+  `data=journal`, no `nobarrier`, no `commit=` tuning, no multi-file workload, no
+  database with its own WAL. A workload whose durability contract differs from
+  "append + fsync" is a different subject.
+- **No repeated checkpoint→discard→cold-boot cycles.** Every arm cuts once. A
+  pool that suspends and re-materialises the same VM dozens of times is
+  untested — and P12 already showed a chained restore has its own constraints.
+- **The volume never left the host.** "The filesystem is authoritative" implies
+  the volume can move; that is exactly the property arm D's `needs_recovery=false`
+  makes *plausible*, and it was not exercised. Cross-host volume hand-off is
+  still open (as is cross-host restore, from P8).
+- **`FIFREEZE` was scoped to the data volume only.** The rootfs was never frozen
+  (freezing the filesystem the running binary lives on deadlocks the guest). A
+  real `fs_quiesce` covering multiple mounts is untested, as is the freeze/thaw
+  ordering when a VM is resumed rather than discarded.
+- **The quiesce was guest-initiated at a pre-agreed seq**, not driven by a host
+  RPC. #100's agent has to be *asked*, over a channel — and P12 showed the vsock
+  connection does not survive a restore. Whether the host can reliably reach the
+  agent to request a quiesce, and what happens when it cannot, is the next
+  question and is not answered here.
+- **Cold-boot timings are for a 17 MB kernel and a 64 MiB rootfs with a static
+  PID 1.** A real workload's boot adds its own startup; the ~1.17 s measured here
+  is the VMM+kernel floor, not a product number. The comparison against restore
+  is still valid — restore has to pay that floor too, plus its memory read.
+- **`ondemand` was not used in any durability arm.** All four arms restore/boot
+  under `Copy`. Whether an `OnDemand` restore interacts with an in-flight guest
+  write is untested.
+- **Nothing about aarch64**, and nothing about the pinned 6.18 kernel (P3, still
+  NOT RUN). Writeback and journal behaviour are kernel-version-sensitive.
+
+### What this changes
+
+- **The ratified direction survives, with a named precondition.** Memory *is* a
+  cache — arm B deletes 2 GiB of it and the VM comes back byte-exact. But that is
+  conditional on the guest having quiesced, and "the guest fsyncs everything" is
+  not a property the platform can assume of arbitrary workloads. **The honest
+  statement is: memory is a cache, and `fs_quiesce` is what makes it one.**
+- **#100's guest agent moves from supporting cast to prerequisite.** Any slice
+  that suspends a VM by discarding memory must quiesce first, and must handle
+  "the agent did not answer" as a first-class case — because the failure mode
+  when it is skipped is total, silent data loss with a clean `e2fsck`.
+- **The warm-pool argument for keeping memory snapshots is now weak on both
+  axes.** P13 killed the RAM-density half (`N × RAM`, no sharing). P14 kills the
+  latency half at ≥4 GiB for the mode that actually ships (`copy`), and prices the
+  disk half at exactly `N × RAM`. What remains for `copy` is a ~250 ms edge at
+  2 GiB — against 2 GiB of disk per suspended VM.
+- **A driver-visible instrument.** `needs_recovery` on the volume image is a
+  cheap, exact test of "did this VM quiesce before it went away" — and it is the
+  gate a cross-host volume move should stand behind.
+
 ## Still open
 
 - ~~**S-3 — vsock across restore.**~~ **ANSWERED 2026-08-10 by P12 (increment-j).** The
@@ -2569,6 +2966,28 @@ and not because the deadline arrived; and the one thing env B cannot reach — a
 `f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
 guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
 Its README carries the operational traps found while building it.
+
+`spike-scratch/increment-l/` (gitignored, never committed) — **P14, memory-as-cache**:
+`probe/Cargo.toml`, `probe/src/bin/{guest_init_l,host_cache}.rs`, `build.sh`,
+`run.sh` (`seed` / one arm / one bench trial), `arms.sh` (the 4-arm × 2-write-mode
+matrix, the `direct=on` variant, and the 40 s long-run buffered arms), `bench.sh`
+(the interleaved cold-vs-restore timing bench). Captured evidence in `evidence/`:
+`arms-20260810T203659.txt` (27 arm trials, all `polarity_ok=true`),
+`arms-20260810T202705.txt` (the FIRST run, kept because it is the record of the
+three harness defects it exposed), `bench-2048m-*.txt`, `bench-4096m-*.txt`,
+`confirm-fdflags-corrupt.txt` (the `O_DIRECT` flags and the proof the lost tail is
+zero-filled), `device-baseline.txt` and `device-baseline-parallel.txt` (the
+queue-depth sweep that cleared the one suspiciously-fast sample).
+The guest extends increment-g's snapshot guest — RAM-only boot nonce + in-RAM tick
+counter — with a **second, durable** work counter written as 64-byte checksummed
+records to a virtio-blk volume, a boot-time recovery scan of that journal, and a
+guest-side `syncfs`+`FIFREEZE` quiesce. Holding both counters is what makes the
+claim falsifiable: after a memory loss the RAM one must RESTART and the durable one
+must CONTINUE, and the assertion's polarity inverts between the resume arm and the
+three memory-loss arms. Forensics run on **two** reflink copies taken the instant
+the cut lands, walked `dumpe2fs` → `e2fsck -fn` → `ro,noload` scan → rw (replaying)
+scan, in that order, because mounting first would silently convert "needed
+recovery" into "was clean". **`crates/` untouched.**
 
 `spike-scratch/increment-k/` (gitignored, never committed) — **P13,
 `memory_restore_mode=ondemand`**: `probe/Cargo.toml`,
