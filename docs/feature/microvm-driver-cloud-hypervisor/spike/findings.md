@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d (P1, P2, P4, P5, P6)
+# SPIKE findings — increments a, c, d, e (P1, P2, P4, P5, P6)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -10,10 +10,10 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P2** vsock beacon + exit status, incl. netns | **WORKS** — confirmed on both arches |
 | **P4** per-launch rootfs copy cost | **WORKS — reflink is ~260× faster and free in space** |
 | **P5** `[D7]` confinement flags compose | **WORKS**, with three corrections `[D7]`/US-VM-7 must absorb |
-| **P6** virtiofsd + `--memory shared=on` | **STILL UNPROVEN** — was unexercisable on the nested host; not yet re-run on metal |
+| **P6** virtiofsd + `--memory shared=on` | **WORKS** — on x86_64. `[D8g]` host-side `read_only` **verified**; aarch64 still unmeasured |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -503,108 +503,194 @@ not a byte-copy of CH's internal ruleset — CH exposes no way to prove the latt
 
 ## P6 — virtiofsd + `--memory shared=on`
 
-### Verdict: **UNPROVEN — explicitly NOT refuted**
+### Verdict: **WORKS** — every question env A left open is now answered
 
-> **Status 2026-08-10:** everything below was measured on env A (nested aarch64),
-> where `--memory shared=on` cannot boot at all. **Env B removes that blocker**, so
-> P6 is now runnable and simply has not been run there yet. The findings below —
-> the `RLIMIT_FSIZE` × memfd interaction, `[D8e]`, `[D8d]` — are mechanism-level and
-> stand; the unanswered half is unanswered only because the probe has not been
-> rebuilt for x86_64.
+Measured on **env B** (bare-metal x86_64) on 2026-08-10. Raw evidence:
+`spike-scratch/increment-e/evidence.txt` (1163 lines), `cache-compare.txt`, and the
+per-mode `transcript-*.txt` / `mem-*.txt` captures.
 
-Raw evidence: `spike-scratch/increment-d/evidence.txt` (371 lines).
+increment-d is preserved unchanged as the env-A record. **increment-e is the same probe
+rebuilt for x86_64** — same guest logic, same modes, same beacon-synchronised `/proc`
+capture — so the only deliberate variable is the environment.
 
-**`shared=on` guest memory does not survive nested virtualisation on Apple Silicon**, so
-the round-trip half of P6 cannot be exercised here by any VMM. The falsification chain is
-complete rather than assumed:
+**Five modes, all COMPLETED:**
 
-| Trial | Reached `/init` |
-|---|---|
-| CH, no `shared=on` | **11/12** |
-| CH, `shared=on` (root, unconfined) | **0/4** |
-| CH, `shared=on` (confined) | 0/4 |
-| CH, `shared=on,prefault=on` / `thp=off` / `128M` | 0/4 each |
-| **QEMU 10.2.1, private memory** | **3/4** |
-| **QEMU 10.2.1, `memory-backend-memfd,share=on`** | **0/4** |
+| Mode | What it isolates | Result |
+|---|---|---|
+| `full` | `shared=on` + 2 fs devices + **all** P5 confinement | **COMPLETED** |
+| `full-no-fsd-rule` | same, minus the landlock rule for the vhost-user socket dir | **COMPLETED** |
+| `sharedonly` | `shared=on`, no fs devices | **COMPLETED** |
+| `noshare` | neither — the `[D8b]` volume-free baseline | **COMPLETED** |
+| `full` @ `--cache=auto` | the `[D8c]` comparison | **COMPLETED** |
 
-**A different VMM failing identically** ⇒ the mechanism is `MAP_SHARED` guest memory under
-nested KVM, not Cloud Hypervisor and not confinement. Same class as increment-a's stall.
-All `shared=on` runs freeze at the same point, right after the `virtio_blk` probe.
-
-### What IS answered — arch-independent, and it matters
-
-**`shared=on` × `RLIMIT_FSIZE` — a genuine P5×P6 composition finding, and the reason
-running these together was worth it.** Every `shared=on` attempt under increment-c's
-rlimit died with CH exit **153** (`128+SIGXFSZ`):
+Guest serial console from the `full` run — `shared=on`, two virtiofsd daemons, and the
+entire P5 stack (seccomp + landlock + uid-drop + prlimit) at once:
 
 ```
-noshare-fsize256      size=512M              FSIZE=256 MiB  rc=124  (no rlimit failure)
-sharedon-fsize256     size=512M,shared=on    FSIZE=256 MiB  rc=153  *** SIGXFSZ ***
-sharedon-fsize768     size=512M,shared=on    FSIZE=768 MiB  rc=124  (no rlimit failure)
-sharedon-256M-fsize192  size=256M,shared=on  FSIZE=192 MiB  rc=153  *** SIGXFSZ ***
-sharedon-256M-fsize384  size=256M,shared=on  FSIZE=384 MiB  rc=124  (no rlimit failure)
+init: HELLO from overdrive spike init (P6), pid=1
+init: insmod /modules/virtiofs.ko -> OK
+init: /proc/filesystems virtiofs line = "nodev\tvirtiofs"
+init: touched 128 MiB of guest memory (every 4K page written)
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+FS-MOUNT tag=volrw at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT tag=volro at /mnt/ro -> OK   (host-side --readonly export, mounted RW by the guest ON PURPOSE)
+FS-MOUNT tag=nosuchvolume at /mnt/bad -> rc=-1 errno=22 (Invalid argument (os error 22))
+FS-RW-LISTING [from-host.txt]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+FS-RO-CREATE refused errno=30 (Read-only file system (os error 30))
+FS-RO-OVERWRITE refused errno=30 (Read-only file system (os error 30))
+FS-RO-READ "PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE"
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
 ```
 
-`shared=on` backs guest RAM with a **memfd**, and a memfd is a *file* for `RLIMIT_FSIZE`:
+### `[D8g]` — host-side `read_only` IS enforced. The security framing now stands.
 
-```
-/proc/3452499/maps:  f1c1c811c000-f1c1e811c000 rw-s 00000000 00:01 7218  /memfd:ch_ram (deleted)
-```
+This was the claim the findings refused to assert for eight days, and it is the most
+consequential result here.
 
-The threshold tracks **`--memory size`**, not the disk. **So `RLIMIT_FSIZE` must be
-`max(rootfs image, guest RAM)` whenever `shared=on` is in play.** Sizing it off the
-rootfs — which is what increment-c did and what a reasonable implementer would do — makes
-every volume-carrying VM die with an opaque signal.
+The test is built to be **non-cooperative on purpose**: the guest mounts the
+`--readonly` export **read-write** and then tries to write it. A guest-side `-o ro` would
+have been guest-cooperative and proved nothing.
 
-Also confirmed:
+- Guest create → `errno=30 EROFS`. Guest overwrite of a pre-existing file → `errno=30 EROFS`.
+- Host-side, after the run: `guest-should-not-create.txt` **absent**, and
+  `preexisting-host-file.txt` still reads `PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE`.
+- Reads still work (`FS-RO-READ` returns the host content), so the share is genuinely
+  mounted, not merely broken.
 
-- **`[D8e]` HOLDS.** The volume *source* directories were granted in **no** trial and CH
-  created the fs device anyway. **Volumes do not widen `[D7]`'s hypervisor confinement;
-  US-VM-8's non-widening AC stands.**
-- **`--fs socket=` IS auto-derived** by CH's implicit ruleset — unlike `--vsock`. Verified
-  with the socket directory as a *sibling* of the granted path (a first attempt nested it,
-  which was vacuous, since Landlock rules are path-beneath).
-- **`--sandbox=namespace` is the default and genuinely in effect — stated precisely:**
-  `mnt` and `net` namespace inodes differ from the shell's; `pid` and `user` do **not**. It
-  is a mount+net sandbox, not a full one. **No silent downgrade to `chroot`** — the
-  reference implementation's failure is not reproduced.
-- `--socket-group=<vmm user>` yields `srwxrwx--- root:spikevmm` — the clean way for a
-  uid-dropped CH to reach the daemon. `virtiofsd` **1.13.2**, `/usr/libexec/virtiofsd`,
-  not on `PATH`. `--readonly` exists as a host-side flag.
-- **`shared=on` memory accounting is a reclassification, not obvious inflation**
-  (early-boot sample, not the controlled post-beacon one): `shared=on` → VmRSS 86432 kB
-  (RssShmem 83224 / RssAnon 316); private → VmRSS 93320 kB (RssAnon 90428 / RssShmem 0).
+Both halves matter: the guest saw a refusal **and** the host tree is untouched. **`[D8a]`'s
+security framing may now be asserted** — with the scope stated in *What this does NOT
+establish* below.
 
-### What is NOT answered — do not let these be assumed later
+### The other answers
 
-- Guest↔host round-trip through the share.
-- **Host-side `--readonly` enforcement against an uncooperative guest (`[D8g]`).** Never
-  tested against a guest. **`[D8a]`'s security framing must not be asserted until it is** —
-  a guest-side `-o ro` is guest-cooperative and void.
-- Failed-mount errno from inside the guest (the evidence `overdrive-init`'s refuse-to-exec
-  path is built against).
-- virtiofs throughput/latency under `--cache=never`. Host-side baseline only: 32 MiB
-  write+fsync in 0.0717 s ≈ 446 MiB/s; 200 small files in 0.0203 s.
-- Whether `shared=on` changes the guest's observed `MemTotal` (`[D8b]` × US-VM-5 / GH #92).
+- **Round-trip works in both directions.** Host→guest read back
+  `HOST-WROTE-THIS-…`; guest→host landed **byte-identical** to what the guest reported
+  writing (39 bytes, `cmp`-verified). The payloads are byte-distinct per direction, so
+  neither assertion can be satisfied by an echo of the other.
+- **Failed-mount errno is `EINVAL` (22)** for a tag with no matching device. This is the
+  value `overdrive-init`'s refuse-to-exec path must match on — previously a guess.
+- **`[D8b]` — `shared=on` does NOT change what the guest sees.** `MemTotal: 463132 kB`,
+  identical across `full`, `sharedonly`, and `noshare`.
+- **`[D8e]` HOLDS on x86_64.** The volume source directories were granted in **no** trial,
+  and the boot plus the full round-trip both succeeded. **Volumes do not widen `[D7]`'s
+  hypervisor confinement; US-VM-8's non-widening AC stands.**
+- **`--fs socket=` IS auto-derived.** `full-no-fsd-rule` — which grants CH a landlock rule
+  for the per-VM directory only, never the vhost-user socket directory — completed with a
+  byte-identical round-trip. Unlike `--vsock`, which needs an explicit grant.
+- **`[D8d]` `--sandbox=namespace` is real, and the precise claim is unchanged from env A:**
+  `mnt` and `net` namespace inodes differ from the shell's; `pid` and `user` do **not**. A
+  mount+net sandbox, not a full one. No silent downgrade to `chroot`.
+- **`RLIMIT_FSIZE` × memfd reproduces exactly on x86_64** — see below.
 
-**A vacuous result was caught and suppressed:** `run.sh` initially printed *"the read-only
-file is unchanged → refused host-side"* after a run in which the guest never booted. That
-reads as evidence when nothing was attempted. The script now skips the block entirely
-unless the guest completed.
+### `shared=on` costs *less* host RSS than private memory, and the difference is reclassification
+
+Captured at the beacon: same guest lifecycle point in every mode, 128 MiB already
+touched, before any filesystem I/O.
+
+| Mode | VmRSS | RssAnon | RssShmem | memfd | Threads |
+|---|---|---|---|---|---|
+| `noshare` (private) | 276888 kB | 273232 kB | 4 kB | **none** | 9 |
+| `sharedonly` | 265456 kB | 852 kB | 260952 kB | `/memfd:ch_ram` | 9 |
+| `full` (+2 fs devices) | 270056 kB | 892 kB | 265512 kB | `/memfd:ch_ram` | 11 |
+
+`shared=on` moves essentially the entire footprint from `RssAnon` to `RssShmem` and lands
+**~11 MB lower** than private. Env A saw the same shape in an early-boot sample and could
+only call it "not obvious inflation"; measured at the controlled point, it is a
+**reclassification, and mildly cheaper**. Two fs devices cost **+2 threads** (`_fs1`,
+`_fs2`) and ~4.6 MB.
+
+### `[D8c]` — `--cache=never` is right for bulk writes and wrong for small files
+
+`[D8c]` picked `never` for the volume role **without measuring it**, on the one path that
+carries the workload's output. Four interleaved trials per mode, everything else held
+fixed. Every sample, no averaging (`cache-compare.txt`):
+
+| `--cache` | 256 MiB streaming write | 1000 files, open+write+fsync+close |
+|---|---|---|
+| `never` | **1527.7 / 1544.8 / 1555.0 / 1561.2 MiB/s** | 0.42 / 0.43 / 0.44 / 0.48 ms/file |
+| `auto` | 404.2 / 408.5 / 411.6 / 421.0 MiB/s | **0.37 / 0.37 / 0.37 / 0.37 ms/file** |
+
+**`never` is ~3.7× faster on the streaming write; `auto` is ~15% faster per small file.**
+The ranges do not overlap in either direction. `fsync` time is identical (0.178–0.180 s)
+in both, so the entire difference sits in the `write()` path.
+
+The streaming direction is opposite to the naive expectation that caching helps writes.
+**No mechanism is claimed here** — this is the measurement, not an explanation of it. What
+it supports is narrow and useful: **`[D8c]`'s choice of `never` is correct for the
+output-carrying bulk path, and it is a genuine trade-off rather than a free win.** A
+metadata-heavy volume would prefer `auto`, which makes cache mode a plausible per-volume
+knob rather than a global constant.
+
+### virtiofs overhead, on both filesystems, against a matched baseline
+
+The host baseline runs the **same syscall sequence** as the guest (`open`+`write`+`fsync`+
+`close` per file; `bs=1M … conv=fsync` for the stream) **on the same filesystem** as the
+shares, so the ratio is virtiofs overhead rather than a filesystem difference.
+
+| Volume filesystem | Stream: guest / host | Overhead | Per file: guest / host | Overhead |
+|---|---|---|---|---|
+| ext4 (`/dev/md1`, root RAID1) | 0.347 s / 0.258 s | **1.34×** | 0.45 / 0.16 ms | **2.8×** |
+| XFS reflink (`/dev/nvme1n1`, `/srv/vm`) | 0.288 s / 0.224 s | **1.29×** | 0.43 / 0.15 ms | **2.9×** |
+
+Streaming through virtiofs costs ~30%; per-file operations cost ~2.8×, which is the number
+that matters for small-file workloads. The overhead ratio is stable across both
+filesystems while absolute throughput tracks the device — so the ~30%/2.8× figures are
+properties of virtiofs, not of this disk.
+
+### What this does NOT establish — do not let these be assumed later
+
+- **x86_64 only. aarch64 `shared=on` remains unmeasured.** Env A cannot boot it and no
+  non-nested Arm hardware is available. Both arches ship, so this is a real gap, not a
+  formality.
+- **Kernel `7.0.0-15-generic`, not the pinned 6.18** (that is P3, still not run).
+- **One VM, one vCPU, no contention.** Nothing here says how virtiofsd behaves under
+  concurrent VMs or multiple queues.
+- **`--cache=always` and DAX were not measured.**
+- **`read_only` is proven against the normal VFS write path** — create and overwrite, both
+  refused at the daemon, host tree verified untouched. That is the claim `[D8a]` needs. It
+  is not an exhaustive audit of every write vector a hostile guest might attempt.
+
+### Harness defects caught before they became findings
+
+Three, all of which would have produced a confidently wrong number:
+
+1. **The small-file baseline did not match the guest.** increment-d's host baseline used a
+   shell loop with one trailing `sync` while the guest fsync'd **per file** — a different
+   operation, making the host look ~6× faster than it is. Replaced with the identical
+   syscall sequence.
+2. **Mode `E` is also `full`, so its transcript overwrote mode `A`'s.** The cache=auto
+   numbers were sitting in the file labelled cache=never. Transcripts are now keyed by
+   mode **and** cache mode.
+3. **Moving the volumes to XFS left the baseline on ext4**, which would have reported a
+   filesystem difference as virtiofs overhead. Baseline now follows `VOLROOT`, and the run
+   header reports the volumes' own filesystem rather than `$OUT`'s.
+
+The first was inherited from env A, where `shared=on` never booted far enough for anyone to
+read the number.
 
 ## Still open
 
-- **P6's round-trip half — the reason the metal box exists, and NOT yet re-run there.**
-  It was unexercisable on the nested host (`shared=on` never boots), which env B removes.
-  A new increment-d probe is needed for x86_64. Until it runs, `[D8g]`'s host-side
-  read-only enforcement stays **unverified** and must not be asserted.
+- **P6 on aarch64.** P6 is answered on x86_64 (increment-e). `shared=on` still cannot be
+  measured on env A — it does not boot under nested virt — and no non-nested Arm hardware
+  is available. Both arches ship, so the virtiofs + `shared=on` path is proven on **one of
+  two** shipping targets. Same blocker as P3's aarch64 half; one piece of hardware closes
+  both.
 - **P3 (pinned 6.18 kernel).** Not run on either environment. Both x86_64 and aarch64
   ship, so this is two questions, not one. Env B has `7.0.0-15`; the LVH path
   (`cargo xtask integration-test vm --kernels …`) is the route on x86_64, and aarch64
   needs non-nested Arm hardware.
-- **P5 confirmation on env B.** P5's verdict is currently pinned to the nested aarch64
-  host. Its mechanisms are arch-independent, but the caveat is not retired until it is
-  re-run.
+- **P5's `--vsock` landlock correction on env B.** Mostly retired: increment-e's `full`
+  mode ran the entire P5 stack — `--seccomp true`, `--landlock` with per-VM rules, the
+  unprivileged `spikevmm` uid + `kvm` group, and `prlimit` — through five completed boots
+  on x86_64, and the per-thread seccomp shape reproduced exactly (leader `Seccomp: 0`, all
+  ten workers `Seccomp: 2`, `NoNewPrivs: 1` throughout). What increment-e did **not**
+  re-derive is correction 1, the explicit `--vsock` UDS directory grant: it inherited the
+  rule rather than re-testing that omitting it fails.
 
 ### Probe portability — fixed 2026-08-10, and one trap worth carrying
 
@@ -652,19 +738,24 @@ Slice 03 builds on them:
 The uid question is settled: **unprivileged uid + `kvm` group membership against `0660
 root:kvm`**. No 0666 needed.
 
-**P6 — STILL DEFERRED, but the blocker is gone.** `[D8]`'s mechanism was never refuted,
-only unexercisable: `shared=on` cannot boot under nested virt (proven by cross-VMM diff —
-QEMU private memory 3/4, QEMU memfd-shared 0/4). **Env B removes that constraint**, so P6
-is now runnable and simply has not been run. It needs a new increment-d probe built for
-x86_64. This is the highest-value remaining work and the reason the metal box exists. `[D8d]` and `[D8e]` are confirmed as far as this host
-allows. **`[D8g]`'s host-side read-only security framing remains unverified and must not be
-asserted until it is.**
+**P6 — PROMOTE on x86_64.** Run on env B as increment-e: five modes, all completed.
+`[D8b]`, `[D8d]`, `[D8e]`, and the `--fs socket=` auto-derivation all hold, and
+**`[D8g]`'s host-side `read_only` is now verified** against a guest that mounted the
+export read-write and tried to write it — refused with `EROFS`, host tree untouched. The
+`[D8a]` security framing may be asserted. Two things go back to design rather than
+forward: **`[D8c]`'s `--cache=never`** is confirmed for the bulk path but is ~15% *worse*
+per small file, which makes cache mode a candidate per-volume knob rather than a
+constant; and **`RLIMIT_FSIZE` must be `max(rootfs image, guest RAM)`**, reproduced
+independently on x86_64. The open half is **aarch64**, which no available hardware can
+measure.
 
 **P3 — belongs on CI, not here.** See § Not run.
 
 Per the slice's own rule — *a failing probe never silently weakens a claim* — nothing above
-was quietly dropped: P5's three corrections are handed to `[D7]`/US-VM-7, and P6's
-unverified `[D8g]` claim is flagged for restatement rather than left standing.
+was quietly dropped: P5's three corrections are handed to `[D7]`/US-VM-7; `[D8g]`, which
+this document refused to assert for eight days, is asserted now **because it was measured**
+and not because the deadline arrived; and the one thing env B cannot reach — aarch64
+`shared=on` — is carried forward in § Still open rather than rounded up to "P6 works".
 
 ## Artifacts
 
@@ -672,6 +763,12 @@ unverified `[D8g]` claim is flagged for restatement rather than left standing.
 `f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
 guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
 Its README carries the operational traps found while building it.
+
+`spike-scratch/increment-e/` (gitignored, never committed) — **P6 on bare-metal x86_64**:
+`probe/Cargo.toml`, `probe/src/bin/{guest_init_fs,host_collector}.rs`, `build.sh`,
+`run.sh`, `evidence.sh`, `cache-compare.sh`, `rlimit-sweep.sh`; captured evidence in
+`evidence.txt`, `cache-compare.txt`, `transcript-<mode>-<cache>.txt`, `mem-<mode>.txt`.
+increment-d is left untouched as the env-A record. **`crates/` untouched.**
 
 `spike-scratch/increment-a/` (gitignored, never committed):
 `probe/Cargo.toml`, `probe/src/bin/guest_init.rs`, `probe/src/bin/host_listener.rs`,
