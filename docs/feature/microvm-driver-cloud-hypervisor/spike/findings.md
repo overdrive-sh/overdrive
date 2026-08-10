@@ -1,59 +1,71 @@
-# SPIKE findings — increments a, c, d (P1, P2, P5, P6)
+# SPIKE findings — increments a, c, d (P1, P2, P4, P5, P6)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
-Date: 2026-08-02.
+Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 
-**Scope: P1, P2 (increment-a), P5 (increment-c), P6 (increment-d).** P3 and P4 are NOT
-run — see § Not run. P6 is **unprovable on this host** and is reported as such rather
-than forced to a verdict.
+| Probe | Verdict |
+|---|---|
+| **P1** kernel boots from ext4 `virtio-blk` | **WORKS** — confirmed on both arches |
+| **P2** vsock beacon + exit status, incl. netns | **WORKS** — confirmed on both arches |
+| **P4** per-launch rootfs copy cost | **WORKS — reflink is ~260× faster and free in space** |
+| **P5** `[D7]` confinement flags compose | **WORKS**, with three corrections `[D7]`/US-VM-7 must absorb |
+| **P6** virtiofsd + `--memory shared=on` | **STILL UNPROVEN** — was unexercisable on the nested host; not yet re-run on metal |
+| **P3** the pinned 6.18 kernel | **NOT RUN** |
 
 Raw evidence: `spike-scratch/increment-{a,c,d}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
-> ## ⚠ Read this first — separate "aarch64" from "nested Apple Silicon"
+> ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
 >
-> **This block was itself rewritten twice on 2026-08-02. Both earlier versions
-> conflated two different things; this one does not.**
+> This block was rewritten twice on 2026-08-02 because both earlier versions
+> conflated them. **On 2026-08-10 the split was confirmed empirically** by
+> re-running on non-nested x86_64 bare metal.
 >
-> - **aarch64 IS a production target.** Findings that are arm64-specific are
->   real platform requirements, not throwaway. Do not discount them.
-> - **Nested virtualisation on Apple Silicon is the artifact.** The dev host is
->   an M4 Max, so the Lima guest is arm64 *and* nested. The **nesting** is what
->   makes boots stall and what makes `shared=on` unusable here — **not the
->   architecture**. Those two properties arrived together in this environment
->   and must not be reasoned about as one.
->
-> Reading the results correctly:
+> - **aarch64 IS a production target.** arm64-specific findings are real
+>   platform requirements, not throwaway.
+> - **Nested virtualisation on Apple Silicon was the artifact.** The dev host is
+>   an M4 Max, so the Lima guest is arm64 *and* nested. The **nesting** caused
+>   the boot stalls and made `shared=on` unusable — **not the architecture**.
 >
 > | Result | Transfers to… |
 > |---|---|
-> | vsock beacon + netns behaviour, `CONFIG_VSOCKETS=m` vs `=y`, `/dev/console`, guest→host no-handshake, `mkfs.ext4 -d` | **every arch** — mechanism-level |
-> | Landlock/uid/rlimit composition (P5) incl. the vsock-UDS ruleset gap, per-thread seccomp, `RLIMIT_FSIZE` × memfd | **every arch** — mechanism-level |
-> | Kernel image must be unwrapped (UKI → EFI-zboot → zstd) | **aarch64 only** — a real requirement for the arm64 appliance. On x86_64 a distro `bzImage` loads directly. |
-> | Boot stalls ~2/3; `shared=on` never boots | **nothing** — nested-Apple only. Proven by cross-VMM diff, not assumed. |
->
-> **Both arches need their own confirmation run.** x86_64 is cheap — CI is
-> already `runs-on: ubuntu-latest` with real `/dev/kvm` and no nesting. aarch64
-> needs **non-nested** hardware (bare-metal Arm; note a non-`.metal` Graviton
-> instance cannot run KVM at all — `.claude/rules/testing.md:1532` currently
-> specifies an impossible tier and needs `*.metal`).
+> | vsock beacon + netns behaviour, `CONFIG_VSOCKETS=m` vs `=y`, `/dev/console`, guest→host no-handshake, `mkfs.ext4 -d` | **every arch** — mechanism-level, now confirmed on both |
+> | Landlock/uid/rlimit composition (P5), the vsock-UDS ruleset gap, per-thread seccomp, `RLIMIT_FSIZE` × memfd | **every arch** — mechanism-level |
+> | Kernel must be unwrapped (UKI → EFI-zboot → zstd) | **aarch64 only.** Confirmed 2026-08-10: on x86_64 `file` reports a bzImage and CH takes it **as-is**. |
+> | `console=ttyAMA0` | **aarch64 only** — x86_64 needs `ttyS0`. See the trap below. |
+> | Boot stalls ~2/3; `shared=on` never boots | **nothing** — nested-Apple only. Now proven by *removing the nesting*. |
 
 ---
 
-## Environment — every verdict below is pinned to this
+## Environments
+
+Two, and every verdict names which one produced it.
+
+**A — nested aarch64 (2026-08-02).** The original increment-a/c/d runs.
 
 ```
-uname -r          : 7.0.0-28-generic
-uname -m          : aarch64
-cloud-hypervisor  : cloud-hypervisor v46.0.0
-virtiofsd         : 1.13.2  (/usr/libexec/virtiofsd — NOT on PATH)
-/dev/kvm          : crw-rw-rw- 1 root kvm 10, 232
-landlock          : CONFIG_SECURITY_LANDLOCK=y; active in /sys/kernel/security/lsm
+uname -r          : 7.0.0-28-generic          uname -m : aarch64
+cloud-hypervisor  : v46.0.0                   virtiofsd: 1.13.2 (/usr/libexec — NOT on PATH)
+/dev/kvm          : crw-rw-rw-  (Lima 0666 udev rule)
+host              : Apple M4 Max, macOS 26.1; CH runs NESTED inside Lima
 ```
 
-Host is Apple Silicon; the Lima guest runs **aarch64**, and Cloud Hypervisor runs
-**nested** inside it. That last fact is load-bearing — see § The nested-virt stall.
+**B — bare metal x86_64 (2026-08-10).** Scaleway Elastic Metal, provisioned by
+`infra/metal/` (committed as `38870e9e`).
+
+```
+uname -r          : 7.0.0-15-generic          uname -m : x86_64
+cpu               : AMD EPYC 8024P (svm / AMD-V)   — note: AMD, not Intel
+systemd-detect-virt: none                     <-- NOT nested. The whole point.
+cloud-hypervisor  : v46.0.0 (--landlock present)
+virtiofsd         : 1.13.2
+/dev/kvm          : crw-rw---- root:kvm       <-- 0660, the production-realistic shape
+storage           : /srv/vm = XFS(reflink=1) on a reclaimed NVMe, 894 GB
+```
+
+Environment B is the trustworthy one. Environment A cannot gate microVM boot —
+see § The nested-virt stall, now settled.
 
 ---
 
@@ -105,6 +117,31 @@ init: HELLO from overdrive spike init, pid=1
 =========================================================
 ```
 
+### CONFIRMED on x86_64 (env B, 2026-08-10) — and the arch split holds exactly
+
+First attempt, no retry, no unwrapping:
+
+```
+### uname -m          : x86_64
+### kernel image      : /var/tmp/spike-increment-a/kernel
+###   file            : Linux kernel x86 boot executable, bzImage, version 7.0.0-15-generic ...
+--- exact CH argv:
+    cloud-hypervisor --cpus boot=1 --memory size=512M \
+      --kernel /var/tmp/spike-increment-a/kernel \
+      --cmdline 'root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=7' \
+      --disk path=/run/spike-increment-a/host/rootfs.ext4 ...
+[    0.670851] EXT4-fs (vda): mounted filesystem f7af687e-... r/w with ordered data mode.
+[    0.744980] Run /init as init process
+init: HELLO from overdrive spike init, pid=1
+```
+
+**The kernel is the distro `vmlinuz` copied verbatim.** `file` identifies it as a
+bzImage and CH loads it directly — no UKI, no EFI-zboot, no zstd. The unwrapping
+chain below is genuinely aarch64-only, as predicted.
+
+Boot reaches `/init` in **0.74 s** on metal, versus ~2.6 s on the nested host when
+it worked at all.
+
 ### The unwrapping requirement is arm64-only — but arm64 is a shipping target, so it stands
 
 Cloud Hypervisor's accepted kernel formats differ by arch (`linux-loader`). The
@@ -113,8 +150,8 @@ since arm64 ships, it remains a genuine appliance requirement on that arch:
 
 | Arch | Accepted | Ubuntu `/boot/vmlinuz-*` is… |
 |---|---|---|
-| **x86_64** (production + CI) | **`bzImage`**, or a PVH-enabled `vmlinux` ELF | **a `bzImage` — loads directly, no unwrapping** |
-| aarch64 (this dev host only) | raw PE `Image` | a UKI wrapper — needs the unwrap below |
+| **x86_64** | **`bzImage`**, or a PVH-enabled `vmlinux` ELF | **a `bzImage` — loads directly, no unwrapping** |
+| **aarch64** | raw PE `Image` | a UKI wrapper — needs the unwrap below |
 
 So on x86_64 there is **no** UKI/zboot/zstd problem and no build-time unwrap step.
 
@@ -200,6 +237,27 @@ Three properties worth naming explicitly:
    exactly the `[D2]` requirement: the Running gate must not depend on the thing it may be
    gating.
 
+### CONFIRMED on x86_64 (env B, 2026-08-10)
+
+Identical behaviour, first attempt:
+
+```
+init: /dev/vsock present BEFORE insmod = false
+init: insmod /modules/vsock.ko -> OK   (+ the two transport modules)
+init: /dev/vsock present AFTER insmod = true
+init: guest net ifaces = [lo] (no networking configured)
+init: vsock connected on attempt 1
+init: reaped pid=72 raw_status=0x700 exited=true code=7
+[HOST t=+1.116s] msg#1 (22 bytes) = "READY pid=1 port=1234\n"
+[HOST t=+1.421s] msg#2 (7 bytes) = "EXIT 7\n"
+[HOST] separate_reads=2 ordering_ready_then_exit=true exit_status_is_7=true
+```
+
+All three load-bearing properties hold on both arches: a real `WEXITSTATUS`
+(`raw_status=0x700`), ordering *observed* via two distinct reads, and the beacon
+arriving with `guest net ifaces = [lo]` — before any networking exists. The
+`CONFIG_VSOCKETS=m` module-loading requirement is also identical on x86_64.
+
 ### Why the netns half works — structural, not incidental
 
 Confirmed against upstream `cloud-hypervisor/docs/vsock.md`: the host end of CH's vsock is
@@ -215,9 +273,26 @@ means this result generalises across kernels rather than being pinned to 7.0.
 
 ---
 
-## The nested-virt stall — an environment finding with real downstream consequences
+## The nested-virt stall — SETTLED 2026-08-10 by removing the nesting
 
-**The probe is flaky, and it is the environment, not Cloud Hypervisor.**
+**The probe is flaky, and it is the environment, not Cloud Hypervisor.** This was
+inferred on 2026-08-02 from population diffs; it is now **proven** by running the
+identical probe on non-nested hardware.
+
+```
+bare metal x86_64 (env B):  12/12 booted + beaconed, 0 failed
+                            time-to-init  min 0.730s  median 0.744s  max 0.746s
+nested aarch64   (env A):   ~1 in 3, stalls varying between the virtio_blk probe
+                            and the root-mount boundary
+```
+
+A 16 ms spread across twelve consecutive runs, versus a two-thirds failure rate.
+The nesting hypothesis is confirmed in the cleanest available form — remove the
+suspected cause, and the symptom disappears entirely.
+
+**Consequence: environment B is a trustworthy gate; environment A structurally is
+not.** Everything below in this section describes env A and remains accurate as
+the account of *why* the dev VM cannot gate microVM boot.
 
 Observed directly during verification: attempt 1 stalled, attempt 2 succeeded. The stall
 freezes *before* `/init` — after `md: ... autorun DONE.`, at the root-mount boundary — and
@@ -278,6 +353,47 @@ stalls will otherwise burn days debugging them as a CH or driver bug. See
 | `[D8d]` virtiofsd sandbox | `--sandbox=namespace` is the default and **genuinely in effect** — but it is a **mount+net** sandbox (`pid` and `user` namespaces are shared). No silent downgrade to `chroot`. State the posture precisely; do not overclaim. |
 | `[D8g]` read-only volumes | **UNVERIFIED.** Host-side `--readonly` was never tested against a guest, because `shared=on` cannot boot on this host. The security framing must not be asserted until it is proven — a guest-side `-o ro` is guest-cooperative and void. |
 | Constraint 7 (version floor) | Installed CH is **v46.0.0**, *below* the reference implementation's unexplained "≥48.0" floor — and it works, and it **has `--landlock` and `--landlock-rules`**. So the ≥48.0 figure has no evidence behind it. Do not inherit it. The real floor should be named against a capability, and P5 will supply the rest. |
+
+---
+
+## P4 — per-launch rootfs copy cost (reflink vs full copy)
+
+### Verdict: **WORKS — reflink is ~260× faster and costs no space**
+
+Env B, `/srv/vm` = XFS(`reflink=1`) on NVMe, 4 GiB source (rootfs-sized), page
+cache dropped before each run, space measured by `df` delta:
+
+```
+coreutils: cp (GNU coreutils) 9.7
+
+  --reflink=never     3.970 s   + 4096 MiB     <- genuine full copy
+  --reflink=auto      0.015 s   +    0 MiB
+  --reflink=always    0.016 s   +    0 MiB
+
+filefrag: 0: 0..1048575: 1048640..2097215: 1048576: last,shared,eof
+```
+
+**~260× faster, zero additional space, extents confirmed shared.** This closes
+research **Gap 2**, which flagged host reflink as a per-VM CoW mechanism as
+essentially undocumented in the literature — plausibly because every surveyed
+platform is multi-tenant, where reflink does not help.
+
+**`[D5]` stands.** A per-launch reflink copy is effectively free, so the
+ext4+`virtio-blk`+reflink design does not need to fall back to squashfs/erofs
+plus an in-guest overlay for cost reasons.
+
+### Design implication — the flag is redundant, the filesystem guarantee is not
+
+**coreutils 9.7 defaults `cp` to `--reflink=auto`.** A plain `cp` already
+reflinks on a capable filesystem, which is why `--reflink=never` was required to
+measure the fallback at all.
+
+So `[D5]` does **not** need to pass the flag. It **does** need to guarantee the
+filesystem, because on ext4 the *identical command* silently becomes the 3.97 s /
+4096 MiB case with **no error and no warning**. That is the whole failure mode:
+not a wrong flag, an unnoticed filesystem. Whatever provisions the appliance's VM
+data directory must assert `FICLONE` works — `infra/metal/provision.sh` does this
+with a real `cp --reflink=always` probe rather than checking the fstype string.
 
 ---
 
@@ -387,7 +503,14 @@ not a byte-copy of CH's internal ruleset — CH exposes no way to prove the latt
 
 ## P6 — virtiofsd + `--memory shared=on`
 
-### Verdict: **UNPROVEN on this host — explicitly NOT refuted**
+### Verdict: **UNPROVEN — explicitly NOT refuted**
+
+> **Status 2026-08-10:** everything below was measured on env A (nested aarch64),
+> where `--memory shared=on` cannot boot at all. **Env B removes that blocker**, so
+> P6 is now runnable and simply has not been run there yet. The findings below —
+> the `RLIMIT_FSIZE` × memfd interaction, `[D8e]`, `[D8d]` — are mechanism-level and
+> stand; the unanswered half is unanswered only because the probe has not been
+> rebuilt for x86_64.
 
 Raw evidence: `spike-scratch/increment-d/evidence.txt` (371 lines).
 
@@ -469,29 +592,52 @@ file is unchanged → refused host-side"* after a run in which the guest never b
 reads as evidence when nothing was attempted. The script now skips the block entirely
 unless the guest completed.
 
-## Not run
+## Still open
 
-- **P3 (two-kernel agreement) — BLOCKED here; belongs on CI.** No 6.18 kernel exists in
-  this VM (only `7.0.0-27` / `7.0.0-28`). Since **both** x86_64 and aarch64 ship, P3 is
-  really two questions — *"does the pinned 6.18 boot under CH on each target arch?"* —
-  and a nested arm64 dev VM answers neither well. Run it through the existing LVH path
-  (`cargo xtask integration-test vm --kernels …`): x86_64 on `ubuntu-latest` is
-  effectively free; aarch64 needs non-nested bare metal.
+- **P6's round-trip half — the reason the metal box exists, and NOT yet re-run there.**
+  It was unexercisable on the nested host (`shared=on` never boots), which env B removes.
+  A new increment-d probe is needed for x86_64. Until it runs, `[D8g]`'s host-side
+  read-only enforcement stays **unverified** and must not be asserted.
+- **P3 (pinned 6.18 kernel).** Not run on either environment. Both x86_64 and aarch64
+  ship, so this is two questions, not one. Env B has `7.0.0-15`; the LVH path
+  (`cargo xtask integration-test vm --kernels …`) is the route on x86_64, and aarch64
+  needs non-nested Arm hardware.
+- **P5 confirmation on env B.** P5's verdict is currently pinned to the nested aarch64
+  host. Its mechanisms are arch-independent, but the caveat is not retired until it is
+  re-run.
 
-  **Every verdict in this document is pinned to `7.0.0-28` / aarch64 / nested.** The
-  mechanism-level results transfer across arch; the boot-reliability results do not.
-- **P4 (per-launch rootfs copy cost / reflink) — still not run.** `[D5]` depends on it,
-  and research Gap 2 flags it as unmeasured. Cheap, and independent of the nesting
-  problem — the obvious next probe if one is wanted.
-- **P6's round-trip half** — unexercisable on this host, not deferred by choice. See the
-  P6 verdict.
+### Probe portability — fixed 2026-08-10, and one trap worth carrying
+
+The increment-a probes were aarch64-only. Four things were arch-bound; three were
+mechanical, one is a genuine trap:
+
+| Bound to arch | Fix |
+|---|---|
+| `TARGET=aarch64-unknown-linux-musl` | `$(uname -m)-unknown-linux-musl` |
+| Kernel prep (UKI unwrap) | x86_64 copies `vmlinuz` verbatim; only aarch64 unwraps |
+| `__NR_finit_module` | 273 on aarch64, **313 on x86_64** — verified from the box's own `asm/unistd_64.h:317`, not memory. Unhandled arches remain a `compile_error!` rather than a wrong syscall. |
+| **`console=ttyAMA0`** | **`ttyS0` on x86_64.** `ttyAMA0` is the ARM PL011 UART. |
+
+**The console name is the trap.** Get it wrong and there is **no error** — the guest
+simply produces no console output at all, which is indistinguishable from a hang. On a
+platform where the known failure mode *is* a silent boot stall, that would have been
+extremely expensive to diagnose.
 
 ---
 
 ## Gate recommendation
 
-**P1 + P2 — PROMOTE.** Slice 01 may proceed on the vsock beacon and the netns placement,
-carrying the two build-time requirements (arm64: raw `Image`; vsock built-in or loaded).
+**P1 + P2 — PROMOTE, and the nested-host caveat is RETIRED.** Confirmed on non-nested
+x86_64 bare metal, 12/12 boots with a 16 ms spread. Slice 01 may proceed on the vsock
+beacon and the netns placement, carrying the build-time requirements: vsock built-in (or
+three modules loaded in order), a static `/dev/console` in the image, and — **on aarch64
+only** — a raw `Image` unwrapped from the distro UKI.
+
+**P4 — PROMOTE. `[D5]` stands.** Reflink is ~260× faster and free in space
+(0.015 s / +0 MiB vs 3.970 s / +4096 MiB for 4 GiB), extents confirmed shared. Carry the
+implication: the `--reflink=auto` flag is redundant on coreutils ≥ 9.0, but the
+**filesystem guarantee is not** — on ext4 the same command silently becomes a full copy
+with no error.
 
 **P5 — PROMOTE, conditional.** `[D7]` / US-VM-7 must absorb three corrections *before*
 Slice 03 builds on them:
@@ -506,10 +652,11 @@ Slice 03 builds on them:
 The uid question is settled: **unprivileged uid + `kvm` group membership against `0660
 root:kvm`**. No 0666 needed.
 
-**P6 — DEFER. Neither PROMOTE nor DISCARD is honest from a nested-Apple host.** `[D8]`'s
-mechanism is **not refuted** — it is unexercisable here, proven by a cross-VMM diff rather
-than assumed. Re-run on **non-nested** hardware before Slice 04 is built (x86_64 CI is the
-cheap path; arm64 needs bare metal). `[D8d]` and `[D8e]` are confirmed as far as this host
+**P6 — STILL DEFERRED, but the blocker is gone.** `[D8]`'s mechanism was never refuted,
+only unexercisable: `shared=on` cannot boot under nested virt (proven by cross-VMM diff —
+QEMU private memory 3/4, QEMU memfd-shared 0/4). **Env B removes that constraint**, so P6
+is now runnable and simply has not been run. It needs a new increment-d probe built for
+x86_64. This is the highest-value remaining work and the reason the metal box exists. `[D8d]` and `[D8e]` are confirmed as far as this host
 allows. **`[D8g]`'s host-side read-only security framing remains unverified and must not be
 asserted until it is.**
 
@@ -520,6 +667,11 @@ was quietly dropped: P5's three corrections are handed to `[D7]`/US-VM-7, and P6
 unverified `[D8g]` claim is flagged for restatement rather than left standing.
 
 ## Artifacts
+
+**Environment B is reproducible from the repo:** `infra/metal/` (`38870e9e`, plus
+`f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
+guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
+Its README carries the operational traps found while building it.
 
 `spike-scratch/increment-a/` (gitignored, never committed):
 `probe/Cargo.toml`, `probe/src/bin/guest_init.rs`, `probe/src/bin/host_listener.rs`,
