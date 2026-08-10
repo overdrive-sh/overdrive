@@ -93,12 +93,28 @@ env:
   OVERDRIVE_LIMA_VM: "1"
 
 # ────────────────────────────────────────────────────────────────────────────
-# Pinned versions for single-file binary downloads. Bump as releases land.
-# Set via env so probes can reference them too.
+# Pinned versions for single-file binary downloads.
+#
+# THE RULE: track LATEST STABLE. A pin below latest needs a named blocking
+# reason written next to it plus the condition that clears it — "our tests pass
+# on the pinned version" is NOT a reason. "Bump as releases land" was the old
+# wording and it did not happen: on 2026-08-10 every pin here was stale, CH by
+# 7 releases (14 months) and wasmtime by 18 major versions, with a fully green
+# board the whole time, because every check in this repo verifies
+# installed == pinned and none verifies pinned == latest.
+#
+# These are duplicated in infra/provision/versions.env and kept aligned BY EYE.
+# That duplication is a known second defect; see the note in that file.
 # ────────────────────────────────────────────────────────────────────────────
 param:
-  CLOUD_HYPERVISOR_VERSION: "v46.0"
-  WASMTIME_VERSION:         "v28.0.0"
+  # v46.0 -> v53.0 (2026-08-10). vhost-user-fs restore is broken before v52.0
+  # (cloud-hypervisor#6931). Full rationale in infra/provision/versions.env.
+  CLOUD_HYPERVISOR_VERSION: "v53.0"
+  # NOTE FOR THE NEXT READER: wasmtime's "v46" is NOT cloud-hypervisor's "v46".
+  # Two unrelated projects that happen to collide on a version number, on
+  # adjacent lines, at the exact moment CH is being moved OFF v46. Read the key,
+  # not the number.
+  WASMTIME_VERSION:         "v46.0.2"
   PWRU_VERSION:             "v1.0.11"
 
 # ────────────────────────────────────────────────────────────────────────────

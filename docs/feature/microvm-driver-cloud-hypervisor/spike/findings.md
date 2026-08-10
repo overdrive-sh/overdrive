@@ -47,7 +47,8 @@ Two, and every verdict names which one produced it.
 
 ```
 uname -r          : 7.0.0-28-generic          uname -m : aarch64
-cloud-hypervisor  : v46.0.0                   virtiofsd: 1.13.2 (/usr/libexec — NOT on PATH)
+cloud-hypervisor  : v53.0 (was v46.0.0 until 2026-08-10 — see § The v46 -> v53 bump)
+                    virtiofsd: 1.13.2 (/usr/libexec — NOT on PATH)
 /dev/kvm          : crw-rw-rw-  (Lima 0666 udev rule)
 host              : Apple M4 Max, macOS 26.1; CH runs NESTED inside Lima
 ```
@@ -59,7 +60,7 @@ host              : Apple M4 Max, macOS 26.1; CH runs NESTED inside Lima
 uname -r          : 7.0.0-15-generic          uname -m : x86_64
 cpu               : AMD EPYC 8024P (svm / AMD-V)   — note: AMD, not Intel
 systemd-detect-virt: none                     <-- NOT nested. The whole point.
-cloud-hypervisor  : v46.0.0 (--landlock present)
+cloud-hypervisor  : v53.0 (--landlock present; was v46.0.0 — see § The v46 -> v53 bump)
 virtiofsd         : 1.13.2
 /dev/kvm          : crw-rw---- root:kvm       <-- 0660, the production-realistic shape
 storage           : /srv/vm = XFS(reflink=1) on a reclaimed NVMe, 894 GB
@@ -353,7 +354,7 @@ stalls will otherwise burn days debugging them as a CH or driver bug. See
 | `[D8e]` volume confinement | **HOLDS.** CH never needed the volume *source* directory — only `virtiofsd` touches the data. US-VM-8's non-widening AC stands. `--fs socket=` is auto-derived by CH's implicit ruleset (unlike `--vsock`). |
 | `[D8d]` virtiofsd sandbox | `--sandbox=namespace` is the default and **genuinely in effect** — but it is a **mount+net** sandbox (`pid` and `user` namespaces are shared). No silent downgrade to `chroot`. State the posture precisely; do not overclaim. |
 | `[D8g]` read-only volumes | **UNVERIFIED.** Host-side `--readonly` was never tested against a guest, because `shared=on` cannot boot on this host. The security framing must not be asserted until it is proven — a guest-side `-o ro` is guest-cooperative and void. |
-| Constraint 7 (version floor) | Installed CH is **v46.0.0**, *below* the reference implementation's unexplained "≥48.0" floor — and it works, and it **has `--landlock` and `--landlock-rules`**. So the ≥48.0 figure has no evidence behind it. Do not inherit it. The real floor should be named against a capability, and P5 will supply the rest. |
+| Constraint 7 (version floor) | ~~Installed CH is **v46.0.0**, *below* the reference implementation's unexplained "≥48.0" floor — and it works, and it **has `--landlock` and `--landlock-rules`**. So the ≥48.0 figure has no evidence behind it. Do not inherit it.~~ **SUPERSEDED 2026-08-10 — this reasoning was the bug.** "Their floor is unjustified" was right; "therefore stay on v46" did not follow. The correct response to an unjustified floor is to take LATEST. Now **v53.0**; see § "The v46 → v53 bump". The half that survives: name a floor against a *capability*, not a number someone else wrote down. |
 
 ---
 
@@ -826,6 +827,84 @@ the question was boot reliability, not throughput.
   power-cut mid-write actually costs on either mechanism is not.
 - **The rate-limit measurement is one sample** at one setting. It shows the knob works and
   is roughly the right magnitude, not that it is precise.
+
+## The v46 → v53 bump, and the one migration it surfaced
+
+**Why this happened at all.** The CH pin sat at **v46.0** (released 2025-05-23) for 14 months
+and 7 releases. It entered the tree in `ed5975d8` — *"feat(core): persist backoff inputs,
+recompute deadline each tick (#143)"* — a version pin buried in a reconciler-backoff commit,
+where no reviewer would look for one. When the upgrade question *did* surface, this document's
+own Constraint 7 and `versions.env` both argued **against** moving, on the grounds that v46
+"demonstrably has the capability we actually need." That reasoning read like rigour and was
+its opposite: it froze the pin against the requirements known at that moment and talked down
+the one prompt that would have moved it. Checkpoint/restore later became the target workload,
+and `vhost-user-fs` restore is broken before v52.0 (cloud-hypervisor#6931).
+
+The structural cause, and it is not specific to CH: **every version gate in this repo checks
+`installed == pinned`; none checks `pinned == latest`.** A pin can rot indefinitely with a
+green board. The sweep that followed found all three single-binary pins stale — CH by 7
+releases, **wasmtime by 18 major versions** (v28.0.0 → v46.0.2), pwru by a patch.
+
+### The migration: `image_type=` is mandatory from v53, and its default is not benign
+
+The first v53 run looked like a virtiofs regression: modes `full`, `full-no-fsd-rule`, and
+`full @ cache=auto` all failed; `sharedonly` and `noshare` passed. Every failing mode had
+`--fs` devices, so the obvious reading was "v53 broke virtiofs." **That reading was wrong.**
+
+```
+WARN: DEPRECATION: auto-detection of disk image type is deprecated ...
+WARN: Autodetected raw image type. Disabling sector 0 writes.
+WARN: <_disk0_q0> Attempting to write to sector 0 on a disk without specifying image_type
+ERROR: Fatal error: VmmThread(VmReboot(DeviceManager(CreateVirtioFs(
+         VhostUserConnect(VhostUserProtocol(SocketConnect(
+           Os { code: 111, kind: ConnectionRefused })))))))
+```
+
+The chain: our images are **bare filesystems with no partition table**, so sector 0 *is* the
+filesystem. v53 auto-detects `raw` and **silently disables sector-0 writes**. The guest's
+write is refused, it faults, `panic=1` reboots it — and on reboot CH cannot reconnect to a
+`virtiofsd` that already exited when the first instance disconnected. Hence
+`CreateVirtioFs`/`ConnectionRefused`.
+
+**The failure surfaced two layers from its cause, and only on the `--fs` modes** — because a
+reboot is fatal *only* when a vhost-user daemon has to be reconnected. The block-only modes
+rebooted and carried on, which is exactly why the signature pointed at virtiofs.
+
+Fix: pass `image_type=raw` explicitly on every `--disk`. With that, **all five modes pass on
+v53.** This is a **driver requirement**, not probe hygiene: `image_type` must be set on every
+disk the `vm` driver attaches, and the auto-detect path must never be relied on.
+
+### The measurements survive the bump
+
+Re-run on v53, six interleaved trials per mechanism (was four on v46):
+
+| Metric | v46 | **v53** |
+|---|---|---|
+| virtiofs, 256 MiB streaming | 2247.6–2325.7 MiB/s | **2256.4–2323.6 MiB/s** |
+| virtio-blk, 256 MiB streaming | 3189.1–3243.7 MiB/s | **3213.3–3365.3 MiB/s** |
+| virtiofs, 1000 files | 0.41–0.49 ms/file | **0.40–0.43 ms/file** |
+| virtio-blk, 1000 files | 0.56–0.59 ms/file | **0.49–0.59 ms/file** |
+
+Still non-overlapping in both directions, same sign, same rough magnitude. **P5, P6, and P7's
+conclusions are unchanged by the bump** — block wins streaming, virtiofs wins per-file.
+
+One honesty note on method: a first 3-trial set produced two outliers (a 3749 MiB/s virtiofs
+streaming sample, above block; and a 0.62 ms/file sample) taken while the box was still
+settling after re-provisioning. They are not in the table above and were not reported as a
+result — the six-trial set replaced them. Had the 3-trial set been written up, it would have
+shown the per-file ranges overlapping and reversed the P7 conclusion on noise.
+
+### What this does NOT re-open, and what it does
+
+- **NOT re-opened: the P6/P7 measurements.** They reproduce on v53.
+- **RE-OPENED: the checkpoint/restore half of the I-6 recommendation.** The research
+  (`docs/research/platform/persistent-microvm-checkpoint-restore-comprehensive-research.md`)
+  argued block wins partly because `vhost-user-fs` restore hangs — cloud-hypervisor#6931,
+  **fixed in v52.0**. On v53 that specific blocker should be gone. The independent half of
+  the argument (the temporal-gap reasoning; the six-for-six convergence that nobody exposes a
+  live host-shared filesystem into a checkpointable guest) is untouched. **Snapshot/restore
+  has still never been run here at all** — that is probe S-1, and it is now the gating
+  question for I-6.
 
 ## Still open
 
