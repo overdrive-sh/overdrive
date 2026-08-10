@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f, g (P1, P2, P4, P5, P6, P7, P8)
+# SPIKE findings — increments a, c, d, e, f, g (P1, P2, P4, P5, P6, P7, P8, P9)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -13,6 +13,7 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P6** virtiofsd + `--memory shared=on` | **WORKS** — on x86_64. `[D8g]` host-side `read_only` **verified**; aarch64 still unmeasured |
 | **P7** virtio-blk volumes — the I-6 counterfactual | **BOTH WORK** — neither wins on speed; live host sharing is the only real axis |
 | **P8** snapshot / restore (S-1, S-6, S-7) | **WORKS on v53** — via the API; the CLI `--restore` is a silent no-op. **CPU hotplug composes with restore.** |
+| **P9** S-2 volumes across restore | **BOTH SURVIVE** — virtiofs included, with a fresh daemon. Overturns the research's checkpoint argument. |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
 Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g}/` (gitignored). `crates/` untouched
@@ -1031,16 +1032,107 @@ nothing here proves the bytes reached the platter.
   wall-clock time spent checkpointed. A proper before/after comparison of
   `CLOCK_REALTIME` deserves its own probe; it is not claimed here.
 
+## P9 — S-2: volumes across restore. **Both survive. This overturns the research premise.**
+
+Measured on env B, CH **v53.0**, as increment-g modes `blk` / `fs` / `fs-keepalive`.
+
+The subject is deliberately not "does the volume still exist afterwards" — that is weak.
+It is **an open file descriptor held across the checkpoint**: the guest opens
+`persist.bin` on the volume *before* the snapshot and, every tick, `pwrite`s the tick
+number through that same fd, `fsync`s, and `pread`s it back. For virtiofs that descriptor
+corresponds to session state inside `virtiofsd`, which lives **outside** the snapshot.
+
+| Arm | Volume | Result |
+|---|---|---|
+| `blk` | `--disk` virtio-blk | **`vol=ok` on every tick**, before and after. No interruption. |
+| `fs` | `--fs` virtiofs, daemon killed with the VMM, **fresh** daemon before restore | **`vol=ok` before AND after**, and the host-side file reads `TICK-000020` — a post-restore guest write landed on the host. |
+| `fs-keepalive` | virtiofs, same daemon kept alive | **Unconstructable — see below.** |
+
+In both surviving arms the S-1 verdict also held: nonce identical, counter continued, no
+reboot banner.
+
+### The finding that matters: virtiofs is NOT disqualified by checkpoint/restore
+
+`docs/research/platform/persistent-microvm-checkpoint-restore-comprehensive-research.md`
+recommended block partly on the grounds that virtiofs cannot survive a checkpoint —
+cloud-hypervisor#6931, plus the argument that live migration hands off between two
+*simultaneously live* daemons whereas a checkpoint is a temporal gap in which no daemon
+exists. **On v53 the gap is real, the daemon does die, and it works anyway.**
+
+```
+17:43:11 INFO  virtiofsd] Client connected, servicing requests
+17:43:17 WARN  virtiofsd::vhost_user] Front-end did not announce migration to begin, so we
+                failed to prepare for it; collecting data now.  If you are doing a
+                snapshot, that is OK; otherwise, migration downtime may be prolonged.
+17:43:17 INFO  virtiofsd] Client disconnected, shutting down
+17:43:18 INFO  virtiofsd] Waiting for vhost-user socket connection...   <- FRESH daemon
+17:43:18 INFO  virtiofsd] Client connected, servicing requests
+```
+
+virtiofsd names the snapshot case itself and blesses it: *"If you are doing a snapshot,
+that is OK."* The guest's pre-existing fd keeps working because the replacement daemon
+re-resolves the path; nothing in the FUSE session had to survive.
+
+**So #6931 is fixed as far as this test reaches, and the CH-side half of the research's
+argument no longer holds on v53.** The half that never depended on CH — that a block
+volume cannot be read by the host while the guest runs — is untouched and remains the
+real axis.
+
+### `fs-keepalive` could not be built, and that is itself the answer
+
+The mode was meant to contrast "daemon survives the checkpoint" against "daemon dies".
+**It cannot exist:** `virtiofsd` shuts itself down the moment its client disconnects, and
+it has no `--persist` / stay-alive option (checked against `--help`). Killing the VMM
+therefore always destroys the daemon. The attempt failed exactly as that implies —
+`PUT vm.restore` → **HTTP 500**, because no socket was listening.
+
+**Driver consequence:** a virtiofs volume requires the driver to **start a fresh
+`virtiofsd` on the same socket path before issuing `vm.restore`**. That is a real,
+ordered step in the restore path, not an implementation detail — get it wrong and restore
+fails with an opaque 500.
+
+### A harness gap caught before it became a finding — the second in two probes
+
+The first `fs` run reported `vol=none` for every tick and looked like a clean negative:
+*virtiofs volume does not survive a checkpoint*. It was nothing of the sort. increment-g's
+rootfs staged **no kernel modules at all**, and `CONFIG_VIRTIO_FS=m` — so the mount failed
+with `ENODEV` before any of this was exercised. Staging `virtiofs.ko` and `insmod`-ing it
+turned the same arm green:
+
+```
+init: insmod /modules/virtiofs.ko -> rc=0
+init: S-2 mount volrw (virtiofs) at /mnt/vol -> rc=0 errno=0
+init: S-2 volume fd=3 OPEN and will be held across the snapshot
+```
+
+This is the same shape as P8's CPU-hotplug near-miss (`/proc/cpuinfo` showing only *online*
+CPUs). **Twice in two probes, a missing guest-side prerequisite would have produced a
+confident, wrong negative** — and in both cases the wrong negative pointed the architecture
+somewhere expensive. The general lesson: before recording "X does not work", confirm the
+guest could have exercised X at all.
+
+### What P9 does NOT establish
+
+- **One file, one stable path, `--cache=never`.** Not tested: a file *unlinked* or renamed
+  on the host during the gap, a share the host mutates while the VM is checkpointed, or
+  `--cache=auto` (where guest-cached metadata could plausibly go stale).
+- **Same host, same socket path.** Cross-host restore remains untested, and the snapshot
+  embeds absolute paths.
+- **No concurrency.** One VM, one volume, one fd.
+- **Nothing about correctness under a crash** — this was a clean `vm.pause` → snapshot,
+  never a power-cut mid-write.
+
+### Where this leaves I-6
+
+Checkpoint/restore no longer decides it: **both mechanisms survive.** The decision falls
+back to the axes P7 already measured — live host access (virtiofs only), rate limiting
+(`--disk` only), the per-VM daemon and its ordered restore step (virtiofs only),
+`shared=on` and its `RLIMIT_FSIZE` interaction (virtiofs only), and the streaming-vs-
+per-file throughput split. That is a decision for the user, and it should be taken on
+those axes rather than on a checkpoint limitation that this probe just removed.
+
 ## Still open
 
-- **S-2 — volumes across restore. This is now the gating question for I-6.**
-  P8 proved snapshot/restore works but was deliberately **rootfs-only**, so nothing yet
-  says what happens to a `--disk` volume or a `--fs` share across a checkpoint. It matters
-  because the research doc's recommendation ("block wins, virtiofs cannot checkpoint")
-  rests partly on cloud-hypervisor#6931 — **fixed in v52.0, and we now run v53**. That
-  half of the argument may no longer hold. The half that does not depend on CH at all —
-  the temporal-gap reasoning, and that no surveyed vendor exposes a live host-shared
-  filesystem into a checkpointable guest — is untouched either way.
 - **S-3 — vsock across restore.** Not tested, deliberately: increment-g uses the serial
   console so that "did the restore work" could not be confounded with "did the vsock peer
   reconnect". Ours is the channel the driver's Running gate rides on, so it needs its own
