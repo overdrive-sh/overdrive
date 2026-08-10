@@ -1033,6 +1033,21 @@ nothing here proves the bytes reached the platter.
 
 ## Still open
 
+- **S-2 — volumes across restore. This is now the gating question for I-6.**
+  P8 proved snapshot/restore works but was deliberately **rootfs-only**, so nothing yet
+  says what happens to a `--disk` volume or a `--fs` share across a checkpoint. It matters
+  because the research doc's recommendation ("block wins, virtiofs cannot checkpoint")
+  rests partly on cloud-hypervisor#6931 — **fixed in v52.0, and we now run v53**. That
+  half of the argument may no longer hold. The half that does not depend on CH at all —
+  the temporal-gap reasoning, and that no surveyed vendor exposes a live host-shared
+  filesystem into a checkpointable guest — is untouched either way.
+- **S-3 — vsock across restore.** Not tested, deliberately: increment-g uses the serial
+  console so that "did the restore work" could not be confounded with "did the vsock peer
+  reconnect". Ours is the channel the driver's Running gate rides on, so it needs its own
+  answer.
+- **Cross-host restore.** Everything in P8 is same-host. A checkpoint that cannot move
+  between machines is a much weaker product primitive, and the snapshot embeds absolute
+  host paths (kernel, disk, serial) that must exist on the restoring host.
 - **P6 on aarch64.** P6 is answered on x86_64 (increment-e). `shared=on` still cannot be
   measured on env A — it does not boot under nested virt — and no non-nested Arm hardware
   is available. Both arches ship, so the virtiofs + `shared=on` path is proven on **one of
@@ -1116,6 +1131,15 @@ limiting, and a volume path that cannot run on the Apple-Silicon dev host. If th
 block wins on every remaining axis. **That question was never asked during DISCUSS** — I-6
 recorded *which* mechanism before anything recorded *what volumes are for*. This is a
 scoping gap to close with the user, not a probe result to act on unilaterally.
+
+**P8 — PROMOTE, and it retires the largest open risk in the feature.** Snapshot/restore
+works on v53 through the API; the CLI `--restore` is a silent no-op and the driver must
+not use it. **CPU hotplug composes with restore**, which was the highest-risk unknown
+here — it is the stated reason this feature chose Cloud Hypervisor, Firecracker forbids
+it, and nobody had checked. Four operational traps (the `<api-socket>.lock`, the
+truncating serial re-open, and two `pkill` shapes) are driver requirements, not probe
+hygiene. What P8 does **not** settle is volumes across restore (S-2), which is now what
+I-6 waits on.
 
 **P3 — belongs on CI, not here.** See § Not run.
 
