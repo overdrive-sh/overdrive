@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f, g (P1, P2, P4, P5, P6, P7, P8, P9)
+# SPIKE findings — increments a, c, d, e, f, g, h (P1, P2, P4, P5, P6, P7, P8, P9, P10)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -14,9 +14,10 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P7** virtio-blk volumes — the I-6 counterfactual | **BOTH WORK** — neither wins on speed; live host sharing is the only real axis |
 | **P8** snapshot / restore (S-1, S-6, S-7) | **WORKS on v53** — via the API; the CLI `--restore` is a silent no-op. **CPU hotplug composes with restore.** |
 | **P9** S-2 volumes across restore | **BOTH SURVIVE** — virtiofs included, with a fresh daemon. Overturns the research's checkpoint argument. |
+| **P10** S-8 `vhost-user-blk` | **WORKS** — but requires `shared=on` and forfeits rate limiting, exactly like `vhost-user-fs`. Its real edge: the backend survives the VMM. |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -1130,6 +1131,93 @@ back to the axes P7 already measured — live host access (virtiofs only), rate 
 `shared=on` and its `RLIMIT_FSIZE` interaction (virtiofs only), and the streaming-vs-
 per-file throughput split. That is a decision for the user, and it should be taken on
 those axes rather than on a checkpoint limitation that this probe just removed.
+
+## P10 — S-8: `vhost-user-blk`. **It works, and it kills two of my own claims.**
+
+Measured on env B, CH **v53.0**, backend `qemu-storage-daemon` (QEMU 10.2.1) — increment-h.
+Reuses increment-g's kernel, rootfs and guest binary unchanged, so the only deliberate
+variable is how the volume is attached.
+
+**Why it was run:** #97 proposes `overdrive-fs` (content-addressed chunks in Garage +
+per-rootfs libSQL + NVMe cache) served over **`vhost-user-fs`**. Fly Sprites converged on
+the same *storage model* but a different *guest seam* — the guest sees ext4 on a block
+device, with no virtiofs anywhere. `vhost-user-blk` is the block-shaped equivalent seam,
+and it had never been measured here.
+
+### It works
+
+| Mode | Result |
+|---|---|
+| `shared` — vhost-user-blk + `--memory shared=on` | **Boots, `vol=ok` before and after, snapshot 204, restore 204, restored from memory** (nonce identical, tick 10 → 20, zero reboot banners) |
+| `noshare` — vhost-user-blk without `shared=on` | **REFUSED at config validation** (below) |
+| `plain` — ordinary `--disk` (the control) | Boots, `vol=ok`, restores from memory, **no `shared=on` needed** |
+
+### The correction: two claims I made were wrong
+
+I told the user that choosing block over virtiofs for #97's seam *"would keep rate
+limiting, avoid `shared=on` and its `RLIMIT_FSIZE` trap, drop the per-VM daemon's ordered
+restore step, and shed the 2.8× per-file FUSE overhead."* Measured against
+`vhost-user-blk` specifically:
+
+| Claim | Verdict |
+|---|---|
+| keeps rate limiting | **FALSE.** `ParsingConfig(Validation(VhostUserRateLimiterNotSupported))` — *"Rate limiting is not supported with vhost-user"* |
+| avoids `shared=on` | **FALSE.** `ParsingConfig(Validation(VhostUserRequiresSharedMemory))` — refused before boot |
+| drops the daemon's ordered restore step | **TRUE**, and it is the real advantage — see below |
+| sheds the 2.8× per-file overhead | **UNMEASURED** for `vhost-user-blk`; the 2.8× was plain `--disk` vs virtiofs |
+
+**The error class is the same one that produced the retracted "block runs in Lima" claim:
+generalising from a measured thing (plain `--disk`) to an unmeasured adjacent thing
+(`vhost-user-blk`) because they share a word.** Both `shared=on` and rate limiting are
+properties of **vhost-user**, not of *block*. Every vhost-user transport pays them.
+
+### The one real advantage, and it is genuine
+
+**The block backend SURVIVES its client's death; `virtiofsd` does not.**
+
+```
+=== [4] kill the VMM
+    backend daemon still alive after the VMM died: 1  (virtiofsd would be 0)
+```
+
+`virtiofsd` shuts down the moment its client disconnects and has no stay-alive option
+(P9), which forces the driver to start a fresh daemon on the same socket path *before*
+`vm.restore` — an ordered step that fails with an opaque HTTP 500 if missed.
+`qemu-storage-daemon` simply keeps serving, and the restore reconnects to the running
+backend. One fewer ordered step, and one fewer way for restore to fail.
+
+### The corrected picture for #97's seam
+
+| | `vhost-user-fs` | `vhost-user-blk` | plain `--disk` |
+|---|---|---|---|
+| Can front a custom backend (`overdrive-fs`) | yes | yes | **no** |
+| `shared=on` required | yes | **yes** | no |
+| Rate limiting | no | **no** | **yes** |
+| Backend survives VMM death | **no** | **yes** | n/a |
+| Ordered daemon restart before restore | **required** | not required | n/a |
+| Survives snapshot/restore | yes (P9) | yes | yes (P9) |
+
+**This reframes the argument.** `shared=on` and rate limiting are NOT fs-vs-blk
+considerations — they belong to *"does this volume need a custom backend at all?"* Any
+volume served by `overdrive-fs` pays `shared=on` and forfeits rate limiting **whichever**
+vhost-user transport it picks. A volume that does **not** need a custom backend should use
+plain `--disk`, which keeps both.
+
+Between the two vhost-user seams, the measured discriminators are: **daemon lifetime**
+(blk wins clearly), **semantics vs the single-writer constraint** (blk matches it; a
+block device is inherently single-writer), and **hydrate-on-access granularity** (fs gives
+file-level semantic knowledge; blk gives block-level, which is what Sprites chose).
+
+### What P10 does NOT establish
+
+- **No throughput number for `vhost-user-blk`.** The daemon here is
+  `qemu-storage-daemon` standing in for a future `overdrive-fs`; benchmarking it would
+  measure QEMU's block layer, not ours. The per-file overhead comparison is therefore
+  still open for this transport.
+- **`qemu-storage-daemon` is not the proposed backend.** It proves the *transport*
+  composes; it says nothing about what a Rust chunk-store backend would cost.
+- **Backend survival was observed once**, not stress-tested across repeated
+  checkpoint cycles, and not with the backend itself restarted mid-flight.
 
 ## Still open
 
