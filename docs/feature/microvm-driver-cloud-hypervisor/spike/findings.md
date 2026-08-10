@@ -1,4 +1,4 @@
-# SPIKE findings — increments a, c, d, e, f, g, h, i, j (P1, P2, P4, P5, P6, P7, P8, P9, P10, P11, P12)
+# SPIKE findings — increments a, c, d, e, f, g, h, i, j, k (P1, P2, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13)
 
 Feature: `microvm-driver-cloud-hypervisor` (GH [#42](https://github.com/overdrive-sh/overdrive/issues/42)).
 Slice: `slices/slice-00-spike-ch-boot-and-vsock.md`. Governed by `.claude/rules/spike.md`.
@@ -16,10 +16,11 @@ Dates: 2026-08-02 (nested aarch64), **2026-08-10 (bare-metal x86_64)**.
 | **P9** S-2 volumes across restore | **BOTH SURVIVE** — virtiofs included, with a fresh daemon. Overturns the research's checkpoint argument. |
 | **P10** S-8 `vhost-user-blk` | **WORKS** — but requires `shared=on` and forfeits rate limiting, exactly like `vhost-user-fs`. Its real edge: the backend survives the VMM. |
 | **P11** what `vhost-user-blk` COSTS | **THE TRANSPORT IS FREE** — matched on memory backing and caching, it ties plain `--disk` (622.7 vs 622.5 MiB/s, ranges overlap). `shared=on` costs 55%, and that is a **host THP tunable**, not a vhost-user property. Two corrections fall out: qemu's default export is **not flush-durable**, and P7's "~42% faster" is really ~11%. |
+| **P13** `memory_restore_mode=ondemand` | **WORKS — restore becomes O(1) in guest RAM** (12–17 ms at BOTH 2 and 4 GiB, vs `copy`'s 0.65–0.88 s / 1.65–1.74 s; ranges disjoint). But it is **asynchronous eager restore, not lazy paging**: a `uffd-handler` thread backfills all of guest RAM at ~900 MiB/s **whether or not the guest touches anything** (proved by a WALK=0 control), so **a warm pool still costs N × RAM** (`Pss ≈ Rss`, `Private_Dirty` = full guest RAM, both modes). **REFUSED under P5's uid-dropped shape** — `Failed to create userfaultfd / EPERM` — needing host `vm.unprivileged_userfaultfd=1`. `prefault` is a pure ~1.8× cost. |
 | **P12** S-3 vsock across snapshot/restore | **THE VM RESTORES, THE CONNECTION DOES NOT** — and the reset is **one tick late**: 13/16 runs the guest got a successful `send()` the host never received. New connections work immediately, so the Running gate is recoverable *if the guest re-dials*. Restore **fails** on a stale socket (`EADDRINUSE`) or a missing directory (`ENOENT`) — recoverable in place. |
 | **P3** the pinned 6.18 kernel | **NOT RUN** |
 
-Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h,i,j}/` (gitignored). `crates/` untouched
+Raw evidence: `spike-scratch/increment-{a,c,d,e,f,g,h,i,j,k}/` (gitignored). `crates/` untouched
 throughout, verified per increment via `git status --porcelain -- crates/`.
 
 > ## ⚠ Read this first — "aarch64" and "nested Apple Silicon" are different things
@@ -1875,6 +1876,512 @@ call before any arm was run.
   a UNIX-domain socket on the host side (P2), so it is expected to transfer — but
   expected is not measured.
 
+---
+
+## P13 — `memory_restore_mode=ondemand` (increment-k)
+
+### Verdict: **WORKS, and it makes restore latency O(1) in guest RAM — but it does NOT make a warm pool cheaper, and it is REFUSED under the uid-dropped shape P5 committed to.**
+
+Measured on env B, CH **v53.0**, 2 GiB and 4 GiB guests, cold page cache.
+This is the first measurement of the userfaultfd restore path added in CH
+**v52.0 (#7800)**. S-7 established that a snapshot's `memory-ranges` is exactly
+guest RAM and not sparse, so under `copy` the restore cost scales with guest
+RAM; `ondemand` is the mechanism that was supposed to change that.
+
+Raw evidence: `spike-scratch/increment-k/evidence/` —
+`bench-2048-walk2.txt`, `bench-4096-walk2.txt`, `bench-2048-walk0.txt`
+(the control), `api-probe.txt`, `uid-drop.txt`, `uid-drop-sysctl1.txt`,
+`s5-n4-2048.txt`.
+
+Three results, and they point in different directions. Taking only the first
+would be the mistake:
+
+1. **Latency: a real, large win.** `vm.restore` returns in ~12 ms instead of
+   ~850 ms (2 GiB) or ~1.7 s (4 GiB), and it does not grow with guest RAM.
+2. **Memory: no win at all.** The VMM reaches full guest RAM within ~2.5 s
+   *whether or not the guest touches anything*. `ondemand` moves the read off
+   the critical path; it does not avoid it.
+3. **Composition: currently blocked.** Under P5's uid-dropped launch shape it
+   fails closed with `Failed to create userfaultfd / Operation not permitted`.
+
+### The API spelling is NOT the CLI spelling — and the field name is unvalidated
+
+Two traps, both of which cost a driver silently rather than loudly.
+
+`--help` documents `memory_restore_mode=copy|ondemand`. **The JSON API rejects
+both of those.** It accepts only `Copy` and `OnDemand`. Established by sending a
+deliberately-invalid value and reading serde's own enumeration back rather than
+guessing (`api-probe.txt`):
+
+```
+  400  {"source_url":"file:///...","memory_restore_mode":"ondemand"}
+       body: ["Failed to deserialize JSON",
+              "unknown variant `ondemand`, expected `Copy` or `OnDemand` at line 1 column 82"]
+  400  {"source_url":"file:///...","memory_restore_mode":"BOGUS_VALUE"}
+       body: ["Failed to deserialize JSON",
+              "unknown variant `BOGUS_VALUE`, expected `Copy` or `OnDemand` at line 1 column 85"]
+  204  {"source_url":"file:///...","memory_restore_mode":"OnDemand"}
+  204  {"source_url":"file:///...","memory_restore_mode":"Copy"}
+```
+
+The wrong VALUE is caught loudly with a 400. The wrong FIELD NAME is not caught
+at all — `RestoreConfig` does not `deny_unknown_fields`:
+
+```
+  204  {"source_url":"file:///...","bogus_field":1}
+```
+
+**So a driver that misspells the key gets `Copy` behaviour, a 204, and no
+signal whatever.** That is the one failure mode here that produces a wrong
+answer silently, and it argues for the driver asserting on the observable
+(restore latency, or VMM RSS immediately after restore) rather than trusting
+the 204.
+
+Third constraint, from the binary's own string table and confirmed by `--help`:
+`'prefault' cannot be combined with 'memory_restore_mode=ondemand'`. **`prefault`
+is a `Copy`-only knob**, so the three arms below are the entire option space.
+
+### 5 interleaved trials per mode, per size — every sample, nothing dropped
+
+30 bench trials + 9 control trials. **All 39 passed the correctness check
+(`genuine=true`, `status=OK`); none was discarded.** Every trial drops the page
+cache after a `sync(2)` and prints `Cached` before/after so a drop that did not
+drop is visible.
+
+```
+=== 2 GiB guest, cold cache
+                     restore_s (the vm.restore call itself)
+    copy           0.6465 0.8435 0.8487 0.8755 0.8543
+    ondemand       0.0175 0.0122 0.0151 0.0120 0.0126
+    copy-prefault  1.5692 1.5606 1.5698 1.5793 1.5625
+
+                     user_visible_ms (restore + resume + resume->first guest tick)
+    copy            651.9  849.0  854.1  881.1  859.8
+    ondemand         91.3   83.9   80.5   85.8   82.4
+    copy-prefault  1578.9 1576.4 1579.3 1593.0 1570.1
+
+                     resume_to_tick_ms (resume returned -> first post-restore tick)
+    copy              4.2    4.3    4.2    4.3    4.3
+    ondemand         72.5   70.5   64.1   72.6   68.5
+    copy-prefault     8.5   14.6    8.3   12.5    6.3
+
+                     rss_at_restore_kb (VMM RSS the instant vm.restore returned)
+    copy           2102656 2102656 2102656 2102656 2102656
+    ondemand         17404   13008   15488   13032   13444
+    copy-prefault  2102716 2102716 2102720 2102720 2102716
+
+=== 4 GiB guest, cold cache
+                     restore_s
+    copy           1.7253 1.6511 1.7432 1.7105 1.6669
+    ondemand       0.0140 0.0143 0.0129 0.0126 0.0133
+    copy-prefault  3.0960 3.0696 3.1155 3.0857 3.1032
+
+                     user_visible_ms
+    copy           1728.6 1656.6 1759.0 1718.0 1670.3
+    ondemand         98.4   83.8   90.9   90.5   80.7
+    copy-prefault  3103.6 3081.3 3131.4 3091.3 3117.0
+
+                     rss_at_restore_kb
+    copy           4199876 4199872 4199876 4199876 4199876
+    ondemand         14632   12544   13488   11692   13792
+    copy-prefault  4199936 4199936 4199940 4199936 4199936
+```
+
+Device baseline on the same XFS, cold, printed at the head of every bench run:
+2 GiB read in **0.830 s O_DIRECT / 0.834 s buffered (2.6 GB/s)**. `copy`'s
+0.65–0.88 s sits exactly on it — `copy` is device-bound, as it must be.
+
+**Do the ranges overlap?**
+
+| Metric (2 GiB) | copy | ondemand | copy-prefault | overlap |
+|---|---|---|---|---|
+| `restore_s` | 0.6465–0.8755 | 0.0120–0.0175 | 1.5606–1.5793 | **none, all 3 pairs disjoint** |
+| `user_visible_ms` | 651.9–881.1 | 80.5–91.3 | 1570.1–1593.0 | **none, all 3 pairs disjoint** |
+| `rss_at_restore_kb` | 2102656 (constant) | 13008–17404 | 2102716–2102720 | **ondemand disjoint from both; copy vs prefault disjoint by 60 kB** |
+| `resume_to_tick_ms` | 4.2–4.3 | 64.1–72.6 | 6.3–14.6 | **copy and copy-prefault OVERLAP**; ondemand disjoint |
+
+| Metric (4 GiB) | copy | ondemand | copy-prefault | overlap |
+|---|---|---|---|---|
+| `restore_s` | 1.6511–1.7432 | 0.0126–0.0143 | 3.0696–3.1155 | **none, all 3 pairs disjoint** |
+| `user_visible_ms` | 1656.6–1759.0 | 80.7–98.4 | 3075.8–3131.4 | **none, all 3 pairs disjoint** |
+
+**The one metric where `ondemand` LOSES is `resume_to_tick_ms`** — 64–73 ms
+against `copy`'s 4.2–4.3 ms, disjoint. The guest's first instructions after
+resume are faulting their way in, and that cost is real. It is an order of
+magnitude smaller than the restore-call saving, so the total still favours
+`ondemand` by ~10×, but a driver that measured only "time to first guest
+progress after resume" would reach the opposite conclusion.
+
+### Restore latency stops scaling with guest RAM — this is the structural result
+
+| Guest RAM | `copy` restore | `ondemand` restore |
+|---|---|---|
+| 2 GiB | 0.6465–0.8755 s | 0.0120–0.0175 s |
+| 4 GiB | 1.6511–1.7432 s | 0.0126–0.0143 s |
+
+`copy` roughly doubles when RAM doubles, as S-7's non-sparse `memory-ranges`
+predicts. **`ondemand` does not move at all** — 12 ms at 2 GiB, 13 ms at 4 GiB.
+Its restore call is O(1) in guest RAM, and by extension so is
+`rss_at_restore_kb` (~13 MB at both sizes). For an 8 or 16 GiB agent sandbox
+that difference keeps growing; this is the one result that generalises beyond
+the sizes measured.
+
+### The control that decides whether any of this is lazy paging — WALK=0
+
+P11 nearly published 2958 MiB/s on a 1163 MiB/s device because five interleaved
+trials and a disjoint-ranges check cannot detect a broken mechanism; only a
+control that removes the mechanism can. The equivalent here: a fast restore
+with a `copy`-shaped RSS curve would not be lazy paging at all.
+
+So the guest carries a rate-controlled memory WALK — it re-reads and verifies
+its own touched region at a known 80 MiB/s — and the control run sets that rate
+to **zero**. If RSS still climbs while the guest touches nothing, the fill is
+not demand-driven.
+
+**It still climbs, identically.** `guest_MiB` is the guest's own cumulative
+verified walk, and it is `0` at every sample:
+
+```
+=== ondemand, WALK=0: the guest touches NOTHING after resume
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         12136         7580         4556            0   true     64242708       <none>
+       100         70312        65752         4560            0   true     64140368            0
+       200        161044       156484         4560            0   true     64008668            0
+       300        253336       248776         4560            0   true     63912964            0
+       500        436712       432152         4560            0   true     63732636            0
+       750        667000       662440         4560            0   true     63503656            0
+      1000        898884       894324         4560            0   true     63269980            0
+      1500       1365772      1361212         4560            0   true     62802524            0
+      2000       1829216      1824656         4560            0   true     62346268            0
+      3000       2102684      2098124         4560            0   true     62106168            0
+      6000       2102684      2098124         4560            0   true     62106144            0
+     10000       2102684      2098124         4560            0   true     62118432            0
+
+=== copy, WALK=0: full at restore-return, flat forever
+         0       2102664      2098104         4560            0   true     62018776       <none>
+       100       2102664      2098104         4560            0   true     62033608            0
+      1000       2102664      2098104         4560            0   true     62034000            0
+     10000       2102668      2098108         4560            0   true     62078196            0
+```
+
+`rss_t1000_kb` with the guest walking 80 MiB/s: **878324–885636**. With the
+guest walking **nothing**: **872304–900992**. The two are indistinguishable —
+in fact the idle guest fills marginally *faster*, because it is not competing
+for the same pages.
+
+The climb is dead linear at **~900 MiB/s** and completes in ~2.5 s regardless
+of guest behaviour. And the VMM thread dump at t=750 ms names the mechanism
+outright — `copy` is burning CPU in `vmm`, `ondemand` in a thread that exists
+only in this mode:
+
+```
+### ondemand                                  ### copy
+tid=99177 comm=uffd-handler    cpu_jiffies=72  tid=99134 comm=vmm         cpu_jiffies=40
+tid=99179 comm=vcpu0           cpu_jiffies=10  tid=99138 comm=vcpu0       cpu_jiffies=8
+tid=99173 comm=cloud-hyperviso cpu_jiffies=0   tid=99133 comm=cloud-hyp.. cpu_jiffies=0
+tid=99174 comm=vmm             cpu_jiffies=0   tid=99135 comm=http-server cpu_jiffies=0
+```
+
+**So `OnDemand` is lazy only at the boundary.** It is *not* steady-state demand
+paging: `vm.restore` returns immediately with ~13 MB resident, and a
+`uffd-handler` thread then streams the entire snapshot in as fast as it can,
+whether the guest wants it or not. The honest one-line description is
+**"asynchronous eager restore"**, not "lazy paging". There is no knob to stop
+the backfill — `prefault` is `Copy`-only.
+
+That distinction is the whole difference between the two claims a reader might
+take away:
+
+- ✅ **"Restore returns ~70× faster and the guest resumes in ~85 ms"** — true,
+  measured, disjoint ranges, holds at 2 and 4 GiB.
+- ❌ **"A restored VM only pays for the memory it touches"** — **false.** It
+  pays for all of it within ~2.5 s. Any warm-pool sizing built on the second
+  claim would be wrong by the full guest RAM per VM.
+
+### S-5 — N simultaneous restores of one snapshot: N × RAM, in BOTH modes
+
+Reported separately so it cannot dilute the latency result. N=4, 2 GiB each,
+`s5-n4-2048.txt`.
+
+**Phase A — the naive form does not work.** Restoring the *same* snapshot
+directory into two VMMs fails on the second, because `config.json` records an
+absolute rootfs path and v53 takes an exclusive write lock on block devices:
+
+```
+  VM0  restore -> HTTP 204   resume -> HTTP 204
+  VM1  restore -> HTTP 500   resume -> HTTP 500
+    Can't get Write lock for /run/.../rootfs-t1-copy-2048.ext4
+      as there is already a ExclusiveWrite lock
+    VM Restore failed: LockingError(DiskLockError(LockDiskImage {
+      error: AlreadyLocked, lock_type: Write, path: "..." }))
+```
+
+A warm pool must therefore materialise a **per-VM snapshot copy with
+`config.json` rewritten** (rootfs path and serial path at minimum). That is
+cheap on XFS — see the reflink note below — but it is a required driver step,
+not an optimisation.
+
+**Phase B — with per-VM copies, all 4 restore fine, and the host pays 4 × RAM:**
+
+```
+--- mode=Copy   baseline MemAvailable=64112808 kB
+    all 4 launched in 3.535838440s
+    t+1s   alive=4/4  sum(VmRSS)=8410920 kB  delta=8391360 kB
+    t+15s  alive=4/4  sum(VmRSS)=8410932 kB  delta=8388684 kB
+
+--- mode=OnDemand   baseline MemAvailable=64303188 kB
+    all 4 launched in .206582601s          <- 17x faster to LAUNCH
+    t+1s   alive=4/4  sum(VmRSS)=3610292 kB  delta=3759844 kB   <- still filling
+    t+5s   alive=4/4  sum(VmRSS)=8410984 kB  delta=8543860 kB   <- caught up
+    t+15s  alive=4/4  sum(VmRSS)=8410984 kB  delta=8553468 kB
+```
+
+`sum(VmRSS)` converges to **8410932 kB (Copy) vs 8410984 kB (OnDemand)** — a
+0.0006% difference on 8 GiB. `MemAvailable` fell by ~8.4 GiB in both. The
+per-VMM breakdown proves there is no sharing to find:
+
+```
+        pid=101391 Rss=2102684 Pss=2099280 Shared_Clean=4536 Shared_Dirty=0 Private_Dirty=2098144 kB
+        pid=101406 Rss=2102768 Pss=2099308 Shared_Clean=4620 Shared_Dirty=0 Private_Dirty=2098144 kB
+```
+
+**`Pss` is within 0.16% of `Rss`, and `Private_Dirty` is the entire guest RAM.**
+Guest memory comes back as private anonymous pages in every VMM under both
+modes (`RssAnon` climbs, `RssFile` stays flat at ~4.5 MB — the binary's text).
+Nothing is shared, and the identical snapshot on disk does not change that.
+
+**So `ondemand` buys warm-pool LAUNCH latency (0.21 s vs 3.54 s for 4 VMs), not
+warm-pool DENSITY.** N suspended-then-restored VMs cost N × guest RAM either
+way. If density is the goal, the mechanism has to come from somewhere else
+(KSM, or a hypervisor that maps the snapshot shared-and-CoW) — and neither is
+in evidence here.
+
+### Storage: the snapshot is still N × RAM on disk, but reflink makes copies free
+
+S-7's result holds unchanged at both sizes — `memory-ranges` is exactly guest
+RAM, apparent == on-disk, no sparseness:
+
+```
+### snapshot bytes: apparent=4295008452 on_disk=4295012352 (guest RAM = 4294967296 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                40096 B           40960 B on disk
+###   memory-ranges        4294967296 B      4294967296 B on disk
+```
+
+The per-VM snapshot copies Phase A forces are nonetheless nearly free, because
+XFS reflink covers them (P4's mechanism, re-confirmed here):
+
+```
+  df used before=129415444 kB   after reflink of a 2 GiB file=129415444 kB   delta=0 kB
+  df used after a FULL copy of the same 2 GiB file:                          delta=2105564 kB
+```
+
+**A correction to my own earlier reading in this probe:** the S-5 run prints
+`on disk : 8.1G` for 4 reflinked copies, which looks like reflink failing. It
+is not — `du` counts shared extents once per file and therefore *cannot* show
+deduplication. `df` is the instrument that can, and it says the reflinked copy
+costs zero blocks. I nearly recorded "reflink silently fell back to a full
+copy" off the `du` number alone.
+
+### `prefault=on` is a pure cost on this path — do not enable it
+
+| Guest RAM | `copy` restore | `copy` + `prefault` | RSS at restore-return |
+|---|---|---|---|
+| 2 GiB | 0.6465–0.8755 s | 1.5606–1.5793 s | identical (2102656 vs ~2102718 kB) |
+| 4 GiB | 1.6511–1.7432 s | 3.0696–3.1155 s | identical (4199874 vs ~4199937 kB) |
+
+`prefault` costs **~1.8×** the restore time at both sizes, with disjoint ranges,
+and buys nothing observable: plain `copy` *already* has the full guest RAM
+resident the instant `vm.restore` returns, so there is nothing left to
+pre-fault. `resume_to_tick_ms` also fails to improve — 6.3–14.6 ms with
+prefault against 4.2–4.3 ms without, i.e. it is no better and the ranges do not
+even overlap in prefault's favour. **Leave it off.**
+
+### The composition failure — `OnDemand` is REFUSED under P5's uid-dropped shape
+
+This is the finding that decides whether the feature is usable at all, and it
+is not visible from any latency number.
+
+P5 settled that production CH runs **uid-dropped**:
+`prlimit … setpriv --reuid=spikevmm --regid=6001 --init-groups --no-new-privs
+-- cloud-hypervisor … --seccomp true --landlock`. `OnDemand` is implemented with
+userfaultfd. This box has the distro default
+`/proc/sys/vm/unprivileged_userfaultfd = 0`, which restricts `userfaultfd(2)` to
+processes holding `CAP_SYS_PTRACE`. Two established facts pointing opposite
+ways; only a run settles it. Both modes were attempted under the **same** dropped
+uid, so a failure that is really about file permissions would appear in both.
+
+```
+=== mode=Copy  as uid=6001 (setpriv --no-new-privs), NOT root
+  VMM pid=97400  running as uid=6001
+  PUT vm.restore -> HTTP 204   in .868561554s
+  PUT vm.resume  -> HTTP 204
+  VmRSS=2102752 kB       guest ticks observed: 105
+
+=== mode=OnDemand  as uid=6001 (setpriv --no-new-privs), NOT root
+  VMM pid=97442  running as uid=6001
+  PUT vm.restore -> HTTP 500   in .027233557s
+      body: ["Error from API","The VM could not be restored","Memory manager error",
+             "Cannot restore VM","On-demand restore failed","Failed to create userfaultfd",
+             "Operation not permitted (os error 1)"]
+  PUT vm.resume  -> HTTP 500
+  guest ticks observed: 0
+  VM Restore failed: MemoryManager(Restore(OnDemandRestore(Create(
+    Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }))))
+```
+
+**It fails CLOSED**, with a typed error naming the exact cause, and does not
+silently degrade to `Copy` — which matches `--help`'s claim that `ondemand`
+"fails restore if userfaultfd support is unavailable" and is the right
+behaviour. But it means **`OnDemand` and the `[D7]` confinement stack do not
+compose as shipped.**
+
+The remedy is a single host sysctl, and it is verified rather than assumed —
+same script, same dropped uid, only the sysctl changed:
+
+```
+vm.unprivileged_userfaultfd = 1
+=== mode=OnDemand  as uid=6001 (setpriv --no-new-privs), NOT root
+  VMM pid=97634  running as uid=6001
+  PUT vm.restore -> HTTP 204   in .024742598s
+  PUT vm.resume  -> HTTP 204
+  VmRSS=2102764 kB       guest ticks observed: 104
+```
+
+(The box was returned to `vm.unprivileged_userfaultfd = 0` afterwards.)
+
+This is the direct analogue of P11's `shmem_enabled=advise`: a capability the
+platform wants, gated on a host-image sysctl the distro defaults against. It
+belongs to the appliance OS (ADR-0068 territory) — with the caveat that
+`unprivileged_userfaultfd=1` widens userfaultfd to every unprivileged process
+on the host, not just the VMM, and userfaultfd is a well-known primitive for
+stalling kernel faults during exploitation. **That is a security trade-off to
+decide deliberately, not a checkbox**, and the alternative (granting CH
+`CAP_SYS_PTRACE`) is plainly worse.
+
+### Re-checkpointing an `OnDemand`-restored VM works
+
+The binary carries a `VmError` reading `VM on-demand memory restore is still in
+progress`, so CH has a state in which operations are refused. Every trial
+therefore re-checkpoints after the sampled window:
+
+```
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204
+  PUT vm.snapshot -> 204 in 0.192 s  apparent=2147524634 on_disk=2147528704
+```
+
+A VM restored with `OnDemand` can be paused and snapshotted again, producing a
+byte-count-identical snapshot. **Warm-pool chaining (restore → run → re-suspend)
+works.** Note this ran ~10 s after resume, i.e. *after* the background fill
+completed — see § What P13 does NOT establish.
+
+### Harness defects caught in myself
+
+All four are stated because the numbers above would have been wrong without
+them, and three of them produced plausible-looking output.
+
+1. **`drop_caches` without `sync(2)` drops nothing.** The first cut wrote `3` to
+   `drop_caches` and logged "dropped host page cache". `vm.snapshot` had just
+   written 2 GiB in 0.19 s — 11 GB/s, which no device on this box can do — so
+   the file was still **dirty**, and dirty pages are not droppable. `copy` then
+   "read" 2 GiB in 0.2316 s = 8.8 GB/s against a measured cold device rate of
+   2.6 GB/s. **That is the P11 shape exactly: a number faster than the hardware
+   beneath it.** Fixed by `sync()` first and by printing `Cached` across the
+   drop so a no-op drop is visible (`Cached 4393668 -> 166172 kB`). Cold `copy`
+   is 0.85 s, not 0.23 s — the corrected number is 3.7× worse, and it is the one
+   in the tables above.
+2. **Parsing a console file mid-write.** `read_console` returned whatever bytes
+   existed, including a half-written final line. The first run reported
+   `nonce=360349041693d9c6c8e5290d5b3e` — 28 hex chars of a 32-char nonce — and
+   `walked_mib=<none>`. Unfixed this corrupts the probe in **both** directions:
+   a truncated `nonce_before` can never match a complete `nonce_after`, so a
+   genuine restore reports as a false negative; and worse, a truncated
+   `TICK n=123` parses as `n=12`, so the "first tick above the floor" search can
+   fire on a **pre-snapshot** tick and report a resume latency that never
+   happened. Fixed by truncating the transcript at its last newline.
+3. **S-5 Phase A failed for the wrong reason and I nearly wrote it up.** The
+   first run showed both VMs failing and would have supported "N-way restore is
+   refused" — but the error was `ENOENT` on the rootfs, because the bench
+   deletes its per-run rootfs on exit and the snapshot records an absolute path.
+   The disk-lock hypothesis was never tested. Recreating the file at the
+   recorded path produced the real result above (`AlreadyLocked`), which is the
+   same verdict with a **different mechanism** and a different remedy.
+4. **`du` cannot see reflinked extents.** Nearly recorded "reflink silently fell
+   back to a full copy" from `du`'s 8.1 G on 4 copies. `df` says the delta is
+   zero. Corrected in § Storage above.
+
+A fifth, procedural: **`infra/metal/bootstrap.sh --sync-only` runs
+`rsync --delete`, which deleted the first bench's evidence files** from the
+remote tree when I re-synced a code edit. Bench logs are now written under
+`/var/tmp/spike-increment-k/ev/`, outside the synced tree, and pulled
+explicitly.
+
+### Design implications
+
+- **Use `OnDemand` for restore, and assert on the observable rather than the
+  204.** The driver sends `{"source_url":…,"memory_restore_mode":"OnDemand"}` —
+  **PascalCase**; the CLI's `ondemand` is rejected and an unknown *field* is
+  silently ignored, so a misspelling degrades to `Copy` with no error.
+- **The appliance OS needs `vm.unprivileged_userfaultfd=1`**, or `OnDemand`
+  cannot be used under the `[D7]` uid-dropped shape at all. This is a host-image
+  decision with a real security trade-off (§ composition failure above), and it
+  sits beside P11's `shmem_enabled=advise` as the second sysctl this feature
+  requires of ADR-0068.
+- **Never enable `prefault`.** ~1.8× the restore time at both sizes, no
+  measurable benefit, and it is `Copy`-only anyway.
+- **Do not size a warm pool on lazy memory.** N restored VMs cost N × guest RAM
+  within ~2.5 s in both modes; `Pss ≈ Rss` and `Private_Dirty` = full guest RAM
+  in every VMM. `OnDemand` buys pool *launch* latency (0.21 s vs 3.54 s for 4
+  VMs), not pool *density*. The density argument for suspended VMs still rests
+  entirely on VMs that are **not** restored.
+- **A warm pool must rewrite `config.json` per VM.** The snapshot records
+  absolute rootfs and serial paths, and v53 takes an exclusive write lock on the
+  disk image, so N VMs from one snapshot need N snapshot copies with rewritten
+  paths. Reflink makes the copy free in space (`df` delta 0) and P4 makes it
+  fast, but the rewrite step is mandatory.
+- **`vm.snapshot`'s wall time is not the checkpoint cost.** 0.19 s for 2 GiB and
+  ~0.4 s for 4 GiB are page-cache speed; the following `sync(2)` took **1.422 s
+  (2 GiB)** and **2.844 s (4 GiB)**. P8 flagged this at 512 MiB; it is now
+  quantified at both sizes. A driver that reports "checkpointed" on the 204 is
+  reporting on unflushed data.
+
+### What P13 does NOT establish
+
+- **Nothing about a partially-filled VM's behaviour under pressure.** Every
+  measurement here runs on a box with 61 GiB free, where the background fill
+  always completes. What `OnDemand` does when the host cannot satisfy the
+  backfill — memory pressure, cgroup limit, many simultaneous restores
+  contending — is unmeasured, and that is precisely the warm-pool regime.
+- **Re-checkpoint DURING the fill is untested.** The re-snapshot above runs ~10 s
+  after resume, long after the ~2.5 s fill. CH carries a distinct error, `VM
+  on-demand memory restore is still in progress`, which nothing here triggered —
+  so whether `vm.pause`/`vm.snapshot`/`vm.resize` are refused in the first ~2.5 s
+  is **open**, and a warm pool that suspends quickly would hit exactly that
+  window.
+- **No cross-host restore**, as in P8/P9/P12. Everything is same-host. The
+  absolute-path and disk-lock findings sharpen that question without answering
+  it.
+- **The ~900 MiB/s fill rate is not attributed.** It is well under the device's
+  2.6 GB/s and well under page-cache speed, so it is bounded by something in the
+  uffd path (single handler thread, per-page `UFFDIO_COPY` cost) — but which was
+  not measured, and no attempt was made to tune it.
+- **`OnDemand` was not combined with volumes, vsock, or CPU hotplug.** P9's
+  `blk`/`fs` arms, P12's vsock arms and P8's S-6 hotplug all ran under `Copy`.
+  A workload with a volume *and* an `OnDemand` restore is the realistic shape
+  and was not run — and `--memory shared=on` (which virtiofs and vhost-user-blk
+  both require, P10/P11) changes the memory backing that userfaultfd is
+  registered against, so it is not safe to assume it composes.
+- **The uid-drop test used `--seccomp true` but not `--landlock`.** P5's full
+  stack includes Landlock rules, and P5 already found CH's implicit ruleset
+  incomplete for the vsock UDS. Whether Landlock additionally interferes with
+  the uffd path is untested.
+- **aarch64 is unmeasured**, as everywhere else in this document.
+- **No claim about kernels other than 7.0.0-15-generic.** userfaultfd
+  permissions and semantics have changed across releases; the pinned 6.18
+  appliance kernel (P3, still NOT RUN) is a different subject.
+
 ## Still open
 
 - ~~**S-3 — vsock across restore.**~~ **ANSWERED 2026-08-10 by P12 (increment-j).** The
@@ -1883,6 +2390,20 @@ call before any arm was run.
   establish — chiefly the **host→guest** direction (only guest→host was exercised),
   **concurrent connections**, **repeated checkpoint cycles**, and **`--vsock` combined
   with volumes**, which is the realistic workload shape and has never been run as one VM.
+- ~~**Does `ondemand` restore make a warm pool cheaper?**~~ **ANSWERED 2026-08-10 by
+  P13 (increment-k), and the answer is NO on memory and YES on latency.** What P13
+  leaves open is listed in § What P13 does NOT establish; the two that matter for the
+  warm-pool design are **the backfill under memory pressure** (every measurement here
+  ran with 61 GiB free, so the fill always completed) and **re-checkpoint DURING the
+  ~2.5 s fill** — CH carries a distinct `VM on-demand memory restore is still in
+  progress` error that nothing in P13 triggered, and a pool that suspends quickly would
+  land in exactly that window. Also open: `OnDemand` combined with volumes, vsock, or
+  `--memory shared=on`, none of which were run together with it.
+- **Whether the appliance takes `vm.unprivileged_userfaultfd=1`.** This is a decision,
+  not a measurement. P13 proved the sysctl is *necessary* for `OnDemand` under the
+  `[D7]` uid-dropped shape and *sufficient* to fix it, but it widens userfaultfd to
+  every unprivileged process on the host, and userfaultfd is a known primitive for
+  stalling kernel faults during exploitation. Owner: whoever owns ADR-0068.
 - **Cross-host restore.** Everything in P8, P9 and P12 is same-host. A checkpoint that
   cannot move between machines is a much weaker product primitive, and the snapshot embeds
   absolute host paths (kernel, disk, serial, **and — P12 — the vsock socket**) that must
@@ -2013,6 +2534,27 @@ file — contradictory requirements on one path, both fatal, though unlike P8's
 **not** cover is the shape a real workload actually has: `--vsock` together with
 volumes has never been run as one VM.
 
+**P13 — PROMOTE `OnDemand` as the restore mode, and carry two host requirements
+plus one deleted assumption.** Restore latency stops scaling with guest RAM
+(12–17 ms at both 2 and 4 GiB against `copy`'s 0.65–0.88 s and 1.65–1.74 s, all
+ranges disjoint), which is exactly the property a warm pool of agent sandboxes
+needs, and it costs nothing to adopt — same API call, one extra field.
+Requirements: **(1)** the appliance image must set
+`vm.unprivileged_userfaultfd=1`, because under P5's uid-dropped shape
+`OnDemand` fails closed with `Failed to create userfaultfd / EPERM` — this is a
+second host sysctl beside P11's `shmem_enabled=advise`, and it carries a real
+security trade-off that should be decided rather than defaulted; **(2)** the
+driver must send the **PascalCase** `"OnDemand"` and must not trust the 204,
+because CH rejects the CLI's `ondemand` spelling loudly but ignores an unknown
+*field name* silently — a misspelled key degrades to `Copy` with no signal.
+**The deleted assumption is the important half:** `OnDemand` is *asynchronous
+eager restore*, not lazy paging — a `uffd-handler` thread backfills all of guest
+RAM at ~900 MiB/s whether or not the guest touches a byte, proved by a WALK=0
+control, and `Pss ≈ Rss` with `Private_Dirty` = full guest RAM across 4
+simultaneous restores in **both** modes. **A warm pool of restored VMs costs
+N × guest RAM regardless of restore mode.** Any density argument must come from
+VMs that are not restored, or from a mechanism not present here.
+
 **P3 — belongs on CI, not here.** See § Not run.
 
 Per the slice's own rule — *a failing probe never silently weakens a claim* — nothing above
@@ -2027,6 +2569,21 @@ and not because the deadline arrived; and the one thing env B cannot reach — a
 `f63b2fb9`) provisions a Scaleway Elastic Metal box end to end — cloud-init, partitioning
 guidance, media checks, the unprivileged VMM identity, XFS/reflink, and the toolchain.
 Its README carries the operational traps found while building it.
+
+`spike-scratch/increment-k/` (gitignored, never committed) — **P13,
+`memory_restore_mode=ondemand`**: `probe/Cargo.toml`,
+`probe/src/bin/{guest_init_ondemand,host_ondemand}.rs`, `build.sh`, `run.sh`
+(one trial, or `api-probe` for the JSON-spelling discovery), `bench.sh` (the
+interleaved 3-mode bench), `s5.sh` (N simultaneous restores), `uid-drop.sh` (the
+P5-composition test). Captured evidence in `evidence/`:
+`bench-2048-walk2.txt`, `bench-4096-walk2.txt`, `bench-2048-walk0.txt` (the
+WALK=0 laziness control), `api-probe.txt`, `s5-n4-2048.txt`, `uid-drop.txt`,
+`uid-drop-sysctl1.txt`.
+The guest extends increment-g's snapshot guest (RAM-only boot nonce + tick
+counter) with a memory TOUCH phase and a rate-controlled verifying WALK; the
+host harness speaks HTTP-over-unix directly rather than via `curl`, because the
+headline is a latency and the control is an RSS trajectory sampled on a fixed
+schedule. **`crates/` untouched.**
 
 `spike-scratch/increment-j/` (gitignored, never committed) — **P12, S-3 vsock across
 snapshot/restore**: `probe/Cargo.toml`,
