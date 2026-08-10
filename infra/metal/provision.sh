@@ -271,7 +271,14 @@ if [ -n "${BREAK_RAID_DISK}" ]; then
 
   # Guard: never touch the disk the live root is actually served from.
   #
-  # Resolve parent disks with lsblk PKNAME, NOT by sed'ing trailing digits.
+  # Resolve parent disks with `lsblk -ndo PKNAME`. TWO traps here, both hit:
+  #   1. Do NOT sed trailing digits — /dev/nvme0n1p2 becomes /dev/nvme0n1p,
+  #      which matches no device, so the guard passes when it must refuse.
+  #   2. `--nodeps` (-d) is MANDATORY. Without it lsblk prints the whole
+  #      subtree, and a RAID-member partition HAS a child (the md device),
+  #      so the output is two lines and `head -1` returns md's parent (the
+  #      partition) rather than the partition's parent (the disk). Verified
+  #      2026-08-10: the guard reported root as living on /dev/nvme0n1p4.
   # The sed approach is silently WRONG on NVMe: /dev/nvme0n1p2 -> /dev/nvme0n1p,
   # which matches no real device, so the "would this orphan root?" check below
   # passes when it must refuse. What then saved the root disk was util-linux
@@ -281,10 +288,10 @@ if [ -n "${BREAK_RAID_DISK}" ]; then
   if [[ "${ROOT_SRC}" == /dev/md* ]]; then
     for m in $(mdadm --detail "${ROOT_SRC}" 2>/dev/null \
                | awk '/\/dev\/(sd|nvme|vd)/ {print $NF}'); do
-      ROOT_DISKS="${ROOT_DISKS}/dev/$(lsblk -no PKNAME "${m}" 2>/dev/null | head -1)"$'\n'
+      ROOT_DISKS="${ROOT_DISKS}/dev/$(lsblk -ndo PKNAME "${m}" 2>/dev/null)"$'\n'
     done
   else
-    ROOT_DISKS="/dev/$(lsblk -no PKNAME "${ROOT_SRC}" 2>/dev/null | head -1)"
+    ROOT_DISKS="/dev/$(lsblk -ndo PKNAME "${ROOT_SRC}" 2>/dev/null)"
   fi
   ROOT_DISKS="$(echo "${ROOT_DISKS}" | grep -v '^/dev/$' | sort -u)"
   echo "root is on ${ROOT_SRC} (disks: ${ROOT_DISKS//$'\n'/ })"
@@ -315,7 +322,7 @@ if [ -n "${BREAK_RAID_DISK}" ]; then
                   | awk '/\/dev\/(sd|nvme|vd)/ {print $NF}'); do
       # Match by PARENT DISK, not a digit-suffix regex — `nvme0n1p2` is not
       # `<disk><digits>`, so the old pattern never matched NVMe at all.
-      [ "/dev/$(lsblk -no PKNAME "${part}" 2>/dev/null | head -1)" = "${BREAK_RAID_DISK}" ] || continue
+      [ "/dev/$(lsblk -ndo PKNAME "${part}" 2>/dev/null)" = "${BREAK_RAID_DISK}" ] || continue
       echo "  ${md}: fail+remove ${part}"
       mdadm "${md}" --fail "${part}"   || true
       mdadm "${md}" --remove "${part}" || true
