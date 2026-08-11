@@ -1146,6 +1146,49 @@ variants; falls back on the verbatim driver `Display` text in `detail`"
 variant, not a new one this feature mints. No named variant needs to be
 invented for this scenario.
 
+#### S-VM-41: A kernel that exists but is the wrong format for this hypervisor is named precisely, not reported as a firmware size cap
+
+**Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@correction:C-7`
+
+```gherkin
+Given Ana has deployed a VM workload on an aarch64 host whose [vm] kernel
+  path points at the host distro's own /boot/vmlinuz -- a UKI-wrapped
+  image, not the raw PE Image cloud-hypervisor requires on aarch64
+When the platform attempts to start the allocation
+Then the allocation is Failed with TransitionReason::VmKernelFormatUnsupported
+  naming the exact path and arch "aarch64"
+And the reported cause reads as a format problem -- never a firmware size
+  cap and never "UefiTooBig"
+And the reason is distinct from VmKernelNotFound (the path exists; only its
+  format is wrong)
+```
+
+**Crafter notes**: This is the **classification-join** half of C-7,
+companion to S-VM-17's pure-function half — do not duplicate S-VM-17 here.
+S-VM-17 already proves `KernelImage::validate(path, arch, header)` is pure
+and rejects the bad magic bytes before any hypervisor process is spawned
+(ADR-0082 §D2.4), covering the identical aarch64 UKI-wrapper artifact at
+the function boundary. This scenario proves the join one layer up:
+`classify_driver_failure`'s VM arm maps the resulting `KernelFormatError`
+onto `TransitionReason::VmKernelFormatUnsupported { path, arch, detail }`
+(ADR-0083 §D5 row 5), and that the operator-visible cause the CLI renders
+is honestly worded as a *format* problem — never CH's misleading
+`VmBoot(UefiLoad(UefiTooBig))` framing, which is exactly the lie this
+variant exists to prevent from reaching the operator (`slice-02.md`'s
+correction block, `brief.md` §104). CH's own verbatim text, if it is ever
+present at all, belongs only in the row's free-form `detail`, never in the
+variant's meaning — assert on the rendered cause text, not on the enum
+discriminant alone, per this AC's own "verified by reading `workload
+describe` output, not by asserting on an enum" acceptance line.
+**Gap-closure note**: this scenario was absent from the original 87 — the
+row-5 Cause variant ADR-0083 §D5 pins for Slice 02
+(`VmKernelFormatUnsupported`) had no test-scenarios.md entry at all, a gap
+a fable review surfaced by cross-checking `deliver/roadmap.json`'s
+Slice-02 step against the ADR's five-row table. Placement:
+`crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`,
+alongside S-VM-33…37 (DWD-14).
+
 ### AC-10: `[vm]` + `[service]` is rejected before scheduling; `[vm]` + `[job]` / `[schedule]` are accepted
 
 #### S-VM-38: A VM service spec is rejected with the reason it cannot be served
@@ -2004,7 +2047,7 @@ No pipeline/service-level test (calling `VmDriver::start` directly) substitutes 
 |---|---|---|
 | K1 (exit-status fidelity, north star) | S-VM-01, S-VM-02, S-VM-42 | Guest exit code, not the VMM's, reaches `workload describe` on every terminal shape |
 | K2 (Running honesty guardrail) | S-VM-03 | A guest that never runs init never reaches `Running` |
-| K3 (≥4 distinct start-failure diagnoses) | S-VM-33…37 | 5 distinct `TransitionReason` variants at Slice 02 alone (13 across the feature) |
+| K3 (≥4 distinct start-failure diagnoses) | S-VM-33…37, S-VM-41 | 5 distinct `TransitionReason` variants at Slice 02 alone (13 across the feature) |
 | K4 (production path reachability, pass/fail bar) | S-VM-01, S-VM-12 | Real `serve` + `deploy` reaches the VM driver with no test-only wiring |
 | K5 (crash-restart parity) | S-VM-43 | Same reconciler, ceiling, backoff as a crashed process |
 | K6 (bounded time-to-Running) | S-VM-01 (companion timing assertion) | p50 ≤3s / p99 ≤10s over ≥20 deploys |
@@ -2022,7 +2065,7 @@ All 10 KPIs traced. K6 is the only "secondary" KPI (a companion assertion on an 
 | Story | AC(s) | Scenario(s) | Coverage |
 |---|---|---|---|
 | US-VM-1 | AC-01…AC-07, AC-18 (+ cross-cutting AC-08/AC-19/AC-20) | S-VM-01…20, S-VM-74, S-VM-76 | 5 UAT scenarios + 15 AC-derived + engineering constraints + the `MtlsInterceptWorker` gating case + `VmDriver::stop` totality |
-| US-VM-2 | AC-09 | S-VM-33…37 | 4 UAT scenarios + 1 additional (rootfs-not-found symmetry); S-VM-35 rewritten to the TOCTOU window it can actually reach (`wave-decisions.md` DWD-11) |
+| US-VM-2 | AC-09 | S-VM-33…37, S-VM-41 | 4 UAT scenarios + 2 additional (rootfs-not-found symmetry; S-VM-41 closing the ADR-0083 §D5 row-5 `VmKernelFormatUnsupported` gap found by fable review, DWD-14); S-VM-35 rewritten to the TOCTOU window it can actually reach (`wave-decisions.md` DWD-11) |
 | US-VM-3 | AC-11 | S-VM-42…45 | 4/4 UAT scenarios |
 | US-VM-4 | AC-12 | S-VM-46…48 | 3/3 UAT scenarios |
 | US-VM-5 | AC-17 | S-VM-69…73 | 3 UAT scenarios + parametrized sizing + property |
@@ -2042,39 +2085,48 @@ from the feature-delta.md without a matching test-scenarios.md entry.
 ## Error / Edge Path Coverage
 
 Counts below are computed mechanically from the `**Tags**:` line of every
-scenario (**87 total** — up from 74 after the adversarial-review
+scenario (**88 total** — up from 74 after the adversarial-review
 remediation pass added 13 new scenarios: the 3 missing §105a.11 ESR
 invariants that were BLOCKER-cited but never defined, the 5 NEW-1-pin
 scenarios, the 4th `svid_lifecycle` evaluation, the `CgroupAccounting`
 equivalence test, the per-launch `FICLONE` self-application test, the
 `VmDriver::stop` totality case, and the `MtlsInterceptWorker`-gating case;
-plus a like-for-like TOCTOU rewrite of S-VM-35, which added no new ID).
+plus a like-for-like TOCTOU rewrite of S-VM-35, which added no new ID);
+then **87 → 88** (DWD-14, S-VM-41, closing the ADR-0083 §D5 row-5
+`VmKernelFormatUnsupported` gap a fable review surfaced against
+`deliver/roadmap.json`'s Slice-02 step).
 Re-verified by `grep -c '^\*\*Tags\*\*:'` and cross-checked against
-`grep -c '^#### S-VM-'` (both 87) after every edit in this pass, most
-recently after S-VM-67's rewrite (DWD-13) — total stays **87** (no
-scenario added or removed), `@property` moves **20 → 21** (S-VM-67 gained
-the tag, mirroring S-VM-16/17/18's pure-function shape), and `@error_path`
-stays **40** (S-VM-67 keeps the tag — its rejection contract survives the
-tier change, same as S-VM-17's pure-function-plus-error_path precedent).
+`grep -c '^#### S-VM-'` (both 88) after every edit in this pass, most
+recently after S-VM-41's addition (DWD-14) — `@error_path` moves
+**40 → 41** and `@contract-shape:bounded-change` moves **65 → 66**
+(S-VM-41 carries both, mirroring S-VM-33…37's shape); `@property` stays
+**21** (S-VM-41 is Tier-3/example-shaped, not a property scenario, same as
+its AC-09 siblings). Mechanical recount also surfaced a pre-existing
+off-by-one in the Self-Review Checklist's `@contract-shape:pure-function`
+/ `@contract-shape:bounded-change` split (claimed 11/66, both were
+already 12/65 before this pass — corrected in Self-Review Checklist item
+13, below).
 
 | Category | Count |
 |---|---|
 | `@happy_path` | 18 |
-| `@error_path` | 40 |
+| `@error_path` | 41 |
 | `@edge_case` | 12 |
 | No happy/error/edge tag (pure `@property`/`@example` scenarios: S-VM-08, 10, 16, 18, 20, 31, 32, 63, 73, 80, 87, 88, 89, 90, 91, 92, 93) | 17 |
 | `@property` | 21 |
 | `@example` (fixed call sequences at layer 3, per Mandate 9 — S-VM-76, 90, 91, 93) | 4 |
-| **Total distinct scenarios** | **87** |
+| **Total distinct scenarios** | **88** |
 
-Error + edge coverage: **52 of 87 ≈ 60%** — well above the 40% target,
+Error + edge coverage: **53 of 88 ≈ 60%** — well above the 40% target,
 consistent with this feature being fundamentally about honest failure
 classification (K1/K2/K3/K7/K9 are ALL guardrail/diagnosis KPIs), and the
 remediation pass's additions skewed further toward `@error_path` (the
 NEW-1 pins, the fourth evaluation, and both adapter-equivalence-gap fixes
-are all failure/edge-shaped by nature). Unchanged by S-VM-67's rewrite
-(DWD-13) — it keeps its `@error_path` tag; only its tier/mechanism tags
-moved (`@tier3 @real-io` → `@tier1 @in-memory`).
+are all failure/edge-shaped by nature). S-VM-41 (DWD-14) keeps the ratio
+unchanged at ≈60% — one more `@error_path` scenario over one more total
+scenario. Unchanged by S-VM-67's rewrite (DWD-13) — it keeps its
+`@error_path` tag; only its tier/mechanism tags moved (`@tier3 @real-io`
+→ `@tier1 @in-memory`).
 
 ---
 
@@ -2088,9 +2140,10 @@ moved (`@tier3 @real-io` → `@tier1 @in-memory`).
 - [x] 6. Mandate 7 scaffolding — see `distill/wave-decisions.md` DWD-06 for the scoped scaffold decision (this feature genuinely introduces new crates/modules, unlike the brownfield precedent that deferred scaffolding entirely). Corrected in this remediation pass: the accounting was internally inconsistent (claimed 15 scaffolds "for every scenario in Slice 01" when only 12 of 20 are scaffolded) and the deferred-scaffold list omitted S-VM-11/S-VM-12 — both fixed in `wave-decisions.md`. No new scaffolds were authored by this remediation pass; every new/modified scenario joins the existing deferred-to-DELIVER set with its crate/file destination recorded in DWD-04
 - [x] 7. Driving Adapter coverage — `overdrive deploy` / `overdrive workload describe` / `overdrive job stop` / `overdrive serve` boot, all exercised via direct CLI handler call against a real in-process `overdrive serve` (never a subprocess, per `crates/overdrive-cli/CLAUDE.md`); see § Driving Adapter Coverage. One documented, justified carve-out: S-VM-76 (`VmDriver::stop` totality) is a component-scope acceptance case against `SimVmm`, named as its own enforcement vehicle by ADR-0082 §D4 because `vmm_equivalence.rs` cannot reach the relocated guest half of `stop`
 - [x] 8. Error path coverage ≥ 40% — 60% (see § Error / Edge Path Coverage)
-- [x] 13. **Contract Shape Classification (mandate 14, 2026-05-15)** — every one of the 87 scenarios carries a `@contract-shape:<pure-function|bounded-change|unbounded-preservation>` tag, mechanically recounted after the remediation pass: 11 `pure-function` (the `VmConfig`/`plan_reclamation`/`SupervisionSet` pure-function scenarios + the `JobEnvelope` V1 roundtrip — unchanged), 10 `unbounded-preservation` (S-VM-14, 24, 52, 57, 61, 68 — unchanged from the original set — plus S-VM-74, 78, 87, 88, added by the remediation pass: "no intercept state exists," "the freshest-read supervision set is never stale toward a booting VM," and the two ESR invariants whose statements are themselves open-ended non-enumerable claims), 66 `bounded-change` (a specific, nameable resource/row/field transition with a closed complement). Zero untagged.
+- [x] 13. **Contract Shape Classification (mandate 14, 2026-05-15)** — every one of the 88 scenarios carries a `@contract-shape:<pure-function|bounded-change|unbounded-preservation>` tag, mechanically recounted while adding S-VM-41 (DWD-14) via `grep '^\*\*Tags\*\*:' | grep -c '@contract-shape:<kind>'`: 12 `pure-function` (the `VmConfig`/`plan_reclamation`/`SupervisionSet` pure-function scenarios + the `JobEnvelope` V1 roundtrip — unchanged; **corrects a pre-existing off-by-one in this line, which read 11** — the true count was already 12 before this pass, confirmed by direct listing), 10 `unbounded-preservation` (S-VM-14, 24, 52, 57, 61, 68 — unchanged from the original set — plus S-VM-74, 78, 87, 88, added by the remediation pass: "no intercept state exists," "the freshest-read supervision set is never stale toward a booting VM," and the two ESR invariants whose statements are themselves open-ended non-enumerable claims), 66 `bounded-change` (a specific, nameable resource/row/field transition with a closed complement — S-VM-41 joins this class, DWD-14; 65 before this pass, not 66 as the prior text implied — the prior 11/66 split summed correctly to 87 by coincidence, masking the same off-by-one). 12 + 10 + 66 = 88. Zero untagged.
 - [x] 9. Wave-decision reconciliation — 0 contradictions (see `distill/wave-decisions.md`)
 - [x] 10. AC-to-scenario traceability complete — all 9 stories + the cross-cutting reconciler + the cross-cutting port-contract scenarios covered
 - [x] 11. KPI traceability documented — all 10 KPIs (K1–K10) traced
 - [x] 12. Property tests specified for every mandatory mutation-target pure function named in the DESIGN handoff (`MemoryPlan::derive`, `KernelImage::validate`, `DiskAttachment::to_disk_arg`, `VmConfinement::seccomp_arg`, `VmConfig::rlimit_fsize`, `plan_reclamation`, `SupervisionSet::reclamation_authorised`, Ending Class totality), plus P2 now stated directly as a property over `VmReclamation` (S-VM-80), not only as worked examples on the two sibling reconcilers
 - [x] 14. **Adversarial-review remediation (2026-08-11)** — see `distill/wave-decisions.md` DWD-11 for the full finding-by-finding disposition. Three BLOCKER-cited-but-undefined ESR invariant scenarios defined (S-VM-87/88/89); zero dangling `S-VM-N` references remain anywhere in `test-scenarios.md`, `feature-delta.md`, or `wave-decisions.md` (mechanically re-verified, see DWD-11)
+- [x] 15. **AC-09 completeness gap closed (2026-08-11) — S-VM-41, DWD-14.** ADR-0083 §D5 pins **five** Slice-02 Cause variants (row 5 is `VmKernelFormatUnsupported`); `deliver/roadmap.json`'s Slice-02 step 03-01 criteria enumerated only four, and the original 87-scenario catalogue had no entry for row 5 at all — a fable reviewer caught the narrowing by cross-checking the roadmap against the ADR. S-VM-41 added, cross-referencing S-VM-17 (the pure-function half already proven) rather than duplicating it. Every count in this file re-verified mechanically after the addition (see § Error / Edge Path Coverage).
