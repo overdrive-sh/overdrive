@@ -17,11 +17,11 @@
             "VmConfinement::seccomp_arg() renders the literal \"true\" unconditionally; no code path can render \"false\" or \"log\".",
             "DiskAttachment::to_disk_arg() always emits image_type=raw for every path/read_only combination, at one rendering site.",
             "KernelImage::validate(path, arch, header) is pure, rejects a non-matching magic before any I/O, and accepts x86_64 bzImage/PVH vmlinux and aarch64 raw PE Image.",
-            "MemoryPlan::derive(declared) is the only constructor; guest_bytes() and cgroup_max_bytes() can never be equal.",
+            "MemoryPlan::derive(declared) is the only constructor; guest_bytes() returns exactly the declared byte figure with no derivation applied. The cgroup_max_bytes() > guest_bytes() invariant (S-VM-18) is NOT evaluable here — cgroup_max_bytes() calls reserve_bytes(guest_bytes), a todo!() at this step — and its proptest stays RED until step 01-05 gives reserve_bytes a real body.",
             "reserve_bytes(guest_bytes) ships as a todo!(\"RED scaffold\") citing the memory.current/memory.stat measurement it needs, never a guessed constant."
           ],
           "test_file": "crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs",
-          "scenario_name": "S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20",
+          "scenario_name": "S-VM-08, S-VM-16, S-VM-17 (S-VM-18 and S-VM-20 remain RED here — both evaluate cgroup_max_bytes(), which traverses the still-todo!() reserve_bytes per ADR-0082 §D2.3; they are unskipped at step 01-05)",
           "implementation_scope": {
             "source_directories": [
               "crates/overdrive-core/src/traits/vmm.rs",
@@ -34,7 +34,7 @@
           },
           "dependencies": [],
           "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, pure functions — proptest over the domain of each (any VmConfinement value; any path/read_only pair; any header byte window; any declared u64). UNSKIP FOUR of the five existing RED scaffolds (#[should_panic(expected=\"RED scaffold\")]) in vm_config_pure_functions.rs — S-VM-08 (seccomp), S-VM-16 (disk), S-VM-17 (kernel format), S-VM-18 (MemoryPlan invariant) — replacing each panic body with a proptest! block per ADR-0082 §D2.1-D2.5's pinned signatures; do not invent a different constructor or field (CLAUDE.md 'Implement to the design'). MemoryPlan/KernelImage/DiskAttachment/VmConfinement are all mandatory mutation targets (brief.md §113) — run cargo xtask mutants --file against each after GREEN. S-VM-20 (reserve_bytes) is the FIFTH scaffold and stays RED here — do NOT unskip it and do NOT write a guessed constant; reserve_bytes(guest_bytes) ships as a todo!() body citing the memory.current/memory.stat measurement it needs. Its scaffold is unskipped, its body written, its @mandatory:mutation_target tag added, and its scoped mutation gate run in ONE LATER commit — step 01-05 — not here (§D2.3, brief §113). (Corrects a prior-draft contradiction that claimed all five scaffolds unskip in this step while simultaneously keeping reserve_bytes a todo!().)"
+          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, pure functions — proptest over the domain of each (any VmConfinement value; any path/read_only pair; any header byte window; any declared u64). UNSKIP THREE of the five existing RED scaffolds (#[should_panic(expected=\"RED scaffold\")]) in vm_config_pure_functions.rs — S-VM-08 (seccomp), S-VM-16 (disk), S-VM-17 (kernel format) — replacing each panic body with a proptest! block per ADR-0082 §D2.1-D2.5's pinned signatures; do not invent a different constructor or field (CLAUDE.md 'Implement to the design'). KernelImage/DiskAttachment/VmConfinement are mandatory mutation targets (brief.md §113) — run cargo xtask mutants --file against each after GREEN. S-VM-18 (MemoryPlan invariant) and S-VM-20 (reserve_bytes) are the REMAINING TWO scaffolds and BOTH stay RED here — do NOT unskip either and do NOT write a guessed constant; reserve_bytes(guest_bytes) ships as a todo!() body citing the memory.current/memory.stat measurement it needs. S-VM-18 cannot be unskipped here either, for the identical reason as S-VM-20: MemoryPlan::derive's cgroup_max_bytes() is defined as guest + reserve_bytes(declared) per ADR-0082 §D2.3, so any proptest evaluating cgroup_max_bytes() panics on the todo!() until reserve_bytes has a real body. Both scaffolds are unskipped, their bodies written, their @mandatory:mutation_target tags added, and their scoped mutation gate run in ONE LATER commit — step 01-05 — not here (§D2.3, brief §113); MemoryPlan's own mutation run is deferred alongside reserve_bytes's, since the invariant they both defend lives in the same function. (Corrects a prior-draft contradiction that claimed all five scaffolds unskip in this step while simultaneously keeping reserve_bytes a todo!() — an earlier revision of this note fixed the contradiction for S-VM-20 alone and left S-VM-18 in the identical trap one scenario over; this revision closes both.)"
         },
         {
           "id": "01-02",
@@ -95,21 +95,26 @@
             "The fixture helper stages a pinned kernel image and an ext4 rootfs image, with the overdrive-init binary (crate overdrive-init, step 01-03) baked into the rootfs at its well-known path, on a directory confirmed reflink-capable by a real FICLONE probe (never an fstype string comparison, per C-1).",
             "cloud-hypervisor is confirmed present and its version floor checked before any test proceeds; a missing or too-old binary fails fixture setup with a named, actionable error rather than surfacing as a downstream test timeout.",
             "The fixture is the single provisioning surface every Tier-3 VM test in this feature (Slices 01-05) calls — no test hand-stages its own kernel, rootfs, or cloud-hypervisor check.",
-            "The fixture is idempotent and safely re-runnable across repeated Lima test invocations — a second call reuses or re-verifies the staged artifacts rather than re-downloading/re-baking from scratch on every run."
+            "The fixture is idempotent and safely re-runnable across repeated Lima test invocations — a second call reuses or re-verifies the staged artifacts rather than re-downloading/re-baking from scratch on every run.",
+            "crates/overdrive-testing/src/lib.rs declares `pub mod vm_fixture;` alongside the existing `pub mod netns;` — without this the fixture module is unreachable outside the crate and every criterion above is vacuously true (no consumer can compile against it).",
+            "The fail-loudly-on-missing-prerequisite and idempotent-re-run behaviors above have NO named test at this step's own boundary — nothing yet calls the fixture. Their first executable assertion is a named Lima-gated smoke test in the fixture's first consumer, step 01-06 (crates/overdrive-host/tests/integration/vmm_equivalence.rs or a sibling vm_fixture_smoke.rs)."
           ],
           "test_file": "crates/overdrive-testing/src/vm_fixture.rs",
           "scenario_name": "Prerequisite for S-VM-01 and every Tier-3 VM scenario in this feature (brief.md 'Handoff to DELIVER' item 1; committed scaffold crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs:22-28, which names this exact gap)",
           "implementation_scope": {
             "source_directories": [
-              "crates/overdrive-testing/src/vm_fixture.rs"
+              "crates/overdrive-testing/src/vm_fixture.rs",
+              "crates/overdrive-testing/src/lib.rs"
             ],
             "test_directories": [
               "crates/overdrive-testing/src/vm_fixture.rs"
             ]
           },
-          "dependencies": ["01-03"],
+          "dependencies": [
+            "01-03"
+          ],
           "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: real-infra shared test fixture (development.md § 'Shared real-infra test fixtures — overdrive-testing') — dev-dependency only, never [dependencies], per that section's placement rule; consumed by every Tier-3 VM test crate across Slices 01-05, which is exactly the ≥2-crate / non-trivial-setup promotion criteria that section names. Run under cargo xtask lima run -- as root (real cgroup/kernel/CH boot envelope, testing.md § 'Running tests — Lima VM'). This step has NO ADR-pinned signature — DELIVER names the fixture helper's exact API at RED phase; there is no design artifact to diverge from here, unlike the ADR-pinned VmConfig/Vmm surfaces elsewhere in this slice. Reuses the FICLONE-probe pattern C-1 already established (brief §102/§113) rather than an fstype string check. Kernel/rootfs staging here is TEST-envelope provisioning (Lima), distinct from the production appliance image DEVOPS owns (brief §114's infra/metal/provision.sh handoff annotation) — this step does not touch infra/."
+          "implementation_notes": "TEST PARADIGM: real-infra shared test fixture (development.md § 'Shared real-infra test fixtures — overdrive-testing') — dev-dependency only, never [dependencies], per that section's placement rule; consumed by every Tier-3 VM test crate across Slices 01-05, which is exactly the ≥2-crate / non-trivial-setup promotion criteria that section names. Run under cargo xtask lima run -- as root (real cgroup/kernel/CH boot envelope, testing.md § 'Running tests — Lima VM'). This step has NO ADR-pinned signature — DELIVER names the fixture helper's exact API at RED phase; there is no design artifact to diverge from here, unlike the ADR-pinned VmConfig/Vmm surfaces elsewhere in this slice. Reuses the FICLONE-probe pattern C-1 already established (brief §102/§113) rather than an fstype string check. Kernel/rootfs staging here is TEST-envelope provisioning (Lima), distinct from the production appliance image DEVOPS owns (brief §114's infra/metal/provision.sh handoff annotation) — this step does not touch infra/. Wire the module: crates/overdrive-testing/src/lib.rs currently declares only `pub mod netns;` — add `pub mod vm_fixture;` in the SAME commit that lands vm_fixture.rs, or the file compiles to dead code and every criterion above reads green vacuously. This step has no consumer yet (overdrive-cli and overdrive-host do not dev-depend on overdrive-testing today — only overdrive-dataplane does); the dev-dependency additions and the fixture's own fail-loudly/idempotent-re-run smoke test land at step 01-06 (overdrive-host, the first consumer) and step 01-08 (overdrive-cli, the walking skeleton)."
         },
         {
           "id": "01-05",
@@ -118,12 +123,13 @@
           "criteria": [
             "reserve_bytes(guest_bytes) returns a value derived from a real-boot memory.current/memory.stat measurement (never RSS) against the fixture from step 01-04, with the measured figures cited by name in the function's own docstring, replacing the todo!() RED scaffold.",
             "S-VM-20's scaffold in vm_config_pure_functions.rs is unskipped into a real proptest asserting the returned value is >= 0 and <= a documented upper bound (a fraction of guest_bytes plus a fixed floor, both named in the docstring), for any guest_bytes value.",
-            "S-VM-20 gains the @mandatory:mutation_target tag in the SAME commit that gives reserve_bytes its body (brief §113 — a todo!() body has nothing to mutate, so the tag could not attach at step 01-01).",
-            "cargo xtask mutants --file crates/overdrive-core/src/vm/config.rs (scoped to reserve_bytes) is run and its kill-rate gate passes before this step closes.",
+            "S-VM-18's scaffold in vm_config_pure_functions.rs is unskipped into a real proptest asserting cgroup_max_bytes() is always strictly greater than guest_bytes(), for any declared guest RAM figure — deferred from step 01-01 because cgroup_max_bytes() evaluates reserve_bytes(), which was still a todo!() there.",
+            "S-VM-20 and S-VM-18 both gain the @mandatory:mutation_target tag in the SAME commit that gives reserve_bytes its body (brief §113 — a todo!() body has nothing to mutate, so neither tag could attach at step 01-01).",
+            "cargo xtask mutants --file crates/overdrive-core/src/vm/config.rs, scoped to reserve_bytes AND the MemoryPlan::cgroup_max_bytes invariant, is run and its kill-rate gate passes before this step closes.",
             "MemoryPlan::derive(declared) now produces a cgroup_max_bytes() bounded by the measured reserve for any declared guest RAM figure; every later step that constructs a real VmConfig (the Vmm adapters, VmDriver, the walking skeleton, and every Tier-3 scenario in Slices 02-05) no longer panics on this path."
           ],
           "test_file": "crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs",
-          "scenario_name": "S-VM-20",
+          "scenario_name": "S-VM-18, S-VM-20",
           "implementation_scope": {
             "source_directories": [
               "crates/overdrive-core/src/vm/config.rs"
@@ -132,9 +138,12 @@
               "crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs"
             ]
           },
-          "dependencies": ["01-01", "01-04"],
+          "dependencies": [
+            "01-01",
+            "01-04"
+          ],
           "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest for the unskipped S-VM-20 scaffold (bounds check against the documented upper bound) — the MEASUREMENT itself is a one-off real-boot exercise under cargo xtask lima run -- (real cloud-hypervisor + the 01-04 fixture, memory.current/memory.stat read directly off the allocation's cgroup, never RSS), not a permanent test; the docstring citation is the durable artifact (brief §102, ADR-0082 §D2.3). Measure BEFORE writing the body — a guessed constant between the two RSS-derived floors (~5.4 MiB steady-state, ~11.9 MiB pre-residency) is intake precedent #7's 'magic version floor' failure repeated with different units (brief §102). This step does NOT require the CloudHypervisorVmm Rust adapter (step 01-06) to be complete — the measurement drives cloud-hypervisor directly against the 01-04 fixture; it is placed before the Vmm adapter and VmDriver steps precisely so THEIR construction of a real VmConfig via MemoryPlan::derive does not itself panic on the still-todo!() reserve_bytes."
+          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest for the unskipped S-VM-20 scaffold (bounds check against the documented upper bound) AND the unskipped S-VM-18 scaffold (cgroup_max_bytes() > guest_bytes() strictly, for any declared guest_bytes) — the MEASUREMENT itself is a one-off real-boot exercise under cargo xtask lima run -- (real cloud-hypervisor + the 01-04 fixture, memory.current/memory.stat read directly off the allocation's cgroup, never RSS), not a permanent test; the docstring citation is the durable artifact (brief §102, ADR-0082 §D2.3). Measure BEFORE writing the body — a guessed constant between the two RSS-derived floors (~5.4 MiB steady-state, ~11.9 MiB pre-residency) is intake precedent #7's 'magic version floor' failure repeated with different units (brief §102). This step does NOT require the CloudHypervisorVmm Rust adapter (step 01-06) to be complete — the measurement drives cloud-hypervisor directly against the 01-04 fixture; it is placed before the Vmm adapter and VmDriver steps precisely so THEIR construction of a real VmConfig via MemoryPlan::derive does not itself panic on the still-todo!() reserve_bytes. S-VM-18 moves here from step 01-01 for the identical reason as S-VM-20: cgroup_max_bytes() is guest + reserve_bytes(declared) per ADR-0082 §D2.3, so its own invariant proptest cannot execute until reserve_bytes has a real body — unskipping S-VM-18 at 01-01 alongside S-VM-08/16/17 was the same iteration-1 self-contradiction already fixed for S-VM-20, recurring one scenario over; both scaffolds now close together here."
         },
         {
           "id": "01-06",
@@ -144,14 +153,17 @@
             "Both adapters produce observably equivalent outcomes across probe/create/terminate, including the six pinned edge cases (ADR-0082 §D6).",
             "create() clones the rootfs via the FICLONE ioctl on the master's own filesystem, never cp; on a real non-reflink target it returns a typed errno, no full-copy fallback, no VMM spawned.",
             "create() removes its clone if the spawn fails; a stale clone destination from a prior crash is replaced, not adopted untouched.",
-            "terminate() on an already-dead VMM returns Ok(Killed); probe() is idempotent and leaves no residue."
+            "terminate() on an already-dead VMM returns Ok(Killed); probe() is idempotent and leaves no residue.",
+            "crates/overdrive-host/Cargo.toml adds `overdrive-testing.workspace = true` under [dev-dependencies] (never [dependencies], per development.md § \"Shared real-infra test fixtures\") — overdrive-host is the first crate besides overdrive-testing itself to consume the 01-04 fixture; vmm_equivalence.rs and vmm_ficlone_per_launch.rs call it to stage kernel/rootfs/cloud-hypervisor rather than hand-staging their own.",
+            "A named Lima-gated smoke test (in vmm_equivalence.rs or a sibling vm_fixture_smoke.rs) asserts the 01-04 fixture's fail-loudly-on-missing-prerequisite behavior (a deliberately broken cloud-hypervisor path fails setup with a named, actionable error, never a downstream timeout) and its idempotent-re-run behavior (a second invocation reuses/re-verifies the staged artifacts rather than re-downloading/re-baking) — these have no test anywhere else in the roadmap."
           ],
           "test_file": "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
           "scenario_name": "S-VM-90, S-VM-94",
           "implementation_scope": {
             "source_directories": [
               "crates/overdrive-host/src/vmm.rs",
-              "crates/overdrive-sim/src/adapters/vmm.rs"
+              "crates/overdrive-sim/src/adapters/vmm.rs",
+              "crates/overdrive-host/Cargo.toml"
             ],
             "test_directories": [
               "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
@@ -159,9 +171,13 @@
               "crates/overdrive-host/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-01", "01-04", "01-05"],
+          "dependencies": [
+            "01-01",
+            "01-04",
+            "01-05"
+          ],
           "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example call-sequence per Mandate 9 (@example, not @property — a fixed hand-enumerated sequence, not generated input). Run via cargo xtask lima run --. S-VM-94 (vmm_ficlone_per_launch.rs) needs a REAL non-reflink fixture (tmpfs TempDir or loopback ext4), no SimVmm. Mandatory mutation target: the FICLONE call must be killed by a mutant substituting a full-copy fallback. Depends on the 01-04 fixture (real cloud-hypervisor + rootfs to spawn/clone against) and 01-05 (reserve_bytes must have a real body before any test here constructs a full VmConfig via MemoryPlan::derive — every VmConfig.memory field is mandatory)."
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example call-sequence per Mandate 9 (@example, not @property — a fixed hand-enumerated sequence, not generated input). Run via cargo xtask lima run --. S-VM-94 (vmm_ficlone_per_launch.rs) needs a REAL non-reflink fixture (tmpfs TempDir or loopback ext4), no SimVmm. Mandatory mutation target: the FICLONE call must be killed by a mutant substituting a full-copy fallback. Depends on the 01-04 fixture (real cloud-hypervisor + rootfs to spawn/clone against) and 01-05 (reserve_bytes must have a real body before any test here constructs a full VmConfig via MemoryPlan::derive — every VmConfig.memory field is mandatory). overdrive-host's Cargo.toml gains overdrive-testing.workspace = true under [dev-dependencies] in THIS step — no other crate but overdrive-dataplane dev-depends on overdrive-testing today, and 01-04 itself has no consumer. The fixture's fail-loudly/idempotent-re-run behaviors, unfalsifiable at 01-04's own boundary, get their first named assertion here as a Lima-gated smoke test."
         },
         {
           "id": "01-07",
@@ -185,7 +201,12 @@
               "crates/overdrive-worker/tests/acceptance.rs"
             ]
           },
-          "dependencies": ["01-01", "01-03", "01-05", "01-06"],
+          "dependencies": [
+            "01-01",
+            "01-03",
+            "01-05",
+            "01-06"
+          ],
           "effort_hours": 10,
           "implementation_notes": "TEST PARADIGM: component-scope, default lane, example-only per Mandate 9 (four FIXED hand-enumerated call sequences against SimVmm, not generated input — @example). Author this RED scaffold fresh (new file, not one of the 15 committed by DISTILL); driving port and edge cases are pinned verbatim in ADR-0082 §D3/§D4 — do not improvise the race shape or the VM_SHUTDOWN_REQUEST_DEADLINE/VM_STOP_GRACE constants (2s/10s). VmExitWatch::recv MUST take &mut self, never self (ADR-0082 §D3 correction). No code path may derive ExitKind from cloud-hypervisor's own exit status — mandatory mutation target, alongside the three race arms' cleanup paths (brief §113 — a mutation dropping cleanup on any non-Ok arm must be killed). S-VM-14 (deadline-arm leak) and S-VM-15 (EXIT-report priority) are AC-06's Tier-3/@real-io evidence for this same race and cleanup logic — DWD-04 commits them to overdrive-cli/tests/integration (real CH, real in-process serve), which does not exist until the walking skeleton lands; their real-boot proof is step 01-08, not here. This step's own SimVmm-driven tests (S-VM-76 plus crafter-authored race-arm examples grounded in ADR-0082 §D3/§D4) are the component-scope RED/GREEN evidence; do not rewrite S-VM-14/15 into SimVmm shadows to close them here — that is the testing theatre DISTILL rejected at S-VM-75's own precedent."
         },
@@ -200,7 +221,8 @@
             "MtlsInterceptWorker installs are gated on DriverType::Exec at both call sites; an mTLS-composed VM allocation gets no bound listener and no installed TPROXY rule.",
             "exit_observer runs one task per registry entry; ServerHandle holds Vec<JoinHandle>, cancels once and awaits all on shutdown; alloc_drivers routes stop/terminal arms.",
             "The deadline arm of the three-way boot race leaks nothing: a guest that never beacons ready reaches Failed with no cloud-hypervisor process, run directory, rootfs clone, or cgroup scope remaining for that allocation, and its supervision claim (taken at step 0 of start) released (S-VM-14).",
-            "A guest EXIT report over vsock is never overwritten by the VMM's own subsequent teardown exit — the reported exit code stays the guest's, with the report's arrival ordered strictly before the ExitEvent emission (S-VM-15)."
+            "A guest EXIT report over vsock is never overwritten by the VMM's own subsequent teardown exit — the reported exit code stays the guest's, with the report's arrival ordered strictly before the ExitEvent emission (S-VM-15).",
+            "crates/overdrive-cli/Cargo.toml adds `overdrive-testing.workspace = true` under [dev-dependencies] (never [dependencies]) — overdrive-cli is the first CLI-side consumer of the 01-04 fixture; vm_walking_skeleton.rs calls it to stage the real kernel/rootfs/cloud-hypervisor prerequisites for the walking-skeleton boot rather than hand-staging its own."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
           "scenario_name": "S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-05, S-VM-06, S-VM-07, S-VM-14, S-VM-15, S-VM-74",
@@ -210,7 +232,8 @@
               "crates/overdrive-control-plane/src/action_shim/mod.rs",
               "crates/overdrive-worker/src/mtls_intercept_worker.rs",
               "crates/overdrive-core/src/traits/driver.rs",
-              "crates/overdrive-core/src/aggregate/workload_spec.rs"
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-cli/Cargo.toml"
             ],
             "test_directories": [
               "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
@@ -218,9 +241,14 @@
               "crates/overdrive-cli/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-02", "01-03", "01-04", "01-07"],
+          "dependencies": [
+            "01-02",
+            "01-03",
+            "01-04",
+            "01-07"
+          ],
           "effort_hours": 12,
-          "implementation_notes": "TEST PARADIGM: walking-skeleton Tier 3 (real serve+deploy, real cloud-hypervisor, real guest kernel — the ONLY scenario group in this feature with a real guest kernel), gated integration-tests, single-example (Mandate 9 layer 3+). UNSKIP the 5 vm_walking_skeleton.rs scaffolds (S-VM-01..05) AND the 2 vm_spec_driver_table_dispatch.rs scaffolds (S-VM-06/07) — replace panic bodies with real assertions, real fixture (step 01-04). Author S-VM-74 fresh in the same file (extends the walking skeleton, DWD-04 addendum). Pin AllocationSpec.driver: DriverPayload and action_shim::dispatch's signature EXACTLY as ADR-0083 §D2a/§D3 — do not invent a different index shape for alloc_drivers. The parser's driver-table dispatch (exactly-one-of-[exec]/[vm]) is a mandatory mutation target (brief §113) — a mutant that admits both-or-neither tables must be killed. GH #248/ADR-0074 trap: S-VM-05 MUST run against an mTLS-composed serve (dataplane_override unset). S-VM-14/S-VM-15 (AC-06, @tier3 @real-io) join this step per DWD-04's crate placement (overdrive-cli/tests/integration) — VmDriver's own component-scope suite (SimVmm, step 01-07) cannot supply real-CH evidence for the deadline-arm cleanup or the EXIT-report priority; this is the first step with both a real fixture (01-04) and a real DriverRegistry-composed serve, so it is their correct home, not 01-07."
+          "implementation_notes": "TEST PARADIGM: walking-skeleton Tier 3 (real serve+deploy, real cloud-hypervisor, real guest kernel — the ONLY scenario group in this feature with a real guest kernel), gated integration-tests, single-example (Mandate 9 layer 3+). UNSKIP the 5 vm_walking_skeleton.rs scaffolds (S-VM-01..05) AND the 2 vm_spec_driver_table_dispatch.rs scaffolds (S-VM-06/07) — replace panic bodies with real assertions, real fixture (step 01-04). Author S-VM-74 fresh in the same file (extends the walking skeleton, DWD-04 addendum). Pin AllocationSpec.driver: DriverPayload and action_shim::dispatch's signature EXACTLY as ADR-0083 §D2a/§D3 — do not invent a different index shape for alloc_drivers. The parser's driver-table dispatch (exactly-one-of-[exec]/[vm]) is a mandatory mutation target (brief §113) — a mutant that admits both-or-neither tables must be killed. GH #248/ADR-0074 trap: S-VM-05 MUST run against an mTLS-composed serve (dataplane_override unset). S-VM-14/S-VM-15 (AC-06, @tier3 @real-io) join this step per DWD-04's crate placement (overdrive-cli/tests/integration) — VmDriver's own component-scope suite (SimVmm, step 01-07) cannot supply real-CH evidence for the deadline-arm cleanup or the EXIT-report priority; this is the first step with both a real fixture (01-04) and a real DriverRegistry-composed serve, so it is their correct home, not 01-07. overdrive-cli's Cargo.toml gains overdrive-testing.workspace = true under [dev-dependencies] in this step — overdrive-cli does not depend on overdrive-testing today (only overdrive-dataplane does); the walking skeleton is the first CLI-side call site for the 01-04 fixture."
         },
         {
           "id": "01-09",
@@ -230,7 +258,8 @@
             "CH present and healthy composes the Vm driver entry; CH absent boots the node with no Vm entry and rejects [vm] at admission naming the capability.",
             "A capability-flag probe failure (Landlock flag/LSM absent, /dev/kvm unreachable) refuses the boot with health.startup.refused, injected via ServerConfig.vmm_override.",
             "A real non-reflink staging directory refuses the boot via an executed FICLONE ioctl, never an fstype string comparison.",
-            "A VM whose memory.max is deliberately undersized is classified Failed/VmOutOfMemory{limit_bytes,oom_kill_count}, never WorkloadCrashedImmediately{signal:9}; disposition StoppedBy::Process, restart budget consumed as any crash."
+            "A VM whose memory.max is deliberately undersized is classified Failed/VmOutOfMemory{limit_bytes,oom_kill_count}, never WorkloadCrashedImmediately{signal:9}; disposition StoppedBy::Process, restart budget consumed as any crash.",
+            "CgroupAccounting::probe() distinguishes the three fault rows exercised by cgroup_accounting_equivalence.rs — Substrate (memory controller absent), SubstrateCorrupt (memory.max present but unparseable), and MissingOomKillKey (memory.events lacks an oom_kill key) — each surfacing its own typed probe failure (S-VM-93)."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
           "scenario_name": "S-VM-11, S-VM-12, S-VM-13, S-VM-75, S-VM-19, S-VM-93",
@@ -248,7 +277,9 @@
               "crates/overdrive-host/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-08"],
+          "dependencies": [
+            "01-08"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. ServerConfig.vmm_override: Option<Arc<dyn Vmm>>, #[cfg(feature=\"integration-tests\")]-gated on both the field and its one use site — mirrors mtls_identity_override, NOT dataplane_override (ADR-0083 §D8). probe() runs unconditionally regardless of which adapter is bound. CgroupAccounting is a NEW port beside CgroupFs, not a widening of it (ADR-0083 §A8 already rejected that). S-VM-93 (cgroup_accounting_equivalence.rs) covers the 3-row probe fault table (Substrate/SubstrateCorrupt/MissingOomKillKey). Mandatory mutation target: exit_observer's new precedence check."
         },
@@ -274,7 +305,10 @@
               "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs"
             ]
           },
-          "dependencies": ["01-01", "01-08"],
+          "dependencies": [
+            "01-01",
+            "01-08"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM (dst-lint clauses): EXEMPT FROM PARADIGM — static-analysis AST-scanner unit tests in xtask (excluded from mutation testing per project convention), following the existing CrashObservabilityStructLiteral clause shape verbatim; not a property over program behavior. TEST PARADIGM (S-VM-09): Tier 3, gated integration-tests, single-example, real serve boot. Mirrors the ADR-0078 LastTerminated{} literal-ban clause for MemoryPlan. This step lands FOUR of DWD-09's five dst-lint clauses (--disk / --landlock-rules / --seccomp / MemoryPlan-literal-ban). The fifth — the exit observer's loop body contains exactly one release_supervision call, outside match outcome — lands in step 02-02, which is where the observer's release-on-every-arm shape is actually built; this step runs before that call site exists (DWD-09, brief §113)."
         }
@@ -311,7 +345,10 @@
               "crates/overdrive-host/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-07", "01-08"],
+          "dependencies": [
+            "01-07",
+            "01-08"
+          ],
           "effort_hours": 10,
           "implementation_notes": "TEST PARADIGM: Tier 1 pure-function proptest for plan_reclamation/SupervisionSet (mandatory mutation targets, brief.md §113); Tier 3 single-example (@example) for vm_host_state_equivalence.rs. UNSKIP the 3 existing vm_reclamation_plan_purity.rs scaffolds (S-VM-31/32/92) — real bodies per ADR-0083 §D7/brief §105a.1-105a.4. VmReclamationView is FIELD-LESS (ADR-0079 pattern) — needs #[expect(clippy::zero_sized_map_values, ...)] on its bulk-load arm. Wires into the five compiler-enforced sites (AnyReconciler/AnyState/AnyReconcilerView/the 4-tuple match/hydrate_desired/hydrate_actual — brief §105a.9)."
         },
@@ -346,7 +383,9 @@
               "xtask/src/dst_lint.rs"
             ]
           },
-          "dependencies": ["02-01"],
+          "dependencies": [
+            "02-01"
+          ],
           "effort_hours": 10,
           "implementation_notes": "TEST PARADIGM: S-VM-77 is Tier 1 proptest over the transition table (mandatory mutation target — a mutation that ignores transition 3's atomic verdict re-opens NEW-3). S-VM-78 is Tier 1 component-scope, scheduling two hydrate_actual reads with a VM start interleaved between them — its implementation site is reconciler_runtime.rs's hydrate_actual arm (wired at step 02-01), which is why that file is in this step's source scope even though 02-01 built its skeleton. S-VM-23/30 are Tier 3, gated integration-tests, real serve boot with N surviving scopes. Extend vm_reclamation_plan_purity.rs OR a new sibling vm_reclamation_claim_lifecycle.rs — DELIVER's own call per DWD-04. Transition 3 (Held→EndingInFlight) is a check-and-act; its discarded return is the 'Check-and-act must be atomic' defect (development.md). The dst-lint clause (criterion 5) is EXEMPT FROM PARADIGM — static-analysis AST-scanner unit test in xtask, following the existing CrashObservabilityStructLiteral clause shape."
         },
@@ -372,7 +411,10 @@
               "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs"
             ]
           },
-          "dependencies": ["02-01", "02-02"],
+          "dependencies": [
+            "02-01",
+            "02-02"
+          ],
           "effort_hours": 10,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, real serve convergence loop (S-VM-21/22's in-memory companion is already covered by 02-01's plan_reclamation property; this step is their Tier-3 shape). S-VM-79's guard is a mandatory mutation target — a mutant flipping is_terminal there re-opens the NEW-1 residual gap. execute_discard_stranded_artifacts takes NO ObservationStore and NO broker parameter — that absence is structural, not a code-review reminder (DD-5)."
         },
@@ -403,7 +445,10 @@
               "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs"
             ]
           },
-          "dependencies": ["02-01", "02-03"],
+          "dependencies": [
+            "02-01",
+            "02-03"
+          ],
           "effort_hours": 10,
           "implementation_notes": "TEST PARADIGM: S-VM-26/27/29 are Tier 1 in-memory proptests over WorkloadLifecycle/ServiceLifecycle (mandatory mutation targets); S-VM-28 is Tier 3 single-example; S-VM-80 is Tier 1 proptest directly over VmReclamation (the missing third leg beside the two sibling-reconciler examples); S-VM-24/87/88/89 are Tier 1 DST invariants (assert_always!/assert_eventually!, SimVmHostState + SimClock advancing the 30s cadence deterministically). is_natural_exit is the ONLY predicate whose meaning changes; is_intentionally_stopped/is_restartable need no edit. Criterion 6's demonstrable-window requirement closes the gap where the ESR gate could pass nominally (four invariants never firing false) without the DST harness ever actually exercising the interval EndingInFlightIsNeverReclaimed exists to witness."
         }
@@ -436,7 +481,9 @@
               "crates/overdrive-cli/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-08"],
+          "dependencies": [
+            "01-08"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (five deliberately-broken deploys). Author the RED scaffold fresh at this slice's own RED phase (DWD-06a) — file name is DELIVER's own call within the overdrive-cli/tests/integration/vm_*.rs family DWD-04 commits. classify_driver_failure branches on DriverType FIRST; the exec prefix table is reached only under Exec — zero exec test cases may change (learning hypothesis, slice-02.md). S-VM-41 (DWD-14, closing the ADR-0083 §D5 row-5 VmKernelFormatUnsupported gap a fable review surfaced against this exact step) is the classification-join half of C-7 — companion to S-VM-17's pure-function half (step 01-01, KernelImage::validate rejecting the bad magic before any hypervisor process spawns). This step's classify_driver_failure VM arm maps the resulting KernelFormatError onto TransitionReason::VmKernelFormatUnsupported{path, arch, detail} (ADR-0082 §D2.4, ADR-0083 §D5 row 5); assert on the rendered cause text via workload describe, never on the enum discriminant alone (DWD-14's own acceptance line). The emit-inventory table (ADR-0083 §D5, opening text) separately lacks two rows this step's own scope only touches tangentially — MtlsInterceptInstallFailed and WorkloadNetnsProvisionFailed are absent from the pre-existing 15-row table (17 variants exist); out of this step's scope to backfill (they predate this feature), noted here only so this step's classify_driver_failure work is not mistaken for closing that separate gap too."
         },
@@ -459,7 +506,9 @@
               "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
             ]
           },
-          "dependencies": ["03-01"],
+          "dependencies": [
+            "03-01"
+          ],
           "effort_hours": 4,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. Per development.md 'Distinct failure modes get distinct error variants' — this is the deliberate exception: an unclassified failure stays unclassified rather than inventing a variant. The kernel-format case (C-7) is explicitly NOT this scenario — it is caught pre-boot by KernelImage::validate (01-01) and, at the classification layer, by VmKernelFormatUnsupported (03-01, S-VM-41) — and never reaches this fallthrough."
         },
@@ -482,7 +531,9 @@
               "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
             ]
           },
-          "dependencies": ["03-01"],
+          "dependencies": [
+            "03-01"
+          ],
           "effort_hours": 4,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (in-process rejection, no VMM needed). Mirrors the existing ParseError::ProbesNotAllowedOnKind precedent (workload_spec.rs:827) — a semantic rejection with guidance, not a parse error. GH #257 and #222 are real, already-filed issues; do not invent a third."
         },
@@ -504,7 +555,9 @@
               "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
             ]
           },
-          "dependencies": ["03-03"],
+          "dependencies": [
+            "03-03"
+          ],
           "effort_hours": 3,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. These are the regression guard that 03-03's rejection is scoped to [service] only — [job]/[schedule] combinations must not regress."
         }
@@ -536,7 +589,10 @@
               "crates/overdrive-cli/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-07", "03-01"],
+          "dependencies": [
+            "01-07",
+            "03-01"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-42 is a mandatory mutation target (K1 north star) — a mutation collapsing the unreported-death arm into CleanExit must be killed. No code path may derive ExitKind from cloud-hypervisor's own exit status (already enforced structurally by 01-07; this step is its operator-facing Tier-3 proof)."
         },
@@ -559,7 +615,9 @@
               "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
             ]
           },
-          "dependencies": ["04-01"],
+          "dependencies": [
+            "04-01"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. This is the FIRST real evidence for the host→guest SHUTDOWN write — the spike exercised the vsock connection guest→host only (findings.md:2787); treat as a mechanism proof, not a regression guard (ADR-0082 §D4). The pre-beacon-stop and already-dead-VMM edge cases are already covered component-scope by 01-07's S-VM-76 — this step is their Tier-3 operator-facing companion for the responsive/unresponsive-guest cases only."
         },
@@ -581,7 +639,9 @@
               "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
             ]
           },
-          "dependencies": ["04-01"],
+          "dependencies": [
+            "04-01"
+          ],
           "effort_hours": 4,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. Reuses 01-06's FICLONE mechanism verbatim — this step proves the RESTART path re-invokes create() with a fresh clone rather than reusing a mutated one."
         },
@@ -606,7 +666,9 @@
               "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
             ]
           },
-          "dependencies": ["04-01"],
+          "dependencies": [
+            "04-01"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, PID resolution via the allocation's cgroup scope cgroup.procs (never a driver-internal handle). Landlock grant derivation (VmRunDir::landlock_rules, ADR-0082 §D2.2) already lands in 01-01/01-06; this step is the real-boot proof. The vsock-directory-grant clause is a dst-lint target too (01-10) — this AT is its behavioral complement (brief.md §113)."
         },
@@ -630,7 +692,10 @@
               "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
             ]
           },
-          "dependencies": ["04-04", "01-09"],
+          "dependencies": [
+            "04-04",
+            "01-09"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, using the SAME ServerConfig.vmm_override seam 01-09 wired (ADR-0083 §D8) — do not invent a second injection mechanism. Mandatory mutation target: warn-and-continue must be killed (the fail-closed arm)."
         }
@@ -662,9 +727,13 @@
               "crates/overdrive-core/tests/acceptance/vm_spec_driver_table_dispatch.rs"
             ]
           },
-          "dependencies": ["01-08", "03-01", "04-01"],
+          "dependencies": [
+            "01-08",
+            "03-01",
+            "04-01"
+          ],
           "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: S-VM-57 is Tier 3, gated integration-tests, single-example (the regression guard); S-VM-62 is Tier 1 in-memory (parse rejection, no VMM). Author fresh at Slice 04's own RED phase (DWD-06a). [[vm.volume]] rides inside Slice 01's JobEnvelope V2 (01-02) — no second rkyv bump. S-VM-62 lands in the EXISTING vm_spec_driver_table_dispatch.rs (created at step 01-08, DWD-04's parse-boundary-rejection placement — same file as S-VM-06/07), not a CLI integration file; do not create a redundant Tier-3 CLI test for it."
+          "implementation_notes": "TEST PARADIGM: S-VM-57 is Tier 3, gated integration-tests, single-example (the regression guard); S-VM-62 is Tier 1 in-memory (parse rejection, no VMM). Author fresh at Slice 04's own RED phase (DWD-06a). [[vm.volume]] rides inside Slice 01's JobEnvelope V2 (01-02) — no second rkyv bump. S-VM-62 lands in the EXISTING vm_spec_driver_table_dispatch.rs — a DISTILL-committed RED scaffold (S-VM-06/S-VM-07) already in tree, wired into crates/overdrive-core/tests/acceptance.rs; step 01-08 only UNSKIPS its two scaffolds, it does not create the file — not a CLI integration file; do not create a redundant Tier-3 CLI test for it."
         },
         {
           "id": "05-02",
@@ -686,7 +755,9 @@
               "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
             ]
           },
-          "dependencies": ["05-01"],
+          "dependencies": [
+            "05-01"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. virtiofsd is a sidecar VmDriver spawns and supervises DIRECTLY (Command::spawn, same shape as ExecDriver's own workload process) — it sits OUTSIDE the Vmm port entirely (system constraint 9). Placement: allocation's cgroup scope + netns (load-bearing — cgroup_kill must reap it). overdrive-host/src/virtiofsd.rs is NOT a port/trait seam — no storage-daemon supervision port is minted (ADR-0083 §D8, explicit ruling: 'Path (a) is explicitly not taken'). It holds plain spawn/supervise helper functions (Command::spawn + wait, mirroring ExecDriver's own workload-process handling) that VmDriver (overdrive-worker, which already depends on overdrive-host per Cargo.toml) calls directly. Do not treat it as a trait boundary or add a Vmm-shaped abstraction over it."
         },
@@ -709,7 +780,9 @@
               "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
             ]
           },
-          "dependencies": ["05-02"],
+          "dependencies": [
+            "05-02"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-56 is a mandatory mutation target and MUST defeat a guest-side-only implementation — a cooperative guest's failed write alone is insufficient evidence (US-VM-8 AC 2). read_only is enforced HOST-side (the export); a guest-side -o ro is an ergonomic guard only, never the boundary. virtiofsd.rs (overdrive-host) is plain spawn/supervise helpers, not a port trait — see 05-02's note; this step's host<->guest byte-faithful assertions read/write the operator's source directory directly via ordinary filesystem access, never through a (nonexistent) storage-daemon port."
         },
@@ -733,7 +806,10 @@
               "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
             ]
           },
-          "dependencies": ["05-02", "01-03"],
+          "dependencies": [
+            "05-02",
+            "01-03"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-60 is THE mandatory mutation target the [D4] amendment exists to defend — without the refuse-to-exec guard, the command writes into the discarded per-launch rootfs copy, exits 0, and workload describe lies. overdrive-init's fifth duty (mount then refuse) is a scoped, non-passive amendment — name the subject, per the [D8g] correction."
         },
@@ -758,7 +834,9 @@
               "crates/overdrive-core/tests/acceptance.rs"
             ]
           },
-          "dependencies": ["05-01"],
+          "dependencies": [
+            "05-01"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest, both mandatory mutation targets. S-VM-67's driving port is a value with private fields and exactly one rendering site (mirroring DiskAttachment::to_disk_arg's D2.1 shape) — the exact type is NOT yet ADR-pinned; DELIVER names it at RED phase per CLAUDE.md 'Implement to the design' (do not invent a storage-daemon supervision port — ADR-0083 §D8 explicitly mints none). The rendering type ITSELF lands in overdrive-core (crates/overdrive-core/src/vm/config.rs), mirroring the DiskAttachment §D2.1 precedent — private fields, one rendering site, pure, testable in this step's own overdrive-core acceptance file. overdrive-host is never a dev-dependency of overdrive-core's test lane (development.md § 'Port-trait dependencies'), so the rendering type cannot live in overdrive-host; only the impure spawn call site that consumes the rendered value lives in overdrive-host/src/virtiofsd.rs (or wherever 05-02 places the virtiofsd module). S-VM-67's Then proves ONLY the rendered argument; it does NOT prove a running virtiofsd enforces the sandbox or that the platform fails closed end-to-end — that stays an undischarged Tier-3 property of this slice (DWD-13), not covered by any scenario in this roadmap."
         },
@@ -783,7 +861,10 @@
               "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
             ]
           },
-          "dependencies": ["05-02", "05-04"],
+          "dependencies": [
+            "05-02",
+            "05-04"
+          ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, both shapes of S-VM-65 mandatory. The exit_observer's storage_daemon_died precedence check runs AHEAD of ExitKind entirely — NOT nested inside the Crashed arm the way VmOutOfMemory (row 13) is (ADR-0083 §D5 row 14). S-VM-64 must discriminate, not merely observe green: assert the daemon's exit WAS observed while contributing nothing — a do-nothing implementation would also pass a naive assertion."
         }
@@ -815,7 +896,10 @@
               "crates/overdrive-cli/tests/integration.rs"
             ]
           },
-          "dependencies": ["01-01", "01-08"],
+          "dependencies": [
+            "01-01",
+            "01-08"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: S-VM-73 is Tier 1 default-lane proptest, mandatory mutation target — author fresh (name pinned by DELIVER's own DESIGN reading, per US-VM-5 Technical Notes; the derivation rule itself is DESIGN's). S-VM-69/70 are Tier 3, gated integration-tests, single-example, real guest CPU count read, which needs a real DriverRegistry-composed serve (step 01-08)."
         },
@@ -839,7 +923,9 @@
               "crates/overdrive-cli/tests/integration.rs"
             ]
           },
-          "dependencies": ["06-01"],
+          "dependencies": [
+            "06-01"
+          ],
           "effort_hours": 5,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, real boot, assertion taken from inside the guest — never from the hypervisor config the platform generated (asserting on generated config would only prove we wrote what we wrote)."
         },
@@ -861,7 +947,10 @@
               "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs"
             ]
           },
-          "dependencies": ["06-02", "05-01"],
+          "dependencies": [
+            "06-02",
+            "05-01"
+          ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single parametrized case (not two separate tests) — the reason Slice 04 (volumes) is ordered before Slice 05 (resources). Driver::resize rejects, always — ADR-0082 §D4 keeps --api-socket in VmConfig only as the future hotplug substrate for GH #92's right-sizing reconciler and states plainly it 'is not depended on by any path in this feature'; a silent no-op is a review rejection, and so is an implemented hotplug this feature does not need."
         }

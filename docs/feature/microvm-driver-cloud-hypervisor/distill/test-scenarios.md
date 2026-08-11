@@ -31,13 +31,14 @@ driven-port equivalence test) per this project's four-tier discipline.
 
 | Port | Kind | Location | Exercises |
 |---|---|---|---|
-| `overdrive deploy <spec.toml>` — direct CLI handler call (`overdrive_cli::commands::deploy::deploy`) against a REAL in-process `overdrive serve`, run under `cargo xtask lima run --` as root | Driving (user-facing) | `crates/overdrive-cli`, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (firm rule — no `Command::new(CARGO_BIN_EXE_overdrive)` anywhere in this feature) | S-VM-01…05, S-VM-11…15, S-VM-33…66, S-VM-68, S-VM-74, S-VM-75, S-VM-81 (Tier-3 cases; **excludes S-VM-67**, moved to the pure-function row below — DWD-13). The REAL OS-level subprocess in every one of these is `cloud-hypervisor` itself, spawned by `VmDriver`/`CloudHypervisorVmm` inside the real `overdrive serve` process — that is what makes them Tier-3/`@real-io`, not how the CLI layer is invoked |
+| `overdrive deploy <spec.toml>` — direct CLI handler call (`overdrive_cli::commands::deploy::deploy`) against a REAL in-process `overdrive serve`, run under `cargo xtask lima run --` as root | Driving (user-facing) | `crates/overdrive-cli`, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (firm rule — no `Command::new(CARGO_BIN_EXE_overdrive)` anywhere in this feature) | S-VM-01…05, S-VM-09, S-VM-11…15, S-VM-19, S-VM-33…66, S-VM-68, S-VM-74, S-VM-75, S-VM-81 (Tier-3 cases; **excludes S-VM-67**, moved to the pure-function row below — DWD-13; **explicitly names S-VM-09/S-VM-19** — DWD-16 closes the sub-range-gap omission DWD-15 flagged). The REAL OS-level subprocess in every one of these is `cloud-hypervisor` itself, spawned by `VmDriver`/`CloudHypervisorVmm` inside the real `overdrive serve` process — that is what makes them Tier-3/`@real-io`, not how the CLI layer is invoked |
 | `overdrive workload describe <id>` / `overdrive job stop <id>` | Driving (user-facing) | `crates/overdrive-cli` | Read-side assertions on every Tier-3 scenario; S-VM-46/47 (stop verb) |
 | `VmDriver::start` / `VmDriver::stop` — **component-scope acceptance case against `SimVmm`, injected at the `Vmm` port boundary** | Driving (internal, component scope — the enforcement vehicle ADR-0082 §D4 names by name: *"`VmDriver::stop`'s edge cases … are therefore asserted by a `VmDriver`-level acceptance case against `SimVmm`, named here so the move does not quietly shed the enforcement it was partly justified on"*) | `crates/overdrive-worker` | S-VM-76. Carved out of the "always reached through the CLI/serve pair" default because `vmm_equivalence.rs` drives the `Vmm` port only and structurally cannot reach `VmDriver::stop`'s relocated guest half (ADR-0082 §D4) — this is `SimVmm` injected at a port boundary per system constraint 1, not a bypass of it |
 | `Vmm` port (`CloudHypervisorVmm` / `SimVmm`) | Driven (adapter-under-test for equivalence only) | `crates/overdrive-host`, `crates/overdrive-sim` | `vmm_equivalence.rs` (S-VM-90); `vmm_ficlone_per_launch.rs` (S-VM-94, real non-reflink substrate) |
 | `VmHostState` port (`RealVmHostState` / `SimVmHostState`) | Driven (adapter-under-test) | `crates/overdrive-host`, `crates/overdrive-sim` | `vm_host_state_equivalence.rs` (S-VM-91) |
 | `CgroupAccounting` port (`RealCgroupAccounting` / `SimCgroupAccounting`) | Driven (adapter-under-test) | `crates/overdrive-host`, `crates/overdrive-sim` | `cgroup_accounting_equivalence.rs` (S-VM-93) |
-| `plan_reclamation(desired, actual) -> Vec<Action>` (pure function) | Driving (internal, port-to-port at function scope) | `crates/overdrive-core/src/reconcilers/vm_reclamation.rs` | S-VM-21…32, S-VM-77…80 (in-memory half); Tier-3 half drives through `overdrive serve`'s convergence loop |
+| `plan_reclamation(desired, actual) -> Vec<Action>` (pure function) | Driving (internal, port-to-port at function scope) | `crates/overdrive-core/src/reconcilers/vm_reclamation.rs` | S-VM-21…32, S-VM-78, S-VM-80 (in-memory half; **excludes S-VM-77/S-VM-79** — moved to the `overdrive-control-plane` row below, DWD-16); Tier-3 half drives through `overdrive serve`'s convergence loop |
+| The exit observer's loop body (`worker/exit_observer.rs:204-371`, claim-release across `RetryOutcome` arms) / `execute_reclaim_allocation` (the `ReclaimAllocation` action executor, `action_shim/`) | Driving (internal, component scope) | `crates/overdrive-control-plane` | S-VM-77, S-VM-79 — moved here from the `plan_reclamation` row above (DWD-16): both driving ports are `overdrive-control-plane`-resident production code, structurally unreachable from an `overdrive-core` test (`overdrive-control-plane` depends on `overdrive-core`, never the reverse) |
 | `VmReclamation` reconciler tick (`ReconcilerRuntime`) | Driving (internal) | `crates/overdrive-core` runtime, composed in `overdrive-control-plane` | S-VM-22, S-VM-24, S-VM-25 Tier-3 shapes |
 | DST harness (`cargo dst`) + `Invariant` catalogue | Driving (internal, Tier 1) | `crates/overdrive-sim` | S-VM-88 (`VmReclamationConverges`), S-VM-24 in-memory shape (`SupervisedVmSurvivesEveryTick`), S-VM-87 (`VmReclamationIdempotentSteadyState`), S-VM-89 (`EndingInFlightIsNeverReclaimed`) |
 | `KernelImage::validate`, `DiskAttachment::to_disk_arg`, `VmConfinement::seccomp_arg`, `MemoryPlan::derive`, `VmConfig::rlimit_fsize`, `SupervisionSet::reclamation_authorised` (pure functions) | Driving (unit scope) | `crates/overdrive-core` | S-VM-08, S-VM-16, S-VM-17, S-VM-20, S-VM-63, S-VM-73, S-VM-92 |
@@ -175,7 +176,7 @@ gets its netns slot) -- only the intercept install is.
 
 #### S-VM-06: Both [exec] and [vm] present is rejected
 
-**Driving port**: `overdrive deploy` (in-process CLI handler, no subprocess)
+**Driving port**: `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML parse boundary, no subprocess, no `overdrive serve` needed)
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-02` `@tier1` `@in-memory`
 
 ```gherkin
@@ -187,7 +188,7 @@ And no allocation is created and no intent is committed
 
 #### S-VM-07: Neither [exec] nor [vm] present is rejected
 
-**Driving port**: `overdrive deploy` (in-process CLI handler)
+**Driving port**: `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML parse boundary, no subprocess, no `overdrive serve` needed)
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-02` `@tier1` `@in-memory`
 
 ```gherkin
@@ -1576,7 +1577,7 @@ And the rest of the [D7] posture (uid, rlimits, cgroup, netns) is unchanged
 
 #### S-VM-62: An unknown key under [[vm.volume]] is rejected by name
 
-**Driving port**: `overdrive deploy` (in-process CLI handler, no subprocess needed)
+**Driving port**: `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML parse boundary, no subprocess, no `overdrive serve` needed)
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-15` `@tier1` `@in-memory`
 
 ```gherkin

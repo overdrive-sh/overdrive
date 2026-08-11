@@ -95,7 +95,7 @@ The generic skill's Strategy A/B/C/D framing does not apply (retired per the ski
 
 | Scenario scope | Crate | Path | Rationale |
 |---|---|---|---|
-| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 11…15, 33…66, 68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs`. **Corrected 2026-08-11 (DWD-13): excludes S-VM-67**, which the original range silently swept in — S-VM-67 is no longer Tier-3/CLI-driven, see the DWD-13 addendum below |
+| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 09, 11…15, 19, 33…66, 68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs`. **Corrected 2026-08-11 (DWD-13): excludes S-VM-67**, which the original range silently swept in — S-VM-67 is no longer Tier-3/CLI-driven, see the DWD-13 addendum below. **Corrected 2026-08-11 (DWD-16): explicitly names S-VM-09 and S-VM-19** — both sit in sub-range gaps (06-10, 16-32) the span notation silently omitted; both carry the identical `overdrive deploy` / real in-process `overdrive serve` driving port and `@tier3 @real-io` tags as their range neighbours, so this is an explicit-naming fix, not a re-placement — see DWD-16 |
 | Pure-function `@property` scenarios (`VmConfig` value family, `plan_reclamation`, `SupervisionSet`, vCPU derivation) | `overdrive-core` | `tests/acceptance/vm_*.rs`, default lane | Port-to-port at function scope; no I/O, no Lima needed |
 | Parse-boundary rejections (S-VM-06/07/62) | `overdrive-core` | `tests/acceptance/vm_spec_driver_table_dispatch.rs`, default lane | In-process TOML deserializer, no subprocess and no real VMM needed |
 | `JobEnvelope` V1→V2 schema evolution (S-VM-10) | `overdrive-core` | `tests/schema_evolution/workload_intent.rs` (EXISTING file, edited, not a new file) | Per the six-step version-bump procedure; `FIXTURE_V1` never touched |
@@ -112,7 +112,8 @@ The generic skill's Strategy A/B/C/D framing does not apply (retired per the ski
 | `MtlsInterceptWorker` gating, ungated-off arm (S-VM-74) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Same driving port and fixture family as S-VM-05, which it extends |
 | `Vmm` real non-reflink substrate (S-VM-75) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Boot-time scenario, alongside S-VM-11…13 |
 | `VmDriver::stop` totality against `SimVmm` (S-VM-76) | `overdrive-worker` | `tests/acceptance/vm_driver_stop_totality.rs` (NEW file), default lane | Component-scope, no Lima/real-CH needed — `SimVmm` only |
-| Abandonment boundary / hydration read order / write-time terminality guard / P2-over-`VmReclamation` (S-VM-77…80) | `overdrive-core` | `tests/acceptance/vm_reclamation_plan_purity.rs` (EXISTING file, extended) or a new sibling `vm_reclamation_claim_lifecycle.rs` — DELIVER's own call once the `VmSupervision` sum type exists | In-memory, pure/component-scope, same family as S-VM-31/32/92 |
+| Hydration read order / P2-over-`VmReclamation` (S-VM-78, 80) | `overdrive-core` | `tests/acceptance/vm_reclamation_plan_purity.rs` (EXISTING file, extended) or a new sibling `vm_reclamation_claim_lifecycle.rs` — DELIVER's own call once the `VmReclamationState`/`VmSupervision` types exist | In-memory, pure/component-scope, same family as S-VM-31/32/92. **Corrected 2026-08-11 (DWD-16): S-VM-77 and S-VM-79 removed from this row** — see the new `overdrive-control-plane` row directly below |
+| Abandonment boundary — claim release across `RetryOutcome` arms — / write-time terminality guard over `execute_reclaim_allocation` (S-VM-77, 79) | `overdrive-control-plane` | `tests/acceptance/vm_reclamation_claim_lifecycle.rs` (NEW file, default lane) — exact filename DELIVER's own call once `VmSupervision`/`execute_reclaim_allocation` exist, following the same file-TBD convention this table already uses elsewhere (e.g. the S-VM-67 row in `test-scenarios.md`'s Driving Ports table) | **Added 2026-08-11 (DWD-16).** Both driving ports are `overdrive-control-plane`-resident production code — `worker/exit_observer.rs`'s loop body (confirmed at `crates/overdrive-control-plane/src/worker/exit_observer.rs`) and the `action_shim` executor for `ReclaimAllocation` (`crates/overdrive-control-plane/src/action_shim/`, this crate's own existing per-action executor-module convention — `action_shim/issue_svid.rs`, `action_shim/release_service_vip.rs`, etc.). `overdrive-control-plane` depends on `overdrive-core`, never the reverse (verified: `overdrive-core`'s `Cargo.toml` carries no `overdrive-control-plane`/`overdrive-cli` dependency edge) — an `overdrive-core`-placed test cannot import either surface. Default lane (`tests/acceptance/*.rs`, unwired from `integration-tests`), matching S-VM-77/79's existing `@tier1 @in-memory` tags — no tier change required |
 | Fourth evaluation — `svid_lifecycle` (S-VM-81) | `overdrive-cli` | `tests/integration/vm_reclamation_tier3.rs`, gated `integration-tests` | Real `overdrive serve` convergence loop, mTLS-composed |
 | ESR invariant scenarios (S-VM-87, 88, 89) | `overdrive-sim` | `src/invariants/vm_reclamation.rs` | Same file as the pre-existing four-invariant placement above |
 | `CgroupAccounting` adapter equivalence (S-VM-93) | `overdrive-host` | `tests/integration/cgroup_accounting_equivalence.rs`, gated `integration-tests` | Named exactly by ADR-0082 §D8, same shape as `vmm_equivalence.rs` / `vm_host_state_equivalence.rs` |
@@ -897,6 +898,252 @@ this pass.
 
 ---
 
+## DWD-15: S-VM-06/07/62 driving-port prose corrected to match DWD-04's parse-boundary placement (2026-08-11, iteration-2 review remediation, LOW)
+
+An iteration-2 review found S-VM-06, S-VM-07, and S-VM-62's per-scenario
+`**Driving port**:` lines read `overdrive deploy` (in-process CLI
+handler, no subprocess) — while DWD-04's crate-placement table (the
+"Parse-boundary rejections (S-VM-06/07/62)" row) places all three at
+`overdrive-core`'s `tests/acceptance/vm_spec_driver_table_dispatch.rs`,
+default lane, rationale "in-process TOML deserializer, no subprocess and
+no real VMM needed." The two cannot both be literally true: `overdrive
+deploy` is `overdrive-cli`'s command handler, and `overdrive-core`
+cannot dev-depend on `overdrive-cli` (verified — `overdrive-core`'s
+`Cargo.toml` carries no `overdrive-cli`/`overdrive-control-plane`
+dependency; the dependency direction runs the other way, per
+`development.md` § "Port-trait dependencies"). A crafter reading the
+scenario's own driving-port line, not DWD-04, would try to invoke the
+CLI handler from a core-lane test and find it unimportable.
+
+**Verified before fixing, not assumed.** The lane and file were already
+correct and already had ground truth: `crates/overdrive-core/tests/
+acceptance/vm_spec_driver_table_dispatch.rs` exists, is one of the
+fifteen DWD-06 scaffolds, is verified compiling and RED, and its own
+module docstring already states the true driving port: *"Driving port:
+the TOML spec parser (in-process, no subprocess, no `overdrive serve`
+needed — a pure parse-boundary rejection)."* The exact function is
+pinned by ADR-0083 (brief.md's Reuse Analysis row 18):
+`WorkloadSpecInput::from_toml_str` (`crates/overdrive-core/src/
+aggregate/workload_spec.rs:710`) — the single parse-boundary function
+whose `!has_exec` branch (`:743-745`) is being replaced by the
+`MissingDriverSection`/`MultipleDriverSections` dispatch. S-VM-62 (the
+`[[vm.volume]]` unknown-key rejection) is grouped with S-VM-06/07 in the
+SAME DWD-04 row and file — its rejection surfaces through the same
+top-level TOML deserialization boundary (a nested `deny_unknown_fields`
+struct failing during the same `from_toml_str` call), so the same
+driving-port wording applies.
+
+**Fix**: all three `**Driving port**:` lines rewritten to
+`` `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML
+parse boundary, no subprocess, no `overdrive serve` needed) ``, matching
+the convention this file already uses for other pure-function driving
+ports (`` `VmConfinement::seccomp_arg()` (pure function) `` etc.). Only
+the metadata line changed — Gherkin bodies, tags, tier, and ACs are
+byte-identical to before (S-VM-06's `When` clause still narrates the
+operator-facing verb "submits it via `overdrive deploy`" in business
+language; that is the domain-language description of the user action,
+not the driving-port mechanism, and DWD-07 already establishes this
+project's CLI-verb-vs-test-mechanism distinction).
+
+**Sweep for the same defect class.** Every scenario's `**Driving port**:`
+line was cross-checked against its DWD-04 (and DWD-11-extended) crate
+placement. Two adjacent findings surfaced, **neither fixed by this
+entry**:
+
+1. **S-VM-77 and S-VM-79 name driving ports that structurally cannot
+   live where DWD-04 places them.** DWD-04's DWD-11 addition places
+   S-VM-77…80 together at `overdrive-core` (`tests/acceptance/
+   vm_reclamation_plan_purity.rs`, extended, or a new sibling file).
+   S-VM-77's own driving-port line names *"the exit observer's loop body
+   (`worker/exit_observer.rs:204-371`)"* and S-VM-79's names
+   *"`execute_reclaim_allocation` (component-scope,
+   `overdrive-control-plane`)"* — both explicitly `overdrive-control-plane`
+   code (`crates/overdrive-control-plane/src/worker/exit_observer.rs`
+   confirmed to exist at that path; `overdrive-control-plane` confirmed
+   to depend on `overdrive-core`, never the reverse). S-VM-78 and S-VM-80
+   in the same DWD-04 row are NOT affected — their driving ports
+   (`VmReclamationState::hydrate_actual`, `plan_reclamation`) are
+   genuinely `overdrive-core`-resident, matching DWD-04's rationale text
+   ("same family as S-VM-31/32/92"). **Not fixed here** because, unlike
+   S-VM-06/07/62, there is no existing scaffold to serve as ground
+   truth — DWD-06 confirms S-VM-77…80 are unscaffolded — and DWD-04's own
+   text already flags the exact *file* for this row as provisional
+   ("DELIVER's own call once the `VmSupervision` sum type exists");
+   resolving whether the *crate* cell should move to
+   `overdrive-control-plane` or the driving-port prose should be
+   rewritten to an `overdrive-core`-reachable equivalent is a placement
+   judgment call, not a prose staleness fix, and is out of this entry's
+   scope. Flagged for whoever scaffolds AC-19 in DELIVER.
+2. **S-VM-09 and S-VM-19 have no DWD-04 placement at all** (an omission,
+   not a contradiction — the defect class asked for). Both carry
+   CLI-driven `overdrive deploy` driving-port lines consistent with
+   DWD-04's Tier-3 row's *neighbors* (S-VM-01…05/11…15/33…66/68), but
+   sit in the numeric gaps the row's span notation does not cover (06-10
+   and 16-32 respectively) and are not named by any other DWD-04 row
+   either. DWD-06's own deferred-scenario list already groups S-VM-09
+   with S-VM-11…15 and S-VM-19 with the same CLI-driven family, so the
+   omission looks like an oversight in DWD-04's span text rather than a
+   deliberate exclusion — but this entry does not touch DWD-04's ranges
+   to avoid re-scoping beyond the assigned finding.
+
+**Files touched by this entry**: `distill/test-scenarios.md` (three
+`**Driving port**:` lines, S-VM-06/07/62 only — no Gherkin, tag, tier, or
+AC changed); `distill/wave-decisions.md` (this entry; Changelog, below).
+`deliver/roadmap.json`, every ADR, `brief.md`, and every `.rs` file were
+NOT touched — this is a DISTILL-side prose correction only, and the
+roadmap pass is concurrent and out of this entry's scope. Scenario count
+re-verified mechanically unchanged at **88** (`grep -c '^#### S-VM-'` and
+`grep -c '^\*\*Tags\*\*:'`, both 88, matching before this entry). No
+GitHub issue created; #259–#263 remain the only real numbers in scope,
+#264 closed, none newly cited here. No commit made by this pass.
+
+---
+
+## DWD-16: The two placement gaps DWD-15 declined to resolve on the spot —
+resolved (2026-08-11)
+
+DWD-15's sweep found two gaps of the same defect class as S-VM-06/07/62
+(a crafter following DWD-04 to the stated crate finds the driving-port
+surface unimportable, or finds no placement at all) but correctly declined
+to fix either inline, because both needed a placement judgement rather
+than a prose correction. This entry makes that judgement. No scenario's
+tier, tags, ACs, or Gherkin (Given/When/Then) changed. No scenario was
+added, removed, or renumbered. Scenario count re-verified mechanically
+unchanged at **88** (`grep -c '^#### S-VM-'` and
+`grep -c '^\*\*Tags\*\*:'`, both 88, both before and after this entry).
+
+### Gap 1 — S-VM-77/S-VM-79 vs their DWD-04 (DWD-11) `overdrive-core`
+placement: contradiction, not staleness
+
+**Verified before fixing.** `crates/overdrive-control-plane/src/worker/
+exit_observer.rs` exists at exactly the path S-VM-77's driving-port line
+names. `execute_reclaim_allocation` (S-VM-79's driving-port line) does not
+exist yet — expected, per DWD-06's per-slice scaffold deferral — but this
+crate's `action_shim/` module is the established home for every other
+per-`Action`-variant executor (`action_shim/issue_svid.rs`,
+`action_shim/release_service_vip.rs`,
+`action_shim/register_local_backend.rs`,
+`action_shim/write_service_backend_row.rs`,
+`action_shim/deregister_local_backend.rs`,
+`action_shim/dataplane_update_service.rs`,
+`action_shim/enqueue_evaluation.rs` — all confirmed present at
+`crates/overdrive-control-plane/src/action_shim/`), so
+`execute_reclaim_allocation` (the `ReclaimAllocation` executor) belongs in
+the same module by the crate's own existing convention. Dependency
+direction confirmed both ways: `overdrive-control-plane/Cargo.toml` names
+`overdrive-core.workspace = true`; `overdrive-core/Cargo.toml` carries no
+`overdrive-control-plane` (or `overdrive-cli`) dependency line at all (its
+three textual mentions of the string are prose comments, not `[dependencies]`
+entries). So DWD-04's placement of S-VM-77/79 at `overdrive-core`
+was not stale prose (the S-VM-06/07/62 shape) — it was a genuine
+contradiction: the stated crate cannot compile a test that imports either
+named driving port. S-VM-78 and S-VM-80, grouped in the same original row,
+are unaffected — `VmReclamationState::hydrate_actual` and
+`plan_reclamation` are both genuinely defined in
+`crates/overdrive-core/src/reconcilers/vm_reclamation.rs`.
+
+**Remedy chosen: move, not rewrite.** Per the dispatch's instruction not to
+fabricate a core-side seam to preserve a tidy table — and because none
+exists: the claim-release loop (S-VM-77) is the exit observer's own
+control-flow, not a pure function `overdrive-core` could host, and the
+write-time terminality guard (S-VM-79) is specifically the *executor*
+half of `ReclaimAllocation` (the re-read-and-refuse guard around
+`kill_scope`/`discard_artifacts`/the row write), which is
+`overdrive-control-plane`'s job by this project's own reconciler/executor
+split (`.claude/rules/reconcilers.md` — "An executor already driven by a
+reconciler... is an action executor, not a reconciler candidate";
+`plan_reclamation` computes the `Action`, `execute_reclaim_allocation`
+performs it). Rewriting the driving-port prose to a core-reachable
+equivalent was considered and rejected: no such equivalent exists without
+either (a) inventing a new pure predicate that doesn't match what
+`brief.md` §105a.3/§105a.5 actually specify (the release-on-every-arm and
+write-time-guard behaviours are stated over the loop body and the
+executor, not over a hypothetical pure projection of them), or (b)
+weakening S-VM-77/79 to test something narrower than what they were
+written to prove — the P5 NEW-1 guard against a stale-arm claim leak,
+and the write-time refusal guard against a TOCTOU race. Both would be the
+"fabricate a core-side seam" move the dispatch explicitly forbade.
+
+**Fix**: DWD-04's AC-19 row split into two — the original row now covers
+only S-VM-78/80 at `overdrive-core`; a new row places S-VM-77/79 at
+`overdrive-control-plane`, `tests/acceptance/vm_reclamation_claim_lifecycle.rs`
+(NEW file, default lane — DELIVER's own filename call, same file-TBD
+convention already used for S-VM-67), matching S-VM-77/79's existing
+`@tier1 @in-memory` tags exactly. **No tier change required** — both
+scenarios already target the default (non-`integration-tests`) lane, and
+`overdrive-control-plane/tests/acceptance/*.rs` is confirmed default-lane
+(its own entrypoint docstring: *"Acceptance tests in this crate stay in
+the default unit lane"*), matching precedent files in the same directory
+(`job_stop_idempotent.rs`, `action_shim_crash_observability.rs`, etc.).
+
+**`test-scenarios.md`'s top-of-file Driving Ports table carried the same
+contradiction independently** (not just DWD-04) — its `plan_reclamation`
+row's exercises column read *"S-VM-21…32, S-VM-77…80 (in-memory half)"*,
+grouping S-VM-77/79 under the `plan_reclamation` pure-function port they do
+not drive through. Corrected in the same pass: that row now lists only
+S-VM-78/80; a new row names the `overdrive-control-plane`-resident driving
+ports (the exit observer's loop body / `execute_reclaim_allocation`) and
+lists S-VM-77/79 against it.
+
+### Gap 2 — S-VM-09/S-VM-19: omission, not contradiction
+
+**Verified before fixing.** Both scenarios' own `**Driving port**:` lines
+already read `overdrive deploy` (direct CLI handler call, real in-process
+`overdrive serve`) — identical wording to their Tier-3 CLI-driven
+neighbours (S-VM-01…05, S-VM-11…15, etc.) — and both carry `@tier3
+@real-io` tags. Nothing about their placement is wrong; DWD-04's Tier-3
+row's span notation (`S-VM-01…05, 11…15, 33…66, 68`) simply never named
+the two IDs sitting in its own sub-range gaps (06-10 for S-VM-09, 16-32
+for S-VM-19) — the same span-notation blind spot DWD-13 already found and
+fixed once for S-VM-41 (there, the gap ID fell *inside* an existing
+sub-span and needed no edit; here, S-VM-09/19 sit *between* named
+sub-spans and the span text never mentions them at all).
+
+**Remedy chosen: extend the existing row's span, not a new row.** The
+mechanism, crate, file pattern, and rationale are byte-identical to the
+row's other members — S-VM-09 and S-VM-19 are not a distinct placement
+class, they were simply never named. A blanket range widen (e.g.
+`01…19`) was rejected: S-VM-06/07 (parse-boundary, `overdrive-core`),
+S-VM-08 (pure-function, `overdrive-core`), and S-VM-10 (schema-evolution
+file edit, `overdrive-core`) all sit inside `06-10`/`16-20` and are placed
+elsewhere by DWD-04's other rows — a range widen would silently
+mis-claim them into the Tier-3 CLI-driven row. S-VM-09 and S-VM-19 are
+named explicitly instead, mirroring DWD-13's own explicit-exclusion
+precedent (S-VM-67 removed from this same row by name) applied in the
+opposite direction (explicit inclusion).
+
+**Fix**: DWD-04's Tier-3 CLI-driven row's span corrected to `S-VM-01…05,
+09, 11…15, 19, 33…66, 68`. `test-scenarios.md`'s top-of-file Driving Ports
+table's `overdrive deploy` row carried the identical omission (its
+exercises column also silently excluded S-VM-09/19) and is corrected the
+same way.
+
+### No tier change required for either gap
+
+Both remedies were checked against the "stop and report" instruction: a
+placement fix that would require changing a scenario's tier is out of
+scope for this entry. Neither did — S-VM-77/79 stay `@tier1 @in-memory`
+(the target crate's `tests/acceptance/` is confirmed default-lane);
+S-VM-09/19 stay `@tier3 @real-io` (the target crate/row is unchanged,
+only the span notation is corrected). Nothing was stopped or reported as
+blocked.
+
+**Files touched by this entry**: `distill/wave-decisions.md` (this entry;
+DWD-04's two edited rows; Changelog, below); `distill/test-scenarios.md`
+(top-of-file Driving Ports table — the `overdrive deploy` row's exercises
+column, the `plan_reclamation` row's exercises column, and one new row for
+the `overdrive-control-plane`-resident driving ports; no Gherkin, tag,
+tier, or AC changed on any scenario). `deliver/roadmap.json`, every ADR,
+`brief.md`, and every `.rs` file were NOT touched — the roadmap pass is
+concurrent and out of this entry's scope, and no production code exists
+yet for either gap's driving ports (DELIVER scaffolds them per DWD-06).
+Scenario count re-verified mechanically unchanged at **88**
+(`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No
+GitHub issue created; #259–#263 remain the only real numbers in scope,
+#264 closed, none newly cited here. No commit made by this pass.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -905,3 +1152,5 @@ this pass.
 - 2026-08-11 — Concurrent DESIGN pass ruled on both outstanding blockers (DWD-12). **RESOLVED**: S-VM-65's mid-run storage-daemon-death variant — ADR-0083 §D5 gained row 14 (`TransitionReason::VmStorageDaemonDied`), checked ahead of `ExitKind` entirely; S-VM-65 rewritten with a second scenario shape (guest self-reports `EXIT 0` after the daemon dies) that fails if the precedence ordering is wrong. **RESOLVED**: the `SimVmm` injection seam for S-VM-13/S-VM-51 — ADR-0083 §D8, `ServerConfig.vmm_override`, a whole-port substitution shaped after `mtls_identity_override`, not `dataplane_override` (rejected by name, §A10); both scenarios' crafter notes now name the seam and gating exactly. **STAYS BLOCKED, precisely**: S-VM-67 — ADR-0083 §D8 explicitly rules it outside the seam's reach (no `Vmm` method sits downstream of virtiofsd's sandbox check; no storage-daemon supervision port exists); its crafter note is corrected to state this is a scoping decision, not a missing seam name, and names the two candidate paths without choosing either. Upstream Issues reduced from two blocked items (four blocked scenario references) to one open item. Adapter Coverage Table's `Vmm (SimVmm)` row and Self-Review Checklist item 4 corrected to drop S-VM-67 (never covered by this seam). Scenario count unchanged at 87 (mechanically re-verified); no ADR, `brief.md`, or Rust file touched.
 - 2026-08-11 — User ruling closes the last open item (DWD-13). **RESOLVED**: S-VM-67 — path (b) chosen: `[D8d]`'s `--sandbox=namespace`-unavailable case is verified at the launch-argument construction layer (private fields, one rendering site, a pure unit test on the rendered value — the same enforcement tier ADR-0082 §D2.1 already uses for `image_type=raw`), never through a real `overdrive serve`. **This feature mints no storage-daemon supervision port.** S-VM-67 rewritten in full: `@tier3`/`@real-io` → `@tier1`/`@in-memory`, `@contract-shape:bounded-change` → `@contract-shape:pure-function`, `@property` gained (mirrors S-VM-17's pure-function-plus-`@error_path` precedent, `@error_path` retained), driving port changed from `overdrive deploy` to the storage daemon's launch-argument rendering site (a not-yet-ADR-pinned Slice 04 type — DELIVER's own naming, per CLAUDE.md § "Implement to the design"). The scenario's `Then` now carries an explicit boundary statement: it proves only what argument the rendering function constructs, never that a running `virtiofsd` enforces it or that the platform genuinely fails closed end-to-end — both stay an undischarged Tier-3 property of Slice 04. No separate Tier-3 runtime-half scenario was added (reasoned in DWD-13: no port to inject through, no genuinely-lying host in the one-kernel Lima envelope, and minting either now would invent API surface past the design). Sibling references corrected: the `@real-io` Adapter Coverage Table's virtiofsd row, the US-VM-9 AC-to-Scenario Traceability row, Self-Review Checklist item 4 (all three previously touched by DWD-12 for the S-VM-13/S-VM-51 resolution, now re-verified against S-VM-67's new resolution), plus two references DWD-12 did not reach: the top-of-file Driving Ports table's `overdrive deploy` row (range corrected to exclude S-VM-67; a new row added for the pure-function driving port) and this file's own DWD-04 crate-placement table (same range correction). Error/Edge Path Coverage counts updated: `@property` 20 → 21, `@tier3`/`@real-io` 61 → 60, `@tier1`/`@in-memory` 29 → 30; `@error_path` unchanged at 40; total unchanged at 87; error+edge coverage unchanged at 60%. Upstream Issues now shows **zero** open items; all three resolved items (S-VM-65, the S-VM-13/S-VM-51 seam, S-VM-67) kept struck-through for the audit trail. No ADR, `brief.md`, or Rust file touched by this DISTILL pass (the ADR amendments already landed via the concurrent DESIGN pass before this pass started). No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made.
 - 2026-08-11 — AC-09 completeness gap closed, found by a fable review cross-checking the concurrent `deliver/roadmap.json` pass against ADR-0083 §D5 (DWD-14). ADR-0083 §D5 pins **five** Slice-02 Cause variants; the roadmap's Slice-02 step 03-01 criteria enumerated only four, and `test-scenarios.md` had **zero** entry for row 5 (`VmKernelFormatUnsupported { path, arch, detail }`) among the original 87 — verified directly (`grep -rn "VmKernelFormatUnsupported" distill/` returned nothing outside `slices/slice-02-boot-failure-vocabulary.md`'s own prose) before acting. **Fixed**: S-VM-41 added — the classification-join half of C-7, companion to S-VM-17's already-proven pure-function half (`KernelImage::validate`), not a duplicate of it; asserts the operator-visible `TransitionReason::VmKernelFormatUnsupported` reads as a format problem, never CH's misleading size-cap/`UefiTooBig` framing. `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@correction:C-7`, placed at `crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs` alongside S-VM-33…37 (already covered by DWD-04's existing `S-VM-33…66` span; no range edit needed). Scenario ID chosen as the lowest genuinely-unused gap (41) rather than extending past 94, matching this file's established gap-reuse practice. Scenario count 87 → 88; `@error_path` 40 → 41; `@contract-shape:bounded-change` 65 → 66; error+edge coverage unchanged at ≈60% (53/88). KPI Traceability K3 row, AC-to-Scenario Traceability US-VM-2 row, and Self-Review Checklist items 8/13/15 updated. Mechanical recount also surfaced and corrected a pre-existing, unrelated off-by-one in Self-Review Checklist item 13's pure-function/bounded-change split (12/65 was already true before this pass, not the claimed 11/66 — both wrong numbers happened to still sum to 87). No ADR, `brief.md`, or Rust file touched; `deliver/roadmap.json` not touched (owned by the concurrent roadmap pass, which cites S-VM-41 by the ID recorded here). No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made by this pass.
+- 2026-08-11 — Iteration-2 review LOW fixed: S-VM-06/07/62's driving-port lines corrected (DWD-15). Prose said `overdrive deploy` (in-process CLI handler) while DWD-04 places all three at `overdrive-core`'s parse-boundary file — `overdrive-core` cannot dev-depend on `overdrive-cli`, so the two statements were mutually exclusive. Verified against the existing compiled scaffold (`vm_spec_driver_table_dispatch.rs`, one of DWD-06's fifteen) and ADR-0083's pinned function (`WorkloadSpecInput::from_toml_str`, `workload_spec.rs:710`) before fixing. Rewrote all three lines to `` `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML parse boundary, no subprocess, no `overdrive serve` needed) ``; Gherkin, tags, tier, and ACs untouched. Sweep for the same defect class run over all 88 scenarios: found S-VM-77/S-VM-79 naming `overdrive-control-plane`-resident driving ports (`worker/exit_observer.rs`'s loop body; `execute_reclaim_allocation`) against DWD-04's `overdrive-core` placement for S-VM-77…80 — **not fixed**, no scaffold exists as ground truth and the correct resolution (move the crate cell vs. rewrite the driving-port prose) is a placement judgment call outside this entry's prose-correction scope; flagged for DELIVER's AC-19 scaffolding. Also noted, not fixed: S-VM-09/S-VM-19 have no DWD-04 placement at all (an omission, not a contradiction). Scenario count re-verified unchanged at 88. No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made by this pass.
+- 2026-08-11 — Both placement gaps DWD-15 flagged (and declined to fix inline) resolved (DWD-16). **Gap 1 — S-VM-77/S-VM-79**: verified a genuine contradiction, not staleness — `worker/exit_observer.rs` and the `ReclaimAllocation` executor (`execute_reclaim_allocation`, by this crate's existing `action_shim/`-per-action-executor convention) are both `overdrive-control-plane`-resident, and `overdrive-control-plane` depends on `overdrive-core`, never the reverse (Cargo.toml dependency graph checked both directions). Remedy: moved, not rewritten — DWD-04's AC-19 row split, S-VM-78/80 stay at `overdrive-core`, a new row places S-VM-77/79 at `overdrive-control-plane` (`tests/acceptance/vm_reclamation_claim_lifecycle.rs`, NEW file, default lane, matching their existing `@tier1 @in-memory` tags — no tier change). Fabricating a core-side seam was explicitly rejected as an option, per the dispatch's instruction. `test-scenarios.md`'s own top-of-file Driving Ports table carried the identical contradiction independently (its `plan_reclamation` row's exercises column wrongly listed S-VM-77…80) and was corrected the same way, plus a new row added for the `overdrive-control-plane` driving ports. **Gap 2 — S-VM-09/S-VM-19**: confirmed an omission, not a contradiction — both scenarios' own driving-port lines and tags (`@tier3 @real-io`) already match the Tier-3 CLI-driven row's other members exactly; the row's span notation simply never named the two IDs sitting in its own sub-range gaps (06-10, 16-32). Remedy: extended the existing row's span to `S-VM-01…05, 09, 11…15, 19, 33…66, 68` (explicit-inclusion, mirroring DWD-13's explicit-exclusion of S-VM-67 from the same row) rather than a blanket range widen, which would have wrongly swept in S-VM-06/07/08/10 (placed elsewhere by DWD-04's other rows). `test-scenarios.md`'s top-of-file Driving Ports table's `overdrive deploy` row carried the identical omission and was corrected the same way. Neither gap required a tier change; nothing was stopped or reported as blocked. No scenario's tier, tags, ACs, or Gherkin changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.

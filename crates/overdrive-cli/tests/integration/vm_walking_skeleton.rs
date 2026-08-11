@@ -15,9 +15,10 @@
 //!
 //! **This is the ONLY scenario group in the feature driven with a real
 //! guest kernel booting under a real hypervisor.** Every other Tier-3
-//! scenario in this feature (see `vm_boot_race_and_composition.rs` and
-//! siblings, scaffolded by DELIVER per-slice) reuses this same fixture
-//! shape.
+//! scenario in this feature (`vm_boot_failure_vocabulary.rs`,
+//! `vm_stop_restart_and_vmm_death.rs`, `vm_volumes_and_storage_daemon.rs`,
+//! `vm_resources_sizing.rs`, `vm_reclamation_tier3.rs` — each scaffolded
+//! by DELIVER per-slice) reuses this same fixture shape.
 //!
 //! Fixture prerequisites this test group depends on (Slice 00 PROMOTE,
 //! per `spike/wave-decisions.md`): a pinned kernel + ext4 rootfs staged on
