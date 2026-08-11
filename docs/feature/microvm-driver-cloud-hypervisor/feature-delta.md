@@ -3170,6 +3170,23 @@ confirms the flag composes with a real boot at v53.0.
    budget-exempt, both are occurrence-bearing — but only the first ends a workload the
    operator believes is running, and the ubiquitous language should not blur them.
 
+   **Superseded by DD-1(b) / § 105a.** *(Marked 2026-08-11, iteration-2 review NEW-5.)*
+   The domain wave minted **Artifact Disposal** as a concept distinct from Platform
+   Reclamation: the steady-state tick's terminal/unknown-allocation arm
+   (`DiscardStrandedArtifacts`) *authors no ending, writes no row, moves neither
+   counter* (DD-1(b)'s vocabulary table). "Both are Platform Reclamation, both
+   budget-exempt, both occurrence-bearing" is false of that half — an ending is
+   exactly what those two predicates are predicates *of*, and Artifact Disposal has
+   none to be exempt or occurrence-bearing about. The instinct that boot and
+   steady-state are not interchangeable survives: DD-4 still pins them as *"regimes
+   of SD-1's reconciler, not Ending Classes"* that must never appear on a row, an
+   Ending Class, or a predicate payload. But the distinction did not land as **two
+   regimes** — it landed as **one predicate**, `reclamation_authorised`, evaluated
+   over observed supervision state (§ 105a.3's `plan_reclamation` table). Boot is
+   that predicate's **degenerate case**: the driver's live-handle set reconstructs
+   empty at boot (`Observed(∅)`), so the predicate reads `true` for every VM
+   allocation by construction — not because a second rule fired.
+
 **To `nw-solution-architect` (application architecture):**
 
 1. **The `Vmm` port must expose a boot-time substrate gate** — SD-5, the sixth trait

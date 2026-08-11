@@ -311,12 +311,36 @@ here:
    other error as a **boot refusal** (`veth_provisioner.rs:1984-1997`,
    `lib.rs:2139-2146`). The steady-state ticks have no such adjacency and carry
    no settle obligation.
-3. **The reconciler is registered after the boot sequence completes**, so no
-   tick can interleave with the boot passes it is sequenced against. Registration
+3. **No tick may interleave with the boot passes the drive is sequenced
+   against** — and the mechanism that delivers this is the convergence loop's
+   **spawn point**, not registration order. Registration is **inert**: it probes
+   the `ViewStore` and hydrates views, and drives nothing. The only production
+   driver of ticks is `spawn_convergence_loop`, which runs **strictly after** the
+   boot passes, and **that spawn ordering is the load-bearing constraint.**
+   Registering *after* the boot passes is structurally unavailable — the runtime
+   is behind an `Arc` before `AppState` is built, and the boot passes read
+   `AppState` — but the property does not depend on it (§ 105a.7). Registration
    is **not** gated on the `Vmm` adapter being composed: a node where
    `cloud-hypervisor` was uninstalled still has surviving VM host state to
    reclaim, and gating reclamation on the capability would strand exactly the
    state nothing else will ever clean up.
+
+**The steady-state driver needs a wake source, and it is specified in § 105a.**
+The evaluation broker is purely event-driven, nothing in the tree would ever
+submit a `vm-reclamation` evaluation, and `has_work` only re-enqueues a
+reconciler that *already* ticked — so the second driver's cadence is a mechanism
+this design must supply, not something Bar 2 grants for free. A fixed sweep
+interval, submitted on the injected `Clock` by the convergence loop (hence
+DST-controllable, not wall-clock), is pinned in § 105a and **ratified by the user
+on 2026-08-11**; it is not operator-tunable and no knob is promised. It is
+deliberately **not restated here** — § 105a is the single site — but recorded so
+a later reader does not find a ticking reconciler with no stated wake source.
+That cadence is also the **node-scoped wake mechanism
+[#197](https://github.com/overdrive-sh/overdrive/issues/197) /
+[#198](https://github.com/overdrive-sh/overdrive/issues/198) /
+[#199](https://github.com/overdrive-sh/overdrive/issues/199) /
+[#234](https://github.com/overdrive-sh/overdrive/issues/234) will each need**,
+and it is the one place this feature touches shared convergence machinery.
 
 **Availability constraint.** A platform-initiated reap **must not consume
 restart budget.** `RESTART_BACKOFF_CEILING = 5`
@@ -733,7 +757,7 @@ flowchart TB
     CH --- RUN
     CH --- IMG
     BOOT -.->|"boot epoch: same pure diff, driven inline<br/>reads cgroup.procs + run dir + clones;<br/>kills, unlinks, writes terminal row"| CG
-    BOOT -->|"registers AFTER the boot passes"| RECL
+    BOOT -->|"registers (INERT — no tick)<br/>ticks begin only when the convergence loop spawns,<br/>strictly AFTER the boot passes"| RECL
     RECL -.->|"every tick: observes the same three surfaces"| CG
     RECL -.->|observes| RUN
     RECL -.->|"sweeps stranded clones (continuous, not boot-only)"| IMG
@@ -796,7 +820,13 @@ contract (**DD-5**) and the context map (**DD-6**). **DD-1(b)** and the second
 half of DD-5 were added in the 2026-08-11 revision pass, after the user ruled
 reclamation a Bar-2 `Reconciler`: that ruling gave the reclamation a *steady-state
 tick* alongside its boot-epoch drive (a taxonomy question — DD-1(b)) and moved its
-effect onto the `Action` boundary (a contract question — DD-5). Evidence base:
+effect onto the `Action` boundary (a contract question — DD-5). **DD-1(b.i)**
+followed in the iteration-2 remediation pass, and its origin is the same ruling
+one step further out: a steady-state tick made *the interval over which a
+supervision handle is held* load-bearing for the first time, and DD-1(b) had
+stated its precondition over the steady state without stating it over the **exit
+path**, which transits that precondition's blank cell on every ordinary exit
+(review NEW-1 / NEW-3, 2026-08-11). Evidence base:
 SD-1 … SD-5 in § *System Architecture* above, `spike/findings.md` P2, ADR-0078,
 ADR-0077, ADR-0037, ADR-0047, ADR-0030, ADR-0023.
 
@@ -993,6 +1023,93 @@ allocation by construction. That is also the domain reason SD-1's *"one pure dif
 two drivers"* is the right shape and not merely an economy — there is one rule
 being evaluated against an input that happens to be uniformly empty at boot.
 
+**DD-1(b.i) — The supervision handle's lifecycle: it is a claim on *authoring an
+ending*, not a grip on a running process.** *(Added 2026-08-11, iteration-2 review
+NEW-1 / NEW-3. The precondition above is correct and is not withdrawn; it was
+stated over the **steady state** and left **incomplete in time**, and the ordinary
+exit path is what exposes the gap.)*
+
+The precondition asks *"can the platform still honestly classify this instance's
+ending?"* and answers it by asking whether a **handle** is held. That substitution
+is sound **only if the handle is held for exactly as long as the answer is yes** —
+and it is not, if the handle is released when the *process* dies. Between a VMM's
+death and its terminal row's write the platform holds the exit report and is *in
+the act of classifying it*: the answer is demonstrably **yes** while the handle
+already reads *released*. The instance then occupies DD-1(b)'s blank cell
+(non-terminal, unsupervised) **transiently, on every ordinary exit** — and the two
+halves are on separate tasks, so the window is real rather than theoretical. A
+sweep landing inside it authors a Platform Reclamation over an ending the platform
+was mid-way through classifying honestly. **The result is DD-1's traps 2 and 3 at
+the same two sites, misclassified in the opposite direction** — which is why this
+rule's absence is not caught by anything DD-1 already binds: a **crash** relabelled
+reclamation is exempted from the restart budget, so a crash-looping VM restarts
+budget-free and the ceiling never fills (trap 2's node-wide cascade, run backwards);
+and a **completed Job** relabelled reclamation is not finalised but **re-driven** —
+a duplicate execution of a side-effecting run (trap 3's fabricated ending, run
+backwards). Both are lies DD-1 exists to refuse, arrived at through the predicate
+DD-1(b) added to refuse them.
+
+> **The supervision handle is the platform's claim to author ONE instance's
+> ending. It is held from the moment that instance starts until the moment that
+> ending has been AUTHORED — the terminal row is written — or until authorship has
+> been ABANDONED as impossible. It is not released at process death, at the exit
+> watcher's return, or at any point at which an exit report is still in flight.**
+
+Three readings follow, and each closes a case the process-death reading leaves
+open:
+
+1. **Ordinary exit.** The handle is held across the exit report, so the blank cell
+   is never entered and nothing races the honest ending. The transient
+   *non-terminal + unsupervised* state ceases to exist rather than being defended
+   against downstream.
+2. **A stop whose kill failed, same `serve` (SD-1's unstoppable orphan).** The
+   ending is authored **on the stop path** — the row is terminal while the VMM
+   survives, which is exactly what makes it an orphan — so the handle is released
+   **then**, notwithstanding the live process. What remains is an orphan process,
+   not a supervised instance: the platform's claim to author that ending is
+   discharged, and holding the handle past it would assert a second authorship
+   over an ending already on the record. This is what makes the orphan reachable
+   by **Artifact Disposal** at all; under the process-death reading the platform
+   would report itself as supervising an instance whose ending it had already
+   written, and the disposal's kill would then fire a still-live watcher into a
+   row that DD-5 declares byte-unchanged.
+3. **Abandonment.** Where authorship cannot complete — the write fails terminally,
+   the authoring task dies with the process — the handle is released and the
+   allocation becomes reclaimable. That is not a loophole; it is the precondition
+   read correctly, because at that point the platform genuinely **cannot** classify
+   the ending, which is precisely DD-1's Platform Reclamation. **The abandonment
+   boundary must be pinned mechanically** — what concludes an authorship attempt —
+   because a handle that is never released is a permanently unreclaimable orphan,
+   i.e. SD-1's headline failure reintroduced by the fix for it.
+
+**The corollary, and it binds the ending-authoring paths rather than the
+reclamation:** *once an instance's ending is authored, no further ending may be
+authored for that instance.* Retiring the handle at authorship is the same
+sentence as DD-1(b)'s refusal to let Artifact Disposal overwrite an authored
+ending, applied to the **exit path** instead of to the sweep. Two consequences
+worth stating because they are testable: a terminal-row instance that is *still
+supervised* becomes **unrepresentable**, so the byte-unchanged assertion on the
+disposal path holds **structurally** rather than by the luck of no watcher being
+alive; and the assertion thereby gains a second target — an implementation that
+keeps an exit watcher alive past the ending it authored.
+
+**The boot epoch is unchanged by all of this, and that is the check that the rule
+is the same rule.** A `serve` that dies mid-exit-report loses the watcher with the
+process: the handle is gone, the ending is unrecoverable, the row is non-terminal
+— authorship was *abandoned*, reading 3, and reclamation is authorised. The empty
+live-handle set at boot remains evidence for the same reason it always was.
+
+**What this obliges the solution architect to pin (§ 105a / § 104), stated so the
+ruling is implementable rather than merely correct:** the **release point** of the
+per-allocation handle, ordered strictly after the terminal-row write; the
+**abandonment boundary** that releases it when the write cannot land; the
+**write-time precondition** of consequence 3 below; the **skew direction** of
+consequence 2 below; and the restatement of the byte-unchanged acceptance
+criterion, whose scenario is now *a terminal-row VMM with no live watcher* — the
+restart orphan and the failed-stop orphan alike — plus an invariant covering the
+exit window, which the existing supervised-survives-every-tick invariant cannot
+reach because it is scoped to membership the allocation has just left.
+
 **Where the discriminating fact must live, and the domain reason.** SD-1 requires
 the supervision discriminator to be an **observed input hydrated into `actual`**,
 never a `View` marker, citing `reconcilers.md`'s fingerprint-as-diff anti-pattern.
@@ -1003,18 +1120,30 @@ fact about what the reconciler last emitted. A `View` marker would answer a
 different question, and here that substitution gates **whether a live VM is
 killed**.
 
-**Two consequences of the precondition that SD-1's table leaves implicit, recorded
-because both are kill-authorising and neither should be discovered in DELIVER.**
+**Three consequences of the precondition — two that SD-1's table leaves implicit,
+and one that the iteration-2 review found the design had lost between emit and
+execute. Recorded because each is kill-authorising and none should be discovered
+in DELIVER.**
 
 1. **The blank cell: a non-terminal allocation this `serve` is *not* supervising,
-   at steady state.** SD-1's steady-state row permits *terminal or unknown* and
-   forbids *supervised non-terminal*; this case falls in neither. The precondition
-   classifies it as **authorised Platform Reclamation** — the handle is gone, so
-   the ending can no longer be classified, and the alternative is precisely SD-1's
-   headline failure: an unstoppable orphan holding the entire committed guest RAM
-   with the row still claiming the workload is alive. This is the one place the
-   domain formalisation *extends* SD-1's table rather than restating it, and it is
-   flagged as such rather than folded in silently.
+   at steady state — where *not supervising* means SETTLED, never MOMENTARILY
+   ABSENT.** SD-1's steady-state row permits *terminal or unknown* and forbids
+   *supervised non-terminal*; this case falls in neither. The precondition
+   classifies it as **authorised Platform Reclamation** — but only where the
+   platform's inability to classify is **settled**: no handle held **and** no
+   ending in flight for that instance. Under DD-1(b.i) those two are one
+   statement, and that identity is the entire warrant for using handle-absence as
+   a proxy for unclassifiability. Under a process-death handle reading they are
+   **not** one statement, and this cell silently swallows every ordinary exit
+   (review NEW-1) — the authorisation would then be granted on the strength of an
+   allocation's absence from a set that is *momentarily stale*, rather than on the
+   platform's actual inability to classify, which is the only thing DD-1(b)
+   licenses. Where the reading is stale rather than settled the answer is **not
+   authorised** (consequence 2); where it is settled, the alternative is precisely
+   SD-1's headline failure: an unstoppable orphan holding the entire committed
+   guest RAM with the row still claiming the workload is alive. This is the one
+   place the domain formalisation *extends* SD-1's table rather than restating it,
+   and it is flagged as such rather than folded in silently.
 2. **Absence of evidence is not evidence of absence — the predicate fails safe.**
    "No live supervision handle" authorises a kill, so a discriminator that is
    *unavailable* (not yet hydrated, hydration errored, the surface is empty because
@@ -1024,6 +1153,29 @@ because both are kill-authorising and neither should be discovered in DELIVER.**
    there because `ExecDriver.live` is reconstructed empty by construction (SD-1) —
    a known fact about the world, not a missing observation. Anywhere else, an empty
    or absent reading means *do nothing this tick*.
+
+   **A STALE reading is a species of unavailable, and the direction it must fail
+   in is binding.** The supervision reading and the host observation are taken at
+   two different instants; whichever is taken first is, by the time the diff runs,
+   a statement about the past. Because the predicate is kill-authorising, that skew
+   must resolve toward **held** — an allocation supervised at either instant is
+   supervised for the purposes of this tick. Doing nothing on a stale *held*
+   reading costs one sweep interval; acting on a stale *unsupervised* one kills a
+   live VM. Which read order discharges this is the solution architect's to pin
+   (§ 105a.2); the **direction** is fixed here.
+
+3. **Authorisation is a precondition of the WRITE, not merely of the emission.** A
+   tick decides at *t* and its executor writes at *t + ε*; an ending authored
+   inside that gap is an ending, and DD-1(b)'s refusal to overwrite an authored
+   ending binds the **reclamation** path exactly as it binds the disposal path.
+   An allocation re-observed **terminal** at execute time therefore authorises
+   nothing, and the command's declared delta collapses to empty (DD-5). This is
+   not redundant with DD-1(b.i): that rule removes the window at its source, this
+   one refuses the write in the residual emit→execute gap, and the two fail
+   independently. Recorded because the executor **already re-reads the row** — the
+   observation is in hand — and the defect was that it was read only as a lookup
+   for the `workload_id` the `alloc_id`-only payload omits, never as the guard;
+   so *losing* the race did not save the honest ending either (review NEW-1).
 
 **And the second concept needs its own word, because reusing the first one is a
 lie.** Disposing of a *terminal* allocation's leftover host state must **not**
@@ -1293,7 +1445,7 @@ emitted it.
 
 | `Action` (recommended name) | Domain-mandated payload | Authorised exactly when | Authors an ending? |
 |---|---|---|---|
-| **`ReclaimAllocation`** | `alloc_id: AllocationId` **and nothing else** | the allocation is **non-terminal** *and* the platform holds **no live supervision handle** for it (DD-1(b)) | **Yes** — Platform Reclamation |
+| **`ReclaimAllocation`** | `alloc_id: AllocationId` **and nothing else** | the allocation is **non-terminal** *and* the platform holds **no live supervision handle** for it (DD-1(b)) — with *handle* read per DD-1(b.i) (held until the ending is authored or abandoned, **not** until the process dies), and **both conjuncts re-checked at the write**, not only at the emission: an allocation re-observed terminal at execute time authorises nothing (DD-1(b) consequence 3) | **Yes** — Platform Reclamation |
 | **`DiscardStrandedArtifacts`** | `alloc_id: AllocationId` **and nothing else** | the allocation is **terminal or unknown**, and host state attributable to it survives | **No** — Artifact Disposal |
 
 **Two payload prohibitions, each closing a specific failure:**
@@ -1324,7 +1476,7 @@ two-variant split, the two payload prohibitions, and the contracts below.
 
 | Command (domain name) | Actual code surface | Declared delta | Complement equality (what must NOT change) |
 |---|---|---|---|
-| **`ReclaimAllocation`** | **NEW — `Action::ReclaimAllocation { alloc_id }`** (Bar-2 ruling, 2026-08-11; see the naming block above). Emitted by SD-1's reclamation reconciler, executed through the action-shim; no `ExitEvent` and no watcher is involved (DD-2). The boot-epoch drive emits the **same** Action through the **same** executor | `state → Terminated` (per DD-1's boundary note — **not** `Failed`, on domain grounds and because `Failed` opens `service_lifecycle.rs:611`'s EarlyExit fabrication); `reason → <reclamation disposition>`; `updated_at` advances one LWW counter step; `last_terminated`, `restart_count` **forward-carried verbatim** (`advance` forwards both on a non-terminal → terminal write — postcondition 3, `observation_store.rs:1088-1092`; code at `:1148-1158`) | every forward-carried identity field; `started_at`; `restart_counts[alloc_id]`; **every other allocation's key** |
+| **`ReclaimAllocation`** | **NEW — `Action::ReclaimAllocation { alloc_id }`** (Bar-2 ruling, 2026-08-11; see the naming block above). Emitted by SD-1's reclamation reconciler, executed through the action-shim; no `ExitEvent` and no watcher is involved (DD-2). The boot-epoch drive emits the **same** Action through the **same** executor | `state → Terminated` (per DD-1's boundary note — **not** `Failed`, on domain grounds and because `Failed` opens `service_lifecycle.rs:611`'s EarlyExit fabrication); `reason → <reclamation disposition>`; `updated_at` advances one LWW counter step; `last_terminated`, `restart_count` **forward-carried verbatim** (`advance` forwards both on a non-terminal → terminal write — postcondition 3, `observation_store.rs:1088-1092`; code at `:1148-1158`) | every forward-carried identity field; `started_at`; `restart_counts[alloc_id]`; **every other allocation's key** — **and, when the row re-observed at execute time is already terminal, the WHOLE row**: the declared delta collapses to empty and the assertion degenerates to `after == before`, identically to `DiscardStrandedArtifacts`'s (DD-1(b) consequence 3). Under DD-1(b.i) that collapse is the residual-gap backstop, not the primary defence — the exit window it guards is closed at its source by the handle's lifetime |
 | **`RestartAfterReclamation`** | The **existing** `Action::RestartAllocation` (`workload_lifecycle.rs:743`), re-driven — unchanged | `state → Running`; `reason → Started`; `started_at` set; `last_terminated → Some(<snapshot of the reclaimed row>)`; `restart_count += 1`; `updated_at` advances | **`restart_counts[alloc_id]` — unchanged. This is the budget exemption, expressed as a complement-equality assertion rather than a comment, and it is the single most testable statement in this section.** Also: `alloc_id` (the restart reuses the key, `workload_lifecycle.rs:744`) |
 | **`FinalizeJobOnNaturalExit`** | The **existing** `Action::FinalizeFailed` (`workload_lifecycle.rs:635`) — unchanged | `terminal → Completed{..} \| Failed{..}` | **must not fire at all on a Platform-Reclamation row** (DD-1 trap 3) — the complement here is the *absence* of the command |
 | **`DiscardStrandedArtifacts`** | **NEW — `Action::DiscardStrandedArtifacts { alloc_id }`** (DD-1(b)). Emitted for a **terminal or unknown** allocation whose host state survives | **Empty over the universe.** The entire declared delta sits *outside* it: the allocation's cgroup scope, run directory and rootfs clone are removed, or were already absent | **The whole `alloc_status[alloc_id]` row** — `state`, `reason`, `detail`, `terminal`, `stderr_tail`, `started_at`, **`updated_at`**, `last_terminated`, `restart_count` — plus `restart_counts[alloc_id]` and every other allocation's key. **An empty declared delta is the strongest complement-equality assertion in this section:** any row write from the disposal path fails it on the spot, which is exactly the re-classification DD-1(b) forbids |
@@ -7922,12 +8074,15 @@ of three architects.
 2026-08-11, **revised** — DD-1(b) added). Where this
 section sharpens an upstream statement it says so; where it would contradict
 one, it does not. **One sharpening is called out here because it is a mechanism
-substitution rather than an elaboration**: SD-1's pin 5 names *"registered after
+substitution rather than an elaboration**: SD-1's pin 5 named *"registered after
 the boot passes"* as the carrier of *"no tick interleaves with the boot passes"*;
 that mechanism is structurally unavailable (`register` takes `&mut self` and
 `Arc::new(runtime)` at `lib.rs:1774` precedes `AppState`), and the **property is
 delivered instead by the convergence loop's spawn point at `lib.rs:2314-2320`** —
-see § 105a.7.
+see § 105a.7. **Settled 2026-08-11: this is closed, not an outstanding
+divergence.** Titan revised § *System Architecture* so pin 5 asserts the property
+and names registration as inert, its C4 L2 registration edge says so too, and the
+cross-reference is mutual.
 
 **Feature scope, per the user's 2026-08-10 ruling:** boot a VM through
 `overdrive serve` + `overdrive deploy`. Slices 01–05. Checkpoint/restore,
@@ -8105,15 +8260,36 @@ signature is **pinned**; crafters must not improvise it.
   persisted; there is no per-workload input to persist, so § "Persist inputs,
   not derived state" is satisfied trivially.
 - **Every non-`Ok` arm cleans up before returning** — SIGKILL the VMM,
-  `cgroup.kill` the scope, unlink the run directory and the clone. Slice 03's
-  *"no leaked hypervisor processes or rootfs copies"* must hold on the **deadline**
-  arm too, which is the arm an implementation is most likely to leak on.
+  `cgroup.kill` the scope, unlink the run directory and the clone, **and release
+  the supervision claim taken at step 0 below**. Slice 03's *"no leaked
+  hypervisor processes or rootfs copies"* must hold on the **deadline** arm too,
+  which is the arm an implementation is most likely to leak on. Releasing the
+  claim here is correct rather than an exception to § 105a.3: a `start` that
+  returns `Err` produced no instance, so there is no ending for the platform to
+  claim — and the shim's own terminal-row write for the rejected start is a
+  second, idempotent release site.
 
-**Start-path ordering (SD-1 handoff item 6), pinned:** create the per-VM run
-directory → **bind the beacon `UnixListener`** → create the cgroup scope + write
-limits → `Vmm::create` (which clones the rootfs on the *master's* filesystem and
-spawns the confined VMM) → enrol the VMM pid in `cgroup.procs` → race. The
-listener must exist before the guest dials; the clone must not land on tmpfs.
+**Start-path ordering (SD-1 handoff item 6), pinned:** **take the supervision
+claim (§ 105a.3)** → create the per-VM run directory → **bind the beacon
+`UnixListener`** → create the cgroup scope + write limits → `Vmm::create` (which
+clones the rootfs on the *master's* filesystem and spawns the confined VMM) →
+enrol the VMM pid in `cgroup.procs` → race. The listener must exist before the
+guest dials; the clone must not land on tmpfs.
+
+**The claim is step 0, and that ordinal is load-bearing rather than tidy.** The
+run directory and the per-launch clone are **VM-exclusive host surfaces**
+(§ 105a.4), and they exist from step 1 and step 4 onward — while the
+allocation's `AllocStatusRow` does **not** yet exist at all, because the shim's
+`StartAllocation` arm reads the prior row (`action_shim/mod.rs:1256`) and writes
+only **after** `driver.start` has answered. So for the whole boot race — up to
+`VM_BOOT_DEADLINE`, 30 s, against a 30 s sweep cadence — a first-seen VM
+allocation is *on two VM-exclusive surfaces with no row*, which is verbatim the
+shape § 105a.4's unknown-allocation row matches. Taking the claim before the
+first surface is created is what makes that row's supervision gate protective;
+taking it at the end of `start` (the obvious placement) would leave the sweep
+free to `kill_scope` a booting VM. The resulting invariant is the one every
+skew argument in § 105a.2 rests on: **at every instant, an allocation present on
+any host surface is an allocation whose claim is held.**
 
 **Exit classification (`[D3]`) — the join, and the ordering hazard.**
 
@@ -8160,8 +8336,8 @@ traffic never traverses:
 | Seam | Today | Pinned shape (ADR-0083 § D2a) |
 |---|---|---|
 | Composition root (`lib.rs:1422-1425`) | one `Arc::new(ExecDriver::new(..))` | discover → probe → insert into the registry |
-| `exit_observer::spawn_with_runtime` (`lib.rs:2293`) | called **once** with the single driver; `take_exit_receiver()` yields *the one* receiver and returns early on `None`; `driver_kind` captured once (`exit_observer.rs:171`) and stamped on every row | **one observer task per registry entry**, each capturing its own `driver_kind`. `ExitEvent` carries no driver discriminator, so merging channels cannot recover provenance — and without this, VM `ExitEvent`s never reach the ObservationStore and `[D3]` is dead on the production path |
-| The shim's stop / terminal arms (`action_shim/mod.rs:1697`, `:1472`, `:1211`, `:1209`) | route to the single driver | **`AppState.alloc_drivers: BTreeMap<AllocationId, DriverType>`**, written on Start/Restart and read on stop/terminal. `StopAllocation` and `FinalizeFailed` carry **no spec and no `workload_id`** (`reconcilers/mod.rs:411-416`, `:448-453`), and `AllocStatusRow.kind` is `WorkloadKind`, not the driver — so there is otherwise no key at all. `action_shim::dispatch`'s `driver: &dyn Driver` (`:852`) becomes `drivers: &DriverRegistry`, and that signature is **pinned** too |
+| `exit_observer::spawn_with_runtime` (`lib.rs:2293`) | called **once** with the single driver; `take_exit_receiver()` yields *the one* receiver and returns early on `None`; `driver_kind` captured once (`exit_observer.rs:171`) and stamped on every row | **one observer task per registry entry**, each capturing its own `driver_kind`, **and each releasing the allocation's supervision claim exactly once per `ExitEvent` (§ 105a.3) — on every `RetryOutcome` arm, not only the successful write**. `ExitEvent` carries no driver discriminator, so merging channels cannot recover provenance — and without this, VM `ExitEvent`s never reach the ObservationStore and `[D3]` is dead on the production path |
+| The shim's stop / terminal arms (`action_shim/mod.rs:1697`, `:1472`, `:1211`, `:1209`) | route to the single driver | **`AppState.alloc_drivers: BTreeMap<AllocationId, DriverType>`**, written on Start/Restart and read on stop/terminal. `StopAllocation` and `FinalizeFailed` carry **no spec and no `workload_id`** (`reconcilers/mod.rs:411-416`, `:448-453`), and `AllocStatusRow.kind` is `WorkloadKind`, not the driver — so there is otherwise no key at all. `action_shim::dispatch`'s `driver: &dyn Driver` (`:852`) becomes `drivers: &DriverRegistry`, and that signature is **pinned** too. **Every one of these arms is an ending-authoring path**, so each releases the allocation's supervision claim strictly after its terminal-row write resolves `Ok` (§ 105a.3) |
 | `MtlsInterceptWorker::start_alloc` (`action_shim/mod.rs:1425`, `:1643`) | fired for **every** alloc reaching `Running` on an mTLS-composed boot — gated on `state == Running` (`:1400`, `:1632`) and `mtls_worker.is_some()` (`:1424`, `:1642`), and on **nothing driver-shaped**. Its docstring says the predicate is `DriverType::Exec`, *"unconditionally true on the worker's exec lifecycle path"* (`mtls_intercept_worker.rs:474-477`) | **gated on `DriverType::Exec`.** A microVM terminates TCP *inside the guest*, so host sockops are structurally blind — GH #222's whole premise. The install is fail-closed (`:482-497`), so ungated it either kills the VM or makes a silent false confidentiality claim |
 | **`ServerHandle`'s shutdown** (`lib.rs:1020`, `:1135-1136`) — *the fifth seam, reached by the fix for the second* | a **scalar** `exit_observer_task: JoinHandle<()>`, one token minted at `:2290`, one await | `exit_observer_tasks: Vec<JoinHandle<()>>`, cancel-once-then-await-all, and the loop **clones** the single token. Dropping a tokio `JoinHandle` **detaches** rather than aborts, so N−1 observers would outlive `shutdown()` holding `Arc` clones; and a token minted per driver leaves N−1 tasks parked on `rx.recv()` with no cancel path |
 
@@ -8259,6 +8435,19 @@ to reach for if a fourth class appears.
 plan, the executors are the impure half. Consumes SD-1's five pin obligations and
 Hera's DD-1(b)/DD-5 verbatim; neither is amended.)*
 
+*(Amended 2026-08-11 by the iteration-2 adversarial review's NEW-1 … NEW-3.
+Every change implements Hera's **DD-1(b.i)** — the supervision handle is a claim
+on **authoring an ending**, not a grip on a running process — and none of it
+re-derives the design. Five pins, all of them kill-authorising: the claim's
+**release point** (§ 105a.3, strictly after the terminal-row write); the
+**abandonment boundary** (§ 105a.3, the one genuinely new decision); the
+**write-time terminality guard** (§ 105a.5); the **hydration read order**
+(§ 105a.2, `observe()` first and supervision **last** — the opposite of the
+obvious choice, for a reason given there); and the restated **AC 5** plus the new
+`EndingInFlightIsNeverReclaimed` invariant (§ 105a.10, § 105a.11). NEW-2's
+falsified "ONE predicate" claim is repaired in § 105a.4 by stating the terminal
+row as an exemption and **gating the unknown row on the predicate**.)*
+
 #### 105a.1 — The shape, in one table
 
 | Element | Pinned |
@@ -8342,6 +8531,33 @@ supervision set, leaving `allocations` empty — mirroring
 `BackendDiscoveryBridge`'s two arms (`reconciler_runtime.rs:1830-1849` and
 `:2822`) exactly.
 
+**The read order inside `hydrate_actual` is pinned, and it is the opposite of
+the obvious one.** Hera's DD-1(b.i) consequence 2 fixes the *direction* — skew
+must resolve toward **held** — and leaves the order to be pinned here. Pinned:
+
+> **`observe()` first; the supervision set LAST.** The kill-authorising input is
+> the freshest thing the tick reads; the host snapshot is the stalest. Overall
+> the tick reads rows (`hydrate_desired`) → host surfaces → supervision.
+
+Why the reverse order — supervision first, which reads as "fail toward held" and
+is what an iteration-2 recommendation proposed — is the **dangerous** one. The
+skew has two directions, and only one of them is a departure from the supervision
+set. Write `S(t)` for the claim set and `H(t)` for the host observation; § 103's
+step-0 claim gives the invariant *present-on-any-host-surface(t) ⇒ in `S(t)`*.
+
+| Order | The allocation that skews | Outcome |
+|---|---|---|
+| **`observe()` at t₁, supervision at t₂ > t₁** (pinned) | one whose ending is **authored** in (t₁, t₂] — it is in `H(t₁)` and gone from `S(t₂)` | authorised ⇒ `ReclaimAllocation` emitted, **and the row is terminal by t₂**, so the write-time guard (§ 105a.5) refuses it. One wasted action, no kill |
+| supervision at t₁, `observe()` at t₂ > t₁ | one that **starts** in (t₁, t₂] — absent from `S(t₁)`, present in `H(t₂)` | authorised ⇒ `ReclaimAllocation` emitted against a **booting VM whose row is `Pending` or absent**, i.e. non-terminal, so the write-time guard **passes** and a live VM dies |
+
+The asymmetry is the whole argument: a *departure*-stale error lands on a
+terminal row and is caught by the residual-gap guard Hera's consequence 3
+already requires; an *arrival*-stale error lands on a non-terminal row and
+nothing downstream can distinguish it from a genuine orphan. So "stale fails
+toward held" is discharged by making the supervision read the last one — every
+allocation in the older host snapshot is measured against a claim set that has
+had *more* time to acquire it, never less.
+
 **A new port rather than widening `CgroupFs`, and the reason is not taste.**
 `CgroupFs` is deliberately **write-only** — `create_dir` / `write` / `remove_dir`
 / `probe` / `kind` (`traits/cgroup_fs.rs:58-257`), with its `write`
@@ -8385,8 +8601,11 @@ pub enum SupervisionSet {
 }
 
 impl SupervisionSet {
-    /// The ONE kill-authorising predicate in the design. `Unavailable` is
-    /// `false` — never "unsupervised". Mandatory mutation target.
+    /// The ONE kill-authorising predicate in the design: every
+    /// `plan_reclamation` row that can reach a LIVE VMM consults it, with
+    /// exactly one stated exemption whose value is a theorem rather than an
+    /// observation (§ 105a.4, the terminal row). `Unavailable` is `false` —
+    /// never "unsupervised". Mandatory mutation target.
     pub fn reclamation_authorised(&self, alloc: &AllocationId) -> bool {
         match self {
             Self::Unavailable        => false,
@@ -8402,23 +8621,154 @@ constructs its half without a supervision set, so a crafter who reads
 authorised"* rather than *"nothing is supervised"* — Hera's
 "empty-because-unpopulated" case, closed by the type rather than by review.
 
-**Where the set comes from, and one defaulted `Driver` method.** The handle is
+**Where the set comes from, and two defaulted `Driver` methods.** The handle is
 `VmDriver`'s per-allocation `LiveVm` (ADR-0082 § D4), so the component that holds
-it is the component that must report it:
+it is the component that must report it — and, per the lifecycle below, the
+component that must be told when to let it go:
 
 ```rust
-// ADDED to the existing `Driver` trait — one method, defaulted, SYNC.
+// ADDED to the existing `Driver` trait — the first of TWO methods (the
+// second is `release_supervision`, below), defaulted, SYNC.
 /// The allocations for which this driver currently holds a live supervision
-/// handle. `None` = "this driver does not report supervision", which the
-/// caller MUST read as `SupervisionSet::Unavailable`, never as "supervises
-/// nothing". Sync deliberately: the live map is a `parking_lot` guard and a
-/// lock must not be held across `.await`.
+/// handle — an authorship claim in EITHER phase, `Held` or `EndingInFlight`.
+/// Reporting only the first phase is exactly the defect DD-1(b.i) refuses.
+/// `None` = "this driver does not report supervision", which the caller MUST
+/// read as `SupervisionSet::Unavailable`, never as "supervises nothing". Sync
+/// deliberately: the live map is a `parking_lot` guard and a lock must not be
+/// held across `.await`.
 fn live_allocations(&self) -> Option<Vec<AllocationId>> { None }
 ```
 
 `VmDriver` overrides it. `ExecDriver` keeps the default, and that is **correct**
 rather than an omission: the reclamation only ever acts on VM allocations
 (SD-1's authority rule), so exec supervision is not an input to it.
+
+**The claim's lifecycle — DD-1(b.i) made mechanical.** *(Added 2026-08-11,
+iteration-2 review NEW-1 / NEW-3. Hera's rule governs verbatim: the handle is
+held from instance start until the ending has been **authored** — the terminal
+row written — or authorship **abandoned as impossible**; it is not released at
+process death, at the exit watcher's return, or while an exit report is in
+flight.)*
+
+Two observations make that rule implementable rather than merely correct. First,
+the claim has exactly **two holders** across its life: `VmDriver` while the
+instance runs, then the ending-authoring path while the row is written. Second,
+an entry that records only *presence* cannot distinguish *"the watcher still
+holds this"* from *"the watcher has handed it on"* — and that distinction is the
+only thing standing between the two failure directions the rule is exposed to.
+So the claim is **the `VmDriver` live map's VALUE**, a sum type over the states
+that value can be in:
+
+```rust
+/// EVERY variant is supervised — `live_allocations()` reports all three,
+/// and that is the one-line form of NEW-1's fix. The type answers exactly
+/// one question: may the holder that is giving up now REMOVE the entry, or
+/// has it already handed the claim on to someone still using it?
+enum VmSupervision {
+    /// Claimed; the boot race is in progress (§ 103 step 0).
+    Starting,
+    /// Running: the claim plus the per-allocation live state.
+    Live(LiveVm),
+    /// The ending is being authored; the live state has been released.
+    EndingInFlight,
+}
+```
+
+**Why the claim is the map value rather than a field on `LiveVm` or a second map
+beside it.** `LiveVm` (ADR-0082 § D4) holds a `VmControl`, which `Vmm::create`
+has not returned at § 103 step 0 — so a flag *on* `LiveVm` cannot exist when the
+claim must be taken, and a `LiveVm` behind an `Option` would be a sentinel where
+a sum type belongs (§ *"Sum types over sentinels"*; the same reasoning ADR-0082
+applies to `Option<BeaconSession>`, which stays as it is because it genuinely has
+two inhabitants). A **separate claim map** beside the live map is worse: two
+representations of one fact that can disagree — precisely the failure this design
+rejects for the capability gate. `LiveVm` itself is unchanged.
+
+**`Held` in the transition table below means `Starting | Live`** — the two
+variants `VmDriver` itself holds.
+
+| # | Event | Transition | Why |
+|---|---|---|---|
+| 1 | `VmDriver::start`, before the run directory exists | ∅ → `Held` | § 103 step 0; makes *on-a-host-surface ⇒ claimed* an invariant |
+| 2 | `start` returns non-`Ok` | `Held` → ∅ | no instance was produced, so there is no ending to claim |
+| 3 | the exit watcher, **immediately before** emitting its `ExitEvent` | `Held` → `EndingInFlight` | the hand-off. **Atomic, and the emission is gated on its verdict** — see below |
+| 4 | the exit watcher terminates **without** having emitted | `Held` → ∅, **and only from `Held`** | abandonment: an attempt that can never begin. A drop guard, so an unwind or an abort is covered |
+| 5 | the exit observer, **once per `ExitEvent`**, at the bottom of the loop body | `*` → ∅ | the authorship attempt concluded — see the boundary below |
+| 6 | any shim arm that writes a terminal row for the allocation, after the write resolves `Ok` | `*` → ∅ | the ending was authored on the stop path — Hera's reading 2 |
+| 7 | the process dies | the whole map → ∅ | unchanged from SD-1: the next boot reconstructs it empty and the boot epoch reclaims |
+
+**The abandonment boundary, which is the one genuinely new decision here:**
+
+> **An authorship attempt concludes when the exit observer's handling of that
+> `ExitEvent` returns — on EVERY `RetryOutcome` arm, not only the successful
+> write. An attempt that can never begin is concluded by the watcher's drop
+> guard. There is no third terminating condition inside a live `serve`.**
+
+Mechanically that is one release call at the bottom of the observer's loop body,
+outside the `match outcome` (`worker/exit_observer.rs:204-371`), covering all
+three arms:
+
+| `RetryOutcome` | Ending | Release |
+|---|---|---|
+| `Wrote` | **authored** | yes — the release point Hera pins, strictly after the row write |
+| `Failed` (retry budget exhausted; the row is still `Running` and the observer escalates a degraded `LifecycleEvent`, `:327-370`) | **abandoned** — the write cannot land | yes |
+| `NoPriorRow` (`:323`) | **abandoned** — there is no row to write a successor against, so no ending will ever be authored on it | yes |
+
+**Both failure directions are closed, and each by a different clause.** Release
+only on `Wrote` — the tempting reading — leaves a `Failed` or `NoPriorRow`
+allocation claimed forever, which is a permanently unreclaimable orphan: SD-1's
+headline failure reintroduced by the fix for it. Release at process death, at
+`wait()`'s return, or at the watcher's return is NEW-1. Release on the watcher's
+drop unconditionally is NEW-1 again by a slower route, which is why transition 4
+fires **only from `Held`**.
+
+**The release surface is one more defaulted `Driver` method, symmetric with
+`live_allocations()` — the reporter of a claim is its releaser:**
+
+```rust
+/// Retire this driver's claim to author `alloc`'s ending. Called exactly
+/// once per `ExitEvent` by the exit observer, and once by each shim arm
+/// that writes a terminal row, in both cases strictly AFTER the write
+/// attempt has concluded. IDEMPOTENT — an unknown id is a no-op, so the
+/// two callers may both fire for one allocation. Sync, for the same
+/// reason `live_allocations` is: the live map is a `parking_lot` guard.
+/// Default: no-op, for drivers that do not report supervision.
+fn release_supervision(&self, _alloc: &AllocationId) {}
+```
+
+The exit observer already holds a `Weak<dyn Driver>` for exactly this shape and
+already upgrades it transiently to call `release_for_exit_emission`
+(`exit_observer.rs:192`, `:349-352`) — this is the same seam, not a new one. A
+`None` upgrade means the driver has been dropped, i.e. the process is shutting
+down, and transition 7 covers it.
+
+**Transition 3 is a check-and-act and must be atomic** per § *"Check-and-act must
+be atomic (no TOCTOU)"*: one map operation whose return value **is** the verdict
+(`did I still hold this claim?`), and the `ExitEvent` is emitted only on `true`.
+Never `if map.contains(alloc) { emit }` and never a discarded return. This is
+what makes Hera's corollary — *once an instance's ending is authored, no further
+ending may be authored for it* — structural rather than remembered, and it is the
+direct fix for NEW-3: a failed-stop orphan's row is terminal and its claim was
+released by transition 6, so when `execute_discard_stranded_artifacts` kills the
+surviving VMM the watcher wakes, **fails** the transition, emits nothing, and no
+row is written. AC 5's byte-unchanged assertion then holds by construction rather
+than by the luck of no watcher being alive.
+
+**One residual, named rather than papered over.** If the exit-observer task
+itself dies mid-attempt while `serve` survives, an `EndingInFlight` entry is left
+that nothing clears until restart, and that allocation is unreclaimable for the
+life of the process. This is accepted, for two reasons: the observer's death is
+the node's entire exit pipeline dying — a strictly larger failure than one stuck
+claim, and one that no reclamation sweep would repair anyway — and the direction
+of the residual is *toward held*, which is the correct direction for a
+kill-authorising predicate. Transition 7 bounds it at the next boot.
+
+**A bounded authorship deadline was considered and rejected** as the abandonment
+boundary: releasing the claim a fixed interval after VMM death would need a
+policy constant, a per-allocation timer and a clock read in the driver, and it is
+strictly weaker — a deadline shorter than a slow `RETRY_BACKOFFS` chain reopens
+NEW-1, and a longer one buys nothing the three `RetryOutcome` arms do not already
+give exactly.
 
 The hydration composes the set as:
 
@@ -8454,9 +8804,46 @@ For every allocation id appearing on any of `actual.host`'s three surfaces:
 |---|---|---|
 | a **non-terminal** VM allocation | `true` | **`ReclaimAllocation { alloc_id }`** — authors an ending (Platform Reclamation) |
 | a **non-terminal** VM allocation | `false` (handle held, **or** `Unavailable`) | **nothing** — a supervised, non-terminal VM survives every tick |
-| a **terminal** VM allocation | *(not consulted)* | **`DiscardStrandedArtifacts { alloc_id }`** — authors no ending |
-| **no entry**, and the id appears on a **VM-exclusive** surface (run dir or clone) | *(not consulted)* | **`DiscardStrandedArtifacts { alloc_id }`** — the unknown-allocation sweep |
-| **no entry**, and the id appears **only** as a cgroup scope | *(not consulted)* | **nothing** |
+| a **terminal** VM allocation | **exempt** — the value is a theorem, not an observation (below) | **`DiscardStrandedArtifacts { alloc_id }`** — authors no ending |
+| **no entry**, and the id appears on a **VM-exclusive** surface (run dir or clone) | `true` | **`DiscardStrandedArtifacts { alloc_id }`** — the unknown-allocation sweep |
+| **no entry**, and the id appears on a **VM-exclusive** surface | `false` (claim held, **or** `Unavailable`) | **nothing** — this is a VM inside its boot race, or a driver whose supervision could not be read |
+| **no entry**, and the id appears **only** as a cgroup scope | *(not reached — no VM-exclusive surface)* | **nothing** |
+
+**Rows 3 and 4 both reach a LIVE VMM through `kill_scope`, so both owe the
+predicate an answer.** *(Amended 2026-08-11, iteration-2 review NEW-2. The prior
+table marked both `(not consulted)`, which falsified § 105a.3's "the ONE
+kill-authorising predicate" claim — a `DiscardStrandedArtifacts` executor kills a
+live VMM just as surely as a `ReclaimAllocation` one does.)*
+
+**Row 3 — the terminal allocation — is an EXEMPTION, and it is stated as one
+rather than left looking unchecked.** It is the case SD-1 exists for: an
+unstoppable orphan **is** a terminal row with a live VMM, and refusing to kill it
+would refuse the feature's headline requirement. The exemption is safe for a
+reason stronger than "we checked the row": under DD-1(b.i)'s corollary a
+terminal-row instance is **never still claimed** — the claim is released at the
+moment the ending is authored (§ 105a.3 transitions 5 and 6) — so
+`reclamation_authorised` is *provably* `true` for every terminal row. The
+predicate is not skipped here; its value is a theorem rather than an observation,
+and calling it would be a tautology. What the exemption costs is a genuine
+coupling: **if the corollary is ever weakened, row 3 must start consulting the
+predicate**, and that dependency is recorded here rather than discovered later.
+
+**Row 4 — the unknown allocation — is GATED on `reclamation_authorised`.** The
+alternative the review offered was to *ground the premise* that no production
+path can present a live VM as "no entry"; that premise is **false**, and the
+counter-example is not exotic. The shim's `StartAllocation` arm reads the prior
+row at `action_shim/mod.rs:1256` and writes only **after** `driver.start` answers,
+while § 103 creates the run directory and the per-launch clone — both
+VM-exclusive surfaces — during the boot race. A first-seen VM allocation is
+therefore *on two VM-exclusive surfaces with no row at all* for as long as
+`VM_BOOT_DEADLINE` (30 s), against a 30 s sweep cadence. Ungated, row 4 is a
+`kill_scope` on a booting VM on the ordinary deploy path. The gate is free for the
+case row 4 exists to serve — a genuinely abandoned or reboot-orphaned allocation
+has no claim, so the predicate reads `true` and the sweep proceeds unchanged —
+and § 103's step-0 claim is what makes it protective rather than decorative.
+This also subsumes the review's own speculative case (a live VM whose intent join
+fails mid-run reads as "no entry"): claimed is claimed, whatever made the join
+fail.
 
 **The last row is what keeps `ExecDriver`'s survive-a-restart behaviour intact,
 and it is a precision SD-1's prose leaves implicit.** The cgroup scope surface is
@@ -8465,8 +8852,9 @@ is not VM-shaped — so a scope with no row is unattributable and is left alone.
 The run directory (SD-2's exclusive per-allocation tmpfs dir) and the clone
 (whose filename carries the allocation id, ADR-0082 § D2) **are** VM-exclusive by
 construction, so an entry there with no row is an unknown **VM** allocation and
-is swept. The consequence is a small, pleasing one: **a scope is never the sole
-trigger.** A reboot-orphaned VM is caught by its clone (the only surface that
+is swept — subject to row 4's supervision gate, which is what distinguishes an
+unknown allocation from a booting one. The consequence is a small, pleasing one:
+**a scope is never the sole trigger.** A reboot-orphaned VM is caught by its clone (the only surface that
 survives a host reboot); a `/run`-remounted VM is caught because its row is
 present. And `ReclaimAllocation`'s executor kills the scope anyway, so nothing
 attributable is missed.
@@ -8516,7 +8904,50 @@ is the same "the executor re-observes" rule that keeps the artifact list out of
 the payload: an observation carried from the diff into the plan goes stale
 between emit and execute.
 
-**`execute_reclaim_allocation`** — `kill_scope` → `discard_artifacts` → write the
+**That re-read is a GUARD, not a lookup — and it gates the whole executor, not
+just the write.** *(Amended 2026-08-11, iteration-2 review NEW-1; Hera's
+DD-1(b.i) consequence 3.)* Authorisation is a precondition of the **write**, and
+a tick decides at *t* while its executor runs at *t + ε*; an ending authored
+inside that gap is an ending, and DD-1(b)'s refusal to overwrite an authored
+ending binds this path exactly as it binds the disposal path. The observation is
+already in hand — the defect was that it was consulted only for the `workload_id`
+the `alloc_id`-only payload omits, so **losing** the race did not save the honest
+ending either. Pinned:
+
+```
+find_prior_alloc_row(obs, alloc_id):
+  Some(row) if !row.state.is_terminal()  -> AUTHORISED  — proceed (below)
+  Some(row)  // is_terminal()            -> REFUSED     — do NOTHING; Ok(())
+  None                                   -> REFUSED     — do NOTHING; Ok(())
+```
+
+`AllocState::is_terminal` already exists (`traits/observation_store.rs:221`).
+
+**A refusal is a total no-op, not a degradation to disposal**, and that is the
+deliberate choice: the executor does not kill, does not discard, and returns
+`Ok(())` with a structured `vm.reclamation.refused` event carrying the
+`alloc_id` and the observed state. It is **not** an error — no
+`ReclamationError` variant, and certainly no `Internal(String)`. The next tick
+re-observes and re-decides, and for a genuinely terminal row that decision is
+`DiscardStrandedArtifacts` — the command that actually carries the
+authors-no-ending contract. Having `execute_reclaim_allocation` improvise a
+disposal instead would smuggle back exactly the one-command-two-behaviours shape
+DD-5's two-variant split refuses. The cost of refusing is one sweep interval on a
+stranded artifact; the cost of proceeding is a fabricated Platform Reclamation
+over an honest ending. That asymmetry is the same one § 105a.2's read order turns
+on.
+
+**The supervision half is deliberately NOT re-checked at execute time**, and the
+premise is grounded rather than assumed (§ *"Ground the premise"*). For a
+refused-by-terminality row to become dangerous again the allocation would have to
+go non-terminal inside ε — which requires a terminal row, a `WorkloadLifecycle`
+tick, a `RestartAllocation`, and a **VM boot** (seconds; `VM_BOOT_DEADLINE` is
+30 s) to complete inside a single `dispatch_single` hop. No production path
+produces that state, so no defense is built for it. If VM start ever becomes
+sub-millisecond, this paragraph is the one to revisit.
+
+**`execute_reclaim_allocation`** (on the AUTHORISED branch) — `kill_scope` →
+`discard_artifacts` → write the
 terminal row (`state: Terminated`, `reason: Stopped { by: PlatformReclaimed }`,
 `terminal: None` — § 105) through the existing LWW merge, so a re-run is a
 same-value write → submit the **four** evaluations the exit observer submits per
@@ -8550,9 +8981,9 @@ path, and it costs a steady-state tick nothing.
 | | **Boot-epoch drive** | **Steady-state tick** |
 |---|---|---|
 | Entry | `vm_reclamation_boot::converge(state)` in `run_server`, **immediately before** the `if state.mtls_worker.is_some()` block at `lib.rs:2131` (outside that gate — VM allocations exist whether or not mTLS is composed) | `run_convergence_tick` → `reconcile` (`reconciler_runtime.rs:1421`, `:1465`) |
-| Observation | `VmHostState::observe()` + the same intent join + the same supervision read | the same, via `hydrate_actual` / `hydrate_desired` (`:2673`, `:1729`) |
+| Observation | `VmHostState::observe()` + the same intent join + the same supervision read, **in § 105a.2's pinned order** (rows → host → supervision last) | the same, via `hydrate_actual` / `hydrate_desired` (`:2673`, `:1729`) |
 | Diff | **`plan_reclamation`** | **`plan_reclamation`** |
-| Effect | calls the two executors **directly** on the returned `Vec<Action>` | the same two executors, reached through `dispatch_single` (`action_shim/mod.rs:983`) |
+| Effect | calls the two executors **directly** on the returned `Vec<Action>` — **including `execute_reclaim_allocation`'s terminality guard** (§ 105a.5), which is in the executor and so cannot be skipped by the path that reaches it | the same two executors, reached through `dispatch_single` (`action_shim/mod.rs:983`) |
 | Settle | inherited from `kill_scope`'s postcondition; **binding here** | inherited; no obligation |
 
 **It is not a second implementation.** One observation function, one pure diff,
@@ -8588,6 +9019,20 @@ it is stated rather than quietly diverged:
 - The boot drive submits **one** `Evaluation { vm-reclamation, node/<id> }` on
   completion, so the first steady-state tick does not wait for the sweep cadence.
 
+**Status: closed, 2026-08-11 — the two sections now agree and cross-reference
+each other.** Titan revised § *System Architecture* so pin 5 asserts the
+*property* (*"no tick may interleave with the boot passes"*), names registration
+as **inert**, and pins `spawn_convergence_loop`'s strictly-after spawn as the
+load-bearing constraint; the C4 L2 registration edge reads *"registers (INERT —
+no tick) / ticks begin only when the convergence loop spawns, strictly AFTER the
+boot passes"*, and pin 5 points back here. **There is no residual divergence
+between the two sections** — the substitution above stands as designed and
+nothing in it changes. The record of *why* is kept deliberately: registration
+order is not the constraint because `register` takes `&mut self` and
+`Arc::new(runtime)` at `lib.rs:1774` precedes `AppState`'s construction, so
+"register last" is structurally unavailable. A later reader who wonders why the
+obvious mechanism was not used needs that fact.
+
 #### 105a.8 — The wake: a broker-driven loop has no bootstrap sweep, so the cadence is designed rather than assumed
 
 `EvaluationBroker` is purely event-driven — `spawn_convergence_loop`
@@ -8598,13 +9043,21 @@ ticks" is not something the Bar-2 ruling gives for free; it is a mechanism this
 design must supply.
 
 **Decision: one periodic submission in the convergence loop**, at a node-scoped
-sweep cadence:
+sweep cadence. **Both halves — the mechanism and the value — were ratified by the
+user on 2026-08-11**; this is a settled decision, not a proposal awaiting
+confirmation:
 
 ```
 VM_RECLAMATION_SWEEP_INTERVAL = 30 s
 ```
 
-Derivation, stated so it is not a magic constant: it bounds **(i)** the
+**It is a compile-time constant: not operator-tunable, and no knob is promised.**
+That is a *property* of the ratified decision, not an open question — an operator
+knob would be a new decision, taken elsewhere, and nothing in this design carries
+a forward pointer to one.
+
+Derivation — retained because it is the reasoning the ratification rests on, and
+a later reader who wants to change the value needs it: it bounds **(i)** the
 unstoppable-orphan window after a failed stop and **(ii)** the repair latency for
 a clone stranded by a crash between teardown steps — the two drifts SD-1's
 Bar-1-vs-Bar-2 triage turns on — while sitting ~300× above the 100 ms tick
@@ -8612,6 +9065,10 @@ cadence so the three-surface walk never lands on the hot path. On a node with
 ~50 allocations the walk is a directory listing plus one `cgroup.procs` read per
 scope, twice a minute. The loop already holds the injected `Clock`, so the
 cadence is **DST-controllable**, not wall-clock.
+
+The three alternatives below are likewise retained rather than pruned: they are
+the options the ratified decision was chosen *against*, and a reader revisiting
+the cadence needs to know they were considered and why each failed.
 
 **Rejected: a `last_swept_at` View field** driving self-re-enqueue — it is a
 marker stamped on the emit path, which SD-1's pin 2 and ADR-0079 both refuse, and
@@ -8628,7 +9085,10 @@ such: a node-scoped sweep cadence is precisely what
 [#197](https://github.com/overdrive-sh/overdrive/issues/197)'s shared
 host/node-infrastructure reconciler model will need for #198 / #199 / #234 too.
 Per SD-1 this design does **not** found that abstraction — it adds one
-submission and leaves the generalisation where Titan put it.
+submission and leaves the generalisation where Titan put it. § *System
+Architecture* carries a one-sentence pointer to the same fact and **defers to
+this section**: it deliberately does not restate the constant, its derivation or
+the rejected alternatives, all of which live here and only here.
 
 #### 105a.9 — The mechanical cost, enumerated so DELIVER does not discover it
 
@@ -8644,6 +9104,18 @@ A new reconciler touches **five enums and four matches**, all compiler-enforced:
 | `hydrate_desired`'s match (`:1734`) | one arm |
 | `hydrate_actual`'s match (`:2678`) | one arm |
 | `dispatch_single`'s match (`action_shim/mod.rs:999`) | two arms |
+
+**The authorship claim's sites are NOT compiler-enforced, and are enumerated
+separately for that reason** — a missed release is a silent unreclaimable
+orphan, not a build failure:
+
+| Site | Edit |
+|---|---|
+| `Driver` trait (`traits/driver.rs:330`) | **two** defaulted methods: `live_allocations`, `release_supervision` |
+| `VmDriver::start` | take the claim at step 0; release on **every** non-`Ok` arm (§ 103) |
+| `VmDriver`'s exit watcher | the atomic `Held → EndingInFlight` transition gating emission, plus the `Held`-only drop guard |
+| `exit_observer`'s loop body (`worker/exit_observer.rs:204-371`) | **one** release call, below the `match outcome`, covering all three arms |
+| the shim's terminal-row arms (`action_shim/mod.rs:1697`, `:1472`, `:1211`, `:1209`) | one release call each, after the write resolves `Ok` |
 
 #### 105a.10 — Acceptance criteria this reconciler adds
 
@@ -8670,11 +9142,38 @@ two `Action`s into one:
 5. **A live VMM whose row is *already terminal* is killed at tick *N*, and the
    row is BYTE-UNCHANGED afterwards** — every field of `alloc_status[alloc_id]`
    including `updated_at`, `last_terminated` and `restart_count`, plus
-   `restart_counts[alloc_id]`. Hera's AC, and **only this assertion catches an
-   implementation that collapsed `DiscardStrandedArtifacts` into
-   `ReclaimAllocation`**: a collapsed implementation still kills the VMM and
-   still passes AC 2, and betrays itself only by re-classifying an honest ending
-   as a platform one.
+   `restart_counts[alloc_id]`.
+
+   *(Restated 2026-08-11, iteration-2 review NEW-3.)* **The scenario is *a
+   terminal-row VMM with no live authorship claim*, and it must be run in BOTH
+   shapes that takes** — the original wording assumed only the first, and the
+   second is the one SD-1 names as its headline failure:
+
+   - **(a) the restart orphan** — the terminal row survived a `serve` restart,
+     so no exit watcher exists at all.
+   - **(b) the failed-stop orphan** — an operator `stop` whose kill failed. The
+     shim authored the ending on the stop path and released the claim (§ 105a.3
+     transition 6) **while the VMM survived**, so the watcher is still
+     *physically alive*, parked on a process the sweep is about to kill.
+
+   **Two targets, and shape (b) is the only route to the second:**
+
+   - the **collapsed-Action** implementation — one that folded
+     `DiscardStrandedArtifacts` into `ReclaimAllocation`. It still kills the VMM
+     and still passes AC 2, and betrays itself only by re-classifying an honest
+     ending as a platform one. This was Hera's original target.
+   - the **watcher-that-outlives-its-authored-ending** implementation. Under
+     shape (b) the disposal's `kill_scope` wakes the surviving watcher; an
+     implementation that did not gate emission on the authorship claim
+     (§ 105a.3 transition 3) emits an `ExitEvent`, whose observer write advances
+     `updated_at` at minimum. Nothing else in the suite reaches this, and it is
+     why the assertion covers `updated_at` rather than only the class-bearing
+     fields.
+
+   Under DD-1(b.i)'s corollary a terminal-row instance that is still claimed is
+   **unrepresentable**, so the byte-unchanged property holds *structurally*
+   rather than by the luck of no watcher being alive — and this AC is what
+   proves the structure is actually there.
 
 Plus two that extend existing enforcement: **P2 (§ 105) now ranges over
 `VmReclamation` as well** — for a reconcile whose observed allocations include a
@@ -8689,7 +9188,7 @@ as a falsifiable case rather than a sentence.
 `.claude/rules/testing.md` requires progress + stability specifications for every
 reconciler. The mechanical form in this tree is an `Invariant` variant plus an
 async evaluator (`overdrive-sim/src/invariants/mod.rs:147`, `ALL` at `:593`,
-`as_canonical` at `:737`, dispatch in `harness.rs:380`) — three new ones, in a
+`as_canonical` at `:737`, dispatch in `harness.rs:380`) — **four** new ones, in a
 new `invariants/vm_reclamation.rs`:
 
 | Invariant | Class | Statement |
@@ -8697,6 +9196,25 @@ new `invariants/vm_reclamation.rs`:
 | `VmReclamationConverges` | liveness — `assert_eventually!` | eventually, **no** host state on any surface is attributable to a terminal or unknown allocation |
 | `SupervisedVmSurvivesEveryTick` | safety — `assert_always!` | **always**, an allocation that is non-terminal **and** in the observed supervision set has its scope, run directory and clone intact, and its row unmodified. This is AC 4 as an invariant |
 | `VmReclamationIdempotentSteadyState` | stability — `assert_always!` | **always**, a second reconcile over an unchanged observation returns an **empty** `Vec<Action>` (mirrors `HydratorIdempotentSteadyState`, `invariants/mod.rs:360`) |
+| `EndingInFlightIsNeverReclaimed` | safety — `assert_always!` | **always**, an allocation whose ending is **in flight** — its VMM has exited, or its stop has been issued, and its terminal row is not yet written — is absent from `plan_reclamation`'s `ReclaimAllocation` output |
+
+**The fourth is new** *(2026-08-11, iteration-2 review NEW-1)* and it is not
+foldable into the second. `SupervisedVmSurvivesEveryTick` is scoped to
+**membership in the observed supervision set**; the exit window is precisely the
+interval in which a process-death handle reading has just *removed* the
+allocation from that set, so the existing invariant is vacuously satisfied
+exactly where the bug lives. `EndingInFlightIsNeverReclaimed` is stated over the
+**world** — has this instance's ending been written yet? — rather than over the
+set, which is why it can witness the window at all. Under DD-1(b.i) the two now
+coincide, and that coincidence is the property being asserted: the invariant
+fails the moment an implementation reverts to releasing the claim at process
+death, at `wait()`'s return, or at the watcher's return.
+
+Hera's corollary — *no second ending for an authored one* — is enforced by
+AC 5 shape (b) plus § 105a.3's atomic transition 3, not by a fifth invariant: the
+violation is an **emission by a retired watcher**, which is observable on the row
+(AC 5) and structurally refused at the transition, so a DST invariant over the
+plan would be looking in the wrong place.
 
 `ReconcilerIsPure` (`:200`) covers the diff for free. DST reachability is
 `SimVmHostState` — the reason the observation is a port at all — driven with a
@@ -8707,16 +9225,19 @@ waited on.
 
 All seven of Titan's contradictions are slice-text and AC corrections in this
 lane, plus three of Hera's documentation corrections. C-1, C-2, C-3, C-4, C-6 and
-C-7 are discharged **structurally** by § 102 — they cannot regress. Two are
-corrections a crafter must make by hand:
+C-7 are discharged **structurally** by § 102 — they cannot regress. Two needed a
+crafter's hand in the slice text:
 
-- **C-5 is the urgent one: an acceptance criterion that fails against correct
-  behaviour.** Slice 01's AC retains *"`/proc/<vmm-pid>/status`'s non-zero
-  `Seccomp:` mode"* as the runtime regression guard. P5 measured `Seccomp: 0` on
-  the thread-group leader of a **correctly** confined CH. The AC must read
-  `/proc/<pid>/task/*/status`. This does not weaken Slice 01's other half — the
-  argv assertion over the constructed seccomp argument stays, because CH's `log`
-  mode still installs a filter and would survive a `/proc`-only check.
+- **C-5 was the urgent one: an acceptance criterion that failed against correct
+  behaviour.** Slice 01's AC read *"`/proc/<vmm-pid>/status`'s non-zero
+  `Seccomp:` mode"* as the runtime regression guard, while P5 measured
+  `Seccomp: 0` on the thread-group leader of a **correctly** confined CH.
+  **Corrected — `slice-01:15` and `:180-185` now read
+  `/proc/<pid>/task/*/status`** *(tense fixed 2026-08-11, iteration-2 review
+  NEW-4; the correction had landed while this paragraph still described it as
+  pending)*. It did not weaken Slice 01's other half — the argv assertion over
+  the constructed seccomp argument stays, because CH's `log` mode still installs
+  a filter and would survive a `/proc`-only check.
 - **Slice 03's "open DESIGN input: which uid/gid" is answered, not returned as a
   blocker.** P5 settled it: an unprivileged uid in the `kvm` group against
   `0660 root:kvm`. No appliance-image change, no `0666`.
@@ -8789,7 +9310,8 @@ mechanism is the proof the gate is still honest.
 | `Vmm::probe` | **bounded-change** | probe-scoped scratch inside the image dir and run root, removed before return | Contract postcondition *"leaves no probe-scoped residue"*; asserted in `vmm_equivalence` |
 | `Vmm::create` | **bounded-change** | the clone destination, the VMM process, the run directory's sockets | On `Err`, the clone is removed — no partial artifact escapes a failed `create`. Cgroup enrolment is the **driver's**, not `create`'s |
 | `Vmm::terminate` | **bounded-change** | the VMM process only | Idempotent on an already-dead VMM; touches no artifact and no guest |
-| `VmDriver::start` | **bounded-change** | one cgroup scope, one run dir, one clone, one VMM process, one beacon listener | Every non-`Ok` arm cleans up before returning; leak assertions on the deadline arm |
+| `VmDriver::start` | **bounded-change** | one cgroup scope, one run dir, one clone, one VMM process, one beacon listener, **one authorship-claim entry** | Every non-`Ok` arm cleans up before returning — **including releasing the claim taken at step 0**; leak assertions on the deadline arm |
+| The **authorship claim** — `VmDriver`'s live map, plus `Driver::{live_allocations, release_supervision}` (§ 105a.3) | **bounded-change**, capability-shaped | exactly **one** entry per allocation, in one of two phases; no other allocation's entry is ever touched | The claim is what the kill-authorising predicate reads, so its lifecycle is the safety property, not bookkeeping. Assertions: transition 3 is an atomic check-and-act whose discarded return is the § *"Check-and-act must be atomic"* defect; transition 4 fires **only** from `Held`; `release_supervision` is idempotent (proptest: any interleaving of the observer's and the shim's release for one allocation converges to absent); and `EndingInFlightIsNeverReclaimed` (§ 105a.11) is the DST witness that the release point is not the process's or the watcher's death |
 | `VmDriver::stop` | **bounded-change** | the beacon session, the VMM process, the cgroup scope, the run dir, the clone | Total over every point in the start path — including **before** the guest has beaconed, where there is no session to write `SHUTDOWN` to and the step is skipped |
 | `DriverRegistry`, `DriverPayload`, the parser's driver-table dispatch, `classify_driver_failure`'s VM arm | **pure-function** | ∅ | Unit tests; the parser and classifier arms are mutation targets |
 | `overdrive-init` (in-guest PID 1) | **bounded-change** | the guest's mount points and the beacon session; **nothing on the host** | Its only host-visible effect is bytes on one socket — the Published Language of § D7 |
@@ -8873,7 +9395,7 @@ flowchart TB
         SVHS["<b>SimVmHostState</b><br/>makes VmReclamation DST-reachable"]
     end
     subgraph WORKER["overdrive-worker — adapter-host"]
-        VD["<b>VmDriver</b> : Driver<br/>cgroup · netns · beacon · 3-way race · [D3]<br/><b>live_allocations() → Some(set)</b>"]
+        VD["<b>VmDriver</b> : Driver<br/>cgroup · netns · beacon · 3-way race · [D3]<br/><b>holds the authorship claim: Held → EndingInFlight</b><br/><b>live_allocations() → Some(set) — BOTH phases</b>"]
         ED["ExecDriver : Driver<br/><i>unchanged; live_allocations() defaults to None</i>"]
     end
     subgraph CP["overdrive-control-plane"]
@@ -8882,6 +9404,7 @@ flowchart TB
         EXEC["<b>action_shim::reclamation</b><br/>execute_reclaim_allocation (row + 4 evals)<br/>execute_discard_stranded_artifacts (NO obs param)"]
         SHIM["action_shim::dispatch_single<br/><i>routes on spec.driver.driver_type()</i>"]
         LOOP["spawn_convergence_loop<br/><i>+ 30 s vm-reclamation sweep submission</i>"]
+        OBSV["<b>exit_observer</b> — one task per registry entry<br/>writes the terminal row, THEN releases the claim"]
     end
     subgraph GUEST["overdrive-init — class: binary (NEW)"]
         INIT["PID 1, static musl<br/>x86_64 + aarch64"]
@@ -8898,8 +9421,11 @@ flowchart TB
     COMP --> ED
     COMP -->|"composes UNCONDITIONALLY<br/>(not Vmm-gated)"| VHS
     SHIM -->|"get(driver_type)"| REG
-    RECON -->|"actual: observe()"| VHS
-    RECON -->|"actual: live_allocations()"| REG
+    RECON -->|"actual, read FIRST: observe()"| VHS
+    RECON -->|"actual, read LAST: live_allocations()"| REG
+    VD -->|"emits ExitEvent iff Held → EndingInFlight succeeds"| OBSV
+    OBSV -->|"release_supervision() — after EVERY RetryOutcome"| VD
+    SHIM -->|"release_supervision() — after the terminal-row write"| VD
     RECON -->|emits| ACTS
     ACTS --> SHIM
     SHIM -->|"steady state"| EXEC
@@ -8950,8 +9476,8 @@ C4Component
     Rel(ch, guest, "boots")
     Rel(guest, beacon, "sends READY then EXIT n over one connection")
     Rel(vd, ch, "races beacon against VMM exit against deadline")
-    Rel(recl, vhs, "hydrates actual from observe(); never reads a View marker")
-    Rel(recl, vd, "reads live_allocations() as the supervision discriminator")
+    Rel(recl, vhs, "hydrates actual from observe() FIRST; never reads a View marker")
+    Rel(recl, vd, "reads live_allocations() LAST as the supervision discriminator — the claim is held until the ending is authored or abandoned")
     Rel(recl, reclx, "emits the two Actions into")
     Rel(reclx, vhs, "kills the scope and discards artifacts through")
     Rel(reclx, ch, "kills survivors — at boot before netns adopt, and at every 30 s sweep")
@@ -8965,6 +9491,8 @@ C4Component
 | **Reliability — recoverability** | The node crashes between reclamation steps | Every partial state converges on the next **tick** — not the next boot (§ 105a.10 AC 1); each step is a no-op on re-apply |
 | **Reliability — maturity (the Bar-2 win)** | A stop fails mid-teardown while the node stays up, stranding a scope and a clone | Repaired within `VM_RECLAMATION_SWEEP_INTERVAL` (30 s) **without a `serve` restart**. Under converge-on-boot the same VM stays unstoppable until the next upgrade |
 | **Reliability — availability (the safety half)** | A supervised, non-terminal VM is running while the sweep ticks repeatedly | The VMM, its scope, its run directory, its clone and its row are **all untouched**. `SupervisionSet::Unavailable` — the `Default` — authorises nothing, so an unhydrated or errored discriminator degrades to "do nothing this tick", never to "kill" |
+| **Reliability — availability (the exit window)** | A VM exits 7 and a sweep tick lands between the VMM's death and the terminal row's write | The honest ending is authored: `Crashed { exit_code: Some(7) }`, **zero** fabricated `PlatformReclaimed` rows, the restart budget consumed as a genuine failure. The claim is held across the exit report (DD-1(b.i)), so the window does not exist; the write-time terminality guard closes the residual emit→execute gap; `EndingInFlightIsNeverReclaimed` is the DST witness |
+| **Reliability — availability (a boot in progress)** | A first-seen VM allocation is 10 s into its boot race, on two VM-exclusive host surfaces with **no row yet**, when a sweep tick lands | Untouched. The claim is taken at § 103 step 0 and the unknown-allocation row is gated on it (§ 105a.4 row 4) |
 | **Functional correctness** | A guest exits 7 while `cloud-hypervisor` exits 0 | `workload describe` reports **7**. No path derives `ExitKind` from the VMM's status |
 | **Functional correctness** | A rootfs with no working init is deployed | Reaches `Failed` **without** passing through `Running`; `Running` follows the beacon, never a 2xx |
 | **Security — confidentiality** | A compromised hypervisor **process** attempts to open a sibling VM's disk | Denied by Landlock (P5: `expect=deny /run/…/vm-b/rootfs.ext4 → DENIED errno=13`). The grant is one exclusive directory. **Scoped to the process, not the guest**, and carrying P5's own caveat: *"this is the same path set CH was given, not a byte-copy of CH's internal ruleset — CH exposes no way to prove the latter"*. P5 tested a host-side process under the identical path set; it did not test a guest, and a guest reaches host paths only through virtio devices |
@@ -9019,7 +9547,7 @@ while a Bar-2 reconciler needs both.
 | 11 | `TransitionReason::OutOfMemory` | OOM diagnosis | **NO CHANGE — declared hole** | Needs a `memory.events` subscription. Deferral D-3; DD-3 records the cost |
 | 12 | `TcpProber` / `HttpProber` / `ExecProber` | readiness | **NO REUSE — different concept** | Runtime workload health checks; none reaches inside a guest. The VM readiness gate is the vsock beacon |
 | 13 | Composition root `compose_production_driver` (declared `lib.rs:1401`; composes the one `ExecDriver` at `:1422-1425`) | which driver an allocation reaches | **EXTEND** | ADR-0022 pre-committed the registry migration to "the second driver class". This is it |
-| 14 | `Driver` trait (`traits/driver.rs:329-532`) | the driver contract | **EXTEND — one defaulted method** | *Re-verdicted at iteration 3; the first two passes said REUSE UNCHANGED and that was correct **for Bar 1**.* `VmDriver` still provides `r#type`/`start`/`stop`/`status`/`resize` and takes every existing default. The Bar-2 ruling adds **`fn live_allocations(&self) -> Option<Vec<AllocationId>>`, defaulted to `None`** — because DD-1(b)'s discriminator must be an **observed fact read from the component that holds the handle**, and holding a second copy of `VmDriver`'s live map beside it is the *"two representations of one fact that can disagree"* failure this design rejects for the capability gate. Intake I-2's licence is therefore exercised, minimally. **`None` is the fail-safe default** (⇒ `SupervisionSet::Unavailable` ⇒ authorises nothing); `ExecDriver` keeps it, correctly, since reclamation never acts on exec allocations |
+| 14 | `Driver` trait (`traits/driver.rs:329-532`) | the driver contract | **EXTEND — two defaulted methods** | *Re-verdicted at iteration 3; the first two passes said REUSE UNCHANGED and that was correct **for Bar 1**. Widened to two methods at iteration 4 (review NEW-1).* `VmDriver` still provides `r#type`/`start`/`stop`/`status`/`resize` and takes every existing default. The Bar-2 ruling adds **`fn live_allocations(&self) -> Option<Vec<AllocationId>>`, defaulted to `None`** — because DD-1(b)'s discriminator must be an **observed fact read from the component that holds the handle**, and holding a second copy of `VmDriver`'s live map beside it is the *"two representations of one fact that can disagree"* failure this design rejects for the capability gate. DD-1(b.i) adds the second, **`fn release_supervision(&self, alloc: &AllocationId)`, defaulted to a no-op** — the claim's holder must also be tellable when to let go, and the release point is on the *ending-authoring* path, in another crate. Intake I-2's licence is therefore exercised twice, minimally. **`None` is the fail-safe default** (⇒ `SupervisionSet::Unavailable` ⇒ authorises nothing); `ExecDriver` keeps both defaults, correctly, since reclamation never acts on exec allocations. **Contract shape (principle 12): `live_allocations` is pure-function/read-only (universe ∅, asserted by the `Unavailable`-as-`Default` proptest); `release_supervision` is bounded-change over exactly one map entry, idempotent, asserted by the interleaving proptest and by `EndingInFlightIsNeverReclaimed` (§ 105a.11)** — the DST witness that the release point is neither the process's nor the watcher's death. Precedent for the whole shape: `release_for_exit_emission` (`:416`), a defaulted sync `Driver` method the exit observer already calls through a `Weak` upgrade |
 | 15 | `DriverType` (`:35-85`) | driver tag | **EXTEND (by deletion)** | `Vm` and `MicroVm` both already exist. I-5 deletes `MicroVm`; `Vm` survives. Two exhaustive-match arms, an OpenAPI regeneration, one stale docstring |
 | 16 | `AllocationSpec` (`:132-234`) | the driver's input | **EXTEND** | `command`/`args` → `driver: DriverPayload`. No serde, no rkyv ⇒ no envelope bump. ADR-0030 §6 pre-sanctioned per-driver-class spec types |
 | 17 | `classify_driver_failure` (`action_shim/mod.rs:179-202`) | failure vocabulary seam | **EXTEND** | Its `DriverType` parameter is documented as *"accepted for forward-compatibility"* and is currently `_`-prefixed. Cashing it is the whole change; zero exec cases move |
@@ -9080,8 +9608,10 @@ criterion, not recommendations** — they are the half of § 102's
 | **P2** — no reconciler emits a terminal claim on a reclaimed row | proptest over `reconcile` **outputs**, now over **three** reconcilers (`WorkloadLifecycle`, `ServiceLifecycle`, `VmReclamation`). **This is the binding one**; P1 cannot catch a missed emission site, and P2 ranging over the new reconciler is what stops reclamation authoring a terminal claim on a row it already reclaimed | `overdrive-core` |
 | **P3** — the disposal path cannot author an ending | proptest: for every `VmReclamationState`, every `DiscardStrandedArtifacts` the diff emits leaves `alloc_status[alloc_id]` and `restart_counts[alloc_id]` byte-identical (`after == before`, DD-5's degenerate complement equality). Structurally reinforced by `execute_discard_stranded_artifacts` having **no `ObservationStore` parameter** | `overdrive-core` + `overdrive-control-plane` |
 | **P4** — the discriminator fails safe | proptest over `SupervisionSet`: `Unavailable` authorises **nothing** for every allocation id; `Observed(s)` authorises exactly the complement of `s`. The `Default` is `Unavailable`, so an unpopulated state half is covered by the same property | `overdrive-core` |
-| **ESR — progress + stability** for `VmReclamation` | three `Invariant` variants + evaluators: `VmReclamationConverges` (eventually), `SupervisedVmSurvivesEveryTick` (always), `VmReclamationIdempotentSteadyState` (always). `ReconcilerIsPure` reused unchanged | `overdrive-sim/src/invariants/vm_reclamation.rs` |
-| Mandatory mutation targets (≥ 80 % kill) | `cargo xtask mutants` | `MemoryPlan::derive`, `KernelImage::validate`, `to_disk_arg`, `seccomp_arg`, `rlimit_fsize`, **`plan_reclamation`**, **`SupervisionSet::reclamation_authorised`**, the three race arms, the `[D3]` classification join, `is_natural_exit`, the budget-exemption guard, **the backoff-ceiling reclamation guard**, `startup_probe_failed_action`'s reclamation guard, the parser's driver-table dispatch. **`reserve_bytes` joins this list at the DELIVER step that gives it a body**, not at Slice 01 — a `todo!()` has nothing to mutate |
+| **P5** — the authorship claim is released on every path | proptest over the transition table (§ 105a.3): from any interleaving of transitions 3–6 for one allocation the map converges to **absent**, and no interleaving leaves an entry when both the watcher has finished and an authorship attempt has concluded. Catches release-only-on-`Wrote` (a permanently unreclaimable orphan) and an unconditional watcher drop guard (NEW-1 by a slower route) | `overdrive-worker` |
+| **The exit observer releases on EVERY arm** | `xtask dst-lint` AST clause — the observer's loop body must contain **exactly one** `release_supervision` call, and it must sit **outside** the `match outcome`. A call inside any arm is the shape that silently omits `Failed` / `NoPriorRow` | `xtask/src/dst_lint.rs`, path-scoped to `worker/exit_observer.rs` |
+| **ESR — progress + stability** for `VmReclamation` | **four** `Invariant` variants + evaluators: `VmReclamationConverges` (eventually), `SupervisedVmSurvivesEveryTick` (always), `VmReclamationIdempotentSteadyState` (always), **`EndingInFlightIsNeverReclaimed` (always)**. `ReconcilerIsPure` reused unchanged | `overdrive-sim/src/invariants/vm_reclamation.rs` |
+| Mandatory mutation targets (≥ 80 % kill) | `cargo xtask mutants` | `MemoryPlan::derive`, `KernelImage::validate`, `to_disk_arg`, `seccomp_arg`, `rlimit_fsize`, **`plan_reclamation`**, **`SupervisionSet::reclamation_authorised`**, the three race arms, the `[D3]` classification join, `is_natural_exit`, the budget-exemption guard, **the backoff-ceiling reclamation guard**, `startup_probe_failed_action`'s reclamation guard, **`execute_reclaim_allocation`'s terminality guard** (§ 105a.5 — a kill-authorising branch, and a mutation that flips `is_terminal` there re-opens NEW-1's residual gap), **the watcher's `Held → EndingInFlight` transition** (§ 105a.3 transition 3 — a mutation that ignores its verdict re-opens NEW-3), the parser's driver-table dispatch. **`reserve_bytes` joins this list at the DELIVER step that gives it a body**, not at Slice 01 — a `todo!()` has nothing to mutate |
 
 `import-linter`-style import-graph tooling remains rejected for this codebase
 (no API for method-presence enforcement); the `xtask dst-lint` AST scanner is the
@@ -9117,6 +9647,8 @@ green run there is evidence, a red run is uninformative.
 
 | Date | Change |
 |---|---|
+| 2026-08-11 | **Cloud Hypervisor VM driver — targeted remediation of the iteration-2 adversarial review (NEW-1 … NEW-4; GH #42). No design re-derived.** **NEW-1 (high) — implements Hera's DD-1(b.i): the supervision handle is a claim on *authoring an ending*, not a grip on a running process.** Five pins, all kill-authorising. **(a) The release point** is strictly after the terminal-row write; § 104's separate exit-watcher / exit-observer tasks become a *constraint*. **(b) The abandonment boundary — the one genuinely new decision** — is *an authorship attempt concludes when the exit observer's handling of that `ExitEvent` returns, on EVERY `RetryOutcome` arm, not only `Wrote`*; an attempt that can never begin is concluded by the watcher's drop guard; there is no third terminating condition inside a live `serve`. Releasing only on `Wrote` leaves a `Failed`/`NoPriorRow` allocation claimed forever — SD-1's unreclaimable orphan reintroduced by the fix for it — and releasing at process death, at `wait()`'s return or at the watcher's return is NEW-1 itself; the two-phase claim (`Held` → `EndingInFlight`, both reported as supervised) is what closes both. **(c) The write-time terminality guard** promotes `execute_reclaim_allocation`'s existing `find_prior_alloc_row` re-read from a `workload_id` lookup to a guard over the **whole executor**: a non-non-terminal row is a total no-op returning `Ok(())` with a `vm.reclamation.refused` event — not a degradation to disposal, which would smuggle back the one-command-two-behaviours shape DD-5's split refuses. **(d) The read order** in `hydrate_actual` is pinned **`observe()` first, supervision LAST** — the *opposite* of the review's recommendation, because the skew has two directions: a *departure*-stale error lands on a terminal row and is caught by (c), while an *arrival*-stale error lands on a **booting VM** whose row is non-terminal and nothing downstream can catch it. **(e) AC 5 restated** over *a terminal-row VMM with no live authorship claim* in **both** shapes — restart orphan and failed-stop orphan — gaining a second target (a watcher kept alive past the ending it authored), plus a fourth ESR invariant **`EndingInFlightIsNeverReclaimed`**, which `SupervisedVmSurvivesEveryTick` cannot reach because it is scoped to set-membership the allocation has just left. Two supporting pins fall out: the claim is taken at **§ 103 step 0**, before the run directory exists, and `Driver` gains a **second** defaulted sync method `release_supervision` (precedent: `release_for_exit_emission`). **NEW-2 (medium) — the "ONE kill-authorising predicate" claim, repaired rather than softened.** `plan_reclamation` row 3 (terminal) is stated as an explicit **exemption** whose predicate value is a *theorem* under DD-1(b.i)'s corollary, with the coupling recorded; row 4 (unknown) is **gated on `reclamation_authorised`** — the "ground the premise" alternative was attempted and the premise is **false**: the shim writes an alloc's row only *after* `driver.start` answers, so a first-seen VM sits on two VM-exclusive surfaces with **no row** for up to `VM_BOOT_DEADLINE` (30 s) against a 30 s sweep. Ungated, row 4 kills booting VMs on the ordinary deploy path. **NEW-3 (medium)** is closed at its root by Hera's EXTEND: the watcher's emission is gated on an **atomic** `Held → EndingInFlight` transition (§ *"Check-and-act must be atomic"*), so a disposal `kill_scope` on a failed-stop orphan wakes a watcher that emits nothing — AC 5's byte-unchanged assertion holds structurally. **NEW-4 (low)** — § 106's C-5 tense corrected; `slice-01:15,180-185` had already landed. **NEW-5 is Titan's and is untouched**, as are § *System Architecture* and § *Domain Model*. Enforcement added: **P5** (claim-release interleaving proptest), a `dst-lint` clause requiring exactly one `release_supervision` call **outside** the observer's `match outcome`, two new mutation targets, two quality-attribute scenarios, one C4 L3 node + three edges. One residual named rather than papered over: an exit-observer task that dies mid-attempt while `serve` survives leaves an `EndingInFlight` entry until the next boot — accepted, because the direction is *toward held* and the observer's death is a strictly larger failure. No GitHub issues created; no deferral language added. — Morgan. |
+| 2026-08-11 | **Cloud Hypervisor VM driver — two escalated items converted from OPEN to SETTLED (status change only; no design changed).** (1) **`VM_RECLAMATION_SWEEP_INTERVAL = 30 s` — RATIFIED by the user**, mechanism *and* value. § 105a.8 now records the ratification and states *not operator-tunable, no knob promised* as a **property** rather than an open question; the derivation and the three rejected alternatives are retained verbatim, since they are the reasoning the ratification rests on. (2) **SD-1 pin 5 — CLOSED.** Titan revised § *System Architecture* so pin 5 asserts the property (*"no tick may interleave with the boot passes"*), names registration **inert**, and pins `spawn_convergence_loop`'s strictly-after spawn as the load-bearing constraint, with the C4 L2 registration edge reading the same and a cross-reference to § 105a.7. § 105a.7 and the section preamble now record the closure and the mutual cross-reference; the substitution stands unchanged, and the reason registration order is *not* the constraint (`register` takes `&mut self` and `Arc::new(runtime)` at `lib.rs:1774` precedes `AppState`) is deliberately retained. Same status change applied in ADR-0083 § D7 and the feature-delta contradiction-check rows 10 and 11. |
 | 2026-08-11 | **Cloud Hypervisor VM driver — application DESIGN, revision after the cross-wave adversarial review (GH #42; ADR-0082 + ADR-0083).** Four items in this lane, one of them a reshape cascaded from the user's **Bar-2 ruling** upstream. **CRITICAL (R-C1, cascaded) — reclamation becomes a registered `Reconciler`.** `plan_vm_reap` / `execute_vm_reap` / `VmReapPlan` **deleted**; new **§ 105a** (eleven sub-sections) pins the shape, ADR-0083 § D7 rewritten, **A7–A9** added. The plan-value split survives as a **reshape, not a loss**: `plan_reclamation(desired, actual) -> Vec<Action>` is pure and **takes no port**, the two `Action`s *are* the plan, the two executors are the impure half. **Titan's five pins discharged:** the hydration seam is a **named port method** (`VmHostState::observe()` returning a plain `VmHostObservation`, so #197 generalises by refactoring an existing seam); the `View` is **field-less** per ADR-0079 with retry from `has_work`; the supervision discriminator is an **observed input on `actual`** via a new **defaulted, sync** `Driver::live_allocations() -> Option<Vec<AllocationId>>`, **failing safe by construction** because `SupervisionSet::Unavailable` is the `Default` and authorises nothing; **one observation, one pure diff, one executor pair, two drivers**; and registration is unconditional, with the *"no tick interleaves with the boot passes"* property delivered by `spawn_convergence_loop`'s spawn point (`lib.rs:2314-2320`) rather than by registration order — `register` takes `&mut self` and `Arc::new(runtime)` at `:1774` precedes `AppState`, so "register last" is structurally unavailable; **that sharpening is stated, not smuggled**. **Hera's DD-1(b)/DD-5 adopted verbatim**: two `Action` variants (one authors an ending, one must not), `alloc_id`-only payloads, no disposition parameter, **no regime field, and no `boot_epoch` anywhere** — at boot the enumeration returns `Observed(∅)`, so the single predicate is true for every VM allocation by construction. `execute_discard_stranded_artifacts` carries **no `ObservationStore` and no broker parameter**, making the empty declared delta structural. **One gap the ruling created and did not fill:** the broker is event-driven with no bootstrap sweep and `has_work` only *re*-enqueues, so **nothing in tree would ever tick this reconciler** — `spawn_convergence_loop` gains one submission every `VM_RECLAMATION_SWEEP_INTERVAL = 30 s` on its injected `Clock`; a `last_swept_at` View field, unconditional self-re-enqueue and event-only wakes are each rejected with a reason. **One precision SD-1 leaves implicit:** the three surfaces are **not equally attributable** — the cgroup tree is shared with exec allocations, so an unattributable scope is left alone (preserving `ExecDriver`'s survive-a-restart behaviour), while the run dir and clone are VM-exclusive, so **a scope is never the sole trigger**. Reuse gate **31 → 37 rows, with two verdict REVERSALS recorded rather than edited over** (row 14 `Driver` REUSE UNCHANGED → EXTEND, one defaulted method, exercising intake I-2's licence the first two drafts recorded as unexercised; row 31 `spawn_convergence_loop` REUSE → EXTEND) and `VmHostState` justified against `CgroupFs`'s deliberately write-only contract (row 35). Five ACs added (§ 105a.10), P2 extended to **three** reconcilers, **P3**/**P4** minted, three `Invariant` variants for ESR, and `plan_reclamation` + `reclamation_authorised` added to the mutation list. **HIGH (R-H2) — evidence overclaim**: the graceful-shutdown row's *"Proven: P2, both arches"* is corrected to *"transport and lifetime proven (P2); the host→guest command byte is unprobed"* — P2 exercised the vsock connection **guest→host only** (`findings.md:357`; `:2787` records host→guest as not established), and the Slice-03 Tier-3 stop AC is the mechanism's **first** evidence. The decision stands; the deciding facts are independent and the 2 s escalation bounds the failure. **HIGH (R-H4) — C-1…C-7 landed in the slices**, which DISTILL reads: `superseded-by-DESIGN` markers on slices 01–05 naming the governing section, plus in-place corrections for `cp --reflink=auto` → `FICLONE` (C-1), the previously-unmentioned `image_type=raw` (C-2), `memory.max = guest + reserve` (C-3), the vsock-directory Landlock grant (C-4), the seccomp AC that **failed against correct behaviour** (C-5), `RLIMIT_FSIZE = max(rootfs, guest RAM)` (C-6), the fifth Slice-02 variant (C-7), and Titan's **A-3** carried onto slice-04. **LOW — ADR-0082's title and D2 heading** claimed *"unrepresentable"* while the corrected body downgrades to *"private fields + one rendering site + a `dst-lint` clause"*; title, heading and § 102's heading now read **"structurally discouraged and lint-enforced"**. — Morgan. |
 | 2026-08-11 | **Cloud Hypervisor VM driver — application DESIGN, review-fix round 2 (GH #42; ADR-0082 + ADR-0083).** Iteration-2 review verified 7 of 16 iteration-1 findings landed cleanly and found **the round-1 fixes reproduced iteration-1's own diagnosis inside themselves** — three of the four composition fixes each stopped **one seam short**. **CRITICAL ×4, all mechanical:** (1) C1 landed in the trait block but **not in the § D6 edge-case table** — the table the ADR calls *"pinned so they cannot be interpreted"* and the one `vmm_equivalence` asserts — which still named `shutdown` / `VmShutdownOutcome`, plus stale copies in §101's prose and the §110 L2 mermaid; (2) **C4's per-driver observer loop reaches a FIFTH seam**: `ServerHandle` holds a **scalar** `exit_observer_task` (`lib.rs:1020`) awaited once (`:1135-1136`) with a token minted per call (`:2290`) — a naive loop **detaches** N−1 tasks (dropping a tokio `JoinHandle` does not abort) so they outlive `shutdown()` holding `Arc` clones, and per-driver tokens leave N−1 parked on `rx.recv()` with no cancel path; pinned to `Vec<JoinHandle>`, cancel-once-then-await-all, **cloned** token, and added as reuse row 32 + a fifth seam-table row; (3) **C6 miscounted the precedent** — the exit observer submits **four** evaluations per exit, not three, and the omitted one is **`svid_lifecycle`** (`exit_observer.rs:318-320`), its **only** on-exit producer, so a reap-authored terminal row would leave `DropSvid` unfired and **the node holding the dead allocation's leaf private key** (ADR-0067 O2's leak-resistance property); all four now submitted; (4) **C5's pinned signature was mis-cited and unimplementable** — `dispatch` is at `:671` (`:852` is an argument), and the index is used inside **`dispatch_single`** (`:983`) whose signature was unpinned, forcing exactly the API invention the ADR forbids; both now pinned. **HIGH ×6:** the relocated guest half had no bound — `VM_SHUTDOWN_REQUEST_DEADLINE` (2 s) and `VM_STOP_GRACE` (10 s) pinned with derivations, **without which the "unresponsive guest still lands `Terminated/Stopped{Operator}`" claim had no mechanism**; `LiveVm.beacon: Option<BeaconSession>` names the session and makes the pre-beacon window structural; a `VmDriver`-level acceptance case closes the enforcement gap the relocation created (`vmm_equivalence` cannot reach past the port); the C3 fix **diagnosed** the audit asymmetry and still did not enumerate — all five `WorkloadLifecycle` `terminal: Some(..)` emitters now tabled (three unchanged, each filtering `state == Running`); the binding count contradicted itself **three ways in one PR**; `alloc_drivers` pinned on lock discipline (the "never hold a lock across `.await`" trap) and lifetime; and six fix-introduced citations corrected — most importantly the **settle contract's own evidence** (`veth_provisioner.rs:1984-1997` is `alloc_scope_pids`, not `adopt_on_restart_recovery` at `:2099`). **MEDIUM ×4:** three of four LOW citation corrections had landed **only in the changelog**, not in normative text; `aggregate/mod.rs:909` likewise (now a fifth doc correction); blast radius is **ten** destructures, not eleven; *"fired unconditionally"* reworded to *"no driver-type gate"* (`MtlsInterceptWorker` is double-gated on `Running` and `mtls_worker.is_some()`). **Verified closed:** P2 is per-`alloc_id`-scoped, so it does not false-positive on a legitimate `FinalizeFailed` for another alloc in the same tick. **Iteration 2 of a maximum 2 — the escalation threshold is reached and is surfaced to the user.** — Morgan. |
 | 2026-08-11 | **Cloud Hypervisor VM driver — application DESIGN, review-fix round (GH #42; ADR-0082 + ADR-0083).** Adversarial review returned **`rejected_pending_revisions`** with **6 critical + 8 high + 3 medium + 2 low**; all fixed, none waived. Theme: the design reasoned well about *values* and badly about *composition*. **`AppState.driver` has FOUR consumers and only one was specified** — §104 gains the four-seam table: `exit_observer::spawn_with_runtime` is called once with the single driver (`take_exit_receiver` yields *the one* receiver, `driver_kind` captured once, `ExitEvent` carries no discriminator) so VM exits would never have reached the ObservationStore, killing **`[D3]` on the production path** → one observer task per registry entry; `StopAllocation`/`FinalizeFailed` carry **no spec and no `workload_id`** so the stop path had **no routing key at all** (and `ExecDriver::stop` on a VM alloc returns `NotFound`, swallowed by `let _ =` — the unstoppable orphan SD-1 exists to prevent) → `AppState.alloc_drivers` index + `action_shim::dispatch`'s signature pinned; `MtlsInterceptWorker::start_alloc` fires unconditionally with a docstring predicate a second driver falsifies, fail-closed → gated on `Exec` (GH #222 is the removal condition). **Two pinned signatures could not be implemented as written:** `Vmm::shutdown` required a beacon connection the adapter cannot reach (`overdrive-host` vs `overdrive-worker`) → re-scoped to `Vmm::terminate` (process half) with the guest request moved to `VmDriver::stop`, **plus the previously-unnamed window** (a stop before the guest beacons has no session — skip the request, still land `Terminated/Stopped{Operator}`); and `VmExitWatch::recv(self)` **destroyed the exit watch on the success path** and would not compile → `recv(&mut self)`. **The DD-1 binding was incomplete on the branch the fix routes rows into**: `workload_lifecycle.rs:679-708` is a second `FinalizeFailed` emitter reachable because `restart_counts` accumulate across prior genuine failures and the `:687` idempotency guard reads a `terminal` a reclamation row leaves `None` → fourth guard added, and **the enforcement replaced**: the predicate-disjointness proptest (**P1**) cannot catch a missed emission site, so an emission-level property (**P2**, both reconcilers) is now binding. **Reuse table 25 → 31 rows** with the gate's own first-pass failure recorded rather than patched. §102's *"unrepresentable"* **downgraded** to what it delivers (private fields + one site + a lint), with the three `dst-lint` clauses promoted to **Slice 01 deliverables with an AC** and the missing constructors pinned. `reserve_bytes` removed from the Slice 01 mutation list (a `todo!()` is a vacuous gate); `rlimit_fsize` made genuinely pure via `RootfsPlan.master_bytes`; `Vmm::probe` scenario 5's **fstype check dropped** (it contradicted the anti-fstype rule three paragraphs above); §111's confidentiality scenario **re-scoped from the guest to the hypervisor process** with P5's own caveat carried; a **settle contract** added to `execute_vm_reap` (adopt refuses the boot on any non-`NotFound` read error, which a scope mid-deletion produces); §108 gains six missing rows. **`SeccompMode` collapsed** into `VmConfinement::seccomp_arg()` — the three-variant compromise was a rationalisation, since the *renderer* is a mutation site regardless of cardinality, so the AC is satisfied **and** `Off`/`Log` become unrepresentable. Four citation corrections (`lib.rs:1401`→`:1422-1425`, `:1300`→`:1301`, `:1088`→`:1096-1111`, `:1113`→`:1116-1120`). Lane discipline reviewed and cleared. — Morgan. |

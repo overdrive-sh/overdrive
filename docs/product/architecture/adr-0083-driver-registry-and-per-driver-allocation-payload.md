@@ -5,8 +5,14 @@
 Accepted. 2026-08-11. **Revised 2026-08-11 (review iteration 3)** — § D7 is
 rewritten from a converge-on-boot (Bar 1) pass to a registered `Reconciler`
 (`reconcilers.md` **Bar 2**) **by user ruling**; A7–A9 added; `plan_vm_reap` /
-`execute_vm_reap` / `VmReapPlan` **deleted**. The application-architecture shape
-is pinned in `brief.md` § *Application Architecture* → **§ 105a**.
+`execute_vm_reap` / `VmReapPlan` **deleted**. **Amended 2026-08-11 (review
+iteration 4, NEW-1 / NEW-3)** — § D7 gains item **2a**, the supervision handle's
+lifecycle per Hera's **DD-1(b.i)**: it is a claim on *authoring an ending*, so
+`Driver` gains a **second** defaulted method (`release_supervision`) and the
+Consequences' "one defaulted method" line is corrected to two. No prior decision
+is reversed; the addition pins a lifecycle the earlier text left open. The
+application-architecture shape is pinned in `brief.md` § *Application
+Architecture* → **§ 105a**.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -29,10 +35,11 @@ Companion: [ADR-0082](adr-0082-vmm-port-trait-and-vmconfig-anti-corruption-value
 Implements the composition-root half of `brief.md` § *System Architecture* →
 **SD-5** (*"how the composition root expresses that gate is a solution-architect
 decision"*), the reconciler half of **SD-1** (its five pin obligations), and the
-binding half of § *Domain Model* → **DD-1** / **DD-1(b)** / **DD-5** (*"no
-reconciler may author a terminal claim on a Platform-Reclamation row"*, the
-supervision precondition, and the two-`Action` split with its payload
-prohibitions). None of those sections is amended; all are consumed.
+binding half of § *Domain Model* → **DD-1** / **DD-1(b)** / **DD-1(b.i)** /
+**DD-5** (*"no reconciler may author a terminal claim on a Platform-Reclamation
+row"*, the supervision precondition, **the handle's lifecycle and its
+corollary**, and the two-`Action` split with its payload prohibitions). None of
+those sections is amended; all are consumed.
 
 Depends on `.claude/rules/development.md` § "Type-driven design", § "Errors",
 § "Newtypes — STRICT by default", § "Reconciler I/O", § "Deletion discipline";
@@ -756,6 +763,24 @@ to the design"*):
    VM is killed. **No registry `Vm` entry ⇒ `Observed(∅)`**, because a node with
    no VM driver provably holds no VM supervision handle — which is what lets an
    uninstalled-`cloud-hypervisor` node still reclaim.
+2a. **The handle is a claim on *authoring an ending*, not a grip on a running
+   process** (Hera's **DD-1(b.i)**; added 2026-08-11, iteration-2 review NEW-1 /
+   NEW-3). It is held from the first line of `VmDriver::start` — before the run
+   directory exists — until that ending has been **authored** (the terminal row
+   written) or authorship **abandoned as impossible**; never released at process
+   death, at the exit watcher's return, or while an exit report is in flight.
+   The claim therefore carries a **phase** (`Held` → `EndingInFlight`), both
+   phases report as supervised, the watcher's `ExitEvent` emission is gated on an
+   **atomic** hand-off transition, and `Driver` gains a second defaulted sync
+   method **`release_supervision(&self, alloc: &AllocationId)`** whose callers are
+   the exit observer (once per `ExitEvent`, on **every** `RetryOutcome` arm — the
+   abandonment boundary) and every shim arm that writes a terminal row (after the
+   write resolves `Ok`). Two further consequences are pinned rather than left to
+   DELIVER: `execute_reclaim_allocation`'s existing prior-row re-read becomes a
+   **terminality guard over the whole executor**, and `hydrate_actual` reads
+   `observe()` **first** and the supervision set **last**. **Brief § 105a.3 is the
+   SSOT** for the transition table, the abandonment boundary and the residual;
+   this item records the decision, not its mechanics.
 3. **`VmHostState::observe()` is the hydration seam** — one call returning a
    plain `VmHostObservation` (SD-1's pin 1, so #197's generalisation is a
    refactor of an existing seam rather than a rewrite). It is a **new driven
@@ -810,7 +835,9 @@ event-driven and nothing in tree names `vm-reclamation`, **this reconciler would
 never tick.** `spawn_convergence_loop` therefore submits one
 `Evaluation { vm-reclamation, node/<node_id> }` every
 **`VM_RECLAMATION_SWEEP_INTERVAL = 30 s`**, measured on the loop's already-injected
-`Clock` so the cadence is DST-controllable rather than wall-clock. The interval
+`Clock` so the cadence is DST-controllable rather than wall-clock. **The mechanism
+and the value were both ratified by the user on 2026-08-11**; the constant is
+compile-time, **not operator-tunable, and no knob is promised**. The interval
 bounds the unstoppable-orphan window and the stranded-clone repair latency — the
 two drifts SD-1's triage turns on — while sitting ~300× above the tick cadence so
 the three-surface walk never lands on the hot path. The boot drive additionally
@@ -920,6 +947,13 @@ restructure. It is also unnecessary: **registration is inert** (it probes the
 tick), and the only production driver of ticks is `spawn_convergence_loop`,
 spawned at **`lib.rs:2314-2320` — strictly after** the boot passes. That spawn
 ordering is the load-bearing fact and is pinned as such.
+
+**Closed 2026-08-11.** SD-1 pin 5 was revised in `brief.md` § *System
+Architecture* to assert the property rather than the literal mechanism, and to
+name registration as inert with the spawn ordering as the constraint — so this is
+a settled agreement between the two sections, not an outstanding divergence. The
+`&mut self` / `Arc::new(runtime)` reason above is kept on purpose: it is what a
+later reader needs when they wonder why registration order is not the constraint.
 
 **No shutdown-time stop is added.** One mechanism, not two: a graceful shutdown
 path fails exactly when it matters (SIGKILL, host crash, OOM), so the boot drive
@@ -1109,10 +1143,12 @@ itself only against the **row-byte-unchanged** assertion (brief § 105a.10 AC 5)
   reconciler would never tick: the broker is event-driven, has no bootstrap
   sweep, and nothing in tree names `vm-reclamation`. The cost is a
   three-surface walk twice a minute per node.
-- **`Driver` gains one defaulted method** (`live_allocations`), exercising intake
-  I-2's licence that the first two drafts recorded as deliberately unexercised.
-  Minimal and fail-safe (`None` ⇒ authorises nothing), but it is a change to the
-  trait every driver implements.
+- **`Driver` gains two defaulted methods** (`live_allocations`, and —
+  per D7 item 2a below — `release_supervision`), exercising intake I-2's licence
+  that the first two drafts recorded as deliberately unexercised. Both are
+  minimal and fail-safe (`None` ⇒ authorises nothing; the release default is a
+  no-op), but they are changes to the trait every driver implements.
+  *(Widened from one method 2026-08-11, iteration-2 review NEW-1.)*
 
 ### Neutral
 
