@@ -1,0 +1,835 @@
+{
+  "roadmap": {
+    "project_id": "microvm-driver-cloud-hypervisor",
+    "created_at": "2026-08-11T19:07:27Z",
+    "total_steps": 30
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton — Vmm port, VmDriver, DriverRegistry, an honest exit code (Slice 01)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Vmm port trait + VmConfig anti-corruption value family",
+          "description": "Land the Vmm port trait signature and VmConfig's pure value family (DiskAttachment, VmRunDir, MemoryPlan, KernelImage, VmConfinement) that make three substrate lies structurally discouraged and lint-enforced (ADR-0082 D1/D2).",
+          "criteria": [
+            "VmConfinement::seccomp_arg() renders the literal \"true\" unconditionally; no code path can render \"false\" or \"log\".",
+            "DiskAttachment::to_disk_arg() always emits image_type=raw for every path/read_only combination, at one rendering site.",
+            "KernelImage::validate(path, arch, header) is pure, rejects a non-matching magic before any I/O, and accepts x86_64 bzImage/PVH vmlinux and aarch64 raw PE Image.",
+            "MemoryPlan::derive(declared) is the only constructor; guest_bytes() and cgroup_max_bytes() can never be equal.",
+            "reserve_bytes(guest_bytes) ships as a todo!(\"RED scaffold\") citing the memory.current/memory.stat measurement it needs, never a guessed constant."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs",
+          "scenario_name": "S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/traits/vmm.rs",
+              "crates/overdrive-core/src/vm/config.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs",
+              "crates/overdrive-core/tests/acceptance.rs"
+            ]
+          },
+          "dependencies": [],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, pure functions — proptest over the domain of each (any VmConfinement value; any path/read_only pair; any header byte window; any declared u64). UNSKIP the five existing RED scaffolds (#[should_panic(expected=\"RED scaffold\")]) in vm_config_pure_functions.rs — replace each panic body with a proptest! block per ADR-0082 §D2.1-D2.5's pinned signatures; do not invent a different constructor or field (CLAUDE.md 'Implement to the design'). MemoryPlan/KernelImage/DiskAttachment/VmConfinement are all mandatory mutation targets (brief.md §113) — run cargo xtask mutants --file against each after GREEN. reserve_bytes stays a todo!() body; do NOT write a guessed constant — its mutation obligation attaches at the DELIVER step that measures it (§D2.3), not here."
+        },
+        {
+          "id": "01-02",
+          "name": "JobEnvelope V1→V2 schema bump + WorkloadDriver::Vm/DriverInput::Vm",
+          "description": "Execute the six-step rkyv version-bump procedure adding WorkloadDriver::Vm to the persisted Job aggregate; FIXTURE_V1 is read first and never touched.",
+          "criteria": [
+            "Existing FIXTURE_V1 golden bytes decode through JobEnvelope::into_latest() to a projection byte-identical to the pre-bump V1 payload.",
+            "A freshly-constructed WorkloadDriver::Vm(Vm) job round-trips through JobEnvelope::V2 archive→access→deserialize unchanged.",
+            "All six version-bump steps land in one commit: V2 variant, Latest alias, latest() constructor, From<V1> for V2, into_latest() chain, new FIXTURE_V2.",
+            "Eleven irrefutable `let WorkloadDriver::Exec(..) =` destructures become exhaustive matches covering the new Vm arm."
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/workload_intent.rs",
+          "scenario_name": "S-VM-10",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/aggregate/mod.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/schema_evolution/workload_intent.rs",
+              "crates/overdrive-core/tests/schema_evolution.rs"
+            ]
+          },
+          "dependencies": [],
+          "effort_hours": 4,
+          "implementation_notes": "TEST PARADIGM: rkyv schema-evolution golden-fixture step (testing.md 'Archive schema-evolution roundtrip', mandatory call site) — EXEMPT FROM PARADIGM for the V1 arm (the golden FIXTURE_V1 bytes ARE the pinned example, not a generated property); the V2 Vm(Vm) arm is proptest-eligible (generate an arbitrary VmPayload, archive→access→deserialize, assert eq) — that adjacent slot carries the property. Read the existing workload_intent.rs file FIRST (DWD-06 point 5) before editing — FIXTURE_V1 is NEVER touched, only appended to. Follow development.md 'rkyv schema evolution' → 'Version-bump procedure' steps 1-6 in a single commit."
+        },
+        {
+          "id": "01-03",
+          "name": "overdrive-init guest agent crate + beacon Published Language",
+          "description": "New static-musl binary crate: PID 1 in the guest, beacons READY once, execs the operator's command, reports the real WEXITSTATUS over vsock, reads at most one SHUTDOWN.",
+          "criteria": [
+            "overdrive-init is a new crate_class=\"binary\" crate, built static for {x86_64,aarch64}-unknown-linux-musl, both targets wired into the toolchain and CI.",
+            "The beacon wire protocol (READY/EXIT/SHUTDOWN/EOF) lives once in overdrive_core::vm::beacon, consumed by both host and guest — no second parser.",
+            "overdrive-init execs the operator's command, forwards stdio, and reports the real exit status; it never validates the operator's own I/O.",
+            "A round-trip proptest on the beacon parser/formatter passes for arbitrary READY/EXIT payloads."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_beacon_roundtrip.rs",
+          "scenario_name": "S-VM-01 (guest-side prerequisite; the Tier-3 assertion lands in step 01-06)",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-init/src/main.rs",
+              "crates/overdrive-core/src/vm/beacon.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_beacon_roundtrip.rs"
+            ]
+          },
+          "dependencies": [],
+          "effort_hours": 5,
+          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest over the beacon parser (newtype-roundtrip discipline, testing.md). No DISTILL scenario names this crate directly — it is the prerequisite S-VM-01 needs; author this test fresh (DWD-06a: crafter authors RED scaffolds outside the 15 DISTILL committed). Per ADR-0082 §D7: line-oriented ASCII, TWO distinct reads for READY and EXIT (never parsed out of one blob). No publish pipeline (GH #259 owns the OCI/Dockerfile→rootfs factory that injects this binary) — this step's whole obligation is the crate + the two build targets."
+        },
+        {
+          "id": "01-04",
+          "name": "CloudHypervisorVmm + SimVmm adapters — probe, create, terminate",
+          "description": "The two Vmm port implementors: real spawn/FICLONE/argv-render against cloud-hypervisor, and the DST double. Enforced by a two-adapter equivalence test.",
+          "criteria": [
+            "Both adapters produce observably equivalent outcomes across probe/create/terminate, including the six pinned edge cases (ADR-0082 §D6).",
+            "create() clones the rootfs via the FICLONE ioctl on the master's own filesystem, never cp; on a real non-reflink target it returns a typed errno, no full-copy fallback, no VMM spawned.",
+            "create() removes its clone if the spawn fails; a stale clone destination from a prior crash is replaced, not adopted untouched.",
+            "terminate() on an already-dead VMM returns Ok(Killed); probe() is idempotent and leaves no residue."
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
+          "scenario_name": "S-VM-90, S-VM-94",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-host/src/vmm.rs",
+              "crates/overdrive-sim/src/adapters/vmm.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
+              "crates/overdrive-host/tests/integration/vmm_ficlone_per_launch.rs",
+              "crates/overdrive-host/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-01"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example call-sequence per Mandate 9 (@example, not @property — a fixed hand-enumerated sequence, not generated input). Run via cargo xtask lima run --. S-VM-94 (vmm_ficlone_per_launch.rs) needs a REAL non-reflink fixture (tmpfs TempDir or loopback ext4), no SimVmm. Mandatory mutation target: the FICLONE call must be killed by a mutant substituting a full-copy fallback."
+        },
+        {
+          "id": "01-05",
+          "name": "VmDriver — cgroup/netns placement, three-way boot race, authorship claim, stop totality",
+          "description": "Driver over Arc<dyn Vmm>: takes the supervision claim at step 0, races beacon/exit/deadline (biased), classifies exit from the guest report only, and is total over VmDriver::stop's four edge sequences.",
+          "criteria": [
+            "VmDriver::start takes the supervision claim before the run directory exists; every non-Ok race arm releases it and cleans up the scope/dir/clone/VMM.",
+            "A guest EXIT report over vsock is drained and read to completion before the ExitEvent is emitted; the VMM's own subsequent teardown exit never overwrites it.",
+            "VmDriver::stop lands Terminated/Stopped{Operator} across all four sequences: pre-beacon stop, unresponsive guest, already-dead VMM, double-stop — never a crash.",
+            "Driver gains two defaulted sync methods, live_allocations() and release_supervision(); VmDriver overrides both, ExecDriver keeps the no-op defaults."
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+          "scenario_name": "S-VM-14, S-VM-15, S-VM-76",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-core/src/traits/driver.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+              "crates/overdrive-worker/tests/acceptance.rs"
+            ]
+          },
+          "dependencies": ["01-01", "01-04"],
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: component-scope, default lane, example-only per Mandate 9 (four FIXED hand-enumerated call sequences against SimVmm, not generated input — @example). Author this RED scaffold fresh (new file, not one of the 15 committed by DISTILL); driving port and edge cases are pinned verbatim in ADR-0082 §D3/§D4 — do not improvise the race shape or the VM_SHUTDOWN_REQUEST_DEADLINE/VM_STOP_GRACE constants (2s/10s). VmExitWatch::recv MUST take &mut self, never self (ADR-0082 §D3 correction). No code path may derive ExitKind from cloud-hypervisor's own exit status — mandatory mutation target."
+        },
+        {
+          "id": "01-06",
+          "name": "DriverRegistry + composition root + spec-parse dispatch + the five-seam wiring",
+          "description": "Replace AppState.driver with DriverRegistry; discover→probe→insert cloud-hypervisor; route dispatch/exit_observer/ServerHandle/MtlsInterceptWorker through it; parser accepts exactly one driver table.",
+          "criteria": [
+            "overdrive serve composes DriverRegistry (discover→probe→insert); a real [vm]+[job] deploy boots a real Cloud Hypervisor VM and reports the guest's exit code, never the VMM's.",
+            "Exactly one of [exec]/[vm] is required; both present or neither is rejected, naming both tables, no allocation created.",
+            "Running is reported only after the ready beacon; a rootfs with no working init reaches Failed without ever passing through Running.",
+            "MtlsInterceptWorker installs are gated on DriverType::Exec at both call sites; an mTLS-composed VM allocation gets no bound listener and no installed TPROXY rule.",
+            "exit_observer runs one task per registry entry; ServerHandle holds Vec<JoinHandle>, cancels once and awaits all on shutdown; alloc_drivers routes stop/terminal arms."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+          "scenario_name": "S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-05, S-VM-06, S-VM-07, S-VM-74",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "crates/overdrive-worker/src/mtls_intercept_worker.rs",
+              "crates/overdrive-core/src/traits/driver.rs",
+              "crates/overdrive-core/src/aggregate/workload_spec.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+              "crates/overdrive-core/tests/acceptance/vm_spec_driver_table_dispatch.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-05"],
+          "effort_hours": 12,
+          "implementation_notes": "TEST PARADIGM: walking-skeleton Tier 3 (real serve+deploy, real cloud-hypervisor, real guest kernel — the ONLY scenario group in this feature with a real guest kernel), gated integration-tests, single-example (Mandate 9 layer 3+). UNSKIP the 5 vm_walking_skeleton.rs scaffolds (S-VM-01..05) AND the 2 vm_spec_driver_table_dispatch.rs scaffolds (S-VM-06/07) — replace panic bodies with real assertions, real fixture (Slice 00 PROMOTE kernel+rootfs+overdrive-init). Author S-VM-74 fresh in the same file (extends the walking skeleton, DWD-04 addendum). Pin AllocationSpec.driver: DriverPayload and action_shim::dispatch's signature EXACTLY as ADR-0083 §D2a/§D3 — do not invent a different index shape for alloc_drivers. GH #248/ADR-0074 trap: S-VM-05 MUST run against an mTLS-composed serve (dataplane_override unset)."
+        },
+        {
+          "id": "01-07",
+          "name": "Composition-gate fault injection (vmm_override seam) + CgroupAccounting OOM diagnosis",
+          "description": "ServerConfig.vmm_override wires SimVmm's fault-injection into a real serve boot; CgroupAccounting closes the D-3 fold-in so a wrong reserve_bytes is diagnosed VmOutOfMemory, never a bare signal 9.",
+          "criteria": [
+            "CH present and healthy composes the Vm driver entry; CH absent boots the node with no Vm entry and rejects [vm] at admission naming the capability.",
+            "A capability-flag probe failure (Landlock flag/LSM absent, /dev/kvm unreachable) refuses the boot with health.startup.refused, injected via ServerConfig.vmm_override.",
+            "A real non-reflink staging directory refuses the boot via an executed FICLONE ioctl, never an fstype string comparison.",
+            "A VM whose memory.max is deliberately undersized is classified Failed/VmOutOfMemory{limit_bytes,oom_kill_count}, never WorkloadCrashedImmediately{signal:9}; disposition StoppedBy::Process, restart budget consumed as any crash."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+          "scenario_name": "S-VM-11, S-VM-12, S-VM-13, S-VM-75, S-VM-19, S-VM-93",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-core/src/traits/cgroup_accounting.rs",
+              "crates/overdrive-host/src/cgroup_accounting.rs",
+              "crates/overdrive-sim/src/adapters/cgroup_accounting.rs",
+              "crates/overdrive-worker/src/exit_observer.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+              "crates/overdrive-host/tests/integration/cgroup_accounting_equivalence.rs"
+            ]
+          },
+          "dependencies": ["01-06"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. ServerConfig.vmm_override: Option<Arc<dyn Vmm>>, #[cfg(feature=\"integration-tests\")]-gated on both the field and its one use site — mirrors mtls_identity_override, NOT dataplane_override (ADR-0083 §D8). probe() runs unconditionally regardless of which adapter is bound. CgroupAccounting is a NEW port beside CgroupFs, not a widening of it (ADR-0083 §A8 already rejected that). S-VM-93 (cgroup_accounting_equivalence.rs) covers the 3-row probe fault table (Substrate/SubstrateCorrupt/MissingOomKillKey). Mandatory mutation target: exit_observer's new precedence check."
+        },
+        {
+          "id": "01-08",
+          "name": "dst-lint enforcement clauses + per-thread seccomp + DriverType::MicroVm deletion",
+          "description": "Static AST-scanner clauses closing the lint half of §102's ACL claim; the runtime per-thread seccomp guard; single-cut deletion of the dead MicroVm variant.",
+          "criteria": [
+            "dst-lint rejects a \"--disk\" / \"--landlock-rules\" / \"--seccomp\" string literal outside its one named rendering function, and a MemoryPlan struct literal outside overdrive-core.",
+            "Seccomp is verified by reading /proc/<vmm-pid>/task/*/status for the vmm/http-server/vcpu0 threads; a bare /proc/<vmm-pid>/status read alone is never the sole evidence.",
+            "DriverType::MicroVm is deleted, OpenAPI is regenerated, and the stale \"wire form never changes\" docstring is corrected — same PR.",
+            "SimVmm is reachable from a Tier-1 DST run (cargo dst)."
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-VM-09",
+          "implementation_scope": {
+            "source_directories": [
+              "xtask/src/dst_lint.rs",
+              "crates/overdrive-core/src/traits/driver.rs"
+            ],
+            "test_directories": [
+              "xtask/src/dst_lint.rs",
+              "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs"
+            ]
+          },
+          "dependencies": ["01-01", "01-06"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM (dst-lint clauses): EXEMPT FROM PARADIGM — static-analysis AST-scanner unit tests in xtask (excluded from mutation testing per project convention), following the existing CrashObservabilityStructLiteral clause shape verbatim; not a property over program behavior. TEST PARADIGM (S-VM-09): Tier 3, gated integration-tests, single-example, real serve boot. Mirrors the ADR-0078 LastTerminated{} literal-ban clause for MemoryPlan."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "VmReclamation — SD-1's Bar-2 reconciler (cross-cutting, depends on Phase 01's driver)",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "VmHostState port + adapters + VmReclamation reconciler skeleton (plan_reclamation, SupervisionSet)",
+          "description": "The host-observation driven port (observe/kill_scope/discard_artifacts), its two adapters, and the registered VmReclamation reconciler whose diff is a pure function taking no port.",
+          "criteria": [
+            "plan_reclamation(desired, actual) matches the six-row decision table for every generated VmReclamationState pair; the function takes no port parameter.",
+            "Every terminal AllocStatusRow the design's three Ending Classes can produce belongs to exactly one class, never zero, never two.",
+            "SupervisionSet::reclamation_authorised is the sole kill-authorising predicate: Unavailable always returns false; Observed(held) returns true iff the alloc is not a member.",
+            "RealVmHostState and SimVmHostState are observably equivalent across probe/observe/kill_scope/discard_artifacts, including kill_scope's rmdir-settled-before-return postcondition."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+          "scenario_name": "S-VM-31, S-VM-32, S-VM-92, S-VM-91",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/traits/vm_host_state.rs",
+              "crates/overdrive-core/src/reconcilers/vm_reclamation.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-host/src/vm_host_state.rs",
+              "crates/overdrive-sim/src/adapters/vm_host_state.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+              "crates/overdrive-host/tests/integration/vm_host_state_equivalence.rs"
+            ]
+          },
+          "dependencies": ["01-05", "01-06"],
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: Tier 1 pure-function proptest for plan_reclamation/SupervisionSet (mandatory mutation targets, brief.md §113); Tier 3 single-example (@example) for vm_host_state_equivalence.rs. UNSKIP the 3 existing vm_reclamation_plan_purity.rs scaffolds (S-VM-31/32/92) — real bodies per ADR-0083 §D7/brief §105a.1-105a.4. VmReclamationView is FIELD-LESS (ADR-0079 pattern) — needs #[expect(clippy::zero_sized_map_values, ...)] on its bulk-load arm. Wires into the five compiler-enforced sites (AnyReconciler/AnyState/AnyReconcilerView/the 4-tuple match/hydrate_desired/hydrate_actual — brief §105a.9)."
+        },
+        {
+          "id": "02-02",
+          "name": "Authorship claim lifecycle — VmSupervision phases, abandonment boundary, hydration read order, sweep + boot-epoch ordering",
+          "description": "The Held→EndingInFlight claim sum type, its release on every RetryOutcome arm, hydrate_actual's observe()-first/supervision-last read order, the 30s sweep submission, and the boot-epoch drive's settle-before-adopt ordering.",
+          "criteria": [
+            "The claim releases on all three RetryOutcome arms (Wrote/Failed/NoPriorRow), never only Wrote; release_supervision converges to absent under any interleaving of the observer's and a shim arm's release.",
+            "hydrate_actual reads VmHostState::observe() first and the supervision set last; a VM starting between the two reads is never reclaimed.",
+            "vm_reclamation_boot::converge runs immediately before adopt_on_restart_recovery; adopt never refuses the boot on a scope the drive already reclaimed.",
+            "A node with no Vm registry entry (CH uninstalled) still reclaims its VM survivors via Observed(∅)."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+          "scenario_name": "S-VM-77, S-VM-78, S-VM-23, S-VM-30",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-worker/src/exit_observer.rs",
+              "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+              "crates/overdrive-core/tests/acceptance/vm_reclamation_claim_lifecycle.rs",
+              "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs"
+            ]
+          },
+          "dependencies": ["02-01"],
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: S-VM-77 is Tier 1 proptest over the transition table (mandatory mutation target — a mutation that ignores transition 3's atomic verdict re-opens NEW-3). S-VM-78 is Tier 1 component-scope, scheduling two hydrate_actual reads with a VM start interleaved between them. S-VM-23/30 are Tier 3, gated integration-tests, real serve boot with N surviving scopes. Extend vm_reclamation_plan_purity.rs OR a new sibling vm_reclamation_claim_lifecycle.rs — DELIVER's own call per DWD-04. Transition 3 (Held→EndingInFlight) is a check-and-act; its discarded return is the 'Check-and-act must be atomic' defect (development.md)."
+        },
+        {
+          "id": "02-03",
+          "name": "The two reclamation executors — write-time terminality guard, four evaluations, disposal's empty universe",
+          "description": "execute_reclaim_allocation's re-read gates the whole executor (not just the workload_id lookup) and submits the same four evaluations the exit observer submits; execute_discard_stranded_artifacts writes no row and submits none.",
+          "criteria": [
+            "A stopped VM whose scope removal is made to fail is reclaimed by a later tick's steady-state sweep, without restarting serve.",
+            "A live VMM whose allocation row is already terminal is killed at tick N; its process, scope, run directory and clone are all gone after the sweep.",
+            "A race-losing ReclaimAllocation (the row went terminal before the re-read resolves) is a total no-op: no kill, no discard, no row write, Ok(()), a vm.reclamation.refused event.",
+            "Both a restart-orphan and a failed-stop-orphan leave alloc_status[alloc_id] BYTE-UNCHANGED after the kill, including updated_at, last_terminated, restart_count.",
+            "Reclaiming an SVID-holding allocation submits a fourth evaluation (svid_lifecycle) alongside the existing three; DropSvid fires and the node drops the leaf private key."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
+          "scenario_name": "S-VM-21, S-VM-22, S-VM-25, S-VM-79, S-VM-81",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs"
+            ]
+          },
+          "dependencies": ["02-01", "02-02"],
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, real serve convergence loop (S-VM-21/22's in-memory companion is already covered by 02-01's plan_reclamation property; this step is their Tier-3 shape). S-VM-79's guard is a mandatory mutation target — a mutant flipping is_terminal there re-opens the NEW-1 residual gap. execute_discard_stranded_artifacts takes NO ObservationStore and NO broker parameter — that absence is structural, not a code-review reminder (DD-5)."
+        },
+        {
+          "id": "02-04",
+          "name": "Sibling-reconciler reclamation guards + P2 property + the four VmReclamation ESR invariants",
+          "description": "is_natural_exit/the backoff ceiling/startup_probe_failed_action all exempt a reclaimed row; P2 ranges over VmReclamation's own diff; the four DST invariants close the safety/liveness/stability specification.",
+          "criteria": [
+            "A reclaimed Job-kind VM is re-driven by the restart branch, never finalised via FinalizeFailed{Failed{exit_code:Some(0)}}.",
+            "Six consecutive serve-restart reclamations never trip RestartBudgetExhausted; the ceiling guard and startup_probe_failed_action both exempt a platform-reclaimed row.",
+            "A reclaim-then-restart cycle populates restart_count and last_terminated together, in one scenario.",
+            "For any VmReclamationState pair where an alloc is already platform-reclaimed, plan_reclamation's output contains no FinalizeFailed and no StopAllocation{terminal:Some(_)} for it.",
+            "The four Invariant variants (VmReclamationConverges, SupervisedVmSurvivesEveryTick, VmReclamationIdempotentSteadyState, EndingInFlightIsNeverReclaimed) all hold under cargo dst."
+          ],
+          "test_file": "crates/overdrive-sim/src/invariants/vm_reclamation.rs",
+          "scenario_name": "S-VM-26, S-VM-27, S-VM-28, S-VM-29, S-VM-80, S-VM-24, S-VM-87, S-VM-88, S-VM-89",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/reconcilers/workload_lifecycle.rs",
+              "crates/overdrive-core/src/service_lifecycle.rs",
+              "crates/overdrive-sim/src/invariants/vm_reclamation.rs",
+              "crates/overdrive-sim/src/invariants/mod.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs",
+              "crates/overdrive-sim/src/invariants/vm_reclamation.rs",
+              "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs"
+            ]
+          },
+          "dependencies": ["02-01", "02-03"],
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: S-VM-26/27/29 are Tier 1 in-memory proptests over WorkloadLifecycle/ServiceLifecycle (mandatory mutation targets); S-VM-28 is Tier 3 single-example; S-VM-80 is Tier 1 proptest directly over VmReclamation (the missing third leg beside the two sibling-reconciler examples); S-VM-24/87/88/89 are Tier 1 DST invariants (assert_always!/assert_eventually!, SimVmHostState + SimClock advancing the 30s cadence deterministically). is_natural_exit is the ONLY predicate whose meaning changes; is_intentionally_stopped/is_restartable need no edit."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Boot-failure vocabulary (Slice 02)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "classify_driver_failure gains a VM arm — kernel/rootfs not found, hypervisor absent, boot deadline",
+          "description": "Cash classify_driver_failure's documented-but-unused DriverType parameter with four Slice-02 Cause variants; zero exec test cases move.",
+          "criteria": [
+            "A deploy whose kernel path does not exist is Failed/VmKernelNotFound naming the exact path, distinct from a missing rootfs.",
+            "A deploy whose rootfs path does not exist is Failed/VmRootfsNotFound naming the exact path.",
+            "cloud-hypervisor removed after admission but before this allocation's start is Failed/VmHypervisorAbsent naming the paths searched (the TOCTOU window S-VM-12's boot-time gate does not close).",
+            "A guest that hangs during boot is Failed/VmBootDeadlineExceeded naming the deadline in ms and the captured console tail; the allocation never passes through Running."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-33, S-VM-34, S-VM-35, S-VM-36",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "crates/overdrive-core/src/transition_reason.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-06"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (four deliberately-broken deploys). Author the RED scaffold fresh at this slice's own RED phase (DWD-06a) — file name is DELIVER's own call within the overdrive-cli/tests/integration/vm_*.rs family DWD-04 commits. classify_driver_failure branches on DriverType FIRST; the exec prefix table is reached only under Exec — zero exec test cases may change (learning hypothesis, slice-02.md)."
+        },
+        {
+          "id": "03-02",
+          "name": "Unclassified-failure fallthrough — verbatim cause, labelled unclassified",
+          "description": "A hypervisor failure with no named variant carries CH's verbatim text and is honestly labelled unclassified, using the existing DriverInternalError fallthrough — no new variant minted.",
+          "criteria": [
+            "A VM start failure the platform has no named variant for reports the verbatim hypervisor error text in detail.",
+            "The reason is labelled unclassified rather than presented as a known cause.",
+            "The fallthrough reuses the EXISTING TransitionReason::DriverInternalError{detail} variant; no new variant is added for this case."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-37",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
+            ]
+          },
+          "dependencies": ["03-01"],
+          "effort_hours": 4,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. Per development.md 'Distinct failure modes get distinct error variants' — this is the deliberate exception: an unclassified failure stays unclassified rather than inventing a variant. The kernel-format case (C-7) is explicitly NOT this scenario — it is caught pre-boot by KernelImage::validate (01-01) and never reaches this fallthrough."
+        },
+        {
+          "id": "03-03",
+          "name": "[vm] + [service] rejected at deploy time",
+          "description": "A spec declaring both [vm] and [service] is rejected before scheduling, naming guest networking, guest probes, and guest-stack mTLS interception as missing, citing GH #257 and #222.",
+          "criteria": [
+            "A spec declaring both [service] and [vm] is rejected before anything is scheduled; no intent is committed and no allocation is created.",
+            "The rejection message names guest networking, guest-reachable probes, and guest-stack mTLS interception as missing capabilities.",
+            "The message cites GH #257 (tap-in-netns + guest probes) and GH #222 (guest-stack mTLS intercept) by number."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-38",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
+            ]
+          },
+          "dependencies": ["03-01"],
+          "effort_hours": 4,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (in-process rejection, no VMM needed). Mirrors the existing ParseError::ProbesNotAllowedOnKind precedent (workload_spec.rs:827) — a semantic rejection with guidance, not a parse error. GH #257 and #222 are real, already-filed issues; do not invent a third."
+        },
+        {
+          "id": "03-04",
+          "name": "[vm] + [job] / [vm] + [schedule] accepted and run",
+          "description": "The complementary positive cases: VM job and scheduled-VM specs are accepted and scheduled with no new capability check blocking them.",
+          "criteria": [
+            "A spec declaring [job] + [vm] is accepted and scheduled.",
+            "A spec declaring [schedule] (cron) + [vm] is accepted and scheduled."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-39, S-VM-40",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
+            ]
+          },
+          "dependencies": ["03-03"],
+          "effort_hours": 3,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. These are the regression guard that 03-03's rejection is scoped to [service] only — [job]/[schedule] combinations must not regress."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Stop, restart, VMM death, and confinement (Slice 03)",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Exit classification — guest-authoritative ExitKind",
+          "description": "CleanExit comes only from an agent-reported guest exit status; an unreported VMM death or host OOM-kill is Crashed with the same restart/backoff treatment as any process crash.",
+          "criteria": [
+            "A guest kernel panic (hypervisor exits 0) is Failed/VmGuestExitUnreported, never Terminated/Completed.",
+            "A host-OOM-killed hypervisor is Failed with the same restart/backoff treatment (same reconciler, same ceiling, same backoff curve) as a crashed process.",
+            "Only an agent-reported EXIT 0 produces Terminated/Completed{exit_code:0}.",
+            "An operator stop yields intentional_stop:true and consumes no restart budget; it is never counted as a crash."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "S-VM-42, S-VM-43, S-VM-44, S-VM-45",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-worker/src/exit_observer.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-05", "03-01"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-42 is a mandatory mutation target (K1 north star) — a mutation collapsing the unreported-death arm into CleanExit must be killed. No code path may derive ExitKind from cloud-hypervisor's own exit status (already enforced structurally by 01-05; this step is its operator-facing Tier-3 proof)."
+        },
+        {
+          "id": "04-02",
+          "name": "Graceful shutdown — overdrive job stop sequencing and bounded grace",
+          "description": "The operator stop verb writes SHUTDOWN on the beacon connection before any hard kill; an unresponsive guest is still terminated within the bounded grace period.",
+          "criteria": [
+            "overdrive job stop writes SHUTDOWN on the already-open beacon connection before Vmm::terminate is called.",
+            "The allocation reaches Terminated/Stopped{Operator} within VM_SHUTDOWN_REQUEST_DEADLINE (2s) + VM_STOP_GRACE (10s).",
+            "A guest that ignores the shutdown byte is escalated to Vmm::terminate at the 2s deadline and is never classified a crash."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "S-VM-46, S-VM-47",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
+            ]
+          },
+          "dependencies": ["04-01"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. This is the FIRST real evidence for the host→guest SHUTDOWN write — the spike exercised the vsock connection guest→host only (findings.md:2787); treat as a mechanism proof, not a regression guard (ADR-0082 §D4). The pre-beacon-stop and already-dead-VMM edge cases are already covered component-scope by 01-05's S-VM-76 — this step is their Tier-3 operator-facing companion for the responsive/unresponsive-guest cases only."
+        },
+        {
+          "id": "04-03",
+          "name": "Restart from a clean rootfs copy",
+          "description": "A crash-restarted VM boots from a fresh FICLONE copy of the operator's rootfs; the original artifact is never mutated.",
+          "criteria": [
+            "A VM workload that crashed after modifying its rootfs is restarted under backoff and boots from an unmodified copy of the operator's original artifact.",
+            "The operator's artifact file on the host is byte-unchanged before and after the crash-restart cycle."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "S-VM-48",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-host/src/vmm.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
+            ]
+          },
+          "dependencies": ["04-01"],
+          "effort_hours": 4,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. Reuses 01-04's FICLONE mechanism verbatim — this step proves the RESTART path re-invokes create() with a fresh clone rather than reusing a mutated one."
+        },
+        {
+          "id": "04-04",
+          "name": "Hypervisor confinement — Landlock/uid-drop/rlimits on the spawned process",
+          "description": "The running VM's hypervisor is a bounded, non-root, Landlock-confined process whose ruleset follows the operator's declared artifact paths.",
+          "criteria": [
+            "/proc/<vmm-pid>/status reports non-zero real and effective Uid/Gid; /proc/<vmm-pid>/limits reports Max-file-size and Max-open-files strictly below the same fields on overdrive serve's own process.",
+            "The Landlock ruleset names CH's auto-derived grants (kernel/disk/serial/api-socket) plus a read-write grant on the run directory, and nothing outside those.",
+            "A rootfs declared outside the default artifact directory still boots and is reachable — the ruleset is derived from the spec, never hardcoded.",
+            "The run directory holds nothing but this VM's own sockets and logs; the vsock socket's Landlock grant is the containing directory, since CH does not auto-derive one for it."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "S-VM-49, S-VM-50, S-VM-53",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-host/src/vmm.rs",
+              "crates/overdrive-core/src/vm/config.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
+            ]
+          },
+          "dependencies": ["04-01"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, PID resolution via the allocation's cgroup scope cgroup.procs (never a driver-internal handle). Landlock grant derivation (VmRunDir::landlock_rules, ADR-0082 §D2.2) already lands in 01-01/01-04; this step is the real-boot proof. The vsock-directory-grant clause is a dst-lint target too (01-08) — this AT is its behavioral complement (brief.md §113)."
+        },
+        {
+          "id": "04-05",
+          "name": "Confinement fail-closed + no new operator surface",
+          "description": "A host that cannot supply required confinement refuses the workload rather than starting it degraded; confinement adds nothing to the deploy surface an operator sees.",
+          "criteria": [
+            "A host that cannot supply a required ConfinementControl (e.g. no --landlock below the version floor) is Failed/VmConfinementUnavailable naming the unavailable control; the hypervisor is never started unconfined.",
+            "The unavailable-confinement condition is injected at the Vmm port boundary via SimVmm (system constraint 1); no genuinely Landlock-less host exists in the Lima test envelope.",
+            "Confinement adds no new deploy flag, table, or verb; the terminal state and exit code an operator reads are unchanged from Slice 01."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs",
+          "scenario_name": "S-VM-51, S-VM-52",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-host/src/vmm.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
+            ]
+          },
+          "dependencies": ["04-04", "01-07"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, using the SAME ServerConfig.vmm_override seam 01-07 wired (ADR-0083 §D8) — do not invent a second injection mechanism. Mandatory mutation target: warn-and-continue must be killed (the fail-closed arm)."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Volumes and the storage daemon's honesty (Slice 04)",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "[[vm.volume]] spec parse + VmConfig volume payload + derived shared=on + no-volume regression guard",
+          "description": "The volume array-of-tables surface, the derived --memory shared=on flag, and the guard proving a volume-free VM is byte-identical to Slices 01-03.",
+          "criteria": [
+            "A VM job with no volume declared starts no storage daemon, derives shared=on OFF, and reaches the same terminal state and exit code as before volumes existed.",
+            "An unrecognised [[vm.volume]] key (e.g. \"cache\") is rejected by name; only source, target and read_only are accepted.",
+            "shared=on is derived from !volumes.is_empty() at one VmConfig construction site — no builder, no second config shape."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+          "scenario_name": "S-VM-57, S-VM-62",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/aggregate/workload_spec.rs",
+              "crates/overdrive-core/src/vm/config.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["01-06", "03-01", "04-01"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: S-VM-57 is Tier 3, gated integration-tests, single-example (the regression guard); S-VM-62 is Tier 1 in-memory (parse rejection, no VMM). Author fresh at Slice 04's own RED phase (DWD-06a). [[vm.volume]] rides inside Slice 01's JobEnvelope V2 (01-02) — no second rkyv bump."
+        },
+        {
+          "id": "05-02",
+          "name": "Supervised virtiofsd lifecycle — ordering, socket readiness, teardown",
+          "description": "One supervised virtiofsd per volume-carrying VM, in the allocation's cgroup scope and netns, running before the guest boots and torn down after the VM.",
+          "criteria": [
+            "A missing virtiofsd binary is Failed/VmStorageDaemonAbsent naming the paths searched, distinct from a missing source directory.",
+            "The guest does not begin booting until the storage daemon's socket is ready; an expired readiness wait is Failed/VmStorageSocketTimeout naming the socket and the wait.",
+            "No daemon process or vhost-user socket survives any terminal path — a failed start, a readiness timeout, or a sandbox refusal."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+          "scenario_name": "S-VM-59, S-VM-66, S-VM-68",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-host/src/virtiofsd.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
+            ]
+          },
+          "dependencies": ["05-01"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. virtiofsd is a sidecar VmDriver spawns and supervises DIRECTLY (Command::spawn, same shape as ExecDriver's own workload process) — it sits OUTSIDE the Vmm port entirely (system constraint 9). Placement: allocation's cgroup scope + netns (load-bearing — cgroup_kill must reap it)."
+        },
+        {
+          "id": "05-03",
+          "name": "Host<->guest byte-faithful round-trip + read-only host-side enforcement",
+          "description": "A guest write inside a declared volume is byte-identical on the host, read by ordinary filesystem access; a read-only volume defeats even an uncooperative guest.",
+          "criteria": [
+            "A guest write inside a declared volume is present, readable, and byte-identical in the operator's host source directory, verified by ordinary filesystem access, not through any Overdrive API.",
+            "A read_only=true volume's guest write fails inside the guest and the host directory is byte-unchanged, including against a guest that tries to remount the share read-write.",
+            "A missing volume source directory is Failed/VmVolumeSourceNotFound naming the source and the path, distinct from a missing rootfs and a missing storage daemon."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+          "scenario_name": "S-VM-55, S-VM-56, S-VM-58",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-host/src/virtiofsd.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
+            ]
+          },
+          "dependencies": ["05-02"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-56 is a mandatory mutation target and MUST defeat a guest-side-only implementation — a cooperative guest's failed write alone is insufficient evidence (US-VM-8 AC 2). read_only is enforced HOST-side (the export); a guest-side -o ro is an ergonomic guard only, never the boundary."
+        },
+        {
+          "id": "05-04",
+          "name": "Guest-side mount + refuse-to-exec (the composite-lie case) + Landlock non-widening",
+          "description": "overdrive-init refuses to exec the operator's command when a required mount fails; a volume never widens what the hypervisor process can reach.",
+          "criteria": [
+            "overdrive-init refuses to exec the operator's command when a required volume mount fails; the allocation is Failed/VmGuestMountFailed naming the volume that could not be mounted.",
+            "The allocation with a failed required mount NEVER reaches a completed terminal state — never Terminated/Completed{exit_code:0} over an empty host directory.",
+            "The volume source directory never appears in the hypervisor's Landlock ruleset for a volume-carrying allocation; the rest of the [D7] posture (uid, rlimits, cgroup, netns) is unchanged from a volume-free VM on the SAME allocation."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+          "scenario_name": "S-VM-60, S-VM-61",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-init/src/main.rs",
+              "crates/overdrive-host/src/vmm.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
+            ]
+          },
+          "dependencies": ["05-02", "01-03"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-60 is THE mandatory mutation target the [D4] amendment exists to defend — without the refuse-to-exec guard, the command writes into the discarded per-launch rootfs copy, exits 0, and workload describe lies. overdrive-init's fifth duty (mount then refuse) is a scoped, non-passive amendment — name the subject, per the [D8g] correction."
+        },
+        {
+          "id": "05-05",
+          "name": "RLIMIT_FSIZE accounts for shared=on's memfd + storage-daemon sandbox launch-argument",
+          "description": "rlimit_fsize() covers a memfd-backed guest uniformly; the storage daemon's launch argument is a pure rendering-site value that only ever emits --sandbox=namespace or a typed refusal.",
+          "criteria": [
+            "rlimit_fsize() always returns max(rootfs image size, guest RAM), uniformly whether or not shared=on is in play for this VmConfig.",
+            "The storage daemon's launch-argument rendering always emits --sandbox=namespace for an available capability signal.",
+            "An unavailable capability signal always yields a typed refusal, never a launch; no input ever yields --sandbox=chroot and no input ever omits --sandbox."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_storage_daemon_sandbox_arg.rs",
+          "scenario_name": "S-VM-63, S-VM-67",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/vm/config.rs",
+              "crates/overdrive-host/src/virtiofsd.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_storage_daemon_sandbox_arg.rs",
+              "crates/overdrive-core/tests/acceptance.rs"
+            ]
+          },
+          "dependencies": ["05-01"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest, both mandatory mutation targets. S-VM-67's driving port is a value with private fields and exactly one rendering site (mirroring DiskAttachment::to_disk_arg's D2.1 shape) — the exact type is NOT yet ADR-pinned; DELIVER names it at RED phase per CLAUDE.md 'Implement to the design' (do not invent a storage-daemon supervision port — ADR-0083 §D8 explicitly mints none). S-VM-67's Then proves ONLY the rendered argument; it does NOT prove a running virtiofsd enforces the sandbox or that the platform fails closed end-to-end — that stays an undischarged Tier-3 property of this slice (DWD-13), not covered by any scenario in this roadmap."
+        },
+        {
+          "id": "05-06",
+          "name": "Storage-daemon exit honesty — clean exit contributes nothing, mid-run death is never clean",
+          "description": "The daemon's own exit status never drives ExitKind in either direction; a mid-run death overrides even a guest-reported clean exit.",
+          "criteria": [
+            "A completed VM job's storage-daemon exit is observed in the allocation's event/audit trail while contributing nothing to ExitKind.",
+            "A storage daemon that dies while the guest is still running is Failed/VmStorageDaemonDied naming the socket, never Terminated/Completed; disposition StoppedBy::Process, never PlatformReclaimed.",
+            "A guest that self-reports EXIT 0 over vsock AFTER its storage daemon already died still resolves VmStorageDaemonDied, overriding the guest-reported clean exit."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
+          "scenario_name": "S-VM-64, S-VM-65",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-worker/src/exit_observer.rs",
+              "crates/overdrive-core/src/transition_reason.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
+            ]
+          },
+          "dependencies": ["05-02", "05-04"],
+          "effort_hours": 8,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, both shapes of S-VM-65 mandatory. The exit_observer's storage_daemon_died precedence check runs AHEAD of ExitKind entirely — NOT nested inside the Crashed arm the way VmOutOfMemory (row 13) is (ADR-0083 §D5 row 14). S-VM-64 must discriminate, not merely observe green: assert the daemon's exit WAS observed while contributing nothing — a do-nothing implementation would also pass a naive assertion."
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "[resources] sizes the VM (Slice 05)",
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "vCPU derivation from cpu_milli — rounding + floor of 1",
+          "description": "The vCPU-derivation pure function rounds up and floors at one; the guest-observed CPU count matches the declared figure.",
+          "criteria": [
+            "Declared cpu_milli=2000 yields exactly two guest-observed online CPUs, observed from inside the guest, never asserted against the constructed hypervisor config.",
+            "A sub-core request (cpu_milli=250) still yields exactly one online CPU and the allocation reaches Running.",
+            "vCPU derivation is max(1, round_up(cpu_milli/1000)) for any u32 including 0 and non-multiples of 1000; the result is never zero."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_resources_derivation.rs",
+          "scenario_name": "S-VM-69, S-VM-70, S-VM-73",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/vm/config.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/vm_resources_derivation.rs",
+              "crates/overdrive-core/tests/acceptance.rs",
+              "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs"
+            ]
+          },
+          "dependencies": ["01-01"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: S-VM-73 is Tier 1 default-lane proptest, mandatory mutation target — author fresh (name pinned by DELIVER's own DESIGN reading, per US-VM-5 Technical Notes; the derivation rule itself is DESIGN's). S-VM-69/70 are Tier 3, gated integration-tests, single-example, real guest CPU count read."
+        },
+        {
+          "id": "06-02",
+          "name": "Guest memory sizing matches the declared figure",
+          "description": "The declared memory_bytes is what the guest observes; workload describe reports the same figure for a VM allocation as for a process allocation.",
+          "criteria": [
+            "Declared memory_bytes=2147483648 yields approximately 2 GiB of memory observed inside the guest.",
+            "overdrive workload describe reports the same declared memory_bytes figure for a VM allocation as it already does for a process allocation."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs",
+          "scenario_name": "S-VM-71",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/vm/config.rs",
+              "crates/overdrive-cli/src/render.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": ["06-01"],
+          "effort_hours": 5,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, real boot, assertion taken from inside the guest — never from the hypervisor config the platform generated (asserting on generated config would only prove we wrote what we wrote)."
+        },
+        {
+          "id": "06-03",
+          "name": "Sizing parity across both memory backings + Driver::resize",
+          "description": "Guest-observed vCPU/memory match the declared figures identically on private memory and on shared=on; resize hotplugs or refuses, never a silent no-op.",
+          "criteria": [
+            "One parametrized Tier-3 case: guest-observed vCPU count and memory size match the declared figures identically for a volume-free (private memory) and a volume-carrying (shared=on) VM.",
+            "Driver::resize either hotplugs the running VM's CPU/memory or rejects with a named reason; it never silently no-ops."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs",
+          "scenario_name": "S-VM-72",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs"
+            ]
+          },
+          "dependencies": ["06-02", "05-01"],
+          "effort_hours": 6,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single parametrized case (not two separate tests) — the reason Slice 04 (volumes) is ordered before Slice 05 (resources). Driver::resize's hotplug-vs-honest-rejection choice is DELIVER's own call within the trait's required-method contract; whichever is chosen, a silent no-op is a review rejection."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-host/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-cli/src/",
+      "crates/overdrive-init/src/",
+      "xtask/src/dst_lint.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-host/tests/",
+      "crates/overdrive-worker/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-cli/tests/",
+      "crates/overdrive-sim/src/invariants/"
+    ],
+    "excluded_patterns": [
+      "target/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-solution-architect-reviewer",
+    "approved_at": ""
+  }
+}
