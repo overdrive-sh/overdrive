@@ -297,4 +297,18 @@ mod acceptance {
     // command + terminal observation row as inputs). Step 01-03 reshaped the
     // `Workflow` trait and deleted the prior contentless terminal enum.
     mod terminal_error_and_workflow_status_roundtrip;
+
+    // microvm-driver-cloud-hypervisor (GH #42) — DISTILL RED scaffolds.
+    // Pure-function `@property` scenarios only; every Tier-3 real-VMM
+    // scenario lives in `overdrive-cli`'s `tests/integration/` (see
+    // `vm_walking_skeleton.rs`), and the JobEnvelope V1->V2 schema-
+    // evolution fixture is deliberately NOT scaffolded here — it is a
+    // precise six-step single-commit edit to the EXISTING
+    // `tests/schema_evolution/workload_intent.rs` file (whose FIXTURE_V1
+    // must never be touched), left to DELIVER's Slice 01 RED phase per
+    // `.claude/rules/development.md` § "rkyv schema evolution" ·
+    // `distill/wave-decisions.md` DWD-06.
+    mod vm_config_pure_functions; // S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20 — ADR-0082 §D2
+    mod vm_reclamation_plan_purity; // S-VM-31, S-VM-32, S-VM-92 — ADR-0083 §D7, brief §105a
+    mod vm_spec_driver_table_dispatch; // S-VM-06, S-VM-07 — ADR-0083 §D4
 }

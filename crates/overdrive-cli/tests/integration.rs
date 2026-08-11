@@ -116,4 +116,17 @@ mod integration {
     //   * S-BIR-CLI-RESTART-UNKNOWN — undeclared workload → typed 404 →
     //     non-zero exit code.
     mod workload_restart;
+
+    // microvm-driver-cloud-hypervisor (GH #42) Slice 01 — the walking
+    // skeleton: `[vm]`+`[job]` deploys through the same verb as `[exec]`,
+    // a real Cloud Hypervisor VM boots, and the guest's real exit code
+    // reaches `overdrive workload describe`. RED scaffold — DELIVER fills
+    // one scenario at a time starting with S-VM-01. See
+    // `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
+    // § Slice 01 for the full scenario set; this file scaffolds US-VM-1's
+    // five UAT scenarios (S-VM-01..05) only — the remaining Slice 01
+    // AC-derived scenarios and Slices 02-05 are scaffolded by DELIVER at
+    // the start of their own RED phase, per `distill/wave-decisions.md`
+    // DWD-06.
+    mod vm_walking_skeleton;
 }
