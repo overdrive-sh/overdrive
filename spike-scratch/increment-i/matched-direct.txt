@@ -1,0 +1,48 @@
+==================================================================
+MATCHED O_DIRECT COMPARISON — 5 trials each, shmem_enabled=never
+same image file, same XFS, same 256 MiB + 1000 file payload.
+vublk is REFUSED without shared=on, so plain-shared+direct is the
+only arm matched to it on BOTH memory backing and caching contract.
+==================================================================
+
+### plain --disk direct=on   (memory size=512M, NO shared=on)
+    FS-THROUGHPUT 256 MiB write=0.224s fsync=0.025s total=0.249s -> 1142.0 MiB/s (write only) / 1026.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.778s -> mean 0.78 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.226s fsync=0.023s total=0.249s -> 1131.2 MiB/s (write only) / 1028.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.746s -> mean 0.75 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.229s fsync=0.026s total=0.255s -> 1120.1 MiB/s (write only) / 1005.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.783s -> mean 0.78 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.275s fsync=0.057s total=0.332s -> 931.1 MiB/s (write only) / 771.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.788s -> mean 0.79 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.205s fsync=0.026s total=0.231s -> 1248.0 MiB/s (write only) / 1108.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.789s -> mean 0.79 ms/file, failures=0
+    argv: vdb (measured volume) : path=/srv/vm/p6f/run-i/volrw.ext4,image_type=raw,direct=on
+    argv: memory argv : size=512M
+
+### plain --disk direct=on   (memory size=512M,shared=on)
+    FS-THROUGHPUT 256 MiB write=0.386s fsync=0.019s total=0.405s -> 663.9 MiB/s (write only) / 632.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.852s -> mean 0.85 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.413s fsync=0.019s total=0.432s -> 619.5 MiB/s (write only) / 592.6 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.739s -> mean 0.74 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.393s fsync=0.019s total=0.412s -> 650.7 MiB/s (write only) / 621.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.793s -> mean 0.79 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.386s fsync=0.019s total=0.405s -> 663.3 MiB/s (write only) / 632.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.793s -> mean 0.79 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.386s fsync=0.018s total=0.404s -> 663.8 MiB/s (write only) / 633.9 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.815s -> mean 0.81 ms/file, failures=0
+    argv: vdb (measured volume) : path=/srv/vm/p6f/run-i/volrw.ext4,image_type=raw,direct=on
+    argv: memory argv : size=512M,shared=on
+
+### vhost-user-blk, qemu cache.direct=on (shared=on, forced)
+    FS-THROUGHPUT 256 MiB write=0.392s fsync=0.018s total=0.411s -> 652.5 MiB/s (write only) / 623.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.584s -> mean 0.58 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.412s fsync=0.018s total=0.430s -> 621.7 MiB/s (write only) / 595.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.713s -> mean 0.71 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.387s fsync=0.018s total=0.405s -> 661.1 MiB/s (write only) / 631.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.511s -> mean 0.51 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.375s fsync=0.018s total=0.393s -> 682.3 MiB/s (write only) / 651.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.512s -> mean 0.51 ms/file, failures=0
+    FS-THROUGHPUT 256 MiB write=0.398s fsync=0.020s total=0.418s -> 642.6 MiB/s (write only) / 611.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.771s -> mean 0.77 ms/file, failures=0
+    argv: vdb (measured volume) : vhost_user=on,socket=/run/spike-increment-i/vub/vublk.sock
+    argv: memory argv : size=512M,shared=on

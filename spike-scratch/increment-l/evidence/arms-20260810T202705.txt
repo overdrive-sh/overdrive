@@ -1,0 +1,2706 @@
+##################################################################
+### increment-l ARMS   mem=2048MiB touch=512MiB cut_at=300 repeats=3
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### volume fs        : ext4, mkfs defaults (has_journal, data=ordered)
+### started          : 2026-08-10T20:27:05+00:00
+##################################################################
+
+==================================================================
+=== REPEAT 1  ARM=a  SYNC=1   2026-08-10T20:27:05+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:27:05+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104462
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=609
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=615 first_seq=0 boot_to_ready_ms=17
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400308
+  ext4 kernel lines:
+      [    0.702334] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.787696] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  644293865aaa11ad0ebcd481335954a2
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683396 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.169 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46663 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 104462 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.233 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=9292
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   644293865aaa11ad0ebcd481335954a2
+  BOOT_NONCE after    644293865aaa11ad0ebcd481335954a2     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=1 label=r1-a-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531691 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730542080 restore_ms=233.1 resume_ms=1.2
+
+==================================================================
+=== REPEAT 1  ARM=a  SYNC=0   2026-08-10T20:27:17+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:27:17+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104545
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=607
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=613 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 230 ms; MemFree_kB=1400372
+  ext4 kernel lines:
+      [    0.702565] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.786658] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  95816c6861bced611b11c2ffd36715cb
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               675216 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.169 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46663 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 104545 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.226 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=8898
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   95816c6861bced611b11c2ffd36715cb
+  BOOT_NONCE after    95816c6861bced611b11c2ffd36715cb     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=0 label=r1-a-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531691 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730542080 restore_ms=225.7 resume_ms=1.2
+
+==================================================================
+=== REPEAT 1  ARM=b  SYNC=1   2026-08-10T20:27:28+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:27:28+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104623
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=602
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=608 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400308
+  ext4 kernel lines:
+      [    0.691711] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.775104] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  c93d9b23dc782b00a68f0845cd58b26d
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677264 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.171 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46661 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 104623 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 0 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=104664
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=15 mono_ms=620
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.703735] EXT4-fs (vda): recovery complete
+      [    0.704568] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.798413] EXT4-fs (vdb): recovery complete
+      [    0.799217] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=627 first_seq=301 boot_to_ready_ms=27
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1826
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   c93d9b23dc782b00a68f0845cd58b26d
+  BOOT_NONCE after    dbae5656a0dc7d9f762fec8a73f8ff0f     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=b sync=1 label=r1-b-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=2147531687 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=b  SYNC=0   2026-08-10T20:27:41+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:27:41+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104704
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=600
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=606 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400316
+  ext4 kernel lines:
+      [    0.694815] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.778812] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  ab10187ca6369dc2e392b2dc48a67994
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               675220 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.170 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46657 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 104704 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 0 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=104739
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=608
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.702135] EXT4-fs (vda): recovery complete
+      [    0.702929] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.786387] EXT4-fs (vdb): recovery complete
+      [    0.787164] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=614 first_seq=0 boot_to_ready_ms=16
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=9119
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   ab10187ca6369dc2e392b2dc48a67994
+  BOOT_NONCE after    d33448b96ead3f03d7bc40fd564436bd     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=b sync=0 label=r1-b-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=2147531683 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=c  SYNC=1   2026-08-10T20:28:01+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:28:01+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104782
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=606
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=612 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400484
+  ext4 kernel lines:
+      [    0.701198] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.784694] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  f0e42b58e54645950dafbc7cf26da6ed
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683408 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 104782 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=104815
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=20 mono_ms=621
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.700200] EXT4-fs (vda): recovery complete
+      [    0.701033] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.799189] EXT4-fs (vdb): recovery complete
+      [    0.800011] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=627 first_seq=301 boot_to_ready_ms=31
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=1776
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   f0e42b58e54645950dafbc7cf26da6ed
+  BOOT_NONCE after    7ee526ed67e24d525e8e1c9e656cbc97     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r1-c-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=c  SYNC=0   2026-08-10T20:28:13+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:28:13+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104858
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=605
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=611 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400228
+  ext4 kernel lines:
+      [    0.694261] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.778711] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  5f8df1d739f6d4346b0596880b6f2eb1
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               675208 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 104858 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=104896
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=7 mono_ms=610
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.702363] EXT4-fs (vda): recovery complete
+      [    0.703202] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.788364] EXT4-fs (vdb): recovery complete
+      [    0.789217] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=616 first_seq=0 boot_to_ready_ms=17
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=9123
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   5f8df1d739f6d4346b0596880b6f2eb1
+  BOOT_NONCE after    86f88904c077b177daeea99aa1aaa3a9     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=c sync=0 label=r1-c-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=d  SYNC=1   2026-08-10T20:28:31+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:28:31+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=104937
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=604
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=611 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400560
+  ext4 kernel lines:
+      [    0.693249] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.777605] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  e42e26e7b0d27d9194359315dbb67482
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               681364 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=8356
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 104937 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=104972
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=602
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.691698] EXT4-fs (vda): recovery complete
+      [    0.692504] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.775549] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=609 first_seq=301 boot_to_ready_ms=15
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=1806
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   e42e26e7b0d27d9194359315dbb67482
+  BOOT_NONCE after    f187cfe6db967e9b9b9a83d44dd5ca7b     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=1 label=r1-d-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=d  SYNC=0   2026-08-10T20:28:43+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:28:43+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105007
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=607
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=613 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400560
+  ext4 kernel lines:
+      [    0.702848] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.786302] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  0b9a0cc8d507ca0906afdd9a127cd72a
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677268 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=8108
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 105007 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=105035
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=608
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.703416] EXT4-fs (vda): recovery complete
+      [    0.704226] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.787515] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=614 first_seq=301 boot_to_ready_ms=15
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1738
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   0b9a0cc8d507ca0906afdd9a127cd72a
+  BOOT_NONCE after    2d68271b3ce4855b4321565cda6b6bb0     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=0 label=r1-d-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 1  ARM=c  SYNC=1  direct=on   2026-08-10T20:28:54+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=1
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:28:54+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105082
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=606
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=613 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400296
+  ext4 kernel lines:
+      [    0.701222] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.785289] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  791262ba3371852bf05bb64e67d8df1a
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               679316 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 105082 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=105114
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=22 mono_ms=626
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.703495] EXT4-fs (vda): recovery complete
+      [    0.704349] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.804767] EXT4-fs (vdb): recovery complete
+      [    0.805581] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=633 first_seq=301 boot_to_ready_ms=33
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1831
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   791262ba3371852bf05bb64e67d8df1a
+  BOOT_NONCE after    5a9382f13510e49ce35ef64dccdf6c6c     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r1-c-s1-direct mem_mib=2048 direct=1 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=a  SYNC=1   2026-08-10T20:29:05+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:29:05+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105153
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=602
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=608 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400196
+  ext4 kernel lines:
+      [    0.691649] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.775100] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  a8829cb65f0c413216ebb934d18b9ad9
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               671120 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.172 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46661 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105153 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.237 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=9127
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   a8829cb65f0c413216ebb934d18b9ad9
+  BOOT_NONCE after    a8829cb65f0c413216ebb934d18b9ad9     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=1 label=r2-a-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531689 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730574848 restore_ms=237.3 resume_ms=1.2
+
+==================================================================
+=== REPEAT 2  ARM=a  SYNC=0   2026-08-10T20:29:17+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:29:17+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105232
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=608
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=613 first_seq=0 boot_to_ready_ms=14
+  init: TOUCHED 512 MiB (131072 pages) in 229 ms; MemFree_kB=1400480
+  ext4 kernel lines:
+      [    0.696720] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.781162] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  289d85469118fd626ed35ec8be59fc4d
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677256 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.170 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46660 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105232 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.246 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=9078
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   289d85469118fd626ed35ec8be59fc4d
+  BOOT_NONCE after    289d85469118fd626ed35ec8be59fc4d     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=0 label=r2-a-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531688 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730542080 restore_ms=246.2 resume_ms=1.2
+
+==================================================================
+=== REPEAT 2  ARM=b  SYNC=1   2026-08-10T20:29:29+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:29:29+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105307
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=606
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=612 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400452
+  ext4 kernel lines:
+      [    0.693850] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.779414] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  fcc479813a90f448faf2616966897a08
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683404 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.169 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46671 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105307 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 0 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=105340
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=15 mono_ms=610
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.694481] EXT4-fs (vda): recovery complete
+      [    0.695266] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.789158] EXT4-fs (vdb): recovery complete
+      [    0.789937] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=617 first_seq=301 boot_to_ready_ms=27
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=1750
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   fcc479813a90f448faf2616966897a08
+  BOOT_NONCE after    c900c2a1cd9f8f3f421db107beb853d0     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=b sync=1 label=r2-b-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=2147531697 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=b  SYNC=0   2026-08-10T20:29:41+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:29:41+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105377
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=609
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=615 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400220
+  ext4 kernel lines:
+      [    0.705446] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.791007] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  986853136f019e3a03cda0a67d129394
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683396 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.168 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46668 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105377 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 0 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=105408
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=6 mono_ms=610
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.703397] EXT4-fs (vda): recovery complete
+      [    0.704233] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.789027] EXT4-fs (vdb): recovery complete
+      [    0.789857] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=616 first_seq=0 boot_to_ready_ms=17
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=8907
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   986853136f019e3a03cda0a67d129394
+  BOOT_NONCE after    b438f0d041db1c8b21d95bc9c386ae12     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=b sync=0 label=r2-b-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=2147531694 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=c  SYNC=1   2026-08-10T20:30:01+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:30:01+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105456
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=613
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=619 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 236 ms; MemFree_kB=1400320
+  ext4 kernel lines:
+      [    0.706802] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.792076] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  0ba69042e6aa2f7207751093f902d242
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               685452 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 105456 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=105493
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=16 mono_ms=626
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.711259] EXT4-fs (vda): recovery complete
+      [    0.712074] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.806217] EXT4-fs (vdb): recovery complete
+      [    0.807028] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=632 first_seq=301 boot_to_ready_ms=27
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1834
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   0ba69042e6aa2f7207751093f902d242
+  BOOT_NONCE after    316c8b1b267cb6bc9655a3724a3d91fc     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r2-c-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=c  SYNC=0   2026-08-10T20:30:13+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:30:13+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105529
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=609
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=615 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400856
+  ext4 kernel lines:
+      [    0.703205] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.787303] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  aba384f5768686367b529d779c7c134a
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677268 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 105529 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      mount -o loop FAILED rc=32: mount: /run/spike-increment-l/mnt-r2-c-s0: cannot mount /dev/loop0 read-only.
+       dmesg(1) may have more information after failed mount system call.
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=true
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=0 lost_noload=300 lost_replayed=300
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=105554
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=604
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.697275] EXT4-fs (vda): recovery complete
+      [    0.698071] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.781727] EXT4-fs (vdb): recovery complete
+      [    0.782530] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=610 first_seq=0 boot_to_ready_ms=16
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=9010
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   aba384f5768686367b529d779c7c134a
+  BOOT_NONCE after    577789f487c63d9d00adc8eaf1bb4e4e     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=c sync=0 label=r2-c-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=0 lost_noload=300 lost_replayed=300 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=true noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=d  SYNC=1   2026-08-10T20:30:31+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:30:31+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105594
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=610
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=617 first_seq=0 boot_to_ready_ms=17
+  init: TOUCHED 512 MiB (131072 pages) in 235 ms; MemFree_kB=1400308
+  ext4 kernel lines:
+      [    0.697447] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.783866] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  0eea685c386bf020d28c6cf36aa08e1e
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683412 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=8215
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 105594 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=105626
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=607
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.701710] EXT4-fs (vda): recovery complete
+      [    0.702521] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.785618] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=613 first_seq=301 boot_to_ready_ms=15
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1752
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   0eea685c386bf020d28c6cf36aa08e1e
+  BOOT_NONCE after    02c2b67b467de4aedba187d727a86e3a     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=1 label=r2-d-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=d  SYNC=0   2026-08-10T20:30:42+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:30:42+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105665
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=605
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=612 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 226 ms; MemFree_kB=1400548
+  ext4 kernel lines:
+      [    0.700799] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.784993] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  2679f94c4e85372b53a69f4688a7c38d
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677264 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=8074
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 105665 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=105696
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=611
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.704578] EXT4-fs (vda): recovery complete
+      [    0.705427] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.789539] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=617 first_seq=301 boot_to_ready_ms=16
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1796
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   2679f94c4e85372b53a69f4688a7c38d
+  BOOT_NONCE after    a9089171cc9f137198d84945f91282c1     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=0 label=r2-d-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 2  ARM=c  SYNC=1  direct=on   2026-08-10T20:30:53+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=1
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:30:53+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105736
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=604
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=610 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 229 ms; MemFree_kB=1400448
+  ext4 kernel lines:
+      [    0.692764] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.776980] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  f3acda52720a59754970a3ed003de3a6
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               671124 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 105736 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=105769
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=22 mono_ms=635
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.714420] EXT4-fs (vda): recovery complete
+      [    0.715262] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.815111] EXT4-fs (vdb): recovery complete
+      [    0.815933] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=641 first_seq=301 boot_to_ready_ms=32
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=1827
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   f3acda52720a59754970a3ed003de3a6
+  BOOT_NONCE after    13d9ca3e72b7d69005f12e4ba4b83383     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r2-c-s1-direct mem_mib=2048 direct=1 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=a  SYNC=1   2026-08-10T20:31:05+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:31:05+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105804
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=605
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=612 first_seq=0 boot_to_ready_ms=17
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400340
+  ext4 kernel lines:
+      [    0.693868] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.778167] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  29b1654d9e791140e20d5e4a0bdbf516
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               679308 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.170 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46644 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105804 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.235 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=9356
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   29b1654d9e791140e20d5e4a0bdbf516
+  BOOT_NONCE after    29b1654d9e791140e20d5e4a0bdbf516     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=1 label=r3-a-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531672 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730542080 restore_ms=234.7 resume_ms=1.3
+
+==================================================================
+=== REPEAT 3  ARM=a  SYNC=0   2026-08-10T20:31:17+00:00
+==================================================================
+##################################################################
+### increment-l ARM a sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:31:17+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105872
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=609
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=615 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 229 ms; MemFree_kB=1400272
+  ext4 kernel lines:
+      [    0.704642] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.788891] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  01a57b6729dd993514bfcb7a4662bc52
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               675216 kB
+
+=========== THE CUT: arm a ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.171 s 
+    config.json                1380 B apparent            4096 B on disk
+    state.json                46648 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105872 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm a =======================
+  PUT vm.restore -> 204 in 0.230 s 
+  PUT vm.resume  -> 204 in 0.001 s 
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=9068
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm a expects: nonce IDENTICAL  |  boot banners 0  |  RAM tick CONTINUED
+  BOOT_NONCE before   01a57b6729dd993514bfcb7a4662bc52
+  BOOT_NONCE after    01a57b6729dd993514bfcb7a4662bc52     -> IDENTICAL
+  RAM tick before     300
+  RAM tick after      320     -> CONTINUED
+  boot banners after  0
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=a sync=0 label=r3-a-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=true tick_continued=true banners=0 snap_apparent=2147531676 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=-936730542080 restore_ms=229.7 resume_ms=1.2
+
+==================================================================
+=== REPEAT 3  ARM=b  SYNC=1   2026-08-10T20:31:28+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:31:28+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=105940
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=610
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=617 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400332
+  ext4 kernel lines:
+      [    0.705158] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.789529] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  ab3a7f7eb8ac99c1703598b29d0a2363
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677264 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.171 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46662 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 105940 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 0 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=105974
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=18 mono_ms=623
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.704441] EXT4-fs (vda): recovery complete
+      [    0.705245] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.801594] EXT4-fs (vdb): recovery complete
+      [    0.802399] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=630 first_seq=301 boot_to_ready_ms=30
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1784
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   ab3a7f7eb8ac99c1703598b29d0a2363
+  BOOT_NONCE after    cbb01099c8f0a7baae4c57554f4bd3c9     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=b sync=1 label=r3-b-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=2147531688 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=b  SYNC=0   2026-08-10T20:31:41+00:00
+==================================================================
+##################################################################
+### increment-l ARM b sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:31:41+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106012
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=614
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=621 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 236 ms; MemFree_kB=1400252
+  ext4 kernel lines:
+      [    0.707387] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.793790] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  06b42b903c6b4981edb53a890769ee46
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               679312 kB
+
+=========== THE CUT: arm b ========================
+  PUT vm.pause    -> 204 
+  PUT vm.snapshot -> 204 in 0.157 s 
+    config.json                1378 B apparent            4096 B on disk
+    state.json                46656 B apparent           49152 B on disk
+    memory-ranges        2147483648 B apparent      2147483648 B on disk
+  df delta on /srv/vm/p14l: 2147536896 B consumed by the snapshot (guest RAM = 2147483648 B)
+  SIGKILL sent to VMM pid 106012 (only pids this harness spawned — trap 6)
+  DISCARD memory-ranges: removed=true was 2147483648 B; df reclaimed 2147483648 B
+  snapshot dir now: ["config.json", "state.json"]
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm b =======================
+  cold-boot VMM pid=106046
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=6 mono_ms=615
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.705764] EXT4-fs (vda): recovery complete
+      [    0.706692] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.792998] EXT4-fs (vdb): recovery complete
+      [    0.793805] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=621 first_seq=0 boot_to_ready_ms=17
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=9134
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm b expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   06b42b903c6b4981edb53a890769ee46
+  BOOT_NONCE after    539f964eb85fa3cca24704297193d1ca     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=b sync=0 label=r3-b-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=2147531682 snap_ondisk=2147536896 mem_ranges_bytes=2147483648 df_snap_cost=2147536896 df_discard_reclaim=2147483648 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=c  SYNC=1   2026-08-10T20:32:02+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:32:02+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106086
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=609
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=616 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400296
+  ext4 kernel lines:
+      [    0.703755] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.788595] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  7d6109304226f21288ef2562ca50410a
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               679320 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 106086 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 301 records (0 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=106117
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=14 mono_ms=620
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.704752] EXT4-fs (vda): recovery complete
+      [    0.705545] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.798638] EXT4-fs (vdb): recovery complete
+      [    0.799417] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=627 first_seq=301 boot_to_ready_ms=26
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1787
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   7d6109304226f21288ef2562ca50410a
+  BOOT_NONCE after    049a0aca9e2d8b4b9f0108aad123cb1d     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r3-c-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=300 lost_noload=300 lost_replayed=0 journal_recovered=301 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=c  SYNC=0   2026-08-10T20:32:13+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:32:13+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106156
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=616
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=622 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 227 ms; MemFree_kB=1400348
+  ext4 kernel lines:
+      [    0.709202] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.795365] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  9a908f76c7a706ed4de86953273d491e
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677264 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 106156 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1
+      first_record=
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8300/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=106188
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=7 mono_ms=614
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.706672] EXT4-fs (vda): recovery complete
+      [    0.707510] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.792482] EXT4-fs (vdb): recovery complete
+      [    0.793327] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=620 first_seq=0 boot_to_ready_ms=17
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=9184
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=1 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   9a908f76c7a706ed4de86953273d491e
+  BOOT_NONCE after    6bb8d5fdbf9e87239419252143ffdee9     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      340     -> CONTINUED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=!!! WRONG — DISCARD volume_intact=YES
+
+L-RESULT arm=c sync=0 label=r3-c-s0 mem_mib=2048 direct=0 status=OK polarity_ok=false claimed=300 durable_noload=0 durable_replayed=-1 lost_noload=300 lost_replayed=301 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=true banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=d  SYNC=1   2026-08-10T20:32:32+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=1 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:32:32+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106230
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=610
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=1
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=617 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400368
+  ext4 kernel lines:
+      [    0.705275] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.789711] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  88cd5fe3f2d76394706f15f717068e1d
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               677264 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=8366
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 106230 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=106261
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=613
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.704969] EXT4-fs (vda): recovery complete
+      [    0.705817] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.792397] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=620 first_seq=301 boot_to_ready_ms=17
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=1823
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   88cd5fe3f2d76394706f15f717068e1d
+  BOOT_NONCE after    e89abad5f7bf1fab7d1e57c451b8b215     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=1 label=r3-d-s1 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=d  SYNC=0   2026-08-10T20:32:43+00:00
+==================================================================
+##################################################################
+### increment-l ARM d sync=0 mem=2048MiB cut_at=300 direct=0
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:32:43+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106304
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=4 mono_ms=605
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=611 first_seq=0 boot_to_ready_ms=15
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400340
+  ext4 kernel lines:
+      [    0.695335] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.778976] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  d18f70f1f8432b9a15aa301732b86719
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               669072 kB
+  QUIESCE seq=300 syncfs_rc=0 syncfs_errno=0 syncfs_ms=1 freeze_rc=0 freeze_errno=0 mono_ms=7889
+
+=========== THE CUT: arm d ========================
+  SIGKILL sent to VMM pid 106304 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum
+  feature `needs_recovery` set: false   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=true bytes=19264 ok=301 corrupt=0 torn_tail=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1
+      first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=false
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      spikevol-l: 13/65536 files (0.0% non-contiguous), 8305/65536 blocks
+      e2fsck 1.47.2 (1-Jan-2025)
+  journal recovered 0 records (301 -> 301)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0
+
+=========== RECOVERY: arm d =======================
+  cold-boot VMM pid=106335
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=609
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.703270] EXT4-fs (vda): recovery complete
+      [    0.704102] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.788233] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=615 first_seq=301 boot_to_ready_ms=15
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=2 freeze_rc=0 freeze_errno=0 mono_ms=1715
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm d expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   d18f70f1f8432b9a15aa301732b86719
+  BOOT_NONCE after    2869f43817599684f4393a98e657520c     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=d sync=0 label=r3-d-s0 mem_mib=2048 direct=0 status=OK polarity_ok=true claimed=300 durable_noload=300 durable_replayed=300 lost_noload=0 lost_replayed=0 journal_recovered=0 fs_state="clean" needs_recovery=false fsck_rc=0 fsck_after_rc=0 nr_after=false noload_ok=301 replayed_ok=301 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+==================================================================
+=== REPEAT 3  ARM=c  SYNC=1  direct=on   2026-08-10T20:32:54+00:00
+==================================================================
+##################################################################
+### increment-l ARM c sync=1 mem=2048MiB cut_at=300 direct=1
+### cloud-hypervisor : cloud-hypervisor v53.0
+Migration Protocol Versions: 0
+### kernel/arch      : 7.0.0-15-generic x86_64
+### date             : 2026-08-10T20:32:54+00:00
+### pre-flight foreign cloud-hypervisor pids: [] (NOT killed — trap 6)
+##################################################################
+### boot VMM pid=106376
+### volume fd flags on the VMM: []
+
+=========== PRE-CUT STATE ==========================
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=5 mono_ms=610
+  init: RECOVER file_bytes=0 records_ok=0 corrupt=0 torn_tail_bytes=0 highest_seq=-1 max_epoch=0 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=1 next_seq=0 append_off=0
+  init: READY_AT_MONO_MS=616 first_seq=0 boot_to_ready_ms=16
+  init: TOUCHED 512 MiB (131072 pages) in 228 ms; MemFree_kB=1400484
+  ext4 kernel lines:
+      [    0.704744] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.788928] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  BOOT_NONCE (pre-cut)  2c0cc3de70f74f9a4e9dcd4826a6ad5d
+  RAM tick   (pre-cut)  300
+  claimed durable seq   300   (301 WORK lines)
+  VMM RSS               683412 kB
+
+=========== THE CUT: arm c ========================
+  SIGKILL sent to VMM pid 106376 (only pids this harness spawned — trap 6)
+
+=========== POST-CUT FORENSICS (on a copy) =========
+  dumpe2fs  Filesystem state:         clean
+  dumpe2fs  Filesystem features:      has_journal ext_attr resize_inode dir_index orphan_file filetype needs_recovery extent 64bit flex_bg metadata_csum_seed sparse_super large_file huge_file dir_nlink extra_isize metadata_csum orphan_present
+  feature `needs_recovery` set: true   <- THIS is the recovery signal,
+      not `Filesystem state`, which reads `clean` either way.
+  e2fsck -fn (journal NOT replayed — weak; cannot see past a dirty journal) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+      
+      spikevol-l: 12/65536 files (0.0% non-contiguous), 8300/65536 blocks
+  scan ro,noload (journal replay SUPPRESSED — what is visible with no recovery at all):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      work.log unreadable: No such file or directory (os error 2)
+  scan rw        (journal REPLAYED, i.e. an ORDINARY mount):
+      present=false bytes=0 ok=0 corrupt=0 torn_tail=0 highest_seq=0 max_epoch=0 gaps=0 first_gap=0
+      mount -o loop FAILED rc=32: mount: /run/spike-increment-l/mnt-r3-c-s1-direct: cannot mount /dev/loop0 read-only.
+       dmesg(1) may have more information after failed mount system call.
+  dumpe2fs after replay: Filesystem state:         clean  needs_recovery=true
+  e2fsck -fn AFTER replay (the meaningful structural verdict) rc=0
+      Warning: skipping journal recovery because doing a read-only filesystem check.
+      Pass 1: Checking inodes, blocks, and sizes
+      Pass 2: Checking directory structure
+      Pass 3: Checking directory connectivity
+      Pass 4: Checking reference counts
+      Pass 5: Checking group summary information
+      Feature orphan_present is set but orphan file is clean.
+      Clear? no
+  journal recovered 0 records (0 -> 0)
+  LOST vs the guest's own announcement (which is a LOWER bound on what
+  reached the device — the guest prints each seq only AFTER its write
+  and, in sync mode, after its fsync returns):
+      claimed=300 durable_noload=0 durable_replayed=0 lost_noload=300 lost_replayed=300
+
+=========== RECOVERY: arm c =======================
+  cold-boot VMM pid=106402
+  init: MOUNT /dev/vdb ext4 -> rc=0 errno=0 mount_ms=21 mono_ms=624
+  ext4 kernel lines on the COLD BOOT (journal recovery shows here):
+      [    0.701873] EXT4-fs (vda): recovery complete
+      [    0.702668] EXT4-fs (vda): mounted filesystem 1db6208c-fe15-4a9e-b2c7-ad947c1d496a r/w with ordered data mode. Quota mode: none.
+      [    0.802979] EXT4-fs (vdb): recovery complete
+      [    0.803816] EXT4-fs (vdb): mounted filesystem ba3d320d-3872-4dca-baee-91780b4efa06 r/w with ordered data mode. Quota mode: none.
+  init: RECOVER file_bytes=19264 records_ok=301 corrupt=0 torn_tail_bytes=0 highest_seq=300 max_epoch=1 gaps=0 first_gap=-1 scan_ms=0
+  init: CONTINUE epoch=2 next_seq=301 append_off=19264
+  init: READY_AT_MONO_MS=631 first_seq=301 boot_to_ready_ms=33
+  QUIESCE seq=340 syncfs_rc=0 syncfs_errno=0 syncfs_ms=0 freeze_rc=0 freeze_errno=0 mono_ms=1829
+
+=========== FINAL VOLUME (after the recovered guest quiesced) ===
+  present=true bytes=21824 ok=341 corrupt=0 torn_tail=0 highest_seq=340 max_epoch=2 gaps=0 first_gap=-1
+  first_record=REC 000000000000 000001 hijklmnopqrstuvwxyzabcdefghijkl16188acd
+
+=========== CORRECTNESS (polarity INVERTS per arm) ==
+  arm c expects: nonce DIFFERENT  |  boot banners 1  |  RAM tick RESTARTED
+  BOOT_NONCE before   2c0cc3de70f74f9a4e9dcd4826a6ad5d
+  BOOT_NONCE after    3b432bd9453cadab465d0ea00069e5c8     -> DIFFERENT
+  RAM tick before     300
+  RAM tick after      39     -> RESTARTED
+  boot banners after  1
+  durable seq claimed before cut  300
+  durable seq at end              340   -> CONTINUED
+  gaps in the final journal       0 (first at -1)
+  VERDICT  polarity=CORRECT volume_intact=YES
+
+L-RESULT arm=c sync=1 label=r3-c-s1-direct mem_mib=2048 direct=1 status=OK polarity_ok=true claimed=300 durable_noload=0 durable_replayed=0 lost_noload=300 lost_replayed=300 journal_recovered=0 fs_state="clean" needs_recovery=true fsck_rc=0 fsck_after_rc=0 nr_after=true noload_ok=0 replayed_ok=0 noload_gaps=0 replayed_gaps=0 noload_corrupt=0 torn_noload=0 torn_replayed=0 final_high=340 final_gaps=0 final_corrupt=0 nonce_same=false tick_continued=false banners=1 snap_apparent=0 snap_ondisk=0 mem_ranges_bytes=0 df_snap_cost=0 df_discard_reclaim=0 restore_ms=-1.0 resume_ms=-1.0
+
+##################################################################
+### SUMMARY — every L-RESULT line, nothing averaged away
+##################################################################

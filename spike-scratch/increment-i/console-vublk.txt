@@ -1,0 +1,33 @@
+=========================================================
+init: HELLO from overdrive spike init (P6), pid=1
+=========================================================
+init: /proc/cmdline = root=/dev/vda rw console=ttyS0 init=/init panic=1 loglevel=4 spike.mib=256 spike.files=1000
+init: insmod /modules/vsock.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport_common.ko -> OK
+init: insmod /modules/vmw_vsock_virtio_transport.ko -> OK
+init: /proc/filesystems ext4 line = "\text4"   (built in; no module staged)
+init: block devices present = [loop0,loop1,loop2,loop3,loop4,loop5,loop6,loop7,vda,vdb,vdc]
+init: touched 128 MiB of guest memory (every 4K page written)
+init: guest MemTotal:         463132 kB
+init: guest MemAvailable:     296700 kB
+READY pid=1 port=1234
+MEMTOTAL MemTotal:         463132 kB
+MEMSNAP-WINDOW-CLOSED
+---------------- volumes over virtio-blk ----------------
+FS-MOUNT dev=/dev/vdb at /mnt/rw -> OK   (read-write volume)
+FS-MOUNT dev=/dev/vdc at /mnt/ro -> rc=-1 errno=13 (Permission denied (os error 13))   (host-side --disk readonly=on, mounted RW by the guest ON PURPOSE)
+[    4.631606] /dev/vdz: Can't lookup blockdev
+FS-MOUNT dev=/dev/vdz at /mnt/bad -> rc=-1 errno=2 (No such file or directory (os error 2))   (DELIBERATELY BROKEN — device was never attached)
+FS-RW-LISTING [from-host.txt,lost+found]
+FS-HOST-TO-GUEST "HOST-WROTE-THIS-9876543210-zyxwvutsrq"
+FS-GUEST-TO-HOST wrote "GUEST-WROTE-THIS-0123456789-abcdefghij"
+---------------- P6: volume I/O cost (payload=256 MiB, files=1000) ----------------
+FS-THROUGHPUT 256 MiB write=0.398s fsync=0.020s total=0.418s -> 642.6 MiB/s (write only) / 611.8 MiB/s (incl. fsync)
+FS-LATENCY 1000 files (open+write+fsync+close) total=0.771s -> mean 0.77 ms/file, failures=0
+FS-UMOUNT /mnt/rw -> rc=0
+FS-UMOUNT /mnt/ro -> rc=-1 errno=22 (Invalid argument (os error 22))
+init: reaped pid=75 raw_status=0x700 exited=true code=7
+EXIT 7
+DONE
+init: powering off (RB_POWER_OFF)
+[    6.380332] reboot: Power down

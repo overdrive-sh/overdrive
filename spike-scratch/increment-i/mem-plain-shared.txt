@@ -1,0 +1,25 @@
+########## mode=plain-shared  pid=83096  snapshot AT BEACON ##########
+### memory argv          : size=512M,shared=on
+### vdb spec             : path=/srv/vm/p6f/run-i/volrw.ext4,image_type=raw,direct=on
+### --- /proc/83096/status ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+VmPeak:	  548700 kB
+VmRSS:	  271188 kB
+RssAnon:	     924 kB
+RssFile:	    4864 kB
+RssShmem:	  265400 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- memfd / shared mappings (ZERO without shared=on) ---
+  memfd-ish mapping lines: 1
+### --- huge pages backing guest RAM ---
+  Rss:              271188 kB
+  AnonHugePages:         0 kB
+  ShmemPmdMapped:        0 kB
+  FilePmdMapped:         0 kB
+### --- host THP policy ---
+  anon : always [madvise] never
+  shmem: always within_size advise [never] deny force

@@ -29,6 +29,14 @@ pre-commit:
     fmt:
       tags: [rust, fast]
       glob: "*.rs"
+      exclude: "spike-scratch/**"
+      # `spike-scratch/` is EXCLUDED. nw-spike probes are committed as evidence
+      # (`.claude/rules/spike.md`) but each is a SELF-CONTAINED `[workspace]`
+      # deliberately outside this one, so workspace tooling cannot see them:
+      # `cargo clippy -p spike-increment-a --all-features` fails with "cannot
+      # specify features for packages outside of workspace", and
+      # `nextest -E 'rdeps(spike-increment-a)'` with "no packages matched".
+      # They are throwaway probes — nothing builds or gates on them.
       # rustfmt reads `rustfmt.toml` automatically. Format the staged
       # Rust files in place and re-stage via `stage_fixed` — routine
       # formatting drift is fixed silently and the commit proceeds.
@@ -42,6 +50,7 @@ pre-commit:
     clippy:
       tags: [rust]
       glob: "*.rs"
+      exclude: "spike-scratch/**"
       # Scope clippy to only the crates that contain staged Rust files.
       # Clippy is crate-level (not file-level), so we walk up from each
       # staged file to its owning Cargo.toml, dedupe, and run clippy
@@ -78,6 +87,7 @@ pre-commit:
     doctest:
       tags: [rust]
       glob: "*.rs"
+      exclude: "spike-scratch/**"
       # Doctests run pre-commit, not pre-push — rustdoc examples are
       # per `.claude/rules/development.md` §Documentation and break
       # cheaply, so catch them at commit time. Scoped per-crate (same
@@ -120,6 +130,7 @@ pre-commit:
     nextest-affected:
       tags: [rust]
       glob: "*.rs"
+      exclude: "spike-scratch/**"
       # Affected-tests smoke check at commit time. Walk up staged files
       # to their owning crates, then run nextest with an `rdeps(...)`
       # filter expression — which selects tests in those crates AND in

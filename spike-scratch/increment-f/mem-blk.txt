@@ -1,0 +1,38 @@
+########## mode=blk  pid=45076  snapshot AT BEACON ##########
+### memory argv          : size=512M (no shared=on)
+### --- /proc/45076/status ---
+Name:	cloud-hyperviso
+Uid:	6001	6001	6001	6001
+Gid:	6001	6001	6001	6001
+Groups:	991 6001 
+VmPeak:	  546492 kB
+VmSize:	  546492 kB
+VmHWM:	  277072 kB
+VmRSS:	  277072 kB
+RssAnon:	  273340 kB
+RssFile:	    3728 kB
+RssShmem:	       4 kB
+Threads:	11
+NoNewPrivs:	1
+Seccomp:	0
+### --- /proc/45076/limits ---
+Max file size             2147483648           2147483648           bytes     
+Max open files            256                  256                  files     
+### --- per-thread seccomp ---
+  cloud-hyperviso    NoNewPrivs:;1 Seccomp:;0 
+  vmm                NoNewPrivs:;1 Seccomp:;2 
+  http-server        NoNewPrivs:;1 Seccomp:;2 
+  vmm_signal_hand    NoNewPrivs:;1 Seccomp:;2 
+  vcpu0              NoNewPrivs:;1 Seccomp:;2 
+  kvm-nx-lpage-re    NoNewPrivs:;1 Seccomp:;2 
+  _disk0_q0          NoNewPrivs:;1 Seccomp:;2 
+  _disk1_q0          NoNewPrivs:;1 Seccomp:;2 
+  _disk2_q0          NoNewPrivs:;1 Seccomp:;2 
+  iou-wrk-45093      NoNewPrivs:;1 Seccomp:;2 
+  _vsock3            NoNewPrivs:;1 Seccomp:;2 
+### --- memfd / shared mappings (expect ZERO without shared=on) ---
+  memfd-ish mapping lines: 0
+### --- host free(1) while live ---
+                 total        used        free      shared  buff/cache   available
+  Mem:           63868        1489       60910          37        2139       62379
+  Swap:              0           0           0

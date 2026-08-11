@@ -1,0 +1,10 @@
+### PARALLEL-STREAM device baseline on /srv/vm (nvme1n1, XFS).
+### A single QD1 dd UNDERSTATES an NVMe -- one outstanding request at a
+### time -- and cloud-hypervisor's restore read is not so constrained.
+### This is the number that decides whether a 3.27 GB/s restore call is
+### IMPOSSIBLE (the P11 shape) or merely faster than dd.
+###   1 O_DIRECT stream(s): 4 GiB in 1.673 s = 2.57 GB/s
+###   2 O_DIRECT stream(s): 4 GiB in 0.880 s = 4.88 GB/s
+###   4 O_DIRECT stream(s): 4 GiB in 0.879 s = 4.89 GB/s
+###   8 O_DIRECT stream(s): 4 GiB in 0.887 s = 4.84 GB/s
+### done

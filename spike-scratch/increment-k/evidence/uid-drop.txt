@@ -1,0 +1,46 @@
+##################################################################
+### increment-k — OnDemand restore under P5's uid-dropped shape
+### unprivileged_userfaultfd = 0
+### source snapshot          = /srv/vm/p13k/snap-t1-copy-2048
+##################################################################
+### spikevmm uid=6001 gid=6001 groups=spikevmm kvm
+### /dev/kvm: crw-rw---- root:kvm
+
+==================================================================
+=== mode=Copy  as uid=6001 (setpriv --no-new-privs), NOT root
+==================================================================
+  VMM pid=97400  running as uid=6001
+  PUT vm.restore -> HTTP 204   in .868561554s
+  PUT vm.resume  -> HTTP 204
+  VmRSS=2102752 kB   threads:
+          1       _disk0_q0
+          1       cloud-hyperviso
+          1       http-server
+          1       iou-wrk-97410
+          1       kvm-nx-lpage-re
+          1       vcpu0
+          1       vmm
+          1       vmm_signal_hand
+  guest ticks observed: 105
+  --- VMM log (errors):
+
+==================================================================
+=== mode=OnDemand  as uid=6001 (setpriv --no-new-privs), NOT root
+==================================================================
+./uid-drop.sh: line 1: 97400 Killed                     prlimit --nofile=256 -- setpriv --reuid="$VMMUSER" --regid="$GID_N" --init-groups --no-new-privs -- cloud-hypervisor --api-socket "path=$S" --seccomp true > "$L" 2>&1
+  VMM pid=97442  running as uid=6001
+  PUT vm.restore -> HTTP 500   in .027233557s
+      body: ["Error from API","The VM could not be restored","Memory manager error","Cannot restore VM","On-demand restore failed","Failed to create userfaultfd","Operation not permitted (os error 1)"]
+  PUT vm.resume  -> HTTP 500
+  VmRSS=4788 kB   threads:
+          1       cloud-hyperviso
+          1       http-server
+          1       vmm
+          1       vmm_signal_hand
+  guest ticks observed: 0
+0
+  --- VMM log (errors):
+      cloud-hypervisor:   0.080990s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed: MemoryManager(Restore(OnDemandRestore(Create(Os { code: 1, kind: PermissionDenied, message: "Operation not permitted" }))))
+./uid-drop.sh: line 101: 97442 Killed                     prlimit --nofile=256 -- setpriv --reuid="$VMMUSER" --regid="$GID_N" --init-groups --no-new-privs -- cloud-hypervisor --api-socket "path=$S" --seccomp true > "$L" 2>&1
+
+=== uid-drop probe DONE

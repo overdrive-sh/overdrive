@@ -1,0 +1,44 @@
+trial=1 mech=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.114s fsync=0.178s total=0.292s -> 2247.6 MiB/s (write only) / 877.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.476s -> mean 0.48 ms/file, failures=0
+    host 256 MiB direct write+fsync: .222412509s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=1 mech=virtio-blk
+    FS-THROUGHPUT 256 MiB write=0.079s fsync=0.182s total=0.261s -> 3243.7 MiB/s (write only) / 981.3 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.557s -> mean 0.56 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218550517s
+    host 1000 small files (open+write+fsync+close): 0.152s -> mean 0.15 ms/file
+    --- volumes reflink-cloned in .009025223s (1 GiB + 64 MiB)
+trial=2 mech=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.112s fsync=0.178s total=0.291s -> 2277.8 MiB/s (write only) / 880.5 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.489s -> mean 0.49 ms/file, failures=0
+    host 256 MiB direct write+fsync: .220126318s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.153s -> mean 0.15 ms/file
+trial=2 mech=virtio-blk
+    FS-THROUGHPUT 256 MiB write=0.079s fsync=0.182s total=0.261s -> 3242.1 MiB/s (write only) / 979.8 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.556s -> mean 0.56 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218934685s
+    host 1000 small files (open+write+fsync+close): 0.155s -> mean 0.15 ms/file
+    --- volumes reflink-cloned in .011463682s (1 GiB + 64 MiB)
+trial=3 mech=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.113s fsync=0.178s total=0.291s -> 2270.3 MiB/s (write only) / 880.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.421s -> mean 0.42 ms/file, failures=0
+    host 256 MiB direct write+fsync: .221021015s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=3 mech=virtio-blk
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.181s total=0.261s -> 3211.1 MiB/s (write only) / 980.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.556s -> mean 0.56 ms/file, failures=0
+    host 256 MiB direct write+fsync: .218437988s
+    host 1000 small files (open+write+fsync+close): 0.148s -> mean 0.15 ms/file
+    --- volumes reflink-cloned in .009035738s (1 GiB + 64 MiB)
+trial=4 mech=virtiofs
+    FS-THROUGHPUT 256 MiB write=0.110s fsync=0.177s total=0.288s -> 2325.7 MiB/s (write only) / 890.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.408s -> mean 0.41 ms/file, failures=0
+    host 256 MiB direct write+fsync: .225141806s
+    host 1000 small files (open+write+fsync+close, SAME sequence as the guest): 0.154s -> mean 0.15 ms/file
+trial=4 mech=virtio-blk
+    FS-THROUGHPUT 256 MiB write=0.080s fsync=0.181s total=0.262s -> 3189.1 MiB/s (write only) / 978.0 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.591s -> mean 0.59 ms/file, failures=0
+    host 256 MiB direct write+fsync: .220653081s
+    host 1000 small files (open+write+fsync+close): 0.155s -> mean 0.15 ms/file
+    --- volumes reflink-cloned in .009430904s (1 GiB + 64 MiB)

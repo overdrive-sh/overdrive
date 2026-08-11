@@ -12,14 +12,24 @@ The wave mechanics (probe → promotion gate → walking skeleton) live in the
 
 ## Spike code is throwaway and ISOLATED — never in `crates/`
 
-Probe code lives in a **gitignored** `spike-scratch/{increment-a,increment-b,…}/`
+Probe code lives in `spike-scratch/{increment-a,increment-b,…}/`
 directory, **self-contained** (its own `Cargo.toml` / workspace), and **never
 touches production source**:
 
 - **NEVER** create or modify a file under `crates/`. No new modules, no `mod.rs`
   wiring, no `[[bin]]` in any workspace member's `Cargo.toml`, no new dep on a
   workspace crate. The probe is a standalone build under `spike-scratch/`.
-- `spike-scratch/` is in `.gitignore` — the probe is **never committed**.
+- **Probe sources, scripts and captured evidence ARE committed** and live until the
+  implementation supersedes them (user ruling 2026-08-11, reversing the prior
+  never-commit rule). Build output is not: `.gitignore` carries
+  `spike-scratch/*/target/` and `spike-scratch/*/out/`.
+  **Why the reversal:** `findings.md` quotes only extracts, so the probe and its raw
+  captures are the sole record of *how* a measured claim was obtained. The
+  microvm-driver spike ran 14 probes across 11 increments whose evidence repeatedly
+  overturned earlier conclusions — twice catching confidently-wrong negatives and once an
+  impossible positive — and none of that is reconstructible from the extracts alone. The
+  probe is still **throwaway**: it is not production code, it is not a test tier, nothing
+  builds or gates on it, and it is deleted when the implementation it validated lands.
 - One increment per probe attempt: `increment-a`, `increment-b`, … Preserve prior
   increments as evidence; don't overwrite.
 - If a probe needs a helper that lives in `crates/` (a syscall wrapper, a const),

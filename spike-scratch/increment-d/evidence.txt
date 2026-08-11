@@ -1,0 +1,371 @@
+############################################################################
+### PROBE increment-d — P6 evidence (microvm-driver-cloud-hypervisor)
+### slice-00 § P6 — does virtiofsd + `--memory shared=on` compose with the
+### boot AND with the P5 confinement?
+###
+### PROVENANCE: every block below is the RAW captured output of a script under
+### spike-scratch/increment-d/, run for real as root inside the overdrive Lima
+### VM via `cargo xtask lima run --`. Nothing is transcribed or narrated.
+############################################################################
+
+############################################################################
+### EXPERIMENT D-2 — the FIRST decisive result: mode=full stalled 12/12.
+### 12/12 is NOT increment-a's ~1-in-3 nested-virt rate, so it was diffed
+### rather than assumed. Raw run log of the 12-attempt full-mode run:
+############################################################################
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask lima run -- bash -lc '/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/run.sh full 12'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+##########################################################
+### PROBE increment-d (P6)  mode=full
+### uname -r          : 7.0.0-28-generic
+### uname -m          : aarch64
+### cloud-hypervisor  : cloud-hypervisor v46.0.0
+### virtiofsd         : virtiofsd 1.13.2  (at /usr/libexec/virtiofsd)
+### virtiofsd on PATH : <NOT ON PATH>
+##########################################################
+
+=== [setup] --sandbox=namespace availability (the [D8d] question)
+          --sandbox <SANDBOX>
+              Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+              
+              [default: namespace]
+    
+    --
+              As opposed to '--translate-uid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host UIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple UID ranges.
+    --
+              As opposed to '--translate-gid', this mapping is not done by virtiofsd, but by the user namespace into which virtiofsd is placed via '--sandbox=namespace'.
+              
+              For example, :0:100000:65536: will map the 65536 host GIDs [100000, 165535] into the namespace as [0, 65535].
+              
+              Provide this argument multiple times to map multiple GID ranges.
+
+=== [setup] VMM identity: uid=6001(spikevmm) gid=6001(spikevmm) groups=6001(spikevmm),991(kvm)
+=== [setup] /dev/kvm: crw-rw---- root:kvm
+
+=== [boot] mode=full (retrying past nested-virt stalls)
+--- attempt 1/12
+--- volume sources seeded:
+    /var/tmp/spike-increment-d/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-d/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- virtiofsd rw pid=3444933  ro pid=3444934  sockets_ready=yes
+    total 8
+    drwxr-xr-x   2 root root     160 Aug  2 15:41 .
+    drwxr-xr-x   4 root root      80 Aug  2 15:41 ..
+    -rw-r--r--   1 root root       0 Aug  2 15:41 fsd-ro.log
+    -rw-r--r--   1 root root       0 Aug  2 15:41 fsd-rw.log
+    srwxrwx---   1 root spikevmm   0 Aug  2 15:41 volro.sock
+    -rw-------   1 root root       8 Aug  2 15:41 volro.sock.pid
+    srwxrwx---   1 root spikevmm   0 Aug  2 15:41 volrw.sock
+    -rw-------   1 root root       8 Aug  2 15:41 volrw.sock.pid
+--- virtiofsd rw log:
+--- virtiofsd ro log:
+--- exact launch argv:
+    prlimit    --fsize=1073741824    --nofile=256    --    setpriv    --reuid=spikevmm    --regid=6001    --init-groups    --no-new-privs    --    cloud-hypervisor    --cpus    boot=1    --memory    size=512M\,shared=on    --kernel    /var/tmp/spike-increment-a/Image    --cmdline    root=/dev/vda\ rw\ console=ttyAMA0\ init=/init\ panic=1\ loglevel=7    --disk    path=/run/spike-increment-d/vm/rootfs.ext4    --serial    file=/run/spike-increment-d/vm/console.log    --console    off    --api-socket    path=/run/spike-increment-d/vm/ch-api.sock    --vsock    cid=3\,socket=/run/spike-increment-d/vm/ch.vsock    --seccomp    true    --landlock    --fs    tag=volrw\,socket=/run/spike-increment-d/fsd/volrw.sock    tag=volro\,socket=/run/spike-increment-d/fsd/volro.sock    --landlock-rules    path=/run/spike-increment-d/vm\,access=rw    path=/run/spike-increment-d/fsd\,access=rw
+--- landlock rules granted to CH: /run/spike-increment-d/vm , /run/spike-increment-d/fsd
+--- landlock rules NOT granted  : /var/tmp/spike-increment-d/volsrc-rw , /var/tmp/spike-increment-d/volsrc-ro  (the [D8e] claim under test)
+
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/run.sh: line 252: 3444948 Killed                     "${PREFIX[@]}" "${CH_ARGV[@]}" > "$chlog" 2>&1
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/run.sh: line 257: 3444933 Killed                     $VIRTIOFSD --socket-path="$fsd_dir/volrw.sock" --shared-dir="$VOLRW" --tag=volrw --cache=never --sandbox=namespace --seccomp kill --socket-group="$VMM_USER" --log-level=info > "$fsd_dir/fsd-rw.log" 2>&1
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/run.sh: line 257: 3444934 Killed                     $VIRTIOFSD --socket-path="$fsd_dir/volro.sock" --shared-dir="$VOLRO" --tag=volro --cache=never --sandbox=namespace --seccomp kill --readonly --socket-group="$VMM_USER" --log-level=info > "$fsd_dir/fsd-ro.log" 2>&1
+--- attempt 1 did not complete (rc=137, ch_rc=137)
+--- attempt 2/12
+--- volume sources seeded:
+    /var/tmp/spike-increment-d/volsrc-rw/from-host.txt : HOST-WROTE-THIS-9876543210-zyxwvutsrq
+    /var/tmp/spike-increment-d/volsrc-ro/preexisting-host-file.txt : PREEXISTING-HOST-CONTENT-DO-NOT-CHANGE
+--- virtiofsd rw pid=3445363  ro pid=3445364  sockets_ready=yes
+    total 8
+    drwxr-xr-x   2 root root     160 Aug  2 15:42 .
+    ... (attempts 6-12 identical: stall right after the virtio_blk probe)
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 6 did not complete (rc=137, ch_rc=137)
+--- attempt 7/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 7 did not complete (rc=137, ch_rc=137)
+--- attempt 8/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 8 did not complete (rc=137, ch_rc=137)
+--- attempt 9/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 9 did not complete (rc=137, ch_rc=137)
+--- attempt 10/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 10 did not complete (rc=137, ch_rc=137)
+--- attempt 11/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 11 did not complete (rc=137, ch_rc=137)
+--- attempt 12/12
+    [watchdog] no beacon by 75s -> nested-virt stall, killing
+--- attempt 12 did not complete (rc=137, ch_rc=137)
+SKIPPED — the guest never completed, so every host-side assertion below
+--- P6 mode=full VERDICT: DID NOT COMPLETE
+
+
+############################################################################
+### EXPERIMENT D-3 — population diff of that stall (stalldiff.sh)
+############################################################################
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask lima run -- bash -lc '/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/stalldiff.sh 6'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+### uname -r: 7.0.0-28-generic  CH: cloud-hypervisor v46.0.0  virtiofsd: virtiofsd 1.13.2
+### rootfs-a (increment-a, 64 MiB): 67108864
+### rootfs-d (increment-d, 96 MiB): 100663296
+
+=== is it the rootfs/init, the memory backing, or the fs device?
+  a-plain                      rootfs=a mem=size=512M              fs=0  ->  reached /init 6/6   last stall point: [    4.691956] reboot: Power down
+  a-sharedon                   rootfs=a mem=size=512M,shared=on    fs=0  ->  reached /init 0/6   last stall point: [    3.237009] virtio_blk virtio0: [vda] 131072 512-byte logical block
+  d-plain                      rootfs=d mem=size=512M              fs=0  ->  reached /init 5/6   last stall point: DONE
+  d-sharedon                   rootfs=d mem=size=512M,shared=on    fs=0  ->  reached /init 0/6   last stall point: [    3.813663] virtio_blk virtio0: [vda] 196608 512-byte logical block
+  d-sharedon-fs                rootfs=d mem=size=512M,shared=on    fs=1  ->  reached /init 0/6   last stall point: [    3.814600] virtio_blk virtio0: [vda] 196608 512-byte logical block
+
+=== console tail of one d-sharedon-fs attempt (the full-mode shape)
+    [    3.802756] loop: module loaded
+    [    3.815054] virtio_blk virtio0: 1/0/0 default/read/poll queues
+    [    3.848863] virtio_blk virtio0: [vda] 196608 512-byte logical blocks (101 MB/96.0 MiB)
+=== virtiofsd log from that attempt
+
+
+############################################################################
+### EXPERIMENT D-5 — attribution of the shared=on stall
+### (sharedon-attribution.sh). 'shared=on breaks the boot' is the LAYER,
+### not the mechanism; three attributions are separated here.
+############################################################################
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask lima run -- bash -lc '/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/sharedon-attribution.sh 4'`
+/opt/homebrew/bin/limactl
+xtask: running limactl shell <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+### uname -r: 7.0.0-28-generic  uname -m: aarch64
+### CH: cloud-hypervisor v46.0.0
+### qemu: QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.1)
+### systemd-detect-virt: apple
+
+=== (i) is it a CONFINEMENT interaction? root + unconfined vs confined
+  root-plain                         confined=0  memory=size=512M                          -> /init 2/4   [    5.621489] reboot: Power down
+  root-sharedon                      confined=0  memory=size=512M,shared=on                -> /init 0/4   [    3.807901] virtio_blk virtio0: [vda] 131072 512-byte logic
+  confined-sharedon                  confined=1  memory=size=512M,shared=on                -> /init 0/4   [    3.366325] virtio_blk virtio0: [vda] 131072 512-byte logic
+
+=== (ii) is some other --memory shape workable? (all root+unconfined)
+  sharedon-prefault                  confined=0  memory=size=512M,shared=on,prefault=on    -> /init 0/4   [    3.286323] virtio_blk virtio0: [vda] 131072 512-byte logic
+  sharedon-thpoff                    confined=0  memory=size=512M,shared=on,thp=off        -> /init 0/4   [    3.306392] virtio_blk virtio0: [vda] 131072 512-byte logic
+  sharedon-128M                      confined=0  memory=size=128M,shared=on                -> /init 0/4   [    3.334500] virtio_blk virtio0: [vda] 131072 512-byte logic
+  plain-prefault                     confined=0  memory=size=512M,prefault=on              -> /init 0/4   [    3.001845] virtio_blk virtio0: [vda] 131072 512-byte logic
+
+=== (iii) QEMU cross-check: is MAP_SHARED guest RAM viable AT ALL here?
+  qemu-private-mem                   -> /init 3/4   [    2.912899] md: ... autorun DONE.
+  qemu-memfd-shared                  -> /init 0/4   [    4.178097] virtio_blk virtio1: [vda] 131072 512-byte logic
+--- qemu-memfd-shared stderr (attempt 1):
+    qemu-system-aarch64: terminating on signal 15 from pid 3451791 (timeout)
+
+
+############################################################################
+### PROBE increment-d — P6 evidence, part 2 (the cheap decisive experiments)
+### captured: 2026-08-02T17:17:18+02:00
+############################################################################
+
+############ ENVIRONMENT ############
+uname -r         : 7.0.0-28-generic
+uname -m         : aarch64   <- DEV-HOST ARTIFACT; production/CI is x86_64
+cloud-hypervisor : cloud-hypervisor v46.0.0
+virtiofsd        : virtiofsd 1.13.2
+virtiofsd path   : /usr/libexec/virtiofsd
+virtiofsd on PATH: <NOT ON PATH — command -v returns nothing>
+qemu             : QEMU emulator version 10.2.1 (Debian 1:10.2.1+ds-1ubuntu3.1)
+systemd-detect-virt: apple
+guest fs config  : CONFIG_FUSE_FS=y CONFIG_VIRTIO_FS=m 
+
+############ virtiofsd --sandbox and --readonly surface ([D8d], [D8g]) ############
+      --socket-group <SOCKET_GROUP>
+          Name of group for the vhost-user socket
+
+      --fd <FD>
+          File descriptor for the listening (not yet connected) socket
+--
+      --sandbox <SANDBOX>
+          Sandbox mechanism to isolate the daemon process (namespace, chroot, none)
+          
+          [default: namespace]
+
+      --readonly
+          Prevent the guest from making modifications to the filesystem
+
+      --seccomp <SECCOMP>
+          Action to take when seccomp finds a not allowed syscall (none, kill, log, trap)
+--
+      --cache <CACHE>
+          The caching policy the file system should use (auto, always, never, metadata)
+          
+          [default: auto]
+
+
+
+############################################################################
+### EXPERIMENT D-1 — the P5 x P6 interaction: --memory shared=on backs guest
+### RAM with a memfd, and a memfd counts as a FILE for RLIMIT_FSIZE.
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/evidence.sh: line 32: full: command not found
+### (surfaced as CH exit 153 = 128+SIGXFSZ on every  attempt)
+############################################################################
+### uname -r: 7.0.0-28-generic   CH: cloud-hypervisor v46.0.0
+### rootfs image size: 100663296 bytes (96 MiB)
+
+=== does shared=on, and only shared=on, trip RLIMIT_FSIZE?
+  noshare-fsize256               memory=size=512M              RLIMIT_FSIZE=256   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/rlimitdiff.sh: line 40: 3452385 File size limit exceeded   timeout 12 prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "$CMDLINE" --disk "path=$run/rootfs.ext4" --serial "file=$run/console.log" --console off --api-socket "path=$run/ch-api.sock" --vsock "cid=3,socket=$run/ch.vsock" --seccomp true --landlock --landlock-rules "path=$run,access=rw" > "$run/ch.log" 2>&1
+  sharedon-fsize256              memory=size=512M,shared=on    RLIMIT_FSIZE=256   MiB  rc=153  *** SIGXFSZ (128+25) — RLIMIT_FSIZE exceeded ***
+
+=== does raising the ceiling above GUEST RAM fix shared=on?
+  sharedon-fsize768              memory=size=512M,shared=on    RLIMIT_FSIZE=768   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+  sharedon-fsize1024             memory=size=512M,shared=on    RLIMIT_FSIZE=1024  MiB  rc=124  launched, killed at 12s (no rlimit failure)
+
+=== does the threshold track --memory size rather than the rootfs size?
+/Users/marcus/conductor/workspaces/helios/hanoi/spike-scratch/increment-d/rlimitdiff.sh: line 40: 3452469 File size limit exceeded   timeout 12 prlimit "--fsize=$((fsize_mib * 1024 * 1024))" --nofile=256 -- setpriv --reuid="$VMM_USER" --regid="$VMM_GID" --init-groups --no-new-privs -- cloud-hypervisor --cpus boot=1 --memory "$mem" --kernel "$KERNEL" --cmdline "$CMDLINE" --disk "path=$run/rootfs.ext4" --serial "file=$run/console.log" --console off --api-socket "path=$run/ch-api.sock" --vsock "cid=3,socket=$run/ch.vsock" --seccomp true --landlock --landlock-rules "path=$run,access=rw" > "$run/ch.log" 2>&1
+  sharedon-256M-fsize192         memory=size=256M,shared=on    RLIMIT_FSIZE=192   MiB  rc=153  *** SIGXFSZ (128+25) — RLIMIT_FSIZE exceeded ***
+  sharedon-256M-fsize384         memory=size=256M,shared=on    RLIMIT_FSIZE=384   MiB  rc=124  launched, killed at 12s (no rlimit failure)
+
+=== is it really a memfd? (mappings of a shared=on VMM that survives)
+--- /proc/3452499/maps lines mentioning memfd or /dev/shm:
+    f1c1c811c000-f1c1e811c000 rw-s 00000000 00:01 7218                       /memfd:ch_ram (deleted)
+--- open fds that are memfds:
+    lrwx------ 1 spikevmm spikevmm 64 Aug  2 17:18 26 -> /memfd:ch_ram (deleted)
+--- RssShmem (shared-backed resident pages):
+    VmRSS:	   86416 kB
+    RssAnon:	     316 kB
+    RssFile:	    2892 kB
+    RssShmem:	   83208 kB
+
+--- contrast: the same VMM WITHOUT shared=on
+--- /proc/3452549/maps lines mentioning memfd or /dev/shm:
+    matches: 0
+--- open fds that are memfds:
+    matches: 0
+    VmRSS:	   93320 kB
+    RssAnon:	   90428 kB
+    RssFile:	    2892 kB
+    RssShmem:	       0 kB
+
+--- (probe complete; the trailing kill -9 above is bookkeeping, not a failure)
+
+
+############################################################################
+### EXPERIMENT D-4 — which Landlock rules does CH need once the fs device
+### is present, and does it ever need the volume SOURCE directory? ([D8e])
+###
+### Answerable despite the shared=on boot stall: CH builds its ruleset and
+### creates every device (incl. connecting to the vhost-user socket) BEFORE
+### the guest kernel runs, so a run that reaches the guest's virtio_blk
+### probe has already created its fs device.
+############################################################################
+### uname -r: 7.0.0-28-generic  CH: cloud-hypervisor v46.0.0  virtiofsd: virtiofsd 1.13.2
+### volume SOURCE dir (never granted to CH in any trial below): /var/tmp/spike-increment-d/volsrc-rw
+
+=== Q1: is a --landlock-rules entry for the vhost-user socket dir required?
+  --- no-fsd-rule
+      rules  : path=/run/spike-d-fsdll/no-fsd-rule,access=rw
+      rc=124  GUEST KERNEL RAN (all devices created, incl. the fs device)
+      fsd log: 
+
+  --- with-fsd-rule
+      rules  : path=/run/spike-d-fsdll/with-fsd-rule,access=rw path=/run/spike-d-fsdll/with-fsd-rule-FSD,access=rw
+      rc=124  GUEST KERNEL RAN (all devices created, incl. the fs device)
+      fsd log: 
+
+=== Q2: was the volume SOURCE dir ever granted? (it was not, in either trial)
+    /var/tmp/spike-increment-d/volsrc-rw appears in no rule above. If 'with-fsd-rule' reached the guest
+    kernel, CH created the fs device without ever being granted the source.
+
+=== who actually opens the volume source? (virtiofsd's fds vs CH's)
+--- virtiofsd pid=3452642  cwd/root/fds:
+    lrwxrwxrwx+ 1 root root 0 Aug  2 17:19 /proc/3452642/cwd -> /conductor/workspaces/helios/hanoi
+    lrwxrwxrwx  1 root root 0 Aug  2 17:19 /proc/3452642/root -> /
+    total 0
+    lr-x------ 1 root root 64 Aug  2 17:19 0 -> /dev/null
+    l-wx------ 1 root root 64 Aug  2 17:19 1 -> /run/spike-d-fsdll/whoopens-FSD/fsd.log
+    l-wx------ 1 root root 64 Aug  2 17:19 2 -> /run/spike-d-fsdll/whoopens-FSD/fsd.log
+    l-wx------ 1 root root 64 Aug  2 17:19 3 -> /run/spike-d-fsdll/whoopens-FSD/volrw.sock.pid
+    l-wx------ 1 root root 64 Aug  2 17:19 6 -> pipe:[4464211]
+    lr-x------ 1 root root 64 Aug  2 17:19 7 -> pipe:[4464212]
+--- virtiofsd namespaces (does --sandbox=namespace actually unshare?):
+    mnt   virtiofsd=mnt:[4026536701]  shell=mnt:[4026531832]
+    pid   virtiofsd=pid:[4026531836]  shell=pid:[4026531836]
+    user  virtiofsd=user:[4026531837]  shell=user:[4026531837]
+    net   virtiofsd=net:[4026537062]  shell=net:[4026531833]
+
+############################################################################
+### LEDGER — what P6 ANSWERED here, and what it did NOT
+############################################################################
+
+ANSWERED (arch-independent; the evidence is above):
+  A1 --memory shared=on x RLIMIT_FSIZE. shared=on backs guest RAM with a
+     memfd (/memfd:ch_ram, mapped rw-s, held as an open fd), and a memfd
+     is a FILE for RLIMIT_FSIZE. CH dies with SIGXFSZ (exit 153) unless
+     the ceiling covers GUEST RAM. Threshold tracks --memory size, not the
+     disk image: 256M guest RAM fails at 192 MiB and passes at 384 MiB.
+     => the P5 rlimit must be max(rootfs image, guest RAM) once volumes
+        are attached. increment-c sized it off the rootfs alone.
+  A2 CH v46 Landlock: --fs socket= IS auto-derived (boot reached the guest
+     kernel with the vhost-user socket dir in NO rule, as a SIBLING of the
+     granted dir). Contrast --vsock, which is NOT (increment-c).
+  A3 [D8e] holds: the volume SOURCE directory was granted in no trial and
+     CH created the fs device anyway. Volumes do NOT widen [D7]'s
+     hypervisor confinement. US-VM-8's non-widening AC stands.
+  A4 virtiofsd 1.13.2 --sandbox=namespace is the DEFAULT and is genuinely
+     in effect: mnt and net namespace inodes differ from the shell's.
+     pid and user do NOT differ. Say 'mount+net namespace', not 'full
+     namespace sandbox' — that precision is exactly what [D8d] exists for.
+  A5 --socket-group=<vmm user> makes the vhost-user socket srwxrwx--- root:
+     <group>, which is how a uid-dropped CH connects without a chmod 0666.
+  A6 virtiofsd lives at /usr/libexec/virtiofsd and is NOT on PATH.
+  A7 shared=on reclassifies the VMM's RSS rather than obviously inflating
+     it: at the same early lifecycle point, shared=on gave VmRSS 86432 kB
+     (RssShmem 83224 / RssAnon 316) and private gave VmRSS 93320 kB
+     (RssAnon 90428 / RssShmem 0). Same order of magnitude, different
+     accounting bucket. NOTE this is an EARLY-BOOT sample, not the
+     controlled post-beacon sample the probe was built to take.
+
+NOT ANSWERED — and NOT refuted. Every one of these needs a guest that
+boots under shared=on, which no VMM can do on this host:
+  U1 guest<->host file round-trip through the share
+  U2 host-side --readonly enforcement against an UNCOOPERATIVE guest
+     ([D8g]). The guest-side write was never attempted, so the host-side
+     'file unchanged' observation is VACUOUS and is deliberately NOT
+     reported as evidence (run.sh skips that block when the guest did
+     not complete).
+  U3 what a FAILED guest mount looks like from inside the guest
+  U4 volume write throughput / per-file latency under --cache=never
+     (the host-side direct-write baseline WAS measured: 32 MiB write+fsync
+     in 0.0717 s ~= 446 MiB/s, and 200 small files in 0.0203 s; there is
+     no virtiofs number to compare it against)
+  U5 whether shared=on changes the GUEST's observed MemTotal (the
+     [D8b] x US-VM-5 / GH #92 interaction)
+  U6 the controlled post-beacon shared=on-vs-private memory delta
+
+WHY UNANSWERABLE HERE — the falsification chain, all of it above:
+  * without shared=on the guest reaches /init 11 times out of 12
+  * with shared=on it reaches /init 0 times out of 18, always freezing
+    immediately after the virtio_blk probe (the root-mount boundary)
+  * root+unconfined stalls identically => NOT a confinement interaction
+  * prefault=on / thp=off / 128M all stall => NOT a --memory shape
+  * QEMU 10.2.1, a completely different VMM, with
+    -object memory-backend-memfd,share=on stalls at the IDENTICAL point
+    (0/4) while the same QEMU with private memory boots (3/4)
+  => MAP_SHARED guest memory does not survive nested KVM on Apple Silicon
+     (systemd-detect-virt reports 'apple'). This is a DEV-HOST artifact of
+     the same class increment-a documented, not a Cloud Hypervisor defect
+     and not evidence against [D8].
+
+############################################################################
+### ISOLATION CHECK (.claude/rules/spike.md)
+############################################################################
+git status --porcelain -- crates/  :
+    (empty above = crates/ untouched)
+git check-ignore -q spike-scratch && echo 'spike-scratch/ is gitignored' :
+    spike-scratch/ IS gitignored

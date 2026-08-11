@@ -1,0 +1,1186 @@
+##################################################################
+### increment-k BENCH   mem=2048MiB trials=5 walk=2MiB/tick
+### modes (interleaved): copy ondemand copy-prefault
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### started          : 2026-08-10T19:16:04+00:00
+##################################################################
+
+### DEVICE BASELINE — cold sequential read of one 2 GiB memory-ranges.
+### Any restore that beats this is reading from RAM, not the device.
+###   O_DIRECT : 2147483648 bytes (2.1 GB, 2.0 GiB) copied, 0.852198 s, 2.5 GB/s
+###   buffered : 2147483648 bytes (2.1 GB, 2.0 GiB) copied, 0.832012 s, 2.6 GB/s
+
+==================================================================
+=== TRIAL 1 / 5   mode=copy   mem=2048MiB   2026-08-10T19:16:06+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64212692 
+### date             : 2026-08-10T19:16:06+00:00
+##################################################################
+### increment-k  label=t1-copy-2048 mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98158
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 687 ms
+### pre-snapshot: nonce=3305229612f451bcbb58cf05c0122996 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719552 kB RssAnon=1714996 RssFile=4552 RssShmem=4
+### vm.pause -> 204 (1.7 ms) 
+### vm.snapshot -> 204 (0.190 s) 
+### snapshot bytes: apparent=2147524619 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                39911 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.190 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393668 -> 166172 kB (delta 4227496 kB)
+### restore VMM pid=98169
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t1-copy-2048","memory_restore_mode":"Copy"}
+### vm.restore -> 204 (0.6465 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102656 kB  RssAnon=2098100  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.197 s  apparent=2147524628 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102660      2098104         4556            0   true     62069900       <none>
+       100       2102668      2098108         4560            0   true     62069912          170
+       200       2102668      2098108         4560            0   true     62112256          176
+       300       2102668      2098108         4560            0   true     62112256          184
+       500       2102668      2098108         4560            0   true     62112256          198
+       750       2102668      2098108         4560            0   true     62111968          214
+      1000       2102668      2098108         4560            0   true     62112464          232
+      1500       2102668      2098108         4560            0   true     62112464          268
+      2000       2102668      2098108         4560            0   true     62112464          302
+      3000       2102668      2098108         4560            0   true     62112464          372
+      6000       2102668      2098108         4560            0   true     62114452          580
+     10000       2102668      2098108         4560            0   true     62124904          858
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98170    comm=vmm                cpu_jiffies=40
+      tid=98174    comm=vcpu0              cpu_jiffies=9
+      tid=98169    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98171    comm=http-server        cpu_jiffies=0
+      tid=98172    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98173    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   3305229612f451bcbb58cf05c0122996
+  BOOT_NONCE after    3305229612f451bcbb58cf05c0122996
+  last tick before    80
+  last tick after     428
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t1-copy-2048 mode=copy mem_mib=2048 status=OK genuine=true restore_s=0.6465 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=4.2 user_visible_ms=651.9 rss_at_restore_kb=2102656 rss_t0_kb=2102660 rss_t200_kb=2102668 rss_t1000_kb=2102668 rss_t3000_kb=2102668 rss_t10000_kb=2102668 bad=0 zero=0 banners=0 snap_apparent=2147524619 snap_ondisk=2147528704 walk_mib=2 traj=0:2102660:<none>,100:2102668:170,200:2102668:176,300:2102668:184,500:2102668:198,750:2102668:214,1000:2102668:232,1500:2102668:268,2000:2102668:302,3000:2102668:372,6000:2102668:580,10000:2102668:858
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 1 / 5   mode=ondemand   mem=2048MiB   2026-08-10T19:16:22+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64212376 
+### date             : 2026-08-10T19:16:22+00:00
+##################################################################
+### increment-k  label=t1-ondemand-2048 mode=ondemand mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98200
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 687 ms
+### pre-snapshot: nonce=3f9c7e313612ef00c25ecb6edff2dc27 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1725744 kB RssAnon=1721140 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.191 s) 
+### snapshot bytes: apparent=2147524647 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1068 B            4096 B on disk
+###   state.json                39931 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.191 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393596 -> 166140 kB (delta 4227456 kB)
+### restore VMM pid=98213
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t1-ondemand-2048","memory_restore_mode":"OnDemand"}
+### vm.restore -> 204 (0.0175 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=17404 kB  RssAnon=12848  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0013 s 
+
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524645 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         18052        13496         4556            0   true     64274808       <none>
+       100         75936        71376         4560            0   true     64177712          164
+       200        162152       157592         4560            0   true     64052488          168
+       300        250660       246100         4560            0   true     63966068          172
+       500        433280       428720         4560            0   true     63781120          186
+       750        664216       659656         4560            0   true     63540552          202
+      1000        896452       891892         4560            0   true     63306548          218
+      1500       1364840      1360280         4560            0   true     62839092          250
+      2000       1835504      1830944         4560            0   true     62375620          282
+      3000       2102680      2098120         4560            0   true     62110628          348
+      6000       2102680      2098120         4560            0   true     62112168          544
+     10000       2102680      2098120         4560            0   true     62111540          822
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98217    comm=uffd-handler       cpu_jiffies=73
+      tid=98219    comm=vcpu0              cpu_jiffies=18
+      tid=98213    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98214    comm=vmm                cpu_jiffies=0
+      tid=98215    comm=http-server        cpu_jiffies=0
+      tid=98216    comm=vmm_signal_hand    cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   3f9c7e313612ef00c25ecb6edff2dc27
+  BOOT_NONCE after    3f9c7e313612ef00c25ecb6edff2dc27
+  last tick before    80
+  last tick after     410
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t1-ondemand-2048 mode=ondemand mem_mib=2048 status=OK genuine=true restore_s=0.0175 resume_s=0.0013 first_tick_n=81 resume_to_tick_ms=72.5 user_visible_ms=91.3 rss_at_restore_kb=17404 rss_t0_kb=18052 rss_t200_kb=162152 rss_t1000_kb=896452 rss_t3000_kb=2102680 rss_t10000_kb=2102680 bad=0 zero=0 banners=0 snap_apparent=2147524647 snap_ondisk=2147528704 walk_mib=2 traj=0:18052:<none>,100:75936:164,200:162152:168,300:250660:172,500:433280:186,750:664216:202,1000:896452:218,1500:1364840:250,2000:1835504:282,3000:2102680:348,6000:2102680:544,10000:2102680:822
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 1 / 5   mode=copy-prefault   mem=2048MiB   2026-08-10T19:16:38+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64215436 
+### date             : 2026-08-10T19:16:38+00:00
+##################################################################
+### increment-k  label=t1-copy-prefault-2048 mode=copy-prefault mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98246
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 693 ms
+### pre-snapshot: nonce=a0df889dc27e6cac806e3994c1eb49a1 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719600 kB RssAnon=1714996 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.8 ms) 
+### vm.snapshot -> 204 (0.191 s) 
+### snapshot bytes: apparent=2147524651 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1078 B            4096 B on disk
+###   state.json                39925 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.191 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393584 -> 166316 kB (delta 4227268 kB)
+### restore VMM pid=98261
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t1-copy-prefault-2048","prefault":true}
+### vm.restore -> 204 (1.5692 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102716 kB  RssAnon=2098096  RssFile=4620  RssShmem=0
+### vm.resume -> 204 in 0.0013 s 
+
+=========== RE-CHECKPOINT after a copy-prefault restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524660 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102720      2098100         4620            0   true     62123400       <none>
+       100       2102728      2098104         4624            0   true     62123536          170
+       200       2102728      2098104         4624            0   true     62123536          176
+       300       2102728      2098104         4624            0   true     62123536          182
+       500       2102728      2098104         4624            0   true     62123536          194
+       750       2102728      2098104         4624            0   true     62123536          212
+      1000       2102728      2098104         4624            0   true     62123536          228
+      1500       2102728      2098104         4624            0   true     62123536          260
+      2000       2102728      2098104         4624            0   true     62123536          292
+      3000       2102732      2098108         4624            0   true     62123284          356
+      6000       2102732      2098108         4624            0   true     62121156          550
+     10000       2102732      2098108         4624            0   true     62120148          810
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98262    comm=vmm                cpu_jiffies=33
+      tid=98267    comm=vcpu0              cpu_jiffies=14
+      tid=98261    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98263    comm=http-server        cpu_jiffies=0
+      tid=98264    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98266    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   a0df889dc27e6cac806e3994c1eb49a1
+  BOOT_NONCE after    a0df889dc27e6cac806e3994c1eb49a1
+  last tick before    80
+  last tick after     404
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t1-copy-prefault-2048 mode=copy-prefault mem_mib=2048 status=OK genuine=true restore_s=1.5692 resume_s=0.0013 first_tick_n=81 resume_to_tick_ms=8.5 user_visible_ms=1578.9 rss_at_restore_kb=2102716 rss_t0_kb=2102720 rss_t200_kb=2102728 rss_t1000_kb=2102728 rss_t3000_kb=2102732 rss_t10000_kb=2102732 bad=0 zero=0 banners=0 snap_apparent=2147524651 snap_ondisk=2147528704 walk_mib=2 traj=0:2102720:<none>,100:2102728:170,200:2102728:176,300:2102728:182,500:2102728:194,750:2102728:212,1000:2102728:228,1500:2102728:260,2000:2102728:292,3000:2102732:356,6000:2102732:550,10000:2102732:810
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 2 / 5   mode=copy   mem=2048MiB   2026-08-10T19:16:56+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64118964 
+### date             : 2026-08-10T19:16:56+00:00
+##################################################################
+### increment-k  label=t2-copy-2048 mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98292
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 687 ms
+### pre-snapshot: nonce=722e55ce85f52ba8e689317531692f9d tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719596 kB RssAnon=1714992 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.193 s) 
+### snapshot bytes: apparent=2147524635 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                39927 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.193 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393712 -> 165960 kB (delta 4227752 kB)
+### restore VMM pid=98309
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t2-copy-2048","memory_restore_mode":"Copy"}
+### vm.restore -> 204 (0.8435 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102656 kB  RssAnon=2098100  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524642 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102668      2098108         4560            0   true     62028968       <none>
+       100       2102668      2098108         4560            0   true     62029112          170
+       200       2102668      2098108         4560            0   true     62029112          176
+       300       2102668      2098108         4560            0   true     62029112          184
+       500       2102668      2098108         4560            0   true     62029112          198
+       750       2102668      2098108         4560            0   true     62029112          214
+      1000       2102668      2098108         4560            0   true     62029112          232
+      1500       2102668      2098108         4560            0   true     62029748          268
+      2000       2102668      2098108         4560            0   true     62037812          302
+      3000       2102668      2098108         4560            0   true     62038048          372
+      6000       2102668      2098108         4560            0   true     62046112          580
+     10000       2102668      2098108         4560            0   true     62061896          858
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98310    comm=vmm                cpu_jiffies=40
+      tid=98314    comm=vcpu0              cpu_jiffies=10
+      tid=98309    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98311    comm=http-server        cpu_jiffies=0
+      tid=98312    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98313    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   722e55ce85f52ba8e689317531692f9d
+  BOOT_NONCE after    722e55ce85f52ba8e689317531692f9d
+  last tick before    80
+  last tick after     428
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t2-copy-2048 mode=copy mem_mib=2048 status=OK genuine=true restore_s=0.8435 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=4.3 user_visible_ms=849.0 rss_at_restore_kb=2102656 rss_t0_kb=2102668 rss_t200_kb=2102668 rss_t1000_kb=2102668 rss_t3000_kb=2102668 rss_t10000_kb=2102668 bad=0 zero=0 banners=0 snap_apparent=2147524635 snap_ondisk=2147528704 walk_mib=2 traj=0:2102668:<none>,100:2102668:170,200:2102668:176,300:2102668:184,500:2102668:198,750:2102668:214,1000:2102668:232,1500:2102668:268,2000:2102668:302,3000:2102668:372,6000:2102668:580,10000:2102668:858
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 2 / 5   mode=ondemand   mem=2048MiB   2026-08-10T19:17:13+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64050444 
+### date             : 2026-08-10T19:17:13+00:00
+##################################################################
+### increment-k  label=t2-ondemand-2048 mode=ondemand mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98343
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 686 ms
+### pre-snapshot: nonce=daa487769a07e1e8eef71044ea9a5517 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1727788 kB RssAnon=1723184 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.7 ms) 
+### vm.snapshot -> 204 (0.189 s) 
+### snapshot bytes: apparent=2147524637 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1068 B            4096 B on disk
+###   state.json                39921 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.189 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393592 -> 166164 kB (delta 4227428 kB)
+### restore VMM pid=98353
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t2-ondemand-2048","memory_restore_mode":"OnDemand"}
+### vm.restore -> 204 (0.0122 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=13008 kB  RssAnon=8452  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.197 s  apparent=2147524677 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         13560         9004         4556            0   true     64145296       <none>
+       100         70280        65720         4560            0   true     64067804          164
+       200        155952       151392         4560            0   true     63931740          168
+       300        243216       238656         4560            0   true     63843956          172
+       500        425572       421012         4560            0   true     63659092          186
+       750        654940       650380         4560            0   true     63434652          202
+      1000        886620       882060         4560            0   true     63200888          218
+      1500       1343632      1339072         4560            0   true     62742292          250
+      2000       1804024      1799464         4560            0   true     62266328          282
+      3000       2102684      2098124         4560            0   true     61970036          346
+      6000       2102684      2098124         4560            0   true     61975684          540
+     10000       2102684      2098124         4560            0   true     61975180          798
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98357    comm=uffd-handler       cpu_jiffies=72
+      tid=98359    comm=vcpu0              cpu_jiffies=18
+      tid=98353    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98354    comm=vmm                cpu_jiffies=0
+      tid=98355    comm=http-server        cpu_jiffies=0
+      tid=98356    comm=vmm_signal_hand    cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   daa487769a07e1e8eef71044ea9a5517
+  BOOT_NONCE after    daa487769a07e1e8eef71044ea9a5517
+  last tick before    80
+  last tick after     398
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t2-ondemand-2048 mode=ondemand mem_mib=2048 status=OK genuine=true restore_s=0.0122 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=70.5 user_visible_ms=83.9 rss_at_restore_kb=13008 rss_t0_kb=13560 rss_t200_kb=155952 rss_t1000_kb=886620 rss_t3000_kb=2102684 rss_t10000_kb=2102684 bad=0 zero=0 banners=0 snap_apparent=2147524637 snap_ondisk=2147528704 walk_mib=2 traj=0:13560:<none>,100:70280:164,200:155952:168,300:243216:172,500:425572:186,750:654940:202,1000:886620:218,1500:1343632:250,2000:1804024:282,3000:2102684:346,6000:2102684:540,10000:2102684:798
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 2 / 5   mode=copy-prefault   mem=2048MiB   2026-08-10T19:17:29+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64092448 
+### date             : 2026-08-10T19:17:29+00:00
+##################################################################
+### increment-k  label=t2-copy-prefault-2048 mode=copy-prefault mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98384
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 690 ms
+### pre-snapshot: nonce=851282b0d5ffcb1f06b120e1738d418c tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719600 kB RssAnon=1714996 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.191 s) 
+### snapshot bytes: apparent=2147524658 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1078 B            4096 B on disk
+###   state.json                39932 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.191 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393580 -> 166164 kB (delta 4227416 kB)
+### restore VMM pid=98395
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t2-copy-prefault-2048","prefault":true}
+### vm.restore -> 204 (1.5606 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102716 kB  RssAnon=2098096  RssFile=4620  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy-prefault restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524671 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102720      2098100         4620            0   true     62068716       <none>
+       100       2102728      2098104         4624            0   true     62068588          168
+       200       2102728      2098104         4624            0   true     62068588          176
+       300       2102728      2098104         4624            0   true     62068588          182
+       500       2102728      2098104         4624            0   true     62076536          194
+       750       2102728      2098104         4624            0   true     62076536          210
+      1000       2102728      2098104         4624            0   true     62076664          226
+      1500       2102728      2098104         4624            0   true     62076664          260
+      2000       2102728      2098104         4624            0   true     62080120          292
+      3000       2102728      2098104         4624            0   true     62080384          356
+      6000       2102728      2098104         4624            0   true     62083812          550
+     10000       2102728      2098104         4624            0   true     62086368          808
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98396    comm=vmm                cpu_jiffies=33
+      tid=98401    comm=vcpu0              cpu_jiffies=13
+      tid=98395    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98397    comm=http-server        cpu_jiffies=0
+      tid=98398    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98400    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   851282b0d5ffcb1f06b120e1738d418c
+  BOOT_NONCE after    851282b0d5ffcb1f06b120e1738d418c
+  last tick before    80
+  last tick after     403
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t2-copy-prefault-2048 mode=copy-prefault mem_mib=2048 status=OK genuine=true restore_s=1.5606 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=14.6 user_visible_ms=1576.4 rss_at_restore_kb=2102716 rss_t0_kb=2102720 rss_t200_kb=2102728 rss_t1000_kb=2102728 rss_t3000_kb=2102728 rss_t10000_kb=2102728 bad=0 zero=0 banners=0 snap_apparent=2147524658 snap_ondisk=2147528704 walk_mib=2 traj=0:2102720:<none>,100:2102728:168,200:2102728:176,300:2102728:182,500:2102728:194,750:2102728:210,1000:2102728:226,1500:2102728:260,2000:2102728:292,3000:2102728:356,6000:2102728:550,10000:2102728:808
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 3 / 5   mode=copy   mem=2048MiB   2026-08-10T19:17:46+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64155124 
+### date             : 2026-08-10T19:17:46+00:00
+##################################################################
+### increment-k  label=t3-copy-2048 mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98426
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 690 ms
+### pre-snapshot: nonce=07091987e0025af4d8f037fd1067a58b tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1727788 kB RssAnon=1723184 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.193 s) 
+### snapshot bytes: apparent=2147524639 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                39931 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.193 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393584 -> 166164 kB (delta 4227420 kB)
+### restore VMM pid=98437
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t3-copy-2048","memory_restore_mode":"Copy"}
+### vm.restore -> 204 (0.8487 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102656 kB  RssAnon=2098100  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.198 s  apparent=2147524638 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102668      2098108         4560            0   true     61944784       <none>
+       100       2102668      2098108         4560            0   true     61961876          170
+       200       2102668      2098108         4560            0   true     61961876          176
+       300       2102668      2098108         4560            0   true     61961876          184
+       500       2102668      2098108         4560            0   true     61961876          198
+       750       2102668      2098108         4560            0   true     61961876          216
+      1000       2102668      2098108         4560            0   true     61961876          232
+      1500       2102668      2098108         4560            0   true     61961372          268
+      2000       2102668      2098108         4560            0   true     61961372          302
+      3000       2102672      2098112         4560            0   true     61961368          372
+      6000       2102672      2098112         4560            0   true     61965552          580
+     10000       2102672      2098112         4560            0   true     61997740          858
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98438    comm=vmm                cpu_jiffies=40
+      tid=98442    comm=vcpu0              cpu_jiffies=9
+      tid=98437    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98439    comm=http-server        cpu_jiffies=0
+      tid=98440    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98441    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   07091987e0025af4d8f037fd1067a58b
+  BOOT_NONCE after    07091987e0025af4d8f037fd1067a58b
+  last tick before    80
+  last tick after     428
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t3-copy-2048 mode=copy mem_mib=2048 status=OK genuine=true restore_s=0.8487 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=4.2 user_visible_ms=854.1 rss_at_restore_kb=2102656 rss_t0_kb=2102668 rss_t200_kb=2102668 rss_t1000_kb=2102668 rss_t3000_kb=2102672 rss_t10000_kb=2102672 bad=0 zero=0 banners=0 snap_apparent=2147524639 snap_ondisk=2147528704 walk_mib=2 traj=0:2102668:<none>,100:2102668:170,200:2102668:176,300:2102668:184,500:2102668:198,750:2102668:216,1000:2102668:232,1500:2102668:268,2000:2102668:302,3000:2102672:372,6000:2102672:580,10000:2102672:858
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 3 / 5   mode=ondemand   mem=2048MiB   2026-08-10T19:18:03+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64096676 
+### date             : 2026-08-10T19:18:03+00:00
+##################################################################
+### increment-k  label=t3-ondemand-2048 mode=ondemand mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98467
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 695 ms
+### pre-snapshot: nonce=e929fa031b0bb0be0022d0bf6be2eef6 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1727792 kB RssAnon=1723188 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.8 ms) 
+### vm.snapshot -> 204 (0.184 s) 
+### snapshot bytes: apparent=2147524632 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1068 B            4096 B on disk
+###   state.json                39916 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.184 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393580 -> 166156 kB (delta 4227424 kB)
+### restore VMM pid=98478
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t3-ondemand-2048","memory_restore_mode":"OnDemand"}
+### vm.restore -> 204 (0.0151 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=15488 kB  RssAnon=10932  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524635 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         16156        11600         4556            0   true     64142308       <none>
+       100         72312        67752         4560            0   true     64050072          164
+       200        158920       154360         4560            0   true     63912976          168
+       300        248060       243500         4560            0   true     63832640          174
+       500        431612       427052         4560            0   true     63648288          188
+       750        640832       636272         4560            0   true     63439080          204
+      1000        872304       867744         4560            0   true     63197488          220
+      1500       1339088      1334528         4560            0   true     62729520          252
+      2000       1798140      1793580         4560            0   true     62266576          284
+      3000       2102684      2098124         4560            0   true     61961436          350
+      6000       2102684      2098124         4560            0   true     62028716          556
+     10000       2102684      2098124         4560            0   true     62030436          826
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98482    comm=uffd-handler       cpu_jiffies=70
+      tid=98484    comm=vcpu0              cpu_jiffies=16
+      tid=98478    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98479    comm=vmm                cpu_jiffies=0
+      tid=98480    comm=http-server        cpu_jiffies=0
+      tid=98481    comm=vmm_signal_hand    cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   e929fa031b0bb0be0022d0bf6be2eef6
+  BOOT_NONCE after    e929fa031b0bb0be0022d0bf6be2eef6
+  last tick before    80
+  last tick after     412
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t3-ondemand-2048 mode=ondemand mem_mib=2048 status=OK genuine=true restore_s=0.0151 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=64.1 user_visible_ms=80.5 rss_at_restore_kb=15488 rss_t0_kb=16156 rss_t200_kb=158920 rss_t1000_kb=872304 rss_t3000_kb=2102684 rss_t10000_kb=2102684 bad=0 zero=0 banners=0 snap_apparent=2147524632 snap_ondisk=2147528704 walk_mib=2 traj=0:16156:<none>,100:72312:164,200:158920:168,300:248060:174,500:431612:188,750:640832:204,1000:872304:220,1500:1339088:252,2000:1798140:284,3000:2102684:350,6000:2102684:556,10000:2102684:826
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 3 / 5   mode=copy-prefault   mem=2048MiB   2026-08-10T19:18:19+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64135288 
+### date             : 2026-08-10T19:18:19+00:00
+##################################################################
+### increment-k  label=t3-copy-prefault-2048 mode=copy-prefault mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98510
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 692 ms
+### pre-snapshot: nonce=0b80724e26e8dc161d37ccb9632459ba tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719600 kB RssAnon=1714996 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.195 s) 
+### snapshot bytes: apparent=2147524662 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1078 B            4096 B on disk
+###   state.json                39936 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.195 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393580 -> 166284 kB (delta 4227296 kB)
+### restore VMM pid=98520
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t3-copy-prefault-2048","prefault":true}
+### vm.restore -> 204 (1.5698 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102720 kB  RssAnon=2098100  RssFile=4620  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy-prefault restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524665 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102724      2098104         4620            0   true     62109116       <none>
+       100       2102732      2098108         4624            0   true     62108980          170
+       200       2102732      2098108         4624            0   true     62108980          176
+       300       2102732      2098108         4624            0   true     62108980          182
+       500       2102732      2098108         4624            0   true     62108980          194
+       750       2102732      2098108         4624            0   true     62108980          212
+      1000       2102732      2098108         4624            0   true     62108980          228
+      1500       2102732      2098108         4624            0   true     62108980          260
+      2000       2102732      2098108         4624            0   true     62108980          292
+      3000       2102732      2098108         4624            0   true     62109052          356
+      6000       2102732      2098108         4624            0   true     62092124          550
+     10000       2102732      2098108         4624            0   true     62090612          810
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98521    comm=vmm                cpu_jiffies=33
+      tid=98526    comm=vcpu0              cpu_jiffies=14
+      tid=98520    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98522    comm=http-server        cpu_jiffies=0
+      tid=98523    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98525    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   0b80724e26e8dc161d37ccb9632459ba
+  BOOT_NONCE after    0b80724e26e8dc161d37ccb9632459ba
+  last tick before    80
+  last tick after     404
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t3-copy-prefault-2048 mode=copy-prefault mem_mib=2048 status=OK genuine=true restore_s=1.5698 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=8.3 user_visible_ms=1579.3 rss_at_restore_kb=2102720 rss_t0_kb=2102724 rss_t200_kb=2102732 rss_t1000_kb=2102732 rss_t3000_kb=2102732 rss_t10000_kb=2102732 bad=0 zero=0 banners=0 snap_apparent=2147524662 snap_ondisk=2147528704 walk_mib=2 traj=0:2102724:<none>,100:2102732:170,200:2102732:176,300:2102732:182,500:2102732:194,750:2102732:212,1000:2102732:228,1500:2102732:260,2000:2102732:292,3000:2102732:356,6000:2102732:550,10000:2102732:810
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 4 / 5   mode=copy   mem=2048MiB   2026-08-10T19:18:37+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64110204 
+### date             : 2026-08-10T19:18:37+00:00
+##################################################################
+### increment-k  label=t4-copy-2048 mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98553
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 688 ms
+### pre-snapshot: nonce=99a198a368c8c59b551b8c456196fe77 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719600 kB RssAnon=1714996 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.7 ms) 
+### vm.snapshot -> 204 (0.193 s) 
+### snapshot bytes: apparent=2147524631 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                39923 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.193 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393708 -> 166032 kB (delta 4227676 kB)
+### restore VMM pid=98563
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t4-copy-2048","memory_restore_mode":"Copy"}
+### vm.restore -> 204 (0.8755 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102656 kB  RssAnon=2098100  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0013 s 
+
+=========== RE-CHECKPOINT after a copy restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.199 s  apparent=2147524636 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102668      2098108         4560            0   true     61969972       <none>
+       100       2102668      2098108         4560            0   true     61969656          170
+       200       2102668      2098108         4560            0   true     61969656          176
+       300       2102668      2098108         4560            0   true     61969656          184
+       500       2102668      2098108         4560            0   true     61969656          198
+       750       2102668      2098108         4560            0   true     61969656          214
+      1000       2102668      2098108         4560            0   true     61969656          232
+      1500       2102668      2098108         4560            0   true     61974288          268
+      2000       2102668      2098108         4560            0   true     61974288          302
+      3000       2102668      2098108         4560            0   true     62063424          372
+      6000       2102668      2098108         4560            0   true     62063544          580
+     10000       2102668      2098108         4560            0   true     62063660          856
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98564    comm=vmm                cpu_jiffies=40
+      tid=98568    comm=vcpu0              cpu_jiffies=9
+      tid=98563    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98565    comm=http-server        cpu_jiffies=0
+      tid=98566    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98567    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   99a198a368c8c59b551b8c456196fe77
+  BOOT_NONCE after    99a198a368c8c59b551b8c456196fe77
+  last tick before    80
+  last tick after     428
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t4-copy-2048 mode=copy mem_mib=2048 status=OK genuine=true restore_s=0.8755 resume_s=0.0013 first_tick_n=81 resume_to_tick_ms=4.3 user_visible_ms=881.1 rss_at_restore_kb=2102656 rss_t0_kb=2102668 rss_t200_kb=2102668 rss_t1000_kb=2102668 rss_t3000_kb=2102668 rss_t10000_kb=2102668 bad=0 zero=0 banners=0 snap_apparent=2147524631 snap_ondisk=2147528704 walk_mib=2 traj=0:2102668:<none>,100:2102668:170,200:2102668:176,300:2102668:184,500:2102668:198,750:2102668:214,1000:2102668:232,1500:2102668:268,2000:2102668:302,3000:2102668:372,6000:2102668:580,10000:2102668:856
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 4 / 5   mode=ondemand   mem=2048MiB   2026-08-10T19:18:53+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64173964 
+### date             : 2026-08-10T19:18:53+00:00
+##################################################################
+### increment-k  label=t4-ondemand-2048 mode=ondemand mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98593
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 687 ms
+### pre-snapshot: nonce=eee3fc92c063ecc6ddfaa682d5c7bb60 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1723696 kB RssAnon=1719092 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.191 s) 
+### snapshot bytes: apparent=2147524642 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1068 B            4096 B on disk
+###   state.json                39926 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.424 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.191 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393592 -> 166104 kB (delta 4227488 kB)
+### restore VMM pid=98603
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t4-ondemand-2048","memory_restore_mode":"OnDemand"}
+### vm.restore -> 204 (0.0120 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=13032 kB  RssAnon=8476  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.179 s  apparent=2147524643 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         13692         9136         4556            0   true     64074896       <none>
+       100         70456        65896         4560            0   true     63995344          164
+       200        155876       151316         4560            0   true     63868908          168
+       300        238556       233996         4560            0   true     63779644          172
+       500        420840       416280         4560            0   true     63593496          184
+       750        653040       648480         4560            0   true     63359940          202
+      1000        883664       879104         4560            0   true     63122632          220
+      1500       1350480      1345920         4560            0   true     62653536          256
+      2000       1818604      1814044         4560            0   true     62195328          292
+      3000       2102684      2098124         4560            0   true     61956768          360
+      6000       2102684      2098124         4560            0   true     61960324          556
+     10000       2102684      2098124         4560            0   true     62020808          816
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98607    comm=uffd-handler       cpu_jiffies=72
+      tid=98609    comm=vcpu0              cpu_jiffies=18
+      tid=98603    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98604    comm=vmm                cpu_jiffies=0
+      tid=98605    comm=http-server        cpu_jiffies=0
+      tid=98606    comm=vmm_signal_hand    cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   eee3fc92c063ecc6ddfaa682d5c7bb60
+  BOOT_NONCE after    eee3fc92c063ecc6ddfaa682d5c7bb60
+  last tick before    80
+  last tick after     407
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t4-ondemand-2048 mode=ondemand mem_mib=2048 status=OK genuine=true restore_s=0.0120 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=72.6 user_visible_ms=85.8 rss_at_restore_kb=13032 rss_t0_kb=13692 rss_t200_kb=155876 rss_t1000_kb=883664 rss_t3000_kb=2102684 rss_t10000_kb=2102684 bad=0 zero=0 banners=0 snap_apparent=2147524642 snap_ondisk=2147528704 walk_mib=2 traj=0:13692:<none>,100:70456:164,200:155876:168,300:238556:172,500:420840:184,750:653040:202,1000:883664:220,1500:1350480:256,2000:1818604:292,3000:2102684:360,6000:2102684:556,10000:2102684:816
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 4 / 5   mode=copy-prefault   mem=2048MiB   2026-08-10T19:19:09+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64006400 
+### date             : 2026-08-10T19:19:09+00:00
+##################################################################
+### increment-k  label=t4-copy-prefault-2048 mode=copy-prefault mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98637
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 693 ms
+### pre-snapshot: nonce=552b895f7d1ffaebb797e5ca46ae07c5 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1727788 kB RssAnon=1723184 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.5 ms) 
+### vm.snapshot -> 204 (0.190 s) 
+### snapshot bytes: apparent=2147524659 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1078 B            4096 B on disk
+###   state.json                39933 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.190 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393588 -> 166172 kB (delta 4227416 kB)
+### restore VMM pid=98647
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t4-copy-prefault-2048","prefault":true}
+### vm.restore -> 204 (1.5793 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102720 kB  RssAnon=2098100  RssFile=4620  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a copy-prefault restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.194 s  apparent=2147524663 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102724      2098104         4620            0   true     62030652       <none>
+       100       2102732      2098108         4624            0   true     62030528          168
+       200       2102732      2098108         4624            0   true     62030528          176
+       300       2102732      2098108         4624            0   true     62030528          182
+       500       2102732      2098108         4624            0   true     62031880          194
+       750       2102732      2098108         4624            0   true     62031880          210
+      1000       2102732      2098108         4624            0   true     62031880          226
+      1500       2102732      2098108         4624            0   true     62031880          258
+      2000       2102732      2098108         4624            0   true     62031876          292
+      3000       2102736      2098112         4624            0   true     62031876          356
+      6000       2102736      2098112         4624            0   true     62034340          550
+     10000       2102736      2098112         4624            0   true     62021380          808
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98648    comm=vmm                cpu_jiffies=33
+      tid=98653    comm=vcpu0              cpu_jiffies=15
+      tid=98647    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98649    comm=http-server        cpu_jiffies=0
+      tid=98650    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98652    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   552b895f7d1ffaebb797e5ca46ae07c5
+  BOOT_NONCE after    552b895f7d1ffaebb797e5ca46ae07c5
+  last tick before    80
+  last tick after     403
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t4-copy-prefault-2048 mode=copy-prefault mem_mib=2048 status=OK genuine=true restore_s=1.5793 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=12.5 user_visible_ms=1593.0 rss_at_restore_kb=2102720 rss_t0_kb=2102724 rss_t200_kb=2102732 rss_t1000_kb=2102732 rss_t3000_kb=2102736 rss_t10000_kb=2102736 bad=0 zero=0 banners=0 snap_apparent=2147524659 snap_ondisk=2147528704 walk_mib=2 traj=0:2102724:<none>,100:2102732:168,200:2102732:176,300:2102732:182,500:2102732:194,750:2102732:210,1000:2102732:226,1500:2102732:258,2000:2102732:292,3000:2102736:356,6000:2102736:550,10000:2102736:808
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 5 / 5   mode=copy   mem=2048MiB   2026-08-10T19:19:27+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64077812 
+### date             : 2026-08-10T19:19:27+00:00
+##################################################################
+### increment-k  label=t5-copy-2048 mode=copy mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98678
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 688 ms
+### pre-snapshot: nonce=8ec89b1826812684f3b5958834acbdd8 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719596 kB RssAnon=1714992 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.7 ms) 
+### vm.snapshot -> 204 (0.190 s) 
+### snapshot bytes: apparent=2147524630 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1060 B            4096 B on disk
+###   state.json                39922 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.190 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393524 -> 166160 kB (delta 4227364 kB)
+### restore VMM pid=98688
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t5-copy-2048","memory_restore_mode":"Copy"}
+### vm.restore -> 204 (0.8543 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102656 kB  RssAnon=2098100  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0013 s 
+
+=========== RE-CHECKPOINT after a copy restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.199 s  apparent=2147524638 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102668      2098108         4560            0   true     62015644       <none>
+       100       2102668      2098108         4560            0   true     62015524          170
+       200       2102668      2098108         4560            0   true     62015524          176
+       300       2102668      2098108         4560            0   true     62015524          184
+       500       2102668      2098108         4560            0   true     62015524          198
+       750       2102668      2098108         4560            0   true     62015524          216
+      1000       2102668      2098108         4560            0   true     62015524          232
+      1500       2102668      2098108         4560            0   true     62015524          268
+      2000       2102668      2098108         4560            0   true     62015524          302
+      3000       2102668      2098108         4560            0   true     62044484          372
+      6000       2102668      2098108         4560            0   true     62104308          580
+     10000       2102668      2098108         4560            0   true     62106160          858
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98689    comm=vmm                cpu_jiffies=40
+      tid=98693    comm=vcpu0              cpu_jiffies=10
+      tid=98688    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98690    comm=http-server        cpu_jiffies=0
+      tid=98691    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98692    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   8ec89b1826812684f3b5958834acbdd8
+  BOOT_NONCE after    8ec89b1826812684f3b5958834acbdd8
+  last tick before    80
+  last tick after     428
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t5-copy-2048 mode=copy mem_mib=2048 status=OK genuine=true restore_s=0.8543 resume_s=0.0013 first_tick_n=81 resume_to_tick_ms=4.3 user_visible_ms=859.8 rss_at_restore_kb=2102656 rss_t0_kb=2102668 rss_t200_kb=2102668 rss_t1000_kb=2102668 rss_t3000_kb=2102668 rss_t10000_kb=2102668 bad=0 zero=0 banners=0 snap_apparent=2147524630 snap_ondisk=2147528704 walk_mib=2 traj=0:2102668:<none>,100:2102668:170,200:2102668:176,300:2102668:184,500:2102668:198,750:2102668:216,1000:2102668:232,1500:2102668:268,2000:2102668:302,3000:2102668:372,6000:2102668:580,10000:2102668:858
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 5 / 5   mode=ondemand   mem=2048MiB   2026-08-10T19:19:44+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64195896 
+### date             : 2026-08-10T19:19:44+00:00
+##################################################################
+### increment-k  label=t5-ondemand-2048 mode=ondemand mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98718
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 688 ms
+### pre-snapshot: nonce=c8ddd2ee7874e767bc44963091204ecf tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1717552 kB RssAnon=1712948 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.7 ms) 
+### vm.snapshot -> 204 (0.189 s) 
+### snapshot bytes: apparent=2147524646 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1068 B            4096 B on disk
+###   state.json                39930 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.423 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.189 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393568 -> 166164 kB (delta 4227404 kB)
+### restore VMM pid=98728
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t5-ondemand-2048","memory_restore_mode":"OnDemand"}
+### vm.restore -> 204 (0.0126 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=13444 kB  RssAnon=8888  RssFile=4556  RssShmem=0
+### vm.resume -> 204 in 0.0012 s 
+
+=========== RE-CHECKPOINT after a ondemand restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.192 s  apparent=2147524639 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0         13996         9440         4556            0   true     64187388       <none>
+       100         70048        65488         4560            0   true     64104644          164
+       200        155796       151236         4560            0   true     63980836          168
+       300        240344       235784         4560            0   true     63892676          172
+       500        423796       419236         4560            0   true     63707744          186
+       750        651148       646588         4560            0   true     63480880          202
+      1000        881796       877236         4560            0   true     63246632          218
+      1500       1349704      1345144         4560            0   true     62818008          250
+      2000       1816788      1812228         4560            0   true     62349788          282
+      3000       2102684      2098124         4560            0   true     62063764          348
+      6000       2102684      2098124         4560            0   true     62046972          544
+     10000       2102684      2098124         4560            0   true     62064612          806
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98732    comm=uffd-handler       cpu_jiffies=71
+      tid=98734    comm=vcpu0              cpu_jiffies=19
+      tid=98728    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98729    comm=vmm                cpu_jiffies=0
+      tid=98730    comm=http-server        cpu_jiffies=0
+      tid=98731    comm=vmm_signal_hand    cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   c8ddd2ee7874e767bc44963091204ecf
+  BOOT_NONCE after    c8ddd2ee7874e767bc44963091204ecf
+  last tick before    80
+  last tick after     402
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t5-ondemand-2048 mode=ondemand mem_mib=2048 status=OK genuine=true restore_s=0.0126 resume_s=0.0012 first_tick_n=81 resume_to_tick_ms=68.5 user_visible_ms=82.4 rss_at_restore_kb=13444 rss_t0_kb=13996 rss_t200_kb=155796 rss_t1000_kb=881796 rss_t3000_kb=2102684 rss_t10000_kb=2102684 bad=0 zero=0 banners=0 snap_apparent=2147524646 snap_ondisk=2147528704 walk_mib=2 traj=0:13996:<none>,100:70048:164,200:155796:168,300:240344:172,500:423796:186,750:651148:202,1000:881796:218,1500:1349704:250,2000:1816788:282,3000:2102684:348,6000:2102684:544,10000:2102684:806
+--- post-restore ch log (first 20 lines):
+
+==================================================================
+=== TRIAL 5 / 5   mode=copy-prefault   mem=2048MiB   2026-08-10T19:20:00+00:00
+==================================================================
+##################################################################
+### PROBE increment-k — memory_restore_mode=ondemand vs copy
+### cloud-hypervisor : cloud-hypervisor v53.0
+### kernel/arch      : 7.0.0-15-generic x86_64  virt=none
+### snapshot dir fs  : xfs
+### host mem         : MemTotal:=65401816 MemAvailable:=64175440 
+### date             : 2026-08-10T19:20:00+00:00
+##################################################################
+### increment-k  label=t5-copy-prefault-2048 mode=copy-prefault mem=2048MiB touch=1536MiB walk=2MiB/tick
+### pre-flight foreign cloud-hypervisor pids: []
+### boot VMM pid=98759
+### init: TOUCHED 1536 MiB (393216 pages, one index-derived byte each) in 686 ms
+### pre-snapshot: nonce=9acdd9ae457d0fec1b8e4a74e690ab83 tick=80 walked_mib=162 bad=0 zero=0
+### pre-snapshot VMM RSS: VmRSS=1719600 kB RssAnon=1714996 RssFile=4600 RssShmem=4
+### vm.pause -> 204 (1.6 ms) 
+### vm.snapshot -> 204 (0.194 s) 
+### snapshot bytes: apparent=2147524654 on_disk=2147528704 (guest RAM = 2147483648 B)
+###   config.json                1078 B            4096 B on disk
+###   state.json                39928 B           40960 B on disk
+###   memory-ranges        2147483648 B      2147483648 B on disk
+### sync() took 1.422 s  <- the REAL durability cost of vm.snapshot;
+###   vm.snapshot's own 0.194 s was page-cache speed, not durability (P8 said
+###   this at 512 MiB; it holds at 2048 MiB).
+### drop_caches=3: Cached 4393572 -> 166404 kB (delta 4227168 kB)
+### restore VMM pid=98769
+### PUT vm.restore body={"source_url":"file:///srv/vm/p13k/snap-t5-copy-prefault-2048","prefault":true}
+### vm.restore -> 204 (1.5625 s) 
+### RSS immediately after vm.restore RETURNED, BEFORE resume:
+###   VmRSS=2102716 kB  RssAnon=2098096  RssFile=4620  RssShmem=0
+### vm.resume -> 204 in 0.0013 s 
+
+=========== RE-CHECKPOINT after a copy-prefault restore ===========
+  GET vm.info -> 200  state="Running","memory_ac
+  PUT vm.pause -> 204 
+  PUT vm.snapshot -> 204 in 0.193 s  apparent=2147524657 on_disk=2147528704 
+
+=========== RSS TRAJECTORY (the laziness control) ===========
+      t_ms      VmRSS_kB   RssAnon_kB   RssFile_kB  RssShmem_kB  alive hostAvail_kB    guest_MiB
+         0       2102720      2098100         4620            0   true     62084824       <none>
+       100       2102728      2098104         4624            0   true     62084196          170
+       200       2102728      2098104         4624            0   true     62084196          176
+       300       2102728      2098104         4624            0   true     62084196          182
+       500       2102728      2098104         4624            0   true     62084196          194
+       750       2102728      2098104         4624            0   true     62086720          212
+      1000       2102728      2098104         4624            0   true     62085964          228
+      1500       2102728      2098104         4624            0   true     62085964          260
+      2000       2102728      2098104         4624            0   true     62088728          292
+      3000       2102728      2098104         4624            0   true     62091752          356
+      6000       2102728      2098104         4624            0   true     62097408          554
+     10000       2102728      2098104         4624            0   true     62099968          816
+  (t is ms since vm.resume RETURNED; guest_MiB is the guest's own
+   cumulative verified WALK at that instant)
+
+--- VMM threads at t=750ms, by CPU (who is populating the memory?)
+      tid=98770    comm=vmm                cpu_jiffies=34
+      tid=98775    comm=vcpu0              cpu_jiffies=14
+      tid=98769    comm=cloud-hyperviso    cpu_jiffies=0
+      tid=98771    comm=http-server        cpu_jiffies=0
+      tid=98772    comm=vmm_signal_hand    cpu_jiffies=0
+      tid=98774    comm=_disk0_q0          cpu_jiffies=0
+
+=========== CORRECTNESS (mandatory; a reboot is FAST) =======
+  BOOT_NONCE before   9acdd9ae457d0fec1b8e4a74e690ab83
+  BOOT_NONCE after    9acdd9ae457d0fec1b8e4a74e690ab83
+  last tick before    80
+  last tick after     407
+  boot banners after  0   (must be 0)
+  walk bad pages      0      (must be 0)
+  walk zero pages     0      (must be 0 — a page served as ZERO
+                              is lazy paging that never fetched content)
+  VERDICT             +++ GENUINE MEMORY RESTORE
+
+K-RESULT label=t5-copy-prefault-2048 mode=copy-prefault mem_mib=2048 status=OK genuine=true restore_s=1.5625 resume_s=0.0013 first_tick_n=81 resume_to_tick_ms=6.3 user_visible_ms=1570.1 rss_at_restore_kb=2102716 rss_t0_kb=2102720 rss_t200_kb=2102728 rss_t1000_kb=2102728 rss_t3000_kb=2102728 rss_t10000_kb=2102728 bad=0 zero=0 banners=0 snap_apparent=2147524654 snap_ondisk=2147528704 walk_mib=2 traj=0:2102720:<none>,100:2102728:170,200:2102728:176,300:2102728:182,500:2102728:194,750:2102728:212,1000:2102728:228,1500:2102728:260,2000:2102728:292,3000:2102728:356,6000:2102728:554,10000:2102728:816
+--- post-restore ch log (first 20 lines):
+
+##################################################################
+### SUMMARY — every sample printed, nothing averaged away
+##################################################################

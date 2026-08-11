@@ -3890,7 +3890,11 @@ sharpenings and two extensions plus one lane call; **rows 9–11 were added
 2026-08-11** when the user's Bar-2 ruling landed upstream. Row 10 is the one
 place this lane delivers an upstream **property** by a **different mechanism**
 than the one named, and it is written as such rather than left for a reader to
-notice.
+notice. **Row 10 is CLOSED as of 2026-08-11** — SD-1 pin 5 was revised to assert
+the property and to name registration as inert, so the two sections agree and
+cross-reference each other; the substitution is recorded, not outstanding. **Row
+11's `VM_RECLAMATION_SWEEP_INTERVAL = 30 s` was ratified by the user on the same
+date**, mechanism and value both.
 
 | # | Upstream | This wave |
 |---|---|---|
@@ -3903,8 +3907,8 @@ notice.
 | 7 | DD-5's declared universe (`alloc_status[alloc_id]` ∪ `restart_counts[alloc_id]`) | **Extended by one slot: `last_failure_seen_at[alloc_id]`, declared complement-equal.** It is failure memory, and a reclamation is not a failure — and stamping it would make a reclaimed workload serve a backoff window before returning, the opposite of SD-1's stated intent. An extension, not a contradiction |
 | 8 | DD-3 / Hera's re-assignment: *"naming the individual Slice 02/03/04 Cause variants is re-assigned to you, bounded by DD-3's two-axis rule"* | **Delivered: twelve `TransitionReason::Vm*` variants** (ADR-0083 § D5). All on the **Cause** axis; the reclamation **disposition** is deliberately excluded and must not be counted toward K3, which twelve exceeds three times over anyway |
 | 9 | DD-1(b) + DD-5 (**added 2026-08-11**): two `Action` variants, two payload prohibitions, regimes never in a row / Ending Class / payload / predicate | **Adopted verbatim, names included.** `Action::ReclaimAllocation { alloc_id }` and `Action::DiscardStrandedArtifacts { alloc_id }`, appended after `LivenessExhausted` (`reconcilers/mod.rs:615`; `Action` derives neither serde nor rkyv, so **no envelope bump**). No disposition parameter, no regime field, no artifact enumeration — the executor re-observes. **The boot epoch is not a case anywhere in the design**: at boot the enumeration returns `Observed(∅)` and the one predicate is true for every VM allocation by construction, which is Hera's *"degenerate case of the steady-state rule rather than a second rule"* as code rather than as prose. `execute_discard_stranded_artifacts` has **no `ObservationStore` and no broker parameter**, so DD-5's *"declared delta empty over the observation universe"* is structural rather than remembered |
-| 10 | SD-1 pin 5: *"the reconciler is registered after the boot sequence completes"* | **Property delivered; mechanism sharpened, and stated rather than quietly diverged.** Registration must sit at the existing site (`lib.rs:1525-1773`) because `register` takes `&mut self` and `Arc::new(runtime)` at `:1774` precedes `AppState`'s construction, which the boot passes at `:2131-2147` then read. But registration is **inert** — it probes the `ViewStore` and `bulk_load`s views and drives no tick — and the only production driver of ticks, `spawn_convergence_loop`, is spawned at `lib.rs:2314-2320`, **strictly after** the boot passes. **That spawn ordering is the load-bearing fact** and is pinned as such (brief § 105a.7). SD-1's second half — *"not gated on `Vmm` composition"* — holds verbatim |
-| 11 | SD-1's *"steady-state ticks"* | **Extended with the mechanism they need, because Bar 2 does not supply it.** `EvaluationBroker` is purely event-driven, there is no bootstrap sweep, and `has_work` only *re*-enqueues a reconciler that already ticked — so **nothing in tree would ever tick `vm-reclamation`**. `spawn_convergence_loop` submits one evaluation every **`VM_RECLAMATION_SWEEP_INTERVAL = 30 s`** on its already-injected `Clock` (DST-controllable), and the boot drive submits one on completion. Three alternatives rejected, including a `last_swept_at` **View field** — which SD-1's pin 2 forbids, and which the runtime fsyncs *before* dispatching so it would record "last attempted". This is the **one** place the design touches shared convergence machinery, named as such |
+| 10 | SD-1 pin 5: *"the reconciler is registered after the boot sequence completes"* | **Property delivered; mechanism sharpened, and stated rather than quietly diverged.** Registration must sit at the existing site (`lib.rs:1525-1773`) because `register` takes `&mut self` and `Arc::new(runtime)` at `:1774` precedes `AppState`'s construction, which the boot passes at `:2131-2147` then read. But registration is **inert** — it probes the `ViewStore` and `bulk_load`s views and drives no tick — and the only production driver of ticks, `spawn_convergence_loop`, is spawned at `lib.rs:2314-2320`, **strictly after** the boot passes. **That spawn ordering is the load-bearing fact** and is pinned as such (brief § 105a.7). SD-1's second half — *"not gated on `Vmm` composition"* — holds verbatim. **CLOSED 2026-08-11** — SD-1 pin 5 now asserts the property, names registration **inert**, pins the strictly-after spawn as the constraint, and its C4 L2 registration edge reads the same; the cross-reference is mutual and no divergence remains. The `&mut self` / `Arc::new(runtime)` reason is retained deliberately — it is why registration order is not the constraint |
+| 11 | SD-1's *"steady-state ticks"* | **Extended with the mechanism they need, because Bar 2 does not supply it.** `EvaluationBroker` is purely event-driven, there is no bootstrap sweep, and `has_work` only *re*-enqueues a reconciler that already ticked — so **nothing in tree would ever tick `vm-reclamation`**. `spawn_convergence_loop` submits one evaluation every **`VM_RECLAMATION_SWEEP_INTERVAL = 30 s`** on its already-injected `Clock` (DST-controllable), and the boot drive submits one on completion. Three alternatives rejected, including a `last_swept_at` **View field** — which SD-1's pin 2 forbids, and which the runtime fsyncs *before* dispatching so it would record "last attempted". This is the **one** place the design touches shared convergence machinery, named as such. **RATIFIED by the user 2026-08-11** — mechanism *and* value; the constant is compile-time, **not operator-tunable, and no knob is promised** (a property, not an open question). The derivation and the three rejected alternatives are retained in brief § 105a.8, which is the single site for them |
 | — | The spike (P1, P2, P4, P5) | **No conflict.** P5's uid answer is consumed as-is (Slice 03's "open DESIGN input" is **answered**, not returned as a blocker); P1's arch split parameterises `KernelImage::validate`; P2 is the evidence for both the beacon protocol and the shutdown mechanism; P4's intra-filesystem constraint fixes where the clone lands |
 
 **Two apparent divergences that are lane calls, stated so they are not read as
@@ -4222,4 +4226,102 @@ low:
   - "ADR-0082 title and D2 heading still say 'unrepresentable' while the corrected body
      (:229-242) honestly downgrades to 'private fields + one rendering site + a dst-lint
      clause — not a type-level impossibility'. The body governs; the headers overclaim."
+```
+
+---
+
+## Wave: DESIGN — adversarial review, iteration 2 (Atlas, fable, 2026-08-11)
+
+All six iteration-1 findings verified FIXED against source, none regressed, blast radius
+propagated completely. One NEW high introduced *by* the Bar-2 revisions — it did not exist
+at iteration 1 because neither the steady-state tick nor the blank-cell authorisation did.
+
+```yaml
+review_id: "arch_rev_2026-08-11_design-wave-adversarial-iter2"
+reviewer: "solution-architect-reviewer (Atlas), model=fable"
+iteration: 2
+approval_status: "conditionally_approved"
+critical_issues_count: 0
+high_issues_count: 1
+
+iteration_1_findings: { R-C1: fixed, R-H1: fixed, R-H2: fixed, R-H3: fixed, R-H4: fixed, low_adr0082_title: fixed }
+
+new_findings:
+  - id: NEW-1
+    severity: high
+    issue: >-
+      Exit-in-flight window. The ordinary VM exit path transits DD-1(b)'s blank cell
+      (non-terminal + unsupervised) TRANSIENTLY: the watcher's wait() returns and the
+      supervision handle is released on the driver's task, while the terminal row is written
+      later by the exit-observer task (§104 pins them as separate tasks). A sweep tick landing
+      in that window sees alloc-on-all-three-host-surfaces + row still Running +
+      Observed(s)-without-the-alloc, fires diff row 1, and writes
+      Terminated/PlatformReclaimed racing the honest exit write on the same LWW key.
+      find_prior_alloc_row is used ONLY to resolve workload_id, not as a terminality guard,
+      so even LOSING the race does not save it. Consequences are DD-1's own forbidden lies:
+      a crash relabelled reclamation escapes the restart budget (crash-looping VM restarts
+      budget-free); a COMPLETED Job relabelled reclamation is re-driven — duplicate execution
+      of a side-effecting job. No §105a.11 invariant covers it —
+      SupervisedVmSurvivesEveryTick requires membership in the supervision set, which this
+      alloc has just left.
+    recommendation: >-
+      (a) release the supervision handle only AFTER the terminal row is written — DD-1(b)'s
+      own precondition applied honestly, since while the exit report is in flight the platform
+      demonstrably CAN still classify the ending; (b) execute_reclaim_allocation no-ops on a
+      terminal re-observed row; (c) read the supervision set BEFORE observe() in
+      hydrate_actual so skew fails toward "held" (§105a.2 currently lists the dangerous
+      order). Add the window as a fourth ESR invariant.
+  - id: NEW-2
+    severity: medium
+    issue: >-
+      plan_reclamation rows 3-4 emit DiscardStrandedArtifacts (whose executor kill_scopes a
+      live VMM) with supervision "(not consulted)", falsifying §105a.3's "the ONE
+      kill-authorising predicate" claim. Row 3 (terminal) is deliberately right — SD-1's
+      unstoppable orphan IS a terminal row with a live VMM — but should be stated as an
+      exemption. Row 4 (unknown) is ungrounded: any state where a LIVE VM's intent join
+      fails makes it "no entry", and the sweep kills it with no ending authored and no
+      supervision check.
+  - id: NEW-3
+    severity: medium
+    issue: >-
+      AC 5's byte-unchanged assertion vs a live watcher. The disposal executor structurally
+      cannot write a row (no ObservationStore/broker params — good), but its kill_scope on a
+      terminal-row VMM that is still supervised fires the live watcher, whose ExitEvent
+      advances updated_at at minimum. Shares a root with NEW-1: the supervision handle's
+      lifecycle at VMM death / failed stop is unpinned.
+  - id: NEW-4
+    severity: low
+    issue: "brief §106 describes the C-5 slice correction as pending; slice-01:15,180-185 has landed it."
+  - id: NEW-5
+    severity: low
+    issue: "Titan handoff item 6 still says steady-state reclamation is 'Platform Reclamation in DD-4's vocabulary'; superseded by DD-1(b) — it is Artifact Disposal, authors no ending."
+
+fail_safe_trace:
+  verdict: "The discriminator does NOT invert."
+  detail: >-
+    SupervisionSet::Unavailable is #[default] and reclamation_authorised returns false for it;
+    hydrate_desired leaves its half at Default, so reading the wrong half yields "nothing
+    authorised" — the empty-because-unpopulated case is closed BY THE TYPE, not by review.
+    Driver::live_allocations() -> None maps to Unavailable, never "supervises nothing". Both
+    Observed(0) cases are known facts about the world: no Vm registry entry means no VmDriver
+    exists to hold a handle; at boot the freshly-composed driver's live map is empty by
+    construction. Boot and steady state both correct THROUGH THE PREDICATE. The two holes
+    found are AROUND it (NEW-1, NEW-2), not in it.
+
+clean_on_recheck:
+  - "Hera's two-variant split + payload prohibitions coherent; empty declared delta structurally enforced at the executor (caveat NEW-3)"
+  - "The blank cell IS genuinely blank in Titan's table (brief:277-280); her classification does not contradict SD-1's safety property, which is scoped to SUPERVISED"
+  - "VmHostState hydration genuinely separable — observe() returns a plain value, plan_reclamation takes NO port; #197 can lift the seam as claimed"
+  - "Driver::live_allocations within intake I-2's explicit licence; REUSE->EXTEND reversal recorded honestly; None is the fail-safe default"
+  - "30 s sweep: Titan defers to §105a as the single site, no restatement, mechanism identical both ends; three-surface walk cost stated"
+  - "Registration/spawn substitution: brief:314-326, C4 edge :760, §105a.7 assert the same property with mutual cross-references; no residual divergence"
+  - "Vertical slice: registered unconditionally in run_server WITH a production wake (periodic submission + one boot-drive submission); not a reconciler nothing ticks"
+  - "ESR: three invariants + SimVmHostState + SimClock. Typed errors, newtypes, persist-inputs, no whitepaper dependency, no invented issue numbers — clean"
+
+praise: >-
+  SupervisionSet is the best type-driven design in this feature — Unavailable as #[default]
+  turns the empty-because-unpopulated review hazard into a compile-time property. AC 5 is
+  genuinely adversarial: the only assertion that catches an implementation collapsing the two
+  Actions into one. And across all three lanes every withdrawn claim (Bar-1, ~2.5 s,
+  "Proven: P2") is recorded AS withdrawn in place, with the manner of the error named.
 ```

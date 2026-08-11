@@ -1,0 +1,104 @@
+##################################################################
+### increment-l BENCH  mem=2048MiB touch=1536MiB trials=5
+### modes (interleaved): cold restore-copy restore-ondemand
+### observable         : the guest's FIRST post-start WORK record
+### cloud-hypervisor   : cloud-hypervisor v53.0
+### kernel/arch        : 7.0.0-15-generic x86_64
+### started            : 2026-08-10T20:50:17+00:00
+##################################################################
+
+### DEVICE BASELINE — cold sequential read of one 2048 MiB memory-ranges.
+### Any restore that beats this is reading from RAM, not the device.
+###   (no prior snapshot yet; baseline re-printed at the end)
+
+==================================================================
+=== TRIAL 1 / 5   mode=cold   mem=2048MiB   2026-08-10T20:50:17+00:00
+==================================================================
+### [b1-cold-2048-cold] sync+drop_caches: Cached 187656 -> 177280 kB (delta 10376)
+L-BENCH label=b1-cold-2048 mode=cold mem_mib=2048 status=OK spawn_ready_ms=1148.2 call_ms=-1 resume_ms=-1 guest_boot_to_ready_ms=16 mount_ms=4 scan_ms=1 recovered_high=300 first_seq=301 banners=1 snap_ondisk=0
+
+==================================================================
+=== TRIAL 1 / 5   mode=restore-copy   mem=2048MiB   2026-08-10T20:50:18+00:00
+==================================================================
+### [b1-restore-copy-2048-restore-copy] sync+drop_caches: Cached 2308620 -> 177892 kB (delta 2130728)
+L-BENCH label=b1-restore-copy-2048 mode=restore-copy mem_mib=2048 status=OK spawn_ready_ms=886.2 call_ms=864.7 resume_ms=1.3 genuine=true nonce_before=13fd8553de868f705d68c42ec379ebb1 nonce_after=13fd8553de868f705d68c42ec379ebb1 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 1 / 5   mode=restore-ondemand   mem=2048MiB   2026-08-10T20:50:24+00:00
+==================================================================
+### [b1-restore-ondemand-2048-restore-ondemand] sync+drop_caches: Cached 2308452 -> 177920 kB (delta 2130532)
+L-BENCH label=b1-restore-ondemand-2048 mode=restore-ondemand mem_mib=2048 status=OK spawn_ready_ms=120.2 call_ms=12.6 resume_ms=1.2 genuine=true nonce_before=f383f68e1c887005e84ee447234acd6e nonce_after=f383f68e1c887005e84ee447234acd6e banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 2 / 5   mode=cold   mem=2048MiB   2026-08-10T20:50:29+00:00
+==================================================================
+### [b2-cold-2048-cold] sync+drop_caches: Cached 193440 -> 177120 kB (delta 16320)
+L-BENCH label=b2-cold-2048 mode=cold mem_mib=2048 status=OK spawn_ready_ms=1158.5 call_ms=-1 resume_ms=-1 guest_boot_to_ready_ms=17 mount_ms=5 scan_ms=0 recovered_high=300 first_seq=301 banners=1 snap_ondisk=0
+
+==================================================================
+=== TRIAL 2 / 5   mode=restore-copy   mem=2048MiB   2026-08-10T20:50:30+00:00
+==================================================================
+### [b2-restore-copy-2048-restore-copy] sync+drop_caches: Cached 2308724 -> 177996 kB (delta 2130728)
+L-BENCH label=b2-restore-copy-2048 mode=restore-copy mem_mib=2048 status=OK spawn_ready_ms=901.1 call_ms=879.2 resume_ms=1.3 genuine=true nonce_before=0e606859cd173f93a06b130a8945af3f nonce_after=0e606859cd173f93a06b130a8945af3f banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 2 / 5   mode=restore-ondemand   mem=2048MiB   2026-08-10T20:50:36+00:00
+==================================================================
+### [b2-restore-ondemand-2048-restore-ondemand] sync+drop_caches: Cached 2308700 -> 178036 kB (delta 2130664)
+L-BENCH label=b2-restore-ondemand-2048 mode=restore-ondemand mem_mib=2048 status=OK spawn_ready_ms=120.0 call_ms=17.5 resume_ms=1.2 genuine=true nonce_before=3b6cc68ae53b8bec35e74b6eacd869a7 nonce_after=3b6cc68ae53b8bec35e74b6eacd869a7 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 3 / 5   mode=cold   mem=2048MiB   2026-08-10T20:50:41+00:00
+==================================================================
+### [b3-cold-2048-cold] sync+drop_caches: Cached 193952 -> 177308 kB (delta 16644)
+L-BENCH label=b3-cold-2048 mode=cold mem_mib=2048 status=OK spawn_ready_ms=1156.7 call_ms=-1 resume_ms=-1 guest_boot_to_ready_ms=17 mount_ms=5 scan_ms=0 recovered_high=300 first_seq=301 banners=1 snap_ondisk=0
+
+==================================================================
+=== TRIAL 3 / 5   mode=restore-copy   mem=2048MiB   2026-08-10T20:50:42+00:00
+==================================================================
+### [b3-restore-copy-2048-restore-copy] sync+drop_caches: Cached 2308836 -> 178220 kB (delta 2130616)
+L-BENCH label=b3-restore-copy-2048 mode=restore-copy mem_mib=2048 status=OK spawn_ready_ms=678.7 call_ms=657.1 resume_ms=1.2 genuine=true nonce_before=71e5111703d7077cd85c379e5712f831 nonce_after=71e5111703d7077cd85c379e5712f831 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 3 / 5   mode=restore-ondemand   mem=2048MiB   2026-08-10T20:50:48+00:00
+==================================================================
+### [b3-restore-ondemand-2048-restore-ondemand] sync+drop_caches: Cached 2308476 -> 177984 kB (delta 2130492)
+L-BENCH label=b3-restore-ondemand-2048 mode=restore-ondemand mem_mib=2048 status=OK spawn_ready_ms=141.2 call_ms=12.6 resume_ms=1.4 genuine=true nonce_before=09070ffd1d98446b4e382039f83fe7a3 nonce_after=09070ffd1d98446b4e382039f83fe7a3 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 4 / 5   mode=cold   mem=2048MiB   2026-08-10T20:50:53+00:00
+==================================================================
+### [b4-cold-2048-cold] sync+drop_caches: Cached 194088 -> 177604 kB (delta 16484)
+L-BENCH label=b4-cold-2048 mode=cold mem_mib=2048 status=OK spawn_ready_ms=1151.7 call_ms=-1 resume_ms=-1 guest_boot_to_ready_ms=16 mount_ms=5 scan_ms=0 recovered_high=300 first_seq=301 banners=1 snap_ondisk=0
+
+==================================================================
+=== TRIAL 4 / 5   mode=restore-copy   mem=2048MiB   2026-08-10T20:50:54+00:00
+==================================================================
+### [b4-restore-copy-2048-restore-copy] sync+drop_caches: Cached 2308880 -> 178208 kB (delta 2130672)
+L-BENCH label=b4-restore-copy-2048 mode=restore-copy mem_mib=2048 status=OK spawn_ready_ms=883.3 call_ms=866.5 resume_ms=1.3 genuine=true nonce_before=28188de894a345269210177601c0af76 nonce_after=28188de894a345269210177601c0af76 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 4 / 5   mode=restore-ondemand   mem=2048MiB   2026-08-10T20:51:00+00:00
+==================================================================
+### [b4-restore-ondemand-2048-restore-ondemand] sync+drop_caches: Cached 2308832 -> 178248 kB (delta 2130584)
+L-BENCH label=b4-restore-ondemand-2048 mode=restore-ondemand mem_mib=2048 status=OK spawn_ready_ms=114.3 call_ms=12.0 resume_ms=1.2 genuine=true nonce_before=c4561a4f6eb0a8d0723fae5fba73d56f nonce_after=c4561a4f6eb0a8d0723fae5fba73d56f banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 5 / 5   mode=cold   mem=2048MiB   2026-08-10T20:51:05+00:00
+==================================================================
+### [b5-cold-2048-cold] sync+drop_caches: Cached 194172 -> 177708 kB (delta 16464)
+L-BENCH label=b5-cold-2048 mode=cold mem_mib=2048 status=OK spawn_ready_ms=1150.9 call_ms=-1 resume_ms=-1 guest_boot_to_ready_ms=17 mount_ms=5 scan_ms=0 recovered_high=300 first_seq=301 banners=1 snap_ondisk=0
+
+==================================================================
+=== TRIAL 5 / 5   mode=restore-copy   mem=2048MiB   2026-08-10T20:51:06+00:00
+==================================================================
+### [b5-restore-copy-2048-restore-copy] sync+drop_caches: Cached 2309048 -> 178320 kB (delta 2130728)
+L-BENCH label=b5-restore-copy-2048 mode=restore-copy mem_mib=2048 status=OK spawn_ready_ms=878.7 call_ms=856.7 resume_ms=1.3 genuine=true nonce_before=63f257edee84f60a685e8256e5734d22 nonce_after=63f257edee84f60a685e8256e5734d22 banners=0 first_seq=342 snap_ondisk=2147536896
+
+==================================================================
+=== TRIAL 5 / 5   mode=restore-ondemand   mem=2048MiB   2026-08-10T20:51:12+00:00
+==================================================================
+### [b5-restore-ondemand-2048-restore-ondemand] sync+drop_caches: Cached 2308948 -> 178352 kB (delta 2130596)
+L-BENCH label=b5-restore-ondemand-2048 mode=restore-ondemand mem_mib=2048 status=OK spawn_ready_ms=116.1 call_ms=12.5 resume_ms=1.3 genuine=true nonce_before=9ebcb81b7f4ddc77fb8182e27beb4b6e nonce_after=9ebcb81b7f4ddc77fb8182e27beb4b6e banners=0 first_seq=342 snap_ondisk=2147536896
+
+### DEVICE BASELINE (again, at the END of the run)

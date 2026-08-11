@@ -1,0 +1,46 @@
+# PROBE increment-k — microvm-driver-cloud-hypervisor slice-00.
+#
+# Subject: `--restore memory_restore_mode=ondemand` (CH v52.0 #7800, userfaultfd
+# lazy demand paging) vs the default `copy`. Throwaway. Self-contained workspace
+# root. NEVER moved into crates/.
+#
+# Two binaries, and the split is deliberate:
+#
+#   guest-init-ondemand  PID 1 inside the microVM. Extends increment-g's
+#                        snapshot guest (RAM-only boot nonce + tick counter)
+#                        with a memory TOUCH phase (so the snapshot holds real
+#                        pages, not zeros) and a rate-controlled memory WALK
+#                        (so demand faults happen at a KNOWN rate after
+#                        restore, which is what makes an RSS ramp readable).
+#
+#   host-ondemand        The harness. increment-g drove the API from bash with
+#                        curl; that cannot time a restore to better than a fork,
+#                        and it cannot sample /proc on a fixed schedule while
+#                        simultaneously watching a console file. Both are
+#                        load-bearing here: the RSS TRAJECTORY is the control
+#                        that decides whether `ondemand` was actually lazy, and
+#                        a latency win with a copy-shaped RSS curve is not lazy
+#                        paging. So the harness speaks HTTP-over-unix itself.
+[workspace]
+
+[package]
+name = "spike-increment-k"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init-ondemand"
+path = "src/bin/guest_init_ondemand.rs"
+
+[[bin]]
+name = "host-ondemand"
+path = "src/bin/host_ondemand.rs"
+
+[profile.release]
+opt-level = 2
+panic = "abort"
+strip = true

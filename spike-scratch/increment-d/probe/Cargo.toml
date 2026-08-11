@@ -1,0 +1,25 @@
+# PROBE increment-d — microvm-driver-cloud-hypervisor slice-00 (P6).
+# Throwaway. Self-contained workspace root. NEVER moved into crates/.
+[workspace]
+
+[package]
+name = "spike-increment-d"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init-fs"
+path = "src/bin/guest_init_fs.rs"
+
+[[bin]]
+name = "host-collector"
+path = "src/bin/host_collector.rs"
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+strip = true

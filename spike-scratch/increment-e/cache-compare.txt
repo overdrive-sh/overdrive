@@ -1,0 +1,24 @@
+trial=1 cache=never
+    FS-THROUGHPUT 256 MiB write=0.164s fsync=0.179s total=0.343s -> 1561.2 MiB/s (write only) / 746.2 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.421s -> mean 0.42 ms/file, failures=0
+trial=1 cache=auto
+    FS-THROUGHPUT 256 MiB write=0.633s fsync=0.179s total=0.812s -> 404.2 MiB/s (write only) / 315.1 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.372s -> mean 0.37 ms/file, failures=0
+trial=2 cache=never
+    FS-THROUGHPUT 256 MiB write=0.165s fsync=0.179s total=0.344s -> 1555.0 MiB/s (write only) / 744.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.428s -> mean 0.43 ms/file, failures=0
+trial=2 cache=auto
+    FS-THROUGHPUT 256 MiB write=0.608s fsync=0.179s total=0.787s -> 421.0 MiB/s (write only) / 325.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.374s -> mean 0.37 ms/file, failures=0
+trial=3 cache=never
+    FS-THROUGHPUT 256 MiB write=0.168s fsync=0.179s total=0.347s -> 1527.7 MiB/s (write only) / 738.7 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.484s -> mean 0.48 ms/file, failures=0
+trial=3 cache=auto
+    FS-THROUGHPUT 256 MiB write=0.627s fsync=0.179s total=0.806s -> 408.5 MiB/s (write only) / 317.7 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.367s -> mean 0.37 ms/file, failures=0
+trial=4 cache=never
+    FS-THROUGHPUT 256 MiB write=0.166s fsync=0.180s total=0.345s -> 1544.8 MiB/s (write only) / 741.4 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.441s -> mean 0.44 ms/file, failures=0
+trial=4 cache=auto
+    FS-THROUGHPUT 256 MiB write=0.622s fsync=0.180s total=0.802s -> 411.6 MiB/s (write only) / 319.3 MiB/s (incl. fsync)
+    FS-LATENCY 1000 files (open+write+fsync+close) total=0.369s -> mean 0.37 ms/file, failures=0

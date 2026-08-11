@@ -1,0 +1,37 @@
+[RECON2 t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1235 (pid=87690)
+[RECON2 t=+0.016s] ACCEPT conn#1
+[RECON2 t=+0.016s] conn#1 <- NEW n=17 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+0.016s] conn#1 CLOSED after 1 lines (total 1)
+[RECON2 t=+0.522s] ACCEPT conn#2
+[RECON2 t=+0.522s] conn#2 <- NEW n=18 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+0.522s] conn#2 CLOSED after 1 lines (total 2)
+[RECON2 t=+1.028s] ACCEPT conn#3
+[RECON2 t=+1.028s] conn#3 <- NEW n=19 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+1.028s] conn#3 CLOSED after 1 lines (total 3)
+[RECON2 t=+1.533s] ACCEPT conn#4
+[RECON2 t=+1.533s] conn#4 <- NEW n=20 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+1.533s] conn#4 CLOSED after 1 lines (total 4)
+[RECON2 t=+2.038s] ACCEPT conn#5
+[RECON2 t=+2.038s] conn#5 <- NEW n=21 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+2.038s] conn#5 CLOSED after 1 lines (total 5)
+[RECON2 t=+2.543s] ACCEPT conn#6
+[RECON2 t=+2.543s] conn#6 <- NEW n=22 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+2.543s] conn#6 CLOSED after 1 lines (total 6)
+[RECON2 t=+3.049s] ACCEPT conn#7
+[RECON2 t=+3.049s] conn#7 <- NEW n=23 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+3.049s] conn#7 CLOSED after 1 lines (total 7)
+[RECON2 t=+3.555s] ACCEPT conn#8
+[RECON2 t=+3.555s] conn#8 <- NEW n=24 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+3.555s] conn#8 CLOSED after 1 lines (total 8)
+[RECON2 t=+4.060s] ACCEPT conn#9
+[RECON2 t=+4.060s] conn#9 <- NEW n=25 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+4.060s] conn#9 CLOSED after 1 lines (total 9)
+[RECON2 t=+4.566s] ACCEPT conn#10
+[RECON2 t=+4.566s] conn#10 <- NEW n=26 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+4.566s] conn#10 CLOSED after 1 lines (total 10)
+[RECON2 t=+5.072s] ACCEPT conn#11
+[RECON2 t=+5.072s] conn#11 <- NEW n=27 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+5.072s] conn#11 CLOSED after 1 lines (total 11)
+[RECON2 t=+5.577s] ACCEPT conn#12
+[RECON2 t=+5.577s] conn#12 <- NEW n=28 nonce=1da1ee2679e76f5f917fc6c5ec71a095
+[RECON2 t=+5.577s] conn#12 CLOSED after 1 lines (total 12)

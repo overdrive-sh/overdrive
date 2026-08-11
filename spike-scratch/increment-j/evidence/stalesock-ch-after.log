@@ -1,0 +1,1 @@
+cloud-hypervisor:   0.074775s: <vmm> ERROR:vmm/src/lib.rs:2391 -- VM Restore failed: DeviceManager(CreateVsockBackend(UnixBind(Os { code: 98, kind: AddrInUse, message: "Address in use" })))

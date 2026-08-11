@@ -1,0 +1,85 @@
+[RECON t=+0.000s] bound /run/spike-increment-j/vsock/ch.vsock_1235 (pid=87805)
+[RECON t=+1.238s] ACCEPT conn#1
+[RECON t=+1.238s] conn#1 <- NEW n=0 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+1.238s] conn#1 CLOSED after 1 lines (total 1)
+[RECON t=+1.741s] ACCEPT conn#2
+[RECON t=+1.741s] conn#2 <- NEW n=1 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+1.742s] conn#2 CLOSED after 1 lines (total 2)
+[RECON t=+2.247s] ACCEPT conn#3
+[RECON t=+2.247s] conn#3 <- NEW n=2 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+2.247s] conn#3 CLOSED after 1 lines (total 3)
+[RECON t=+2.753s] ACCEPT conn#4
+[RECON t=+2.753s] conn#4 <- NEW n=3 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+2.753s] conn#4 CLOSED after 1 lines (total 4)
+[RECON t=+3.259s] ACCEPT conn#5
+[RECON t=+3.259s] conn#5 <- NEW n=4 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+3.259s] conn#5 CLOSED after 1 lines (total 5)
+[RECON t=+3.764s] ACCEPT conn#6
+[RECON t=+3.764s] conn#6 <- NEW n=5 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+3.764s] conn#6 CLOSED after 1 lines (total 6)
+[RECON t=+4.270s] ACCEPT conn#7
+[RECON t=+4.270s] conn#7 <- NEW n=6 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+4.270s] conn#7 CLOSED after 1 lines (total 7)
+[RECON t=+4.776s] ACCEPT conn#8
+[RECON t=+4.776s] conn#8 <- NEW n=7 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+4.776s] conn#8 CLOSED after 1 lines (total 8)
+[RECON t=+5.281s] ACCEPT conn#9
+[RECON t=+5.281s] conn#9 <- NEW n=8 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+5.281s] conn#9 CLOSED after 1 lines (total 9)
+[RECON t=+5.787s] ACCEPT conn#10
+[RECON t=+5.787s] conn#10 <- NEW n=9 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+5.787s] conn#10 CLOSED after 1 lines (total 10)
+[RECON t=+6.292s] ACCEPT conn#11
+[RECON t=+6.292s] conn#11 <- NEW n=10 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+6.292s] conn#11 CLOSED after 1 lines (total 11)
+[RECON t=+6.995s] ACCEPT conn#12
+[RECON t=+6.995s] conn#12 <- NEW n=11 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+6.995s] conn#12 CLOSED after 1 lines (total 12)
+[RECON t=+7.500s] ACCEPT conn#13
+[RECON t=+7.500s] conn#13 <- NEW n=12 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+7.500s] conn#13 CLOSED after 1 lines (total 13)
+[RECON t=+8.005s] ACCEPT conn#14
+[RECON t=+8.005s] conn#14 <- NEW n=13 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+8.005s] conn#14 CLOSED after 1 lines (total 14)
+[RECON t=+8.511s] ACCEPT conn#15
+[RECON t=+8.511s] conn#15 <- NEW n=14 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+8.511s] conn#15 CLOSED after 1 lines (total 15)
+[RECON t=+9.016s] ACCEPT conn#16
+[RECON t=+9.016s] conn#16 <- NEW n=15 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+9.017s] conn#16 CLOSED after 1 lines (total 16)
+[RECON t=+9.522s] ACCEPT conn#17
+[RECON t=+9.522s] conn#17 <- NEW n=16 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+9.522s] conn#17 CLOSED after 1 lines (total 17)
+[RECON t=+10.028s] ACCEPT conn#18
+[RECON t=+10.028s] conn#18 <- NEW n=17 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+10.028s] conn#18 CLOSED after 1 lines (total 18)
+[RECON t=+10.533s] ACCEPT conn#19
+[RECON t=+10.533s] conn#19 <- NEW n=18 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+10.533s] conn#19 CLOSED after 1 lines (total 19)
+[RECON t=+11.039s] ACCEPT conn#20
+[RECON t=+11.039s] conn#20 <- NEW n=19 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+11.039s] conn#20 CLOSED after 1 lines (total 20)
+[RECON t=+11.544s] ACCEPT conn#21
+[RECON t=+11.545s] conn#21 <- NEW n=20 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+11.545s] conn#21 CLOSED after 1 lines (total 21)
+[RECON t=+12.050s] ACCEPT conn#22
+[RECON t=+12.050s] conn#22 <- NEW n=21 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+12.050s] conn#22 CLOSED after 1 lines (total 22)
+[RECON t=+12.556s] ACCEPT conn#23
+[RECON t=+12.556s] conn#23 <- NEW n=22 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+12.556s] conn#23 CLOSED after 1 lines (total 23)
+[RECON t=+13.062s] ACCEPT conn#24
+[RECON t=+13.062s] conn#24 <- NEW n=23 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+13.062s] conn#24 CLOSED after 1 lines (total 24)
+[RECON t=+13.567s] ACCEPT conn#25
+[RECON t=+13.567s] conn#25 <- NEW n=24 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+13.567s] conn#25 CLOSED after 1 lines (total 25)
+[RECON t=+14.073s] ACCEPT conn#26
+[RECON t=+14.073s] conn#26 <- NEW n=25 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+14.073s] conn#26 CLOSED after 1 lines (total 26)
+[RECON t=+14.579s] ACCEPT conn#27
+[RECON t=+14.579s] conn#27 <- NEW n=26 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+14.579s] conn#27 CLOSED after 1 lines (total 27)
+[RECON t=+15.084s] ACCEPT conn#28
+[RECON t=+15.084s] conn#28 <- NEW n=27 nonce=964052c30a681a2c9d6636c4506ed23a
+[RECON t=+15.084s] conn#28 CLOSED after 1 lines (total 28)

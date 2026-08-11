@@ -1,0 +1,26 @@
+# PROBE increment-a — microvm-driver-cloud-hypervisor slice-00 (P1 + P2).
+# Throwaway. Self-contained workspace root so the parent Overdrive workspace
+# never sees it. NEVER moved into crates/.
+[workspace]
+
+[package]
+name = "spike-increment-a"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "guest-init"
+path = "src/bin/guest_init.rs"
+
+[[bin]]
+name = "host-listener"
+path = "src/bin/host_listener.rs"
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+strip = true
