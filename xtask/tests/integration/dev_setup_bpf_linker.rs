@@ -7,11 +7,13 @@
 //! toolchain bits the Lima YAML provisions in `infra/lima/overdrive-dev.yaml`:
 //!
 //! - `bpf-linker` via `cargo install --locked bpf-linker`
-//! - `nightly` rustup toolchain via `rustup toolchain install nightly
-//!   --component rust-src --profile minimal`
-//! - `rust-src` component on nightly via `rustup component add rust-src
-//!   --toolchain nightly` (when the toolchain is already present but
-//!   the component is missing).
+//! - the pinned `BPF_NIGHTLY_TOOLCHAIN` rustup toolchain via `rustup
+//!   toolchain install <BPF_NIGHTLY_TOOLCHAIN> --component rust-src
+//!   --profile minimal` — a dated nightly, not the floating `nightly`
+//!   channel; see that constant's doc comment for why.
+//! - `rust-src` component on it via `rustup component add rust-src
+//!   --toolchain <BPF_NIGHTLY_TOOLCHAIN>` (when the toolchain is
+//!   already present but the component is missing).
 //!
 //! The four tests cover the four planning permutations:
 //!
@@ -25,6 +27,7 @@
 //! function — no process spawning, no environment mutation, no
 //! filesystem touches.
 
+use xtask::BPF_NIGHTLY_TOOLCHAIN;
 use xtask::dev_setup::{Plan, ProbeContext, plan};
 
 /// AC1, AC3, AC10 — when bpf-linker is absent the plan contains a
@@ -107,8 +110,8 @@ fn dev_setup_plans_nightly_toolchain_install_with_rust_src_when_missing() {
         });
 
     assert!(
-        nightly_cmd.argv.iter().any(|a| a == "nightly"),
-        "expected `nightly` in argv, got: {:?}",
+        nightly_cmd.argv.iter().any(|a| a == BPF_NIGHTLY_TOOLCHAIN),
+        "expected `{BPF_NIGHTLY_TOOLCHAIN}` in argv, got: {:?}",
         nightly_cmd.argv,
     );
     assert!(
@@ -172,8 +175,8 @@ fn dev_setup_plans_only_rust_src_add_when_nightly_present_but_component_missing(
         component_add.argv,
     );
     assert!(
-        component_add.argv.iter().any(|a| a == "nightly"),
-        "expected `nightly` in argv, got: {:?}",
+        component_add.argv.iter().any(|a| a == BPF_NIGHTLY_TOOLCHAIN),
+        "expected `{BPF_NIGHTLY_TOOLCHAIN}` in argv, got: {:?}",
         component_add.argv,
     );
 

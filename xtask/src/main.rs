@@ -691,9 +691,9 @@ fn bpf_build() -> Result<()> {
     let workspace_root = workspace_root_dir()?;
     let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
 
-    // Invoke through `rustup run nightly cargo …` rather than the
-    // bare `cargo +nightly` form. The `$CARGO` env var that
-    // `cargo()` resolves to is populated by cargo itself with the
+    // Invoke through `rustup run <BPF_NIGHTLY_TOOLCHAIN> cargo …`
+    // rather than the bare `cargo +nightly` form. The `$CARGO` env var
+    // that `cargo()` resolves to is populated by cargo itself with the
     // direct cargo binary (not rustup's shim), and the direct
     // binary does not parse `+toolchain` directives. Going through
     // rustup is the canonical way to pin a non-default toolchain
@@ -702,12 +702,17 @@ fn bpf_build() -> Result<()> {
     // `-Z build-std=core` flag requires nightly per
     // `wave-decisions.md` D3 / ADR-0038 §3.1; nightly is provisioned
     // alongside stable on the dev surfaces (Lima, dev-setup).
+    //
+    // The toolchain is the *dated* `BPF_NIGHTLY_TOOLCHAIN`, not the
+    // floating `nightly` channel — see that constant's doc comment
+    // for why (bpf-linker/rustc LLVM major-version skew).
+    let nightly = xtask::BPF_NIGHTLY_TOOLCHAIN;
     sh(
-        "rustup run nightly cargo build (overdrive-bpf, bpfel-unknown-none)",
+        &format!("rustup run {nightly} cargo build (overdrive-bpf, bpfel-unknown-none)"),
         Command::new("rustup")
             .args([
                 "run",
-                "nightly",
+                nightly,
                 "cargo",
                 "build",
                 "--release",
@@ -775,12 +780,15 @@ fn bpf_clippy() -> Result<()> {
     let workspace_root = workspace_root_dir()?;
     let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
 
+    // Pinned nightly — see `xtask::BPF_NIGHTLY_TOOLCHAIN`'s doc
+    // comment (bpf-linker/rustc LLVM major-version skew).
+    let nightly = xtask::BPF_NIGHTLY_TOOLCHAIN;
     sh(
-        "rustup run nightly cargo clippy (overdrive-bpf, bpfel-unknown-none)",
+        &format!("rustup run {nightly} cargo clippy (overdrive-bpf, bpfel-unknown-none)"),
         Command::new("rustup")
             .args([
                 "run",
-                "nightly",
+                nightly,
                 "cargo",
                 "clippy",
                 "--release",
