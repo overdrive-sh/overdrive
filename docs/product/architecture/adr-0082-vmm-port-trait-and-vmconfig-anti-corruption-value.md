@@ -8,6 +8,20 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-11 (fold-in of prerequisites, same DESIGN pass, user
+ruling)** — § D8 is added: a new `CgroupAccounting` port gives the VM
+mid-run exit path a post-mortem read of the allocation scope's
+`memory.events` `oom_kill` counter, so a cgroup-OOM-killed VM is diagnosed
+as `TransitionReason::VmOutOfMemory` (ADR-0083 § D5 row 13) rather than an
+undiagnosable `WorkloadCrashedImmediately { signal: 9 }`. This closes
+deferral D-3 in its **reduced** form only — a point read, not the live
+`memory.events` subscription D-3 names as its mechanism, which stays
+deferred, as does the matching gap on `ExecDriver`'s own OOM path. No prior
+decision is reversed; § D2.3's `MemoryPlan` / `reserve_bytes` text is
+unamended — § D8 only makes that derivation's failure diagnosable. Lands in
+Slice 01
+(`docs/feature/microvm-driver-cloud-hypervisor/slices/slice-01-vm-job-boots-and-exit-code-is-honest.md`).
+
 Implements the application-architecture half of
 `docs/product/architecture/brief.md` § *System Architecture* → *Cloud Hypervisor
 VM driver* (**SD-1 … SD-5**, Titan, 2026-08-10) and § *Domain Model* → *VM
@@ -688,6 +702,191 @@ coupling from the one path the Running gate rides on.
 never "the platform verified the workload succeeded"** (Hera's DD-4). No
 artifact may state or imply otherwise.
 
+### D8 — the cgroup-OOM diagnosis gap (deferral D-3, reduced form): a new `CgroupAccounting` port, read once at exit time
+
+*(Added 2026-08-11, folding in prerequisite D-3 per user ruling — anything
+this feature needs to work properly lands now, not as a deferral. Scope is
+deliberately narrow: a **post-mortem read**, not the live `memory.events`
+subscription D-3 names as its mechanism. That subscription — and the
+matching gap on `ExecDriver`'s own OOM path — stays deferred; this closes
+the VM mid-run path only.)*
+
+§ D2.3 states the failure mode this closes, verbatim: `MemoryPlan::derive`
+correctly makes `guest_bytes == cgroup_max_bytes` unrepresentable, but when
+`reserve_bytes` is wrong — and it ships as a RED scaffold (§ D2.3,
+Consequences) — the resulting cgroup OOM *"surfaces as `Failed /
+WorkloadCrashedImmediately { signal: 9 }`, indistinguishable from `kill
+-9`"*. That sentence is a bug report against this ADR's own design, not
+just against deferral D-3 in the abstract, and it is worse than a rare edge
+case: `brief.md` § SD-4 already establishes that a VM's declared RAM is a
+**standing claim** whose host-resident share trends toward the declared
+figure over the run, so a wrong `reserve_bytes` is an **expected** overrun,
+not a corner case.
+
+**The read.** `CgroupAccounting`, a new port beside `CgroupFs`
+(`traits/cgroup_fs.rs`) — **not** an extension of it; see "Why not widen
+`CgroupFs`" below.
+
+```rust
+// crates/overdrive-core/src/traits/cgroup_accounting.rs
+#[async_trait]
+pub trait CgroupAccounting: Send + Sync + 'static {
+    /// Read the `oom_kill` counter out of the `memory.events`
+    /// pseudo-file at `memory_events_path` (the caller resolves and
+    /// joins the full path -- same convention as `CgroupFs::write`,
+    /// which also takes a fully-resolved file path).
+    ///
+    /// # Postconditions on Ok
+    /// Returns the current value of the `oom_kill` key, parsed from
+    /// `key value\n` lines. `0` is a real, positive fact ("the kernel
+    /// has never OOM-killed a process in this scope"), not a default.
+    ///
+    /// # Errors
+    /// - `Io` -- the substrate `read` failed (`NotFound`,
+    ///   `PermissionDenied`, ...). At the ONE call site this port is
+    ///   used from (immediately after the exit-watcher's `wait`/
+    ///   `recv()` resolves, before any teardown -- see below),
+    ///   `NotFound` is an anomaly, not a benign race.
+    /// - `Malformed` -- the content parsed as valid UTF-8 but had no
+    ///   `oom_kill` line. cgroup v2 guarantees the key when the
+    ///   `memory` controller is enabled; its absence means the
+    ///   controller was never enabled for this scope, or the path is
+    ///   not `memory.events` at all.
+    async fn oom_kill_count(&self, memory_events_path: &Path)
+        -> Result<u64, CgroupAccountingError>;
+
+    async fn probe(&self) -> Result<(), CgroupAccountingProbeError>;
+    fn kind(&self) -> &'static str;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CgroupAccountingError {
+    #[error("cgroup accounting read failed: {source}")]
+    Io { #[source] source: std::io::Error },
+    #[error("memory.events has no parseable 'oom_kill' line: {raw:?}")]
+    Malformed { raw: String },
+}
+```
+
+**Call site — the mid-run exit watcher, not the boot race.** § D3's
+three-way `start` race is unaffected: an OOM during the 30 s boot window
+still falls through to `VmBootDeadlineExceeded` / the existing
+`StartRejected` path (ADR-0083 § D5 rows 4 and 7), and closing that corner
+is out of this fold-in's scope — the measured floors in § D2.3 put the risk
+almost entirely in steady-state residency, not boot. The read belongs in
+the **per-alloc exit watcher** that `exit` (§ D3's `VmExitWatch`) is moved
+into once the beacon has won the race — the Slice-01-built, VM-shaped
+analogue of `ExecDriver`'s `spawn_exit_watcher`. Immediately after that
+watcher's `wait`/`recv()` resolves and **before any teardown** (so the
+scope's `memory.events` is still readable), and only on the "no agent EXIT
+report, VMM died" branch, it calls `cgroup_accounting.oom_kill_count(&scope
+.resolve(&cgroup_root).join("memory.events"))`.
+
+**Threading the fact through the SHARED `ExitEvent` — one additive field,
+one additive precedence check.** `ExitEvent` (`traits/driver.rs`) gains:
+
+```rust
+pub struct ExitEvent {
+    pub alloc: AllocationId,
+    pub kind: ExitKind,
+    pub intentional_stop: bool,
+    pub stderr_tail: Option<String>,
+    /// Set only when the driver observed, immediately after exit and
+    /// before any teardown, that the allocation's cgroup scope had a
+    /// nonzero `oom_kill` counter. `ExecDriver` never sets this (its
+    /// own OOM diagnosis is the unreduced half of D-3, still
+    /// deferred). `None` means "not observed to be OOM" -- it does
+    /// NOT mean "confirmed not OOM": a read error also yields `None`,
+    /// per this fold-in's best-effort scope.
+    pub oom: Option<OomFacts>,
+}
+
+pub struct OomFacts { pub limit_bytes: u64, pub oom_kill_count: u64 }
+```
+
+`limit_bytes` costs no I/O — it is `MemoryPlan::cgroup_max_bytes()`, already
+held by the driver from `start`.
+
+`overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`
+(Slice 01's Dependencies list previously read *"exit observer … reused
+unchanged"* — corrected in the slice by this fold-in, since this is no
+longer true) gains one precedence check ahead of its existing `Crashed →
+WorkloadCrashedImmediately` mapping:
+
+```
+ExitKind::Crashed { .. } if event.oom.is_some_and(|o| o.oom_kill_count > 0)
+    → TransitionReason::VmOutOfMemory { limit_bytes, oom_kill_count }   // ADR-0083 § D5 row 13
+ExitKind::Crashed { exit_code, signal }
+    → TransitionReason::WorkloadCrashedImmediately { .. }               // unchanged default
+```
+
+No `DriverType` branch is needed — `ExecDriver` never populates `oom`, so
+every Exec crash falls through unchanged. `VmOutOfMemory`'s `StoppedBy`
+disposition is `Process` (an ordinary crash), the same as
+`WorkloadCrashedImmediately` — **it is NOT `PlatformReclaimed`**: DD-1's
+third ending class is about the platform losing supervision, never about
+*why* a supervised VM died. So `VmOutOfMemory` consumes restart budget
+exactly as any other crash does, no exemption; `is_restartable` /
+`is_intentionally_stopped` need no change (ADR-0083's reuse rows 1–2
+already cover this).
+
+**Composition — gated with `Vmm`, not unconditional like `VmHostState`.**
+`VmHostState` (`brief.md` § 105a.2) is composed unconditionally because
+reclamation must clean up a node that has since **uninstalled** CH.
+`CgroupAccounting` has no such job — it is consulted only by the VM
+exit-watcher, which exists only when `VmDriver` is composed. It rides SD-5's
+same composition gate (ADR-0083 § D2): probed alongside `Vmm`, refusing the
+node on the same substrate-lie / capability-absence split. `VmDriver::new`
+gains a required parameter, extending the constructor already shown in
+ADR-0083 § D2:
+
+```rust
+// was: VmDriver::new(Arc::new(vmm), clock, fs, vm_layout)
+VmDriver::new(Arc::new(vmm), clock, fs, cgroup_accounting, vm_layout)
+```
+
+**Why not widen `CgroupFs`.** ADR-0083 § A8 already rejected this once, for
+`VmHostState`'s need, on the trait's own contract — *"deliberately
+write-only … the read side is unexposed by design"*. That reasoning is not
+scoped to `VmHostState`'s enumeration; it is stated as a property of the
+trait itself. This need is narrower than `VmHostState`'s (one already-known
+cgroupfs path, not a node-wide enumeration spanning non-cgroupfs surfaces)
+and was tempting to fold in as "just one more read method" — but doing so
+would make `CgroupFs`'s write-only contract mean one thing at one call site
+and another thing at the next. Reusing A8's verdict keeps it meaning one
+thing everywhere it's read.
+
+**Why not ride `VmHostState::observe()`.** Wrong cadence and wrong crate.
+`observe()` is a whole-node, periodic-tick snapshot consumed by the
+control-plane's `VmReclamation` reconciler (`brief.md` § 105a); this read
+must happen **synchronously, once, immediately after `child.wait()`/
+`recv()` resolves**, in `overdrive-worker`, before any teardown a later
+reclamation tick might perform. Routing it through the reconciler's cadence
+would both mistime the read (the scope may be gone by the next tick — and
+per § 105a.3, `VmReclamation` is *authorised* to remove a scope with no
+live supervision, which this exit-watcher currently is) and reach across a
+crate boundary `VmHostState`'s one consumer was never meant to cross.
+
+**Probe (Earned Trust, CLAUDE.md principle 13).**
+`RealCgroupAccounting::probe()` reads `<cgroup_root>/memory.events` at the
+control-plane's own delegated root scope (already created by
+`create_and_enrol_control_plane_slice()` before this probe runs, per
+`overdrive-control-plane`'s own cgroup-boot-ordering convention) and
+asserts the content parses with an `oom_kill` key present — the same
+kernel-guaranteed key the per-VM read depends on. Fault-injection
+scenarios, mirroring `CgroupFs::probe`'s shape:
+
+| # | Scenario | `CgroupAccountingProbeError` variant |
+|---|---|---|
+| 1 | Read fails (`ENOENT`, `EACCES`) | `Substrate { source }` |
+| 2 | Content is not valid UTF-8 | `SubstrateCorrupt` |
+| 3 | Content is valid UTF-8 but has no `oom_kill` line | `MissingOomKillKey` |
+
+`SimCgroupAccounting` (`adapter-sim`) is an in-memory `BTreeMap<PathBuf,
+u64>` with an injectable per-path error schedule, mirroring `SimCgroupFs` —
+the seam that makes "this VM's scope was OOM-killed" a DST-controllable
+scenario for Tier-1.
+
 ---
 
 ## Alternatives considered
@@ -774,6 +973,11 @@ states this in as many words.
 - `MemoryPlan::derive` gives GH #92's right-sizing reconciler a single
   unambiguous desired-size target, which was Slice 05's stated learning
   hypothesis.
+- **Deferral D-3's reduced form is closed for the VM mid-run path** (§ D8): a
+  cgroup OOM from a wrong `reserve_bytes` is now diagnosable as
+  `VmOutOfMemory`, not an undifferentiated `signal: 9`. This also gives
+  DELIVER's `reserve_bytes` measurement pass (§ D2.3) an honest oracle — see
+  Slice 05's coupling note.
 
 ### Negative, and stated
 
@@ -798,6 +1002,18 @@ states this in as many words.
 - **A new `binary`-class crate (`overdrive-init`) and two musl targets** enter
   the build. Under BYO-artifact the operator must bake it into their rootfs;
   the platform ships the artifact and the contract, not the image.
+- **A seventh port (`CgroupAccounting`) plus its two adapters and probe** (§
+  D8) — for one read method. The cost is real: a new trait, `RealCgroupAccounting`
+  / `SimCgroupAccounting`, composition-root wiring, and a fault-injection
+  probe, all to close one diagnosis gap. Accepted because ADR-0083 § A8
+  already rejected widening `CgroupFs` for a related need on the trait's own
+  contract, and reusing that verdict here (rather than re-litigating it for a
+  "just one more method" need) is what keeps the contract meaning one thing.
+- **`overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`
+  is touched** — one additive precedence branch, `DriverType`-agnostic. Slice
+  01's Dependencies list previously named this file "reused unchanged"; that
+  claim no longer holds and is corrected in the slice rather than left to
+  contradict the code.
 
 ### Neutral
 

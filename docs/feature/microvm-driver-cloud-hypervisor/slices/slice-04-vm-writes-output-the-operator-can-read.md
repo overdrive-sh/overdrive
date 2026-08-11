@@ -107,6 +107,54 @@ mount** (the composite-lie case); a daemon killed mid-run; and a host that canno
   the volume path for **both** shipping arches on a single-arch measurement — **if
   `shared=on` misbehaves on Arm metal, this slice is x86_64-only until measured.** The
   volume capability is what gates, not the driver.
+- **Host tuning prerequisite — `shmem_enabled=advise`, undeferred D-5 (2026-08-11, GH #42).**
+  Spike P11 (`spike/findings.md`) measured the host default
+  `/sys/kernel/mm/transparent_hugepage/shmem_enabled=never` at **~55% lower durable
+  throughput on every `--memory shared=on` path** — exactly the memory backing `[D8b]`
+  turns on for a volume-carrying VM. This was first surfaced as deferral **D-5** and filed
+  as out-of-scope on the reasoning *"only bites once volumes land (Slice 04)"* — but Slice
+  04 **is** this feature, so a prerequisite for it is a prerequisite of the feature, not a
+  deferral. Three decisions:
+  - **Who sets it — node bootstrap, not the driver, not "the appliance image."** Overdrive
+    ships no Image Factory / appliance-image build pipeline yet (intake **I-3**: *"zero
+    image machinery today"*); naming that pipeline as the owner would document behaviour
+    that does not exist (`.claude/rules/development.md` § "Documentation" — no aspirational
+    docs). `shmem_enabled` is one host-wide sysfs knob
+    (`/sys/kernel/mm/transparent_hugepage/shmem_enabled`), not per-VM state, so it is set
+    **once per node** — never from `Vmm::create`/the driver on every launch, which would
+    race concurrent VM starts over one global file and push a host-policy concern into
+    per-workload driver code. The landing site is `infra/provision/common-system.sh` (the
+    shared Lima + bare-metal provisioning surface both targets already invoke), installing a
+    **boot-persistent** write — a `systemd-tmpfiles.d` `w` line or a small oneshot unit,
+    mirroring the existing `/etc/sysctl.d/99-overdrive.conf` (`net.ipv4.ip_forward`) and
+    `/etc/udev/rules.d/99-kvm4all.rules` (`/dev/kvm`) precedents in
+    `infra/lima/overdrive-dev.yaml`. `shmem_enabled` sits under `/sys/kernel/mm/`, **not**
+    `/proc/sys`, so the project's `sysctl.d` mechanism does not reach it and a dedicated
+    boot-time writer is needed. (When an Image Factory eventually ships, this same
+    idempotent write relocates into the image's own boot unit set — the decision is
+    unchanged, only where the script that performs it lives.)
+  - **What happens when it's `never` — WARN, never refuse.** This is a throughput knob, not
+    a correctness or security claim. Unlike `[D8d]`'s `--sandbox=namespace` — whose silent
+    downgrade is a *lie about the isolation delivered*, and therefore fails closed — a
+    degraded `shmem_enabled` changes nothing about durability or correctness (P11: `fsync`
+    is untouched; only the write phase slows). Per **SD-5**'s dichotomy, *"a substrate lie
+    refuses the node, a capability absence does not"* — this is neither: a suboptimal but
+    honest host configuration. Refusing to boot a volume-carrying VM over it would leave the
+    operator strictly worse off than the slow-but-correct VM they would otherwise get. The
+    check extends the **existing** `Vmm::probe()` boot gate (Slice 01; SD-5 Reuse Analysis
+    row 3) with one more read: `shmem_enabled` is a host fact that "cannot change between
+    deploys on the same node" (SD-5's own reasoning for the CH-absence refinement applies
+    verbatim here), so the check fires **once at node boot**, not per-VM-launch, and never
+    gates `[vm]` admission.
+  - **Where it's observable.** A structured `tracing::warn!(name: "health.startup.warn",
+    reason: "vmm.shmem_enabled_suboptimal", observed: "never", recommended: "advise")` at
+    boot, naming the measured cost (P11: ~55% lower durable `shared=on` throughput) and the
+    fix (the provisioning script above) — the same `health.startup.{refused,warn}`
+    vocabulary every other Earned-Trust probe in this codebase uses
+    (`crates/overdrive-dataplane/src/allocators/vip_range.rs:256` is the one prior reference
+    to `health.startup.warn`; this is its first real emit site). This is what turns a 55%
+    throughput regression into an attributable boot-time fact instead of a mysterious
+    volume-performance complaint days later.
 - **`--cache=never` (`[D8c]`)** — exactly one guest mounts each share, and CH has no DAX, so
   a guest page cache over the share would be plain double-buffering.
 - **`--sandbox=namespace`, fail-closed (`[D8d]`)** — virtiofsd's own default, giving *that*
@@ -202,6 +250,12 @@ mount** (the composite-lie case); a daemon killed mid-run; and a host that canno
       name**. Stated as the observable rather than as "`--cache` is platform-derived",
       because a construction property over code that never names the flag has no test and no
       mutation site.
+- [ ] **Engineering constraint (binding, not UAT-derived; undeferred D-5):** node boot emits
+      `health.startup.warn` (`reason: "vmm.shmem_enabled_suboptimal"`) exactly once, at
+      `Vmm::probe()` time, when `/sys/kernel/mm/transparent_hugepage/shmem_enabled != advise`
+      — and **never** gates `[vm]` admission on it. Verified by reading the emitted event,
+      not by asserting on throughput (the throughput cost itself is P11's measurement, not a
+      re-derived AC here).
 
 ### US-VM-9 — the honesty
 
@@ -263,6 +317,7 @@ rows. The corrected `[D8f]` table:
 | Failure vocabulary — four new variants | Slice 02's shape | **Yes** | 0.5 d |
 | Tier-3 harness — round-trip, read-only, mid-run kill, teardown, no-volume regression, mount failure | Slice 03's harness | **Yes** | 1.5 d |
 | A possible **second** rkyv envelope bump if `[[vm.volume]]` reaches the persisted aggregate | `[G4]`'s procedure | **Conditional** | 0–0.5 d |
+| `shmem_enabled` boot-time WARN check *(undeferred D-5, 2026-08-11)* | `Vmm::probe()` (Slice 01) | **Yes — one read + one warn event** | 0 d |
 
 US-VM-8 ≈ 3.5–5 d, US-VM-9 ≈ 2.5–4 d. **The largest slice after the walking skeleton, whose
 upper bound it now meets.**
@@ -296,6 +351,11 @@ upper bound it now meets.**
 - **Independent of Slice 05.** The 04-before-05 ordering is a priority call, not a
   dependency; the only thing lost by swapping them is US-VM-5's both-memory-shapes sizing
   case.
+- **Node-bootstrap prerequisite, undeferred D-5 (Slice 00 P11, `spike/findings.md`).**
+  `infra/provision/common-system.sh` must set `shmem_enabled=advise` (boot-persistent, see
+  Behavior above) before this slice's throughput-sensitive ACs are measured for real —
+  otherwise Tier-3 evidence for the volume path is silently captured against the ~55%-
+  penalized host default and any future re-measurement is not comparing like with like.
 
 ## Explicitly NOT in this slice
 

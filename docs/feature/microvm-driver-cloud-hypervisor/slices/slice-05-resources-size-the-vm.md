@@ -54,6 +54,16 @@ test.
   `memory.current` / `memory.stat`, not RSS; a guessed constant between the two known
   RSS-derived floors (~5.4 MiB steady-state, ~11.9 MiB pre-residency, both P13/restore-path)
   is a rejection.
+  **Coupling to the D-3 fold-in (DESIGN, 2026-08-11 — ADR-0082 § D8, see Slice 01):**
+  before this DESIGN pass, "measure `reserve_bytes` against a real boot" had no way to
+  *tell* a too-low `reserve` apart from any other crash — the failure signal was an
+  undifferentiated `signal: 9`. Slice 01 now reads the scope's `memory.events` `oom_kill`
+  counter at exit time, so the DELIVER measurement pass that sets `reserve_bytes` has an
+  honest oracle: sweep candidate `reserve` values against a real boot and confirm
+  `oom_kill_count == 0` at residency (not merely "the process didn't get signal 9" — the
+  counter is authoritative where a bare exit-status read was not). Slice 05 does not
+  re-measure `reserve_bytes` itself (it is Slice 01's constant); this is a dependency
+  note, not a new obligation on this slice.
 - **`[vm]` carries no CPU and no memory field** — deliberately. Two sources of truth here
   would break #92 before it is written.
 - `workload describe` reports declared resources for a VM allocation as it does for a
@@ -101,7 +111,9 @@ test.
 
 ## Dependencies
 
-- **Slice 01** (a VM must boot before it can be sized).
+- **Slice 01** (a VM must boot before it can be sized). Also: Slice 01's cgroup-OOM
+  diagnosis fold-in (D-3 reduced form, ADR-0082 § D8) is what gives DELIVER's
+  `reserve_bytes` measurement pass an honest oracle — see the C-3 correction above.
 - **Slice 04** — for the both-shapes sizing case only. **Not a hard dependency:** 04 and 05
   are mutually independent and can be resequenced; the only thing lost by swapping them is
   that parametrization, which would then fall to #92.

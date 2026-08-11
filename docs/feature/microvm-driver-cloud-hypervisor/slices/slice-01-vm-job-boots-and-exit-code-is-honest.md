@@ -17,6 +17,17 @@
 > (spike P5) — the old AC **failed against correct behaviour**. **C-6**
 > (`RLIMIT_FSIZE = max(rootfs, guest RAM)`) is encoded from this slice even
 > though `shared=on` first ships in Slice 04.
+>
+> **Fold-in, 2026-08-11 (same DESIGN pass, additions rather than corrections)** —
+> per user ruling, three prerequisites this feature needs *to work properly*
+> land now rather than as deferrals: **(a)** `overdrive-init`'s two static musl
+> build targets (ADR-0082 § D7 — see the Behavior section); **(b)** the D-3
+> cgroup-OOM diagnosis gap, reduced form — a new `CgroupAccounting` port reads
+> the scope's `memory.events` `oom_kill` counter at exit time, so a bad
+> `reserve` lands `VmOutOfMemory`, not a bare `signal: 9` (ADR-0082 § D8,
+> ADR-0083 § D5 row 13; see Behavior + Acceptance + the corrected Dependencies
+> line). Item (c), coupling the `reserve_bytes` DELIVER measurement to (b)'s
+> now-readable signal, is recorded in Slice 05.
 
 ## Goal (one line)
 
@@ -108,6 +119,40 @@ volumes.** One VM, runs to completion, reports its exit code.
   `Arc::new(ExecDriver::new(...))`; the shim routes by the spec's driver table.
 - **Guest agent:** static PID-1 `overdrive-init` — ready beacon, exec the command,
   forward stdio, report the real exit status over vsock. Not `kata-agent`.
+  **Engineering constraint (M-5's toolchain half, folded in — DESIGN, 2026-08-11):**
+  `overdrive-init` is a new `crate_class = "binary"` crate built **static** for
+  **`{x86_64,aarch64}-unknown-linux-musl`** (ADR-0082 § D7 — already decided
+  there; recorded here so a DISTILL/roadmap author sees it, since it appeared in
+  zero slice files before this pass). Add both musl targets to the toolchain and
+  CI in this slice's step that builds the crate. **There is no publish pipeline —
+  not in this slice and not later.** BYO-artifact is intake **I-3**'s *slicing
+  mechanism* (the `[vm]` spec points at a prebuilt kernel + rootfs already on the
+  host), adopted so this driver ships without blocking on the image factory —
+  *thinner-but-live beats complete-but-dead*. It is **not** an operator-facing
+  product surface, so nothing obliges the platform to publish `overdrive-init` as
+  a consumable artifact carrying a host↔guest protocol-compatibility contract.
+  Getting `overdrive-init` into a rootfs is the **factory's** job, GH
+  [#259](https://github.com/overdrive-sh/overdrive/issues/259), which now carries
+  that requirement. *(User ruling 2026-08-11. GH #264 was filed on the opposite
+  premise — that BYO rootfs is a product surface — and is closed as wrong-premised,
+  rather than deferred.)* The crate and its two build targets are the whole of
+  this slice's obligation.
+- **Cgroup-OOM diagnosis (deferral D-3, reduced form — folded in, DESIGN
+  2026-08-11; ADR-0082 § D8, ADR-0083 § D5 row 13):** the exit-watcher this
+  slice builds reads the allocation's cgroup scope `memory.events` `oom_kill`
+  counter, once, immediately after the watcher's `wait`/`recv()` resolves and
+  before any teardown, via a new `CgroupAccounting` port (`overdrive-core`,
+  beside `CgroupFs`; `RealCgroupAccounting` in `overdrive-host`,
+  `SimCgroupAccounting` in `overdrive-sim`; composed and probed alongside
+  `Vmm` under the same SD-5 composition gate — **not** unconditional like
+  `VmHostState`). This is the **reduced** form of D-3 only: a post-mortem
+  point read, not the live `memory.events` subscription D-3 names as its
+  mechanism, and it covers the VM **mid-run** path only — an OOM during the
+  30 s boot race still falls through to the existing boot-failure vocabulary
+  (ADR-0083 § D5), unchanged by this fold-in. See ADR-0082 § D8 for the
+  pinned trait, the `ExitEvent.oom: Option<OomFacts>` threading, and why
+  neither `CgroupFs` (rejected already, ADR-0083 § A8) nor `VmHostState`
+  (wrong cadence/crate boundary) is the right seam.
 - **Rootfs:** ext4 attached as `virtio-blk` (`[D5]` — the **rootfs** decision; it says
   nothing about virtiofs, which `[D8]` selects for volumes in Slice 04); a per-launch clone
   so the operator's artifact is never mutated. The copy is discarded at
@@ -134,6 +179,11 @@ volumes.** One VM, runs to completion, reports its exit code.
   both from one number is a cgroup OOM **by construction**, surfacing as
   `signal: 9` with no mention of memory. `reserve` is measured in DELIVER via
   `memory.current` / `memory.stat` — **not** RSS, and **not** guessed.
+  **This is no longer undiagnosable when the guess is wrong** (deferral D-3, reduced
+  form, folded in — ADR-0082 § D8): the exit-watcher this slice builds reads the
+  scope's `memory.events` `oom_kill` counter at exit time, so a `reserve` that was too
+  low lands `VmOutOfMemory`, not a bare `signal: 9`. See the Behavior section's
+  "Cgroup-OOM diagnosis" bullet.
   **`RLIMIT_FSIZE` is `max(rootfs image, guest RAM)` from this slice (C-6)**, before
   Slice 04 turns `--memory shared=on` on, because `shared=on` backs guest RAM with a memfd
   and a memfd is a *file* for `RLIMIT_FSIZE`.
@@ -199,6 +249,22 @@ volumes.** One VM, runs to completion, reports its exit code.
       the guest's RAM by the reserve; a VM booted at its declared `memory_bytes` is **not**
       cgroup-OOM-killed on reaching residency. `guest_bytes == cgroup_max_bytes` has no
       constructor.
+- [ ] **Cgroup-OOM diagnosis (D-3 reduced form, added by DESIGN — ADR-0082 § D8,
+      ADR-0083 § D5 row 13)** — a VM whose `memory.max` is deliberately set below its
+      guest RAM (a `MemoryPlan` constructed with a `reserve` too small to hold residency)
+      is classified `Failed / TransitionReason::VmOutOfMemory { limit_bytes,
+      oom_kill_count }`, **not** `Failed / WorkloadCrashedImmediately { signal: 9 }` —
+      Tier-3 case with `memory.max` set below the guest's declared `memory_bytes` on
+      purpose. The scope's `memory.events` `oom_kill` counter is read once, immediately
+      after the exit-watcher's `wait`/`recv()` resolves and before any teardown, via the
+      new `CgroupAccounting` port. Restart/backoff is **unaffected** — `VmOutOfMemory`'s
+      disposition is `StoppedBy::Process` (an ordinary crash), the **same** budget
+      treatment as any other `Crashed` ending, **not** `PlatformReclaimed` (DD-1's third
+      ending class is a different axis entirely — the platform losing supervision, not a
+      supervised VM's cause of death). Scope boundary, stated so it is not mistaken for a
+      gap in this AC: an OOM during the 30 s boot race (before the beacon wins D3's
+      three-way `select!`) is unaffected by this AC and still falls through to the
+      existing boot-failure vocabulary.
 - [ ] `DriverType::MicroVm` deleted, OpenAPI regenerated, stale docstring amended — same PR.
 - [ ] **`JobEnvelope` V1 → V2** lands as **one commit** via the six-step procedure, with a
       new golden-bytes fixture pinning V1 and a `From<JobV1> for JobV2` impl; **existing
@@ -213,7 +279,21 @@ volumes.** One VM, runs to completion, reports its exit code.
   work already inside this slice; they add no mechanism. The additive confinement items
   (Landlock, uid/gid drop, rlimits) are **US-VM-7 in Slice 03**, and the mount namespace is
   **not in this feature** (GH #258) — see feature-delta `[D7]`.
-- SHIPPED and reused unchanged: reconciler runtime, action shim, exit observer,
-  restart/backoff, cgroup slice bootstrap, `workload describe`.
+  **Not true of the D-3 fold-in (2026-08-11).** Unlike `[D7]`, the cgroup-OOM diagnosis
+  item adds a genuine new mechanism — a new port, two adapters, a probe, and a touch to
+  `exit_observer.rs` — on top of the mid-run exit watcher this slice already builds. Two
+  musl CI targets are comparatively cheap. Sizing this honestly is DISTILL's job, not
+  DESIGN's estimate to silently absorb into "5–8 d unchanged" — flagged here so the
+  roadmap author does not inherit a stale range.
+- SHIPPED and reused: reconciler runtime, action shim, restart/backoff, cgroup slice
+  bootstrap, `workload describe`. **Correction (DESIGN, 2026-08-11) — exit observer is
+  NOT unchanged.** `overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`
+  gains one additive precedence check ahead of its existing `Crashed →
+  WorkloadCrashedImmediately` mapping (ADR-0082 § D8): a `DriverType`-agnostic check on
+  `ExitEvent.oom` (a new `Option<OomFacts>` field `ExecDriver` never populates), so every
+  Exec crash falls through unchanged and the "reused" claim holds for that half. The
+  prior text asserted this file was untouched by the whole feature-delta; that was true
+  before deferral D-3 was folded in and is corrected here rather than left to
+  contradict the code.
 - ADR-0022 pre-committed the registry migration to "the second driver class" — this is it.
   ADR-0030 §6 pre-sanctioned per-driver-class spec types.

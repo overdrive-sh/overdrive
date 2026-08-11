@@ -12,7 +12,15 @@ lifecycle per Hera's **DD-1(b.i)**: it is a claim on *authoring an ending*, so
 Consequences' "one defaulted method" line is corrected to two. No prior decision
 is reversed; the addition pins a lifecycle the earlier text left open. The
 application-architecture shape is pinned in `brief.md` § *Application
-Architecture* → **§ 105a**.
+Architecture* → **§ 105a**. **Amended 2026-08-11 (fold-in of prerequisite
+D-3, same DESIGN pass, user ruling)** — § D5's Cause-variant table gains a
+**thirteenth** row, `VmOutOfMemory { limit_bytes, oom_kill_count }`,
+constructed in **Slice 01** (not 02–04, since it is built alongside the
+mid-run exit watcher that slice already owns) from the new
+`CgroupAccounting` port's read — see companion ADR-0082 § D8 for the port,
+the `ExitEvent.oom` field it threads through, and the reconciliation with §
+A8's already-rejected "widen `CgroupFs`" alternative. No prior row is
+renumbered or reworded.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -489,6 +497,7 @@ the Cause variants over rather than dropping them):
 | 10 | `VmGuestMountFailed` | `{ target: String, detail: String }` | 04 | The composite-lie case |
 | 11 | `VmStorageSocketTimeout` | `{ socket: String, waited_ms: u64 }` | 04 | |
 | 12 | `VmStorageSandboxUnavailable` | `{ requested: String, detail: String }` | 04 | |
+| 13 | `VmOutOfMemory` | `{ limit_bytes: u64, oom_kill_count: u64 }` | 01 | **Added 2026-08-11, D-3 fold-in.** Mid-run cgroup OOM, diagnosed from a post-mortem `memory.events` read (ADR-0082 § D8) — closes deferral D-3's *reduced* form for the VM path only. `StoppedBy` disposition is `Process`, same as any other crash; **not** `PlatformReclaimed` |
 
 ```rust
 pub enum ConfinementControl { Landlock, Seccomp, UidDrop, RlimitFsize, RlimitNofile, KvmAccess }
@@ -501,10 +510,12 @@ which is what Slice 03 asks for in as many words (*"a **fifth** variant minted
 in Slice 02's shape"*). A `String` discriminant would have been the stringly-
 typed version and is rejected.
 
-**Twelve distinct causes**, against K3's "≥ 4 distinct". Per DD-3, the
-reclamation **disposition** is deliberately **not** in this table and must not
-be counted toward K3 — counting a disposition as a failure cause would let the
-feature satisfy K3 without shipping a fourth diagnosis.
+**Thirteen distinct causes** (twelve from the original Slice 02–04 sweep plus
+`VmOutOfMemory`, row 13, added by the 2026-08-11 D-3 fold-in), against K3's
+"≥ 4 distinct". Per DD-3, the reclamation **disposition** is deliberately
+**not** in this table and must not be counted toward K3 — counting a
+disposition as a failure cause would let the feature satisfy K3 without
+shipping a fourth diagnosis.
 
 `TransitionReason` is `#[non_exhaustive]` (`transition_reason.rs:87`) and every
 addition is appended, preserving rkyv discriminants — the same discipline
@@ -1050,6 +1061,15 @@ contract, both adapters and the equivalence test for a consumer that still needs
 a second surface walk. `VmHostState` also gives the hydration the **named,
 separable seam** SD-1's pin 1 requires so that #197's generalisation is a
 refactor rather than a rewrite.
+
+**Addendum, 2026-08-11 (D-3 fold-in).** A second, narrower read need arose —
+`memory.events`' `oom_kill` counter for the VM exit-watcher's diagnosis — and
+did **not** reopen this verdict. `CgroupFs`'s write-only contract is a
+property of the trait, not scoped to `VmHostState`'s enumeration; a single
+already-known cgroupfs path is still a read `CgroupFs` was never built to
+expose. It landed on its own `CgroupAccounting` port rather than either
+`CgroupFs` or `VmHostState` — see ADR-0082 § D8 for the full reasoning,
+including why `VmHostState`'s cadence and crate boundary also didn't fit.
 
 ### A9 — A single `ReclaimAllocation { alloc_id, authors_ending: bool }`
 
