@@ -95,7 +95,7 @@ The generic skill's Strategy A/B/C/D framing does not apply (retired per the ski
 
 | Scenario scope | Crate | Path | Rationale |
 |---|---|---|---|
-| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 11…15, 33…68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs` |
+| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 11…15, 33…66, 68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs`. **Corrected 2026-08-11 (DWD-13): excludes S-VM-67**, which the original range silently swept in — S-VM-67 is no longer Tier-3/CLI-driven, see the DWD-13 addendum below |
 | Pure-function `@property` scenarios (`VmConfig` value family, `plan_reclamation`, `SupervisionSet`, vCPU derivation) | `overdrive-core` | `tests/acceptance/vm_*.rs`, default lane | Port-to-port at function scope; no I/O, no Lima needed |
 | Parse-boundary rejections (S-VM-06/07/62) | `overdrive-core` | `tests/acceptance/vm_spec_driver_table_dispatch.rs`, default lane | In-process TOML deserializer, no subprocess and no real VMM needed |
 | `JobEnvelope` V1→V2 schema evolution (S-VM-10) | `overdrive-core` | `tests/schema_evolution/workload_intent.rs` (EXISTING file, edited, not a new file) | Per the six-step version-bump procedure; `FIXTURE_V1` never touched |
@@ -411,24 +411,14 @@ None discovered. Every acceptance criterion in feature-delta.md's nine user stor
 
 One item is flagged for the user's awareness, not as a blocker: DESIGN's own Deferrals sections (D-1…D-6, H-1…H-4, M-1…M-5) are all still open per the feature-delta.md's own record — this DISTILL does not re-litigate any of them (they are DESIGN/DEVOPS-scope, not DISTILL-scope), but M-1 (`reserve_bytes` ships as a RED scaffold and is a hard DELIVER dependency) and D-3 (unresolved by design — a cgroup OOM ships as `signal: 9` on the class most likely to cause one, mitigated in reduced form by the D-3 fold-in / `CgroupAccounting`) are directly load-bearing for S-VM-19/20 and worth DELIVER re-reading before implementing those two scenarios specifically.
 
-**Two items were BLOCKED on the concurrent DESIGN pass, added by the prior
-remediation (DWD-11). Both rulings have now landed, same day — see DWD-12
-below for the finding-by-finding disposition. One open item remains:**
+**Three items were BLOCKED on the concurrent DESIGN pass / a user scoping
+decision, added by the prior remediation (DWD-11) and DWD-12. All three
+rulings have now landed — see DWD-12 (S-VM-65, the S-VM-13/S-VM-51
+injection seam) and DWD-13 (S-VM-67) below for the finding-by-finding
+dispositions. Zero open items remain.**
 
-1. **S-VM-67's storage-daemon-sandbox injection seam.** ADR-0083 §D8 (the
-   ruling that resolves item 2 below for S-VM-13/S-VM-51) explicitly rules
-   S-VM-67 OUT of its own scope: `Vmm::create` spawns "ONE confined
-   hypervisor process" and `VmConfig` carries no volume field, so
-   virtiofsd's `--sandbox=namespace` capability check sits behind no `Vmm`
-   method the seam could substitute — no storage-daemon supervision port
-   exists in either ADR. Two honest paths are named (a future Slice-04 port
-   mirroring §D8's probe/fault-injection-table shape, or asserting the case
-   at a level narrower than a real `overdrive serve`) and neither is chosen
-   — this is a scoping decision for the user, not a missing name DISTILL
-   can invent. See `test-scenarios.md` S-VM-67's crafter note.
-
-Resolved (kept here for the audit trail; see DWD-12 for the full ruling
-text):
+Resolved (kept here for the audit trail; see DWD-12 / DWD-13 for the full
+ruling text):
 
 1. ~~S-VM-65's `TransitionReason` variant for a mid-run storage-daemon
    death.~~ **RESOLVED** — ADR-0083 §D5 gained row 14,
@@ -441,9 +431,21 @@ text):
    `ServerConfig.vmm_override`, `#[cfg(feature = "integration-tests")]`-
    gated, shaped after `mtls_identity_override` (a whole-port swap), not
    `dataplane_override` (a whole-subsystem gate, rejected by name in §A10).
-   **Does NOT cover S-VM-67** — that scenario is a different port entirely
-   (virtiofsd sits outside `Vmm`), which is why it is listed above as the
-   one item still open.
+   Never covered S-VM-67 — that scenario sits behind a different port
+   entirely (virtiofsd sits outside `Vmm`); see item 3.
+3. ~~S-VM-67's storage-daemon-sandbox injection seam / scoping decision.~~
+   **RESOLVED by explicit user ruling (DWD-13) — path (b).** `[D8d]`'s
+   `--sandbox=namespace`-unavailable case is verified at the
+   **launch-argument construction layer** instead of through a real
+   `overdrive serve` — the same enforcement tier ADR-0082 §D2.1 already
+   uses for `image_type=raw` (private fields, one rendering site, a pure
+   unit test on the rendered value). **This feature mints no
+   storage-daemon supervision port** (path (a) explicitly not taken).
+   `test-scenarios.md` S-VM-67 rewritten accordingly (`@tier1`/
+   `@in-memory`, pure-function driving port); the deploy-level
+   fail-closed claim is recorded, explicitly, as an undischarged Tier-3
+   property of Slice 04 — not proven by this feature, not silently
+   assumed either.
 
 ---
 
@@ -666,9 +668,126 @@ numbers in scope, #264 closed, none newly cited here.
 
 ---
 
+## DWD-13: S-VM-67 unblocked by explicit user ruling (2026-08-11) — path
+(b), the launch-argument construction layer, mirroring S-VM-16
+
+The user has ruled on the one item DWD-12 left open. **Path (b)**: assert
+`[D8d]`'s `--sandbox=namespace`-unavailable case below `overdrive serve`,
+at the launch-argument construction layer — the same enforcement tier
+ADR-0082 §D2.1 already uses for `image_type=raw` (private fields, exactly
+one rendering site, a pure unit test on the rendered value). **No
+storage-daemon supervision port is minted by this feature** — path (a) is
+explicitly not taken. The concurrent DESIGN pass already landed the ADR
+amendments this ruling drove (ADR-0082 §D2.1's cross-reference amendment;
+ADR-0083 §D8's closing amendment, including the "Negative, and stated"
+bullet) before this DISTILL pass started; this entry reconciles
+`test-scenarios.md` and this file against those amendments, and records
+the DISTILL-side reasoning for each downstream change. No scenario was
+added or removed; the count stays **87** (mechanically re-verified:
+`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'` both return 87 after
+every edit in this pass).
+
+**S-VM-67's new shape and tier.** Rewritten from a Tier-3, `overdrive
+deploy`-driven, `@error_path`/`@tier3`/`@real-io` scenario asserting a
+deploy-level `Failed` outcome, to a **pure-function, `@tier1`/`@in-memory`
+property scenario** asserting on the storage daemon's launch-argument
+rendering site directly — `@contract-shape:pure-function`, `@property`,
+`@error_path` retained (the rejection contract survives the tier change;
+S-VM-17's `KernelImage::validate` is the exact precedent for a pure
+function that is BOTH `@property` and `@error_path`), `@mandatory:
+mutation_target` retained, `@correction:D8d` retained. Title changed from
+"A host that cannot sandbox the storage daemon refuses the workload" (a
+claim the new scenario does not make) to "The storage daemon's launch
+argument never carries a weaker sandbox than `--sandbox=namespace`" (the
+claim it does make). Full text: `distill/test-scenarios.md` S-VM-67.
+
+**No runtime-half Tier-3 scenario was added.** Considered and rejected,
+for reasons stated in S-VM-67's own crafter note and repeated here for the
+audit trail: (i) the user's ruling is explicit that this feature mints no
+storage-daemon supervision port, so there is no seam a Tier-3 scenario
+could inject an unavailable-capability fault through (`ServerConfig.
+vmm_override` does not reach here — ADR-0083 §D8, "What the seam does NOT
+reach"); (ii) the single-kernel Lima test envelope genuinely supports
+`--sandbox=namespace` (`spike/findings.md` line 362), so there is no
+real, un-injected lying host to exercise the failure against either;
+(iii) building either a port or a seam now, absent a design decision that
+mints one, is exactly the "invent API surface past the design" move
+CLAUDE.md and ADR-0083 §D8 both forbid. If Slice 04's own future DESIGN
+mints a storage-daemon supervision port on its own merits, the Tier-3
+fail-closed scenario is that slice's own DISTILL addition, not
+retrofitted onto this feature's catalogue.
+
+**The boundary statement, written into S-VM-67's crafter note verbatim
+(summarised here).** The rewritten scenario's `Then` proves only what
+argument the rendering function constructs — that rendering
+`--sandbox=namespace` is representable at exactly one site, with no
+second call site and no field that could carry `chroot`. It does **not**
+prove a *running* `virtiofsd` enforces the flag, nor that the *platform*
+turns a host's genuine incapacity into a `Failed` allocation end-to-end.
+Both halves are named, explicitly, as an **undischarged Tier-3 property
+of Slice 04** — this is ADR-0083 §D8's own honesty, carried into the
+DISTILL artifact rather than softened. This scenario's `Then` must never
+be cited as proof of the runtime posture.
+
+**Sibling references checked and corrected** (the same three DWD-12 fixed
+for the S-VM-13/S-VM-51 injection-seam resolution, re-verified here
+against the new S-VM-67 resolution rather than merely against its old
+BLOCKED state — plus two more this pass found while checking):
+
+1. **`@real-io` Adapter Coverage Table, `Vmm (SimVmm)` row** — already
+   correct from DWD-12 (never listed S-VM-67; the seam never covered it).
+   No change needed.
+2. **`@real-io` Adapter Coverage Table, "virtiofsd storage daemon (real
+   supervised host process)" row** — DWD-12 did not touch this row
+   (S-VM-67's content was still Tier-3/real-io at the time). **Now
+   corrected**: S-VM-67 removed from the covered-by list — the rewritten
+   scenario touches no real virtiofsd process. The adapter keeps 7 other
+   `@real-io` scenarios (S-VM-55, 56, 59, 64, 65, 66, 68); zero "NO —
+   MISSING" rows introduced.
+3. **US-VM-9 AC-to-Scenario Traceability row** — reworded from "S-VM-67
+   remains BLOCKED on a scoping decision (ADR-0083 §D8)" to "RESOLVED by
+   explicit user ruling (DWD-13) — rewritten to the pure
+   launch-argument-construction layer... the deploy-level fail-closed
+   claim stays an undischarged Tier-3 property of Slice 04."
+4. **Self-Review Checklist item 4** — reworded from "S-VM-67 stays
+   BLOCKED on a scoping decision, not resolved by this seam" to "RESOLVED,
+   not by this seam: explicit user ruling (DWD-13) moves S-VM-67 to the
+   pure launch-argument-construction layer instead."
+5. **NEW — top-of-file "Driving Ports" table, `overdrive deploy` row**
+   (not checked by DWD-12; it predates that entry's scope). The range
+   `S-VM-33…68` silently included S-VM-67 among the Tier-3 CLI-driven
+   scenarios. **Corrected** to `S-VM-33…66, S-VM-68` with an explicit
+   exclusion note, and a new row added for the storage-daemon
+   launch-argument rendering site, explicitly marked "exact type NOT yet
+   pinned by any ADR."
+6. **NEW — `distill/wave-decisions.md` DWD-04's crate-placement table**
+   (this file, not `test-scenarios.md`; same silent-range issue as #5).
+   "S-VM-01…05, 11…15, 33…68" corrected to "...33…66, 68" with a note
+   pointing at this entry.
+7. **NEW — Error / Edge Path Coverage counts.** `@property` moves 20 → 21
+   (S-VM-67 gained the tag); `@error_path` stays 40 (S-VM-67 keeps it);
+   `@tier3`/`@real-io` each drop by one, `@tier1`/`@in-memory` each gain
+   one; total scenario count unchanged at 87; error+edge coverage
+   unchanged at 52/87 ≈ 60%.
+
+**Files touched by this entry**: `distill/test-scenarios.md` (S-VM-67's
+full rewrite; the top-of-file Driving Ports table; the `@real-io` Adapter
+Coverage Table's virtiofsd row; the US-VM-9 AC-to-Scenario Traceability
+row; Self-Review Checklist item 4; the Error/Edge Path Coverage counts),
+`distill/wave-decisions.md` (this entry; DWD-04's crate-placement table;
+the Upstream Issues section, below). No ADR, `brief.md`, or Rust file was
+touched by this entry — those already landed via the concurrent DESIGN
+pass (ADR-0082, ADR-0083) before this DISTILL pass started; DELIVER's
+Slice 04 RED phase is the remaining consumer. No GitHub issue created or
+referenced; #259–#263 remain the only real numbers in scope, #264 closed,
+none newly cited here. No commit made by this pass.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
 - 2026-08-11 — Peer review (Sentinel, `nw-acceptance-designer-reviewer`): NEEDS_REVISION (1 blocker, 2 high). Fixed, none waived (DWD-08): added the mandate-14 `@contract-shape:` tag to all 74 scenarios; corrected a 2-scenario undercount surfaced by the tagging pass (72 → 74, mechanically recounted) across `test-scenarios.md`, this file, and `feature-delta.md`'s DISTILL section; confirmed the deferred-scaffold forward-reference table (DWD-04) already satisfies the reviewer's other high finding.
 - 2026-08-11 — Second-round adversarial review (Sentinel + Atlas, two independent fable dispatches, both `needs_revision`): FIXED (DWD-11). One BLOCKER (S-VM-88/89 phantom references + the third undefined §105a.11 invariant) — three scenarios defined under a new AC-20 (S-VM-87, 88, 89). Four systemic HIGH findings (the NEW-1 pins under-covered) — four scenarios under a new AC-19 (S-VM-77…80). Eight more HIGH findings — S-VM-81 (fourth evaluation), S-VM-93 (`CgroupAccounting` equivalence), S-VM-94 (per-launch `FICLONE`), S-VM-74 (`MtlsInterceptWorker` gating), S-VM-76 (`VmDriver::stop` totality, new AC-18, with a documented Driving Ports table carve-out), S-VM-13 narrowed + S-VM-75 added (non-reflink envelope-claim fix), S-VM-35 rewritten (TOCTOU, fixes the S-VM-12 contradiction), S-VM-49 reworded (fixes the S-VM-53 contradiction). Nine MEDIUM/LOW findings — S-VM-26/S-VM-20/S-VM-08/S-VM-44/S-VM-37 corrected in place; DWD-03/DWD-06 accounting errors fixed; a dst-lint-clause AC-ownership decision (DWD-09) and a kernel-matrix-ownership decision (DWD-10) recorded. One item SETTLED by explicit user ruling, not fixed: DWD-06a records that `.claude/rules/testing.md` governs over the generic skill's ADR-025 statement, so the scaffold deferral stands; ownership of per-slice scaffold authorship (crafter) and review (`nw-software-crafter-reviewer`) answered. Two items marked BLOCKED on the concurrent DESIGN pass, not guessed: S-VM-65's mid-run storage-daemon-death `TransitionReason` variant, and the `SimVmm`/`SimVmHostState` production-composition-root injection seam for S-VM-13/51/67. Scenario count 74 → 87; error/edge coverage 59% → 60%; zero dangling `S-VM-N` references (mechanically re-verified across all three artifacts).
 - 2026-08-11 — Concurrent DESIGN pass ruled on both outstanding blockers (DWD-12). **RESOLVED**: S-VM-65's mid-run storage-daemon-death variant — ADR-0083 §D5 gained row 14 (`TransitionReason::VmStorageDaemonDied`), checked ahead of `ExitKind` entirely; S-VM-65 rewritten with a second scenario shape (guest self-reports `EXIT 0` after the daemon dies) that fails if the precedence ordering is wrong. **RESOLVED**: the `SimVmm` injection seam for S-VM-13/S-VM-51 — ADR-0083 §D8, `ServerConfig.vmm_override`, a whole-port substitution shaped after `mtls_identity_override`, not `dataplane_override` (rejected by name, §A10); both scenarios' crafter notes now name the seam and gating exactly. **STAYS BLOCKED, precisely**: S-VM-67 — ADR-0083 §D8 explicitly rules it outside the seam's reach (no `Vmm` method sits downstream of virtiofsd's sandbox check; no storage-daemon supervision port exists); its crafter note is corrected to state this is a scoping decision, not a missing seam name, and names the two candidate paths without choosing either. Upstream Issues reduced from two blocked items (four blocked scenario references) to one open item. Adapter Coverage Table's `Vmm (SimVmm)` row and Self-Review Checklist item 4 corrected to drop S-VM-67 (never covered by this seam). Scenario count unchanged at 87 (mechanically re-verified); no ADR, `brief.md`, or Rust file touched.
+- 2026-08-11 — User ruling closes the last open item (DWD-13). **RESOLVED**: S-VM-67 — path (b) chosen: `[D8d]`'s `--sandbox=namespace`-unavailable case is verified at the launch-argument construction layer (private fields, one rendering site, a pure unit test on the rendered value — the same enforcement tier ADR-0082 §D2.1 already uses for `image_type=raw`), never through a real `overdrive serve`. **This feature mints no storage-daemon supervision port.** S-VM-67 rewritten in full: `@tier3`/`@real-io` → `@tier1`/`@in-memory`, `@contract-shape:bounded-change` → `@contract-shape:pure-function`, `@property` gained (mirrors S-VM-17's pure-function-plus-`@error_path` precedent, `@error_path` retained), driving port changed from `overdrive deploy` to the storage daemon's launch-argument rendering site (a not-yet-ADR-pinned Slice 04 type — DELIVER's own naming, per CLAUDE.md § "Implement to the design"). The scenario's `Then` now carries an explicit boundary statement: it proves only what argument the rendering function constructs, never that a running `virtiofsd` enforces it or that the platform genuinely fails closed end-to-end — both stay an undischarged Tier-3 property of Slice 04. No separate Tier-3 runtime-half scenario was added (reasoned in DWD-13: no port to inject through, no genuinely-lying host in the one-kernel Lima envelope, and minting either now would invent API surface past the design). Sibling references corrected: the `@real-io` Adapter Coverage Table's virtiofsd row, the US-VM-9 AC-to-Scenario Traceability row, Self-Review Checklist item 4 (all three previously touched by DWD-12 for the S-VM-13/S-VM-51 resolution, now re-verified against S-VM-67's new resolution), plus two references DWD-12 did not reach: the top-of-file Driving Ports table's `overdrive deploy` row (range corrected to exclude S-VM-67; a new row added for the pure-function driving port) and this file's own DWD-04 crate-placement table (same range correction). Error/Edge Path Coverage counts updated: `@property` 20 → 21, `@tier3`/`@real-io` 61 → 60, `@tier1`/`@in-memory` 29 → 30; `@error_path` unchanged at 40; total unchanged at 87; error+edge coverage unchanged at 60%. Upstream Issues now shows **zero** open items; all three resolved items (S-VM-65, the S-VM-13/S-VM-51 seam, S-VM-67) kept struck-through for the audit trail. No ADR, `brief.md`, or Rust file touched by this DISTILL pass (the ADR amendments already landed via the concurrent DESIGN pass before this pass started). No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made.

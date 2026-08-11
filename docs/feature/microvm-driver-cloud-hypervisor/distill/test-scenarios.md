@@ -31,7 +31,7 @@ driven-port equivalence test) per this project's four-tier discipline.
 
 | Port | Kind | Location | Exercises |
 |---|---|---|---|
-| `overdrive deploy <spec.toml>` — direct CLI handler call (`overdrive_cli::commands::deploy::deploy`) against a REAL in-process `overdrive serve`, run under `cargo xtask lima run --` as root | Driving (user-facing) | `crates/overdrive-cli`, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (firm rule — no `Command::new(CARGO_BIN_EXE_overdrive)` anywhere in this feature) | S-VM-01…05, S-VM-11…15, S-VM-33…68, S-VM-74, S-VM-75, S-VM-81 (Tier-3 cases). The REAL OS-level subprocess in every one of these is `cloud-hypervisor` itself, spawned by `VmDriver`/`CloudHypervisorVmm` inside the real `overdrive serve` process — that is what makes them Tier-3/`@real-io`, not how the CLI layer is invoked |
+| `overdrive deploy <spec.toml>` — direct CLI handler call (`overdrive_cli::commands::deploy::deploy`) against a REAL in-process `overdrive serve`, run under `cargo xtask lima run --` as root | Driving (user-facing) | `crates/overdrive-cli`, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (firm rule — no `Command::new(CARGO_BIN_EXE_overdrive)` anywhere in this feature) | S-VM-01…05, S-VM-11…15, S-VM-33…66, S-VM-68, S-VM-74, S-VM-75, S-VM-81 (Tier-3 cases; **excludes S-VM-67**, moved to the pure-function row below — DWD-13). The REAL OS-level subprocess in every one of these is `cloud-hypervisor` itself, spawned by `VmDriver`/`CloudHypervisorVmm` inside the real `overdrive serve` process — that is what makes them Tier-3/`@real-io`, not how the CLI layer is invoked |
 | `overdrive workload describe <id>` / `overdrive job stop <id>` | Driving (user-facing) | `crates/overdrive-cli` | Read-side assertions on every Tier-3 scenario; S-VM-46/47 (stop verb) |
 | `VmDriver::start` / `VmDriver::stop` — **component-scope acceptance case against `SimVmm`, injected at the `Vmm` port boundary** | Driving (internal, component scope — the enforcement vehicle ADR-0082 §D4 names by name: *"`VmDriver::stop`'s edge cases … are therefore asserted by a `VmDriver`-level acceptance case against `SimVmm`, named here so the move does not quietly shed the enforcement it was partly justified on"*) | `crates/overdrive-worker` | S-VM-76. Carved out of the "always reached through the CLI/serve pair" default because `vmm_equivalence.rs` drives the `Vmm` port only and structurally cannot reach `VmDriver::stop`'s relocated guest half (ADR-0082 §D4) — this is `SimVmm` injected at a port boundary per system constraint 1, not a bypass of it |
 | `Vmm` port (`CloudHypervisorVmm` / `SimVmm`) | Driven (adapter-under-test for equivalence only) | `crates/overdrive-host`, `crates/overdrive-sim` | `vmm_equivalence.rs` (S-VM-90); `vmm_ficlone_per_launch.rs` (S-VM-94, real non-reflink substrate) |
@@ -41,6 +41,7 @@ driven-port equivalence test) per this project's four-tier discipline.
 | `VmReclamation` reconciler tick (`ReconcilerRuntime`) | Driving (internal) | `crates/overdrive-core` runtime, composed in `overdrive-control-plane` | S-VM-22, S-VM-24, S-VM-25 Tier-3 shapes |
 | DST harness (`cargo dst`) + `Invariant` catalogue | Driving (internal, Tier 1) | `crates/overdrive-sim` | S-VM-88 (`VmReclamationConverges`), S-VM-24 in-memory shape (`SupervisedVmSurvivesEveryTick`), S-VM-87 (`VmReclamationIdempotentSteadyState`), S-VM-89 (`EndingInFlightIsNeverReclaimed`) |
 | `KernelImage::validate`, `DiskAttachment::to_disk_arg`, `VmConfinement::seccomp_arg`, `MemoryPlan::derive`, `VmConfig::rlimit_fsize`, `SupervisionSet::reclamation_authorised` (pure functions) | Driving (unit scope) | `crates/overdrive-core` | S-VM-08, S-VM-16, S-VM-17, S-VM-20, S-VM-63, S-VM-73, S-VM-92 |
+| Storage daemon's launch-argument rendering site (pure function; mirrors `DiskAttachment::to_disk_arg`'s D2.1 shape — private fields, one rendering site; **exact type NOT yet pinned by any ADR**, Slice 04's own, DELIVER names it at RED phase, per ADR-0083 §D8's closing amendment) | Driving (unit scope, forward-specified — DWD-13) | `crates/overdrive-core` (exact file TBD) | S-VM-67 |
 
 ---
 
@@ -1646,44 +1647,107 @@ And if the share never becomes ready, the allocation is Failed with
   TransitionReason::VmStorageSocketTimeout naming the socket and the wait
 ```
 
-#### S-VM-67: A host that cannot sandbox the storage daemon refuses the workload
+#### S-VM-67: The storage daemon's launch argument never carries a weaker sandbox than `--sandbox=namespace`
 
-**Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, `--sandbox=namespace` unavailable, injected at the port boundary)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-16` `@tier3` `@real-io` `@mandatory:mutation_target` `@correction:D8d`
+**Driving port**: the storage daemon's launch-argument rendering site (pure function; a value with private fields and exactly one rendering site, mirroring `DiskAttachment::to_disk_arg()`'s D2.1 shape verbatim — ADR-0082 §D2.1 / ADR-0083 §D8's closing amendment pin the enforcement TIER, not a concrete type name; the exact type is Slice 04's own, not yet designed, and DELIVER's Slice 04 RED phase names it per CLAUDE.md § "Implement to the design")
+**Tags**: `@contract-shape:pure-function` `@property` `@error_path` `@ac-16` `@tier1` `@in-memory` `@mandatory:mutation_target` `@correction:D8d`
 
 ```gherkin
-Given Ana has deployed a VM job declaring a volume on a host that cannot
-  supply --sandbox=namespace for virtiofsd
-When the platform attempts to start the allocation
-Then the allocation is Failed with TransitionReason::VmStorageSandboxUnavailable
-  naming the unavailable sandbox
-And the storage daemon is NEVER started with a weaker sandbox (chroot)
-  instead
+Given any host capability signal describing whether --sandbox=namespace can
+  be supplied for the storage daemon (available or unavailable)
+When the storage daemon's launch argument is rendered from that signal
+Then an available signal always yields a launch carrying --sandbox=namespace
+And an unavailable signal always yields a typed refusal naming the
+  unavailable sandbox -- never a launch
+And no input to this function ever yields a launch carrying
+  --sandbox=chroot, and no input ever yields a launch with --sandbox
+  omitted
 ```
 
-**Crafter notes**: Fail-closed, not fall-back — the reference
-implementation silently downgraded to `chroot`; this design makes that
-unrepresentable. **Still BLOCKED — now on a scoping decision, not a
-missing injection mechanism.** ADR-0083 §D8 (which resolves the
-identical-looking blocker on S-VM-13/S-VM-51) explicitly rules this
-scenario OUT of its own seam: `Vmm::create` spawns "ONE confined
-hypervisor process" (ADR-0082 §D1, verbatim) and `VmConfig` carries no
-volume field at all, so `--sandbox=namespace`'s capability check sits
-behind no `Vmm` method `vmm_override` could ever substitute — `virtiofsd`
-is a sidecar `VmDriver` spawns and supervises directly (real
-`Command::spawn`, the same shape `ExecDriver` already uses for its own
-workload process), never behind a port trait, per system constraint 9 /
-US-VM-9. `vmm_override` has nothing to inject here. ADR-0083 §D8 names two
-honest paths and deliberately chooses neither: (a) Slice 04 mints its own
-storage-daemon supervision port when it is designed, carrying the same
-`probe` / fault-injection-table shape §D8 pins for `Vmm`, with its own
-`ServerConfig` override field following the same pattern; or (b) the
-`--sandbox=namespace`-unavailable case is asserted at a level narrower
-than a real `overdrive serve` — a pure unit test over the spawn-argument
-construction plus a Tier-2-shaped fail-closed assertion — rather than
-through production `serve` + `deploy`. This DISTILL pass does not choose
-between them or invent a supervision port on its own initiative (CLAUDE.md
-§ "Implement to the design") — the choice is the user's.
+**Crafter notes**: **RESOLVED 2026-08-11 by explicit user ruling** (recorded
+in `distill/wave-decisions.md` DWD-13; the ruling itself, and the ADR
+amendments it drove, are already landed in ADR-0082 §D2.1's cross-reference
+amendment and ADR-0083 §D8's closing amendment — read both before touching
+this scenario). The prior BLOCKED note offered two honest paths and chose
+neither; **the user has now chosen path (b): assert the case below
+`overdrive serve`, at the launch-argument construction layer — the same
+enforcement tier ADR-0082 §D2.1 already uses for `image_type=raw`: private
+fields, exactly one rendering site, a pure unit test on the rendered value.
+No storage-daemon supervision port is minted by this feature** — path (a)
+(a future Slice-04 port mirroring §D8's `Vmm` fault-injection shape) is
+explicitly not taken here, and is never inherited from this ruling if a
+later slice mints one on its own merits (process supervision, restart,
+health).
+
+**Why the argv layer, not the deploy-level symptom (measured, not
+stylistic).** The spike measured `image_type=raw`'s own *absence*
+surfacing **two layers away**, as `CreateVirtioFs`/vhost-user
+`ConnectionRefused` on the `--fs` (virtiofs) modes only, on a VMM reboot
+that had nothing to do with the actual cause (`spike/findings.md` lines
+867-893, quoting the exact CH v53 error chain). Asserting where the value
+is produced — the rendering site — rather than on a downstream symptom is
+the pattern that already works here; ADR-0083 §D8's closing amendment
+draws the same line explicitly. A Tier-3 scenario driving `overdrive
+deploy` to observe the eventual `Failed` allocation would reproduce
+exactly that trap: a real virtiofsd's failure to honour the flag, a
+supervision bug in the sidecar, or a probe that never runs would all look
+identical to "the argument was wrong" three layers downstream, and only
+the argv-layer test isolates the actual mechanism this decision governs.
+
+**The mutation site this scenario exists to kill** (feature-delta.md AC-16
+Scenario 4 checklist, verbatim): *"No code path starts the daemon with a
+weaker sandbox — mutation target: turning the fail-closed arm into
+downgrade-and-continue must be killed."* The reference implementation's
+unrecorded `namespace`→`chroot` drift (precedent warning #6) is exactly
+what a mutant flipping the unavailable-signal branch from "typed refusal"
+to "render `--sandbox=chroot` and continue" reproduces; this scenario's
+totality assertion (both branches, no third output) is what kills it.
+Complementary static enforcement — a `xtask dst-lint` clause banning a
+second `--sandbox=` rendering site outside the one function, mirroring the
+existing `"--disk"` clause (`brief.md` §113) — is a Slice 04 DELIVER
+obligation once the type lands; `brief.md` §113's table is Slice-01-scoped
+today and does not yet carry this row (DESIGN's, not this DISTILL pass's,
+to add).
+
+**THE BOUNDARY — stated so it cannot be read as more than it is (per
+ADR-0083 §D8's own closing honesty).** This scenario's `Then` proves
+**only** what argument the rendering function constructs: rendering
+`--sandbox=namespace` at one site, with no second call site and no field
+that could carry `chroot`, is verifiable purely. It does **NOT** prove:
+(a) that a **running** `virtiofsd` actually enforces `--sandbox=namespace`
+once spawned (the spike already verified this once, for the happy path —
+`spike/findings.md` line 362, "the default and genuinely in effect... a
+mount+net sandbox, not a full one" — that verification is not repeated per
+scenario here); or (b) that the **platform** genuinely turns a host's real
+incapacity into a `Failed` allocation end-to-end, rather than `virtiofsd`
+degrading or failing to start silently underneath a correctly-rendered
+argv. Both (a) and (b) remain a **Tier-3 property of Slice 04**, exercised
+against a real supervised `virtiofsd` process when that slice is designed
+and built — undischarged by this scenario, and undischarged by this
+DISTILL pass. Do not read this scenario's `Then` as proof of the runtime
+posture.
+
+**No separate Tier-3 runtime-half scenario is added by this pass.**
+Reasoned, not omitted: (i) no storage-daemon supervision port exists or is
+minted by this feature (the negative decision above), so there is no
+`Vmm`-style seam to inject an unavailable-capability fault through — the
+`ServerConfig.vmm_override` seam that resolves S-VM-13/S-VM-51 does not
+reach here (ADR-0083 §D8, "What the seam does NOT reach"); (ii) the
+single-kernel Lima test envelope genuinely supports `--sandbox=namespace`
+(`spike/findings.md` line 362), so there is no genuinely-lying host to
+exercise the failure on without an injection seam; (iii) building either
+now would be exactly the CLAUDE.md-forbidden "invent API surface past the
+design" move both ADR-0083 §D8 and the user's ruling explicitly decline.
+If Slice 04's own future DESIGN mints a storage-daemon supervision port on
+its own merits, the resulting Tier-3 fail-closed scenario is that slice's
+own DISTILL addition — not retrofitted onto this one.
+
+**Placement** (supersedes the prior Tier-3 `overdrive-cli` placement):
+`overdrive-core`, `tests/acceptance/vm_*.rs` (exact filename TBD — DELIVER's
+Slice 04 RED phase pins it once the launch-argument value type exists,
+following DWD-04's forward-reference discipline), default lane, no Lima
+needed — a genuine tier change, not a relabeling, from the Tier-3
+`overdrive-cli`/`@real-io` placement this scenario previously carried.
 
 #### S-VM-68: Nothing is left behind after a volume-carrying VM ends, on any path
 
@@ -1911,7 +1975,7 @@ non-reflink fixture, gated `integration-tests`.
 | `MtlsInterceptWorker` gating (§D2a(c)) | YES | S-VM-05 (fail-closed arm), S-VM-74 (gated-off arm) |
 | Spec parser — `[vm]` / `[[vm.volume]]` driver-table dispatch | YES (in-process; real deserializer, no subprocess needed for rejection-only cases) | S-VM-06, S-VM-07, S-VM-62 |
 | `JobEnvelope` V1→V2 (rkyv, real serialize/deserialize) | YES | S-VM-10 |
-| virtiofsd storage daemon (real supervised host process) | YES | S-VM-55, S-VM-56, S-VM-59, S-VM-64, S-VM-65, S-VM-66, S-VM-67, S-VM-68 |
+| virtiofsd storage daemon (real supervised host process) | YES | S-VM-55, S-VM-56, S-VM-59, S-VM-64, S-VM-65, S-VM-66, S-VM-68 (excludes S-VM-67 — moved to `@tier1`/`@in-memory` pure launch-argument construction, DWD-13; the running-daemon half of `[D8d]` stays a Tier-3 property of Slice 04, undischarged by any scenario in this catalogue — see S-VM-67's own crafter note) |
 | `VmReclamation` reconciler, real `overdrive serve` convergence loop | YES | S-VM-21 (Tier-3 companion), S-VM-22 (Tier-3 companion), S-VM-23, S-VM-28, S-VM-30, S-VM-81 (`svid_lifecycle` evaluation) |
 | DST harness, `VmReclamation` ESR invariants | YES (Tier 1, `SimVmHostState` + `SimClock`) | S-VM-24, S-VM-87, S-VM-88, S-VM-89 |
 
@@ -1965,7 +2029,7 @@ All 10 KPIs traced. K6 is the only "secondary" KPI (a companion assertion on an 
 | US-VM-6 | AC-10 | S-VM-38…40 | 3/3 UAT scenarios |
 | US-VM-7 | AC-13 | S-VM-49…53 | 4 UAT scenarios + Landlock-directory-grant correction; S-VM-49's ruleset enumeration corrected to match S-VM-53 |
 | US-VM-8 | AC-14, AC-15 | S-VM-55…63 | 7 UAT scenarios + engineering-constraint scenario |
-| US-VM-9 | AC-16 | S-VM-64…68 | 5/5 UAT scenarios; S-VM-65's hedged `TransitionReason` variant RESOLVED by the concurrent DESIGN pass (ADR-0083 §D5 row 14, `VmStorageDaemonDied`); S-VM-67 remains BLOCKED on a scoping decision (ADR-0083 §D8) |
+| US-VM-9 | AC-16 | S-VM-64…68 | 5/5 UAT scenarios; S-VM-65's hedged `TransitionReason` variant RESOLVED by the concurrent DESIGN pass (ADR-0083 §D5 row 14, `VmStorageDaemonDied`); S-VM-67 RESOLVED by explicit user ruling (DWD-13) — rewritten to the pure launch-argument-construction layer, `@tier1`/`@in-memory`, no storage-daemon supervision port minted; the deploy-level fail-closed claim stays an undischarged Tier-3 property of Slice 04, not covered by any scenario in this catalogue |
 | SD-1 (Bar 2 reconciler) | AC-08, AC-19, AC-20 | S-VM-21…32, S-VM-77…81, S-VM-87…89 | 5 ACs (105a.10) + 2 property tests (P1 totality, `plan_reclamation` purity) + DD-1 trap scenarios (a)/(b)/(d) + the five NEW-1 pins (abandonment boundary, hydration read order, write-time terminality guard, P2-over-`VmReclamation`, the fourth `svid_lifecycle` evaluation) + all four §105a.11 ESR invariants |
 | Port contract enforcement (cross-cutting, no single owning story) | — | S-VM-90…94 | `Vmm`, `VmHostState`, `CgroupAccounting` adapter equivalence; `SupervisionSet::reclamation_authorised` purity; per-launch `FICLONE` self-application |
 
@@ -1986,7 +2050,12 @@ equivalence test, the per-launch `FICLONE` self-application test, the
 `VmDriver::stop` totality case, and the `MtlsInterceptWorker`-gating case;
 plus a like-for-like TOCTOU rewrite of S-VM-35, which added no new ID).
 Re-verified by `grep -c '^\*\*Tags\*\*:'` and cross-checked against
-`grep -c '^#### S-VM-'` (both 87) after every edit in this pass.
+`grep -c '^#### S-VM-'` (both 87) after every edit in this pass, most
+recently after S-VM-67's rewrite (DWD-13) — total stays **87** (no
+scenario added or removed), `@property` moves **20 → 21** (S-VM-67 gained
+the tag, mirroring S-VM-16/17/18's pure-function shape), and `@error_path`
+stays **40** (S-VM-67 keeps the tag — its rejection contract survives the
+tier change, same as S-VM-17's pure-function-plus-error_path precedent).
 
 | Category | Count |
 |---|---|
@@ -1994,7 +2063,7 @@ Re-verified by `grep -c '^\*\*Tags\*\*:'` and cross-checked against
 | `@error_path` | 40 |
 | `@edge_case` | 12 |
 | No happy/error/edge tag (pure `@property`/`@example` scenarios: S-VM-08, 10, 16, 18, 20, 31, 32, 63, 73, 80, 87, 88, 89, 90, 91, 92, 93) | 17 |
-| `@property` | 20 |
+| `@property` | 21 |
 | `@example` (fixed call sequences at layer 3, per Mandate 9 — S-VM-76, 90, 91, 93) | 4 |
 | **Total distinct scenarios** | **87** |
 
@@ -2003,7 +2072,9 @@ consistent with this feature being fundamentally about honest failure
 classification (K1/K2/K3/K7/K9 are ALL guardrail/diagnosis KPIs), and the
 remediation pass's additions skewed further toward `@error_path` (the
 NEW-1 pins, the fourth evaluation, and both adapter-equivalence-gap fixes
-are all failure/edge-shaped by nature).
+are all failure/edge-shaped by nature). Unchanged by S-VM-67's rewrite
+(DWD-13) — it keeps its `@error_path` tag; only its tier/mechanism tags
+moved (`@tier3 @real-io` → `@tier1 @in-memory`).
 
 ---
 
@@ -2012,7 +2083,7 @@ are all failure/edge-shaped by nature).
 - [x] 1. Walking skeleton declared: S-VM-01, tagged `@walking_skeleton @driving_port`, driven through real `overdrive serve` + `overdrive deploy` with a real Cloud Hypervisor VMM and a real guest kernel. Exactly one.
 - [x] 2. Scenarios tagged `@real-io` / `@in-memory` / `@tier1` / `@tier3` per this project's four-tier model (mapped from the generic skill's Strategy A/B/C/D, which does not apply to this Rust workspace)
 - [x] 3. Every driven adapter has at least one `@real-io` scenario — Adapter Coverage Table: 0 MISSING. Includes `CgroupAccounting` (`S-VM-93`, added in remediation — the earlier pass got equivalence tests for `Vmm` and `VmHostState` but missed the third new port trait)
-- [x] 4. `SimVmm` fault-injection scope documented, corrected: it injects substrate LIES that CANNOT be produced on the single Lima kernel in the test envelope — capability-flag absence (Landlock flag/LSM, KVM access) and an unbindable run root — via `ServerConfig.vmm_override` (ADR-0083 §D8). **The non-reflink class is NOT in this set** — a tmpfs/loopback-ext4 staging directory IS a real, non-injected non-reflink substrate reachable in the same Lima harness, and is exercised for real at S-VM-75 (boot probe) and S-VM-94 (per-launch clone). **The sandbox-unavailable class (S-VM-67) is likewise NOT in this set** — ADR-0083 §D8 explicitly rules it outside `vmm_override`'s reach (`virtiofsd` sits behind no `Vmm` method, and no other port currently exists for it); S-VM-67 stays BLOCKED on a scoping decision, not resolved by this seam — see its own crafter note. Never a production effect the test hand-installs (system constraint 1 compliance, GH #248/ADR-0074 trap deliberately reproduced and closed in S-VM-05/S-VM-74)
+- [x] 4. `SimVmm` fault-injection scope documented, corrected: it injects substrate LIES that CANNOT be produced on the single Lima kernel in the test envelope — capability-flag absence (Landlock flag/LSM, KVM access) and an unbindable run root — via `ServerConfig.vmm_override` (ADR-0083 §D8). **The non-reflink class is NOT in this set** — a tmpfs/loopback-ext4 staging directory IS a real, non-injected non-reflink substrate reachable in the same Lima harness, and is exercised for real at S-VM-75 (boot probe) and S-VM-94 (per-launch clone). **The sandbox-unavailable class (S-VM-67) was never in this set** — ADR-0083 §D8 explicitly rules it outside `vmm_override`'s reach (`virtiofsd` sits behind no `Vmm` method, and no other port exists for it). **RESOLVED, not by this seam**: explicit user ruling (DWD-13) moves S-VM-67 to the pure launch-argument-construction layer instead — no `SimVmm`/port injection of any kind, `@tier1`/`@in-memory`, no storage-daemon supervision port minted by this feature; see S-VM-67's own crafter note for the full boundary statement. Never a production effect the test hand-installs (system constraint 1 compliance, GH #248/ADR-0074 trap deliberately reproduced and closed in S-VM-05/S-VM-74)
 - [x] 5. No container preference — all Tier-3 execution is `cargo xtask lima run --`, per project convention
 - [x] 6. Mandate 7 scaffolding — see `distill/wave-decisions.md` DWD-06 for the scoped scaffold decision (this feature genuinely introduces new crates/modules, unlike the brownfield precedent that deferred scaffolding entirely). Corrected in this remediation pass: the accounting was internally inconsistent (claimed 15 scaffolds "for every scenario in Slice 01" when only 12 of 20 are scaffolded) and the deferred-scaffold list omitted S-VM-11/S-VM-12 — both fixed in `wave-decisions.md`. No new scaffolds were authored by this remediation pass; every new/modified scenario joins the existing deferred-to-DELIVER set with its crate/file destination recorded in DWD-04
 - [x] 7. Driving Adapter coverage — `overdrive deploy` / `overdrive workload describe` / `overdrive job stop` / `overdrive serve` boot, all exercised via direct CLI handler call against a real in-process `overdrive serve` (never a subprocess, per `crates/overdrive-cli/CLAUDE.md`); see § Driving Adapter Coverage. One documented, justified carve-out: S-VM-76 (`VmDriver::stop` totality) is a component-scope acceptance case against `SimVmm`, named as its own enforcement vehicle by ADR-0082 §D4 because `vmm_equivalence.rs` cannot reach the relocated guest half of `stop`

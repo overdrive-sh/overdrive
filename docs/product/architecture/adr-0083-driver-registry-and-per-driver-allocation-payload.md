@@ -38,7 +38,17 @@ pass** — § D8 is added: `ServerConfig.vmm_override`, a
 for `Vmm`, pinning how S-VM-13 and S-VM-51 reach `SimVmm` inside a real
 `overdrive serve`. Ruled explicitly NOT the seam that reaches S-VM-67 —
 `virtiofsd`'s sandbox check sits outside the `Vmm` port entirely, and that
-boundary is stated rather than papered over.
+boundary is stated rather than papered over. **Amended 2026-08-11 (user
+ruling, closes § D8's S-VM-67 open item), same DESIGN pass** — § D8's
+closing section is amended: the user ruled **path (b)** of its own two
+named paths. The `--sandbox=namespace` posture is verified at the
+**launch-argument construction layer** — the same enforcement tier ADR-0082
+§ D2.1 already uses for `image_type=raw` (private fields, one rendering
+site, a pure unit test on the rendered value, a lint clause forbidding a
+second construction site) — never through a real `overdrive serve`.
+**No storage-daemon supervision port is minted by this feature.** Path (a)
+is explicitly not taken. No prior decision is reversed; this closes the one
+item § D8 deliberately left open.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -1205,10 +1215,10 @@ for S-VM-67: injecting a `SimVmm` changes what `discover` / `probe` /
 `create` / `terminate` return, and virtiofsd's `--sandbox=namespace`
 capability check is not downstream of any of those four calls.
 
-Two honest paths exist for S-VM-67, and **this ADR pair does not choose
-between them** — doing so mints a new port trait or narrows an
-already-accepted DISTILL scenario, both outside the two gaps this
-amendment closes:
+Two honest paths existed for S-VM-67 — doing either mints a new port trait
+or narrows an already-accepted DISTILL scenario, both outside the two gaps
+this amendment closed, which is why this ADR pair did not choose between
+them at the time:
 
 (a) Slice 04 mints its own storage-daemon supervision port when it is
     designed, carrying the same `probe` / fault-injection-table shape this
@@ -1220,8 +1230,55 @@ amendment closes:
     spawn-argument construction plus a Tier-2-shaped fail-closed
     assertion — rather than through production `serve` + `deploy`.
 
-This is recorded here so the gap is visible rather than silently assumed
+This was recorded here so the gap was visible rather than silently assumed
 solved by proximity to S-VM-13 / S-VM-51's (real) seam.
+
+> **Ruled 2026-08-11, by user ruling — closes the open item above. Path
+> (b).** The `--sandbox=namespace` posture is verified at the
+> **launch-argument construction layer** — the same enforcement tier
+> ADR-0082 § D2.1 already uses for `image_type=raw`: a value with private
+> fields, exactly one rendering site able to produce the argument, and a
+> pure unit test asserting on the rendered value. The spike's own evidence
+> is why this shape is right, not merely convenient: `image_type=raw`'s
+> *absence* surfaced **two layers away**, as a virtiofs `ConnectionRefused`
+> (D2.1's own opening lie), so asserting at the argv-construction layer —
+> where the value is produced — rather than on a downstream symptom is the
+> pattern that already works here, twice.
+>
+> **The negative decision, stated plainly: this feature mints no
+> storage-daemon supervision port.** Path (a) is explicitly not taken. If
+> Slice 04's virtiofsd lifecycle later needs a supervision port on its own
+> merits — process supervision, restart, health — that is a design decision
+> made **then**, on those merits, never inherited from this ruling and never
+> introduced as test scaffolding to reach S-VM-67 through a real
+> `overdrive serve`.
+>
+> **What the argv-layer assertion covers, and what it honestly does not.**
+> Rendering `--sandbox=namespace` at one site, with no second call site able
+> to construct the argument and no field that could carry `chroot`, is
+> **verifiable purely** — a unit test on the rendered value is a complete
+> proof of what argument `VmDriver` constructs. It is **not** a proof that a
+> *running* `virtiofsd` actually enforces that sandbox, nor that a host
+> which genuinely cannot supply `--sandbox=namespace` is observed and turned
+> into a `Failed` allocation rather than `virtiofsd` degrading — or failing
+> to start — silently underneath a correctly-rendered argv. That second
+> half is a **Tier-3 property of Slice 04**, exercised against a real
+> supervised `virtiofsd` process when that slice is designed and built; it
+> is not discharged by this ruling.
+>
+> **And, honestly, against `[D8d]`'s own requirement — fail-closed, never
+> silently downgraded.** The silent-downgrade bug this feature exists to
+> correct (the reference implementation's unrecorded `namespace` → `chroot`
+> drift) is made **lint/test-detected by this ruling, not structurally
+> unrepresentable at the type level** — the same tier D2.1 itself declares
+> for `image_type=raw`: *"private fields + one rendering site + a lint
+> clause… not a type-level impossibility."* A future edit to the one
+> rendering function could still emit `chroot`; what this ruling buys is
+> that there is exactly one place in the workspace such an edit could
+> happen, and a pure unit test plus a lint clause catch it there. A stronger,
+> type-level claim is Slice 04's to earn when it is designed, the same way
+> D2.1 earned its own precision correction — by naming the enforcement
+> mechanism exactly, never by asserting more than the type system delivers.
 
 ---
 
@@ -1440,9 +1497,15 @@ everything downstream stays real.
   than papered over** (§ D8). `virtiofsd`'s `--sandbox=namespace`
   capability check sits outside the `Vmm` port entirely (no volume field
   reaches `VmConfig`), so `vmm_override` cannot inject its unavailability.
-  Slice 04 either mints its own storage-daemon port (mirroring § D8's
-  shape) or the scenario is asserted at a narrower level than a real
-  `overdrive serve`. Neither choice is made here.
+  **Ruled 2026-08-11, by user ruling:** the fail-closed posture is instead
+  verified at the launch-argument construction layer — a pure unit test on
+  the rendered `--sandbox=` value, the same enforcement tier as D2.1's
+  `image_type=raw` — never through a real `overdrive serve`. **This
+  feature mints no storage-daemon supervision port.** That assertion
+  proves what argument `VmDriver` constructs; it does not prove a running
+  `virtiofsd` enforces it or fails closed when the host cannot — that
+  remains a Tier-3 property of Slice 04. § D8's closing section carries the
+  full statement.
 - **`ExitEvent` gains a second additive field** (`storage_daemon_died`,
   row 14) beside `oom` (ADR-0082 § D8), and `exit_observer::handle_exit_event`
   gains a second precedence check — this one checked **ahead of** `ExitKind`

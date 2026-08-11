@@ -37,8 +37,18 @@ and leaves `probe()` running unconditionally against whatever is bound).
 ADR-0083 § D8 also rules that the seam does **not** reach S-VM-67
 (`virtiofsd`'s `--sandbox=namespace` check, since no volume information
 reaches `VmConfig` or any `Vmm` method) — a boundary stated there, not
-resolved here or in ADR-0083. No decision in this ADR is reversed; this
-amendment closes a wiring gap the ADR left open.
+resolved here or in ADR-0083 at the time. No decision in this ADR is
+reversed; this amendment closes a wiring gap the ADR left open.
+
+**Amended 2026-08-11 (cross-reference update — the open item just above is
+now closed), same DESIGN pass** — ADR-0083 § D8 records a user ruling: the
+`--sandbox=namespace` posture is verified at the launch-argument
+construction layer, mirroring this ADR's own § D2.1 `image_type=raw`
+pattern (private fields, one rendering site, a pure unit test on the
+rendered value — lint/test-detected, not a type-level impossibility, the
+same honesty D2.1 states about itself). **No storage-daemon supervision
+port is minted by this feature.** No decision in this ADR changes; only the
+cross-reference above is now stale and is corrected by this note.
 
 Implements the application-architecture half of
 `docs/product/architecture/brief.md` § *System Architecture* → *Cloud Hypervisor
@@ -652,7 +662,9 @@ failures and `virtiofsd`'s own sandbox check are two different things —
 the former is reachable through this table's scenarios and § D8's seam;
 the latter (S-VM-67) is not, because no volume information reaches
 `VmConfig` or any `Vmm` method — see ADR-0083 § D8's closing section for
-that boundary stated in full.
+that boundary stated in full, including the 2026-08-11 user ruling that
+closes it (argv-layer assertion, no storage-daemon supervision port
+minted).
 
 Scenario 1 is an **executed `FICLONE`**, not an fstype string comparison —
 `infra/metal/provision.sh:419-430` already does exactly this
