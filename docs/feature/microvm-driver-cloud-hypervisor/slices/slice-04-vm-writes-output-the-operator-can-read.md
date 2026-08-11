@@ -95,6 +95,18 @@ mount** (the composite-lie case); a daemon killed mid-run; and a host that canno
   one field on the `VmConfig` **value** (system constraint 4 already forbids a builder, so
   this is one branch at one construction site, not two config shapes). A volume-free VM
   boots byte-identically to Slice 01.
+  **`superseded-by-DESIGN` (2026-08-11, GH #42) — two corrections.** **C-6:**
+  `RLIMIT_FSIZE` must be **`max(rootfs image, guest RAM)`** whenever `shared=on` is in
+  play, because `shared=on` backs guest RAM with a **memfd** and a memfd is a *file* for
+  `RLIMIT_FSIZE` — a limit sized off the rootfs alone kills every volume-carrying VM with
+  an opaque `SIGXFSZ`. It is encoded from **Slice 01** (`VmConfig::rlimit_fsize()`,
+  ADR-0082 § D2), *before* this slice turns `shared=on` on, so this slice inherits it
+  rather than deriving it. **Assumption A-3 (labelled by the system designer,
+  2026-08-11):** P6 measured the `shared=on` volume path on **x86_64 only**;
+  `findings.md`'s verdict table records *"aarch64 still unmeasured"*. This slice designs
+  the volume path for **both** shipping arches on a single-arch measurement — **if
+  `shared=on` misbehaves on Arm metal, this slice is x86_64-only until measured.** The
+  volume capability is what gates, not the driver.
 - **`--cache=never` (`[D8c]`)** — exactly one guest mounts each share, and CH has no DAX, so
   a guest page cache over the share would be plain double-buffering.
 - **`--sandbox=namespace`, fail-closed (`[D8d]`)** — virtiofsd's own default, giving *that*

@@ -4,6 +4,19 @@
 > **4–6 d**). Feature: `microvm-driver-cloud-hypervisor` (GH #42).
 > Stories: **US-VM-3**, **US-VM-4**, **US-VM-7**. Job: **J-OPS-003**. Gated by Slice 01
 > (and by Slice 02 for US-VM-7's fail-closed reason vocabulary).
+>
+> **`superseded-by-DESIGN` (2026-08-11, GH #42).** Three statements below are
+> corrected in place; the governing text is named at each site and **governs
+> where this file and it disagree**. **C-1** — the fresh per-restart copy is the
+> **`FICLONE` ioctl**, not `cp --reflink=auto` (ADR-0082 § D2 / brief § 102).
+> **C-4** — the Landlock ruleset's **only** explicitly-declared rule is the
+> **vsock socket's containing directory**; CH auto-derives the three paths this
+> slice previously named (ADR-0082 § D2.2). **C-6** — `RLIMIT_FSIZE` is
+> `max(rootfs image, guest RAM)`, encoded from Slice 01 (ADR-0082 § D2). The
+> **graceful-shutdown mechanism** is also now pinned to two constants —
+> `VM_SHUTDOWN_REQUEST_DEADLINE` (2 s) and `VM_STOP_GRACE` (10 s), ADR-0082 § D4
+> — and this slice's Tier-3 stop AC is the **first evidence** for the host→guest
+> `SHUTDOWN` write, which the spike never exercised (`findings.md:2787`).
 
 ## Goal (one line)
 
@@ -65,14 +78,35 @@ cannot supply the required confinement.
 - `Driver::stop` requests a graceful guest shutdown, escalating to a hard kill after a
   bounded grace period; an unresponsive guest still lands
   `Terminated / Stopped{by: Operator}`, never a crash.
-- A restarted allocation boots from a **fresh** `cp --reflink=auto` of the operator's
-  rootfs; the operator's artifact on disk is byte-unchanged.
+- A restarted allocation boots from a **fresh clone** of the operator's rootfs; the
+  operator's artifact on disk is byte-unchanged. **C-1 correction (DESIGN, ADR-0082 § D2 /
+  brief § 102):** the clone is the **`FICLONE` ioctl issued directly**, **not**
+  `cp --reflink=auto` — `auto` silently degrades to a full copy on a filesystem that cannot
+  reflink (0.015 s / +0 MiB versus 3.970 s / +4096 MiB, ~260×, P4) with no error anywhere,
+  and the ioctl has no such path. The clone lands on the rootfs master's own filesystem and
+  its filename carries the allocation id.
 - DESIGN pins the ordering where the agent's report and the VMM's exit race, so a reported
   exit is never overwritten by the subsequent teardown.
 - **US-VM-7 — `[D7]` items 1–3 on the spawned hypervisor:** `--landlock` with a ruleset
-  derived from **the paths this spec declares** (kernel, per-launch rootfs copy, API
-  socket) — not a hardcoded artifact directory; a **uid/gid drop** to a non-root identity
-  that retains `/dev/kvm`; and `setrlimit` on `RLIMIT_FSIZE` and `RLIMIT_NOFILE`.
+  derived from **the paths this spec declares** — not a hardcoded artifact directory; a
+  **uid/gid drop** to a non-root identity that retains `/dev/kvm`; and `setrlimit` on
+  `RLIMIT_FSIZE` and `RLIMIT_NOFILE`.
+  **C-4 correction (DESIGN, ADR-0082 § D2.2):** the three paths this slice previously
+  named — kernel, per-launch rootfs copy, API socket — are **exactly the ones CH
+  auto-derives** (along with `--serial file=`). The one path that needs an explicit rule is
+  the **vsock socket's containing directory**, which CH does **not** auto-derive for the
+  socket it binds itself; the failure is `CreateVsockBackend(UnixBind(EACCES))` and never
+  mentions Landlock (P5). A read-only rule is insufficient, and the rule **cannot name the
+  socket path** (CH validates rule paths for existence at config-parse time, before the
+  socket exists), so the grant is `access=rw` on the **per-allocation run directory** — the
+  reason that directory must hold nothing else (SD-2). `VmRunDir::landlock_grant()` is the
+  only producer; there is no path list to get wrong.
+  **C-6 correction (DESIGN, ADR-0082 § D2):** `RLIMIT_FSIZE` is
+  **`max(rootfs image, guest RAM)`**, encoded from **Slice 01** rather than derived here.
+  `--memory shared=on` (Slice 04) backs guest RAM with a memfd, and a memfd is a *file* for
+  `RLIMIT_FSIZE` — a limit sized off the rootfs alone kills every volume-carrying VM with
+  an opaque `SIGXFSZ`. The AC below (*"finite … strictly lower than `overdrive serve`"*)
+  is unchanged and still binding; the `max` is the **floor** it must clear.
   **Fail-closed:** a host that cannot supply them yields a distinct `Failed` reason — a
   **fifth** variant minted in Slice 02's shape, not a reuse of one of that slice's four
   (US-VM-2's "no two share a variant" holds) — never a hypervisor started with confinement
@@ -120,8 +154,15 @@ cannot supply the required confinement.
 - [ ] The classification arm is covered by mutation testing; the `CleanExit`-collapse
       mutation is killed.
 - [ ] `overdrive job stop` requests graceful guest shutdown before any hard kill.
+      **This AC is the FIRST evidence for the host→guest `SHUTDOWN` write** — the spike
+      exercised the vsock connection **guest→host only** (`findings.md:2787`), so no probe
+      ever wrote host→guest nor had a guest agent read while supervising a child. Treat it
+      as a mechanism proof, not a regression guard (ADR-0082 § D4).
 - [ ] An unresponsive guest terminates within a bounded grace period and lands
-      `Terminated / Stopped{by: Operator}`.
+      `Terminated / Stopped{by: Operator}` — bounded by `VM_SHUTDOWN_REQUEST_DEADLINE`
+      (2 s, step 1) then `VM_STOP_GRACE` (10 s, step 2), ADR-0082 § D4. A stop arriving
+      **before the guest has beaconed** has no session to write to: step 1 is skipped and
+      the allocation still lands `Terminated / Stopped{by: Operator}`, never a crash.
 - [ ] A restarted VM boots from an unmodified copy; the operator's artifact is
       byte-identical before and after.
 - [ ] No leaked hypervisor processes or rootfs copies after terminal states.

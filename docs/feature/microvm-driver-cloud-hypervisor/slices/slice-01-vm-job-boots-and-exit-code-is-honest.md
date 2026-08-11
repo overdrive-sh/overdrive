@@ -3,6 +3,20 @@
 > DISCUSS brief (2026-08-01). Feature: `microvm-driver-cloud-hypervisor` (GH #42).
 > Story: **US-VM-1**. Job: **J-OPS-003**. **The walking skeleton.** Gated by Slice 00
 > PROMOTE.
+>
+> **`superseded-by-DESIGN` (2026-08-11, GH #42).** Four statements below are
+> corrected in place by the DESIGN wave; the governing text is named at each
+> site, and **the ADR/brief section governs where this file and it disagree**.
+> Summary of what changed for this slice — **C-1** the per-launch copy is the
+> **`FICLONE` ioctl**, never `cp --reflink=auto` (ADR-0082 § D2 / brief § 102);
+> **C-2** every `--disk` carries `image_type=raw`, rendered at one site
+> (ADR-0082 § D2.1); **C-3** `memory.max` is `guest RAM + reserve`, never the
+> declared figure alone (brief § *System Architecture* SD-4, ADR-0082 § D2);
+> **C-5** the seccomp runtime guard reads `/proc/<pid>/task/*/status`, because
+> `/proc/<pid>/status` reports `Seccomp: 0` on a **correctly** confined CH
+> (spike P5) — the old AC **failed against correct behaviour**. **C-6**
+> (`RLIMIT_FSIZE = max(rootfs, guest RAM)`) is encoded from this slice even
+> though `shared=on` first ships in Slice 04.
 
 ## Goal (one line)
 
@@ -95,10 +109,34 @@ volumes.** One VM, runs to completion, reports its exit code.
 - **Guest agent:** static PID-1 `overdrive-init` — ready beacon, exec the command,
   forward stdio, report the real exit status over vsock. Not `kata-agent`.
 - **Rootfs:** ext4 attached as `virtio-blk` (`[D5]` — the **rootfs** decision; it says
-  nothing about virtiofs, which `[D8]` selects for volumes in Slice 04); per-launch
-  `cp --reflink=auto` so the operator's artifact is never mutated. The copy is discarded at
+  nothing about virtiofs, which `[D8]` selects for volumes in Slice 04); a per-launch clone
+  so the operator's artifact is never mutated. The copy is discarded at
   terminal **by design** — which is what makes restart honest, and also why a workload
   needs a Slice 04 volume for any output to survive.
+  **C-1 correction (DESIGN, ADR-0082 § D2 / brief § 102):** the clone is the **`FICLONE`
+  ioctl issued directly**, **not** `cp --reflink=auto`. `auto` degrades to a full copy with
+  **no error** on a filesystem that cannot reflink — measured 0.015 s / +0 MiB versus
+  3.970 s / +4096 MiB, ~260× (P4) — and the ioctl has no `auto` path to degrade and no
+  coreutils-version dependency. The clone lands on the **rootfs master's own filesystem**
+  (reflink is intra-filesystem; staging into `/run` fails `Invalid cross-device link`), and
+  its **filename carries the allocation id**, which is what makes a reboot-orphaned clone
+  attributable (SD-1 / SD-2).
+- **Disk argument (C-2, new here — no slice previously mentioned it):** every `--disk`
+  carries **`image_type=raw` explicitly**, rendered at the single site
+  `DiskAttachment::to_disk_arg` (ADR-0082 § D2.1). CH v53's auto-detect *"disables sector-0
+  writes"*, and our images are bare filesystems where sector 0 **is** the filesystem — the
+  guest faults, `panic=1` reboots it, and the failure surfaces two layers from its cause
+  (P10/P11). There is no `image_type` field to forget.
+- **Resource limits (C-3):** the allocation's `memory.max` is
+  **`resources.memory_bytes + reserve(resources.memory_bytes)`**, not the declared figure
+  alone (SD-4; `MemoryPlan::derive` is the only constructor, ADR-0082 § D2). The cgroup
+  charges the hypervisor's whole RSS **plus** host page tables RSS cannot see, so setting
+  both from one number is a cgroup OOM **by construction**, surfacing as
+  `signal: 9` with no mention of memory. `reserve` is measured in DELIVER via
+  `memory.current` / `memory.stat` — **not** RSS, and **not** guessed.
+  **`RLIMIT_FSIZE` is `max(rootfs image, guest RAM)` from this slice (C-6)**, before
+  Slice 04 turns `--memory shared=on` on, because `shared=on` backs guest RAM with a memfd
+  and a memfd is a *file* for `RLIMIT_FSIZE`.
 - **Single cut, same PR:** delete `DriverType::MicroVm`, regenerate OpenAPI, amend the
   now-false `traits/driver.rs:26-29` "wire form never changes" docstring.
 
@@ -140,12 +178,27 @@ volumes.** One VM, runs to completion, reports its exit code.
       mutation flipping it to `false` **or** `log` must be killed **by an assertion over the
       constructed argument**, not by the `/proc` read — CH's `log` mode still installs a
       filter, so `Seccomp:` stays non-zero and `log` would survive a `/proc`-only check.
-      `/proc/<vmm-pid>/status`'s non-zero `Seccomp:` mode is retained as the runtime
-      regression guard; note it is satisfied by CH's default alone, so it does not by itself
-      prove this slice acted.
+      **C-5 correction (DESIGN, 2026-08-11; brief § 106):** the runtime regression guard
+      reads **`/proc/<vmm-pid>/task/*/status`**, never `/proc/<vmm-pid>/status`. Spike P5
+      measured `Seccomp: 0` on the thread-group leader of a **correctly** confined CH — the
+      filters sit on the `vmm` / `http-server` / `vcpu0` threads — so the previous wording
+      *"`/proc/<vmm-pid>/status`'s non-zero `Seccomp:` mode"* is **an AC that fails against
+      correct behaviour** and must not be implemented. The per-thread read is retained as
+      the runtime guard; note it is satisfied by CH's default alone, so it does not by
+      itself prove this slice acted — which is why the argv assertion above is the binding
+      half.
 - [ ] **PID resolution** — every `/proc/<vmm-pid>/…` assertion resolves the hypervisor PID
       via the allocation's cgroup scope `cgroup.procs`. This makes item 5's cgroup placement
       a **prerequisite for verifying US-VM-7 in Slice 03**, not just an ordering.
+- [ ] **C-1 / C-2 (added by DESIGN)** — the per-launch clone is produced by a **`FICLONE`
+      ioctl** on the rootfs master's own filesystem (a mutation replacing it with a plain
+      copy is killed), and **every** `--disk` argument the driver constructs contains
+      `image_type=raw` (asserted over the constructed argument at the single rendering site,
+      so it is a mutation target).
+- [ ] **C-3 (added by DESIGN)** — the allocation's `memory.max` is **strictly greater** than
+      the guest's RAM by the reserve; a VM booted at its declared `memory_bytes` is **not**
+      cgroup-OOM-killed on reaching residency. `guest_bytes == cgroup_max_bytes` has no
+      constructor.
 - [ ] `DriverType::MicroVm` deleted, OpenAPI regenerated, stale docstring amended — same PR.
 - [ ] **`JobEnvelope` V1 → V2** lands as **one commit** via the six-step procedure, with a
       new golden-bytes fixture pinning V1 and a `From<JobV1> for JobV2` impl; **existing

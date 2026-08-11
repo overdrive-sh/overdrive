@@ -19,6 +19,26 @@ no new mechanism, no change to exec classification.
 **Predicted:** four distinct VM failure modes route to four distinct `TransitionReason`
 variants through the existing seam, and zero exec test cases change.
 
+> **`superseded-by-DESIGN` (2026-08-11, GH #42) — C-7.** The count is **five, not
+> four**. The spike's measured P1 failure is a kernel that **is** found and is
+> **not loadable**: CH silently reinterprets it as UEFI firmware and reports
+> `VmBoot(UefiLoad(UefiTooBig))` — a firmware **size cap** for what is a
+> **format** rejection. The unclassified-verbatim arm below catches it and
+> reports CH's text faithfully, which is accurate reporting of a *misleading
+> upstream term*: the operator reads a size cap and goes looking at file sizes.
+> DESIGN adds **`TransitionReason::VmKernelFormatUnsupported`** (brief § 104,
+> ADR-0083 § D5), fed by the **pure** pre-flight `KernelImage::validate(path,
+> arch, header)` that runs **before** CH ever sees the file (ADR-0082 § D2); CH's
+> verbatim text belongs in `detail`, never in the variant's meaning. The
+> **twelve** `TransitionReason::Vm*` cause variants named in ADR-0083 § D5 are the
+> governing list; this slice produces its share of them. US-VM-2 / K3's *"no two
+> share a variant"* is unaffected and is exceeded.
+>
+> One further correction: *"no `cloud-hypervisor` on the host"* is a **host**
+> property, not a spec property, and its better diagnosis is SD-5's boot probe
+> plus an **admission** rejection naming the absent capability (brief § 104). The
+> ACs below are unaffected — the deploy still fails, the message improves.
+
 ## Thinnest `serve` + `deploy` loop
 
 `overdrive serve` + four deliberately-broken deploys (bad kernel path, bad rootfs path, no
@@ -28,8 +48,9 @@ Read `overdrive workload describe` / CLI output for each.
 ## Behavior (DESIGN owns the API)
 
 - Distinct `TransitionReason` variants for: **kernel artifact not found**, **rootfs
-  artifact not found**, **hypervisor binary absent**, **boot deadline exceeded**. No two
-  share a variant.
+  artifact not found**, **hypervisor binary absent**, **boot deadline exceeded**, and
+  — **C-7, added by DESIGN** — **kernel present but not loadable by this hypervisor**
+  (`VmKernelFormatUnsupported`, brief § 104 / ADR-0083 § D5). No two share a variant.
 - `classify_driver_failure` gains a VM arm routed by its `DriverType` parameter; the exec
   prefix table is untouched.
 - Genuinely unclassified failures carry the **verbatim** hypervisor text and are labelled
@@ -57,7 +78,13 @@ Read `overdrive workload describe` / CLI output for each.
 
 ## Acceptance (= US-VM-2 + US-VM-6 ACs)
 
-- [ ] Four distinct `TransitionReason` variants exist; none is a catch-all.
+- [ ] **Five** distinct `TransitionReason` variants exist; none is a catch-all. *(Was
+      "four" — **C-7** adds *kernel present but not loadable*; see the correction block
+      above.)*
+- [ ] **C-7 (added by DESIGN)** — a deploy whose `kernel` path exists but is not a loadable
+      image for the target arch reports a **format** error naming the real problem, produced
+      by the pure pre-flight validation **before** CH is invoked. It must **not** surface as
+      `UefiTooBig`, and CH's verbatim text (when present) appears only in `detail`.
 - [ ] VM failures route via the `DriverType` parameter; exec classification is unchanged
       (existing exec tests green, untouched).
 - [ ] Each message names the artifact or resource **and** the actionable next step —

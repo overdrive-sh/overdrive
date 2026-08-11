@@ -38,6 +38,22 @@ test.
 - vCPU count derived from `resources.cpu_milli` with a documented rounding rule and a
   **floor of 1** (a VM cannot have a fractional CPU; floor rather than refuse).
 - Memory size derived from `resources.memory_bytes`.
+  **C-3 correction (`superseded-by-DESIGN`, 2026-08-11; SD-4 in brief
+  § *System Architecture*, ADR-0082 § D2).** The **guest's RAM** is
+  `resources.memory_bytes` — the operator's declared figure is what the workload observes —
+  but the allocation's **`memory.max` is `resources.memory_bytes + reserve(...)`**, never
+  the declared figure alone. The cgroup charges the hypervisor's entire RSS **plus** the
+  host page tables backing the guest mapping, which RSS structurally cannot see, so setting
+  both from one number is a cgroup OOM **by construction** — surfacing as
+  `WorkloadCrashedImmediately { signal: 9 }`, indistinguishable from `kill -9`, with no
+  mention of memory. `MemoryPlan::derive` is the only constructor and
+  `guest_bytes == cgroup_max_bytes` has no representation.
+  **This bites from Slice 01, not from here** — Slice 01 already writes resource limits and
+  must give the guest *some* size — so the derivation is encoded there and this slice
+  extends it to the operator-declared figure. `reserve` is **measured in DELIVER** via
+  `memory.current` / `memory.stat`, not RSS; a guessed constant between the two known
+  RSS-derived floors (~5.4 MiB steady-state, ~11.9 MiB pre-residency, both P13/restore-path)
+  is a rejection.
 - **`[vm]` carries no CPU and no memory field** — deliberately. Two sources of truth here
   would break #92 before it is written.
 - `workload describe` reports declared resources for a VM allocation as it does for a
@@ -69,7 +85,10 @@ test.
 
 - [ ] vCPU count derived from `cpu_milli` with a documented rounding rule and floor of 1;
       `[vm]` has no CPU field.
-- [ ] Memory size derived from `memory_bytes`; `[vm]` has no memory field.
+- [ ] Memory size derived from `memory_bytes`; `[vm]` has no memory field. **And the
+      allocation's `memory.max` is strictly greater than the guest's RAM by the reserve
+      (C-3)** — a VM booted at its declared `memory_bytes` reaches residency without being
+      cgroup-OOM-killed.
 - [ ] Both observable **from inside the guest** in a Tier-3 case.
 - [ ] `workload describe` reports declared resources for VM allocations as for process
       allocations.
