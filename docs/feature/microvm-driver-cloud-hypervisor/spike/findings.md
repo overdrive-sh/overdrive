@@ -2882,8 +2882,11 @@ independently on x86_64. The open half is **aarch64**, which no available hardwa
 measure.
 
 **P7 — the I-6 volume decision goes back to the user, with numbers.** Both mechanisms
-work. Performance does not decide it: block is ~42% faster streaming, virtiofs ~25% faster
-per small file, neither overlapping. What *does* decide it is whether volumes need the host
+work. Performance does not decide it: block is **~11%** faster streaming (P7's headline
+"~42%" was a WRITE-ONLY figure, which measures how much each mechanism defers past the
+timer rather than what it costs — **corrected by P11**, which recomputed the durable ratio
+from P7's own untouched evidence at 1.110 and reproduced 1.114 independently), virtiofs
+~25% faster per small file, neither overlapping. What *does* decide it is whether volumes need the host
 reading or writing them **while the guest runs** — the one thing block cannot do at any
 price. If they do, virtiofs, and the platform accepts a per-VM daemon, `shared=on`, no rate
 limiting, and a volume path that cannot run on the Apple-Silicon dev host. If they do not,
