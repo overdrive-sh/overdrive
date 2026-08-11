@@ -22,6 +22,24 @@ unamended — § D8 only makes that derivation's failure diagnosable. Lands in
 Slice 01
 (`docs/feature/microvm-driver-cloud-hypervisor/slices/slice-01-vm-job-boots-and-exit-code-is-honest.md`).
 
+**Amended 2026-08-11 (gap-closure, DISTILL-surfaced), same DESIGN pass** —
+§ D1 names `SimVmm` as the port's simulation adapter and § D5 (below) names
+the five faults it must be able to answer, but neither this ADR nor
+`brief.md` § 100 (which separately asserted `SimVmm` is *"the injection
+point for Slice 03's fail-closed confinement case"*) ever pinned HOW a real
+in-process `overdrive serve` reaches `SimVmm` in place of
+`CloudHypervisorVmm`. **ADR-0083 § D8** now pins the seam:
+`ServerConfig.vmm_override`, a `#[cfg(feature = "integration-tests")]`-gated
+whole-port substitution mirroring the already-shipped
+`mtls_identity_override`, ruled explicitly NOT `dataplane_override`-shaped
+(that pattern gates off a whole subsystem; this one swaps one port binding
+and leaves `probe()` running unconditionally against whatever is bound).
+ADR-0083 § D8 also rules that the seam does **not** reach S-VM-67
+(`virtiofsd`'s `--sandbox=namespace` check, since no volume information
+reaches `VmConfig` or any `Vmm` method) — a boundary stated there, not
+resolved here or in ADR-0083. No decision in this ADR is reversed; this
+amendment closes a wiring gap the ADR left open.
+
 Implements the application-architecture half of
 `docs/product/architecture/brief.md` § *System Architecture* → *Cloud Hypervisor
 VM driver* (**SD-1 … SD-5**, Titan, 2026-08-10) and § *Domain Model* → *VM
@@ -619,6 +637,22 @@ DELIVER:
 | 3 | The host kernel does not expose the Landlock LSM (`/sys/kernel/security/lsm`) | Lie 4, host half | `LandlockLsmAbsent { lsms }` |
 | 4 | `/dev/kvm` is not openable **under the target identity** | Lie 7 — `0660 root:kvm`; a uid-dropped VMM reaches it only via group membership | `KvmUnreachable { uid, gid, mode, source }` |
 | 5 | The run-directory root is absent or unwritable — an executed `mkdir` → `bind` → `unlink` round-trip on a probe-scoped subdirectory | SD-2 — the run directory must be creatable and bindable, since the vsock and beacon sockets both land in it | `RunDirUnusable { root, source }` |
+
+**How these five scenarios reach `SimVmm` inside a real `overdrive serve`
+(added 2026-08-11, gap-closure amendment).** This table specifies WHICH
+faults `SimVmm` must be able to answer; it does not specify how `SimVmm`
+gets composed in place of `CloudHypervisorVmm` for a Tier-3 test exercising
+S-VM-13 (scenario 1, non-reflink staging) or S-VM-51 (confinement, via
+scenarios 2–4). That wiring is **ADR-0083 § D8** — `ServerConfig
+.vmm_override`, a whole-port substitution seam gated behind
+`#[cfg(feature = "integration-tests")]`, ruled there as the port-boundary
+pattern (`Sim*` swapped in for exactly one port) rather than a
+`dataplane_override`-shaped subsystem gate. `Vmm::create`'s confinement
+failures and `virtiofsd`'s own sandbox check are two different things —
+the former is reachable through this table's scenarios and § D8's seam;
+the latter (S-VM-67) is not, because no volume information reaches
+`VmConfig` or any `Vmm` method — see ADR-0083 § D8's closing section for
+that boundary stated in full.
 
 Scenario 1 is an **executed `FICLONE`**, not an fstype string comparison —
 `infra/metal/provision.sh:419-430` already does exactly this

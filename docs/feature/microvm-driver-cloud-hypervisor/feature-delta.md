@@ -4217,6 +4217,8 @@ binary.
 
 | Date | Wave | Change |
 |---|---|---|
+| 2026-08-11 | DESIGN (application — Morgan, two DISTILL-surfaced gap closures) | **Closed two design gaps DISTILL surfaced rather than improvised past (CLAUDE.md § "Implement to the design").** **Gap 1 — no `TransitionReason` Cause variant for a mid-run storage-daemon death.** ADR-0083 § D5's Cause table gained a **fourteenth row**, `VmStorageDaemonDied { socket: String, exit_code: Option<i32>, signal: Option<u8> }` (Slice 04), ruling the open hedge S-VM-65 recorded (*"`VmGuestMountFailed`'s sibling variant, or a distinct mid-run variant"*) as: a distinct variant. Constructed via a new additive `ExitEvent.storage_daemon_died` field (mirroring ADR-0082 § D8's `oom` field), set by `VmDriver`'s own direct supervision of the sidecar it spawns (system constraint 9 — `virtiofsd` sits outside the `Vmm` port entirely, same as `ExecDriver`'s own workload process), and classified by a new `exit_observer::handle_exit_event` precedence check that is checked **AHEAD of `ExitKind` entirely** — not nested inside a `Crashed` arm the way row 13 (`VmOutOfMemory`) is — because a guest whose writes silently failed after its share died can still self-report `EXIT 0`, and checking inside `Crashed` only would let that `CleanExit` resolve first and reproduce `VmGuestMountFailed`'s composite-lie defect one phase later. Disposition is `StoppedBy::Process` (an ordinary crash), never `PlatformReclaimed`. **Gap 2 — the `SimVmm` injection seam into the production composition root was unspecified.** ADR-0083 gained a new **§ D8**: `ServerConfig.vmm_override: Option<Arc<dyn Vmm>>`, `#[cfg(feature = "integration-tests")]`-gated, shaped after the already-shipped `mtls_identity_override` (a whole-port-implementation swap) rather than `dataplane_override` (a whole-subsystem gate) or `dataplane_probe_fault` (a one-shot `String` message — insufficient here since `Vmm` needs multiple typed fault classes across two methods and `VmmProbeError`/`VmmError` cannot derive `Clone`). Ruled explicitly as the port-trait-boundary pattern (`development.md` § "Port-trait dependencies"), not a composition-root override in the GH #248 / ADR-0074 sense: the states it injects (non-reflink staging, absent `--landlock`, unreachable `/dev/kvm`) are ADR-0082 § D5's own catalogued, production-reachable substrate lies — not a state only the seam itself can produce — and `.probe()` still runs unconditionally against whichever adapter is bound, so wire → probe → use (principle 13) is never bypassed. Covers S-VM-13 and S-VM-51. **Explicitly ruled NOT to cover S-VM-67** (storage-daemon `--sandbox=namespace` unavailable): `Vmm::create` spawns "ONE confined hypervisor process" and `VmConfig` carries no volume field, so `virtiofsd`'s sandbox check is not reachable through any `Vmm` method — no storage-daemon supervision port exists yet in either ADR. Recorded as an open boundary (two honest paths named, neither chosen: a future Slice-04 storage-daemon port mirroring this seam's shape, or asserting the case at a narrower level than a real `overdrive serve`) rather than silently assumed solved by proximity to the other two scenarios. A companion cross-reference amendment landed in ADR-0082 (its Status header and its § D5 fault-injection table), and three now-stale `TransitionReason::Vm*` variant-count references in `brief.md` (§ 100, § 104, and the Reuse Analysis table row 20 — "twelve," already stale since the earlier D-3 fold-in went unreflected there, now "fourteen") were corrected in the same pass per CLAUDE.md § "Behavior change must mark stale adjacent docs." No Rust exists for this feature yet; nothing here claims otherwise. `distill/test-scenarios.md` and `distill/wave-decisions.md` were NOT touched (concurrent DISTILL remediation pass owns them). No GitHub issues created; #259–#263 verified as the only real numbers in scope, none newly cited. No commit made. |
+| 2026-08-11 | DISTILL (Quinn) | **DISTILL complete — 0 contradictions, handoff-ready for DELIVER.** Consumed all three DESIGN dispatches (Titan/Hera/Morgan) + both ADRs + `brief.md` §§89–114 + spike PROMOTE verdict in full. Produced `distill/test-scenarios.md` (74 scenarios: 5 walking-skeleton-adjacent US-VM-1 UAT scenarios + AC-derived scenarios across all 9 stories + the cross-cutting `VmReclamation` reconciler's 5 ACs/4 ESR invariants/DD-1-trap scenarios + 3 port-contract-enforcement scenarios; 59% error/edge coverage; all 10 KPIs traced; every scenario carries a mandate-14 `@contract-shape:` tag) and `distill/wave-decisions.md` (DWD-01…08). Corrected two drafting errors before finalizing: the CLI driving-port framing (this project's `overdrive-cli` firm no-subprocess rule — direct handler call against a real in-process `overdrive serve`, not `Command::spawn`) and three dangling scenario references. Scaffolded 15 RED Rust tests (`#[should_panic(expected = "RED scaffold")]`) across 4 new files in `overdrive-cli`/`overdrive-core`, scoped to Slice 01 + 3 cross-cutting pure-function properties per DWD-06's calibrated-against-precedent reasoning (deferring production-side `todo!()` module stubs to DELIVER, since the ADRs are already the exact-signature SSOT and a DISTILL-authored parallel transcription would be a second, driftable source of truth); verified compiling clean (`cargo check`, `cargo clippy -D warnings`) and genuinely RED by execution (`cargo nextest run`: 15/15 pass) rather than narrated. Appended 4 new rows to the existing `docs/architecture/atdd-infrastructure-policy.md` (inherit mode). Peer review (Sentinel): NEEDS_REVISION (1 blocker — missing `@contract-shape:` tags; 2 high — the scenario-count undercount this same review caught, and a deferred-scaffold forward-reference that DWD-04 already supplied) — all fixed in-session, none waived (DWD-08). Zero new blockers; M-1 (`reserve_bytes` RED-scaffold dependency) and D-3 (cgroup-OOM diagnosis, reduced-form-closed) flagged for DELIVER's attention on S-VM-19/20, not re-opened as DISTILL-scope questions. |
 | 2026-08-11 | DESIGN (application — Morgan, guardrail 3 closure) | **Closed the guardrail 3 escalation this same DESIGN pass raised** (previous row: Slice 01 re-sized 5–8 d → 11–14 d, guardrail 3 fired on the single-slice >50%-over-band clause at 75% over). **User ruling, verbatim: "we dont care bout how many days this feature takes."** Consequence: no split, no rescope, no estimate adjustment — Slice 01 stays one slice carrying its full scope. The escalation is closed as **not a decision gate**, not as an accepted overrun. **This is not an ad-hoc exception — it restates standing policy the trigger was silently contradicting:** CLAUDE.md § "No effort/time budget cuts" (`effort_hours` estimates are advisory, not enforcement; do not defer or cut scope on the basis of exceeding a time budget), read with § "Build vertical slices through production entry points" (a slice is sized by whether it closes a real loop through `serve` + `deploy`, not by effort). **Guardrail 3's day-count clauses (>35 d total, >50%-over-band single-slice) are marked superseded in place** — feature-delta § Scope assessment (new "Guardrail 3 — closed by user ruling" subsection under § Scope re-assessment after the D-3 fold-in), the three-guardrail definition block above it, and `slices/slice-01-vm-job-boots-and-exit-code-is-honest.md` § Dependencies — rather than edited away, per this wave's established supersession style (cf. the Reuse-table row 14/31 verdict reversals, Titan handoff item 6). **Guardrail 2 (Slice 04's own >9 d lift trigger) is the same shape — a day-count enforcement gate — and inherits the same treatment, explicitly: retired, not fired, not unmet.** Marked superseded at its own site in `slices/slice-04-vm-writes-output-the-operator-can-read.md`. **Recorded what a genuine re-size trigger would be instead**, so removing this one does not leave a vacuum: the vertical-slice test — a slice that cannot be driven end-to-end through `overdrive serve` + `overdrive deploy` is mis-sized regardless of its day count. The itemised 6 d D-3 breakdown and the 6–9 d `[D8f]` table both stay as information about what each slice contains, not as gates. No slice's scope, ACs, or content changed. No commit made. No GitHub issues created. |
 | 2026-08-11 | DESIGN (application — Morgan, closing out the deferred Slice 01 re-size) | **Closed the sizing deferral the D-3 fold-in entry (this same pass, below) left open.** That entry explicitly declined to price the cgroup-OOM diagnosis fold-in — *"sizing this honestly is DISTILL's job, not DESIGN's estimate to silently absorb"* — per user instruction, priced it here instead. **Slice 01: 5–8 d → 11–14 d** (itemized table in the slice file: `CgroupAccounting` port + two adapters + probe + equivalence test ≈3 d; the exit-observer classification branch + `TransitionReason::VmOutOfMemory` Cause variant + a new Tier-3 AC ≈2 d; `overdrive-init`'s two musl targets 0.5 d; total 6 d, none of it present in any prior estimate). **Guardrail 3 (§ Scope assessment, wave-unadjustable, pre-committed at DISCUSS amendment 2's review fixes, 2026-08-02) FIRES on the single-slice clause**: Slice 01's stated upper band was 8 d, 50% over is 12 d, the re-sized upper bound is 14 d — 75% over. Total feature effort recomputed the same way as the existing `~22–32 d` figure: **~27–37 d** (the upper-bound reading exceeds the guardrail's 35 d ceiling; the midpoint reading ≈32 d does not — the single-slice clause fires regardless of which reading is used). **Not resolved here** — per the user's own framing when this re-size was commissioned, disposition (split further / accept as a delivery-sequence risk / re-scope / other) is the user's decision, not DESIGN's to absorb by shrinking the estimate to fit under the ceiling. Guardrail 2 (Slice 04's own >9 d lift trigger, already re-run once this pass at the DESIGN handoff and found not firing) re-confirmed unaffected by this change. **Also corrected, found while sanity-checking Slice 04 per the same dispatch:** the `shmem_enabled` WARN row in `[D8f]`'s table was costed 0 d on the reasoning that it fully piggybacks on Slice 01's `Vmm::probe()` — undersold the probe-side read+compare+warn logic and the `infra/provision/common-system.sh` write the Behavior section assigns to this slice; corrected to 0.5 d, which does not move Slice 04's 6–9 d headline band or trip its own lift trigger. New scope-reassessment subsection and total-effort table added to § Scope assessment (after the `[D8]` re-assessment) rather than editing the historical `~22–32 d` / D7-fold numbers in place. No GitHub issues created. |
 | 2026-08-11 | DESIGN (domain — Hera, ADR-0078 amendment discharged) | **Discharged the amendment obligation ADR-0081 § *Narrows ADR-0078 § D1* recorded on itself, per user approval.** Amended [ADR-0078](../../product/architecture/adr-0078-crash-and-recover-is-durably-observable-last-terminated-plus-restart-count.md) § D1 in place, immediately after the `CrashFacts::advance` docstring, in ADR-0077's established in-place-amendment style (no supersession). The amended clause is the "operator-stopped `Terminated` prior… unreachable in Phase 1" edge-case bullet. Written to hold in **both tenses**, avoiding the aspirational-docs trap: the claim is stated as **true today** (`StoppedBy::PlatformReclaimed` does not exist in code — ADR-0081 is DESIGN-complete only, #42 has not entered DELIVER) and **narrows, not reverses**, the moment that disposition lands — a reclamation-restart re-drives `Terminated → Running` through the same `RestartAllocation` path, reachable there for the first time, while the *operator*-stop half of the claim stays genuinely unreachable forever. States explicitly that `CrashFacts::advance` needs **no code change** — it already produces the correct answer — so the note cannot be misread as a bug report against it. Binds the future DELIVER-wave commit that lands the disposition to a further dated amendment (here and in the `observation_store.rs` docstring), without performing that edit now. Cross-referenced to ADR-0081 by name and section. Only ADR-0078 touched; ADR-0081, `brief.md` and the slices were already correct and landed. No GitHub issue created (used existing #42/#259–#263 only, none newly cited). |
@@ -4446,3 +4448,160 @@ praise: >-
   Actions into one. And across all three lanes every withdrawn claim (Bar-1, ~2.5 s,
   "Proven: P2") is recorded AS withdrawn in place, with the manner of the error named.
 ```
+
+---
+
+## Wave: DISTILL — acceptance test specification (Quinn, 2026-08-11)
+
+> Consumes DISCUSS (`[D1]`–`[D8]`) and all three DESIGN dispatches (Titan
+> SD-1…SD-5, Hera DD-1…DD-6/DD-1(b), Morgan §§99–114 + ADR-0082 + ADR-0083)
+> without amending any of them. Full scenario specification lives in
+> `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
+> (SSOT for scenarios, per this project's Rust-native "no `.feature` files"
+> convention — `.claude/rules/testing.md`); the decision record lives in
+> `docs/feature/microvm-driver-cloud-hypervisor/distill/wave-decisions.md`
+> (DWD-01…11, extended 2026-08-11 by an adversarial-review remediation
+> pass — DWD-11 is the finding-by-finding disposition). This section is
+> the Tier-1 `[REF]` pointer + summary the
+> `nw-distill` skill's Output contract calls for, adapted to this project's
+> two-file (not `.feature`-file) convention.
+
+### `[REF]` Scenario list with tags
+
+**87 scenarios** (74 → 87, adversarial-review remediation 2026-08-11 —
+`distill/wave-decisions.md` DWD-11) across 9 user stories, 1 cross-cutting
+reconciler (SD-1's `VmReclamation`, Bar 2, now spanning AC-08/AC-19/AC-20),
+and 5 port-contract-enforcement scenarios. One `@walking_skeleton`
+(S-VM-01, Slice 01, driven end-to-end through a real `overdrive serve` + a
+real Cloud Hypervisor VMM). Full per-scenario GIVEN/WHEN/THEN, tags
+(`@happy_path` / `@error_path` / `@edge_case` / `@property` / `@example` /
+`@tier1`/`@tier3` / `@real-io`/`@in-memory` / `@mandatory:mutation_target` /
+`@mandatory:esr_invariant` / `@correction:C-N` / `@kpi:KN`) and driving port
+live in `distill/test-scenarios.md`. Coverage: 60% error/edge path (52/87),
+all 10 KPIs traced, all 9 stories + the reconciler + the port-contract
+scenarios traced with zero AC uncovered. Every scenario carries a
+mandate-14 `@contract-shape:<pure-function|bounded-change|unbounded-preservation>`
+tag (11 pure-function, 10 unbounded-preservation, 66 bounded-change).
+Remediation added: the three §105a.11 ESR invariant scenarios a peer review
+found BLOCKER-cited but undefined (S-VM-87…89); five scenarios closing the
+NEW-1-pin coverage gap (S-VM-77…81); three closing missed adapter/adjacent
+coverage (S-VM-74, 93, 94); one closing a named-but-unavailable enforcement
+vehicle (S-VM-76); and two contradiction fixes (S-VM-35 rewritten, S-VM-49
+reworded) that added no new scenario IDs.
+
+### `[REF]` Walking skeleton strategy
+
+One scenario (S-VM-01), Slice 01. Driving port: direct CLI handler call
+(`overdrive_cli::commands::deploy::deploy`) against a REAL in-process
+`overdrive serve`, per `crates/overdrive-cli/CLAUDE.md`'s firm
+no-subprocess rule (corrected during this DISTILL pass — see
+`wave-decisions.md` DWD-07). The real OS-level subprocess this scenario
+exercises is `cloud-hypervisor` itself, spawned by `VmDriver` inside that
+in-process server. No test-only wiring stands in for any production call
+site — `DriverRegistry` composition (discover → probe → insert) happens
+inside `overdrive serve`'s own boot sequence.
+
+### `[REF]` Adapter coverage table
+
+Zero "NO — MISSING" rows across 10 driven adapters (`Vmm` production +
+sim, `VmHostState` production + sim, `CgroupAccounting`, `overdrive-init`,
+`DriverRegistry` composition, the spec parser, `JobEnvelope` rkyv, the
+virtiofsd storage daemon, the `VmReclamation` reconciler's real convergence
+loop). Full table in `test-scenarios.md` § "`@real-io` Adapter Coverage
+Table".
+
+### `[REF]` Scaffolds
+
+Fifteen RED scaffolds land with this DISTILL pass (`#[should_panic(expected
+= "RED scaffold")]`, verified compiling clean and genuinely RED by
+execution — not narrated):
+
+| File | Scenarios |
+|---|---|
+| `crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs` | S-VM-01…05 |
+| `crates/overdrive-core/tests/acceptance/vm_config_pure_functions.rs` | S-VM-08, 16, 17, 18, 20 |
+| `crates/overdrive-core/tests/acceptance/vm_spec_driver_table_dispatch.rs` | S-VM-06, 07 |
+| `crates/overdrive-core/tests/acceptance/vm_reclamation_plan_purity.rs` | S-VM-31, 32, 92 |
+
+The remaining 72 scenarios' scaffolds are deferred to DELIVER's per-slice
+RED phase — each already has an exact crate/file destination committed in
+`wave-decisions.md` DWD-04 (extended by the adversarial-review remediation
+pass, DWD-11), and the reasoning for the scope line (why production-side
+`todo!()` module stubs for the `Vmm`/`VmHostState` port families and the
+`VmReclamation` reconciler's enum wiring are NOT authored here) is in
+DWD-06. **The scope of this deferral, and its standing against the generic
+skill's ADR-025 statement, was raised as a BLOCKER by peer review and
+SETTLED (not overridden) by explicit user ruling — `.claude/rules/testing.md`
+governs; see `wave-decisions.md` DWD-06a.**
+
+### `[REF]` Test placement
+
+This project's four-tier discipline governs, not the generic skill's
+directory convention: `tests/acceptance/*.rs` (default lane, Tier 1,
+in-memory/pure-function) vs `tests/integration/*.rs` (gated
+`integration-tests`, Tier 3, real Lima + real Cloud Hypervisor). Full
+per-scenario crate/path table in `wave-decisions.md` DWD-04.
+
+### `[REF]` Driving Adapter coverage
+
+Every production entry point DESIGN names is covered by at least one
+Tier-3 scenario: `overdrive deploy` (S-VM-01 and the great majority of
+Tier-3 scenarios), `overdrive workload describe` (read-side assertion on
+every Tier-3 scenario), `overdrive job stop` (S-VM-45/46/47), `overdrive
+serve` boot / composition gate (S-VM-11/12/13/23/30/75). No pipeline-level
+test (`VmDriver::start` called directly) substitutes for any of these —
+system constraint 1 compliance verified scenario-by-scenario. One
+documented carve-out: S-VM-76 (`VmDriver::stop` totality) is a
+component-scope acceptance case against `SimVmm`, named as its own
+enforcement vehicle by ADR-0082 §D4 because `vmm_equivalence.rs` cannot
+reach the relocated guest half of `stop` — see `test-scenarios.md`'s
+Driving Ports table.
+
+### `[REF]` Pre-requisites
+
+DESIGN driving ports: `Vmm` (4 methods, ADR-0082 §D1), `VmHostState` (4
+methods, brief §105a.2), `DriverRegistry` (ADR-0083 §D1), the `[vm]` /
+`[[vm.volume]]` parse surface (ADR-0083 §D3-D4), `VmReclamation` +
+`plan_reclamation` + `SupervisionSet` (ADR-0083 §D7, brief §105a). DEVOPS
+environment matrix: absent — Slice 00's own two-kernel matrix (Lima dev +
+pinned 6.18 appliance) substitutes, per `spike/wave-decisions.md`. Slice 00
+itself is PROMOTE (revised 2026-08-10) — every mechanism Slices 01–05
+depend on is measured on non-nested bare-metal hardware at the shipping CH
+version (v53.0).
+
+### `[REF]` Handoff to DELIVER
+
+1. **Start with Slice 01's walking skeleton (S-VM-01).** The scaffold
+   exists (`vm_walking_skeleton.rs`); the first real body requires Slice
+   00's artifact-provisioning fixture (pinned kernel + ext4 rootfs on a
+   reflink-capable filesystem + `cloud-hypervisor` installed +
+   `overdrive-init` baked into the rootfs), which does not exist in-tree
+   yet — that fixture is Slice 01's own first sub-step, not a DISTILL
+   deliverable.
+2. **Pinned signatures are not DISTILL's to improvise, and were not
+   improvised here.** Every scaffold's docstring cites the exact ADR/brief
+   section carrying the signature it will need. Per CLAUDE.md § "Implement
+   to the design," DELIVER reads the ADRs directly rather than trusting a
+   DISTILL paraphrase.
+3. **`reserve_bytes` (S-VM-20) and the D-3-fold-in `VmOutOfMemory` path
+   (S-VM-19) are hard measurement dependencies**, not routine
+   implementation — measure via `memory.current`/`memory.stat` against a
+   real boot before writing either body (ADR-0082 §D2.3 Consequences, §D8).
+4. **Mandatory mutation targets** are tagged `@mandatory:mutation_target`
+   throughout `test-scenarios.md`, including the five NEW-1-pin scenarios
+   added by the remediation pass (S-VM-77, 78, 79, 80, 81) and the
+   per-launch `FICLONE` / `CgroupAccounting` equivalence additions
+   (S-VM-93, 94) — plus the pre-existing `@property` scenarios and several
+   `@error_path` fail-closed scenarios (S-VM-13, 51, 67). `cargo xtask
+   mutants --diff origin/main --package <crate> --file <file>` per DELIVER
+   step, per `.claude/rules/testing.md`. `reserve_bytes` (S-VM-20) is
+   deliberately NOT in this set at DISTILL time — see its crafter note.
+5. **ESR specifications** for `VmReclamation` are four new `Invariant`
+   variants in a new `overdrive-sim/src/invariants/vm_reclamation.rs`
+   (`VmReclamationConverges` — S-VM-88, `SupervisedVmSurvivesEveryTick` —
+   S-VM-24, `VmReclamationIdempotentSteadyState` — S-VM-87,
+   `EndingInFlightIsNeverReclaimed` — S-VM-89) — brief §105a.11 pins the
+   exact statement of each; `ReconcilerIsPure` is reused unchanged.
+
+---
+

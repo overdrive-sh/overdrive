@@ -8123,7 +8123,7 @@ built.
 |---|---|---|---|
 | `Vmm` trait, `VmConfig` + its value types, `VmmError`, `VmmProbeError` | `overdrive-core` | `core` | The port and its vocabulary. Pure; no I/O. |
 | `DriverRegistry`, `DriverPayload` / `ExecPayload` / `VmPayload` | `overdrive-core` | `core` | Driver dispatch as data; the per-driver allocation payload. |
-| `is_platform_reclaimed`, the twelve `TransitionReason::Vm*` causes, `StoppedBy::PlatformReclaimed`, `ConfinementControl` | `overdrive-core` | `core` | DD-1's classification and DD-3's cause axis. |
+| `is_platform_reclaimed`, the fourteen `TransitionReason::Vm*` causes, `StoppedBy::PlatformReclaimed`, `ConfinementControl` | `overdrive-core` | `core` | DD-1's classification and DD-3's cause axis. *(Corrected 2026-08-11 — twelve at original design, thirteen after the D-3 fold-in's `VmOutOfMemory`, fourteen after the gap-closure amendment's `VmStorageDaemonDied`; see ADR-0083 § D5.)* |
 | `overdrive_core::vm::beacon` | `overdrive-core` | `core` | The guest↔host Published Language (pure parse/format). |
 | `VmHostState` trait, `VmHostObservation`, `VmHostStateError` / `VmHostStateProbeError` | `overdrive-core` | `core` | SD-1's host-observation port and the plain observed-state value its diff is a pure function over. |
 | `VmReclamation` (`Reconciler`), `VmReclamationState`, `SupervisionSet`, `plan_reclamation` | `overdrive-core` | `core` | SD-1's Bar-2 reconciler and its **pure** diff. |
@@ -8374,11 +8374,13 @@ admission. Putting it in the parser would make a **host** property look like a
 **spec** property — which is the refinement Titan flagged against Slice 02, whose
 ACs are unaffected: the deploy still fails, the message improves.
 
-**Twelve `TransitionReason::Vm*` cause variants** are named in ADR-0083 § D5
-(cause-variant naming was re-assigned to me by Hera's DD-3). Against K3's "≥ 4
-distinct": twelve. Per DD-3 the reclamation **disposition** is deliberately not
-among them and must not be counted — counting a disposition as a failure cause
-would satisfy K3 without shipping a fourth diagnosis.
+**Fourteen `TransitionReason::Vm*` cause variants** are named in ADR-0083 § D5
+(cause-variant naming was re-assigned to me by Hera's DD-3) — twelve from the
+original design, plus `VmOutOfMemory` (the D-3 fold-in) and
+`VmStorageDaemonDied` (the 2026-08-11 gap-closure amendment). Against K3's
+"≥ 4 distinct": fourteen. Per DD-3 the reclamation **disposition** is
+deliberately not among them and must not be counted — counting a disposition
+as a failure cause would satisfy K3 without shipping a fourth diagnosis.
 
 ### 105. DD-1, bound: one predicate, five binding sites across two reconcilers, two property tests
 
@@ -9561,7 +9563,7 @@ while a Bar-2 reconciler needs both.
 | 17 | `classify_driver_failure` (`action_shim/mod.rs:179-202`) | failure vocabulary seam | **EXTEND** | Its `DriverType` parameter is documented as *"accepted for forward-compatibility"* and is currently `_`-prefixed. Cashing it is the whole change; zero exec cases move |
 | 18 | `WorkloadSpecInput::from_toml_str` (`workload_spec.rs:710`) | spec parse | **EXTEND** | Hardcodes `contains_key("exec")` → `MissingExec`. Becomes a driver-table dispatch mirroring the existing `MixedServiceAndJob` / `MissingKindSection` pair |
 | 19 | `StoppedBy` (`transition_reason.rs:212-255`) | "who ended this" | **EXTEND** | `#[non_exhaustive]`, append-only rkyv discipline stated verbatim at `:237-241` and exercised twice. A fifth append is the established move |
-| 20 | `TransitionReason` (`:74-210`) | cause vocabulary | **EXTEND** | `#[non_exhaustive]`; twelve appended variants in the existing `Exec*` naming shape |
+| 20 | `TransitionReason` (`:74-210`) | cause vocabulary | **EXTEND** | `#[non_exhaustive]`; fourteen appended variants in the existing `Exec*` naming shape (twelve original + `VmOutOfMemory` + `VmStorageDaemonDied`, the latter two added by amendment; ADR-0083 § D5) |
 | 21 | `CrashFacts::advance` + `LastTerminated` + `restart_count` (ADR-0078) | occurrence surface | **REUSE UNCHANGED** | Already produces the right answer. Changing it would erase the occurrence |
 | 22 | `WorkloadLifecycleView.restart_counts` (`:1312`) | restart **budget** | **REUSE UNCHANGED** | Structure and ceiling check correct as they stand; the exemption is at the increment site, as a complement-equality assertion. **No `budget_exempt` View field** — that would be derived state persisted, and the class is already on the row |
 | 23 | `ExitEvent.intentional_stop` (`:299-303`) | the existing **two**-class discriminator | **REUSE UNCHANGED** | It is a `bool` and cannot carry a third class — and it cannot accidentally claim the reclamation: after a `serve` restart the driver's `live` map is empty, so no watcher holds the flag and **no `ExitEvent` is produced for a surviving VMM at all** |

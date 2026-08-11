@@ -20,7 +20,25 @@ mid-run exit watcher that slice already owns) from the new
 `CgroupAccounting` port's read — see companion ADR-0082 § D8 for the port,
 the `ExitEvent.oom` field it threads through, and the reconciliation with §
 A8's already-rejected "widen `CgroupFs`" alternative. No prior row is
-renumbered or reworded.
+renumbered or reworded. **Amended 2026-08-11 (DISTILL-surfaced gap 1 — a
+mid-run storage-daemon death had no Cause variant), same DESIGN pass** — §
+D5's Cause-variant table gains a **fourteenth** row, `VmStorageDaemonDied {
+socket, exit_code, signal }`, constructed in **Slice 04** from a new
+`ExitEvent.storage_daemon_died` field mirroring row 13's `oom` field
+(ADR-0082 § D8) — checked AHEAD of `ExitKind` entirely, not nested inside a
+`Crashed` arm the way row 13 is. This rules the hedge S-VM-65 recorded
+against this table
+(*"`VmGuestMountFailed`'s sibling variant, or a distinct mid-run variant"*):
+it is a distinct variant; `VmGuestMountFailed` stays scoped to the
+guest-reported START-time mount failure. No prior row is renumbered or
+reworded. **Amended 2026-08-11 (DISTILL-surfaced gap 2 — the `SimVmm`
+injection seam `brief.md` § 100 assumed but never wired), same DESIGN
+pass** — § D8 is added: `ServerConfig.vmm_override`, a
+`#[cfg(feature = "integration-tests")]`-gated whole-port substitution seam
+for `Vmm`, pinning how S-VM-13 and S-VM-51 reach `SimVmm` inside a real
+`overdrive serve`. Ruled explicitly NOT the seam that reaches S-VM-67 —
+`virtiofsd`'s sandbox check sits outside the `Vmm` port entirely, and that
+boundary is stated rather than papered over.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -498,6 +516,7 @@ the Cause variants over rather than dropping them):
 | 11 | `VmStorageSocketTimeout` | `{ socket: String, waited_ms: u64 }` | 04 | |
 | 12 | `VmStorageSandboxUnavailable` | `{ requested: String, detail: String }` | 04 | |
 | 13 | `VmOutOfMemory` | `{ limit_bytes: u64, oom_kill_count: u64 }` | 01 | **Added 2026-08-11, D-3 fold-in.** Mid-run cgroup OOM, diagnosed from a post-mortem `memory.events` read (ADR-0082 § D8) — closes deferral D-3's *reduced* form for the VM path only. `StoppedBy` disposition is `Process`, same as any other crash; **not** `PlatformReclaimed` |
+| 14 | `VmStorageDaemonDied` | `{ socket: String, exit_code: Option<i32>, signal: Option<u8> }` | 04 | **Added 2026-08-11, gap-closure amendment.** Mid-run `virtiofsd` death (S-VM-65) — see the dedicated subsection below. `StoppedBy` disposition is `Process`, same as any other crash; **not** `PlatformReclaimed` |
 
 ```rust
 pub enum ConfinementControl { Landlock, Seccomp, UidDrop, RlimitFsize, RlimitNofile, KvmAccess }
@@ -510,12 +529,86 @@ which is what Slice 03 asks for in as many words (*"a **fifth** variant minted
 in Slice 02's shape"*). A `String` discriminant would have been the stringly-
 typed version and is rejected.
 
-**Thirteen distinct causes** (twelve from the original Slice 02–04 sweep plus
-`VmOutOfMemory`, row 13, added by the 2026-08-11 D-3 fold-in), against K3's
-"≥ 4 distinct". Per DD-3, the reclamation **disposition** is deliberately
-**not** in this table and must not be counted toward K3 — counting a
-disposition as a failure cause would let the feature satisfy K3 without
-shipping a fourth diagnosis.
+**Row 14 — why it is mid-run and not `classify_driver_failure`'s to
+construct, and why it must be checked ahead of `ExitKind`, not nested inside
+it.** *(2026-08-11, gap-closure amendment; closes the hedge S-VM-65 recorded:
+"`VmGuestMountFailed`'s sibling variant, or a distinct mid-run variant per
+ADR-0083 § D5".)* `classify_driver_failure`'s VM arm (opening text, above)
+maps `DriverError::StartRejected` — a **start-time** failure. A `virtiofsd`
+death mid-run is not a start failure; the allocation is already `Running`,
+and by the time the platform observes the death there is no `create()` call
+in flight to reject. The construction mechanism is instead the same shape
+ADR-0082 § D8 introduced for row 13: `ExitEvent` gains a second additive
+field,
+
+```rust
+pub struct StorageDaemonDeathFacts {
+    pub socket:    String,       // VmRunDir::vsock_socket-shaped path, i.e.
+                                  // the virtiofsd UDS this VM's daemon served
+    pub exit_code: Option<i32>,
+    pub signal:    Option<u8>,
+}
+
+// ExitEvent (traits/driver.rs) gains, alongside `oom` (ADR-0082 § D8):
+pub storage_daemon_died: Option<StorageDaemonDeathFacts>,
+```
+
+set by `VmDriver`'s own mid-run supervision of the daemon it spawned
+directly (system constraint 9 / US-VM-9 — `virtiofsd` is a **sidecar
+process `VmDriver` supervises itself**, the same shape `ExecDriver` already
+uses for its own workload process; it is not behind the `Vmm` port — see §
+D8 below for why that matters to Gap 2). The field is set **only** when the
+daemon's exit was observed BEFORE the workload itself reported an outcome
+and BEFORE teardown began — the exact before/during-teardown guard US-VM-9
+AC 1 / AC 2 name as the discriminator, mirroring `oom`'s own "immediately
+after exit and before any teardown" gating (ADR-0082 § D8). A daemon that
+exits as part of ordinary teardown, after the guest's own outcome is
+already reported, leaves this field `None` — its exit is still observed
+(audit trail, US-VM-9 AC 1) but is not this fact.
+
+`overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`
+(already touched by ADR-0082 § D8's `oom` precedence check) gains a
+**second** additive precedence check, checked **before** the existing
+`ExitKind` match runs at all — not nested inside the `Crashed` arm the way
+row 13's check is:
+
+```
+event.storage_daemon_died.is_some()
+    → TransitionReason::VmStorageDaemonDied { socket, exit_code, signal }  // row 14, checked FIRST
+ExitKind::Crashed { .. } if event.oom.is_some_and(|o| o.oom_kill_count > 0)
+    → TransitionReason::VmOutOfMemory { .. }                              // row 13, unchanged
+ExitKind::Crashed { exit_code, signal }
+    → TransitionReason::WorkloadCrashedImmediately { .. }                 // unchanged default
+ExitKind::CleanExit { .. }
+    → (unchanged mapping)
+```
+
+**Why ahead of `ExitKind`, stated because getting this wrong reproduces the
+feature's own headline defect one phase later.** A guest whose writes start
+silently failing after its storage daemon dies has no reason to notice —
+per `[D4]`, `overdrive-init` execs the operator's command and waits on it;
+it does not validate the operator's own I/O. That guest can still exit `0`
+and report `EXIT 0` over the beacon, which resolves `ExitKind::CleanExit`.
+If the daemon-death check were reached only from inside a `Crashed` arm (row
+13's shape), a guest that self-reports success after its share died would
+resolve `CleanExit` first and the daemon-death fact would never be
+consulted — silently reproducing `VmGuestMountFailed`'s composite-lie defect
+(row 10, § D2.4 of ADR-0082) one execution phase later, and exactly the
+"job wrote 40 frames and the share died... job reports success anyway"
+failure US-VM-9's Problem statement names. Checking
+`storage_daemon_died.is_some()` first — overriding a guest-reported
+`CleanExit`, never merely supplementing a `Crashed` — is what makes US-VM-9
+AC 1/2's single discriminated classification (not three independent checks)
+actually hold across both the `Crashed` and `CleanExit` guest-reported
+outcomes, not only the `Crashed` one.
+
+**Fourteen distinct causes** (twelve from the original Slice 02–04 sweep,
+plus `VmOutOfMemory` — row 13, 2026-08-11 D-3 fold-in — and
+`VmStorageDaemonDied` — row 14, 2026-08-11 gap-closure amendment), against
+K3's "≥ 4 distinct". Per DD-3, the reclamation **disposition** is
+deliberately **not** in this table and must not be counted toward K3 —
+counting a disposition as a failure cause would let the feature satisfy K3
+without shipping a fourth diagnosis.
 
 `TransitionReason` is `#[non_exhaustive]` (`transition_reason.rs:87`) and every
 addition is appended, preserving rkyv discriminants — the same discipline
@@ -978,6 +1071,158 @@ supervision set is `Observed(∅)`, so those survivors are authorised rather tha
 stranded. This is the reason ADR-0082 § A6 keeps artifact removal off the `Vmm`
 port.
 
+### D8 — the `Vmm` fault-injection seam: `ServerConfig.vmm_override`, and the boundary it does NOT reach
+
+> **Added 2026-08-11, gap-closure amendment.** § D2's composition-root
+> snippet named no override seam, but `brief.md` § 100 already asserted
+> *"`SimVmm` is the injection point for Slice 03's fail-closed confinement
+> case"* and three DISTILL scenarios — S-VM-13 (non-reflink staging),
+> S-VM-51 (confinement-unavailable), and, only partially (see below),
+> S-VM-67 (storage-sandbox-unavailable) — are written against a `SimVmm`
+> "injected at the port boundary" (system constraint 1) inside a REAL
+> in-process `overdrive serve`. The fixed Lima kernel test envelope cannot
+> organically produce a non-reflink staging filesystem, an absent
+> `--landlock` flag, or an unreachable `/dev/kvm` (ADR-0082 § D5's own
+> fault-injection table); left unpinned, a crafter improvises the wiring —
+> forbidden by CLAUDE.md § "Implement to the design". `dataplane_override`
+> is precedent for the PATTERN'S existence in this codebase, never
+> authorisation for its SHAPE — see the ruling below, which is why this
+> seam is not shaped like it.
+
+**The seam.** `ServerConfig` (`overdrive-control-plane/src/lib.rs`) gains a
+field in the same family as the existing `mtls_identity_override` (a
+whole-port-implementation swap, `Arc<dyn Trait>`) — **not** the
+`dataplane_probe_fault` shape (a one-shot forced-message seam layered on
+the REAL adapter via a setter), because `Vmm` needs multiple **distinct
+typed** fault classes across **two** methods (`probe` and `create`), which
+a single `Option<String>` cannot carry, and because `VmmProbeError` /
+`VmmError` cannot derive `Clone` (both embed `std::io::Error`, the same
+reason `dataplane_probe_fault` reached for a `String` in the first place —
+this seam does not have that escape available since it needs the type
+distinction, not just a message):
+
+```rust
+// crates/overdrive-control-plane/src/lib.rs, ServerConfig
+
+/// Test-only adapter-substitution seam for the `Vmm` port. When `Some(v)`,
+/// `compose_production_driver` uses THIS adapter in place of
+/// `CloudHypervisorVmm::discover`'s result, so a real in-process
+/// `overdrive serve` runs the SAME discover → probe → insert sequence
+/// (§ D2) against a `SimVmm` carrying an injected fault, rather than
+/// against the real hypervisor binary. `None` in production; the field
+/// does not exist in a production binary (`#[cfg(feature =
+/// "integration-tests")]`-gated on both the declaration and its one use
+/// site, mirroring `mtls_identity_override`'s discipline).
+#[cfg(feature = "integration-tests")]
+pub vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+```
+
+**Placement — § D2's snippet, amended.** The `match
+CloudHypervisorVmm::discover(&vm_layout).await` resolves the override
+first, and every line after that resolution is **unchanged**:
+
+```rust
+#[cfg(feature = "integration-tests")]
+let discovered = match &config.vmm_override {
+    Some(injected) => Ok(Some(Arc::clone(injected))),
+    None => CloudHypervisorVmm::discover(&vm_layout).await
+        .map(|found| found.map(|v| Arc::new(v) as Arc<dyn Vmm>)),
+};
+#[cfg(not(feature = "integration-tests"))]
+let discovered = CloudHypervisorVmm::discover(&vm_layout).await
+    .map(|found| found.map(|v| Arc::new(v) as Arc<dyn Vmm>));
+
+match discovered {
+    Ok(None) => { /* capability absence — unchanged */ }
+    Ok(Some(vmm)) => {
+        // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
+        // WHATEVER adapter is present, production or injected. There is
+        // no `if fault_injected { skip probe }` branch anywhere in this
+        // function — the composition root calls the same trait method
+        // either way.
+        if let Err(source) = vmm.probe().await { /* unchanged */ }
+        drivers.insert(Arc::new(VmDriver::new(vmm, clock, fs, cgroup_accounting, vm_layout)));
+    }
+    Err(source) => { /* unchanged */ }
+}
+```
+
+Every downstream consumer — `DriverRegistry`, § D2a's per-driver
+`exit_observer` loop, `alloc_drivers`, `MtlsInterceptWorker`'s
+`DriverType::Exec` gate, `VmReclamation` — sees `Arc<dyn Vmm>` and is
+**unchanged and unaware the seam exists**. That is what "port-boundary
+substitution" means structurally: one binding changes; nothing downstream
+of it does.
+
+**Why this is legitimate, and why it is NOT the #248 / `dataplane_override`
+shape** (`.claude/rules/development.md` § "Ground the premise: a state
+only a test seam can produce is not a feature"):
+
+1. **The states it produces are production-reachable.** `ReflinkUnsupported`
+   / `LandlockFlagAbsent` / `LandlockLsmAbsent` / `KvmUnreachable` /
+   `RunDirUnusable` are ADR-0082 § D5's own named, catalogued substrate
+   lies — a staging filesystem without reflink, a CH build without
+   `--landlock`, a kernel without the Landlock LSM are real host
+   conditions. The seam does not invent a state; it makes an
+   already-real state reachable on the one Lima kernel the envelope runs.
+   Contrast #248: `workload_addr = None` occurred **only** when
+   `dataplane_override` disabled mTLS composition entirely — a state no
+   real deploy with mTLS composed could ever reach.
+2. **It does not gate off a subsystem.** `dataplane_override` flips
+   `compose_mtls = dataplane_override.is_none()` — a whole layer stops
+   composing. `vmm_override` composes nothing differently: the registry,
+   `VmDriver`, the exit-observer loop and `VmReclamation` all run exactly
+   as in production, against whichever `Arc<dyn Vmm>` is bound. Only the
+   one port binding differs — the same shape as `mtls_identity_override`
+   (the mTLS layer stays fully composed; only `IdentityRead`'s source
+   changes) and structurally narrower than `dataplane_override`.
+3. **`probe()` still runs, unconditionally.** Wire → probe → use
+   (principle 13) holds against whichever adapter is bound; a
+   hand-installed bypass that skipped `.probe()` to force the refusal
+   would be the CLAUDE.md-forbidden shape. Calling the real trait method
+   against a `SimVmm` configured to answer honestly with an injected
+   fault is exactly what a `Sim*` adapter at a port boundary is for
+   (system constraint 1, verbatim).
+4. **Production cannot construct the state.** The field is
+   `#[cfg(feature = "integration-tests")]`-gated on both the declaration
+   and the composition-root use site — a production binary contains
+   neither the field, the branch, nor a code path that could read it.
+
+**Ruling: this is the port-trait-boundary pattern
+(`.claude/rules/development.md` § "Port-trait dependencies"), not a
+composition-root override in the #248 sense.**
+
+**What the seam does NOT reach — S-VM-67, stated plainly rather than
+glossed.** `Vmm::create(&VmConfig)` spawns **"ONE confined hypervisor
+process"** (ADR-0082 § D1, verbatim), and `VmConfig` (ADR-0082 § D2)
+carries no volume field at all. `virtiofsd` is never composed, started, or
+reachable through the `Vmm` port at any method — per system constraint 9
+and US-VM-9 it is a **sidecar `VmDriver` spawns and supervises directly**
+(real `Command::spawn`, the same shape `ExecDriver` already uses for its
+own workload process; no port trait sits between `VmDriver` and the OS for
+it — see row 14 above). `vmm_override` therefore has nothing to substitute
+for S-VM-67: injecting a `SimVmm` changes what `discover` / `probe` /
+`create` / `terminate` return, and virtiofsd's `--sandbox=namespace`
+capability check is not downstream of any of those four calls.
+
+Two honest paths exist for S-VM-67, and **this ADR pair does not choose
+between them** — doing so mints a new port trait or narrows an
+already-accepted DISTILL scenario, both outside the two gaps this
+amendment closes:
+
+(a) Slice 04 mints its own storage-daemon supervision port when it is
+    designed, carrying the same `probe` / fault-injection-table shape this
+    section pins for `Vmm`, with its own `ServerConfig` override field
+    following this same pattern; or
+
+(b) the `--sandbox=namespace`-unavailable case is asserted at a narrower
+    level than a real `overdrive serve` — a pure unit test over the
+    spawn-argument construction plus a Tier-2-shaped fail-closed
+    assertion — rather than through production `serve` + `deploy`.
+
+This is recorded here so the gap is visible rather than silently assumed
+solved by proximity to S-VM-13 / S-VM-51's (real) seam.
+
 ---
 
 ## Alternatives considered
@@ -1081,6 +1326,22 @@ the one failure a test can miss: a collapsed implementation still kills the VMM
 and still passes the *"terminal allocation's VMM is killed"* AC, and betrays
 itself only against the **row-byte-unchanged** assertion (brief § 105a.10 AC 5).
 
+### A10 — A `dataplane_override`-shaped `compose_vmm = vmm_override.is_none()` gate
+
+*(Added 2026-08-11, gap-closure amendment, § D8.)* Mirror `dataplane_override`
+exactly: an override field that, when set, skips `compose_production_driver`'s
+Vm branch entirely and lets the test wire its own `VmDriver` by hand.
+
+**Rejected.** This is the shape ADR-0074 (#248) found broken, reproduced on
+purpose to show why § D8 does not copy it. Skipping composition rather than
+substituting one port binding means the registry, the exit-observer loop,
+`alloc_drivers` and `MtlsInterceptWorker`'s gate are **not** exercised by the
+test — exactly the *"hand-installing a missing production effect"* shape
+system constraint 1 forbids, and precisely what let #248's `AllocBackend`
+discriminator ship dead on the one production path it needed to guard.
+`vmm_override` (§ D8) is a narrower substitution: one port binding changes,
+everything downstream stays real.
+
 ---
 
 ## Consequences
@@ -1108,6 +1369,12 @@ itself only against the **row-byte-unchanged** assertion (brief § 105a.10 AC 5)
   `SupervisionSet`'s `Default` is `Unavailable`, so an unpopulated, unhydrated or
   errored discriminator authorises **nothing**. Reading the wrong half of the
   state degrades to "do nothing this tick", never to "kill a live VM".
+- **§ D8 closes the gap between what `brief.md` § 100 already asserted
+  (*"`SimVmm` is the injection point"*) and how a crafter reaches it.**
+  S-VM-13 and S-VM-51 are buildable against a pinned field and a pinned
+  composition-root diff rather than an improvised seam, and the seam is
+  provably no wider than `mtls_identity_override`'s already-shipped pattern
+  — nothing downstream of the one port binding changes.
 
 ### Negative, and stated
 
@@ -1169,6 +1436,18 @@ itself only against the **row-byte-unchanged** assertion (brief § 105a.10 AC 5)
   minimal and fail-safe (`None` ⇒ authorises nothing; the release default is a
   no-op), but they are changes to the trait every driver implements.
   *(Widened from one method 2026-08-11, iteration-2 review NEW-1.)*
+- **S-VM-67 has no seam this ADR pair supplies, and that is stated rather
+  than papered over** (§ D8). `virtiofsd`'s `--sandbox=namespace`
+  capability check sits outside the `Vmm` port entirely (no volume field
+  reaches `VmConfig`), so `vmm_override` cannot inject its unavailability.
+  Slice 04 either mints its own storage-daemon port (mirroring § D8's
+  shape) or the scenario is asserted at a narrower level than a real
+  `overdrive serve`. Neither choice is made here.
+- **`ExitEvent` gains a second additive field** (`storage_daemon_died`,
+  row 14) beside `oom` (ADR-0082 § D8), and `exit_observer::handle_exit_event`
+  gains a second precedence check — this one checked **ahead of** `ExitKind`
+  rather than nested inside a `Crashed` arm, which is a different shape
+  from row 13's and must not be copy-pasted from it verbatim.
 
 ### Neutral
 
