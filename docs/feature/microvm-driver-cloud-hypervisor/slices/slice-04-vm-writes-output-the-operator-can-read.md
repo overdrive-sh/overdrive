@@ -341,6 +341,15 @@ upper bound it now meets.**
 > fires.** Consequence if lifted, stated so it is not glossed: this feature's honest
 > deliverable becomes a VM class that computes but cannot deliver, and US-VM-8/9 become a
 > hard prerequisite before `[vm]` + `[job]` is presented to operators as production-ready.
+>
+> **Superseded 2026-08-11** — closed by the same user ruling that closed Slice 01's guardrail
+> 3 escalation: *"we dont care bout how many days this feature takes."* This trigger is the
+> same shape (a day-count enforcement gate) and inherits the same treatment, explicitly:
+> retired per CLAUDE.md § "No effort/time budget cuts", not fired, not unmet. See
+> feature-delta § "Guardrail 3 — closed by user ruling" (under § Scope re-assessment after
+> the D-3 fold-in) and the Changelog. The 6–9 d table above stays as information about what
+> this slice contains, not as a gate — and per the Blockers section's independent 2026-08-02
+> ruling, Slice 04 was already staying in this feature regardless of its size.
 
 ## Dependencies
 

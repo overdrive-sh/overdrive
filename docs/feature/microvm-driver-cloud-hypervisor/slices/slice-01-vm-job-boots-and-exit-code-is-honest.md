@@ -311,6 +311,15 @@ volumes.** One VM, runs to completion, reports its exit code.
   threshold and is not this wave's to resolve by picking a smaller one — see feature-delta's
   Changelog (2026-08-11) and § Scope assessment for the full trigger record and the
   total-effort consequence. Disposition is the user's call.
+
+  **Superseded 2026-08-11 — closed by user ruling, not a scope decision.** Ruling, verbatim:
+  *"we dont care bout how many days this feature takes."* No split, no rescope, no estimate
+  adjustment; Slice 01 stays one slice carrying the full scope above. Guardrail 3's day-count
+  clauses are retired per CLAUDE.md § "No effort/time budget cuts" (`effort_hours` is
+  advisory, not enforcement) — see feature-delta § "Guardrail 3 — closed by user ruling"
+  (under § Scope re-assessment after the D-3 fold-in) and the Changelog for the full record.
+  The itemized 6 d table above stays as information about what this slice contains, not as a
+  gate.
 - SHIPPED and reused: reconciler runtime, action shim, restart/backoff, cgroup slice
   bootstrap, `workload describe`. **Correction (DESIGN, 2026-08-11) — exit observer is
   NOT unchanged.** `overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`

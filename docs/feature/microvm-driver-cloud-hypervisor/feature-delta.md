@@ -805,7 +805,7 @@ Run before journey/story investment. **Four oversized signals fired.**
 | # | Slice | Goal (one line) | Size |
 |---|---|---|---|
 | 00 | `spike-ch-boot-and-vsock` | Does the pinned 6.18 kernel boot under CH from an ext4 `virtio-blk` rootfs, does vsock carry a beacon **from inside a netns**, do the `[D7]` confinement flags compose with a real boot, and does **`virtiofsd` + `--memory shared=on` compose with both** — on the Lima dev kernel **and** the appliance kernel? | 3–4 d |
-| 01 | `vm-job-boots-and-exit-code-is-honest` | `overdrive deploy` a `[vm]` + `[job]` spec → the guest runs → its **real** exit code reaches `workload describe`. **Walking skeleton.** | **11–14 d** *(was 5–8 d; re-sized 2026-08-11 for the D-3 fold-in — see § Scope re-assessment below; guardrail 3 fires)* |
+| 01 | `vm-job-boots-and-exit-code-is-honest` | `overdrive deploy` a `[vm]` + `[job]` spec → the guest runs → its **real** exit code reaches `workload describe`. **Walking skeleton.** | **11–14 d** *(was 5–8 d; re-sized 2026-08-11 for the D-3 fold-in — see § Scope re-assessment below; guardrail 3 fires, retired as a decision gate by the user's 2026-08-11 ruling — see the Changelog)* |
 | 02 | `boot-failure-vocabulary` | A VM that fails to boot says **why**, in operator language, with a fix. | 2–3 d |
 | 03 | `stop-restart-and-vmm-death` | `job stop` and crash-restart converge for VMs; an unreported VMM death is `Crashed`, never `CleanExit`; **the hypervisor process is confined** (`[D7]` items 1–3). | 4–6 d |
 | **04** | **`vm-writes-output-the-operator-can-read`** | **A `[vm]`+`[job]` workload writes a file and the operator reads it on the host — and the storage daemon's death is classified as honestly as the hypervisor's (`[D8]`).** | **6–9 d** |
@@ -951,6 +951,15 @@ because a trigger nobody is assigned to fire is not a gate.**
 **Owner and checkpoint: DESIGN re-runs all three at the DESIGN handoff and returns a blocker
 if any fires.** Not "someone notices later under delivery pressure."
 
+> **Guardrails 2 and 3 superseded, 2026-08-11 — see § "Guardrail 3 — closed by user ruling"
+> under § Scope re-assessment after the D-3 fold-in below, and the Changelog.** Both are
+> day-count enforcement gates, and CLAUDE.md § "No effort/time budget cuts" forbids exactly
+> that: `effort_hours` estimates are advisory, not enforcement, and scope is not cut or
+> deferred on the basis of exceeding a time budget. Guardrail 1 (story/slice **count**) is
+> untouched — it is not a day-count measure. Guardrails 2 (Slice 04's 9-day lift trigger) and
+> 3 (the 35-day / 50%-over-band triggers) are retired as decision gates; their itemised cost
+> tables remain as information about what each slice contains, not as gates.
+
 > **Reconciling two claims that would otherwise contradict each other.** The priority
 > rationale rates volumes **Value 5** on the grounds that *"a `[vm]`+`[job]` workload that
 > cannot write output anywhere is not a batch workload — it is a number"*, while guardrail 2
@@ -1015,6 +1024,47 @@ boundaries, or shrinking Slice 01's scope to duck under 12 d. The trigger is pre
 open rather than let a wave quietly absorb it — which is exactly what the prior pass's
 deferral of this number risked doing. Disposition (split further, accept as a
 delivery-sequence risk, re-scope, or something else) is the user's decision.
+
+### Guardrail 3 — closed by user ruling (2026-08-11), not a scope decision
+
+**Ruling, verbatim: "we dont care bout how many days this feature takes."** Consequence: no
+split, no rescope, no estimate adjustment. Slice 01 stays one slice carrying its full scope.
+The escalation above is closed **as not a decision gate** — the trigger fired exactly as
+designed and is retired, not overridden by a one-off exception.
+
+**This is not an ad-hoc exception. It restates standing project policy the trigger had been
+silently contradicting.** CLAUDE.md § "No effort/time budget cuts": `effort_hours` estimates
+are advisory, not enforcement; do NOT defer or cut scope on the basis of exceeding an
+hour/day budget — land the full work a step's acceptance criteria describe, however long it
+takes. A "wave-unadjustable trigger" keyed on day counts is enforcement dressed as a
+guardrail. Read together with CLAUDE.md § "Build vertical slices through production entry
+points" — which sizes a slice by whether it closes a real loop through `overdrive serve` +
+`overdrive deploy`, not by effort — the day-count trigger was measuring the wrong property
+entirely. A slice is mis-sized when it cannot be driven end-to-end, not when it takes longer
+than a band predicted.
+
+**Superseded by CLAUDE.md § "No effort/time budget cuts."** Guardrail 3's day-count clauses
+— both the **>35 d total-feature-effort** clause and the **>50%-over-stated-band
+single-slice** clause (the one that fired here, at 75% over) — are retired as decision
+gates. They do not re-fire on a future re-read of the total-effort table above, and no
+future wave owes them a re-run.
+
+**Guardrail 2 (Slice 04's own >9-day lift trigger, § Scope re-assessment after `[D8]` above,
+and restated in `slices/slice-04-vm-writes-output-the-operator-can-read.md`) is the same
+shape — a day-count enforcement gate — and inherits the same treatment, explicitly:
+retired, not fired, not unmet.** It is marked superseded at its own site in the slice-04
+file rather than restated in full here.
+
+**What a genuine re-size trigger looks like, so removing this one does not leave a vacuum:**
+the vertical-slice test. A slice that cannot be driven end-to-end through `overdrive serve` +
+`overdrive deploy` is mis-sized regardless of its day count — that is the condition worth
+escalating to the user, not a total measured in hours or days.
+
+**The itemised 6 d D-3 breakdown above stays as information, not as a gate.** It is useful to
+DISTILL and DELIVER as a description of what Slice 01 contains and where the cost sits
+(the `CgroupAccounting` port + adapters + probe + equivalence test, and the new
+classification path they feed); it is not read as justification for a split, and no future
+reader should treat its total as a threshold to duck under.
 
 ---
 
@@ -4167,6 +4217,7 @@ binary.
 
 | Date | Wave | Change |
 |---|---|---|
+| 2026-08-11 | DESIGN (application — Morgan, guardrail 3 closure) | **Closed the guardrail 3 escalation this same DESIGN pass raised** (previous row: Slice 01 re-sized 5–8 d → 11–14 d, guardrail 3 fired on the single-slice >50%-over-band clause at 75% over). **User ruling, verbatim: "we dont care bout how many days this feature takes."** Consequence: no split, no rescope, no estimate adjustment — Slice 01 stays one slice carrying its full scope. The escalation is closed as **not a decision gate**, not as an accepted overrun. **This is not an ad-hoc exception — it restates standing policy the trigger was silently contradicting:** CLAUDE.md § "No effort/time budget cuts" (`effort_hours` estimates are advisory, not enforcement; do not defer or cut scope on the basis of exceeding a time budget), read with § "Build vertical slices through production entry points" (a slice is sized by whether it closes a real loop through `serve` + `deploy`, not by effort). **Guardrail 3's day-count clauses (>35 d total, >50%-over-band single-slice) are marked superseded in place** — feature-delta § Scope assessment (new "Guardrail 3 — closed by user ruling" subsection under § Scope re-assessment after the D-3 fold-in), the three-guardrail definition block above it, and `slices/slice-01-vm-job-boots-and-exit-code-is-honest.md` § Dependencies — rather than edited away, per this wave's established supersession style (cf. the Reuse-table row 14/31 verdict reversals, Titan handoff item 6). **Guardrail 2 (Slice 04's own >9 d lift trigger) is the same shape — a day-count enforcement gate — and inherits the same treatment, explicitly: retired, not fired, not unmet.** Marked superseded at its own site in `slices/slice-04-vm-writes-output-the-operator-can-read.md`. **Recorded what a genuine re-size trigger would be instead**, so removing this one does not leave a vacuum: the vertical-slice test — a slice that cannot be driven end-to-end through `overdrive serve` + `overdrive deploy` is mis-sized regardless of its day count. The itemised 6 d D-3 breakdown and the 6–9 d `[D8f]` table both stay as information about what each slice contains, not as gates. No slice's scope, ACs, or content changed. No commit made. No GitHub issues created. |
 | 2026-08-11 | DESIGN (application — Morgan, closing out the deferred Slice 01 re-size) | **Closed the sizing deferral the D-3 fold-in entry (this same pass, below) left open.** That entry explicitly declined to price the cgroup-OOM diagnosis fold-in — *"sizing this honestly is DISTILL's job, not DESIGN's estimate to silently absorb"* — per user instruction, priced it here instead. **Slice 01: 5–8 d → 11–14 d** (itemized table in the slice file: `CgroupAccounting` port + two adapters + probe + equivalence test ≈3 d; the exit-observer classification branch + `TransitionReason::VmOutOfMemory` Cause variant + a new Tier-3 AC ≈2 d; `overdrive-init`'s two musl targets 0.5 d; total 6 d, none of it present in any prior estimate). **Guardrail 3 (§ Scope assessment, wave-unadjustable, pre-committed at DISCUSS amendment 2's review fixes, 2026-08-02) FIRES on the single-slice clause**: Slice 01's stated upper band was 8 d, 50% over is 12 d, the re-sized upper bound is 14 d — 75% over. Total feature effort recomputed the same way as the existing `~22–32 d` figure: **~27–37 d** (the upper-bound reading exceeds the guardrail's 35 d ceiling; the midpoint reading ≈32 d does not — the single-slice clause fires regardless of which reading is used). **Not resolved here** — per the user's own framing when this re-size was commissioned, disposition (split further / accept as a delivery-sequence risk / re-scope / other) is the user's decision, not DESIGN's to absorb by shrinking the estimate to fit under the ceiling. Guardrail 2 (Slice 04's own >9 d lift trigger, already re-run once this pass at the DESIGN handoff and found not firing) re-confirmed unaffected by this change. **Also corrected, found while sanity-checking Slice 04 per the same dispatch:** the `shmem_enabled` WARN row in `[D8f]`'s table was costed 0 d on the reasoning that it fully piggybacks on Slice 01's `Vmm::probe()` — undersold the probe-side read+compare+warn logic and the `infra/provision/common-system.sh` write the Behavior section assigns to this slice; corrected to 0.5 d, which does not move Slice 04's 6–9 d headline band or trip its own lift trigger. New scope-reassessment subsection and total-effort table added to § Scope assessment (after the `[D8]` re-assessment) rather than editing the historical `~22–32 d` / D7-fold numbers in place. No GitHub issues created. |
 | 2026-08-11 | DESIGN (domain — Hera, ADR-0078 amendment discharged) | **Discharged the amendment obligation ADR-0081 § *Narrows ADR-0078 § D1* recorded on itself, per user approval.** Amended [ADR-0078](../../product/architecture/adr-0078-crash-and-recover-is-durably-observable-last-terminated-plus-restart-count.md) § D1 in place, immediately after the `CrashFacts::advance` docstring, in ADR-0077's established in-place-amendment style (no supersession). The amended clause is the "operator-stopped `Terminated` prior… unreachable in Phase 1" edge-case bullet. Written to hold in **both tenses**, avoiding the aspirational-docs trap: the claim is stated as **true today** (`StoppedBy::PlatformReclaimed` does not exist in code — ADR-0081 is DESIGN-complete only, #42 has not entered DELIVER) and **narrows, not reverses**, the moment that disposition lands — a reclamation-restart re-drives `Terminated → Running` through the same `RestartAllocation` path, reachable there for the first time, while the *operator*-stop half of the claim stays genuinely unreachable forever. States explicitly that `CrashFacts::advance` needs **no code change** — it already produces the correct answer — so the note cannot be misread as a bug report against it. Binds the future DELIVER-wave commit that lands the disposition to a further dated amendment (here and in the `observation_store.rs` docstring), without performing that edit now. Cross-referenced to ADR-0081 by name and section. Only ADR-0078 touched; ADR-0081, `brief.md` and the slices were already correct and landed. No GitHub issue created (used existing #42/#259–#263 only, none newly cited). |
 | 2026-08-11 | DESIGN (user ruling — BYO rootfs is not a product surface) | **Corrects the row below it, same day.** That row recorded `overdrive-init`'s publish pipeline as *"correctly left to DEVOPS, cited as GH #264"*. **GH #264 is now CLOSED as wrong-premised — not deferred.** The premise was that BYO rootfs is an **operator-facing product surface**, which would oblige the platform to publish `overdrive-init` as a consumable artifact carrying a host↔guest protocol-compatibility contract. It is not one. Per intake **I-3**, BYO-artifact is a **slicing mechanism** — the `[vm]` spec points at a prebuilt kernel + rootfs already on the host — adopted so this driver ships without blocking on the image factory (*thinner-but-live beats complete-but-dead*, CLAUDE.md § "Build vertical slices through production entry points"). **The user's framing, which is the governing one:** *"we don't need BYO rootfs — we just do it now so we can ship this feature without relying on the OCI/Dockerfile → bootable rootfs image factory."* A bootstrap mechanism was mistaken for a product commitment, and filing it as planned work is precisely the deferral-language drift CLAUDE.md § "Deferrals require GitHub issues" exists to stop — the next reader would have treated a publish pipeline as scheduled. **The one real requirement inside it moved to GH [#259](https://github.com/overdrive-sh/overdrive/issues/259)** (OCI / Dockerfile → bootable rootfs image factory), which now carries both halves: the factory **injects** `overdrive-init`, and **host↔guest protocol compatibility is the factory's concern** — pinned by digest, versioned in the beacon, or rebuild-on-upgrade, but decided there rather than handed to operators as a compatibility matrix. `slice-01`'s engineering constraint is corrected in place: **no publish pipeline, not in this slice and not later**; the crate and its two static musl targets remain the whole of Slice 01's obligation. No new issue created. |
