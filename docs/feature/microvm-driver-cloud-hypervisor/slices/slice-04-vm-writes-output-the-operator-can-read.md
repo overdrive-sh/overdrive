@@ -317,10 +317,22 @@ rows. The corrected `[D8f]` table:
 | Failure vocabulary — four new variants | Slice 02's shape | **Yes** | 0.5 d |
 | Tier-3 harness — round-trip, read-only, mid-run kill, teardown, no-volume regression, mount failure | Slice 03's harness | **Yes** | 1.5 d |
 | A possible **second** rkyv envelope bump if `[[vm.volume]]` reaches the persisted aggregate | `[G4]`'s procedure | **Conditional** | 0–0.5 d |
-| `shmem_enabled` boot-time WARN check *(undeferred D-5, 2026-08-11)* | `Vmm::probe()` (Slice 01) | **Yes — one read + one warn event** | 0 d |
+| `shmem_enabled` boot-time WARN check *(undeferred D-5, 2026-08-11)* | `Vmm::probe()`'s existing gate (Slice 01) | **Yes — one read + one warn event + the `infra/provision/common-system.sh` write** | 0.5 d *(corrected 2026-08-11 — was 0 d, see note below)* |
 
 US-VM-8 ≈ 3.5–5 d, US-VM-9 ≈ 2.5–4 d. **The largest slice after the walking skeleton, whose
 upper bound it now meets.**
+
+> **Correction, 2026-08-11 (Morgan, sanity-checked while re-sizing Slice 01).** The
+> `shmem_enabled` row above was **0 d** on the reasoning that it fully piggybacks on
+> Slice 01's `Vmm::probe()`. That undersold two real, if small, pieces of work its own
+> "New: Yes" already concedes exist: the probe-side sysfs read + comparison + structured
+> `tracing::warn!` emission (unlike every genuine `0 d` row above, which reuses code
+> **verbatim** with no new line written), and the `infra/provision/common-system.sh`
+> boot-persistent write this slice's own Behavior/Dependencies sections assign here, not to
+> Slice 01 or to a nonexistent Image Factory. Corrected to **0.5 d**. **This does not move
+> the 6–9 d headline band** (the table's raw sum was already comfortably under 9 d) **and
+> does not trip guardrail 2** (Slice 04's own >9 d lift trigger, re-run at the DESIGN
+> handoff and confirmed still not firing).
 
 > **Lift trigger, numbered:** if this slice exceeds **9 days** — its stated upper band —
 > lifting it into its own feature is **pre-authorised** (feature-delta § Scope assessment,

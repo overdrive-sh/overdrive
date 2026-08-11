@@ -401,6 +401,45 @@ impl CrashFacts {
 }
 ```
 
+**Amendment 2026-08-11 — the "unreachable in Phase 1" clause narrows, not
+reverses, the moment ADR-0081's `StoppedBy::PlatformReclaimed` disposition
+lands (GH #42).**
+[ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md)
+§ *Narrows ADR-0078 § D1* traces the operator-stopped-prior bullet above to a
+second path into the same `Terminated → Running` transition: **Platform
+Reclamation**, a disposition that does not exist in code as of this writing —
+ADR-0081 is DESIGN-complete only, no `StoppedBy::PlatformReclaimed` has landed,
+and this bullet's claim is **true exactly as written today**. It stops being
+the whole truth, without becoming false about what it was written for, the
+moment that disposition ships: a reclamation-restart re-drives through the same
+`RestartAllocation` path at the same allocation key, making `Terminated →
+Running` reachable there for the first time — and reachable *correctly*. The
+**operator-stop half is untouched and stays true forever**: `is_restartable`
+continues to exclude intentionally-stopped rows, so an *operator*-stopped
+`Terminated` prior remains genuinely unreachable; only the umbrella claim
+("unreachable in Phase 1", covering every path) narrows to name reclamation as
+the one exception.
+
+**`advance` itself needs NO code change for this.** It already produces the
+right answer: reclamation writes `Terminated`, the restart write supersedes it
+with `Running` at the same key, and `advance` snapshots the terminal into
+`LastTerminated` and increments `restart_count` exactly as it does for any
+other recovery — because it deliberately does not consult an intentional-stop
+discriminator (the bullet's own opening sentence). Do **not** "fix" `advance`
+to exempt reclamation from the count when that lands; doing so would erase the
+occurrence, which is precisely the defect this ADR exists to prevent,
+reproduced by the feature that cites it. This note corrects only a
+*reachability claim* going stale on landing — the mechanism it describes is
+unchanged and needs no revisiting.
+
+**Binding on the DELIVER-wave commit that lands `StoppedBy::PlatformReclaimed`**
+(ADR-0081's own stated obligation): that commit must carry a further dated
+amendment here — and to the mirrored docstring in
+`observation_store.rs` — striking "unreachable in Phase 1" and naming
+reclamation as the reachable path. Not performed now; editing an accepted ADR
+ahead of the landing it describes would document behaviour that does not yet
+exist.
+
 Supporting predicate, on the enum that owns it
 (`.claude/rules/development.md` § "Label enums own their string
 representation" — same locality argument, applied to a classification):

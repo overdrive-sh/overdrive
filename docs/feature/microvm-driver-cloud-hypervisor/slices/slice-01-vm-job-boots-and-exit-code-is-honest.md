@@ -279,12 +279,38 @@ volumes.** One VM, runs to completion, reports its exit code.
   work already inside this slice; they add no mechanism. The additive confinement items
   (Landlock, uid/gid drop, rlimits) are **US-VM-7 in Slice 03**, and the mount namespace is
   **not in this feature** (GH #258) — see feature-delta `[D7]`.
-  **Not true of the D-3 fold-in (2026-08-11).** Unlike `[D7]`, the cgroup-OOM diagnosis
-  item adds a genuine new mechanism — a new port, two adapters, a probe, and a touch to
-  `exit_observer.rs` — on top of the mid-run exit watcher this slice already builds. Two
-  musl CI targets are comparatively cheap. Sizing this honestly is DISTILL's job, not
-  DESIGN's estimate to silently absorb into "5–8 d unchanged" — flagged here so the
-  roadmap author does not inherit a stale range.
+  **RE-SIZED 2026-08-11 — the D-3 fold-in is NOT covered by the `[D7]` claim above.** The
+  prior text on this line named the gap and explicitly declined to price it (*"sizing this
+  honestly is DISTILL's job, not DESIGN's estimate to silently absorb"*). Closed out here,
+  same pass, per user instruction not to leave it open. Costed the same way `[D8f]` costs
+  Slice 04 — an itemized table, not a number pulled from the air:
+
+  | Concern | Reused from | New | Est. |
+  |---|---|---|---|
+  | `CgroupAccounting` port + error types + full contract docstring (pre-/postconditions, edge cases, observable invariants — `.claude/rules/development.md` § "Trait definitions specify behavior") | `CgroupFs`'s trait shape | Yes | 0.5 d |
+  | `RealCgroupAccounting` adapter (`memory.events` read + parse) + `probe()` with 3 fault-injection scenarios | mirrors `CgroupFs::probe`'s shape (ADR-0082 § D8) | Yes | 1 d |
+  | `SimCgroupAccounting` adapter (in-memory `BTreeMap` + injectable per-path error schedule) | mirrors `SimCgroupFs` | Yes | 0.5 d |
+  | Composition-root wiring — `VmDriver::new` gains a required param; SD-5's gate extended to probe `CgroupAccounting` alongside `Vmm` | SD-5's existing gate shape | Yes | 0.5 d |
+  | Adapter equivalence test (Real vs Sim), mandatory per the trait-contract rule cited above | pattern from other port-equivalence tests in this codebase | Yes | 0.5 d |
+  | `ExitEvent.oom: Option<OomFacts>` field + the exit-watcher's read-before-teardown call | the mid-run exit watcher this slice already builds | Yes | 0.5 d |
+  | `exit_observer` precedence check + `TransitionReason::VmOutOfMemory` Cause variant + totality re-check | `[D3]`'s existing `Crashed → WorkloadCrashedImmediately` mapping | Yes | 1 d |
+  | New Tier-3 AC — deliberately undersized `memory.max`, real cgroup OOM, confirm `VmOutOfMemory` lands, not `signal: 9` | this slice's own boot Tier-3 harness | Yes | 1 d |
+  | `overdrive-init`'s two static musl build targets (toolchain + CI matrix) | — | Yes | 0.5 d |
+  | **Subtotal — D-3 fold-in + M-5 toolchain** | | | **6 d** |
+
+  **New band: 11–14 d** (the `[D7]`-fold band of 5–8 d, plus the 6 d subtotal above — none
+  of it was in either prior number). US-VM-1's musl-toolchain share is 0.5 d of the 6; the
+  load-bearing cost is the `CgroupAccounting` port + its two adapters + probe + equivalence
+  test (3 d) and the new classification path they feed (2 d: the exit-observer branch/
+  variant plus the Tier-3 AC that proves it).
+
+  **Guardrail 3 fires (feature-delta § Scope assessment — wave-unadjustable, pre-committed
+  at DISCUSS amendment 2's review fixes, 2026-08-02).** Slice 01's stated upper band was
+  **8 d**; more than 50% over that is any upper bound past **12 d**. The re-sized upper
+  bound is **14 d — 75% over the stated band.** This number is not chosen to duck the
+  threshold and is not this wave's to resolve by picking a smaller one — see feature-delta's
+  Changelog (2026-08-11) and § Scope assessment for the full trigger record and the
+  total-effort consequence. Disposition is the user's call.
 - SHIPPED and reused: reconciler runtime, action shim, restart/backoff, cgroup slice
   bootstrap, `workload describe`. **Correction (DESIGN, 2026-08-11) — exit observer is
   NOT unchanged.** `overdrive-control-plane`'s `worker::exit_observer::handle_exit_event`
