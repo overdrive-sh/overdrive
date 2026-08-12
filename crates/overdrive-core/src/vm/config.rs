@@ -24,47 +24,54 @@
 //!   literal `"true"`; CH's `log` and `false` modes have no
 //!   representation anywhere in this workspace.
 //!
-//! # What is deferred, and why
+//! # What step 01-01 PART 2 lands
 //!
-//! `VmRunDir` (§D2.2), the outer `VmConfig` aggregate (§D2), and the
-//! `Vmm` port trait (§D1 — `create`'s signature takes `&VmConfig`, so the
-//! trait cannot compile without it) are **not** landed this step. Three
-//! independent blockers on `VmConfig`'s remaining field types originally
-//! prevented building them without inventing API surface ADR-0082 did not
-//! pin (CLAUDE.md § "Implement to the design — never invent API
-//! surface"). ADR-0082's 2026-08-12 amendment closed the first two;
-//! **step 01-01 PART 1 (this commit) implements that closure**:
+//! PART 1 (commit `2636ba1c`) resolved the first two of three blockers
+//! on `VmConfig`'s remaining field types (`cgroup_scope: CgroupPath`
+//! relocated into [`crate::cgroup`]; `netns: Option<NetnsName>` via the
+//! new [`crate::id::NetnsName`] newtype). PART 2 closes the third and
+//! lands everything it unblocks:
 //!
-//! 1. **RESOLVED — `cgroup_scope: CgroupPath`.** Relocated verbatim into
-//!    [`crate::cgroup`] (`overdrive_core::cgroup::CgroupPath`).
-//!    `overdrive_worker::cgroup_manager` re-exports it for its existing
-//!    call sites, so no consumer outside this crate needed to change.
-//! 2. **RESOLVED — `netns: Option<NetnsName>`.** [`crate::id::NetnsName`]
-//!    now exists — an INTERNAL newtype (no serde/rkyv/`FromStr`; the
-//!    ONLY constructor is `from_hex4`, called at exactly one site,
-//!    `derive_workload_netns_plan` in `overdrive-control-plane`). This
-//!    SUPERSEDES D-TME-12 / JOIN-1's prior `Option<String>` choice on
-//!    `AllocationSpec.netns` (see
-//!    `crates/overdrive-core/src/traits/driver.rs`'s field docstring,
-//!    rewritten in the same commit) per ADR-0082 §D2's supersession
-//!    record. `VmConfig.netns` (PART 2) sources from the same newtype.
-//! 3. **STILL BLOCKED — `rootfs: RootfsPlan`** and **`cmdline:
-//!    KernelCmdline`** — ADR-0082 gives `RootfsPlan` a one-line shape
-//!    hint ("master + master_bytes + clone destination") but
-//!    `KernelCmdline` none at all beyond "platform-derived; NOT operator
-//!    surface." Guessing field names and method surface for either risks
-//!    a contract a later step then has to rework. This is PART 2's
-//!    remaining blocker.
+//! - [`RootfsPlan`] (§D2, gap 3) — the rootfs staging plan: the
+//!   operator's read-only master image, its size (captured at
+//!   construction so [`VmConfig::rlimit_fsize`] stays pure), and the
+//!   per-launch clone destination (derived on the master's own
+//!   filesystem — FICLONE is intra-filesystem — with a filename
+//!   carrying the allocation id for reap attribution).
+//! - [`KernelCmdline`] (§D2, gap 4) — the platform-owned guest kernel
+//!   command line. NOT operator surface: `[vm]` carries
+//!   kernel/rootfs/command/args, never a cmdline.
+//! - [`VsockPort`] — the beacon socket's vsock port number, an internal
+//!   newtype (GH #42).
+//! - [`VmRunDir`] (§D2.2) — the per-allocation run directory; owns
+//!   every path inside it (SD-2 exclusivity).
+//! - [`VmConfig`] (§D2) — the outer aggregate. Every field now names a
+//!   concrete `overdrive-core`-resident type, so this struct — and
+//!   therefore `Vmm::create(&VmConfig)` (§D1,
+//!   `crate::traits::vmm::Vmm`) — compiles.
 //!
-//! `VmRunDir::landlock_grant() -> LandlockRule` (closing the vsock
-//! Landlock gap, §D2.2) is separately deferred to Slice 03 (US-VM-7) per
-//! ADR-0082's 2026-08-12 amendment — not a Slice-01 blocker at all.
+//! # What remains deferred, and why
 //!
-//! Item 3 remains flagged as a blocker for the PART 2 handoff rather than
-//! guessed. See the module doc in `crate::vm` for the summary.
+//! `VmRunDir::landlock_grant() -> LandlockRule` and
+//! `VmConfig::landlock_rules()` are deferred to Slice 03 (US-VM-7) per
+//! ADR-0082's 2026-08-12 amendment (gap 5) — `LandlockRule` has no shape
+//! anywhere, and the slice-01 doc already assigns the additive
+//! confinement items (Landlock, uid/gid drop, rlimits) to US-VM-7. This
+//! is a scoping decision, not a blocker: Slice 01 runs Cloud Hypervisor
+//! without `--landlock`/`--landlock-rules`, so no run-directory grant is
+//! needed until Landlock confinement is opted into in Slice 03.
+//!
+//! [`reserve_bytes`] (§D2.3) still ships as a RED scaffold until step
+//! 01-05 measures the real bound via a real boot — unchanged by this
+//! step.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::num::NonZeroU8;
+use std::path::{Path, PathBuf};
+
+use crate::AllocationId;
+use crate::cgroup::CgroupPath;
+use crate::id::NetnsName;
 
 // -----------------------------------------------------------------------
 // D2.4 — KernelImage: validates before Cloud Hypervisor ever sees the file
@@ -353,5 +360,437 @@ impl VmConfinement {
     #[must_use]
     pub const fn seccomp_arg(&self) -> &'static str {
         "true"
+    }
+}
+
+// -----------------------------------------------------------------------
+// D2 gap 3 — RootfsPlan: the FICLONE source, its size, and the
+// per-launch clone destination
+// -----------------------------------------------------------------------
+
+/// The rootfs staging plan: the operator's read-only master image, its
+/// size (captured at construction so [`VmConfig::rlimit_fsize`] stays
+/// pure), and the per-launch clone destination (ADR-0082 §D2, gap 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootfsPlan {
+    master: PathBuf,
+    master_bytes: u64,
+    clone_dest: PathBuf,
+}
+
+impl RootfsPlan {
+    /// Build the plan for one allocation. `master` is the operator's
+    /// BYO rootfs artifact; `master_bytes` is its size, captured HERE
+    /// by the caller (the imperative shell does the `stat`) — the same
+    /// Functional-Core / Imperative-Shell split [`KernelImage::validate`]
+    /// applies.
+    ///
+    /// The clone destination is derived on the **master's own
+    /// filesystem** (FICLONE is intra-filesystem; staging into `/run`
+    /// fails `EXDEV`), with a filename **carrying `alloc`** so a
+    /// reboot-orphaned clone is attributable (SD-1 / SD-2; the reap
+    /// keys off it — ADR-0083 §D7).
+    #[must_use]
+    pub fn for_alloc(master: PathBuf, master_bytes: u64, alloc: &AllocationId) -> Self {
+        let dir = master.parent().unwrap_or_else(|| Path::new(""));
+        let clone_dest = dir.join(format!(".overdrive-vm-rootfs-{alloc}.img"));
+        Self { master, master_bytes, clone_dest }
+    }
+
+    /// The FICLONE source — the operator's read-only master image.
+    #[must_use]
+    pub fn master(&self) -> &Path {
+        &self.master
+    }
+
+    /// The master image's size, captured at construction. Feeds
+    /// [`VmConfig::rlimit_fsize`].
+    #[must_use]
+    pub const fn master_bytes(&self) -> u64 {
+        self.master_bytes
+    }
+
+    /// The FICLONE target — becomes the virtio-blk disk source.
+    #[must_use]
+    pub fn clone_dest(&self) -> &Path {
+        &self.clone_dest
+    }
+}
+
+// -----------------------------------------------------------------------
+// D2 gap 4 — KernelCmdline: platform-derived, never operator surface
+// -----------------------------------------------------------------------
+
+/// The guest kernel command line. PLATFORM-DERIVED — there is NO
+/// operator surface for it (`[vm]` carries kernel/rootfs/command/args,
+/// never a cmdline). Constructed by the platform (the VM driver, the
+/// imperative shell) from fixed boot parameters — the operator cannot
+/// inject kernel parameters (ADR-0082 §D2, gap 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelCmdline(String);
+
+impl KernelCmdline {
+    /// The platform's kernel command line for `arch`. Called by the VM
+    /// driver, NEVER from operator input. Renders the fixed platform
+    /// boot line — the arch-appropriate `console=`, `panic=1`, and the
+    /// virtio-blk `root=` device for the ext4 rootfs — so the guest
+    /// kernel boots, mounts the rootfs, and reaches `overdrive-init`.
+    ///
+    /// The exact token set is platform boot policy, provisional until
+    /// validated against a real boot (step 01-08's walking skeleton) —
+    /// the same provisional-constant discipline as [`reserve_bytes`].
+    /// The *shape* ADR-0082 §D2 pins — a single platform-owned
+    /// constructor with no operator input — is fixed now.
+    #[must_use]
+    pub fn platform_default(arch: HostArch) -> Self {
+        let console = match arch {
+            HostArch::X86_64 => "ttyS0",
+            HostArch::Aarch64 => "ttyAMA0",
+        };
+        Self(format!("console={console} panic=1 root=/dev/vda rw"))
+    }
+
+    /// The complete `--cmdline` argument value.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+// -----------------------------------------------------------------------
+// VsockPort — the beacon socket's vsock port number (GH #42)
+// -----------------------------------------------------------------------
+
+/// The vsock port the guest agent dials for the beacon connection
+/// (ADR-0082 §D2.2). INTERNAL newtype: a platform-internal beacon port,
+/// never operator-typed, never persisted — same completeness class as
+/// [`crate::id::NetnsName`], so no `serde`, `rkyv`, or `FromStr`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct VsockPort(u32);
+
+impl VsockPort {
+    #[must_use]
+    pub const fn new(port: u32) -> Self {
+        Self(port)
+    }
+
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for VsockPort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// -----------------------------------------------------------------------
+// D2.2 — VmRunDir: owns every path inside the per-allocation run
+// directory (SD-2 exclusivity)
+// -----------------------------------------------------------------------
+
+/// The per-allocation run directory (SD-2 — tmpfs, one per allocation,
+/// holding NOTHING else). This type owns every path inside it, which is
+/// why SD-2's exclusivity is a structural property rather than a
+/// convention (ADR-0082 §D2.2).
+///
+/// `landlock_grant() -> LandlockRule` is deferred to Slice 03 (US-VM-7,
+/// gap 5) — Slice 01 launches Cloud Hypervisor without
+/// `--landlock`/`--landlock-rules`, so no directory grant is minted this
+/// slice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmRunDir(PathBuf);
+
+impl VmRunDir {
+    /// The per-allocation run directory under `root` (the tmpfs mount
+    /// point).
+    #[must_use]
+    pub fn for_alloc(root: &Path, alloc: &AllocationId) -> Self {
+        Self(root.join(alloc.as_str()))
+    }
+
+    /// The run directory itself.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// `<dir>/vsock` — Cloud Hypervisor binds this (the guest connects
+    /// out to it).
+    #[must_use]
+    pub fn vsock_socket(&self) -> PathBuf {
+        self.0.join("vsock")
+    }
+
+    /// `<dir>/vsock_<port>` — the DRIVER binds this; Cloud Hypervisor's
+    /// guest→host vsock path connects out to `<vsock_socket>_<port>`
+    /// (ADR-0082 §D2.2).
+    #[must_use]
+    pub fn beacon_socket(&self, port: VsockPort) -> PathBuf {
+        self.0.join(format!("vsock_{}", port.as_u32()))
+    }
+
+    /// `<dir>/api` — Cloud Hypervisor's `--api-socket`.
+    #[must_use]
+    pub fn api_socket(&self) -> PathBuf {
+        self.0.join("api")
+    }
+
+    /// `<dir>/console.log` — the guest's serial console capture.
+    #[must_use]
+    pub fn console_log(&self) -> PathBuf {
+        self.0.join("console.log")
+    }
+}
+
+// -----------------------------------------------------------------------
+// D2 — VmConfig: the outer aggregate. Every field now names a concrete
+// overdrive-core-resident type (ADR-0082 §D2, 2026-08-12 amendment).
+// -----------------------------------------------------------------------
+
+/// One VM launch's complete, validated configuration — the value
+/// [`crate::traits::vmm::Vmm::create`] takes. Every field is either
+/// already-validated (`kernel`, `memory`, `confinement`) or a pure
+/// derivation from a mandatory input (`rootfs`, `cmdline`, `run_dir`,
+/// `cgroup_scope`) — "one value, one call" (ADR-0082 §D2, rejecting the
+/// reference implementation's stateful config-accumulating builder,
+/// §A1).
+///
+/// Transient — passed by reference to [`crate::traits::vmm::Vmm::create`]
+/// and not persisted; per `.claude/rules/development.md` § "Persist
+/// inputs, not derived state" it carries no `serde`/`rkyv` derives (the
+/// same discipline `AllocationSpec` follows for the same reason).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmConfig {
+    pub alloc: AllocationId,
+    pub kernel: KernelImage,
+    pub rootfs: RootfsPlan,
+    pub cmdline: KernelCmdline,
+    pub memory: MemoryPlan,
+    pub vcpus: NonZeroU8,
+    pub run_dir: VmRunDir,
+    pub confinement: VmConfinement,
+    /// `Some` only when the action-shim provisioned a per-workload
+    /// netns for this allocation; `None` runs the hypervisor process in
+    /// the host netns (not an error — Job-kind VMs need no tap device).
+    /// Sourced from the same [`NetnsName`] as
+    /// [`crate::traits::driver::AllocationSpec::netns`].
+    pub netns: Option<NetnsName>,
+    pub cgroup_scope: CgroupPath,
+}
+
+impl VmConfig {
+    /// `max(rootfs image size, guest RAM)` (lie 6 / C-6, ADR-0082 §D2).
+    /// Encoded from Slice 01, BEFORE Slice 04 turns `--memory
+    /// shared=on` on, because `shared=on` backs guest RAM with a memfd
+    /// and a memfd is a *file* for `RLIMIT_FSIZE`.
+    ///
+    /// **PURE.** The rootfs size is `self.rootfs.master_bytes()`,
+    /// captured at [`RootfsPlan`] construction by the caller — the same
+    /// Functional-Core / Imperative-Shell split [`KernelImage::validate`]
+    /// uses, where the caller does the `read` and the validator does
+    /// not.
+    #[must_use]
+    pub const fn rlimit_fsize(&self) -> u64 {
+        let rootfs_bytes = self.rootfs.master_bytes();
+        let guest_bytes = self.memory.guest_bytes();
+        if rootfs_bytes > guest_bytes { rootfs_bytes } else { guest_bytes }
+    }
+}
+
+// -----------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// Valid-label regex for `AllocationId` — lowercase alnum segments
+    /// joined by hyphens, always starting/ending alnum (matches
+    /// `id::validate_label`'s grammar).
+    const ALLOC_SUFFIX_STRATEGY: &str = "[a-z0-9]{1,4}(-[a-z0-9]{1,4}){0,3}";
+
+    // -------------------------------------------------------------------
+    // RootfsPlan (ADR-0082 §D2, gap 3)
+    // -------------------------------------------------------------------
+
+    proptest! {
+        /// `RootfsPlan::for_alloc` derives the clone destination on the
+        /// master's OWN parent directory (FICLONE is intra-filesystem)
+        /// with a filename carrying the allocation id (SD-1 / SD-2 reap
+        /// attribution).
+        #[test]
+        fn rootfs_plan_clone_dest_sits_beside_master_and_carries_alloc(
+            dir_name in "[a-z0-9]{1,8}",
+            file_name in "[a-z0-9]{1,8}",
+            alloc_suffix in ALLOC_SUFFIX_STRATEGY,
+            master_bytes in any::<u64>(),
+        ) {
+            let alloc = AllocationId::new(&alloc_suffix).unwrap();
+            let master = PathBuf::from(format!("/var/lib/overdrive/{dir_name}/{file_name}.img"));
+            let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc);
+
+            prop_assert_eq!(plan.master(), master.as_path());
+            prop_assert_eq!(plan.master_bytes(), master_bytes);
+            prop_assert_eq!(plan.clone_dest().parent(), master.parent());
+
+            let clone_name = plan
+                .clone_dest()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            prop_assert!(
+                clone_name.contains(alloc.as_str()),
+                "clone dest filename {clone_name:?} must carry the alloc id {alloc}",
+            );
+            prop_assert_ne!(plan.clone_dest(), master.as_path());
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // KernelCmdline (ADR-0082 §D2, gap 4)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn kernel_cmdline_platform_default_is_arch_correct_and_carries_panic_1() {
+        let x86 = KernelCmdline::platform_default(HostArch::X86_64);
+        assert!(x86.as_str().contains("panic=1"), "must set panic=1: {}", x86.as_str());
+        assert!(
+            x86.as_str().contains("console=ttyS0"),
+            "x86_64 must set the serial console: {}",
+            x86.as_str(),
+        );
+        assert!(
+            x86.as_str().contains("root=/dev/vda"),
+            "must set the virtio-blk root device: {}",
+            x86.as_str(),
+        );
+
+        let aarch64 = KernelCmdline::platform_default(HostArch::Aarch64);
+        assert!(aarch64.as_str().contains("panic=1"), "must set panic=1: {}", aarch64.as_str());
+        assert!(
+            aarch64.as_str().contains("console=ttyAMA0"),
+            "aarch64 must set the PL011 console: {}",
+            aarch64.as_str(),
+        );
+        assert!(
+            aarch64.as_str().contains("root=/dev/vda"),
+            "must set the virtio-blk root device: {}",
+            aarch64.as_str(),
+        );
+
+        assert_ne!(
+            x86.as_str(),
+            aarch64.as_str(),
+            "the two arches must render distinct console tokens",
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // VsockPort (GH #42)
+    // -------------------------------------------------------------------
+
+    proptest! {
+        /// `VsockPort::new` / `as_u32` round-trip for every `u32`, and
+        /// `Display` renders the decimal form.
+        #[test]
+        fn vsock_port_roundtrips_and_displays_decimal(raw in any::<u32>()) {
+            let port = VsockPort::new(raw);
+            prop_assert_eq!(port.as_u32(), raw);
+            prop_assert_eq!(port.to_string(), raw.to_string());
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // VmRunDir (ADR-0082 §D2.2)
+    // -------------------------------------------------------------------
+
+    proptest! {
+        /// Every socket/log path `VmRunDir` exposes is `<dir>/<fixed
+        /// name>`, and `beacon_socket` embeds the port number.
+        #[test]
+        fn vm_run_dir_paths_are_dir_joined_names(
+            root_name in "[a-z0-9]{1,8}",
+            alloc_suffix in ALLOC_SUFFIX_STRATEGY,
+            port in any::<u32>(),
+        ) {
+            let alloc = AllocationId::new(&alloc_suffix).unwrap();
+            let root = PathBuf::from(format!("/run/overdrive/{root_name}"));
+            let run_dir = VmRunDir::for_alloc(&root, &alloc);
+            let dir = run_dir.path();
+
+            prop_assert_eq!(run_dir.vsock_socket(), dir.join("vsock"));
+            prop_assert_eq!(run_dir.api_socket(), dir.join("api"));
+            prop_assert_eq!(run_dir.console_log(), dir.join("console.log"));
+
+            let beacon = run_dir.beacon_socket(VsockPort::new(port));
+            prop_assert_eq!(beacon.parent(), Some(dir));
+
+            let beacon_name = beacon.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let port_str = port.to_string();
+            prop_assert!(
+                beacon_name.contains(port_str.as_str()),
+                "beacon socket name {beacon_name:?} must embed the port {port}",
+            );
+            prop_assert_ne!(run_dir.vsock_socket(), beacon);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // VmConfig::rlimit_fsize (ADR-0082 §D2, lie 6 / C-6)
+    // -------------------------------------------------------------------
+
+    /// Builds a structurally-valid `VmConfig` fixture, varying only the
+    /// two inputs `rlimit_fsize` derives from. Constructs `MemoryPlan`
+    /// via its private fields (visible to this nested test module)
+    /// rather than `MemoryPlan::derive`, because `derive` calls
+    /// `reserve_bytes`, which is a RED scaffold that panics until step
+    /// 01-05 (§D2.3) — this fixture exercises `VmConfig::rlimit_fsize`,
+    /// not `MemoryPlan::derive`.
+    fn sample_vm_config(master_bytes: u64, guest_bytes: u64) -> VmConfig {
+        let alloc = AllocationId::new("alloc-rlimit-fixture").unwrap();
+        let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        let kernel =
+            KernelImage::validate(PathBuf::from("/boot/vmlinuz"), HostArch::X86_64, &header)
+                .unwrap();
+        VmConfig {
+            alloc: alloc.clone(),
+            kernel,
+            rootfs: RootfsPlan::for_alloc(
+                PathBuf::from("/var/lib/overdrive/images/base.img"),
+                master_bytes,
+                &alloc,
+            ),
+            cmdline: KernelCmdline::platform_default(HostArch::X86_64),
+            memory: MemoryPlan { guest_bytes, cgroup_max_bytes: guest_bytes },
+            vcpus: NonZeroU8::new(1).unwrap(),
+            run_dir: VmRunDir::for_alloc(&PathBuf::from("/run/overdrive"), &alloc),
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+            netns: None,
+            cgroup_scope: CgroupPath::for_alloc(&alloc),
+        }
+    }
+
+    proptest! {
+        /// `VmConfig::rlimit_fsize` is `max(rootfs master bytes, guest
+        /// memory bytes)` (lie 6 / C-6) for every combination of the two
+        /// inputs it derives from.
+        #[test]
+        fn vm_config_rlimit_fsize_is_max_of_rootfs_and_guest_bytes(
+            master_bytes in any::<u64>(),
+            guest_bytes in any::<u64>(),
+        ) {
+            let config = sample_vm_config(master_bytes, guest_bytes);
+            prop_assert_eq!(config.rlimit_fsize(), master_bytes.max(guest_bytes));
+        }
     }
 }

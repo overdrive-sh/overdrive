@@ -42,6 +42,12 @@ pub mod observation_store;
 // ADR-0054 §3. Lands GREEN across slices 01-03.
 pub mod prober;
 pub mod transport;
+// microvm-driver-cloud-hypervisor (ADR-0082, GH #42). The hypervisor-
+// process port: `Vmm::create`/`terminate` plus the `VmConfig`-shaped
+// value family in `crate::vm::config`. No implementor lands until step
+// 01-06 (`CloudHypervisorVmm` / `SimVmm`); the trait compiles with zero
+// implementors, which is expected for this step.
+pub mod vmm;
 
 pub use ca::{
     Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,

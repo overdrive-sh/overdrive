@@ -5,10 +5,13 @@
 //! whose sole public constructor makes one silent substrate lie
 //! structurally discouraged.
 //!
-//! **Landed incrementally.** Step 01-01 lands [`config::DiskAttachment`],
-//! [`config::MemoryPlan`] + [`config::reserve_bytes`],
-//! [`config::KernelImage`], and [`config::VmConfinement`] — see
-//! `config`'s module doc for exactly what is landed and, importantly,
-//! what remains deferred (`VmRunDir`, the outer `VmConfig` aggregate, and
-//! the `Vmm` port trait that references `VmConfig`) and why.
+//! **Landed incrementally.** Step 01-01 PART 1 landed
+//! [`config::DiskAttachment`], [`config::MemoryPlan`] +
+//! [`config::reserve_bytes`], [`config::KernelImage`], and
+//! [`config::VmConfinement`]. PART 2 lands [`config::RootfsPlan`],
+//! [`config::KernelCmdline`], [`config::VsockPort`],
+//! [`config::VmRunDir`], and the outer [`config::VmConfig`] aggregate,
+//! plus the `Vmm` port trait (`crate::traits::vmm`) that references it
+//! — see `config`'s module doc for exactly what is landed and what
+//! remains deferred (Landlock, Slice 03 / US-VM-7) and why.
 pub mod config;
