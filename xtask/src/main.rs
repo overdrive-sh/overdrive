@@ -101,6 +101,23 @@ enum Task {
         action: LimaAction,
     },
 
+    /// Run tests / commands on the bare-metal `x86_64` KVM box.
+    ///
+    /// The Cloud-Hypervisor microVM `kvm-tests` need `x86_64` + nested KVM,
+    /// which Lima on Apple Silicon cannot provide, so their Tier-3 boot
+    /// surface runs on a real `x86_64` box reached over ssh. The target host
+    /// (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the process
+    /// environment or `.env` at the workspace root (see `.env.example`).
+    /// This is the metal sibling of `Lima` — `run` rsyncs the tree up
+    /// (via `infra/metal/bootstrap.sh --sync-only`) and then ssh-executes
+    /// under a `bash -lc` login shell (so rustup/cargo are on PATH),
+    /// wrapping in `sudo … env "HOME=$HOME" "PATH=$PATH" …` by default so
+    /// the KVM / cgroup tests get the root permission surface they need.
+    Metal {
+        #[command(subcommand)]
+        action: MetalAction,
+    },
+
     /// Manage git hooks via lefthook — see `lefthook.yml`.
     Hooks {
         #[command(subcommand)]
@@ -261,6 +278,31 @@ enum LimaAction {
 }
 
 #[derive(Debug, Subcommand)]
+enum MetalAction {
+    /// rsync the working tree up to the metal box (bootstrap.sh --sync-only).
+    Sync,
+    /// Open an interactive shell on the metal box in `~/overdrive`.
+    Shell,
+    /// Sync, then run a command on the metal box (remaining args forwarded).
+    ///
+    /// Default wraps the command in `sudo -E env "PATH=$PATH" ...` so it
+    /// runs as root — the permission surface the KVM / cgroup tests need
+    /// (`$PATH` is expanded on the remote host, not locally). Pass
+    /// `--no-sudo` to run as the login user, `--no-sync` to skip the
+    /// pre-run rsync (e.g. to re-run a suite against an already-synced tree).
+    Run {
+        /// Skip the pre-run rsync; run against whatever is already on the box.
+        #[arg(long)]
+        no_sync: bool,
+        /// Run as the login user instead of wrapping in `sudo -E ...`.
+        #[arg(long)]
+        no_sudo: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum IntegrationScope {
     /// Full kernel matrix inside QEMU via `little-vm-helper`.
     Vm {
@@ -298,6 +340,7 @@ fn run() -> Result<()> {
         Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
+        Task::Metal { action } => metal(action),
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
@@ -608,6 +651,115 @@ fn lima(action: LimaAction) -> Result<()> {
         }
         LimaAction::Validate => {
             sh("limactl validate", Command::new("limactl").args(["validate", LIMA_TEMPLATE]))
+        }
+    }
+}
+
+/// Process-env / `.env` key naming the bare-metal test host (`user@host`).
+const METAL_TARGET_ENV: &str = "OVERDRIVE_METAL_TARGET";
+/// Working tree location on the metal box — `infra/metal/bootstrap.sh`
+/// rsyncs into `$HOME/overdrive`; `~` is expanded by the remote shell.
+const METAL_REMOTE_DIR: &str = "~/overdrive";
+/// The one rsync definition — reused so metal `sync` and the `lima` VM
+/// path never diverge on excludes.
+const METAL_BOOTSTRAP: &str = "infra/metal/bootstrap.sh";
+/// ssh options mirroring `infra/metal/bootstrap.sh` (`SSH_OPTS`): accept a
+/// new host key on first contact, keep the connection alive across a long
+/// test run.
+const METAL_SSH_OPTS: [&str; 4] =
+    ["-o", "StrictHostKeyChecking=accept-new", "-o", "ServerAliveInterval=30"];
+
+/// Resolve the bare-metal test host (`user@host`) from
+/// `OVERDRIVE_METAL_TARGET` in the process environment, falling back to
+/// `.env` at the workspace root. This is the `x86_64` + nested-KVM box the
+/// Cloud-Hypervisor microVM `kvm-tests` run on; Lima on Apple Silicon
+/// cannot provide nested KVM (see infra/metal/bootstrap.sh).
+fn metal_target() -> Result<String> {
+    let workspace_root = std::env::current_dir()?;
+    let env_file = load_env_file(&workspace_root.join(".env"))?;
+    lookup_required(
+        &env_file,
+        &[METAL_TARGET_ENV],
+        "set the bare-metal test host, e.g. `export OVERDRIVE_METAL_TARGET=ubuntu@1.2.3.4` \
+         or add it to `.env` (see .env.example). It is the x86_64 KVM box the \
+         Cloud-Hypervisor `kvm-tests` run on — Lima on Apple Silicon cannot do nested KVM.",
+    )
+}
+
+/// rsync the working tree to the metal box via the existing bootstrap
+/// script's `--sync-only` mode, so metal and its excludes have exactly
+/// one definition.
+fn metal_sync(target: &str) -> Result<()> {
+    sh(
+        "metal sync (bootstrap.sh --sync-only)",
+        Command::new("bash").args([METAL_BOOTSTRAP, target, "--sync-only"]),
+    )
+}
+
+/// `cargo xtask metal …` — the metal sibling of `lima`. Resolves the
+/// target host, then syncs / shells / runs over ssh. `run` rsyncs first
+/// (unless `--no-sync`) and wraps in `sudo -E env "PATH=$PATH" …` by
+/// default (unless `--no-sudo`) so the KVM / cgroup tests get root.
+fn metal(action: MetalAction) -> Result<()> {
+    which_or_hint(
+        "ssh",
+        "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
+    )?;
+    let target = metal_target()?;
+
+    match action {
+        MetalAction::Sync => metal_sync(&target),
+        MetalAction::Shell => sh(
+            "ssh <metal> (shell)",
+            Command::new("ssh")
+                .args(METAL_SSH_OPTS)
+                .arg("-t")
+                .arg(&target)
+                .arg(format!("cd {METAL_REMOTE_DIR} && exec \"$SHELL\" -l")),
+        ),
+        MetalAction::Run { no_sync, no_sudo, args } => {
+            if args.is_empty() {
+                bail!(
+                    "no command given; use `cargo xtask metal run -- cargo nextest run \
+                     -p overdrive-cli --features integration-tests,kvm-tests`"
+                );
+            }
+            if !no_sync {
+                metal_sync(&target)?;
+            }
+            // The args become one remote-shell command string, so each is
+            // single-quote-escaped exactly as the `lima` passthrough does.
+            let joined = args.iter().map(|a| sh_escape(a)).collect::<Vec<_>>().join(" ");
+            // The inner script runs under `bash -lc` — a LOGIN shell — so the
+            // remote user's profile puts rustup/cargo on PATH. ssh's default
+            // command shell is NON-login, whose PATH lacks ~/.cargo/bin, so an
+            // unwrapped `cargo` fails with 127. This mirrors `lima run`.
+            let inner = if no_sudo {
+                format!("cd {METAL_REMOTE_DIR} && {joined}")
+            } else {
+                // Run as root for the KVM / cgroup permission surface. `-E` is
+                // IGNORED by this box's sudoers (Ubuntu ≥26.04: "preserving the
+                // entire environment is not supported"), so HOME and PATH are
+                // injected EXPLICITLY via `env`. HOME is load-bearing: `cargo`
+                // is a rustup symlink, so a root run resolves
+                // RUSTUP_HOME=$HOME/.rustup — without HOME it looks under
+                // /root/.rustup and fails "toolchain not installed". Both vars
+                // are expanded by the login shell (correct values) before sudo.
+                format!(
+                    r#"cd {METAL_REMOTE_DIR} && sudo -E env "HOME=$HOME" "PATH=$PATH" {joined}"#
+                )
+            };
+            // Pass the whole `bash -lc '<inner>'` as ONE ssh argument: ssh
+            // concatenates the post-target args and re-parses them through the
+            // remote shell, so `inner` must arrive as a single quoted token.
+            // The outer shell strips the quotes; `bash -lc` receives the raw
+            // inner (so `~` tilde-expands and `$HOME`/`$PATH` expand in the
+            // login shell).
+            let remote = format!("bash -lc {}", sh_escape(&inner));
+            sh(
+                "ssh <metal> <cmd>",
+                Command::new("ssh").args(METAL_SSH_OPTS).arg(&target).arg(&remote),
+            )
         }
     }
 }

@@ -1361,6 +1361,41 @@ meaningless. The check is mechanical: does this command pass
 `--features integration-tests`? If yes, prefix with `cargo xtask lima
 run --`.
 
+### Running tests — bare-metal KVM box (`kvm-tests`)
+
+The Cloud-Hypervisor microVM driver boots **real** microVMs, which need
+**x86_64 + nested KVM**. Lima on Apple Silicon (arm64) cannot provide
+that, so the driver's Tier-3 boot surface is gated behind a `kvm-tests`
+cargo feature (on top of `integration-tests`) and runs on a real x86_64
+box reached over ssh — NOT in Lima. The default lane (pure-Rust proptest,
+schema-evolution, `Sim*`-backed unit tests) still runs in Lima as usual;
+only the `kvm-tests`-gated scenarios require the metal box.
+
+**The canonical runner is `cargo xtask metal run --`** — the metal sibling
+of `cargo xtask lima run --`. It (1) rsyncs the working tree up via
+`infra/metal/bootstrap.sh --sync-only`, then (2) ssh-executes under a
+`bash -lc` login shell wrapped in `sudo … env "HOME=$HOME" "PATH=$PATH" …`
+so the run has the root permission surface KVM/cgroups need and cargo on
+PATH. The `block-bare-nextest` hook allows `cargo xtask metal run` exactly
+as it allows `cargo xtask lima run`.
+
+| ❌ don't | ✅ do |
+|---|---|
+| `ssh <box> '… cargo nextest run …'` | `cargo xtask metal run -- cargo nextest run …` |
+| `cargo xtask lima run -- … --features kvm-tests` (Lima has no nested KVM) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests` |
+
+The target host (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the
+process environment or a workspace-root `.env` (gitignored; see
+`.env.example`) — never hardcoded. `--no-sync` skips the pre-run rsync
+(re-run a suite against an already-synced tree); `--no-sudo` runs as the
+login user. The sync is folded into `run` on purpose: it removes the
+"tested stale code" hazard of a separate sync-then-ssh dance. `cargo xtask
+metal sync` and `cargo xtask metal shell` cover the standalone cases.
+
+Provisioning the box itself (partitions, KVM, toolchain) is a one-time
+`infra/metal/bootstrap.sh <user@host>` (without `--sync-only`); see
+`infra/metal/README.md`.
+
 ### Assertion rules
 
 Assert on observable kernel side effects. Never on program internal
