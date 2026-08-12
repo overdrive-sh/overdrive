@@ -12,10 +12,19 @@
 //!
 //! ```text
 //! guest -> host   "READY pid=<u32> port=<u32>"   exactly once, before exec
+//! host  -> guest  "EXEC <json-argv>"             exactly once, after READY, before exec
 //! guest -> host   "EXIT <i32>"                   exactly once, after waitpid
 //! host  -> guest  "SHUTDOWN"                     at most once (§D4)
 //!                 EOF                             terminates the session
 //! ```
+//!
+//! `EXEC` (ADR-0082 §D7 amendment 2026-08-12, GH #42) carries the
+//! operator's command to the guest — the kernel cmdline never does. Its
+//! payload is a JSON-encoded `argv: Vec<String>` (`argv[0]` the program),
+//! chosen over space-tokenizing because the operator's arguments may
+//! themselves contain spaces or embedded newlines; JSON string escaping
+//! keeps the encoded line single-line by construction, preserving the
+//! module's one-message-per-line framing.
 //!
 //! The `READY` key-value payload (`pid=`, `port=`) matches the ONLY
 //! concrete instantiation of ADR-0082 §D7's generic `"READY
@@ -56,7 +65,10 @@ pub enum BeaconParseError {
     /// The line had no content at all.
     #[error("empty beacon line")]
     Empty,
-    /// The first token was not `READY`, `EXIT`, or `SHUTDOWN`.
+    /// The first token was not `READY`, `EXIT`, `SHUTDOWN`, or an `EXEC`
+    /// carrying a payload (a bare `EXEC` with no trailing-space payload
+    /// falls through to this generic bucket too, since it never reaches
+    /// the dedicated `EXEC ` prefix match).
     #[error("unrecognised beacon message kind {kind:?} in line {raw:?}")]
     UnknownKind {
         /// The unrecognised first token.
@@ -101,14 +113,38 @@ pub enum BeaconParseError {
         #[source]
         source: ParseIntError,
     },
+    /// `EXEC`'s JSON-decoded argv was the empty array — there is no
+    /// `argv[0]` to exec, so this is invalid by construction rather than
+    /// a valid-but-degenerate command.
+    #[error("EXEC argv must not be empty in line {raw:?}")]
+    EmptyArgv {
+        /// The full line that failed to parse.
+        raw: String,
+    },
+    /// `EXEC`'s payload was not valid JSON, or not a JSON array of
+    /// strings. Carries the JSON error's `Display` text as `detail`
+    /// rather than embedding `serde_json::Error` itself via `#[source]`
+    /// — `serde_json::Error` is neither `Clone` nor `PartialEq`, and
+    /// embedding it would break this enum's derives.
+    #[error("EXEC payload is not a valid JSON string array ({detail}) in line {raw:?}")]
+    MalformedArgv {
+        /// The full line that failed to parse.
+        raw: String,
+        /// The underlying JSON-parse failure's `Display` text.
+        detail: String,
+    },
 }
 
 /// One message on the beacon wire. Both directions share this one type
 /// (§D7's "no second parser") — [`Ready`](Self::Ready) and
-/// [`Exit`](Self::Exit) travel guest → host, [`Shutdown`](Self::Shutdown)
-/// travels host → guest; nothing on the wire itself distinguishes
-/// direction beyond which endpoint reads or writes it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// [`Exit`](Self::Exit) travel guest → host, [`Exec`](Self::Exec) and
+/// [`Shutdown`](Self::Shutdown) travel host → guest; nothing on the wire
+/// itself distinguishes direction beyond which endpoint reads or writes
+/// it.
+///
+/// Not `Copy` — [`Exec`](Self::Exec)'s `Vec<String>` cannot be. Call
+/// sites that relied on implicit copies move or `.clone()` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BeaconMessage {
     /// Sent exactly once, guest → host, before the guest execs the
     /// operator's command. `pid` is the guest agent's own process id
@@ -119,6 +155,18 @@ pub enum BeaconMessage {
         pid: u32,
         /// The vsock port the guest dialed.
         port: VsockPort,
+    },
+    /// Sent at most once, host → guest, immediately after `READY` is
+    /// accepted and before the guest execs anything (ADR-0082 §D7
+    /// amendment 2026-08-12, GH #42). Carries the operator's command as
+    /// a JSON-encoded argv on the wire (`EXEC <json-argv>`); `argv[0]`
+    /// is the program, `argv` the full vector. This is how
+    /// `overdrive-init` learns what to exec — the kernel cmdline never
+    /// carries it (`KernelCmdline` stays platform-only, ADR-0082 §D2).
+    Exec {
+        /// The operator's command and its arguments. `argv[0]` is the
+        /// program to exec.
+        argv: Vec<String>,
     },
     /// Sent exactly once, guest → host, after the guest's `waitpid` on
     /// the operator's command resolves. `status` carries the guest's own
@@ -138,6 +186,12 @@ impl fmt::Display for BeaconMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ready { pid, port } => write!(f, "READY pid={pid} port={port}"),
+            Self::Exec { argv } => {
+                // `Vec<String>` serialisation is total; the `fmt::Error`
+                // arm is the unreachable sentinel — never `.expect()`
+                // (`core` library crate, no panics on the happy path).
+                write!(f, "EXEC {}", serde_json::to_string(argv).map_err(|_| fmt::Error)?)
+            }
             Self::Exit { status } => write!(f, "EXIT {status}"),
             Self::Shutdown => f.write_str("SHUTDOWN"),
         }
@@ -153,6 +207,16 @@ impl FromStr for BeaconMessage {
         // already strips it). `Display` never emits one, so this branch
         // never fires on a round-tripped message.
         let line = line.trim_end_matches(['\n', '\r']);
+
+        // `EXEC`'s payload is a single JSON array that may itself
+        // contain spaces — decode the raw remainder as one JSON blob
+        // rather than participating in the generic space-tokenizer
+        // below (ADR-0082 §D7 amendment: "does NOT space-tokenize the
+        // payload", unlike READY/EXIT/SHUTDOWN).
+        if let Some(json) = line.strip_prefix("EXEC ") {
+            return parse_exec(line, json);
+        }
+
         let mut tokens = line.split(' ').filter(|token| !token.is_empty());
         let kind = tokens.next().ok_or(BeaconParseError::Empty)?;
         let rest: Vec<&str> = tokens.collect();
@@ -234,4 +298,17 @@ fn parse_shutdown(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParse
     const KIND: &str = "SHUTDOWN";
     check_field_count(KIND, 0, rest, raw)?;
     Ok(BeaconMessage::Shutdown)
+}
+
+/// Parses `EXEC`'s payload — the raw JSON-array remainder after the
+/// `"EXEC "` prefix, never space-tokenized (ADR-0082 §D7 amendment). An
+/// empty argv is rejected structurally: there is no `argv[0]` to exec.
+fn parse_exec(raw: &str, json: &str) -> Result<BeaconMessage, BeaconParseError> {
+    let argv: Vec<String> = serde_json::from_str(json).map_err(|source| {
+        BeaconParseError::MalformedArgv { raw: raw.to_string(), detail: source.to_string() }
+    })?;
+    if argv.is_empty() {
+        return Err(BeaconParseError::EmptyArgv { raw: raw.to_string() });
+    }
+    Ok(BeaconMessage::Exec { argv })
 }

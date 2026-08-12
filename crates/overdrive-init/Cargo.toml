@@ -8,11 +8,11 @@
 #
 # Target: static `{x86_64,aarch64}-unknown-linux-musl` (ADR-0082 §D7 /
 # §D1). This step compiles against the workspace's default target for
-# `cargo check`/`cargo nextest run`; the two musl cross-targets are a
-# later toolchain/CI concern (per this step's dispatch, explicitly out of
-# scope — the crate's production logic does not depend on musl-specific
-# behaviour, only on `std` + `nix`, both of which support the musl
-# targets as Tier 1/2 Rust targets).
+# `cargo check`/`cargo nextest run`; the two musl cross-targets and their
+# CI/toolchain wiring land at step 01-04 (rootfs baking owns the
+# static-musl target wiring) — the crate's production logic does not
+# depend on musl-specific behaviour, only on `std` + `nix`, both of which
+# support the musl targets as Tier 1/2 Rust targets.
 
 [package]
 name        = "overdrive-init"

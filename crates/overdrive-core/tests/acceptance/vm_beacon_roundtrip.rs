@@ -14,6 +14,7 @@
 //!
 //! ```text
 //! guest -> host   "READY pid=<u32> port=<u32>"   exactly once, before exec
+//! host  -> guest  "EXEC <json-argv>"             exactly once, after READY, before exec
 //! guest -> host   "EXIT <i32>"                   exactly once, after waitpid
 //! host  -> guest  "SHUTDOWN"                     at most once (§D4)
 //!                 EOF                             terminates the session
@@ -25,6 +26,14 @@
 //! (`spike/findings.md:230`, `"READY pid=1 port=1234\n"`), cited by §D7's
 //! own supporting evidence (P2). Roadmap AC 4: "A round-trip proptest on
 //! the beacon parser/formatter passes for arbitrary READY/EXIT payloads."
+//!
+//! `EXEC` (ADR-0082 §D7 amendment 2026-08-12, GH #42) is added by the
+//! 01-03 review-remediation: the operator-command->guest channel rides
+//! the beacon as a fourth `BeaconMessage` variant carrying a
+//! JSON-encoded argv. Unlike READY/EXIT/SHUTDOWN, `EXEC`'s wire shape is
+//! a design pin, not a spike measurement — the host->guest write is
+//! explicitly unprobed (§D7: "every vsock probe in the spike exercised
+//! guest->host only").
 
 #![allow(clippy::unwrap_used)]
 
@@ -38,6 +47,13 @@ fn beacon_message_strategy() -> impl Strategy<Value = BeaconMessage> {
             .prop_map(|(pid, port)| BeaconMessage::Ready { pid, port: VsockPort::new(port) }),
         any::<i32>().prop_map(|status| BeaconMessage::Exit { status }),
         Just(BeaconMessage::Shutdown),
+        // Non-empty argv only — an all-empty argv is structurally
+        // rejected by `FromStr` (`BeaconParseError::EmptyArgv`), so it is
+        // not a value this round-trip property holds for. Individual
+        // elements are unconstrained `String`s, which already covers
+        // spaces, embedded newlines, and empty-string elements.
+        proptest::collection::vec(any::<String>(), 1..8)
+            .prop_map(|argv| BeaconMessage::Exec { argv }),
     ]
 }
 
@@ -73,7 +89,7 @@ fn ready_message_renders_the_measured_wire_shape() {
 }
 
 /// EXIT's rendered wire form matches the exact measured shape
-/// (`spike/findings.md:543`, `"EXIT 7"`).
+/// (`spike/findings.md:555`, `"EXIT 7"`).
 #[test]
 fn exit_message_renders_the_measured_wire_shape() {
     let msg = BeaconMessage::Exit { status: 7 };
@@ -167,4 +183,16 @@ fn from_str_rejects_shutdown_with_a_payload() {
         matches!(err, BeaconParseError::FieldCount { kind: "SHUTDOWN", expected: 0, actual: 1, .. }),
         "{err:?}"
     );
+}
+
+#[test]
+fn from_str_rejects_exec_with_empty_argv() {
+    let err = "EXEC []".parse::<BeaconMessage>().unwrap_err();
+    assert!(matches!(err, BeaconParseError::EmptyArgv { .. }), "{err:?}");
+}
+
+#[test]
+fn from_str_rejects_exec_with_malformed_json() {
+    let err = "EXEC not-json".parse::<BeaconMessage>().unwrap_err();
+    assert!(matches!(err, BeaconParseError::MalformedArgv { .. }), "{err:?}");
 }
