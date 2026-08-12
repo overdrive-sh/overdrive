@@ -810,7 +810,7 @@ impl ServiceV2 {
             liveness_probes,
         } = input;
 
-        // Identity + scalar field validation — mirrors `JobV1::from_submit`.
+        // Identity + scalar field validation — mirrors `JobV2::from_submit`.
         let id = WorkloadId::new(&id)?;
         let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
             field: "replicas",
@@ -823,7 +823,7 @@ impl ServiceV2 {
             });
         }
 
-        // Driver projection — same shape as `JobV1::from_submit`.
+        // Driver projection — same shape as `JobV2::from_submit`.
         let DriverInput::Exec(exec_input) = driver;
         if exec_input.command.trim().is_empty() {
             return Err(AggregateError::Validation {
@@ -991,43 +991,67 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
     }
 
     // mutants: skip — `discriminant_offset_from_end` is intentionally
-    // `None` per ADR-0050 step 02-03a (re-pin deferred until V2
-    // lands; tracked in the rkyv-envelope-forward-traps memory note).
-    // The pre-decode probe is structurally a no-op until that point,
-    // so `Some(0)` and `None` produce indistinguishable behaviour
-    // — there is no test that can distinguish them. Future commit
-    // that introduces `V2` MUST re-pin the offset AND add a golden-
-    // bytes test that fires on `Some(0)`.
+    // `None`. Per ADR-0050 step 02-03a the empirical re-pin was
+    // originally deferred "until V2 lands"; V2 landed at the
+    // ADR-0083 Amendment 2026-08-12 fork (GH #42,
+    // `WorkloadDriverV2::Vm`) and the re-pin was explicitly WAIVED
+    // for that landing, NOT silently skipped — the outer envelope
+    // still wraps a 3-variant inner enum per driver kind, so the
+    // JobEnvelope-style 64-byte from-end pin does not trivially
+    // transfer, and re-deriving the offset empirically was judged
+    // not worth the investment for this fork (the golden-bytes
+    // fixtures below are the load-bearing defense either way — see
+    // the body comment). The pre-decode probe is structurally a
+    // no-op while this returns `None`, so `Some(0)` and `None`
+    // produce indistinguishable behaviour — there is no test that
+    // can distinguish them.
+    //
+    // COUPLING: this method and `known_discriminants()` immediately
+    // below MUST move together. A future re-pin MUST (1) set this to
+    // `Some(N)`, (2) confirm `known_discriminants()` already lists
+    // every live tag (today `&[0, 1]`), and (3) add a golden-bytes
+    // test that fires on the newly-`Some` offset — do not re-pin one
+    // without the other.
     fn discriminant_offset_from_end() -> Option<usize> {
-        // Empirically-pinned offset is DEFERRED for `WorkloadIntentEnvelope`
-        // per ADR-0050 step 02-03a — the outer envelope wraps a
-        // 3-variant inner enum (`WorkloadIntentV1::{Job, Service,
-        // Schedule}`) whose archived layout shifts the trailing root
-        // region in ways that the JobEnvelope-style 64-byte from-end
-        // pin cannot trivially adopt. Returning `None` makes the
-        // pre-decode probe a no-op; unknown-future-variant bytes
-        // still surface as `EnvelopeError::Malformed` via rkyv's
-        // bytecheck (operator-facing remediation is the same:
-        // "delete the redb file"). The structural defense against
-        // future-binary surface IS preserved by the round-trip
-        // golden-bytes fixture for V1 (Job / Service / Schedule);
-        // the targeted `UnknownVersion` classification is the only
-        // diagnostic surface that degrades. Re-pin in a follow-up
-        // commit when V2 lands and the empirical offset becomes
-        // worth investing in.
+        // Empirically-pinned offset remains DEFERRED for
+        // `WorkloadIntentEnvelope` — waived (not merely "not yet
+        // reached") at both the original ADR-0050 step 02-03a
+        // landing and the ADR-0083 Amendment 2026-08-12 V1->V2 fork
+        // (GH #42). The outer envelope wraps a 3-variant inner enum
+        // (`WorkloadIntentV1::{Job, Service, Schedule}` /
+        // `WorkloadIntentV2::{Job, Service, Schedule}`) whose
+        // archived layout shifts the trailing root region in ways
+        // that the JobEnvelope-style 64-byte from-end pin cannot
+        // trivially adopt. Returning `None` makes the pre-decode
+        // probe a no-op; unknown-future-variant bytes still surface
+        // as `EnvelopeError::Malformed` via rkyv's bytecheck
+        // (operator-facing remediation is the same: "delete the
+        // redb file"). The structural defense against future-binary
+        // surface IS preserved by the round-trip golden-bytes
+        // fixtures for BOTH `V1` (`FIXTURE_V1_JOB` / `_SERVICE` /
+        // `_SCHEDULE`) and `V2` (`FIXTURE_V2_JOB_VM`) in
+        // `tests/schema_evolution/workload_intent.rs`; the targeted
+        // `UnknownVersion` classification is the only diagnostic
+        // surface that degrades. Re-pin when the empirical offset
+        // becomes worth investing in.
         None
     }
 
     // mutants: skip — `known_discriminants` is unused when
-    // `discriminant_offset_from_end` returns `None` (see above
-    // skip block). Mutations that replace the `&[0]` slice with
-    // `Vec::leak(vec![])` / `Vec::leak(vec![1])` produce no
+    // `discriminant_offset_from_end` returns `None` (see the
+    // COUPLING note on that method above — the two are pinned
+    // together and must be re-derived together). Mutations that
+    // replace the `&[0, 1]` slice with `Vec::leak(vec![])` /
+    // `Vec::leak(vec![0])` / `Vec::leak(vec![1])` produce no
     // observable behaviour change while the offset probe is a
-    // no-op. Lands GREEN in the same commit as the V2 offset re-pin.
+    // no-op.
     fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0; when `discriminant_offset_from_end`
-        // is `None`, the probe is skipped and this slice is unused.
-        &[0]
+        // V1 carries rkyv discriminant 0, V2 carries 1 (ADR-0083
+        // Amendment 2026-08-12, GH #42). Kept accurate even though
+        // `discriminant_offset_from_end` returning `None` makes the
+        // probe skip this slice today — a future re-pin reads this
+        // value as-is rather than also needing to backfill it.
+        &[0, 1]
     }
 
     // mutants: skip — `type_name` feeds only the `EnvelopeError`
@@ -1139,7 +1163,7 @@ impl WorkloadIntentV2 {
     }
 }
 
-/// Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
+/// Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
 ///
@@ -1170,7 +1194,7 @@ pub struct JobSpecInput {
 /// hygiene: the rkyv-archived intent-side `Resources` is kept clean of
 /// serde-only / utoipa-only concerns; this twin carries the wire-side
 /// derives. The projection onto `Resources` is field-by-field inside
-/// `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+/// `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
 /// and the validation rules — `memory_bytes != 0` — must fire on the
 /// way through anyway).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
@@ -1194,7 +1218,7 @@ pub struct ResourcesInput {
 pub enum DriverInput {
     /// Native binary under cgroups v2 — the `[exec]` table in TOML.
     Exec(ExecInput),
-    // Future: MicroVm(MicroVmInput), Wasm(WasmInput)
+    // Future (step 01-08): Vm(VmInput); later Wasm(WasmInput)
 }
 
 /// Operator-facing `[exec]` table fields per ADR-0031 §2.
@@ -1202,7 +1226,7 @@ pub enum DriverInput {
 #[serde(deny_unknown_fields)]
 pub struct ExecInput {
     /// Host filesystem path to the binary. Validated non-empty (after
-    /// trim) at `JobV1::from_submit` per ADR-0031 §4.
+    /// trim) at `JobV2::from_submit` per ADR-0031 §4.
     pub command: String,
     /// Argv passed verbatim. Required field — an absent `args` is a
     /// parse error, not "default to no args" (per ADR-0031 §8). Empty

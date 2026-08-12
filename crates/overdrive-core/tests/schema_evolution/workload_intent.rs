@@ -34,17 +34,44 @@
 //! same-commit-regeneration precedent (`service_spec.rs`). From
 //! that commit onward they are pinned verbatim again — NEVER
 //! touched.
+//!
+//! **Review remediation 2026-08-12 (D1, step 01-02 #42):** the first
+//! regeneration pass above wrapped the canonical payload via
+//! `WorkloadIntentEnvelope::latest(...)`, which accepts only
+//! `Self::Latest = WorkloadIntentV2` — it silently produced
+//! V2-tagged bytes mislabelled as `FIXTURE_V1_*`, so the "old V1
+//! bytes still decode" defense this file exists to provide was never
+//! actually exercised. Corrected: `canonical_v1_{job,service,
+//! schedule}_payload()` now construct the genuinely FROZEN
+//! `WorkloadIntentV1` / `JobV1` / `ServiceV1` / `ScheduleV1` /
+//! `WorkloadDriverV1` types directly, and `print_fixture_v1_bytes`
+//! wraps them via the explicit `WorkloadIntentEnvelope::V1(...)`
+//! constructor (never `.latest()`, which is structurally incapable of
+//! producing a `V1`-tagged envelope). Each V1 round-trip test also
+//! asserts the decoded envelope IS the `V1` variant before projecting
+//! to `Latest`, so a future regeneration that repeats this mistake
+//! fails loudly instead of silently passing through
+//! `into_latest()`'s `V2` identity arm. Each test's `expected` value
+//! is ALSO independently hand-written (`expected_v2_for_v1_*`, built
+//! directly via V2 struct literals) rather than derived via
+//! `canonical_v1_*_payload().into()` — the latter is tautological
+//! (both sides of the comparison would route through the identical
+//! `From<WorkloadIntentV1>` chain over the identical input), which a
+//! deliberate temporary corruption of
+//! `From<WorkloadDriverV1> for WorkloadDriverV2` confirmed: the
+//! `.into()`-derived form kept passing.
 
 use std::num::{NonZeroU16, NonZeroU32};
 
 use overdrive_core::aggregate::{
-    CronExpr, Exec, Job, Listener, Schedule, Service, Vm, WorkloadDriver, WorkloadIntent,
-    WorkloadIntentEnvelope,
+    CronExpr, Exec, Job, JobV1, Listener, Schedule, ScheduleV1, Service, ServiceV1, Vm,
+    WorkloadDriver, WorkloadDriverV1, WorkloadIntent, WorkloadIntentEnvelope, WorkloadIntentV1,
 };
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::driver::Resources;
+use proptest::prelude::*;
 
 use super::harness::assert_envelope_v_roundtrip;
 
@@ -56,15 +83,19 @@ use super::harness::assert_envelope_v_roundtrip;
 // fixtures + `archive_for_store` round-trip remain the load-bearing
 // schema-evolution defense.
 
-/// Canonical V1 `Job`-variant payload. Same shape as the
-/// pre-migration `JobEnvelope` V1 fixture, now wrapped in the outer
-/// `WorkloadIntent::Job` discriminant.
-fn canonical_v1_job_payload() -> WorkloadIntent {
-    WorkloadIntent::Job(Job {
+/// Canonical V1 `Job`-variant payload. **Genuinely FROZEN-typed** —
+/// `WorkloadIntentV1::Job(JobV1 { .. })` with `WorkloadDriverV1::Exec`.
+/// D1 review remediation (#42): prior to this fix the function
+/// returned a `WorkloadIntentV2`-typed value (the live `WorkloadIntent`
+/// / `Job` / `WorkloadDriver` aliases all resolved to V2 after the
+/// fork), so "the V1 fixture" never actually touched the frozen V1
+/// shape or exercised `From<WorkloadIntentV1> for WorkloadIntentV2`.
+fn canonical_v1_job_payload() -> WorkloadIntentV1 {
+    WorkloadIntentV1::Job(JobV1 {
         id: WorkloadId::new("svc-payments").expect("valid workload id"),
         replicas: NonZeroU32::new(3).expect("non-zero replicas"),
         resources: Resources { cpu_milli: 250, memory_bytes: 256 * 1024 * 1024 },
-        driver: WorkloadDriver::Exec(Exec {
+        driver: WorkloadDriverV1::Exec(Exec {
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
         }),
@@ -78,8 +109,77 @@ fn canonical_v1_job_payload() -> WorkloadIntent {
 /// most common Phase-1 shape (no operator-declared probes; the
 /// parser's default-TCP inference flows through `startup_probes`
 /// when listeners exist; an explicit empty vec is the explicit
-/// opt-out per ADR-0058).
-fn canonical_v1_service_payload() -> WorkloadIntent {
+/// opt-out per ADR-0058). See [`canonical_v1_job_payload`] for why
+/// this returns the genuinely FROZEN `WorkloadIntentV1` type.
+fn canonical_v1_service_payload() -> WorkloadIntentV1 {
+    WorkloadIntentV1::Service(ServiceV1 {
+        id: WorkloadId::new("svc-frontends").expect("valid workload id"),
+        replicas: NonZeroU32::new(2).expect("non-zero replicas"),
+        resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        driver: WorkloadDriverV1::Exec(Exec {
+            command: "/usr/bin/frontend".to_string(),
+            args: vec!["--port".to_string(), "8080".to_string()],
+        }),
+        listeners: vec![Listener {
+            port: NonZeroU16::new(8080).expect("non-zero port"),
+            protocol: Proto::Tcp,
+        }],
+        startup_probes: vec![],
+        readiness_probes: vec![],
+        liveness_probes: vec![],
+    })
+}
+
+/// Canonical V1 `Schedule`-variant payload (ADR-0050 OQ-4 embedded-
+/// job shape). See [`canonical_v1_job_payload`] for why this returns
+/// the genuinely FROZEN `WorkloadIntentV1` type.
+fn canonical_v1_schedule_payload() -> WorkloadIntentV1 {
+    WorkloadIntentV1::Schedule(ScheduleV1 {
+        id: WorkloadId::new("svc-nightly-cleanup").expect("valid workload id"),
+        job: JobV1 {
+            id: WorkloadId::new("svc-nightly-cleanup").expect("valid workload id"),
+            replicas: NonZeroU32::new(1).expect("non-zero replicas"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            driver: WorkloadDriverV1::Exec(Exec {
+                command: "/usr/local/bin/cleanup".to_string(),
+                args: vec!["--mode".to_string(), "nightly".to_string()],
+            }),
+        },
+        cron_expr: CronExpr::new("0 2 * * *").expect("valid cron expr"),
+    })
+}
+
+/// Independently hand-written V2 projection of
+/// [`canonical_v1_job_payload`] — same field values, but built
+/// directly via [`Job`] / [`WorkloadDriver`] (V2) struct literals,
+/// NOT via `.into()`.
+///
+/// D1 point-4 review verification (#42): comparing
+/// `decode(fixture).into_latest()` against
+/// `canonical_v1_job_payload().into()` is TAUTOLOGICAL — both sides
+/// route through the identical `From<WorkloadIntentV1>` chain over
+/// the identical input, so a broken link in that chain cancels out
+/// symmetrically and the test cannot detect it (confirmed by
+/// temporarily corrupting `From<WorkloadDriverV1> for
+/// WorkloadDriverV2` to emit a wrong `command` string — the test kept
+/// passing). This independently hand-written expected value breaks
+/// the symmetry: a wrong mapping anywhere in the `From` chain now
+/// diverges from this value and the comparison genuinely fails.
+fn expected_v2_for_v1_job() -> WorkloadIntent {
+    WorkloadIntent::Job(Job {
+        id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        replicas: NonZeroU32::new(3).expect("non-zero replicas"),
+        resources: Resources { cpu_milli: 250, memory_bytes: 256 * 1024 * 1024 },
+        driver: WorkloadDriver::Exec(Exec {
+            command: "/bin/sleep".to_string(),
+            args: vec!["3600".to_string()],
+        }),
+    })
+}
+
+/// See [`expected_v2_for_v1_job`] — independently hand-written V2
+/// projection of [`canonical_v1_service_payload`].
+fn expected_v2_for_v1_service() -> WorkloadIntent {
     WorkloadIntent::Service(Service {
         id: WorkloadId::new("svc-frontends").expect("valid workload id"),
         replicas: NonZeroU32::new(2).expect("non-zero replicas"),
@@ -98,9 +198,9 @@ fn canonical_v1_service_payload() -> WorkloadIntent {
     })
 }
 
-/// Canonical V1 `Schedule`-variant payload (ADR-0050 OQ-4 embedded-
-/// job shape).
-fn canonical_v1_schedule_payload() -> WorkloadIntent {
+/// See [`expected_v2_for_v1_job`] — independently hand-written V2
+/// projection of [`canonical_v1_schedule_payload`].
+fn expected_v2_for_v1_schedule() -> WorkloadIntent {
     WorkloadIntent::Schedule(Schedule {
         id: WorkloadId::new("svc-nightly-cleanup").expect("valid workload id"),
         job: Job {
@@ -114,6 +214,22 @@ fn canonical_v1_schedule_payload() -> WorkloadIntent {
         },
         cron_expr: CronExpr::new("0 2 * * *").expect("valid cron expr"),
     })
+}
+
+/// Decode `fixture_hex` into the raw [`WorkloadIntentEnvelope`]
+/// WITHOUT projecting through `into_latest()` — used only to assert
+/// which envelope VARIANT a fixture encodes. `into_latest()`'s `V2`
+/// arm is an identity projection, so a fixture that was mistakenly
+/// regenerated as `V2` (D1 review remediation, GH #42) would still
+/// pass `assert_envelope_v_roundtrip`; this helper is the structural
+/// defense a wrong-variant regeneration cannot slip past.
+fn decode_envelope_variant(fixture_hex: &str) -> WorkloadIntentEnvelope {
+    let bytes = hex::decode(fixture_hex.trim())
+        .expect("schema_evolution fixture hex string must decode cleanly");
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(&bytes);
+    rkyv::from_bytes::<WorkloadIntentEnvelope, rkyv::rancor::Error>(&aligned)
+        .expect("schema_evolution fixture bytes must deserialise as the envelope")
 }
 
 /// Hex-encoded rkyv-archived bytes of
@@ -157,51 +273,83 @@ const FIXTURE_V1: &str = FIXTURE_V1_JOB;
 // all regenerate together — the outer envelope's archive offsets are
 // positional across every variant. From this commit onward they are
 // pinned verbatim again — NEVER touched.
-const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff010000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+//
+// Review remediation (D1, step 01-02 #42): the FIRST regeneration
+// pass wrapped via `WorkloadIntentEnvelope::latest(...)`, which only
+// accepts `WorkloadIntentV2` — it silently produced V2-tagged bytes
+// mislabelled as V1. This is the CORRECTED regeneration: the bytes
+// below are `WorkloadIntentEnvelope::V1(..)` over the frozen
+// `WorkloadIntentV1`/`JobV1`/`WorkloadDriverV1` types (see
+// `canonical_v1_job_payload` and `print_fixture_v1_bytes`).
+const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff000000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_service_payload())`.
 ///
-/// Regenerated 2026-08-12 alongside `FIXTURE_V1_JOB` — see that
-/// constant's comment for the full rationale (the
-/// `WorkloadIntentEnvelope` V1->V2 fork, GH #42 / ADR-0083 Amendment
-/// 2026-08-12, grew the outer envelope's archived root across every
-/// variant; regenerated in the same commit as the bump, user-
-/// approved, per the `ServiceSpecEnvelope` precedent). `ServiceV1`'s
-/// own payload shape did not change — only the outer envelope's
-/// positional offsets shifted.
-const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000010000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff0200000000000000000000000000000000000000a4ffffff01000000a0ffffff0000000098ffffff0000000090ffffff0000000000000000";
+/// Regenerated alongside `FIXTURE_V1_JOB` — see that constant's
+/// comment for the full rationale (the `WorkloadIntentEnvelope`
+/// V1->V2 fork, GH #42 / ADR-0083 Amendment 2026-08-12, and the D1
+/// review-remediation correction to construct the envelope explicitly
+/// via `WorkloadIntentEnvelope::V1(..)` over the frozen types).
+/// `ServiceV1`'s own payload shape did not change — only the outer
+/// envelope's positional offsets shifted.
+const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000000000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff02000000b4ffffff01000000b0ffffff00000000a8ffffff00000000a0ffffff000000000000000000000000000000000000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_schedule_payload())`.
 ///
-/// Regenerated 2026-08-12 alongside `FIXTURE_V1_JOB` — see that
-/// constant's comment for the full rationale (the
-/// `WorkloadIntentEnvelope` V1->V2 fork, GH #42 / ADR-0083 Amendment
-/// 2026-08-12, grew the outer envelope's archived root across every
-/// variant; regenerated in the same commit as the bump, user-
-/// approved, per the `ServiceSpecEnvelope` precedent). The Schedule
-/// fixture itself does NOT embed the `Vm`-carrying driver (Schedule
-/// embeds `Job`, which does), but the SHARED `WorkloadIntentEnvelope`
-/// archive offsets are positional — the V2 sibling's growth shifts
-/// archive metadata across all three variants.
-const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000010000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff0200000000000000000000000000000000000000000000008900000094ffffff00000000000000000000000000000000";
+/// Regenerated alongside `FIXTURE_V1_JOB` — see that constant's
+/// comment for the full rationale (the `WorkloadIntentEnvelope`
+/// V1->V2 fork, GH #42 / ADR-0083 Amendment 2026-08-12, and the D1
+/// review-remediation correction to construct the envelope explicitly
+/// via `WorkloadIntentEnvelope::V1(..)` over the frozen types). The
+/// Schedule fixture itself does NOT embed the `Vm`-carrying driver
+/// (Schedule embeds `Job`, which does), but the SHARED
+/// `WorkloadIntentEnvelope` archive offsets are positional — the V2
+/// sibling's growth shifts archive metadata across all three
+/// variants.
+const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000000000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff020000000000000089000000a4ffffff0000000000000000000000000000000000000000000000000000000000000000";
 
 #[test]
 fn workload_intent_v1_job_decodes_through_current_envelope() {
-    let expected = canonical_v1_job_payload();
+    assert!(
+        matches!(decode_envelope_variant(FIXTURE_V1_JOB), WorkloadIntentEnvelope::V1(_)),
+        "FIXTURE_V1_JOB must encode WorkloadIntentEnvelope::V1 — a wrong-variant regeneration \
+         (wrapping via `.latest()`, which only accepts the V2 payload) would silently pass \
+         `into_latest()`'s V2 identity arm without exercising the V1 decode arm or \
+         From<WorkloadIntentV1> for WorkloadIntentV2 (D1 review remediation, GH #42)",
+    );
+    // Independently hand-written -- NOT `canonical_v1_job_payload().into()`.
+    // See `expected_v2_for_v1_job`'s doc comment: a `.into()`-derived
+    // `expected` makes this assertion tautological against a broken
+    // `From` chain.
+    let expected = expected_v2_for_v1_job();
     assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_JOB, &expected);
 }
 
 #[test]
 fn workload_intent_v1_service_decodes_through_current_envelope() {
-    let expected = canonical_v1_service_payload();
+    assert!(
+        matches!(decode_envelope_variant(FIXTURE_V1_SERVICE), WorkloadIntentEnvelope::V1(_)),
+        "FIXTURE_V1_SERVICE must encode WorkloadIntentEnvelope::V1 — see \
+         workload_intent_v1_job_decodes_through_current_envelope for why this guard exists",
+    );
+    // Independently hand-written -- see `expected_v2_for_v1_job`'s doc
+    // comment for why a `.into()`-derived `expected` is tautological.
+    let expected = expected_v2_for_v1_service();
     assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_SERVICE, &expected);
 }
 
 #[test]
 fn workload_intent_v1_schedule_decodes_through_current_envelope() {
-    let expected = canonical_v1_schedule_payload();
+    assert!(
+        matches!(decode_envelope_variant(FIXTURE_V1_SCHEDULE), WorkloadIntentEnvelope::V1(_)),
+        "FIXTURE_V1_SCHEDULE must encode WorkloadIntentEnvelope::V1 — see \
+         workload_intent_v1_job_decodes_through_current_envelope for why this guard exists",
+    );
+    // Independently hand-written -- see `expected_v2_for_v1_job`'s doc
+    // comment for why a `.into()`-derived `expected` is tautological.
+    let expected = expected_v2_for_v1_schedule();
     assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_SCHEDULE, &expected);
 }
 
@@ -260,13 +408,21 @@ fn workload_intent_v2_job_vm_decodes_through_current_envelope() {
 /// rkyv-archived **inner** `WorkloadIntentV1` payload bytes (NOT the
 /// envelope) — stable across envelope version bumps. The
 /// `ServiceVipAllocator` memo (ADR-0049) keys by this value.
+///
+/// D3 review remediation (#42): the loop now also covers a fresh
+/// `Vm`-driven `Job` (`canonical_v2_job_vm_payload`) alongside the
+/// three Exec-driven V1-projected payloads — AC-2 must exercise the
+/// Vm driver through the runtime `spec_digest` path, not only the
+/// pinned `FIXTURE_V2_JOB_VM` hex constant.
 #[test]
 fn spec_digest_is_deterministic_across_variants() {
-    for canonical in [
-        canonical_v1_job_payload(),
-        canonical_v1_service_payload(),
-        canonical_v1_schedule_payload(),
-    ] {
+    let canonicals: [WorkloadIntent; 4] = [
+        canonical_v1_job_payload().into(),
+        canonical_v1_service_payload().into(),
+        canonical_v1_schedule_payload().into(),
+        canonical_v2_job_vm_payload(),
+    ];
+    for canonical in canonicals {
         let first = canonical.spec_digest().expect("first spec_digest must succeed");
         let second = canonical.spec_digest().expect("second spec_digest must succeed");
         assert_eq!(
@@ -282,13 +438,20 @@ fn spec_digest_is_deterministic_across_variants() {
 /// through `WorkloadIntent::from_store_bytes` for every variant. Per
 /// ADR-0050 § 4: the codec methods are the SOLE persistence-boundary
 /// wrapping sites; the round-trip is the load-bearing invariant.
+///
+/// D3 review remediation (#42): the loop now also covers a fresh
+/// `Vm`-driven `Job` (`canonical_v2_job_vm_payload`) — see
+/// `spec_digest_is_deterministic_across_variants` above for the same
+/// rationale.
 #[test]
 fn archive_for_store_roundtrips_every_variant() {
-    for canonical in [
-        canonical_v1_job_payload(),
-        canonical_v1_service_payload(),
-        canonical_v1_schedule_payload(),
-    ] {
+    let canonicals: [WorkloadIntent; 4] = [
+        canonical_v1_job_payload().into(),
+        canonical_v1_service_payload().into(),
+        canonical_v1_schedule_payload().into(),
+        canonical_v2_job_vm_payload(),
+    ];
+    for canonical in canonicals {
         let bytes = canonical.archive_for_store().expect("archive_for_store must succeed");
         let decoded = WorkloadIntent::from_store_bytes(
             bytes.as_ref(),
@@ -303,6 +466,45 @@ fn archive_for_store_roundtrips_every_variant() {
     }
 }
 
+// ---------------------------------------------------------------------
+// D3 review remediation (#42) — fresh (non-pinned) Vm-driver roundtrip.
+//
+// AC-2 was previously covered only by the single pinned
+// `FIXTURE_V2_JOB_VM` hex constant. This property generates arbitrary
+// `Vm` field values on every run and drives them through the REAL
+// persistence codec (`archive_for_store` -> `from_store_bytes`),
+// independent of any pinned fixture — the roadmap-suggested defense
+// against a codec regression that a single hand-picked example could
+// miss.
+// ---------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn workload_intent_v2_vm_driver_roundtrips_for_arbitrary_fields(
+        command in ".{0,64}",
+        args in prop::collection::vec(".{0,32}", 0..=4),
+        kernel in ".{0,64}",
+        rootfs in ".{0,64}",
+    ) {
+        let canonical: WorkloadIntent = WorkloadIntent::Job(Job {
+            id: WorkloadId::new("svc-vm-proptest").expect("valid workload id"),
+            replicas: NonZeroU32::new(1).expect("non-zero replicas"),
+            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            driver: WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }),
+        });
+        let bytes = canonical.archive_for_store().expect("archive_for_store must succeed");
+        let decoded = WorkloadIntent::from_store_bytes(
+            bytes.as_ref(),
+            std::path::Path::new("schema_evolution.redb"),
+            None,
+        )
+        .expect("from_store_bytes must succeed on the bytes archive_for_store just produced");
+        prop_assert_eq!(decoded, canonical);
+    }
+}
+
 #[test]
 #[ignore = "fixture regeneration tool — run on demand when bumping a payload variant; the pinned FIXTURE_V<N>_* constants are the load-bearing artifact"]
 #[allow(
@@ -310,12 +512,19 @@ fn archive_for_store_roundtrips_every_variant() {
     reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V<N>_* constants"
 )]
 fn print_fixture_v1_bytes() {
-    for (label, canonical) in [
+    for (label, v1_payload) in [
         ("FIXTURE_V1_JOB", canonical_v1_job_payload()),
         ("FIXTURE_V1_SERVICE", canonical_v1_service_payload()),
         ("FIXTURE_V1_SCHEDULE", canonical_v1_schedule_payload()),
     ] {
-        let envelope = WorkloadIntentEnvelope::latest(canonical);
+        // Explicit V1 wrap — NOT `WorkloadIntentEnvelope::latest(...)`,
+        // which only accepts `Self::Latest = WorkloadIntentV2` and is
+        // therefore structurally incapable of producing a V1-tagged
+        // envelope. D1 review remediation (GH #42): that was the bug —
+        // `canonical_v1_*_payload()` used to return a V2-typed value
+        // (the live aliases all resolved to V2 after the fork), so
+        // `.latest()` silently wrapped it as V2.
+        let envelope = WorkloadIntentEnvelope::V1(v1_payload);
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
         println!("const {label}: &str = \"{}\";", hex::encode(bytes.as_ref()));
     }

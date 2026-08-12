@@ -828,7 +828,7 @@ components:
           type: string
           description: |-
             Host filesystem path to the binary. Validated non-empty (after
-            trim) at `JobV1::from_submit` per ADR-0031 §4.
+            trim) at `JobV2::from_submit` per ADR-0031 §4.
       additionalProperties: false
     IdempotencyOutcome:
       type: string
@@ -888,7 +888,7 @@ components:
           resources:
             $ref: '#/components/schemas/ResourcesInput'
       description: |-
-        Input shape for `JobV1::from_submit`. The CLI deserialises TOML into this
+        Input shape for `JobV2::from_submit`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
 
@@ -1001,7 +1001,7 @@ components:
         `protocol: Proto` after TOML decoding; the wire side carries
         `port: u16` and `protocol: String` for JSON deserialise tolerance,
         with validation deferred to
-        [`crate::aggregate::ServiceV1::from_submit`].
+        [`crate::aggregate::ServiceV2::from_submit`].
       required:
       - port
       - protocol
@@ -1011,14 +1011,14 @@ components:
           format: int32
           description: |-
             Listener port — 1..=65535. `port == 0` is rejected at admission
-            inside `ServiceV1::from_submit`.
+            inside `ServiceV2::from_submit`.
           maximum: 65535
           minimum: 1
         protocol:
           type: string
           description: |-
             L4 protocol — `tcp` / `udp` (case-insensitive). Validated at
-            admission inside `ServiceV1::from_submit`.
+            admission inside `ServiceV2::from_submit`.
       additionalProperties: false
     NodeList:
       type: object
@@ -1085,7 +1085,7 @@ components:
           description: |-
             0-indexed position within THIS descriptor's role array
             (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV2`
-            construction and carried verbatim into `ServiceV1`; never
+            construction and carried verbatim into `ServiceV2`; never
             re-derived downstream.
 
             Per ADR-0080 § D1 this is the field ADR-0057:172 specified and
@@ -1402,7 +1402,7 @@ components:
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
-        `JobV1::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
+        `JobV2::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
         and the validation rules — `memory_bytes != 0` — must fire on the
         way through anyway).
       required:
@@ -1481,7 +1481,7 @@ components:
       description: |-
         HTTP/JSON wire-shape for a Schedule submission per ADR-0051 § 3.
 
-        The per-fire instance is a [`crate::aggregate::JobV1`] per ADR-0047
+        The per-fire instance is a [`crate::aggregate::JobV2`] per ADR-0047
         § 1 / ADR-0050 § 2; the schedule adds the cron expression. The
         inner job body uses the same wire shape standalone Jobs use —
         operators write the schedule body and the inner job body in the
@@ -1495,7 +1495,7 @@ components:
           type: string
           description: |-
             Cron expression. String-shaped on the wire; validated and
-            projected onto `CronExpr` inside `ScheduleV1::from_submit`.
+            projected onto `CronExpr` inside `ScheduleV2::from_submit`.
         id:
           type: string
         job:
@@ -1801,7 +1801,7 @@ components:
               $ref: '#/components/schemas/ListenerInput'
             description: |-
               Operator-declared listeners in declaration order. Validated at
-              admission inside [`crate::aggregate::ServiceV1::from_submit`]:
+              admission inside [`crate::aggregate::ServiceV2::from_submit`]:
               at least one element; no two share `(port, protocol)`; protocol
               is `tcp` / `udp` only.
           liveness_probes:
@@ -1889,7 +1889,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared liveness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
               surfaced on describe so a Service's liveness probes round-trip.
           readiness_probes:
@@ -1898,7 +1898,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared readiness probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
               surfaced on describe so a Service's readiness probes round-trip.
           replicas:
@@ -1913,7 +1913,7 @@ components:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
               Operator-declared startup probes, projected read-only from the
-              persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+              persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
               side [`crate::api::submit::ServiceSpecInput::startup_probes`].
               Surfaced today so an operator who declared a
               `[[health_check.startup]]` probe sees it reflected on describe
@@ -2210,8 +2210,8 @@ components:
         spec verbatim per ADR-0051 (Accepted 2026-05-15); the server
         dispatches on the [`SubmitSpecInput`] variant and routes each
         arm through the per-kind validating constructor
-        (`JobV1::from_submit` / `ServiceV1::from_submit` /
-        `ScheduleV1::from_submit`) to derive the intent key / digest.
+        (`JobV2::from_submit` / `ServiceV2::from_submit` /
+        `ScheduleV2::from_submit`) to derive the intent key / digest.
 
         Per ADR-0051 § 6 the wire-side `kind` tag inside `SubmitSpecInput`
         is the SOLE workload-kind discriminator carrier — the previous
