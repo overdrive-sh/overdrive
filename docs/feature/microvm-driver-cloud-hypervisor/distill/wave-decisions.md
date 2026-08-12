@@ -95,13 +95,13 @@ The generic skill's Strategy A/B/C/D framing does not apply (retired per the ski
 
 | Scenario scope | Crate | Path | Rationale |
 |---|---|---|---|
-| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 09, 11…15, 19, 33…66, 68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs`. **Corrected 2026-08-11 (DWD-13): excludes S-VM-67**, which the original range silently swept in — S-VM-67 is no longer Tier-3/CLI-driven, see the DWD-13 addendum below. **Corrected 2026-08-11 (DWD-16): explicitly names S-VM-09 and S-VM-19** — both sit in sub-range gaps (06-10, 16-32) the span notation silently omitted; both carry the identical `overdrive deploy` / real in-process `overdrive serve` driving port and `@tier3 @real-io` tags as their range neighbours, so this is an explicit-naming fix, not a re-placement — see DWD-16 |
+| Walking skeleton + all Tier-3 CLI-driven scenarios (S-VM-01…05, 09, 11…15, 19, 33…66, 68) | `overdrive-cli` | `tests/integration/vm_*.rs`, gated `integration-tests` | Real driving port is the CLI handler; mirrors `exec_spec_walking_skeleton.rs`. **Corrected 2026-08-11 (DWD-13): excludes S-VM-67**, which the original range silently swept in — S-VM-67 is no longer Tier-3/CLI-driven, see the DWD-13 addendum below. **Corrected 2026-08-11 (DWD-16): explicitly names S-VM-09 and S-VM-19** — both sit in sub-range gaps (06-10, 16-32) the span notation silently omitted; both carry the identical `overdrive deploy` / real in-process `overdrive serve` driving port and `@tier3 @real-io` tags as their range neighbours, so this is an explicit-naming fix, not a re-placement — see DWD-16. **Added 2026-08-11 (DWD-17): this row's file set is a MIXED capability lane** — most of its members carry `@requires-kvm` (a real `cloud-hypervisor` guest-boot attempt), but S-VM-11, 12, 13, 33, 34, 35, 38, 40, 41, 51, 58, 59 do NOT (composition-gate probes, `SimVmm`-injected faults, and pre-spawn artifact-validation rejections — none of these spawn a real guest-booting hypervisor). `integration-tests` gates the whole file at the Lima/real-I/O level; `@requires-kvm` is the narrower, flakier sub-capability the concurrent roadmap pass' preflight mechanism must gate independently, per-test-function, within this same file set — see DWD-17 |
 | Pure-function `@property` scenarios (`VmConfig` value family, `plan_reclamation`, `SupervisionSet`, vCPU derivation) | `overdrive-core` | `tests/acceptance/vm_*.rs`, default lane | Port-to-port at function scope; no I/O, no Lima needed |
 | Parse-boundary rejections (S-VM-06/07/62) | `overdrive-core` | `tests/acceptance/vm_spec_driver_table_dispatch.rs`, default lane | In-process TOML deserializer, no subprocess and no real VMM needed |
 | `JobEnvelope` V1→V2 schema evolution (S-VM-10) | `overdrive-core` | `tests/schema_evolution/workload_intent.rs` (EXISTING file, edited, not a new file) | Per the six-step version-bump procedure; `FIXTURE_V1` never touched |
-| `Vmm` / `VmHostState` adapter equivalence (S-VM-90/91) | `overdrive-host` | `tests/integration/vmm_equivalence.rs`, `vm_host_state_equivalence.rs`, gated `integration-tests` | Named exactly by the design (ADR-0082 §D6, ADR-0083 §D7) |
+| `Vmm` / `VmHostState` adapter equivalence (S-VM-90/91) | `overdrive-host` | `tests/integration/vmm_equivalence.rs`, `vm_host_state_equivalence.rs`, gated `integration-tests` | Named exactly by the design (ADR-0082 §D6, ADR-0083 §D7). **Added 2026-08-11 (DWD-17): split capability lane** — `vmm_equivalence.rs` (S-VM-90) drives real `CloudHypervisorVmm::create()`, `@requires-kvm`; `vm_host_state_equivalence.rs` (S-VM-91) operates on generic cgroupfs/filesystem host-state primitives, no guest-boot needed — see DWD-17 |
 | `VmReclamation` reconciler in-memory shapes (S-VM-21 companion, 24, 26, 27, 29) | `overdrive-core` | `tests/acceptance/vm_reclamation_*.rs`, default lane | Pure `reconcile()` driving port |
-| `VmReclamation` reconciler Tier-3 shapes (S-VM-21, 22, 23, 25, 28, 30) | `overdrive-cli` | `tests/integration/vm_reclamation_tier3.rs`, gated `integration-tests` | Real `overdrive serve` convergence loop |
+| `VmReclamation` reconciler Tier-3 shapes (S-VM-21, 22, 23, 25, 28, 30) | `overdrive-cli` | `tests/integration/vm_reclamation_tier3.rs`, gated `integration-tests` | Real `overdrive serve` convergence loop. **Added 2026-08-11 (DWD-17): every member of this row carries `@requires-kvm`** — the reconciler's Tier-3 companion shapes are specifically meant to prove convergence against genuinely real leftover VM artifacts (per this project's "No Fixture Theater" rule), not fixture-crafted stand-ins — see DWD-17 |
 | DST invariants (`VmReclamationConverges`, `SupervisedVmSurvivesEveryTick`, `VmReclamationIdempotentSteadyState`, `EndingInFlightIsNeverReclaimed`) | `overdrive-sim` | `src/invariants/vm_reclamation.rs` | Per the existing `Invariant` catalogue mechanical shape (`ALL`, `as_canonical`, `harness.rs` dispatch). Covers S-VM-87/88/89 (S-VM-24 already placed above) |
 | `overdrive-init` guest agent | `overdrive-init` (NEW crate, `binary` class) | `src/main.rs` | `[D4]`; a new workspace member |
 
@@ -109,17 +109,17 @@ The generic skill's Strategy A/B/C/D framing does not apply (retired per the ski
 
 | Scenario scope | Crate | Path | Rationale |
 |---|---|---|---|
-| `MtlsInterceptWorker` gating, ungated-off arm (S-VM-74) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Same driving port and fixture family as S-VM-05, which it extends |
-| `Vmm` real non-reflink substrate (S-VM-75) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Boot-time scenario, alongside S-VM-11…13 |
+| `MtlsInterceptWorker` gating, ungated-off arm (S-VM-74) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Same driving port and fixture family as S-VM-05, which it extends. `@requires-kvm` (DWD-17) — depends on the allocation reaching Running |
+| `Vmm` real non-reflink substrate (S-VM-75) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Boot-time scenario, alongside S-VM-11…13. NOT `@requires-kvm` (DWD-17) — the FICLONE probe refuses the boot before any guest-booting hypervisor capability exists |
 | `VmDriver::stop` totality against `SimVmm` (S-VM-76) | `overdrive-worker` | `tests/acceptance/vm_driver_stop_totality.rs` (NEW file), default lane | Component-scope, no Lima/real-CH needed — `SimVmm` only |
 | Hydration read order / P2-over-`VmReclamation` (S-VM-78, 80) | `overdrive-core` | `tests/acceptance/vm_reclamation_plan_purity.rs` (EXISTING file, extended) or a new sibling `vm_reclamation_claim_lifecycle.rs` — DELIVER's own call once the `VmReclamationState`/`VmSupervision` types exist | In-memory, pure/component-scope, same family as S-VM-31/32/92. **Corrected 2026-08-11 (DWD-16): S-VM-77 and S-VM-79 removed from this row** — see the new `overdrive-control-plane` row directly below |
 | Abandonment boundary — claim release across `RetryOutcome` arms — / write-time terminality guard over `execute_reclaim_allocation` (S-VM-77, 79) | `overdrive-control-plane` | `tests/acceptance/vm_reclamation_claim_lifecycle.rs` (NEW file, default lane) — exact filename DELIVER's own call once `VmSupervision`/`execute_reclaim_allocation` exist, following the same file-TBD convention this table already uses elsewhere (e.g. the S-VM-67 row in `test-scenarios.md`'s Driving Ports table) | **Added 2026-08-11 (DWD-16).** Both driving ports are `overdrive-control-plane`-resident production code — `worker/exit_observer.rs`'s loop body (confirmed at `crates/overdrive-control-plane/src/worker/exit_observer.rs`) and the `action_shim` executor for `ReclaimAllocation` (`crates/overdrive-control-plane/src/action_shim/`, this crate's own existing per-action executor-module convention — `action_shim/issue_svid.rs`, `action_shim/release_service_vip.rs`, etc.). `overdrive-control-plane` depends on `overdrive-core`, never the reverse (verified: `overdrive-core`'s `Cargo.toml` carries no `overdrive-control-plane`/`overdrive-cli` dependency edge) — an `overdrive-core`-placed test cannot import either surface. Default lane (`tests/acceptance/*.rs`, unwired from `integration-tests`), matching S-VM-77/79's existing `@tier1 @in-memory` tags — no tier change required |
-| Fourth evaluation — `svid_lifecycle` (S-VM-81) | `overdrive-cli` | `tests/integration/vm_reclamation_tier3.rs`, gated `integration-tests` | Real `overdrive serve` convergence loop, mTLS-composed |
+| Fourth evaluation — `svid_lifecycle` (S-VM-81) | `overdrive-cli` | `tests/integration/vm_reclamation_tier3.rs`, gated `integration-tests` | Real `overdrive serve` convergence loop, mTLS-composed. `@requires-kvm` (DWD-17) — the SVID-holding allocation must have been a genuinely running VM |
 | ESR invariant scenarios (S-VM-87, 88, 89) | `overdrive-sim` | `src/invariants/vm_reclamation.rs` | Same file as the pre-existing four-invariant placement above |
-| `CgroupAccounting` adapter equivalence (S-VM-93) | `overdrive-host` | `tests/integration/cgroup_accounting_equivalence.rs`, gated `integration-tests` | Named exactly by ADR-0082 §D8, same shape as `vmm_equivalence.rs` / `vm_host_state_equivalence.rs` |
-| Per-launch `FICLONE` self-application (S-VM-94) | `overdrive-host` | `tests/integration/vmm_ficlone_per_launch.rs` (NEW file), gated `integration-tests` | Real non-reflink fixture, adapter-level, not through the CLI |
-| S-VM-35 (rewritten to the TOCTOU window) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Unchanged placement — the rewrite changes the scenario's content, not its file |
-| S-VM-13 (narrowed to capability-flag classes) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Unchanged placement |
+| `CgroupAccounting` adapter equivalence (S-VM-93) | `overdrive-host` | `tests/integration/cgroup_accounting_equivalence.rs`, gated `integration-tests` | Named exactly by ADR-0082 §D8, same shape as `vmm_equivalence.rs` / `vm_host_state_equivalence.rs`. NOT `@requires-kvm` (DWD-17) — generic cgroupfs read-once semantics, no guest-boot needed |
+| Per-launch `FICLONE` self-application (S-VM-94) | `overdrive-host` | `tests/integration/vmm_ficlone_per_launch.rs` (NEW file), gated `integration-tests` | Real non-reflink fixture, adapter-level, not through the CLI. NOT `@requires-kvm` (DWD-17) — the scenario's own `Then` states no hypervisor process was spawned |
+| S-VM-35 (rewritten to the TOCTOU window) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Unchanged placement — the rewrite changes the scenario's content, not its file. NOT `@requires-kvm` (DWD-17) — the binary is gone before spawn is attempted, exec fails immediately |
+| S-VM-13 (narrowed to capability-flag classes) | `overdrive-cli` | `tests/integration/vm_walking_skeleton.rs`, gated `integration-tests` | Unchanged placement. NOT `@requires-kvm` (DWD-17) — `SimVmm`-injected, no real `cloud-hypervisor` process is involved |
 
 ### DWD-05: Scenario Coverage Shape
 
@@ -1144,6 +1144,304 @@ GitHub issue created; #259–#263 remain the only real numbers in scope,
 
 ---
 
+## DWD-17: `@requires-kvm` capability-class gate — a decision the spike
+explicitly deferred to this wave, closed (2026-08-11)
+
+### The gap
+
+`spike/findings.md` § "The nested-virt stall — SETTLED 2026-08-10 by
+removing the nesting" states, verbatim: *"So: don't gate on Lima for
+microVM boot. The decision point is Slice 01's first integration test,
+not now. The cheap move there is a preflight that detects nested-Apple
+and emits a third outcome — cannot render a verdict — rather than a
+[red]."* Neither `test-scenarios.md` nor this file mentioned nested
+virtualisation, KVM, or a capability gate anywhere before this entry —
+confirmed by grep before acting. The decision the spike deferred to
+"Slice 01's first integration test" was never picked up by the original
+DISTILL pass, and survived two adversarial review rounds (DWD-08, DWD-11)
+untouched, because neither reviewer was scoped to cross-check the spike's
+own deferred-decision language against the scenario catalogue.
+
+### The measured asymmetry (why this is not cosmetic)
+
+- **Bare-metal x86_64 (env B, non-nested)**: 12/12 CH boots, 0 failed,
+  time-to-init 0.730s–0.746s (16ms spread).
+- **Nested aarch64 (env A, the standard macOS dev Lima VM)**: ~1 in 3
+  stalls, freezing before `/init` at the root-mount boundary, killed by a
+  90s watchdog.
+- **CI (`ubuntu-latest`)**: real `/dev/kvm`, non-nested — unaffected.
+- The spike's own framing: *"A green run is genuine evidence... A red run
+  is uninformative"* — a stall and a real regression are
+  indistinguishable under nested virtualisation. Per
+  `.claude/rules/testing.md`, "Flaky tests break mutation testing...
+  worse than missing them" applies with full force here.
+
+### Why `@tier3`/`@real-io` alone does not capture this
+
+The existing tags mean *"real infra that works inside Lima"* — netns,
+cgroups, subprocesses, cgroupfs, real filesystem probes, `SimVmm`-free
+adapter calls. That predicate does not distinguish a real
+`cloud-hypervisor` guest-boot ATTEMPT (which touches `/dev/kvm`, creates
+vcpus, and is exactly the capability class the spike measured as flaky
+under nesting) from every other kind of real I/O this suite already
+exercises safely inside Lima. A macOS developer running the standard
+`--features integration-tests` command today eats ~1/3 flaky failures on
+every scenario that happens to boot a guest, with no signal distinguishing
+"the driver is broken" from "the dev host cannot render a verdict."
+
+### The classification method
+
+Walked all 88 scenarios; classified the 61 carrying `@tier3`/`@real-io`
+(27 pure `@tier1`/`@in-memory` scenarios are trivially excluded — no real
+I/O of any kind). Discriminator applied: **does the scenario's own
+Given/When/Then necessarily require a real `cloud-hypervisor` process to
+be spawned with intent to boot a guest kernel** — including scenarios
+where the guest deliberately never reaches userspace (the boot ATTEMPT
+itself, not completion, is what exercises KVM and is subject to the
+stall)? Applied consistently:
+
+- **YES** (`@requires-kvm` added): the allocation reaches Running, a
+  guest command executes/exits/reports over vsock, a guest kernel panics
+  or hangs mid-boot, confinement is inspected on a live `/proc/<vmm-pid>`,
+  a storage daemon serves a live guest, in-guest CPU/memory is observed,
+  or (for `vmm_equivalence.rs`, S-VM-90) `Vmm::create()` is driven against
+  the real `CloudHypervisorVmm` adapter.
+- **NO** (tag withheld): `overdrive serve`'s own boot-time composition
+  gate/capability probe (S-VM-11, 12, 75 — checks binary presence,
+  Landlock/KVM capability flags, an executed `FICLONE` ioctl; none spawn
+  a guest-booting hypervisor), `SimVmm`-injected fault scenarios (S-VM-13,
+  51 — the fake adapter is substituted at the port boundary, so no real
+  `cloud-hypervisor` process is ever involved), pre-spawn
+  artifact-validation rejections where the platform's own design states
+  the check happens "before any hypervisor process is spawned" (S-VM-33,
+  34, 35, 41, 58, 59 — missing/wrong-format kernel, missing rootfs, a
+  vanished binary caught by `exec` failing immediately, missing volume
+  source/storage-daemon), admission-time rejections stated explicitly as
+  occurring "before anything is scheduled" (S-VM-38), and adapter
+  equivalence tests over generic host primitives with no guest/kernel/
+  hypervisor language in their Given/When/Then (S-VM-91 `VmHostState`,
+  S-VM-93 `CgroupAccounting` — cgroupfs and filesystem operations that do
+  not depend on what process occupies the scope), plus S-VM-94 where the
+  scenario's own `Then` states explicitly *"no hypervisor process was
+  spawned"* (the FICLONE clone fails before CH would ever be exec'd).
+
+**Hybrid scenarios** (S-VM-21, 22, 25 — each carries a primary
+`@tier1`/`@in-memory` shape plus a documented "Tier-3 companion" clause):
+`@requires-kvm` is attached only to the companion-shape tag cluster
+inline in the `**Tags**:` line, not as a scenario-wide tag — the primary
+in-memory shape (`SimVmHostState` + `SimClock`) never spawns real CH.
+
+### Genuinely ambiguous — flagged, not silently resolved
+
+Five dispositions rest on judgment rather than an explicit textual
+statement, and are recorded here rather than buried in a silent tag:
+
+1. **S-VM-04, S-VM-39** ("A VM workload deploys through the same verb...",
+   "A VM job spec is accepted") — the `Then` clause asserts only
+   "accepted and scheduled," not that the guest reaches Running or
+   completes. Tagged `@requires-kvm` because both sit in the
+   `@happy_path` walking-skeleton-adjacent family (DWD-01: "sharing the
+   same driving port and fixture shape" as S-VM-01) and this project's
+   `[job]` driver dispatches to immediate execution — but the scenario
+   text alone does not pin whether the crafter's test needs to observe
+   guest-boot completion or only the admission/scheduling decision.
+2. **S-VM-40** ("A scheduled VM job is accepted", `[schedule]`+`[vm]`,
+   cron-triggered) — left WITHOUT `@requires-kvm`: a cron-scheduled job is
+   deferred by construction, so "accepted and scheduled" plausibly means
+   admission-only within the scenario's own timeframe, unlike S-VM-39's
+   immediate `[job]`.
+3. **S-VM-23, S-VM-28, S-VM-30** — each Given describes "surviving"/
+   "leftover" VM artifacts "from a prior boot" as a PRECONDITION. Tagged
+   `@requires-kvm` on the reasoning that a genuinely real prior boot is
+   the more faithful reading (consistent with "No Fixture Theater" and
+   the Tier-3-companion family's stated purpose of proving convergence
+   against real infrastructure) — but a crafter could legitimately
+   fixture-craft the leftover cgroup scope/directory/row state as a
+   precondition without an actual prior `cloud-hypervisor` boot, since
+   Given-step fixture crafting of PRECONDITIONS is sanctioned by this
+   project's own testing discipline.
+4. **S-VM-58, S-VM-59** (missing volume source / missing storage daemon)
+   — left WITHOUT `@requires-kvm` by analogy to S-VM-33/34's
+   pre-spawn-validation pattern, but neither scenario's own text states
+   explicitly (the way S-VM-17/41 do for the kernel path) that the check
+   precedes hypervisor spawn.
+5. **S-VM-91, S-VM-93** (`VmHostState`/`CgroupAccounting` adapter
+   equivalence) — left WITHOUT `@requires-kvm`: both operate on generic
+   cgroupfs/filesystem primitives whose fixture could plausibly be a
+   lightweight stand-in process rather than a genuine CH boot, but the
+   scenario text does not rule out a real-VM-derived fixture either.
+
+**These five items are the concurrent roadmap pass's to reconcile against
+its own step criteria** — if the roadmap pass's pinned step language
+implies a different disposition for any of the five, that is not a
+contradiction with this entry; it is exactly the kind of judgment call
+this section exists to surface rather than bury.
+
+### What this decision does NOT do
+
+Per the dispatch's explicit instruction, this entry does not invent the
+Rust-side mechanism (a Cargo feature, a runtime preflight check, an
+`#[ignore]`-with-reason convention, or a `SKIP` outcome distinct from
+pass/fail). `@requires-kvm` in `test-scenarios.md` is a DISTILL-side
+specification-level classification; the concrete gating mechanism that
+consumes it is pinned by the concurrent `deliver/roadmap.json` pass. This
+is not a deferral requiring a GitHub issue — the mechanism naming is
+in-feature work assigned to the roadmap pass, not a future-phase
+scope cut.
+
+**Addendum (2026-08-12) — the mechanism is now pinned: `@requires-kvm` ⇒
+the `kvm-tests` Cargo feature.** The concurrent roadmap pass named it
+(first declared at `deliver/roadmap.json` step covering S-VM-90/94,
+"CloudHypervisorVmm + SimVmm adapters — probe, create, terminate", on
+`crates/overdrive-host`, and re-declared on `crates/overdrive-cli` at the
+walking-skeleton step). See DWD-18 below for the naming rationale and the
+reconciliation of this artifact's own `@requires-kvm` dispositions against
+the roadmap's file-level gate.
+
+### Files touched by this entry
+
+`distill/test-scenarios.md` — 45 of the 61 `@tier3`/`@real-io` scenarios
+gained `@requires-kvm` (a top-of-file explanatory note added; three
+hybrid scenarios' companion-shape clauses tagged inline; no scenario's
+tier, ACs, or Gherkin body changed; no scenario added, removed, or
+renumbered). `distill/wave-decisions.md` (this entry; DWD-04's rows
+annotated with the capability-lane split where it was previously
+invisible; Changelog, below). `deliver/roadmap.json`, every ADR,
+`brief.md`, and every `.rs` file were **not** touched — the roadmap pass
+is concurrent and owns the exact mechanism/feature-name pinning; this
+entry reports that the pinned name is needed for the two artifacts to
+agree, per the dispatch. Scenario count re-verified mechanically
+unchanged at **88** (`grep -c '^#### S-VM-'` and `grep -c
+'^\*\*Tags\*\*:'`, both 88, both before and after this pass). No GitHub
+issue created; #92, #222, #248, #257, #259–#263 remain the only real
+numbers in scope, #264 closed, none newly cited here. No commit made by
+this pass.
+
+---
+
+## DWD-18: `@requires-kvm` ⇒ `kvm-tests` — binding recorded, ten flagged
+ambiguities reconciled against the roadmap's file-level gate (2026-08-12)
+
+DWD-17 classified 45 of 88 scenarios `@requires-kvm` and explicitly left
+the Rust-side mechanism to the concurrent `deliver/roadmap.json` pass. That
+pass has now landed and pinned the mechanism. This entry (a) states the
+binding, (b) records the naming reasoning so it is not re-litigated, and
+(c) reconciles DWD-17's five genuinely-ambiguous dispositions (ten
+scenario IDs) against the roadmap's actual file-level gate. No scenario's
+tier, tags, ACs, or Gherkin body changed by this entry. No scenario was
+added, removed, or renumbered. Scenario count re-verified mechanically
+unchanged at **88** (`grep -c '^#### S-VM-'` and `grep -c
+'^\*\*Tags\*\*:'` against `distill/test-scenarios.md`, both 88).
+
+### The pinned name — `kvm-tests`
+
+- **`bare-metal-tests` was rejected as false.** CI runs `ubuntu-latest` —
+  a GitHub-hosted VM, not bare metal — and the spike measured it
+  trustworthy ("real `/dev/kvm`, no nesting"). A "bare-metal" name would
+  exclude the only host the lane actually runs on.
+- **The property is nesting, not hardware.** The spike's own diagnosis
+  (`spike/findings.md`): *"Nested virtualisation on Apple Silicon was the
+  artifact… the Lima guest is arm64 **and** nested. The **nesting**
+  caused it."* The dev Lima VM *has* `/dev/kvm` (0666 udev rule) and is
+  still untrustworthy — hardware presence alone does not predict the
+  stall.
+- **`kvm-tests` names the lane, not a hardware claim** — shaped like its
+  sibling `integration-tests` (a lane noun, not a predicate), generic
+  enough to be reused by any future work needing a real guest VM
+  (snapshot/restore, the kernel matrix, a future VMM) without a rename.
+- **Division of labour**: the *feature* gates the lane; the *preflight*
+  enforces the capability (`systemd-detect-virt` plus the `/dev/kvm`
+  permission shape — the spike recorded `crw-rw---- root:kvm` 0660 as
+  "the production-realistic shape" against Lima's 0666). The feature name
+  does not need to encode the nesting nuance because the preflight is
+  the layer that does.
+- **Declaration is narrow, not workspace-wide** — only `overdrive-host`
+  and `overdrive-cli` declare `kvm-tests = []`. `integration-tests` is
+  universal only because `cargo-mutants` v27 scopes per-mutant builds to
+  `--package`, and Tier-3 tests are structurally excluded from mutation
+  runs anyway (`.claude/rules/testing.md` § "What it's NOT for") — so the
+  forcing function that makes `integration-tests` universal does not
+  apply to `kvm-tests`.
+- **The preflight fails loudly rather than skips.** The feature gate is
+  the spike's own "third outcome" (cannot render a verdict, rather than a
+  red) applied at compile time; the preflight only covers the deliberate
+  opt-in case, where a silent green would be the "reads green vacuously"
+  trap this project's own conventions (`vm_fixture.rs`'s wiring note)
+  already guard against elsewhere in this same roadmap.
+
+### Ten-way reconciliation against the roadmap's file-level gate
+
+The roadmap gates `@requires-kvm` at **file** granularity (every scenario
+in a given test file shares that file's `kvm-tests` compile gate — or
+lack of one). Only one direction is dangerous: DISTILL leaned
+`@requires-kvm` but the roadmap's file placement is **not** gated — the
+scenario would then compile and run on every host, including a nested
+Lima dev VM, with no feature-level defense against the ~1-in-3 stall.
+The opposite direction (leaned NOT, file **is** gated) is harmless
+over-gating — a laptop developer skips a test that didn't strictly need
+gating, nothing worse.
+
+| Scenario | DWD-17 disposition | Roadmap file | File-level gate | Direction |
+|---|---|---|---|---|
+| S-VM-04 | leaned `@requires-kvm` | `vm_walking_skeleton.rs` | `integration-tests,kvm-tests` | consistent |
+| S-VM-39 | leaned `@requires-kvm` | `vm_boot_failure_vocabulary.rs` | `integration-tests,kvm-tests` (inherited from step 03-01) | consistent |
+| S-VM-23 | leaned `@requires-kvm` | `vm_reclamation_tier3.rs` | `integration-tests,kvm-tests` | consistent |
+| S-VM-28 | leaned `@requires-kvm` | `vm_reclamation_tier3.rs` | `integration-tests,kvm-tests` | consistent |
+| S-VM-30 | leaned `@requires-kvm` | `vm_reclamation_tier3.rs` | `integration-tests,kvm-tests` | consistent |
+| S-VM-40 | leaned NOT | `vm_boot_failure_vocabulary.rs` | `integration-tests,kvm-tests` (inherited) | harmless (over-gated) |
+| S-VM-58 | leaned NOT | `vm_volumes_and_storage_daemon.rs` | `integration-tests,kvm-tests` (inherited from step 05-01) | harmless (over-gated) |
+| S-VM-59 | leaned NOT | `vm_volumes_and_storage_daemon.rs` | `integration-tests,kvm-tests` (inherited from step 05-01) | harmless (over-gated) |
+| S-VM-91 | leaned NOT | `vm_host_state_equivalence.rs` | `integration-tests,kvm-tests` | harmless (over-gated) |
+| S-VM-93 | leaned NOT | `cgroup_accounting_equivalence.rs` | `integration-tests` only (**deliberately not** `kvm-tests` — roadmap's own words: *"it never goes through the `Vmm` port and never spawns cloud-hypervisor, so it stays gated by `integration-tests` alone, deliberately NOT `kvm-tests`"*) | consistent |
+
+**Result: zero scenarios land in the dangerous bucket.** No file
+placement in the roadmap under-gates a scenario DWD-17 judged to need a
+real guest-boot attempt. Five of the ten (S-VM-04, 39, 23, 28, 30) are
+consistent — DISTILL's lean matches the roadmap's gate exactly. The
+remaining five (S-VM-40, 58, 59, 91, 93) all sit in files the roadmap
+placed alongside `@requires-kvm` siblings from the same AC/step (`vm_boot_
+failure_vocabulary.rs` gains its gate from S-VM-39's own presence;
+`vm_volumes_and_storage_daemon.rs` from S-VM-57/64/65's real-boot
+scenarios; `vm_host_state_equivalence.rs` from being the file-level
+adjacent-scenario neighbor of a real-VM-derived fixture) — four of those
+five are over-gated (harmless), and one (S-VM-93) is correctly ungated,
+matching DWD-17's own disposition exactly. Nothing in DWD-17's own
+classification required correction; nothing in the roadmap's file
+placement is flagged as wrong.
+
+### Two deliberately-ungated files — confirmed to agree with DWD-17's tags
+
+- **`cgroup_accounting_equivalence.rs` (S-VM-93)** — synthetic cgroup
+  fixtures, never touches the `Vmm` port. Roadmap: gated `integration-
+  tests` only, explicitly not `kvm-tests`. DWD-17: leaned NOT
+  `@requires-kvm` (generic cgroupfs/filesystem primitives). **Agree.**
+- **`vm_storage_daemon_sandbox_arg.rs` (S-VM-67)** — Tier-1 pure
+  rendering proptest. Roadmap: "Tier 1 pure/proptest and spawns no VMM —
+  it is deliberately NOT gated behind `kvm-tests`, only the crate's
+  normal default lane." `test-scenarios.md`: S-VM-67 carries `@tier1
+  @in-memory` (per DWD-13's rewrite to the launch-argument-construction
+  layer) — not `@tier3`/`@real-io` at all, so `@requires-kvm` was never a
+  candidate tag for it. **Agree.**
+
+### Files touched by this entry
+
+`distill/wave-decisions.md` (this entry; a short addendum inside DWD-17's
+"What this decision does NOT do" section pointing here; Changelog,
+below), `distill/test-scenarios.md` (top-of-file `@requires-kvm`
+explanatory note — states the `kvm-tests` binding explicitly, replacing
+the now-stale "pinned by the concurrent roadmap pass" forward pointer; no
+scenario body, tag, tier, or AC touched). `deliver/roadmap.json` was
+**read only** — not touched, per this dispatch's explicit instruction; it
+is the artifact that pinned the name this entry reconciles against. No
+ADR, `brief.md`, or Rust file touched. Scenario count re-verified
+mechanically unchanged at **88** (`grep -c '^#### S-VM-'` and `grep -c
+'^\*\*Tags\*\*:'`, both 88, both before and after this entry). No GitHub
+issue created; #92, #222, #248, #257, #259–#263 remain the only real
+numbers in scope, #264 closed, none newly cited here. No commit made by
+this pass.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1154,3 +1452,5 @@ GitHub issue created; #259–#263 remain the only real numbers in scope,
 - 2026-08-11 — AC-09 completeness gap closed, found by a fable review cross-checking the concurrent `deliver/roadmap.json` pass against ADR-0083 §D5 (DWD-14). ADR-0083 §D5 pins **five** Slice-02 Cause variants; the roadmap's Slice-02 step 03-01 criteria enumerated only four, and `test-scenarios.md` had **zero** entry for row 5 (`VmKernelFormatUnsupported { path, arch, detail }`) among the original 87 — verified directly (`grep -rn "VmKernelFormatUnsupported" distill/` returned nothing outside `slices/slice-02-boot-failure-vocabulary.md`'s own prose) before acting. **Fixed**: S-VM-41 added — the classification-join half of C-7, companion to S-VM-17's already-proven pure-function half (`KernelImage::validate`), not a duplicate of it; asserts the operator-visible `TransitionReason::VmKernelFormatUnsupported` reads as a format problem, never CH's misleading size-cap/`UefiTooBig` framing. `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@correction:C-7`, placed at `crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs` alongside S-VM-33…37 (already covered by DWD-04's existing `S-VM-33…66` span; no range edit needed). Scenario ID chosen as the lowest genuinely-unused gap (41) rather than extending past 94, matching this file's established gap-reuse practice. Scenario count 87 → 88; `@error_path` 40 → 41; `@contract-shape:bounded-change` 65 → 66; error+edge coverage unchanged at ≈60% (53/88). KPI Traceability K3 row, AC-to-Scenario Traceability US-VM-2 row, and Self-Review Checklist items 8/13/15 updated. Mechanical recount also surfaced and corrected a pre-existing, unrelated off-by-one in Self-Review Checklist item 13's pure-function/bounded-change split (12/65 was already true before this pass, not the claimed 11/66 — both wrong numbers happened to still sum to 87). No ADR, `brief.md`, or Rust file touched; `deliver/roadmap.json` not touched (owned by the concurrent roadmap pass, which cites S-VM-41 by the ID recorded here). No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made by this pass.
 - 2026-08-11 — Iteration-2 review LOW fixed: S-VM-06/07/62's driving-port lines corrected (DWD-15). Prose said `overdrive deploy` (in-process CLI handler) while DWD-04 places all three at `overdrive-core`'s parse-boundary file — `overdrive-core` cannot dev-depend on `overdrive-cli`, so the two statements were mutually exclusive. Verified against the existing compiled scaffold (`vm_spec_driver_table_dispatch.rs`, one of DWD-06's fifteen) and ADR-0083's pinned function (`WorkloadSpecInput::from_toml_str`, `workload_spec.rs:710`) before fixing. Rewrote all three lines to `` `WorkloadSpecInput::from_toml_str()` (pure function — in-process TOML parse boundary, no subprocess, no `overdrive serve` needed) ``; Gherkin, tags, tier, and ACs untouched. Sweep for the same defect class run over all 88 scenarios: found S-VM-77/S-VM-79 naming `overdrive-control-plane`-resident driving ports (`worker/exit_observer.rs`'s loop body; `execute_reclaim_allocation`) against DWD-04's `overdrive-core` placement for S-VM-77…80 — **not fixed**, no scaffold exists as ground truth and the correct resolution (move the crate cell vs. rewrite the driving-port prose) is a placement judgment call outside this entry's prose-correction scope; flagged for DELIVER's AC-19 scaffolding. Also noted, not fixed: S-VM-09/S-VM-19 have no DWD-04 placement at all (an omission, not a contradiction). Scenario count re-verified unchanged at 88. No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed. No commit made by this pass.
 - 2026-08-11 — Both placement gaps DWD-15 flagged (and declined to fix inline) resolved (DWD-16). **Gap 1 — S-VM-77/S-VM-79**: verified a genuine contradiction, not staleness — `worker/exit_observer.rs` and the `ReclaimAllocation` executor (`execute_reclaim_allocation`, by this crate's existing `action_shim/`-per-action-executor convention) are both `overdrive-control-plane`-resident, and `overdrive-control-plane` depends on `overdrive-core`, never the reverse (Cargo.toml dependency graph checked both directions). Remedy: moved, not rewritten — DWD-04's AC-19 row split, S-VM-78/80 stay at `overdrive-core`, a new row places S-VM-77/79 at `overdrive-control-plane` (`tests/acceptance/vm_reclamation_claim_lifecycle.rs`, NEW file, default lane, matching their existing `@tier1 @in-memory` tags — no tier change). Fabricating a core-side seam was explicitly rejected as an option, per the dispatch's instruction. `test-scenarios.md`'s own top-of-file Driving Ports table carried the identical contradiction independently (its `plan_reclamation` row's exercises column wrongly listed S-VM-77…80) and was corrected the same way, plus a new row added for the `overdrive-control-plane` driving ports. **Gap 2 — S-VM-09/S-VM-19**: confirmed an omission, not a contradiction — both scenarios' own driving-port lines and tags (`@tier3 @real-io`) already match the Tier-3 CLI-driven row's other members exactly; the row's span notation simply never named the two IDs sitting in its own sub-range gaps (06-10, 16-32). Remedy: extended the existing row's span to `S-VM-01…05, 09, 11…15, 19, 33…66, 68` (explicit-inclusion, mirroring DWD-13's explicit-exclusion of S-VM-67 from the same row) rather than a blanket range widen, which would have wrongly swept in S-VM-06/07/08/10 (placed elsewhere by DWD-04's other rows). `test-scenarios.md`'s top-of-file Driving Ports table's `overdrive deploy` row carried the identical omission and was corrected the same way. Neither gap required a tier change; nothing was stopped or reported as blocked. No scenario's tier, tags, ACs, or Gherkin changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
+- 2026-08-12 — `@requires-kvm` capability-class gate recorded (DWD-17), closing a decision `spike/findings.md` explicitly deferred to "Slice 01's first integration test" and that neither the original DISTILL pass nor two adversarial review rounds picked up. Walked all 61 `@tier3`/`@real-io` scenarios; classified 45 as requiring a real `cloud-hypervisor` guest-boot attempt (tagged `@requires-kvm` — including three hybrid scenarios, S-VM-21/22/25, where the tag attaches only to the documented Tier-3-companion clause, not the primary `@tier1`/`@in-memory` shape) and 16 as real I/O that never spawns a guest-booting hypervisor (composition-gate probes S-VM-11/12/75, `SimVmm`-injected faults S-VM-13/51, pre-spawn artifact-validation rejections S-VM-33/34/35/41/58/59, an admission-time rejection S-VM-38, generic host-primitive adapter equivalence S-VM-91/93, and S-VM-94 whose own `Then` states no hypervisor process was spawned). Five dispositions recorded as genuinely ambiguous rather than silently resolved: S-VM-04/S-VM-39 (leaned `@requires-kvm`, happy-path/walking-skeleton-adjacent framing), S-VM-40 (leaned NOT — cron-deferred), S-VM-23/S-VM-28/S-VM-30 (leaned `@requires-kvm` — "No Fixture Theater" + Tier-3-companion intent), S-VM-58/S-VM-59 (leaned NOT — pre-spawn-validation analogy), S-VM-91/S-VM-93 (leaned NOT — generic cgroupfs/filesystem primitives). A top-of-file explanatory note added to `test-scenarios.md` citing the spike's measured asymmetry (bare-metal x86_64 12/12 vs nested-aarch64 ~1-in-3). DWD-04's rows annotated with the capability-lane split where a single row/file mixes `@requires-kvm` and non-`@requires-kvm` members (the walking-skeleton/Tier-3-CLI row, the `Vmm`/`VmHostState` adapter-equivalence row, and the `VmReclamation` Tier-3-shapes row, plus seven individually-noted rows in the DWD-11 addendum table). The concrete Rust-side gating mechanism (feature name, preflight shape) is explicitly NOT invented here — it is pinned by the concurrent `deliver/roadmap.json` pass, which this entry asks to reconcile against; not a deferral requiring a GitHub issue, since the mechanism-naming is in-feature work assigned to that concurrent pass. No scenario's tier, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
+- 2026-08-12 — `@requires-kvm` bound explicitly to the `kvm-tests` Cargo feature the concurrent roadmap pass pinned; DWD-17's ten flagged-ambiguous scenario IDs reconciled against the roadmap's file-level gate (DWD-18). Binding stated in both `test-scenarios.md`'s top-of-file `@requires-kvm` note (replacing the now-stale "pinned by the concurrent roadmap pass" forward pointer) and as an addendum inside DWD-17. Naming reasoning recorded: `bare-metal-tests` rejected as false (CI is a GitHub-hosted VM, not bare metal, and the spike measured it trustworthy); the property gating matters is nesting, not hardware presence (the spike's own diagnosis); `kvm-tests` names the lane generically, shaped like `integration-tests`; declaration is narrow (only `overdrive-host`/`overdrive-cli`, since `kvm-tests` gates no mutation-testing surface); the preflight fails loudly rather than silently skipping. Ten-way reconciliation (S-VM-04, 23, 28, 30, 39, 40, 58, 59, 91, 93) checked in the one dangerous direction (leaned `@requires-kvm` but roadmap file NOT gated) — **zero scenarios land in that bucket**: five (S-VM-04/23/28/30/39) are consistent (leaned yes, file gated `kvm-tests`); five (S-VM-40/58/59/91/93) are either harmlessly over-gated (S-VM-40/58/59/91 — leaned NOT, file gated anyway) or correctly ungated (S-VM-93 — leaned NOT, roadmap explicitly states it "never goes through the `Vmm` port... deliberately NOT `kvm-tests`"). No scenario's own classification needed correction; no roadmap file placement flagged as wrong. Confirmed the two deliberately-ungated files agree with their scenarios' tags: `cgroup_accounting_equivalence.rs` (S-VM-93, synthetic cgroup fixtures, never touches `Vmm`) and `vm_storage_daemon_sandbox_arg.rs` (S-VM-67, Tier-1 pure rendering proptest, `@tier1 @in-memory` — never a `@requires-kvm` candidate). No scenario's tier, tags, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). `deliver/roadmap.json` read-only, not touched. No ADR or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.

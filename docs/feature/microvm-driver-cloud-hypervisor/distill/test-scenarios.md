@@ -25,6 +25,45 @@ scenario either drives the same CLI path with a different fixture, or
 enters at a narrower driving port (a reconciler tick, a pure function, a
 driven-port equivalence test) per this project's four-tier discipline.
 
+**45 scenarios carry `@requires-kvm`** — the capability class distinct from
+`@tier3`/`@real-io`. `spike/findings.md` § "The nested-virt stall — SETTLED
+2026-08-10" measured a real asymmetry: bare-metal x86_64 booted 12/12
+(median 0.744s), while nested-aarch64 (the standard macOS dev Lima VM)
+stalled ~1 in 3 — "a stall and a real regression are indistinguishable,"
+and the spike explicitly deferred the gating decision to "Slice 01's first
+integration test." `@tier3`/`@real-io` means *"real infra that works
+inside Lima"* (netns, cgroups, subprocesses, cgroupfs, real filesystem
+probes) — that predicate does not distinguish it from booting an actual
+guest kernel under KVM, which is a narrower and flakier capability class on
+a nested-virtualization host. `@requires-kvm` is applied to every scenario
+whose own Given/When/Then requires a real `cloud-hypervisor` process to be
+spawned with intent to boot a guest kernel (including scenarios where the
+guest deliberately never reaches userspace — the boot ATTEMPT itself is
+what exercises KVM and is subject to the stall) — see DWD-17 in
+`wave-decisions.md` for the full classification method, the per-scenario
+disposition, and the scenarios flagged genuinely ambiguous. `@tier3`
+scenarios that are real I/O but do **not** spawn a real guest-booting
+`cloud-hypervisor` process (pure-function/parse rejections that already
+carry `@tier1`, node-boot capability probes, `SimVmm`-injected fault
+scenarios, adapter-equivalence tests over generic cgroupfs/filesystem
+primitives, and pre-spawn artifact-validation rejections) do **not** carry
+`@requires-kvm`.
+
+**`@requires-kvm` ⇒ the `kvm-tests` Cargo feature.** The concurrent
+`deliver/roadmap.json` pass has pinned the Rust-side mechanism this tag
+consumes: a scenario carrying `@requires-kvm` compiles only in a test
+file gated behind `--features integration-tests,kvm-tests` (declared
+narrowly on `crates/overdrive-host` and `crates/overdrive-cli` only — not
+workspace-wide, unlike `integration-tests` — because `kvm-tests` gates no
+mutation-testing surface and has no forcing function requiring a
+universal per-crate declaration). A runtime preflight (real `/dev/kvm`
+open + `systemd-detect-virt`) is the secondary defense, for the case the
+feature is deliberately enabled on an incapable host; it fails loudly and
+named, never a silent skip. See DWD-17 (and its DWD-18 addendum) in
+`wave-decisions.md` for the full binding rationale, the naming
+reasoning, and the reconciliation of this classification against the
+roadmap's file-level gate.
+
 ---
 
 ## Driving Ports
@@ -57,7 +96,7 @@ ADR-0083 D1–D5, contradictions C-1/C-2/C-3/C-5/C-7, KPIs K1/K2/K4/K6/K7 (item
 #### S-VM-01: A VM workload runs to completion and its exit code reaches the operator
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, real Cloud Hypervisor VMM)
-**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@driving_port` `@happy_path` `@ac-01` `@tier3` `@real-io` `@kpi:K1` `@kpi:K4` `@kpi:K6`
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@driving_port` `@happy_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm` `@kpi:K1` `@kpi:K4` `@kpi:K6`
 
 ```gherkin
 Given a kernel and an ext4 rootfs are staged on the host, and the rootfs's
@@ -81,7 +120,7 @@ scenario — record wall-clock per run.
 #### S-VM-02: A non-zero guest exit code is reported, never the hypervisor's
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@error_path` `@ac-01` `@tier3` `@real-io` `@kpi:K1`
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@error_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm` `@kpi:K1`
 
 ```gherkin
 Given Ana has deployed a VM workload whose guest command exits 7
@@ -100,7 +139,7 @@ status").
 #### S-VM-03: A guest that never starts is never reported Running
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@error_path` `@ac-01` `@tier3` `@real-io` `@kpi:K2` `@guardrail`
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@error_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm` `@kpi:K2` `@guardrail`
 
 ```gherkin
 Given Ana has deployed a VM workload whose rootfs has no working init
@@ -115,7 +154,7 @@ history, not just the final state, to catch a transient false-Running.
 #### S-VM-04: A VM workload deploys through the same verb as a process workload
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@happy_path` `@ac-01` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@happy_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana already deploys process workloads with "overdrive deploy <spec>"
@@ -126,7 +165,7 @@ Then the workload is accepted and scheduled with no new verb and no new flag
 #### S-VM-05: The platform contains the hypervisor it started
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process, mTLS-composed `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@happy_path` `@ac-01` `@tier3` `@real-io` `@kpi:K7`
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@happy_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm` `@kpi:K7`
 
 ```gherkin
 Given Ana has deployed a VM workload on a node running the PRODUCTION
@@ -148,7 +187,7 @@ US-VM-1 AC 5). `<vmm-pid>` resolves through the allocation's cgroup
 #### S-VM-74: A VM allocation reaching Running gets no mTLS intercept state — ungated-and-succeeding would be a silent false confidentiality claim
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process, mTLS-composed `overdrive serve`)
-**Tags**: `@contract-shape:unbounded-preservation` `@error_path` `@ac-01` `@tier3` `@real-io`
+**Tags**: `@contract-shape:unbounded-preservation` `@error_path` `@ac-01` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload on an mTLS-composed "overdrive serve"
@@ -228,7 +267,7 @@ S-VM-09 is the `/proc`-level half.
 #### S-VM-09: Seccomp is verified per-thread, not on the thread-group leader
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-03` `@tier3` `@real-io` `@correction:C-5`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-03` `@tier3` `@real-io` `@requires-kvm` `@correction:C-5`
 
 ```gherkin
 Given Ana has deployed a VM workload and the allocation reaches Running
@@ -387,7 +426,7 @@ staging root override for this one boot.
 #### S-VM-14: The deadline arm leaks nothing
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, `SimVmm`-free — real CH that never beacons)
-**Tags**: `@contract-shape:unbounded-preservation` `@error_path` `@ac-06` `@tier3` `@real-io`
+**Tags**: `@contract-shape:unbounded-preservation` `@error_path` `@ac-06` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload whose guest never beacons ready
@@ -405,7 +444,7 @@ be killed.
 #### S-VM-15: A guest EXIT report is never overwritten by the VMM's own teardown exit
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-06` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-06` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana's guest reports EXIT 7 over vsock
@@ -482,7 +521,7 @@ test; see `distill/wave-decisions.md`'s dst-lint-clause decision.
 #### S-VM-19: A VM that exceeds its declared memory is diagnosed as OOM, not a bare signal 9
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, cgroup memory pressure induced)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-07` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-07` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload whose guest workload is made to exceed
@@ -592,7 +631,7 @@ the two executors and the Tier-3 boot/tick shapes are layer 3+
 #### S-VM-21: Mid-run drift repairs without a `serve` restart
 
 **Driving port**: `overdrive serve` steady-state convergence loop (real, `VM_RECLAMATION_SWEEP_INTERVAL` advanced via `SimClock` in-memory, or real 30s wait in Tier-3)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-08` `@tier1` `@in-memory` `@property` — companion Tier-3 shape `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-08` `@tier1` `@in-memory` `@property` — companion Tier-3 shape `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given a VM allocation is stopped and its cgroup scope removal is made to fail
@@ -610,7 +649,7 @@ the WAKE mechanism (§105a.8) actually fires it.
 #### S-VM-22: A live VMM whose allocation row is already terminal is killed at tick N
 
 **Driving port**: `plan_reclamation` (in-memory) + Tier-3 shape through `overdrive serve`
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier1` `@in-memory` — Tier-3 companion `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier1` `@in-memory` — Tier-3 companion `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given an allocation's row is Terminated (an unstoppable orphan -- the VMM
@@ -623,7 +662,7 @@ Then the surviving VMM process, its cgroup scope, run directory and rootfs
 #### S-VM-23: Boot-epoch reclamation settles before `adopt_on_restart_recovery` reads the tree
 
 **Driving port**: `overdrive serve` boot sequence
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given N surviving VM cgroup scopes from a prior serve process
@@ -657,7 +696,7 @@ not optional coverage.
 #### S-VM-25: A terminal-row VMM with no live authorship claim — both shapes
 
 **Driving port**: `plan_reclamation` (in-memory) + Tier-3
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier1` `@in-memory` `@property` — Tier-3 companion `@tier3` `@real-io` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier1` `@in-memory` `@property` — Tier-3 companion `@tier3` `@real-io` `@requires-kvm` `@mandatory:mutation_target`
 
 ```gherkin
 Scenario shape (a) — the restart orphan:
@@ -735,7 +774,7 @@ not a site enumeration) — this scenario is that gap made concrete.
 #### S-VM-28: Restart count and last-terminated populate together, in one scenario
 
 **Driving port**: `overdrive workload describe` after a reclaim-and-restart cycle (Tier-3)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-08` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given a VM allocation is reclaimed and then restarted
@@ -773,7 +812,7 @@ was missed.
 #### S-VM-30: A node that uninstalled cloud-hypervisor still reclaims its VM survivors
 
 **Driving port**: `overdrive serve` boot (Tier-3, no `Vm` registry entry)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given a node has surviving VM cgroup scopes, run directories and clones from
@@ -950,7 +989,7 @@ generator already produces.
 #### S-VM-81: Reclaiming an SVID-holding allocation drops its SVID -- the fourth evaluation
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process, mTLS-composed `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-19` `@tier3` `@real-io` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-19` `@tier3` `@real-io` `@requires-kvm` `@mandatory:mutation_target`
 
 ```gherkin
 Given Ana has deployed a VM workload on an mTLS-composed "overdrive serve"
@@ -1113,7 +1152,7 @@ not deploy-scoped -- so this window is real, not contrived.
 #### S-VM-36: A guest that hangs during boot reports a timeout, not a missing artifact
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload whose rootfs init hangs forever
@@ -1126,7 +1165,7 @@ And the allocation never passes through Running
 #### S-VM-37: An unclassified hypervisor failure carries its verbatim cause, labelled unclassified
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, a hypervisor failure not covered by the named vocabulary)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given a VM start fails for a reason the platform has no named variant for
@@ -1208,7 +1247,7 @@ And the error names guest networking, guest probes and guest-stack mTLS as
 #### S-VM-39: A VM job spec is accepted
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has written a spec declaring both [job] and [vm]
@@ -1238,7 +1277,7 @@ Consumes: US-VM-3, US-VM-4, US-VM-7, contradiction C-4, K5, K7 (items 1–3).
 #### S-VM-42: A guest kernel panic is a crash, never a clean completion
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, guest kernel-panics after boot)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-11` `@tier3` `@real-io` `@kpi:K1` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-11` `@tier3` `@real-io` `@requires-kvm` `@kpi:K1` `@mandatory:mutation_target`
 
 ```gherkin
 Given Ana has deployed a VM workload whose guest kernel panics after boot
@@ -1250,7 +1289,7 @@ And the allocation is NOT Terminated with a completed condition
 #### S-VM-43: A hypervisor killed by the host (OOM) is a crash
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, host OOM-kills the VMM)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-11` `@tier3` `@real-io` `@kpi:K5`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-11` `@tier3` `@real-io` `@requires-kvm` `@kpi:K5`
 
 ```gherkin
 Given Ana has deployed a VM workload and its hypervisor process is
@@ -1264,7 +1303,7 @@ And the restart/backoff behaviour matches a crashed process workload
 #### S-VM-44: Only an agent-reported exit produces a completed terminal state
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-11` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-11` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload whose guest command exits 0 and reports it
@@ -1286,7 +1325,7 @@ reported exit does NOT reach this state), not by a single scenario's Then.
 #### S-VM-45: An operator stop is never counted as a crash
 
 **Driving port**: `overdrive job stop` (direct CLI handler call, real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-11` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-11` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has a running VM workload
@@ -1300,7 +1339,7 @@ And no restart budget is consumed
 #### S-VM-46: Stopping a VM workload reaches the same terminal state as a process workload
 
 **Driving port**: `overdrive job stop` (direct CLI handler call, real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-12` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-12` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has a running VM workload
@@ -1317,7 +1356,7 @@ decision table). `VM_SHUTDOWN_REQUEST_DEADLINE = 2s` bounds the wait.
 #### S-VM-47: An unresponsive guest is stopped within a bounded grace period, not classified as a crash
 
 **Driving port**: `overdrive job stop` (direct CLI handler call, real in-process `overdrive serve`, guest ignores the shutdown byte)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-12` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-12` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has a running VM workload whose guest ignores shutdown requests
@@ -1330,7 +1369,7 @@ And it is NOT classified as a crash
 #### S-VM-48: A restarted VM boots from a clean, unmodified rootfs copy
 
 **Driving port**: `overdrive deploy` (direct CLI handler call, real in-process `overdrive serve`) + crash-induced restart
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-12` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-12` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given a VM workload crashed after modifying its rootfs
@@ -1345,7 +1384,7 @@ And the operator's artifact file on the host is byte-unchanged
 #### S-VM-49: An untrusted VM workload runs with a bounded, non-root, Landlock-confined hypervisor
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, on a host that supports the required confinement)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-13` `@tier3` `@real-io` `@kpi:K7`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-13` `@tier3` `@real-io` `@requires-kvm` `@kpi:K7`
 
 ```gherkin
 Given Ana has deployed a VM workload on a host that supports the required
@@ -1378,7 +1417,7 @@ derivable.
 #### S-VM-50: The confinement ruleset follows the operator's declared artifact paths, never a hardcoded directory
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, rootfs outside the default artifact directory)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-13` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-13` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana's rootfs lives at /home/ana/scratch/render.ext4, not the default
@@ -1420,7 +1459,7 @@ substitutes `SimVmm` into this Tier-3 test's `overdrive serve` boot.
 #### S-VM-52: Confinement adds no new operator surface
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:unbounded-preservation` `@happy_path` `@ac-13` `@tier3` `@real-io`
+**Tags**: `@contract-shape:unbounded-preservation` `@happy_path` `@ac-13` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana already deploys VM jobs with "overdrive deploy <spec>"
@@ -1432,7 +1471,7 @@ And the terminal state and exit code she reads are unchanged
 #### S-VM-53: The vsock socket's Landlock grant is a directory grant, scoped to nothing else
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`) + `VmConfig::landlock_rules()` (pure)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-13` `@tier3` `@real-io` `@correction:C-4`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-13` `@tier3` `@real-io` `@requires-kvm` `@correction:C-4`
 
 ```gherkin
 Given Ana has deployed a VM workload
@@ -1463,7 +1502,7 @@ Consumes: US-VM-8, US-VM-9, contradiction C-6, K8, K9, K7 (volume-carrying case)
 #### S-VM-55: A guest's write to a declared volume is readable, byte-identical, on the host
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-14` `@tier3` `@real-io` `@kpi:K8`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-14` `@tier3` `@real-io` `@requires-kvm` `@kpi:K8`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume from a host directory to
@@ -1479,7 +1518,7 @@ And the host-side read is done by ordinary filesystem access, not through
 #### S-VM-56: A read-only volume refuses guest writes, host-side, and defeats an uncooperative guest
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-14` `@tier3` `@real-io` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-14` `@tier3` `@real-io` `@requires-kvm` `@mandatory:mutation_target`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a read-only volume
@@ -1498,7 +1537,7 @@ implementation" clause.
 #### S-VM-57: A VM job declaring no volume behaves exactly as before volumes existed
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:unbounded-preservation` `@happy_path` `@ac-14` `@tier3` `@real-io` `@guardrail`
+**Tags**: `@contract-shape:unbounded-preservation` `@happy_path` `@ac-14` `@tier3` `@real-io` `@requires-kvm` `@guardrail`
 
 ```gherkin
 Given Ana has deployed a VM job with no volume declared
@@ -1539,7 +1578,7 @@ Then the allocation is Failed with TransitionReason::VmStorageDaemonAbsent
 #### S-VM-60: A volume that cannot be mounted in the guest never reports a completed run — the composite-lie case
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, mount made to fail inside the guest)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-14` `@tier3` `@real-io` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-14` `@tier3` `@real-io` `@requires-kvm` `@mandatory:mutation_target`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume
@@ -1561,7 +1600,7 @@ the AC the whole `[D4]` amendment exists to defend.
 #### S-VM-61: Adding a volume does not widen what the hypervisor can reach
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, volume-carrying allocation)
-**Tags**: `@contract-shape:unbounded-preservation` `@edge_case` `@ac-14` `@tier3` `@real-io` `@kpi:K7`
+**Tags**: `@contract-shape:unbounded-preservation` `@edge_case` `@ac-14` `@tier3` `@real-io` `@requires-kvm` `@kpi:K7`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume
@@ -1611,7 +1650,7 @@ folded into S-VM-55's happy path — no separate case needed.
 #### S-VM-64: A completed VM job is never reported as crashed by its own storage daemon's clean shutdown
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-16` `@tier3` `@real-io` `@kpi:K9` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-16` `@tier3` `@real-io` `@requires-kvm` `@kpi:K9` `@mandatory:mutation_target`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume whose guest command exits 0
@@ -1630,7 +1669,7 @@ teardown guard is the actual mutation site.
 #### S-VM-65: A storage daemon that dies mid-run never produces a clean exit
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, virtiofsd killed while the guest runs)
-**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-16` `@tier3` `@real-io` `@kpi:K9` `@mandatory:mutation_target`
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-16` `@tier3` `@real-io` `@requires-kvm` `@kpi:K9` `@mandatory:mutation_target`
 
 ```gherkin
 Scenario shape (a) — the guest never resolves an outcome of its own:
@@ -1680,7 +1719,7 @@ it).
 #### S-VM-66: The guest does not boot before its share is ready
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-16` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-16` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume
@@ -1796,7 +1835,7 @@ needed — a genuine tier change, not a relabeling, from the Tier-3
 #### S-VM-68: Nothing is left behind after a volume-carrying VM ends, on any path
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, multiple terminal shapes)
-**Tags**: `@contract-shape:unbounded-preservation` `@edge_case` `@ac-16` `@tier3` `@real-io`
+**Tags**: `@contract-shape:unbounded-preservation` `@edge_case` `@ac-16` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM job declaring a volume
@@ -1817,7 +1856,7 @@ Consumes: US-VM-5, K10.
 #### S-VM-69: Declared CPU translates to guest vCPUs
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-17` `@tier3` `@real-io` `@kpi:K10`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-17` `@tier3` `@real-io` `@requires-kvm` `@kpi:K10`
 
 ```gherkin
 Given Ana has deployed a VM workload declaring 2000 cpu_milli
@@ -1829,7 +1868,7 @@ Then the guest reports two online CPUs (observed FROM INSIDE the guest, not
 #### S-VM-70: A sub-core CPU request still yields a usable VM
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-17` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-17` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has deployed a VM workload declaring 250 cpu_milli
@@ -1841,7 +1880,7 @@ And the allocation reaches Running
 #### S-VM-71: Declared memory is what the guest gets
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-17` `@tier3` `@real-io` `@kpi:K10`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-17` `@tier3` `@real-io` `@requires-kvm` `@kpi:K10`
 
 ```gherkin
 Given Ana has deployed a VM workload declaring 2147483648 memory_bytes
@@ -1853,7 +1892,7 @@ And "overdrive workload describe" reports the same declared figure
 #### S-VM-72: Sizing holds on both memory backings
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, parametrized)
-**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-17` `@tier3` `@real-io` `@kpi:K10`
+**Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-17` `@tier3` `@real-io` `@requires-kvm` `@kpi:K10`
 
 ```gherkin
 Given a VM workload declaring a fixed cpu_milli and memory_bytes
@@ -1890,7 +1929,7 @@ test is the enforcement.
 #### S-VM-90: `Vmm` adapter equivalence — `CloudHypervisorVmm` and `SimVmm` observe the same behaviour
 
 **Driving port**: `vmm_equivalence.rs` (drives both adapters through the same call sequence)
-**Tags**: `@contract-shape:bounded-change` `@example` `@tier3` `@real-io` `@mandatory:trait_contract`
+**Tags**: `@contract-shape:bounded-change` `@example` `@tier3` `@real-io` `@requires-kvm` `@mandatory:trait_contract`
 
 **Crafter notes**: Per Mandate 9, layer 3+ is example-only — this is a
 FIXED, hand-enumerated call sequence (including the named edge cases), not
