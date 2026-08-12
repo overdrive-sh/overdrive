@@ -1521,6 +1521,76 @@ everything downstream stays real.
   now-false *"existing variants never change their wire form"* docstring at
   `traits/driver.rs:26-29`. `DriverType` reaches **no** persisted row, so there
   is no rkyv envelope bump for it.
-- Adding `WorkloadDriver::Vm` **is** an rkyv event — `JobEnvelope` V1 → V2 via
-  the full six-step single-commit procedure, user-ruled at intake I-5. Existing
-  golden fixtures are never touched.
+- Adding `WorkloadDriver::Vm` **is** an rkyv event — `WorkloadIntentEnvelope`
+  V1 → V2 via the full six-step single-commit procedure, user-ruled at intake
+  I-5. Existing golden fixtures are never touched. **The exact payload-type
+  fork is pinned in the Amendment 2026-08-12 section below** (`JobEnvelope`
+  was ADR-0050-deleted; the live envelope is `WorkloadIntentEnvelope`).
+
+---
+
+## Amendment 2026-08-12 (DELIVER 01-02 — `WorkloadIntentEnvelope` V1→V2 fork, GH #42)
+
+**Context.** The Consequences "Neutral" note above records that adding
+`WorkloadDriver::Vm` is an rkyv schema event, and the earlier text named the
+envelope "`JobEnvelope` V1 → V2". That name was stale: `JobEnvelope` was
+**deleted by ADR-0050**; the live envelope is `WorkloadIntentEnvelope`. This
+amendment corrects the name and pins the exact payload-type fork DELIVER 01-02
+lands, per ADR-0048 (alias-to-payload + the six-step version-bump procedure).
+
+**Why the archived layout shifts.** `WorkloadDriver` is embedded by the frozen
+V1 payloads — `JobV1`, `ServiceV1` and `ScheduleV1` each carry
+`driver: WorkloadDriver`. Growing that enum with a `Vm` variant shifts the
+archived layout of all three, so their `FIXTURE_V1_*` golden bytes would break
+without a version bump. The fork is uniform across all three inner payloads.
+
+**FROZEN** (embedded by the frozen V1 payloads; byte-identical to today's
+Exec-only `WorkloadDriver`):
+
+- `WorkloadDriverV1 { Exec(Exec) }`
+- `JobV1` / `ServiceV1` / `ScheduleV1` re-point `driver:` to
+  `WorkloadDriverV1` — **byte-preserving**: a single-variant enum's layout is
+  unchanged, so `FIXTURE_V1_*` still decode.
+
+**LIVE / V2:**
+
+- `Vm { command: String, args: Vec<String>, kernel: String, rootfs: String }`
+  — mirrors the runtime `VmPayload` (§ D3) **minus `volumes`**; `String` not
+  `PathBuf` (rkyv/serde-clean, matches `Exec.command`); volumes deferred to
+  Slice 04; same derive set as `Exec`.
+- `WorkloadDriverV2 { Exec(Exec), Vm(Vm) }` ; `pub type WorkloadDriver = WorkloadDriverV2`
+- `JobV2` / `ServiceV2` / `ScheduleV2` = copies of the V1 shapes with
+  `driver: WorkloadDriverV2` ; `pub type Job = JobV2` ;
+  `pub type Service = ServiceV2` ; `pub type Schedule = ScheduleV2`
+- `WorkloadIntentV2 { Job(JobV2), Service(ServiceV2), Schedule(ScheduleV2) }` ;
+  `pub type WorkloadIntent = WorkloadIntentV2`
+- `WorkloadIntentEnvelope::V2(WorkloadIntentV2)` appended ;
+  `Latest = WorkloadIntentV2` ; `latest() -> V2`
+- `From<WorkloadIntentV1> for WorkloadIntentV2` — structural
+  Job→Job / Service→Service / Schedule→Schedule, driver
+  `WorkloadDriverV1::Exec → WorkloadDriverV2::Exec`
+- `into_latest()` extended to chain V1 → V2
+
+**Uniform-fork rationale.** § D4 rejects `[vm]` + `[service]` (a Service can
+never be a Vm) but accepts `[vm]` + `[job]` and `[vm]` + `[schedule]`. All
+three inner payloads still fork to V2 (Service embeds `WorkloadDriverV2` too)
+because (a) it preserves today's uniform embedding, (b) "Service-with-Vm" is
+prevented at the **parse gate** (§ D4) — it need not be made unrepresentable at
+the type level, and (c) leaving `Service` on `WorkloadDriverV1` creates a
+V1-vs-V2 type mismatch at live `Service`-construction sites.
+
+**Test mechanics** (`workload_intent.rs`). The `canonical_v1_*` payload
+builders use the **live aliases** (`WorkloadIntent` / `Job` /
+`WorkloadDriver`), which move to V2 transparently under alias-to-payload — so
+those builder functions **do not change**, and the `FIXTURE_V1_*` hex +
+assertions stay **verbatim**. `FIXTURE_V1` bytes decode via
+`WorkloadIntentEnvelope::V1` and `into_latest()` converts V1 → V2 for the
+comparison against the `Latest`(V2) projection. The
+`discriminant_offset_from_end() == None` deferral (`workload_intent.rs:37-43`)
+is **unaffected** by the V2 bump — the V1 roundtrip + `archive_for_store`
+roundtrip remain the defense.
+
+**Destructures.** Every irrefutable `let WorkloadDriver::Exec(..) =` becomes an
+exhaustive `match` with a `Vm` arm. Where the `Vm` behaviour needs step 01-08's
+`AllocationSpec.driver` / `DriverPayload` work, the arm is
+`todo!("RED scaffold: ... 01-08")` gated with `#[expect(clippy::todo)]`.
