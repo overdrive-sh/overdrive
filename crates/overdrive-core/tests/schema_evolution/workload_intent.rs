@@ -18,8 +18,22 @@
 //!
 //! When bumping to `WorkloadIntentEnvelope::V2`, append new
 //! `FIXTURE_V2_*` constants + new tests; the V1 constants + tests
-//! stay verbatim, asserting V1 bytes continue to decode through the
-//! bumped envelope via `From<WorkloadIntentV1> for WorkloadIntentV2`.
+//! normally stay verbatim, asserting V1 bytes continue to decode
+//! through the bumped envelope via
+//! `From<WorkloadIntentV1> for WorkloadIntentV2`.
+//!
+//! **Exception realized 2026-08-12 (GH #42 / ADR-0083 Amendment):**
+//! the V1->V2 fork that added `WorkloadDriverV2::Vm` grew the outer
+//! envelope's archived root — rkyv 0.8 sizes an enum's root to the
+//! max footprint across all variants, so a wider V2 sibling pads
+//! every archive, including ones holding the smaller V1 payload.
+//! Old V1 bytes, sized for a V1-only envelope, stopped decoding
+//! (`InvalidEnumDiscriminantError` on `ArchivedWorkloadIntentEnvelope`).
+//! `FIXTURE_V1_*` were regenerated in the SAME commit as the bump,
+//! user-approved, per the `ServiceSpecEnvelope` greenfield
+//! same-commit-regeneration precedent (`service_spec.rs`). From
+//! that commit onward they are pinned verbatim again — NEVER
+//! touched.
 
 use std::num::{NonZeroU16, NonZeroU32};
 
@@ -123,44 +137,55 @@ const FIXTURE_V1: &str = FIXTURE_V1_JOB;
     dead_code,
     reason = "fixture constant retained for explicit job-arm naming; aliased from FIXTURE_V1"
 )]
-// Regenerated in the GAP-6 corrective patch (2026-05-28) — the outer
-// `WorkloadIntentEnvelope`'s archive offsets are positional. Changing
-// `ServiceV1`'s archived layout (one inner variant) shifts the
-// trailing root region pointers across every variant of the outer
-// envelope; the JOB and SCHEDULE fixtures regenerate alongside the
-// SERVICE fixture even though their inner payloads (JobV1) did not
-// change. Phase-1 greenfield single-cut policy.
-const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff000000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff01000000000000000000000000000000000000000000000000000000000000000000000000000000";
+// Regenerated 2026-08-12 at the `WorkloadIntentEnvelope` V1->V2 fork
+// (`WorkloadDriverV2::Vm`, GH #42 / ADR-0083 Amendment 2026-08-12),
+// user-approved. rkyv 0.8 sizes an enum's archived root to the max
+// footprint across all variants; the moment `WorkloadIntentEnvelope`
+// gained the wider V2 sibling (embeds `WorkloadDriverV2::Vm`, two
+// more `String` fields than `WorkloadDriverV1::Exec`), the whole
+// envelope's archived layout grew to fit V2 — even archives holding
+// the smaller V1 variant, which pad to match. Old V1 bytes, sized
+// for a V1-only envelope, no longer decode
+// (`InvalidEnumDiscriminantError` on `ArchivedWorkloadIntentEnvelope`).
+// Per the `ServiceSpecEnvelope` precedent (`service_spec.rs`
+// FIXTURE_V2, GAP-6/ADR-0080 same-commit regenerations) and the
+// Phase-1 greenfield single-cut migration policy (delete the on-disk
+// redb file is the official upgrade path — no real pre-V2 bytes to
+// preserve), the fixture is regenerated in the SAME commit as the
+// envelope bump rather than attempting byte preservation across a
+// real size-growing fork. The JOB, SERVICE, and SCHEDULE fixtures
+// all regenerate together — the outer envelope's archive offsets are
+// positional across every variant. From this commit onward they are
+// pinned verbatim again — NEVER touched.
+const FIXTURE_V1_JOB: &str = "7376632d7061796d656e74732f62696e2f736c656570000033363030ffffffff010000000000000000000000000000008c000000d0ffffff0300000000000000fa000000000000000000001000000000000000008a000000b8ffffffbcffffff0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_service_payload())`.
 ///
-/// Regenerated in the GAP-6 corrective patch (2026-05-28) — the
-/// addition of three `Vec<ProbeDescriptor>` slots to `ServiceV1`
-/// shifted positional offsets in the rkyv archive. The historical
-/// V1 bytes do not survive the layout change under the Phase-1
-/// greenfield single-cut migration policy (per
-/// `feedback_single_cut_greenfield_migrations.md`: "delete the on-
-/// disk redb file" is the official upgrade path). The fixture
-/// continues to pin the canonical V1 archived layout — the
-/// structural defense (every persisted layout has a pinned
-/// golden-bytes fixture) is preserved across the bump.
-const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000000000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff02000000b4ffffff01000000b0ffffff00000000a8ffffff00000000a0ffffff0000000000000000";
+/// Regenerated 2026-08-12 alongside `FIXTURE_V1_JOB` — see that
+/// constant's comment for the full rationale (the
+/// `WorkloadIntentEnvelope` V1->V2 fork, GH #42 / ADR-0083 Amendment
+/// 2026-08-12, grew the outer envelope's archived root across every
+/// variant; regenerated in the same commit as the bump, user-
+/// approved, per the `ServiceSpecEnvelope` precedent). `ServiceV1`'s
+/// own payload shape did not change — only the outer envelope's
+/// positional offsets shifted.
+const FIXTURE_V1_SERVICE: &str = "7376632d66726f6e74656e64732f7573722f62696e2f66726f6e74656e6400002d2d706f7274ffff38303830ffffffff901f000000000000010000000000000001000000000000008d000000b8ffffff0200000000000000f40100000000000000000008000000000000000091000000a1ffffffacffffff0200000000000000000000000000000000000000a4ffffff01000000a0ffffff0000000098ffffff0000000090ffffff0000000000000000";
 
 /// Hex-encoded rkyv-archived bytes of
 /// `WorkloadIntentEnvelope::V1(canonical_v1_schedule_payload())`.
 ///
-/// Regenerated in the GAP-6 corrective patch (2026-05-28) — the
-/// outer envelope's archived layout shifted because the
-/// `WorkloadIntentV1::Service(ServiceV1)` variant's archived
-/// payload size changed (probe-vec slots), which moved the
-/// trailing root region pointers. The historical V1 bytes do not
-/// survive the layout change under the Phase-1 greenfield single-
-/// cut migration policy. The Schedule fixture itself does NOT
-/// embed `ServiceV1` (Schedule embeds `JobV1`), but the SHARED
-/// `WorkloadIntentEnvelope` archive offsets are positional —
-/// changing one variant shifts archive metadata across all three.
-const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000000000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff020000000000000089000000a4ffffff00000000000000000000000000000000";
+/// Regenerated 2026-08-12 alongside `FIXTURE_V1_JOB` — see that
+/// constant's comment for the full rationale (the
+/// `WorkloadIntentEnvelope` V1->V2 fork, GH #42 / ADR-0083 Amendment
+/// 2026-08-12, grew the outer envelope's archived root across every
+/// variant; regenerated in the same commit as the bump, user-
+/// approved, per the `ServiceSpecEnvelope` precedent). The Schedule
+/// fixture itself does NOT embed the `Vm`-carrying driver (Schedule
+/// embeds `Job`, which does), but the SHARED `WorkloadIntentEnvelope`
+/// archive offsets are positional — the V2 sibling's growth shifts
+/// archive metadata across all three variants.
+const FIXTURE_V1_SCHEDULE: &str = "7376632d6e696768746c792d636c65616e75707376632d6e696768746c792d636c65616e75702f7573722f6c6f63616c2f62696e2f636c65616e75702d2d6d6f6465ffff6e696768746c79ff302032202a202a202a000000010000000000000002000000000000009300000098ffffff93000000a3ffffff010000000000000064000000000000000000000400000000000000009600000092ffffffa0ffffff0200000000000000000000000000000000000000000000008900000094ffffff00000000000000000000000000000000";
 
 #[test]
 fn workload_intent_v1_job_decodes_through_current_envelope() {
@@ -303,9 +328,8 @@ fn print_fixture_v1_bytes() {
     reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V<N>_* constants"
 )]
 fn print_fixture_v2_bytes() {
-    for (label, canonical) in [("FIXTURE_V2_JOB_VM", canonical_v2_job_vm_payload())] {
-        let envelope = WorkloadIntentEnvelope::latest(canonical);
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
-        println!("const {label}: &str = \"{}\";", hex::encode(bytes.as_ref()));
-    }
+    let (label, canonical) = ("FIXTURE_V2_JOB_VM", canonical_v2_job_vm_payload());
+    let envelope = WorkloadIntentEnvelope::latest(canonical);
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+    println!("const {label}: &str = \"{}\";", hex::encode(bytes.as_ref()));
 }
