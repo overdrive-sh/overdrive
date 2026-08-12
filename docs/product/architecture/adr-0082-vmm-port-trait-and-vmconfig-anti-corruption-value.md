@@ -50,6 +50,91 @@ same honesty D2.1 states about itself). **No storage-daemon supervision
 port is minted by this feature.** No decision in this ADR changes; only the
 cross-reference above is now stale and is corrected by this note.
 
+**Amendment 2026-08-12 (DELIVER 01-01 design-gap closure, GH #42, user
+ruling).** DELIVER step 01-01 landed the pure value family (`DiskAttachment`,
+`MemoryPlan` + `reserve_bytes`, `KernelImage`, `VmConfinement`; committed
+`2636ba1c`) and then **correctly refused to invent API** (CLAUDE.md §
+*"Implement to the design"*) for the outer `VmConfig` struct, whose remaining
+field types were under-/mis-specified — so `VmConfig`, `VmRunDir` and therefore
+the `Vmm` trait (`create(&VmConfig)`) could not compile. Five ratified
+resolutions close the gap; the pinned shapes land inline at §§ D1, D2, D2.2
+below (which govern), and are summarised here:
+
+1. **`cgroup_scope: CgroupPath` — `CgroupPath` is RELOCATED into
+   `overdrive-core`.** It lives today at
+   `overdrive_worker::cgroup_manager::CgroupPath` (`adapter-host`), and
+   `overdrive-core` (where `VmConfig` lives, § D1 table) cannot depend on
+   `overdrive-worker`. The type moves **verbatim** to
+   `crates/overdrive-core/src/cgroup.rs` (module `overdrive_core::cgroup`) — it
+   is a pure domain identifier, and `adapter-host` was the wrong home; the core
+   `CgroupFs` trait already speaks `&Path` (callers pass
+   `CgroupPath::resolve(&root)`), so no core→worker cycle exists to break. rkyv
+   layout is structural (`struct CgroupPath(String)` — one field), so the
+   relocation is byte-compatible for any persisted value.
+   `overdrive-worker::cgroup_manager` re-exports it for its existing call sites.
+2. **`netns: Option<NetnsName>` — a `NetnsName` newtype is INTRODUCED in
+   `overdrive-core`, used at BOTH `AllocationSpec.netns` and `VmConfig.netns`.**
+   This **supersedes D-TME-12 / JOIN-1** (which chose `Option<String>` for
+   `AllocationSpec.netns`) per explicit user ruling (option (a): newtype both
+   sites, accepting the cross-feature blast radius). See § D2 for the pinned
+   internal-newtype shape and the supersession record.
+3. **`rootfs: RootfsPlan`** and **4. `cmdline: KernelCmdline`** — pinned to
+   concrete shapes at § D2 (both resident in `overdrive-core`,
+   `crate::vm::config`).
+5. **`LandlockRule` + `VmConfig::landlock_rules()` +
+   `VmRunDir::landlock_grant()` are DEFERRED to Slice 03 (US-VM-7).**
+   `LandlockRule` has no shape anywhere and the slice-01 doc already assigns the
+   additive confinement items (Landlock, uid/gid drop, rlimits) to US-VM-7.
+   Both methods are removed from the Slice-01 surface (§§ D2, D2.2); Slice 01
+   runs Cloud Hypervisor **without `--landlock`/`--landlock-rules`** (so the
+   vsock socket needs no grant until Landlock is opted into in Slice 03), and
+   the § D2.2 vsock-Landlock necessity argument becomes **operative in Slice
+   03, not Slice 01**. Seccomp is unaffected — `VmConfinement::seccomp_arg()`
+   stays a Slice-01 deliverable with a landed AC.
+
+**D-TME-12 / JOIN-1 supersession — recorded here because the cited canonical
+home could not be located.** The "no newtype for the netns field" decision is
+cited (in `crates/overdrive-core/src/traits/driver.rs` and `.../vm/config.rs`)
+as living in `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`
+— **that path does not exist** (the transparent-mtls-enrollment feature is
+archived; the surviving references are in
+`docs/architecture/transparent-mtls-enrollment/feature-delta.md` and
+`docs/evolution/2026-06-22-transparent-mtls-enrollment.md`, neither of which is
+a `wave-decisions.md`, and neither *houses* the newtype-rationale — they only
+reference it). Per the fallback discipline, the authoritative supersession is
+recorded in **§ D2** below: JOIN-1's "no `NetnsName` newtype" decision is
+**REVERSED** for `AllocationSpec.netns` and `VmConfig.netns`, citing GH #42 and
+the 2026-08-12 user ruling. JOIN-1's *reasoning* (the value is machine-minted,
+bounded, never operator-typed, never persisted) is preserved and shapes the
+newtype's completeness level; only its conclusion is reversed.
+
+**DELIVER implementation scope (for the crafter — informational; not a roadmap
+edit).** Realising gaps 1 & 2 touches, beyond `crates/overdrive-core/src/vm/config.rs`
+(the `VmConfig`/`VmRunDir`/`RootfsPlan`/`KernelCmdline` build):
+
+- **Gap 1 (`CgroupPath` relocation):** move the type verbatim from
+  `crates/overdrive-worker/src/cgroup_manager.rs` into a new
+  `crates/overdrive-core/src/cgroup.rs` (+ `pub mod cgroup;` in
+  `crates/overdrive-core/src/lib.rs`); re-export from
+  `overdrive-worker::cgroup_manager` (`pub use overdrive_core::cgroup::{CgroupPath, CgroupPathError};`)
+  so existing `overdrive_worker::cgroup_manager::CgroupPath` call sites keep
+  resolving.
+- **Gap 2 (`NetnsName` introduction):** add `NetnsName` to
+  `crates/overdrive-core/src/id.rs`; convert `AllocationSpec.netns`
+  (`crates/overdrive-core/src/traits/driver.rs`) to `Option<NetnsName>` and
+  rewrite its JOIN-1 docstring to cite this ADR's supersession; mint the value
+  in `derive_workload_netns_plan`
+  (`crates/overdrive-control-plane/src/veth_provisioner.rs`, the SINGLE mint
+  site) via `NetnsName::from_hex4(&slot.to_hex4())`; and thread `NetnsName`
+  through the ~9 `AllocationSpec.netns` consumers —
+  `crates/overdrive-control-plane/src/{veth_provisioner.rs, reconciler_runtime.rs, action_shim/mod.rs}`,
+  `crates/overdrive-core/src/{traits/driver.rs, reconcilers/workload_lifecycle.rs, traits/observation_store.rs}`,
+  `crates/overdrive-sim/src/adapters/driver.rs`,
+  `crates/overdrive-worker/src/driver.rs`. The crafter must confirm no consumer
+  serializes/persists the name (the allocator persists the `NetSlot`, not the
+  name); if one does, `NetnsName` needs serde and that is a blocker to surface,
+  not to resolve by adding derives silently.
+
 Implements the application-architecture half of
 `docs/product/architecture/brief.md` § *System Architecture* → *Cloud Hypervisor
 VM driver* (**SD-1 … SD-5**, Titan, 2026-08-10) and § *Domain Model* → *VM
@@ -185,6 +270,17 @@ implementation's `Virtualizer` carried beyond these (`configure`,
 | `VmDriver` (implements `Driver` over `Arc<dyn Vmm>`) | `overdrive-worker` | `adapter-host` |
 | `overdrive-init` (the in-guest PID 1) | `overdrive-init` (**new**) | `binary` |
 
+> **Amendment 2026-08-12 (gaps 1 & 2 — two `overdrive-core` residents pinned).**
+> "`VmConfig` + every value type below" resolves to concrete `overdrive-core`
+> types: `RootfsPlan` / `KernelCmdline` / `VmRunDir` in `crate::vm::config`
+> (beside the landed `KernelImage` / `MemoryPlan` / `VmConfinement`). Two field
+> types were not previously in `overdrive-core` and now are: **`CgroupPath` is
+> relocated** from `overdrive_worker::cgroup_manager` into a new
+> `overdrive_core::cgroup` module (worker re-exports it — see § D2), and
+> **`NetnsName` is introduced** in `overdrive_core::id` (see § D2). Neither adds
+> a dependency; both are required because `VmConfig` and `AllocationSpec` live in
+> `overdrive-core` and cannot reach an `adapter-host`-class type.
+
 `CloudHypervisorVmm` lands in `overdrive-host`, not `overdrive-worker`: it is a
 **production binding of a core port trait to the host OS**, which is
 `overdrive-host`'s stated charter, and it keeps `overdrive-worker` free of
@@ -213,29 +309,186 @@ omitted.**
 
 ```rust
 pub struct VmConfig {
-    pub alloc:       AllocationId,
-    pub kernel:      KernelImage,       // validated magic (lie 3 / C-7)
-    pub rootfs:      RootfsPlan,        // master + master_bytes + clone destination
-    pub cmdline:     KernelCmdline,     // platform-derived; NOT operator surface
-    pub memory:      MemoryPlan,        // guest bytes AND cgroup max (SD-4 / C-3)
-    pub vcpus:       NonZeroU8,         // derived from cpu_milli, floor 1
-    pub run_dir:     VmRunDir,          // owns every path inside it (SD-2 / C-4)
-    pub confinement: VmConfinement,     // identity, seccomp, nofile
-    pub netns:       Option<NetnsName>, // from AllocationSpec.netns
-    pub cgroup_scope: CgroupPath,
+    pub alloc:        AllocationId,      // overdrive_core::id
+    pub kernel:       KernelImage,       // crate::vm::config — validated magic (lie 3 / C-7)
+    pub rootfs:       RootfsPlan,        // crate::vm::config — master + master_bytes + clone dest
+    pub cmdline:      KernelCmdline,     // crate::vm::config — platform-derived; NOT operator surface
+    pub memory:       MemoryPlan,        // crate::vm::config — guest bytes AND cgroup max (SD-4 / C-3)
+    pub vcpus:        NonZeroU8,         // std — derived from cpu_milli, floor 1
+    pub run_dir:      VmRunDir,          // crate::vm::config (§ D2.2) — owns every path inside it (SD-2 / C-4)
+    pub confinement:  VmConfinement,     // crate::vm::config — identity, seccomp, nofile
+    pub netns:        Option<NetnsName>, // overdrive_core::id — from AllocationSpec.netns (both NetnsName)
+    pub cgroup_scope: CgroupPath,        // overdrive_core::cgroup — relocated from overdrive-worker (gap 1)
 }
 ```
 
-There is no `image_type` field, no `landlock_rules` field, no `memory_max`
-field and no `rlimit_fsize` field. Each is a **method**:
+> **Amendment 2026-08-12 (DELIVER 01-01 design-gap closure, GH #42).** Every
+> field above now names a concrete type that resides in (or is relocated to)
+> `overdrive-core`, so this struct — and therefore `Vmm::create(&VmConfig)`
+> (§ D1) — compiles once the four types below are built. The four resolutions
+> that were under-specified at first draft (`CgroupPath`'s home, `NetnsName`'s
+> existence and shape, `RootfsPlan`'s shape, `KernelCmdline`'s shape) are pinned
+> here so the crafter has zero latitude (CLAUDE.md § *"Implement to the
+> design"*). `LandlockRule` is **deferred to Slice 03** — it was never a field
+> (see the method block below).
+
+**`cgroup_scope: CgroupPath` — relocated into `overdrive-core` (gap 1).**
+`CgroupPath` moves **verbatim** from
+`overdrive_worker::cgroup_manager::CgroupPath` to
+`crates/overdrive-core/src/cgroup.rs` (module `overdrive_core::cgroup`); its
+type, derives (`Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize,
+Deserialize, rkyv::{Archive, Serialize, Deserialize}`), `#[serde(try_from =
+"String", into = "String")]`, error type `CgroupPathError`, and its
+`for_alloc(&AllocationId)` / `as_str()` / `resolve(&Path)` / `Display` /
+`FromStr` / `TryFrom` surface are unchanged. `overdrive-worker::cgroup_manager`
+re-exports it (`pub use overdrive_core::cgroup::{CgroupPath, CgroupPathError};`)
+so its existing call sites keep resolving. `overdrive-core` already carries the
+`serde` / `rkyv` derives this needs, and `AllocationId` (used by `for_alloc`) is
+already in `overdrive-core::id`; the move introduces no new dependency and — the
+rkyv layout being a single `String` field — is byte-compatible for any persisted
+`CgroupPath`.
+
+**`netns: Option<NetnsName>` — a new INTERNAL newtype in `overdrive-core`, at
+both sites (gap 2). This SUPERSEDES D-TME-12 / JOIN-1.**
+
+```rust
+// crates/overdrive-core/src/id.rs — beside the newtype catalogue
+
+/// Machine-minted per-allocation network-namespace NAME (`ovd-ns-<4hex>`).
+/// INTERNAL newtype: never operator-typed, never persisted. The value is
+/// minted at exactly ONE site — `derive_workload_netns_plan`
+/// (`overdrive-control-plane`) — from a validated `NetSlot`; this type makes
+/// the shape invariant that derivation previously left implicit explicit.
+///
+/// Used at BOTH `AllocationSpec.netns` and `VmConfig.netns` (user ruling
+/// 2026-08-12, GH #42), reversing JOIN-1's `Option<String>` choice.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NetnsName(String);
+
+impl NetnsName {
+    /// The canonical name prefix. `ovd-ns-` (7) + 4 lowercase hex = 11 chars,
+    /// ≤ IFNAMSIZ (15) and ≤ NAME_MAX (255) by construction.
+    pub const PREFIX: &'static str = "ovd-ns-";
+
+    /// Construct from a 4-char lowercase-hex slot segment (`NetSlot::to_hex4`).
+    /// Validates: exactly 4 chars, all `0-9a-f`; the name is `PREFIX + hex`.
+    /// This is the ONLY constructor. Core cannot depend on `NetSlot`
+    /// (`overdrive-control-plane`), so the constructor takes the already-
+    /// rendered hex segment rather than the slot itself.
+    pub fn from_hex4(hex: &str) -> Result<Self, NetnsNameError>;
+
+    /// The canonical name string (`ovd-ns-<4hex>`) — for building the
+    /// `/var/run/netns/<name>` path and for `setns` targeting.
+    pub fn as_str(&self) -> &str;
+}
+// impl Display for NetnsName { … writes as_str() … }
+```
+
+**Completeness level: INTERNAL newtype — a validating constructor +
+`Display`/`as_str`, and NO `serde`, NO `rkyv`, NO `FromStr`.** JOIN-1's
+still-valid observation drives this: the value has *no operator-typed entry
+point*, *no wire/persist boundary*, and *no `FromStr` round-trip to defend*.
+`AllocationSpec` derives only `Debug, Clone, PartialEq, Eq` (never serde/rkyv)
+and is recomputed each reconcile tick; `VmConfig` is a transient value passed to
+`Vmm::create`; the per-host allocator persists the **`NetSlot`**, never the
+name; and `adopt_on_restart` recovers a `NetSlot` (not a `NetnsName`) from the
+on-disk `/var/run/netns` entries via `strip_prefix`. So no consumer crosses a
+wire/persist boundary and the STRICT `FromStr`/serde obligations do not apply —
+what *is* enforced is the machine-mint invariant (`from_hex4` validates the 4-hex
+shape), which is a strengthening JOIN-1 could not deliver with a bare `String`.
+`NetnsNameError` carries the two validation failures (wrong length, non-hex).
+`Hash`/`Ord` are derived so any set/map keyed on the name works; they cost
+nothing and pre-empt a re-derive.
+
+> **D-TME-12 / JOIN-1 SUPERSEDED (2026-08-12, GH #42, user ruling).** JOIN-1's
+> decision *not* to wrap `AllocationSpec.netns` in a newtype (cited in
+> `traits/driver.rs` as living in the now-nonexistent
+> `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`) is
+> **REVERSED**: both `AllocationSpec.netns` and `VmConfig.netns` become
+> `Option<NetnsName>`. This is recorded here because the cited canonical home
+> could not be located (see the top-of-file amendment note); JOIN-1's *reasoning*
+> is preserved and is exactly why the newtype is INTERNAL (no serde/rkyv/FromStr)
+> rather than STRICT. The `traits/driver.rs` field docstring is the crafter's to
+> rewrite when it lands gap 2, pointing here.
+
+**`rootfs: RootfsPlan` — pinned shape (gap 3), in `crate::vm::config`.**
+
+```rust
+/// The rootfs staging plan: the operator's read-only master image, its size
+/// (captured at construction so `VmConfig::rlimit_fsize` stays PURE), and the
+/// per-launch clone destination.
+pub struct RootfsPlan {
+    master: PathBuf,
+    master_bytes: u64,
+    clone_dest: PathBuf,
+}
+
+impl RootfsPlan {
+    /// Build the plan for one allocation. `master` is the operator's BYO
+    /// rootfs artifact; `master_bytes` is its size, captured HERE by the
+    /// caller (the imperative shell does the `stat`). The clone destination is
+    /// derived on the **master's own filesystem** (FICLONE is intra-filesystem;
+    /// staging into `/run` fails `EXDEV`) with a filename **carrying `alloc`**
+    /// so a reboot-orphaned clone is attributable (SD-1 / SD-2; the reap keys
+    /// off it — ADR-0083 § D7).
+    pub fn for_alloc(master: PathBuf, master_bytes: u64, alloc: &AllocationId) -> Self;
+
+    pub fn master(&self) -> &Path;         // the FICLONE source (read-only)
+    pub fn master_bytes(&self) -> u64;     // captured at construction; feeds rlimit_fsize
+    pub fn clone_dest(&self) -> &Path;     // the FICLONE target / virtio-blk source
+}
+```
+
+The exact clone **filename** format is the crafter's (it must sit in `master`'s
+own directory and contain `alloc`); the *shape* above is fixed. `master_bytes()`
+is what keeps `VmConfig::rlimit_fsize()` pure (see the method block below).
+
+**`cmdline: KernelCmdline` — pinned shape (gap 4), in `crate::vm::config`.**
+
+```rust
+/// The guest kernel command line. PLATFORM-DERIVED — there is NO operator
+/// surface for it (`[vm]` carries kernel/rootfs/command/args, never a
+/// cmdline). Constructed by the platform (the VM driver, the imperative shell)
+/// from fixed boot parameters — the operator cannot inject kernel parameters.
+pub struct KernelCmdline(String);
+
+impl KernelCmdline {
+    /// The platform's kernel command line for `arch`. Called by the VM driver,
+    /// NEVER from operator input. Renders the fixed platform boot line — the
+    /// arch-appropriate `console=…`, `panic=1`, and the virtio-blk `root=`
+    /// device for the ext4 rootfs — so the guest kernel boots, mounts the
+    /// rootfs and reaches `overdrive-init`. The exact token set is platform
+    /// boot policy (the crafter fixes it against a real boot, as with
+    /// `reserve_bytes`); the *shape* — a single platform-owned constructor with
+    /// no operator input — is what is pinned.
+    pub fn platform_default(arch: HostArch) -> Self;
+
+    /// The complete `--cmdline` argument value.
+    pub fn as_str(&self) -> &str;
+}
+```
+
+The operator's *command/args* do **not** ride the cmdline (that would violate
+"NOT operator surface"); how `overdrive-init` learns them is a § D7 guest-channel
+concern, out of `KernelCmdline`'s scope.
+
+There is no `image_type` field, no `memory_max` field and no `rlimit_fsize`
+field. Each is a **method**:
+
+> **Amendment 2026-08-12 (gap 5 — Landlock deferred to Slice 03).**
+> `VmConfig::landlock_rules(&self) -> Vec<LandlockRule>` is **removed from the
+> Slice-01 method set** and, together with the `LandlockRule` type, **deferred
+> to Slice 03 (US-VM-7)** — `LandlockRule` has no shape anywhere and the
+> slice-01 Dependencies section already assigns the additive confinement items
+> (Landlock, uid/gid drop, rlimits) to US-VM-7. Slice 01 launches Cloud
+> Hypervisor **without `--landlock`/`--landlock-rules`**, so no run-directory
+> grant is needed until Landlock confinement is opted into in Slice 03. Do NOT
+> invent `LandlockRule`'s shape now. `rlimit_fsize` (below) is **retained** in
+> Slice 01 (C-6). Seccomp is likewise unaffected —
+> `VmConfinement::seccomp_arg()` (§ D2.5) is a landed Slice-01 deliverable.
 
 ```rust
 impl VmConfig {
-    /// The ONLY Landlock grant CH needs beyond its auto-derived set: the
-    /// run directory, read-write (lie 4 / C-4). Derived from `run_dir` —
-    /// there is no field to forget, and no operator input reaches it.
-    pub fn landlock_rules(&self) -> Vec<LandlockRule>;
-
     /// `max(rootfs image size, guest RAM)` (lie 6 / C-6). Encoded from
     /// Slice 01, BEFORE Slice 04 turns `--memory shared=on` on, because
     /// `shared=on` backs guest RAM with a memfd and a memfd is a *file*
@@ -287,16 +540,17 @@ brief.md § 113) is therefore a Slice 01 deliverable with an acceptance
 criterion, not a recommendation** — without it, the claim is convention. The
 same correction applies to `MemoryPlan` (private fields, struct-literal-
 constructible *within* `overdrive-core`, which is precisely why a
-"never struct-literal-constructed" lint clause is needed at all) and to
-`LandlockRule`.
+"never struct-literal-constructed" lint clause is needed at all). *(The first
+draft also named `LandlockRule` here; per the 2026-08-12 gap-5 ruling
+`LandlockRule` and its lint obligation are **deferred to Slice 03** — see the
+method-block amendment above and § D2.2.)*
 
 #### D2.2 — the vsock Landlock gap (lie 4 / C-4) and directory exclusivity (SD-2): `VmRunDir` owns every path inside itself
 
 ```rust
 /// The per-allocation run directory (SD-2 — tmpfs, one per allocation,
 /// holding NOTHING else). This type owns every path inside it, which is why
-/// SD-2's exclusivity is a structural property rather than a convention and
-/// why C-4's Landlock grant is *derived* rather than *declared*.
+/// SD-2's exclusivity is a structural property rather than a convention.
 pub struct VmRunDir(PathBuf);
 
 impl VmRunDir {
@@ -306,11 +560,23 @@ impl VmRunDir {
     pub fn beacon_socket(&self, port: VsockPort) -> PathBuf; // <dir>/vsock_<port> — the DRIVER binds
     pub fn api_socket(&self) -> PathBuf;               // <dir>/api
     pub fn console_log(&self) -> PathBuf;              // <dir>/console.log
-    pub fn landlock_grant(&self) -> LandlockRule;      // rw on the DIRECTORY, never the socket
+    // landlock_grant() -> LandlockRule — DEFERRED to Slice 03 (gap 5); see note
 }
 ```
 
-Three measured constraints are discharged by this one type:
+> **Amendment 2026-08-12 (gap 5 — Landlock deferred to Slice 03).**
+> `VmRunDir::landlock_grant(&self) -> LandlockRule` is **removed from the
+> Slice-01 method set** and deferred, with the `LandlockRule` type, to Slice 03
+> (US-VM-7). Slice 01 launches Cloud Hypervisor **without
+> `--landlock`/`--landlock-rules`**, so no directory grant is minted this slice.
+> The three measured constraints below are the DESIGN rationale for the Slice-03
+> grant — **they become operative in Slice 03, not Slice 01** — and are retained
+> here so US-VM-7 inherits the pinned reasoning rather than re-deriving it. `C-4`
+> is a Slice-03 concern; the earlier "`C-4`'s Landlock grant is *derived*"
+> framing on `VmRunDir` above is likewise Slice-03-operative.
+
+Three measured constraints are discharged by this one type **when Landlock is
+opted into (Slice 03, US-VM-7)**:
 
 1. **CH does not auto-derive the vsock rule** — so the grant must be explicit,
    and `landlock_grant()` is the only producer.
