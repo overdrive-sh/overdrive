@@ -160,7 +160,7 @@ pub struct AllocationSpec {
     /// Target network namespace NAME this allocation's workload is spawned
     /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
     /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). `Some(plan.netns_name)` only when the C3 site
+    /// `Driver::start`). `Some(plan.netns)` only when the C3 site
     /// provisioned a per-workload netns (the production mTLS boot); `None`
     /// for every non-netns workload (every current test fixture, and any
     /// boot where the mTLS composition gate is off). The driver opens
