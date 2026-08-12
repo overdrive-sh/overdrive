@@ -3153,13 +3153,22 @@ components:
         | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
         | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
-        | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
+        | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
         | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
         | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
 
         **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
         subscription not yet present in the Phase 1 `ExecDriver`; it is defined
         now for wire-shape forward-compatibility and will be emitted in Phase 2.
+        `NoCapacity` is the second emit-deferred variant, and until 2026-08-11
+        this table claimed it was emitted. It is not: nothing in production
+        constructs `TransitionReason::NoCapacity` — only two acceptance tests do
+        (`alloc_status_row_archive_roundtrip`, `alloc_status_snapshot`). The
+        scheduler's `PlacementError::NoCapacity` **is** constructed
+        (`scheduler.rs`), and being a same-named variant on a different enum is
+        what let the false claim stand: a grep for `NoCapacity` appears to
+        confirm it. Emitting this variant needs real node capacity and
+        cross-workload accounting to exist first — GH #261.
         `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
         performs `child.wait()` and produces `ExitKind::Crashed`; the
         `ExitObserver` maps that to this variant directly.
