@@ -4,7 +4,7 @@
 //! Pre-corrective state: the TOML parser produced `ServiceSpec` with
 //! `startup_probes` / `readiness_probes` / `liveness_probes`, but the
 //! wire envelope (`ServiceSpecInput`) and persistent intent payload
-//! (`ServiceV1`) both dropped the vecs on the way to the server. Probe
+//! (`ServiceV2`) both dropped the vecs on the way to the server. Probe
 //! descriptors declared in TOML silently disappeared between CLI
 //! submit and intent admission — surfaced when the GAP-1 corrective
 //! crafter found `hydrate_desired` had no probe data to read.
@@ -17,19 +17,19 @@
 //!
 //! * **GAP-6-AT-01** — `ServiceSpecInput` serde JSON round-trip
 //!   bit-equivalent over arbitrary probe vecs.
-//! * **GAP-6-AT-02** — `ServiceV1::from_submit` projects all three
+//! * **GAP-6-AT-02** — `ServiceV2::from_submit` projects all three
 //!   probe vecs through unchanged for any valid input.
-//! * **GAP-6-AT-03** — `ServiceV1` rkyv archive + deserialize
+//! * **GAP-6-AT-03** — `ServiceV2` rkyv archive + deserialize
 //!   round-trips probe descriptors bit-equivalently. Structural
 //!   guard against rkyv field-shifting silently corrupting probe
 //!   bytes.
 //! * **GAP-6-AT-04** — Composed parser → wire → intent end-to-end:
 //!   a TOML fixture with declared probes parses to a `ServiceSpec`
 //!   whose probe vecs equal the corresponding fields in the
-//!   `ServiceV1` produced by `from_submit` on the wire-side input
+//!   `ServiceV2` produced by `from_submit` on the wire-side input
 //!   projected from the parsed spec.
 //! * **GAP-6-AT-05** — Regression guard: for any non-empty input
-//!   probe vec, the resulting `ServiceV1` has non-empty matching
+//!   probe vec, the resulting `ServiceV2` has non-empty matching
 //!   probe vec (defensive against future refactors silently
 //!   dropping fields).
 
@@ -37,7 +37,7 @@
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, ResourcesInput, ServiceV1, WorkloadDriver, WorkloadIntent,
+    DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadDriver, WorkloadIntent,
     WorkloadIntentEnvelope, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
@@ -67,7 +67,7 @@ fn arb_mechanic() -> impl Strategy<Value = ProbeMechanic> {
 fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
     (
         // ADR-0080 § D1 — `idx` is drawn ARBITRARILY here, deliberately
-        // modelling a hostile wire client. `ServiceV1::from_submit` is
+        // modelling a hostile wire client. `ServiceV2::from_submit` is
         // the API/wire ingress and does not trust a caller-supplied
         // index: it re-assigns from vector position, so a client cannot
         // inject a duplicate `(role, idx)` pair and collide two probes'
@@ -170,13 +170,13 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// GAP-6-AT-02 — from_submit projects probe vecs into ServiceV1.
+// GAP-6-AT-02 — from_submit projects probe vecs into ServiceV2.
 // ---------------------------------------------------------------------------
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
-    /// `ServiceV1::from_submit(input)` produces a `ServiceV1` whose
+    /// `ServiceV2::from_submit(input)` produces a `ServiceV2` whose
     /// three probe vecs equal `input`'s three probe vecs — the
     /// validating constructor MUST NOT drop probe data on the way
     /// through. This is the gap that produced the bug: the legacy
@@ -196,7 +196,7 @@ proptest! {
         let expected_readiness = expected_after_from_submit(&input.readiness_probes);
         let expected_liveness = expected_after_from_submit(&input.liveness_probes);
 
-        let svc = ServiceV1::from_submit(input)
+        let svc = ServiceV2::from_submit(input)
             .expect("canonical ServiceSpecInput is valid");
 
         prop_assert_eq!(&svc.startup_probes, &expected_startup);
@@ -219,7 +219,7 @@ proptest! {
         let readiness_len = input.readiness_probes.len();
         let liveness_len = input.liveness_probes.len();
 
-        let svc = ServiceV1::from_submit(input)
+        let svc = ServiceV2::from_submit(input)
             .expect("canonical ServiceSpecInput is valid");
 
         for (label, probes, expected_len) in [
@@ -249,12 +249,12 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// GAP-6-AT-03 — rkyv archive of ServiceV1 + envelope round-trips probes.
+// GAP-6-AT-03 — rkyv archive of ServiceV2 + envelope round-trips probes.
 // ---------------------------------------------------------------------------
 
-fn arb_service_v1_via_from_submit() -> impl Strategy<Value = ServiceV1> {
+fn arb_service_v1_via_from_submit() -> impl Strategy<Value = ServiceV2> {
     arb_service_spec_input()
-        .prop_map(|input| ServiceV1::from_submit(input).expect("valid ServiceSpecInput"))
+        .prop_map(|input| ServiceV2::from_submit(input).expect("valid ServiceSpecInput"))
 }
 
 proptest! {
@@ -262,11 +262,11 @@ proptest! {
 
     /// `WorkloadIntent::Service(svc).archive_for_store() →
     /// WorkloadIntent::from_store_bytes(...)` round-trips
-    /// bit-equivalent for any `ServiceV1` with arbitrary probe
+    /// bit-equivalent for any `ServiceV2` with arbitrary probe
     /// vecs. Structural guard: an rkyv layout change that silently
     /// shifted probe-vec offsets would fail this assertion. Per
     /// `.claude/rules/development.md` § "rkyv schema evolution" the
-    /// archived layout of `ServiceV1` is positional — appending the
+    /// archived layout of `ServiceV2` is positional — appending the
     /// three probe vecs in the GAP-6 corrective patch is layout-
     /// affecting; this test pins the resulting V1 layout.
     #[test]
@@ -384,11 +384,11 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
 
     // Intent side — validating constructor MUST carry probe vecs
     // through unchanged.
-    let svc = ServiceV1::from_submit(wire_input).expect("valid service spec");
+    let svc = ServiceV2::from_submit(wire_input).expect("valid service spec");
 
     assert_eq!(
         svc.startup_probes, service_spec.startup_probes,
-        "ServiceV1.startup_probes MUST equal parser-side ServiceSpec.startup_probes — \
+        "ServiceV2.startup_probes MUST equal parser-side ServiceSpec.startup_probes — \
          from_submit MUST NOT drop probes on the way through",
     );
     assert_eq!(svc.readiness_probes, service_spec.readiness_probes);
@@ -420,7 +420,7 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
 
-    /// For any non-empty input probe vec, the projected `ServiceV1`
+    /// For any non-empty input probe vec, the projected `ServiceV2`
     /// has a non-empty matching probe vec. Defensive guard against
     /// a future refactor that silently drops a field — for example,
     /// a rewrite of `from_submit` that omits one of the three
@@ -446,7 +446,7 @@ proptest! {
             liveness_probes: liveness,
         };
 
-        let svc = ServiceV1::from_submit(input)
+        let svc = ServiceV2::from_submit(input)
             .expect("canonical ServiceSpecInput is valid");
 
         prop_assert!(
@@ -494,13 +494,21 @@ fn service_spec_input_legacy_json_without_probe_fields_deserialises_with_empty_v
     assert!(parsed.liveness_probes.is_empty());
 
     // And it still flows through `from_submit` unchanged.
-    let svc = ServiceV1::from_submit(parsed).expect("legacy spec validates");
+    let svc = ServiceV2::from_submit(parsed).expect("legacy spec validates");
     assert!(svc.startup_probes.is_empty());
     assert!(svc.readiness_probes.is_empty());
     assert!(svc.liveness_probes.is_empty());
 
-    // ServiceV1's driver projection MUST be Exec("/bin/legacy") —
-    // smoke check that the rest of the projection still works.
-    let WorkloadDriver::Exec(exec) = svc.driver;
+    // Service's driver projection MUST be Exec("/bin/legacy") — smoke
+    // check that the rest of the projection still works. `from_submit`
+    // can only ever construct `WorkloadDriver::Exec` — `DriverInput`
+    // (the wire/parser shape this test drives through) has no `Vm`
+    // variant until step 01-08 wires the `[vm]` dispatch (ADR-0083
+    // Amendment 2026-08-12, GH #42).
+    let WorkloadDriver::Exec(exec) = svc.driver else {
+        unreachable!(
+            "test precondition: from_submit only constructs WorkloadDriver::Exec until DriverInput::Vm lands (step 01-08)"
+        )
+    };
     assert_eq!(exec.command, "/bin/legacy");
 }

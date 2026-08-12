@@ -77,7 +77,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, ResourcesInput, ServiceV1, WorkloadIntent,
+    DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadIntent,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::{CorrelationKey, NodeId};
@@ -206,14 +206,14 @@ async fn fetch_alloc_status(state: AppState, workload_id: &str) -> AllocStatusRe
 
 /// Derive the `spec_digest` of the Service spec the way the production
 /// `submit_workload` handler does — wrap into `WorkloadIntent::Service`
-/// via `ServiceV1::from_submit` and call `spec_digest()`. This is the
+/// via `ServiceV2::from_submit` and call `spec_digest()`. This is the
 /// SAME digest the handler hands to `allocator.allocate(...)`, so the
 /// hand-constructed `Action::ReleaseServiceVip` carries the digest the
 /// allocator's memo is actually keyed by — the integration would pass
 /// trivially against a bogus digest if this projection drifted, hence
 /// the careful mirror of the handler's path.
 fn digest_for_spec(spec: ServiceSpecInput) -> [u8; 32] {
-    let service = ServiceV1::from_submit(spec).expect("Service spec must validate");
+    let service = ServiceV2::from_submit(spec).expect("Service spec must validate");
     let intent = WorkloadIntent::Service(service);
     let hash = intent.spec_digest().expect("spec_digest of WorkloadIntent");
     *hash.as_bytes()

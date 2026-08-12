@@ -79,7 +79,7 @@ pub struct ServiceSpecOutput {
     /// at the Service level, not per-listener).
     pub listeners: Vec<ListenerInput>,
     /// Operator-declared startup probes, projected read-only from the
-    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
     /// side [`crate::api::submit::ServiceSpecInput::startup_probes`].
     /// Surfaced today so an operator who declared a
     /// `[[health_check.startup]]` probe sees it reflected on describe
@@ -88,12 +88,12 @@ pub struct ServiceSpecOutput {
     /// `#[serde(default)]` is needed on this response wire.
     pub startup_probes: Vec<ProbeDescriptor>,
     /// Operator-declared readiness probes, projected read-only from the
-    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
     /// side [`crate::api::submit::ServiceSpecInput::readiness_probes`];
     /// surfaced on describe so a Service's readiness probes round-trip.
     pub readiness_probes: Vec<ProbeDescriptor>,
     /// Operator-declared liveness probes, projected read-only from the
-    /// persisted [`crate::aggregate::ServiceV1`]. Mirrors the submit-
+    /// persisted [`crate::aggregate::ServiceV2`]. Mirrors the submit-
     /// side [`crate::api::submit::ServiceSpecInput::liveness_probes`];
     /// surfaced on describe so a Service's liveness probes round-trip.
     pub liveness_probes: Vec<ProbeDescriptor>,
@@ -155,7 +155,7 @@ mod tests {
 
     /// Strategy producing an arbitrary `Vec<ListenerInput>` with
     /// arbitrary ports and protocol strings (no validation at the wire
-    /// layer — that happens in `ServiceV1::from_submit`).
+    /// layer — that happens in `ServiceV2::from_submit`).
     fn listeners_strategy() -> impl Strategy<Value = Vec<ListenerInput>> {
         proptest::collection::vec(
             (any::<u16>(), ".*").prop_map(|(port, protocol)| ListenerInput { port, protocol }),
@@ -264,7 +264,7 @@ mod tests {
             )
     }
 
-    use crate::aggregate::{JobV1, ServiceV1};
+    use crate::aggregate::{JobV2, ServiceV2};
     use crate::api::submit::ServiceSpecInput;
 
     /// A known-good `JobSpecInput` for building intent fixtures through
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn job_to_describe_delegates_to_from_job() {
-        let job: JobV1 = JobV1::from_submit(valid_job_spec_input()).expect("valid job spec");
+        let job: JobV2 = JobV2::from_submit(valid_job_spec_input()).expect("valid job spec");
 
         // `to_describe` is the describe-side render path; it must equal
         // the existing `From<&Job>` projection it delegates to.
@@ -298,7 +298,7 @@ mod tests {
         use crate::aggregate::probe_descriptor::ProbeMechanic;
         use crate::observation::{ProbeIdx, ProbeRole};
 
-        // An operator-declared startup probe — `ServiceV1::from_submit`
+        // An operator-declared startup probe — `ServiceV2::from_submit`
         // passes probe vecs through unchanged (validation only; default-
         // TCP synthesis happens at the TOML parser, NOT in `from_submit`),
         // so the describe round-trip is exact equality with this input.
@@ -329,7 +329,7 @@ mod tests {
             readiness_probes: vec![],
             liveness_probes: vec![],
         };
-        let svc: ServiceV1 = ServiceV1::from_submit(input).expect("valid service spec");
+        let svc: ServiceV2 = ServiceV2::from_submit(input).expect("valid service spec");
         let vip = ServiceVip::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 96, 0, 7)))
             .expect("ipv4 vip");
 

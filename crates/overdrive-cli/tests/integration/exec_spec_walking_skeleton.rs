@@ -202,12 +202,18 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
         panic!("test precondition: submit handler today only writes WorkloadIntent::Job");
     };
 
-    // Destructure WorkloadDriver::Exec — irrefutable for Phase 1 (single
-    // variant). Future Phase 2+ variants (`MicroVm`, `Wasm`) make this
-    // a `match`, but the new arms project to their own
-    // `assert_eq!(exec.command, ...)` body — the WS structure carries
-    // forward.
-    let WorkloadDriver::Exec(exec) = &job.driver;
+    // Destructure WorkloadDriver::Exec. `from_submit` can only ever
+    // construct `WorkloadDriver::Exec` — `DriverInput` (the wire/
+    // parser shape this WS drives through) has no `Vm` variant until
+    // step 01-08 wires the `[vm]` dispatch (ADR-0083 Amendment
+    // 2026-08-12, GH #42). A future Vm-specific WS test would project
+    // to its own `assert_eq!(vm.command, ...)` body — that test does
+    // not yet exist, so the `Vm` arm here is a test precondition.
+    let WorkloadDriver::Exec(exec) = &job.driver else {
+        unreachable!(
+            "test precondition: from_submit only constructs WorkloadDriver::Exec until DriverInput::Vm lands (step 01-08)"
+        )
+    };
     assert_eq!(
         exec.command, "/opt/payments/bin/payments-server",
         "stored Job.driver.exec.command must equal the operator's TOML \

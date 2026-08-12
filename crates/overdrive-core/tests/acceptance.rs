@@ -229,8 +229,8 @@ mod acceptance {
     // service-health-check-probes — GAP-6 corrective patch.
     // Probe descriptors persist end-to-end through the parser →
     // wire (ServiceSpecInput) → intent (WorkloadIntent::Service /
-    // ServiceV1) → IntentStore rkyv-archived bytes round-trip.
-    // Pre-corrective state: ServiceV1::from_submit had zero
+    // ServiceV2) → IntentStore rkyv-archived bytes round-trip.
+    // Pre-corrective state: ServiceV2::from_submit had zero
     // probe-related code and silently dropped operator-declared
     // probes between admission and IntentStore. Surfaced when the
     // GAP-1 corrective crafter found hydrate_desired had no probe

@@ -44,7 +44,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
-use overdrive_core::aggregate::{ServiceV1, WorkloadIntent};
+use overdrive_core::aggregate::{ServiceV2, WorkloadIntent};
 use overdrive_core::api::submit::{ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -282,7 +282,7 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 /// `SubmitWorkloadResponse.spec_digest`).
 #[must_use]
 pub fn service_spec_digest_hex(spec: ServiceSpecInput) -> String {
-    let service = ServiceV1::from_submit(spec).expect("Service spec must validate");
+    let service = ServiceV2::from_submit(spec).expect("Service spec must validate");
     let intent = WorkloadIntent::Service(service);
     intent.spec_digest().expect("spec_digest").to_string()
 }

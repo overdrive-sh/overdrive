@@ -72,7 +72,7 @@ async fn service_workload_convergence_tick_does_not_panic() {
     let clock = Arc::new(SimClock::new());
     let state = build_state(&tmp, clock.clone()).await;
 
-    let svc = overdrive_core::aggregate::ServiceV1::from_submit(ServiceSpecInput {
+    let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

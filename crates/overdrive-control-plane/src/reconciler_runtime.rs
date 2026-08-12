@@ -1888,7 +1888,7 @@ async fn hydrate_desired(
     }
 }
 
-/// Read `WorkloadIntent::Service(ServiceV1)` from the IntentStore for
+/// Read `WorkloadIntent::Service(ServiceV2)` from the IntentStore for
 /// `workload_id`. Returns `Ok(None)` when the intent is absent
 /// (deferred to next tick) or when the persisted intent is a
 /// `Job` / `Schedule` variant (kind mismatch — Service-lifecycle
@@ -1896,7 +1896,7 @@ async fn hydrate_desired(
 async fn service_spec_from_intent(
     state: &AppState,
     workload_id: &WorkloadId,
-) -> Result<Option<overdrive_core::aggregate::ServiceV1>, ConvergenceError> {
+) -> Result<Option<overdrive_core::aggregate::ServiceV2>, ConvergenceError> {
     let key = IntentKey::for_workload(workload_id);
     let Some(bytes) = state
         .store
@@ -1941,9 +1941,9 @@ fn format_mechanic_summary(
 /// uniformly across every alloc of the same workload. Returns a
 /// closure-able tuple `(max_attempts, startup_deadline,
 /// mechanic_summary, inferred, startup_probes_empty)` derived from
-/// `ServiceV1.startup_probes` per ADR-0057/0058.
+/// `ServiceV2.startup_probes` per ADR-0057/0058.
 fn spec_facts_for_service(
-    svc: &overdrive_core::aggregate::ServiceV1,
+    svc: &overdrive_core::aggregate::ServiceV2,
 ) -> (u32, Duration, String, bool, bool) {
     use overdrive_core::service_lifecycle::DEFAULT_STARTUP_DEADLINE;
     let startup_probes_empty = svc.startup_probes.is_empty();
@@ -1971,11 +1971,11 @@ fn spec_facts_for_service(
 
 /// Slice 04 — project the readiness facts uniform across every alloc:
 /// `(has_readiness_probe, success_threshold)`. `has_readiness_probe`
-/// is `ServiceV1.readiness_probes` non-empty; `success_threshold` is
+/// is `ServiceV2.readiness_probes` non-empty; `success_threshold` is
 /// the first readiness probe's declared threshold (default 1 per
 /// ADR-0055 §6 / ADR-0057 §2), or 1 when absent. Per persist-inputs,
 /// these are re-derived from the live spec every tick.
-fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
     let has_readiness_probe = !svc.readiness_probes.is_empty();
     let success_threshold =
         svc.readiness_probes.first().and_then(|p| p.success_threshold).unwrap_or(1);
@@ -1984,12 +1984,12 @@ fn readiness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (b
 
 /// Step 03-02 / Slice 05 — project the liveness facts uniform across
 /// every alloc: `(has_liveness_probe, failure_threshold)`.
-/// `has_liveness_probe` is `ServiceV1.liveness_probes` non-empty;
+/// `has_liveness_probe` is `ServiceV2.liveness_probes` non-empty;
 /// `failure_threshold` is the first liveness probe's declared
 /// threshold (default 3 per ADR-0057 §2 / DDD-14), or 3 when absent.
 /// Per persist-inputs, these are re-derived from the live spec every
 /// tick — never persisted as a `should_restart` flag.
-fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV1) -> (bool, u32) {
+fn liveness_facts_for_service(svc: &overdrive_core::aggregate::ServiceV2) -> (bool, u32) {
     let has_liveness_probe = !svc.liveness_probes.is_empty();
     let failure_threshold = svc
         .liveness_probes
@@ -2018,7 +2018,7 @@ const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
 async fn service_dataplane_identity(
     state: &AppState,
     workload_id: &WorkloadId,
-    svc: &overdrive_core::aggregate::ServiceV1,
+    svc: &overdrive_core::aggregate::ServiceV2,
 ) -> Result<Option<overdrive_core::service_lifecycle::ServiceDataplaneIdentity>, ConvergenceError> {
     let Some(listener) = svc.listeners.first() else {
         return Ok(None);
@@ -2096,7 +2096,7 @@ pub async fn hydrate_actual_for_test(
 /// Reads `WorkloadIntent` at `IntentKey::for_workload(&workload_id)`
 /// and dispatches per ADR-0050 § 2:
 ///
-/// * `WorkloadIntent::Service(ServiceV1)` — computes `spec_digest`,
+/// * `WorkloadIntent::Service(ServiceV2)` — computes `spec_digest`,
 ///   consults `state.allocator.lock().await.get(&digest)` for the
 ///   allocator-issued VIP, projects each listener through
 ///   `ServiceId::derive(&vip, port, protocol, "service-map")` per
@@ -2313,9 +2313,9 @@ async fn hydrate_svid_actual_held(
 /// `ConvergenceError::IntentRead`.
 ///
 /// Returns a kind-agnostic `Job` projection for both `Job` and
-/// `Service` variants — `ServiceV1` carries an identical
+/// `Service` variants — `ServiceV2` carries an identical
 /// `(id, replicas, resources, driver)` envelope (its only extra field
-/// `listeners` is consumed elsewhere via `ServiceV1`-typed reads, not
+/// `listeners` is consumed elsewhere via `ServiceV2`-typed reads, not
 /// through this projection), so Service workloads pick up their
 /// driver + resource envelope identically and feed into the existing
 /// `Some(job) => …` allocation-emission arm at
@@ -2373,13 +2373,13 @@ async fn read_job(
             Ok((Some(job.clone()), None, probe_descriptors, service_ports))
         }
         overdrive_core::aggregate::WorkloadIntent::Service(svc) => {
-            // Project Service onto a kind-agnostic Job shape. JobV1
-            // and ServiceV1 are field-for-field equivalent over
+            // Project Service onto a kind-agnostic Job shape. JobV2
+            // and ServiceV2 are field-for-field equivalent over
             // (id, replicas, resources, driver) — the reconciler's
             // `Some(job) =>` arm reads only these four fields, so the
             // projection is lossless from its perspective. Service-
             // only fields (listeners, *_probes) are consumed elsewhere:
-            // listeners via ServiceV1-typed reads; probe descriptors
+            // listeners via ServiceV2-typed reads; probe descriptors
             // via `probe_descriptors` returned alongside `job`. The
             // `WorkloadKind::Service` discriminator is threaded
             // separately via `desired.workload_kind` so emitted actions
@@ -2835,7 +2835,7 @@ async fn hydrate_actual(
         //      the `ServiceMapHydrator` LWW pattern at the arm above
         //      (`updated_at.dominates`).
         //   3. `IntentStore::get(IntentKey::for_workload(workload_id))`
-        //      → `WorkloadIntent::Service(ServiceV1)` — sources
+        //      → `WorkloadIntent::Service(ServiceV2)` — sources
         //      `max_attempts`, `startup_deadline`, `mechanic_summary`,
         //      `inferred`, `startup_probes_empty`. Same `service_spec_from_intent`
         //      helper as the `hydrate_desired` arm above.
@@ -3008,7 +3008,7 @@ fn latest_probe_status(
 async fn hydrate_service_alloc_facts(
     state: &AppState,
     workload_id: &WorkloadId,
-    spec: &overdrive_core::aggregate::ServiceV1,
+    spec: &overdrive_core::aggregate::ServiceV2,
     spec_facts: &(u32, Duration, String, bool, bool),
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
@@ -3029,11 +3029,23 @@ async fn hydrate_service_alloc_facts(
     let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     // Slice 05 — the live driver command/args the liveness restart
     // replays. Same projection the WorkloadLifecycle Run branch uses
-    // (`workload_lifecycle.rs`): single Phase-1 Exec variant.
-    let overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
-        command: live_command,
-        args: live_args,
-    }) = &spec.driver;
+    // (`workload_lifecycle.rs`). `WorkloadDriverV2::Vm` landed at step
+    // 01-02 (ADR-0083 Amendment 2026-08-12, GH #42) but replaying a
+    // Vm-driven restart needs step 01-08's `AllocationSpec.driver:
+    // DriverPayload` (ADR-0083 § D3).
+    let (live_command, live_args) = match &spec.driver {
+        overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
+            command,
+            args,
+        }) => (command, args),
+        #[expect(
+            clippy::todo,
+            reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — liveness restart cannot replay a Vm-driven alloc until then"
+        )]
+        overdrive_core::aggregate::WorkloadDriver::Vm(_) => todo!(
+            "RED scaffold: liveness restart replay for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
+        ),
+    };
     let rows = state
         .obs
         .alloc_status_rows()
@@ -3165,7 +3177,7 @@ async fn hydrate_service_alloc_facts(
 /// keep that fn within the `clippy::too_many_lines` budget per
 /// `.claude/rules/development.md` § Object Calisthenics.
 fn liveness_restart_spec(
-    spec: &overdrive_core::aggregate::ServiceV1,
+    spec: &overdrive_core::aggregate::ServiceV2,
     alloc_id: &AllocationId,
     identity: &overdrive_core::SpiffeId,
     command: &str,
@@ -3186,7 +3198,7 @@ fn liveness_restart_spec(
             .collect(),
         // canonical-workload-address-inbound-tproxy (D-A1 / D-BLOCKER1, GH
         // #241): the declared Service listener ports — read through the
-        // single `ServiceV1::listen_ports` source the hydrate-desired
+        // single `ServiceV2::listen_ports` source the hydrate-desired
         // projection also reads, so the two sets stay structurally identical.
         service_ports: spec.listen_ports(),
         // Netns/veth/addr-agnostic reconciler side (JOIN-2 + D-A1) — the
@@ -3362,7 +3374,7 @@ mod tests {
         use std::sync::Arc;
 
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, ResourcesInput, ServiceV1, WorkloadIntent, WorkloadKind,
+            DriverInput, ExecInput, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
         use overdrive_core::dataplane::backend_key::Proto;
@@ -3414,7 +3426,7 @@ mod tests {
                 .iter()
                 .map(|p| ListenerInput { port: *p, protocol: "tcp".to_string() })
                 .collect();
-            let svc = ServiceV1::from_submit(ServiceSpecInput {
+            let svc = ServiceV2::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3607,10 +3619,10 @@ mod tests {
         /// listener map.
         #[tokio::test]
         async fn hydrate_desired_job_returns_empty_listeners() {
-            use overdrive_core::aggregate::{JobSpecInput, JobV1};
+            use overdrive_core::aggregate::{JobSpecInput, JobV2};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let job = JobV1::from_submit(JobSpecInput {
+            let job = JobV2::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3643,17 +3655,17 @@ mod tests {
         /// S-BDB-08 unit-level proxy: a `Schedule` intent also has no
         /// listeners — same hydrate skip as Job.
         ///
-        /// Note: `ScheduleV1::from_submit` is itself a RED scaffold
+        /// Note: `ScheduleV2::from_submit` is itself a RED scaffold
         /// (lands in a future slice per ADR-0051 OQ-5). The test
-        /// constructs `ScheduleV1` directly via struct literal —
+        /// constructs `ScheduleV2` directly via struct literal —
         /// the wire-arm validator is not under test here, only the
         /// hydrate path's `Schedule(_)` arm.
         #[tokio::test]
         async fn hydrate_desired_schedule_returns_empty_listeners() {
-            use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV1, ScheduleV1};
+            use overdrive_core::aggregate::{CronExpr, JobSpecInput, JobV2, ScheduleV2};
 
             let tmp = TempDir::new().expect("tmpdir");
-            let inner_job = JobV1::from_submit(JobSpecInput {
+            let inner_job = JobV2::from_submit(JobSpecInput {
                 id: WORKLOAD.to_string(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -3663,7 +3675,7 @@ mod tests {
                 }),
             })
             .expect("valid job");
-            let sched = ScheduleV1 {
+            let sched = ScheduleV2 {
                 id: workload_id(),
                 job: inner_job,
                 cron_expr: CronExpr::new("* * * * *").expect("valid cron"),
@@ -4071,7 +4083,7 @@ mod tests {
         use overdrive_core::UnixInstant;
         use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
         use overdrive_core::aggregate::{
-            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent,
+            DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent,
             WorkloadKind,
         };
         use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
@@ -4145,7 +4157,7 @@ mod tests {
                 inferred: false,
             };
 
-            let svc = ServiceV1::from_submit(ServiceSpecInput {
+            let svc = ServiceV2::from_submit(ServiceSpecInput {
                 id: WORKLOAD.to_owned(),
                 replicas: 1,
                 resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

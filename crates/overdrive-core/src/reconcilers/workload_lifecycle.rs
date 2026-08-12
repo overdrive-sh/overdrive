@@ -735,11 +735,22 @@ impl WorkloadLifecycle {
                     // Per ADR-0031 Amendment 1: destructure the
                     // tagged-enum `WorkloadDriver` to project to the
                     // flat `AllocationSpec` (which stays flat per
-                    // ADR-0030 §6). The destructure is irrefutable
-                    // today (single Phase-1 variant); when Phase-2+
-                    // adds variants it becomes a `match` and each arm
-                    // projects to its per-driver-class spec.
-                    let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+                    // ADR-0030 §6 until step 01-08 replaces it with
+                    // `AllocationSpec.driver: DriverPayload` per
+                    // ADR-0083 § D3). `WorkloadDriverV2::Vm` landed at
+                    // step 01-02 (ADR-0083 Amendment 2026-08-12,
+                    // GH #42) but placing a Vm-driven restart onto the
+                    // flat spec needs that future typed payload.
+                    let (command, args) = match &job.driver {
+                        WorkloadDriver::Exec(Exec { command, args }) => (command, args),
+                        #[expect(
+                            clippy::todo,
+                            reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — WorkloadLifecycle cannot place a Vm-driven restart until then"
+                        )]
+                        WorkloadDriver::Vm(_) => todo!(
+                            "RED scaffold: WorkloadLifecycle restart placement for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
+                        ),
+                    };
                     let action = Action::RestartAllocation {
                         alloc_id: failed.alloc_id.clone(),
                         spec: AllocationSpec {
@@ -850,10 +861,22 @@ impl WorkloadLifecycle {
                         // action carries the operator-declared command
                         // + args projected from the tagged-enum
                         // `WorkloadDriver` field on `Job`. No more
-                        // literal `/bin/sleep` / `["60"]`. The
-                        // destructure is irrefutable today (single
-                        // Phase-1 variant); future variants append.
-                        let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+                        // literal `/bin/sleep` / `["60"]`.
+                        // `WorkloadDriverV2::Vm` landed at step 01-02
+                        // (ADR-0083 Amendment 2026-08-12, GH #42) but
+                        // placing a Vm-driven start onto the flat spec
+                        // needs step 01-08's `AllocationSpec.driver:
+                        // DriverPayload` (ADR-0083 § D3).
+                        let (command, args) = match &job.driver {
+                            WorkloadDriver::Exec(Exec { command, args }) => (command, args),
+                            #[expect(
+                                clippy::todo,
+                                reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — WorkloadLifecycle cannot place a Vm-driven start until then"
+                            )]
+                            WorkloadDriver::Vm(_) => todo!(
+                                "RED scaffold: WorkloadLifecycle start placement for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
+                            ),
+                        };
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
                             workload_id: job.id.clone(),
@@ -1223,7 +1246,7 @@ pub struct WorkloadLifecycleState {
 /// Closes GAP-8 from the Phase 01 structural audit. Pre-patch the
 /// reconciler hardcoded an empty `Vec` at both action arms with a
 /// comment justifying it for Job-kind; Service-kind silently inherited
-/// the empty vec even though `ServiceV1` carries three probe vectors
+/// the empty vec even though `ServiceV2` carries three probe vectors
 /// (GAP-6 admission close-out). The runtime now calls this helper at
 /// hydrate-desired time and stamps the result onto
 /// [`WorkloadLifecycleState::probe_descriptors`]; the reconciler
@@ -1285,7 +1308,7 @@ pub fn project_probe_descriptors(
 /// - [`crate::aggregate::WorkloadIntent::Service(svc)`] →
 ///   `svc.listen_ports()` — the operator's declared listener ports in
 ///   declaration order, read through the single
-///   [`crate::aggregate::ServiceV1::listen_ports`] source (D-BLOCKER1).
+///   [`crate::aggregate::ServiceV2::listen_ports`] source (D-BLOCKER1).
 /// - [`crate::aggregate::WorkloadIntent::Job(_)`] → empty vec (Job-kind has
 ///   no listener surface; the canonical-address inbound path is a
 ///   Service-kind concern, same boundary as probes per ADR-0054 §3).
@@ -1351,7 +1374,7 @@ mod project_service_listen_ports_tests {
     //! listener ports; Job and Schedule each project the empty vec.
     //!
     //! Fixtures build the `Service` arm end-to-end via
-    //! `ServiceV1::from_submit` (the parser-side path), so the projection
+    //! `ServiceV2::from_submit` (the parser-side path), so the projection
     //! is exercised against the same `svc.listeners` shape the runtime
     //! hydrate path uses and the bridge reads in 02-01 — keeping the
     //! S-PORTSET equality property structurally honest (D-BLOCKER1: one
@@ -1362,7 +1385,7 @@ mod project_service_listen_ports_tests {
     use proptest::prelude::*;
 
     use crate::aggregate::{
-        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV1, ServiceV1,
+        CronExpr, DriverInput, Exec, ExecInput, Job, ResourcesInput, ScheduleV2, ServiceV2,
         WorkloadDriver, WorkloadIntent,
     };
     use crate::api::submit::{ListenerInput, ServiceSpecInput};
@@ -1402,7 +1425,7 @@ mod project_service_listen_ports_tests {
             readiness_probes: vec![],
             liveness_probes: vec![],
         };
-        let svc = ServiceV1::from_submit(input).expect("canonical ServiceSpecInput is valid");
+        let svc = ServiceV2::from_submit(input).expect("canonical ServiceSpecInput is valid");
         WorkloadIntent::Service(svc)
     }
 
@@ -1443,7 +1466,7 @@ mod project_service_listen_ports_tests {
 
     #[test]
     fn schedule_kind_projects_the_empty_port_set() {
-        let intent = WorkloadIntent::Schedule(ScheduleV1 {
+        let intent = WorkloadIntent::Schedule(ScheduleV2 {
             id: wid("a-schedule"),
             job: make_job("a-schedule"),
             cron_expr: CronExpr::new("0 * * * *").expect("valid cron"),

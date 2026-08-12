@@ -20,7 +20,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use overdrive_core::aggregate::{
-    AggregateError, IntentKey, Job, ServiceV1, WorkloadIntent, WorkloadKind,
+    AggregateError, IntentKey, Job, ServiceV2, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::id::{SpiffeId, WorkloadId};
@@ -243,8 +243,8 @@ pub async fn submit_workload(
     let want_streaming = wants_ndjson(&headers);
     // 1. Dispatch on the wire-side `SubmitSpecInput` discriminator per
     //    ADR-0051 § 4 / OQ-6 and route each arm through its per-kind
-    //    validating constructor (`JobV1::from_submit` /
-    //    `ServiceV1::from_submit` / `ScheduleV1::from_submit`). This
+    //    validating constructor (`JobV2::from_submit` /
+    //    `ServiceV2::from_submit` / `ScheduleV2::from_submit`). This
     //    is the wire → intent boundary; the constructors are the
     //    single validation surface. Field-name preservation per
     //    ADR-0015: scalar-field validation failures
@@ -271,7 +271,7 @@ pub async fn submit_workload(
             })?)
         }
         overdrive_core::api::submit::SubmitSpecInput::Service(ssi) => {
-            WorkloadIntent::Service(ServiceV1::from_submit(ssi).map_err(|e| match e {
+            WorkloadIntent::Service(ServiceV2::from_submit(ssi).map_err(|e| match e {
                 AggregateError::Validation { field, message } => {
                     ControlPlaneError::Validation { field: Some(field.to_owned()), message }
                 }
@@ -758,7 +758,7 @@ pub async fn describe_workload(
             DescribeSpecOutput::Service(svc.to_describe(vip))
         }
         // Schedule describe is unreachable in Phase 1 — no Schedule can be
-        // persisted (`ScheduleV1::from_submit` is itself a RED scaffold per
+        // persisted (`ScheduleV2::from_submit` is itself a RED scaffold per
         // ADR-0064 OQ-5). Reject with the same structured `Validation`
         // shape the submit handler uses for the unrealised Schedule path,
         // so client tooling branching on the error discriminator stays
@@ -1259,7 +1259,7 @@ pub async fn alloc_status(
 /// deriving an index from the flat concatenation is the exact defect
 /// that ADR restored `ProbeDescriptor.idx` to prevent).
 fn service_probe_descriptors(
-    svc: &overdrive_core::aggregate::ServiceV1,
+    svc: &overdrive_core::aggregate::ServiceV2,
 ) -> Vec<overdrive_core::aggregate::probe_descriptor::ProbeDescriptor> {
     svc.startup_probes
         .iter()

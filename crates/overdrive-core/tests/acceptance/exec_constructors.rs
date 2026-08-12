@@ -13,6 +13,20 @@ use overdrive_core::aggregate::{
     DriverInput, Exec, ExecInput, Job, JobSpecInput, ResourcesInput, WorkloadDriver,
 };
 
+/// `Job::from_submit` can only ever construct `WorkloadDriver::Exec` —
+/// `DriverInput` (the wire/parser shape this test drives through) has
+/// no `Vm` variant until step 01-08 wires the `[vm]` dispatch
+/// (ADR-0083 Amendment 2026-08-12, GH #42). The `Vm` arm below is
+/// therefore a test precondition, not a design gap.
+fn exec_of(driver: &WorkloadDriver) -> &Exec {
+    match driver {
+        WorkloadDriver::Exec(exec) => exec,
+        WorkloadDriver::Vm(_) => unreachable!(
+            "test precondition: Job::from_submit only constructs WorkloadDriver::Exec until DriverInput::Vm lands (step 01-08)"
+        ),
+    }
+}
+
 /// Helper — produce a spec whose `exec.command` is `cmd` and `exec.args`
 /// is `argv`, leaving id / replicas / resources at canonical-valid
 /// values.
@@ -33,7 +47,7 @@ fn job_from_spec_accepts_non_empty_command_with_empty_args_vec() {
     let job = Job::from_submit(spec).expect("non-empty command + empty args is valid");
     // Per ADR-0031 Amendment 1 the command + args live one level
     // deeper through the tagged-enum `WorkloadDriver` field.
-    let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+    let Exec { command, args } = exec_of(&job.driver);
     assert_eq!(command, "/bin/true");
     assert!(args.is_empty(), "args must remain empty; got {args:?}");
 }
@@ -46,7 +60,7 @@ fn job_from_spec_preserves_operator_command_casing_verbatim() {
     // (e.g. ext4 case-sensitive).
     let spec = spec_with("/Opt/Payments/Server", vec![]);
     let job = Job::from_submit(spec).expect("mixed-case command is valid");
-    let WorkloadDriver::Exec(Exec { command, .. }) = &job.driver;
+    let Exec { command, .. } = exec_of(&job.driver);
     assert_eq!(command, "/Opt/Payments/Server", "command must preserve operator casing verbatim");
 }
 
@@ -59,7 +73,7 @@ fn job_from_spec_accepts_empty_string_and_whitespace_in_args_vec() {
     let argv = vec![String::new(), "  ".to_string(), "non-empty".to_string()];
     let spec = spec_with("/bin/echo", argv.clone());
     let job = Job::from_submit(spec).expect("empty / whitespace args elements are valid");
-    let WorkloadDriver::Exec(Exec { args, .. }) = &job.driver;
+    let Exec { args, .. } = exec_of(&job.driver);
     assert_eq!(
         args, &argv,
         "args vector must be preserved verbatim including empty / whitespace elements",
@@ -75,7 +89,7 @@ fn job_from_spec_carries_command_and_args_through_to_aggregate() {
     let argv = vec!["--port".to_string(), "8080".to_string(), "--mode=fast".to_string()];
     let spec = spec_with("/opt/payments/bin/payments-server", argv.clone());
     let job = Job::from_submit(spec).expect("canonical exec spec is valid");
-    let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+    let Exec { command, args } = exec_of(&job.driver);
     assert_eq!(command, "/opt/payments/bin/payments-server");
     assert_eq!(args, &argv);
 }

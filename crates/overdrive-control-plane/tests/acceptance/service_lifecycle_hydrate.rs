@@ -14,7 +14,7 @@
 //!   2. `obs.list_probe_results_for_alloc(...)` LWW projection —
 //!      sources `latest_startup_probe`.
 //!   3. `IntentStore::get(IntentKey::for_workload(workload_id))` →
-//!      `WorkloadIntent::Service(ServiceV1)` (with probe vecs
+//!      `WorkloadIntent::Service(ServiceV2)` (with probe vecs
 //!      persisted post-GAP-6) — sources `max_attempts`,
 //!      `startup_deadline`, `mechanic_summary`, `inferred`,
 //!      `startup_probes_empty`.
@@ -46,7 +46,7 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent, WorkloadKind,
+    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -145,7 +145,7 @@ fn inferred_tcp_probe(port: u16) -> ProbeDescriptor {
     }
 }
 
-fn build_service_spec(wid: &WorkloadId, startup_probes: Vec<ProbeDescriptor>) -> ServiceV1 {
+fn build_service_spec(wid: &WorkloadId, startup_probes: Vec<ProbeDescriptor>) -> ServiceV2 {
     let input = ServiceSpecInput {
         id: wid.as_str().to_string(),
         replicas: 1,
@@ -156,10 +156,10 @@ fn build_service_spec(wid: &WorkloadId, startup_probes: Vec<ProbeDescriptor>) ->
         readiness_probes: vec![],
         liveness_probes: vec![],
     };
-    ServiceV1::from_submit(input).expect("valid service spec")
+    ServiceV2::from_submit(input).expect("valid service spec")
 }
 
-async fn persist_service_intent(state: &AppState, svc: &ServiceV1) {
+async fn persist_service_intent(state: &AppState, svc: &ServiceV2) {
     let wid = svc.id.clone();
     let intent = WorkloadIntent::Service(svc.clone());
     let archived = intent.archive_for_store().expect("rkyv archive");
@@ -251,10 +251,10 @@ fn extract_lifecycle(state: AnyState) -> ServiceLifecycleState {
 }
 
 // ===========================================================================
-// GAP-1-AT-01 — hydrate_desired against IntentStore-persisted ServiceV1
+// GAP-1-AT-01 — hydrate_desired against IntentStore-persisted ServiceV2
 // ===========================================================================
 
-/// `WorkloadIntent::Service(ServiceV1)` with a declared startup probe
+/// `WorkloadIntent::Service(ServiceV2)` with a declared startup probe
 /// → `hydrate_desired` returns a non-default `ServiceLifecycleState`.
 ///
 /// Closes the audit's "AT exercises the placeholder default() return"

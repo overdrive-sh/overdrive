@@ -12,7 +12,7 @@
 //!   allocator-issued `ServiceVip` resolved at hydrate time.
 //! - [`ProjectedListener`] — single allocator-issued
 //!   `(vip, port, protocol)` triple. The VIP is NOT carried by intent
-//!   (`ServiceV1` has no `vip` field per ADR-0050 § 2); the runtime's
+//!   (`ServiceV2` has no `vip` field per ADR-0050 § 2); the runtime's
 //!   hydrate path looks it up via `ServiceVipAllocator::get(&spec_digest)`
 //!   per ADR-0049 § 5a.
 //! - [`RunningAllocSet`] — actual-side projection of the Running
@@ -68,7 +68,7 @@ use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 /// 01-03) from two reads:
 ///
 /// 1. `IntentStore::get(IntentKey::for_workload(&workload_id))` →
-///    `WorkloadIntent::Service(ServiceV1)`, which carries the
+///    `WorkloadIntent::Service(ServiceV2)`, which carries the
 ///    per-listener `(port, protocol)` pairs.
 /// 2. `ServiceVipAllocator::get(&spec_digest)` per ADR-0049 § 5a,
 ///    where `spec_digest = WorkloadIntent::spec_digest(&intent)?`.
@@ -98,7 +98,7 @@ pub struct ServiceListenerSet {
 /// in the per-`ServiceId` entries of [`ServiceListenerSet`].
 ///
 /// The VIP is allocator-issued at hydrate time per ADR-0049 § 5a;
-/// `ServiceV1` carries no `vip` field per ADR-0050 § 2. Per
+/// `ServiceV2` carries no `vip` field per ADR-0050 § 2. Per
 /// `.claude/rules/development.md` § "Persist inputs, not derived
 /// state" the VIP is hydration input, NOT a value persisted
 /// anywhere on the bridge's `View`.
@@ -106,7 +106,7 @@ pub struct ServiceListenerSet {
 pub struct ProjectedListener {
     /// Allocator-issued VIP for the workload. Sourced from
     /// `ServiceVipAllocator::get(&spec_digest)` at hydrate time per
-    /// ADR-0049 § 5a; NOT from the intent aggregate (`ServiceV1`
+    /// ADR-0049 § 5a; NOT from the intent aggregate (`ServiceV2`
     /// carries no VIP field — ADR-0050 § 2).
     pub vip: ServiceVip,
     /// TCP / UDP port the listener accepts traffic on. `NonZeroU16`

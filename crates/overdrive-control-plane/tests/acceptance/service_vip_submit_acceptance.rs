@@ -15,7 +15,7 @@
 //!   VIP field.
 //! * S-VIP-03 `multi_listener_one_vip` — two listeners on different
 //!   `(port, protocol)` tuples share ONE Service-level VIP. Listener
-//!   uniqueness is enforced by `ServiceV1::from_submit`; the allocator
+//!   uniqueness is enforced by `ServiceV2::from_submit`; the allocator
 //!   issues one VIP per `WorkloadIntent::Service(_).spec_digest()`.
 //! * S-VIP-04 `idempotent_resubmit_same_vip` — resubmitting a byte-
 //!   identical Service spec returns the SAME VIP. The allocator memo is

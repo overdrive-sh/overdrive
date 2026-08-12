@@ -28,7 +28,7 @@
 
 use bytes::Bytes;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, JobSpecInput, JobV1, ResourcesInput, WorkloadIntent,
+    DriverInput, ExecInput, IntentKey, JobSpecInput, JobV2, ResourcesInput, WorkloadIntent,
     WorkloadKind,
 };
 use overdrive_core::id::WorkloadId;
@@ -47,7 +47,7 @@ fn job_intent(id_str: &str) -> WorkloadIntent {
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
-    WorkloadIntent::Job(JobV1::from_submit(spec).expect("canonical job spec must validate"))
+    WorkloadIntent::Job(JobV2::from_submit(spec).expect("canonical job spec must validate"))
 }
 
 fn workload_id(id_str: &str) -> WorkloadId {

@@ -17,7 +17,7 @@
 //! an empty actual-set; S-BDB-01 was structurally impossible.
 //!
 //! This test enters through the post-fix shape: `read_job` projects
-//! `ServiceV1.{id, replicas, resources, driver}` into a kind-agnostic
+//! `ServiceV2.{id, replicas, resources, driver}` into a kind-agnostic
 //! `Job` value, the existing `Some(job) => ...` arm at
 //! `reconciler.rs:1466` emits `Action::StartAllocation`, the action
 //! shim drives `SimDriver::start`, and an `AllocStatusRow` with
@@ -90,7 +90,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// reconciler's `None`-arm fires every tick → zero `StartAllocation`
 /// actions emitted → zero `alloc_status` rows written.
 ///
-/// Post-fix: `read_job` projects `ServiceV1` into a kind-agnostic
+/// Post-fix: `read_job` projects `ServiceV2` into a kind-agnostic
 /// `Job`-shape → `Some(job)`-arm fires → `StartAllocation` emitted
 /// with `kind: WorkloadKind::Service` → action shim drives
 /// `SimDriver::start` → one Running row written with
@@ -101,7 +101,7 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     let clock = Arc::new(SimClock::new());
     let state = build_state(&tmp, clock.clone()).await;
 
-    let svc = overdrive_core::aggregate::ServiceV1::from_submit(ServiceSpecInput {
+    let svc = overdrive_core::aggregate::ServiceV2::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },

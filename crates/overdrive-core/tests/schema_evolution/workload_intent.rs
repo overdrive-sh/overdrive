@@ -24,7 +24,7 @@
 use std::num::{NonZeroU16, NonZeroU32};
 
 use overdrive_core::aggregate::{
-    CronExpr, Exec, Job, Listener, ScheduleV1, ServiceV1, WorkloadDriver, WorkloadIntent,
+    CronExpr, Exec, Job, Listener, Schedule, Service, Vm, WorkloadDriver, WorkloadIntent,
     WorkloadIntentEnvelope,
 };
 use overdrive_core::codec::VersionedEnvelope;
@@ -66,7 +66,7 @@ fn canonical_v1_job_payload() -> WorkloadIntent {
 /// when listeners exist; an explicit empty vec is the explicit
 /// opt-out per ADR-0058).
 fn canonical_v1_service_payload() -> WorkloadIntent {
-    WorkloadIntent::Service(ServiceV1 {
+    WorkloadIntent::Service(Service {
         id: WorkloadId::new("svc-frontends").expect("valid workload id"),
         replicas: NonZeroU32::new(2).expect("non-zero replicas"),
         resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
@@ -87,7 +87,7 @@ fn canonical_v1_service_payload() -> WorkloadIntent {
 /// Canonical V1 `Schedule`-variant payload (ADR-0050 OQ-4 embedded-
 /// job shape).
 fn canonical_v1_schedule_payload() -> WorkloadIntent {
-    WorkloadIntent::Schedule(ScheduleV1 {
+    WorkloadIntent::Schedule(Schedule {
         id: WorkloadId::new("svc-nightly-cleanup").expect("valid workload id"),
         job: Job {
             id: WorkloadId::new("svc-nightly-cleanup").expect("valid workload id"),
@@ -180,6 +180,51 @@ fn workload_intent_v1_schedule_decodes_through_current_envelope() {
     assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_SCHEDULE, &expected);
 }
 
+/// Canonical V2 `Job`-variant payload carrying the new
+/// `WorkloadDriverV2::Vm` arm (GH #42 / ADR-0083 Amendment
+/// 2026-08-12). Exercises the microVM driver through the live
+/// `WorkloadDriver` alias — proves `WorkloadIntentEnvelope::V2` round-
+/// trips a `Vm`-driven `Job` bit-equivalently.
+fn canonical_v2_job_vm_payload() -> WorkloadIntent {
+    WorkloadIntent::Job(Job {
+        id: WorkloadId::new("svc-microvm").expect("valid workload id"),
+        replicas: NonZeroU32::new(1).expect("non-zero replicas"),
+        resources: Resources { cpu_milli: 500, memory_bytes: 512 * 1024 * 1024 },
+        driver: WorkloadDriver::Vm(Vm {
+            command: "/sbin/init".to_string(),
+            args: vec!["--quiet".to_string()],
+            kernel: "/var/lib/overdrive/vmlinux".to_string(),
+            rootfs: "/var/lib/overdrive/rootfs.img".to_string(),
+        }),
+    })
+}
+
+/// Hex-encoded rkyv-archived bytes of
+/// `WorkloadIntentEnvelope::V2(canonical_v2_job_vm_payload())`.
+/// Generated once at the GREEN landing of step 01-02 via
+/// `print_fixture_v2_bytes`. NEVER touched on subsequent commits.
+///
+/// The dst-lint envelope-fixture-coverage scanner (ADR-0048 § 6)
+/// requires a `FIXTURE_V<N>` constant per envelope variant — this is
+/// the canonical V2 fixture.
+#[allow(
+    dead_code,
+    reason = "fixture constant retained for explicit job+vm-arm naming; aliased from FIXTURE_V2"
+)]
+const FIXTURE_V2_JOB_VM: &str = "7376632d6d6963726f766d2f7362696e2f696e69740000002d2d7175696574ff2f7661722f6c69622f6f76657264726976652f766d6c696e75782f7661722f6c69622f6f76657264726976652f726f6f7466732e696d6700010000000000000000000000000000008b00000098ffffff0100000000000000f4010000000000000000002000000000010000008a0000007fffffff84ffffff010000009a00000084ffffff9d00000096ffffff000000000000000000000000000000000000000000000000000000000000000000000000";
+
+#[allow(
+    dead_code,
+    reason = "consumed by xtask::dst_lint::scan_for_envelope_fixture_coverage at PR-time, not by any test runtime — the constant's NAME is the load-bearing artifact"
+)]
+const FIXTURE_V2: &str = FIXTURE_V2_JOB_VM;
+
+#[test]
+fn workload_intent_v2_job_vm_decodes_through_current_envelope() {
+    let expected = canonical_v2_job_vm_payload();
+    assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V2_JOB_VM, &expected);
+}
+
 // Triangulation + unknown_version_probe assertions deferred per the
 // `discriminant_offset_from_end -> None` choice above. Re-add when
 // the empirical offset for `WorkloadIntentEnvelope` is pinned.
@@ -245,6 +290,20 @@ fn print_fixture_v1_bytes() {
         ("FIXTURE_V1_SERVICE", canonical_v1_service_payload()),
         ("FIXTURE_V1_SCHEDULE", canonical_v1_schedule_payload()),
     ] {
+        let envelope = WorkloadIntentEnvelope::latest(canonical);
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
+        println!("const {label}: &str = \"{}\";", hex::encode(bytes.as_ref()));
+    }
+}
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when bumping a payload variant; the pinned FIXTURE_V<N>_* constants are the load-bearing artifact"]
+#[allow(
+    clippy::print_stdout,
+    reason = "fixture regeneration tool emits hex to stdout for the human to paste into FIXTURE_V<N>_* constants"
+)]
+fn print_fixture_v2_bytes() {
+    for (label, canonical) in [("FIXTURE_V2_JOB_VM", canonical_v2_job_vm_payload())] {
         let envelope = WorkloadIntentEnvelope::latest(canonical);
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
         println!("const {label}: &str = \"{}\";", hex::encode(bytes.as_ref()));

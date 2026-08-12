@@ -34,7 +34,7 @@ use overdrive_control_plane::AppState;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV1, WorkloadIntent, WorkloadKind,
+    DriverInput, ExecInput, IntentKey, ResourcesInput, ServiceV2, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -112,7 +112,7 @@ async fn persist_service_and_allocate_vip(
     listener_port: u16,
     protocol: &str,
 ) -> (ServiceVip, u16, ServiceId) {
-    let svc = ServiceV1::from_submit(ServiceSpecInput {
+    let svc = ServiceV2::from_submit(ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
