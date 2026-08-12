@@ -27,7 +27,7 @@ use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NetnsName};
 use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
@@ -447,7 +447,7 @@ impl Driver for ExecDriver {
         //    `start` joins onto the stock `/var/run/netns/<name>` location
         //    (where `ip netns add` places it). The driver ENTERS, never
         //    creates (CNI-aligned).
-        let netns_fd = match spec.netns.as_deref() {
+        let netns_fd = match spec.netns.as_ref().map(NetnsName::as_str) {
             None => None,
             Some(name) => {
                 let path = std::path::Path::new("/var/run/netns").join(name);
@@ -479,7 +479,7 @@ impl Driver for ExecDriver {
                 // pre-flight above already ruled out a missing
                 // path). Surface as `NetnsEntry` so the caller can
                 // distinguish from a workload-spec rejection.
-                if let Some(name) = spec.netns.as_deref() {
+                if let Some(name) = spec.netns.as_ref().map(NetnsName::as_str) {
                     return Err(DriverError::NetnsEntry {
                         driver: DriverType::Exec,
                         netns_path: std::path::Path::new("/var/run/netns")

@@ -29,43 +29,38 @@
 //! `VmRunDir` (§D2.2), the outer `VmConfig` aggregate (§D2), and the
 //! `Vmm` port trait (§D1 — `create`'s signature takes `&VmConfig`, so the
 //! trait cannot compile without it) are **not** landed this step. Three
-//! independent, confirmed blockers on `VmConfig`'s remaining field types
-//! prevent building them without inventing API surface ADR-0082 does not
+//! independent blockers on `VmConfig`'s remaining field types originally
+//! prevented building them without inventing API surface ADR-0082 did not
 //! pin (CLAUDE.md § "Implement to the design — never invent API
-//! surface"):
+//! surface"). ADR-0082's 2026-08-12 amendment closed the first two;
+//! **step 01-01 PART 1 (this commit) implements that closure**:
 //!
-//! 1. **`cgroup_scope: CgroupPath`** — a fully-built newtype already
-//!    lives at `overdrive_worker::cgroup_manager::CgroupPath`
-//!    (`adapter-host` class). `overdrive-core` (`core` class) cannot
-//!    depend on `overdrive-worker` — the dependency runs the other way
-//!    (`overdrive-worker` depends on `overdrive-core`) — so reusing it is
-//!    impossible, and minting a second, differently-shaped `CgroupPath`
-//!    in `overdrive-core` would create two divergent types under one
-//!    name.
-//! 2. **`netns: Option<NetnsName>`** — ADR-0082 §D2 names this newtype,
-//!    but `crates/overdrive-core/src/traits/driver.rs:168-178` records a
-//!    **deliberate, cited** prior decision (JOIN-1 /
-//!    `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`
-//!    D-TME-12) NOT to wrap the equivalent `AllocationSpec.netns` field
-//!    in a newtype: it is a slot-derived name with "no parse surface, no
-//!    operator-typed entry point, no `FromStr` round-trip to defend."
-//!    `VmConfig.netns` is sourced from that same field.
-//! 3. **`rootfs: RootfsPlan`** and **`cmdline: KernelCmdline`** — ADR-0082
-//!    gives `RootfsPlan` a one-line shape hint ("master + master_bytes +
-//!    clone destination") but `KernelCmdline` none at all beyond
-//!    "platform-derived; NOT operator surface." Guessing field names and
-//!    method surface for either risks a contract a later step then has to
-//!    rework.
+//! 1. **RESOLVED — `cgroup_scope: CgroupPath`.** Relocated verbatim into
+//!    [`crate::cgroup`] (`overdrive_core::cgroup::CgroupPath`).
+//!    `overdrive_worker::cgroup_manager` re-exports it for its existing
+//!    call sites, so no consumer outside this crate needed to change.
+//! 2. **RESOLVED — `netns: Option<NetnsName>`.** [`crate::id::NetnsName`]
+//!    now exists — an INTERNAL newtype (no serde/rkyv/`FromStr`; the
+//!    ONLY constructor is `from_hex4`, called at exactly one site,
+//!    `derive_workload_netns_plan` in `overdrive-control-plane`). This
+//!    SUPERSEDES D-TME-12 / JOIN-1's prior `Option<String>` choice on
+//!    `AllocationSpec.netns` (see
+//!    `crates/overdrive-core/src/traits/driver.rs`'s field docstring,
+//!    rewritten in the same commit) per ADR-0082 §D2's supersession
+//!    record. `VmConfig.netns` (PART 2) sources from the same newtype.
+//! 3. **STILL BLOCKED — `rootfs: RootfsPlan`** and **`cmdline:
+//!    KernelCmdline`** — ADR-0082 gives `RootfsPlan` a one-line shape
+//!    hint ("master + master_bytes + clone destination") but
+//!    `KernelCmdline` none at all beyond "platform-derived; NOT operator
+//!    surface." Guessing field names and method surface for either risks
+//!    a contract a later step then has to rework. This is PART 2's
+//!    remaining blocker.
 //!
 //! `VmRunDir::landlock_grant() -> LandlockRule` (closing the vsock
-//! Landlock gap, §D2.2) has the same shape gap: ADR-0082 states
-//! `landlock_grant()` takes no parameter and always grants `rw` ("no
-//! parameter to get wrong") but never shows `LandlockRule`'s field/method
-//! surface, and the slice-01 doc's own Dependencies section assigns
-//! "additive confinement items (Landlock, uid/gid drop, rlimits)" to
-//! Slice 03 (US-VM-7), not Slice 01.
+//! Landlock gap, §D2.2) is separately deferred to Slice 03 (US-VM-7) per
+//! ADR-0082's 2026-08-12 amendment — not a Slice-01 blocker at all.
 //!
-//! These are flagged as a blocker in the step 01-01 handoff rather than
+//! Item 3 remains flagged as a blocker for the PART 2 handoff rather than
 //! guessed. See the module doc in `crate::vm` for the summary.
 
 use std::fmt;

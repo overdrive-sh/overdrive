@@ -18,6 +18,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
+use crate::id::NetnsName;
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
@@ -159,24 +160,34 @@ pub struct AllocationSpec {
     /// Target network namespace NAME this allocation's workload is spawned
     /// INTO (the `ExecDriver` `setns(CLONE_NEWNET)` seam ENTERS it; it must
     /// already exist — the action-shim C3 site provisions it before
-    /// `Driver::start`). `Some(plan.netns)` only when the C3 site provisioned
-    /// a per-workload netns (the production mTLS boot); `None` for every
-    /// non-netns workload (every current test fixture, and any boot where the
-    /// mTLS composition gate is off). The driver opens `/var/run/netns/<name>`
-    /// when `Some`; a `None` spec yields the pre-join host-netns behaviour.
+    /// `Driver::start`). `Some(plan.netns_name)` only when the C3 site
+    /// provisioned a per-workload netns (the production mTLS boot); `None`
+    /// for every non-netns workload (every current test fixture, and any
+    /// boot where the mTLS composition gate is off). The driver opens
+    /// `/var/run/netns/<name>` (via [`NetnsName::as_str`]) when `Some`; a
+    /// `None` spec yields the pre-join host-netns behaviour.
     ///
-    /// `Option<String>`, NOT a `NetnsName` newtype: the value is already a
-    /// validated, bounded, slot-derived name (`ovd-ns-<4hex>`, 11 chars ≤
-    /// NAME_MAX) minted ONLY by `derive_workload_netns_plan` — it has no parse
-    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
-    /// defend (see the JOIN-1 newtype rationale in
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`
-    /// D-TME-12). Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": `AllocationSpec` derives only
-    /// `Debug, Clone, PartialEq, Eq` — NO serde, NO rkyv — and is recomputed
-    /// each reconcile tick (never persisted), so this field is a pure
-    /// in-memory channel with no schema-evolution discipline attached.
-    pub netns: Option<String>,
+    /// `Option<NetnsName>` — [`NetnsName`] is an INTERNAL newtype (no
+    /// serde, no rkyv, no `FromStr`) minted ONLY by
+    /// `derive_workload_netns_plan` (`overdrive-control-plane`) from a
+    /// validated `NetSlot`. **This field's type SUPERSEDES D-TME-12 /
+    /// JOIN-1's prior `Option<String>` choice** — per ADR-0082 §D2
+    /// (Amendment 2026-08-12, GH #42), the value gained a newtype while
+    /// keeping JOIN-1's underlying reasoning intact: it has no parse
+    /// surface, no operator-typed entry point, and no `FromStr`
+    /// round-trip to defend (the JOIN-1 canonical home,
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
+    /// no longer exists on disk — the archived feature's surviving
+    /// references are `docs/architecture/transparent-mtls-enrollment/
+    /// feature-delta.md` and `docs/evolution/
+    /// 2026-06-22-transparent-mtls-enrollment.md`; ADR-0082 §D2 is the
+    /// authoritative record of the supersession). Per
+    /// `.claude/rules/development.md` § "Persist inputs, not derived
+    /// state": `AllocationSpec` derives only `Debug, Clone, PartialEq,
+    /// Eq` — NO serde, NO rkyv — and is recomputed each reconcile tick
+    /// (never persisted), so this field is a pure in-memory channel with
+    /// no schema-evolution discipline attached.
+    pub netns: Option<NetnsName>,
 
     /// Host-side veth interface NAME for this allocation's per-workload veth
     /// pair (`ovd-hv-<4hex-slot>`), the `iifname` the outbound nft-TPROXY rule

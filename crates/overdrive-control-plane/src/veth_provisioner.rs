@@ -445,6 +445,8 @@ impl<'de> serde::Deserialize<'de> for NetSlot {
     }
 }
 
+use overdrive_core::id::NetnsName;
+
 /// Derived plan for a single allocation's netns + veth pair. A plain value
 /// object — carries the per-alloc netns name, the two slot-derived veth-end
 /// names, the host-side and in-netns addresses, the in-netns default-route
@@ -460,6 +462,16 @@ pub struct WorkloadNetnsPlan {
     /// (B3), so 11 chars ≤ NAME_MAX (255) and ≤ IFNAMSIZ (15) by construction —
     /// the identical shape to the two veth names.
     pub netns: String,
+    /// The SAME value as [`Self::netns`], typed. `overdrive_core::id::
+    /// NetnsName` is minted HERE — this is the type's ONLY mint site
+    /// (ADR-0082 §D2, Amendment 2026-08-12, GH #42) — so
+    /// `AllocationSpec.netns` (and, in a later step, `VmConfig.netns`)
+    /// can carry the newtype without re-deriving or re-validating it.
+    /// Every `&str`-shaped netns consumer in this file (the ~30
+    /// `ip netns …` shell-outs below) keeps using [`Self::netns`]
+    /// unchanged; `netns_name` exists ONLY to flow into the two typed
+    /// consumers.
+    pub netns_name: NetnsName,
     /// Host-side veth-end name (`ovd-hv-<4hex-slot>`) — stays in the host
     /// netns; the nft-TPROXY PREROUTING interception point. SLOT-derived
     /// (not alloc-id-derived) so it fits IFNAMSIZ by construction (D-TME-12).
@@ -521,6 +533,13 @@ pub struct WorkloadNetnsPlan {
 #[must_use]
 pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> WorkloadNetnsPlan {
     let hex = slot.to_hex4();
+    // The ONLY `NetnsName::from_hex4` call site in the workspace (ADR-0082
+    // §D2). `NetSlot::to_hex4` always renders exactly 4 lowercase-hex
+    // chars (see its own doc comment), so this can never actually fail —
+    // `unreachable!` communicates the invariant rather than masking it
+    // behind a `?` early-return that would suggest a real fallible path.
+    let netns_name = NetnsName::from_hex4(&hex)
+        .unwrap_or_else(|_| unreachable!("NetSlot::to_hex4 always renders exactly 4 lowercase hex chars"));
 
     // Carve the per-allocation /30 from the fixed base: slot N owns the four
     // contiguous addresses at base + N*4. A /30 always has exactly two usable
@@ -533,6 +552,7 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
 
     WorkloadNetnsPlan {
         netns: format!("{WORKLOAD_NETNS_PREFIX}{hex}"),
+        netns_name,
         host_veth: format!("{WORKLOAD_HOST_VETH_PREFIX}{hex}"),
         workload_veth: format!("{WORKLOAD_VETH_PREFIX}{hex}"),
         host_addr,
