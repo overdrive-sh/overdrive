@@ -126,6 +126,16 @@ pub mod wall_clock;
 // `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
 // DWD-03.
 pub mod transition_reason;
+// `vm::config` — `VmConfig`'s pure value family for the Cloud Hypervisor
+// VM driver (`microvm-driver-cloud-hypervisor`, GH #42, ADR-0082 §§D2.1-
+// D2.5): `DiskAttachment`, `MemoryPlan` + `reserve_bytes`, `KernelImage`,
+// `VmConfinement`. Landed incrementally — step 01-01 lands the value
+// family named above; `VmRunDir`, the outer `VmConfig` aggregate, and the
+// `Vmm` port trait (which references `VmConfig`) are deferred pending a
+// cross-crate `CgroupPath` placement conflict and two under-specified
+// newtypes (`RootfsPlan`, `KernelCmdline`) — see `vm::config`'s module
+// doc for the full blocker record.
+pub mod vm;
 
 /// Trait-conformance harnesses exposed to adapter test suites.
 ///
