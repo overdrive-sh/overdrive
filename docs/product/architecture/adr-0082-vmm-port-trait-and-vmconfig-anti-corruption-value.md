@@ -469,8 +469,12 @@ impl KernelCmdline {
 ```
 
 The operator's *command/args* do **not** ride the cmdline (that would violate
-"NOT operator surface"); how `overdrive-init` learns them is a § D7 guest-channel
-concern, out of `KernelCmdline`'s scope.
+"NOT operator surface"); they reach `overdrive-init` over the **beacon vsock
+connection** as a host→guest **`EXEC`** message. The § D7 guest-channel decision
+this once punted to is now **made** — see § D7's *Amendment 2026-08-12
+(operator-command→guest channel)*, which pins the `EXEC` wire shape (JSON-encoded
+argv, spaces/newlines safe), the `READY`→`EXEC`→exec→`EXIT` handshake, and
+per-step ownership. Out of `KernelCmdline`'s scope, as before.
 
 There is no `image_type` field, no `memory_max` field and no `rlimit_fsize`
 field. Each is a **method**:
@@ -1013,6 +1017,150 @@ coupling from the one path the Running gate rides on.
 **`ExitKind::CleanExit` for a VM means "the guest agent reported a clean exit",
 never "the platform verified the workload succeeded"** (Hera's DD-4). No
 artifact may state or imply otherwise.
+
+> **Amendment 2026-08-12 (operator-command→guest channel — rides the beacon, GH #42, user ruling).**
+> § D2's gap 4 punted *"how `overdrive-init` learns the command/args"* to *"a § D7
+> guest-channel decision,"* and the first cut of § D7 never made it — a hole that
+> blocks S-VM-01's walking skeleton (the guest cannot run a command it was never
+> told). The user ruled 2026-08-12: **the operator's command + args reach
+> `overdrive-init` over the beacon vsock connection as a host→guest message, NOT
+> the kernel cmdline** (§ D2.4's `KernelCmdline` stays platform-only). Pinned here
+> so the crafter has zero latitude (CLAUDE.md § "Implement to the design").
+>
+> **1 — the message: `EXEC`, a fourth `BeaconMessage` variant carrying a JSON-encoded argv.**
+>
+> ```
+> host → guest   "EXEC <json-argv>\n"    exactly once, after READY is accepted, before the guest execs
+> ```
+>
+> where `<json-argv>` is `serde_json::to_string(&argv)` over `argv: Vec<String>`
+> — e.g. `EXEC ["/usr/bin/render","--out","/tmp/a b"]`. The variant is
+> `BeaconMessage::Exec { argv: Vec<String> }`, `argv[0]` the program and `argv`
+> the full vector.
+>
+> **Why JSON, not a space-split token line.** The operator's argv is arbitrary
+> strings that may contain spaces AND newlines. The landed `BeaconMessage::from_str`
+> is space-delimited (`line.split(' ')`) and the module's framing is
+> one-message-per-line (`\n` terminator): a raw argument with a space would split
+> into phantom tokens, one with a newline would break the line framing outright.
+> JSON string escaping closes both — `serde_json` escapes every embedded `"`, `\`
+> and control character, crucially `\n`→`\n` and `\r`→`\r` (two chars each), so the
+> encoded array is **single-line by construction** and the newline framing is
+> preserved. `serde_json` is a standard workspace crate (development.md § "Use
+> standard crates" — do not hand-roll an escape scheme), is `core`-class-safe (no
+> tokio/rand/net), and a `Vec<String>` round-trips deterministically. Rejected:
+> length-prefixed binary payload (breaks the one-line/`read_line` discipline the
+> whole module is built on) and per-arg base64 (works, but JSON is more legible on
+> the wire and idiomatic here).
+>
+> **Parse/format, pinned exactly (extends the landed `Display`/`FromStr`
+> round-trip + structured `BeaconParseError`):**
+> - `Display`: `write!(f, "EXEC {}", serde_json::to_string(argv).map_err(|_| fmt::Error)?)`.
+>   Serialising a `Vec<String>` is total; the `fmt::Error` arm is the unreachable
+>   sentinel (§ "logically unreachable" adapted to `Display`), never `.expect()`
+>   (this is a `core` library crate — development.md § "No `.expect()` in
+>   production library code").
+> - `FromStr`: the `EXEC` arm decodes the **entire post-kind remainder as one JSON
+>   array** — it does NOT space-tokenize the payload (the split that is correct for
+>   `READY`/`EXIT`/`SHUTDOWN` is wrong here). `READY`/`EXIT`/`SHUTDOWN` parsing is
+>   unchanged.
+> - Two new `BeaconParseError` variants, both carrying only `Clone + PartialEq +
+>   Eq` data so the enum's existing derives survive — a `serde_json::Error` is none
+>   of those, so do **not** `#[source]`-embed it: `EmptyArgv { raw: String }` (a
+>   `[]` argv has no `argv[0]` to exec — invalid by construction) and
+>   `MalformedArgv { raw: String, detail: String }` where `detail` is the serde
+>   error's `Display`.
+> - **`Copy` is dropped from `BeaconMessage`'s derive list** (`Vec<String>` is not
+>   `Copy`); it keeps `Debug, Clone, PartialEq, Eq`. Call sites relying on `Copy`
+>   move/clone — a mechanical consequence, pinned so it is not dodged with a
+>   `Copy`-preserving shape.
+> - `EXEC` carries **argv only** — no env, no cwd, no PATH policy; none is on the
+>   `[vm]` operator surface (§ D1), so none is invented. The guest execs `argv[0]`
+>   as given (absolute path, mirroring `ExecDriver`).
+>
+> **2 — the handshake sequence (Candidate A) and what `READY` means.** Unchanged
+> from the landed `beacon.rs` `READY` semantics — this amendment pins the sequence
+> *around* them, it does not move them:
+>
+> ```
+> 1. guest dials CID 2 : BEACON_VSOCK_PORT, connects (one connection, no handshake — P2)
+> 2. guest → host  READY pid=1 port=1234   exactly once — wins the § D3 biased race → Running
+> 3. host  → guest  EXEC ["…"]              exactly once, on the § D3 Ok continuation (below)
+> 4. guest forks; child execs argv[0] with argv, inheriting /dev/console stdio (§ D7)
+> 5. guest → host  EXIT <status>            exactly once, after waitpid
+>    host → guest  SHUTDOWN                 at most once, any time after step 3 succeeds (§ D4)
+>                  EOF                       terminates the session
+> ```
+>
+> `READY` means **"the guest agent (PID 1) is up and has opened the beacon; the
+> operator's command has NOT yet started."** (Candidate A, not B: under B `READY`
+> fires only *after* the command starts, so a slow fork/exec would trip
+> `VM_BOOT_DEADLINE` on a healthy boot and Running would stop meaning "guest up.")
+> This is exactly what § D3's beacon arm and § D4's pre-beacon-window text already
+> assume.
+>
+> **The `EXEC` write is folded into § D3's Ok continuation and gates Running —
+> reconciling S-VM-01 with the pre-command window.** On the `accept_ready` win,
+> before the select is allowed to yield `Ok(handle)`:
+> - VmDriver writes `EXEC <argv>` on the just-accepted session. **Write ok** →
+>   store the session in § D4's `LiveVm.beacon` (now `Some`), move the still-live
+>   `exit` watch into the exit watcher (§ D3), return `Ok(handle)` → **Running**.
+>   **Write err** → treat as `StartRejected` exactly like the other non-Ok arms
+>   (§ D3's "every non-`Ok` arm cleans up"): SIGKILL the VMM, `cgroup.kill`, unlink
+>   dir + clone, release the supervision claim → **Failed**, no leak.
+> - The honest consequence: **Running ⟹ READY arrived AND `EXEC` was delivered** —
+>   Running now means "guest up and command dispatched," strictly ≥ the ready
+>   beacon, so S-VM-01's *"Running reached no earlier than the ready beacon"* holds
+>   and is in fact tightened. This does not reopen § D3's race (the three arms are
+>   unchanged); it extends only the Ok *continuation*.
+> - **§ D4's `LiveVm.beacon` becomes `Some` only after the `EXEC` write succeeds.**
+>   This *strengthens* D4's stop totality and removes any host-side `EXEC`/`SHUTDOWN`
+>   race: a stop in the [READY-consumed → EXEC-sent] window sees `beacon == None`
+>   and, per D4, skips the `SHUTDOWN` write and goes straight to `Vmm::terminate`
+>   (lands `Terminated / Stopped { by: Operator }`). The guest therefore **never
+>   observes `SHUTDOWN` before `EXEC`** — its read model stays: block for exactly
+>   one `EXEC`, then (D4 duties) supervise the child while watching for at most one
+>   `SHUTDOWN`. The pre-beacon window (§ D4, before step 2) is unchanged.
+>
+> **3 — how `overdrive-init` consumes it.** After sending `READY`, the guest blocks
+> on `BufRead::read_line` for exactly one host→guest message; on `EXEC { argv }` it
+> forks and the child execs `argv[0]` with `argv` (replacing the loud placeholder
+> the 01-03 draft ships), inheriting `/dev/console` as the child's stdio, while
+> PID 1 `waitpid`s and reports the real `WEXITSTATUS` as `EXIT <status>` (§ D3),
+> then reads at most one further `SHUTDOWN` (§ D4). No second parser — `EXEC` is
+> decoded through the same `overdrive_core::vm::beacon` module both sides already
+> share (Hera's DD-6).
+>
+> **Honesty — the host→guest write is unprobed, same status as `SHUTDOWN`.** Every
+> vsock probe in the spike exercised guest→host only (`spike/findings.md:2787`; the
+> § D4 step-1 correction, review iteration 3). `EXEC` rides the same unprobed
+> host→guest direction as `SHUTDOWN`; the connection's *availability* is measured
+> (the guest holds it open from `READY`), the host→guest *write* is an assumption.
+> Its **first real evidence is S-VM-01's Tier-3 walking skeleton (step 01-08)** — a
+> real `overdrive deploy` whose guest runs the operator's command — not a
+> regression guard on something already measured. Do not label this row "proven."
+>
+> **Ownership — every piece has a landing step, so no deferral is left unowned**
+> (this closes the 01-03 review's *"unowned deferral"*):
+>
+> | Piece | Lands in | Surface |
+> |---|---|---|
+> | `EXEC` variant + JSON codec + two `BeaconParseError` variants + `Copy` drop | **01-03** (owns `overdrive-core/src/vm/beacon.rs`) — in the 01-03 review-remediation, since the guest consumer is already 01-03's | `overdrive_core::vm::beacon` |
+> | `overdrive-init` reads `EXEC`, forks, child execs `argv[0]` | **01-03** (owns `overdrive-init/src/main.rs`; criterion "execs the operator's command") | guest |
+> | VmDriver **writes** `EXEC` on the § D3 Ok continuation, gates Running, stores the session only after | **01-07** (owns `VmDriver` + the three-way race + the `LiveVm` session) | host |
+> | Operator `command`/`args` **source** → `VmDriver::start` (via `AllocationSpec.command`/`args`, `[G5]`, threaded through `DriverInput::Vm`), driven by a real `[vm]+[job]` deploy | **01-08** (owns spec-parse dispatch + composition root + the S-VM-01 walking skeleton) | host wiring |
+>
+> **Boundary — stdio forwarding is a *separate* channel and is NOT a second gap
+> for this one.** `overdrive-init`'s duty (c) *"forwards stdio"* (§ [D4] scope)
+> rides `/dev/console` → CH stdout/stderr → `VmmExit.stderr_tail` (§ D3), a data
+> path already pinned by § D7's `/dev/console` requirement and entirely independent
+> of the beacon *control* channel (vsock CID 2). S-VM-01's gating ACs assert on the
+> **exit code** (carried by `EXIT <status>`, already landed), not on host-captured
+> stdout, so the command channel is unblocked without any stdio framing. If a
+> future AC ever needs *structured, per-stream* host capture of the child's stdout
+> distinct from init's own console logging, that framing is a separate,
+> currently-unpinned concern — it does not block Slice 01 and is deliberately not
+> decided here.
 
 ### D8 — the cgroup-OOM diagnosis gap (deferral D-3, reduced form): a new `CgroupAccounting` port, read once at exit time
 
