@@ -2210,6 +2210,10 @@ dependencies = [
 [[package]]
 name = "overdrive-testing"
 version = "0.0.0"
+dependencies = [
+ "overdrive-core",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "overdrive-worker"

@@ -1,4 +1,10 @@
 [toolchain]
 channel    = "1.95.0"
 components = ["rustfmt", "clippy", "rust-src"]
+# Static-musl cross targets for `overdrive-init` (ADR-0082 §D7/§D1: the
+# guest PID 1 is baked into every operator rootfs as a static binary).
+# Listed here so rustup auto-installs them on first use; the
+# `overdrive-testing::vm_fixture` boot fixture (step 01-04) is the first
+# consumer, cross-compiling with `cargo build --target <one of these>`.
+targets    = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
 profile    = "default"

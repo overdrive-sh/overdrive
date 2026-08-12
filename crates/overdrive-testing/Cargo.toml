@@ -36,6 +36,10 @@ crate_class = "adapter-host"
 integration-tests = []
 
 [dependencies]
+# `vm_fixture` reuses the pure `KernelImage`/`HostArch` validation family
+# from `overdrive-core` rather than re-deriving kernel-format checks here.
+overdrive-core.workspace = true
+thiserror.workspace      = true
 
 [lints]
 workspace = true
