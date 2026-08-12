@@ -439,7 +439,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
 
     // AC14.3 (precondition): the slot-derived netns now exists.
     assert!(
-        netns_present(&expected_plan.netns),
+        netns_present(expected_plan.netns.as_str()),
         "AC14.1: the per-workload netns {} must exist after the provision seam",
         expected_plan.netns,
     );
@@ -453,7 +453,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
         // detail? No: read it from `ip netns pids`. The most robust observable
         // is: the netns has exactly the spawned sleep as a member.
         let out = Command::new("ip")
-            .args(["netns", "pids", &expected_plan.netns])
+            .args(["netns", "pids", expected_plan.netns.as_str()])
             .output()
             .expect("spawn ip netns pids");
         String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.trim().parse::<u32>().ok())
@@ -484,7 +484,7 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     // AC14.3: the netns is GONE after terminal (teardown-then-release) and the
     // slot is released (no leak).
     assert!(
-        !netns_present(&expected_plan.netns),
+        !netns_present(expected_plan.netns.as_str()),
         "AC14.3: the per-workload netns {} must be torn down on terminal",
         expected_plan.netns,
     );
@@ -649,11 +649,11 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
     // BONUS (root only): the netns the slot derives must survive. On an
     // unprivileged host no real netns was ever provisioned, so this is vacuous —
     // skip it rather than assert against a netns that never existed.
-    if is_root() && netns_present(&plan.netns) {
+    if is_root() && netns_present(plan.netns.as_str()) {
         // Only meaningful if a real netns was provisioned (it was not, here, since
         // we assigned the slot directly). Present-and-still-present is the claim.
         assert!(
-            netns_present(&plan.netns),
+            netns_present(plan.netns.as_str()),
             "RCA §9: a Stable terminal must not reap the per-workload netns {}",
             plan.netns,
         );
@@ -725,7 +725,7 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
     // BONUS (root only): the netns is reaped on a genuine failure.
     if is_root() {
         assert!(
-            !netns_present(&plan.netns),
+            !netns_present(plan.netns.as_str()),
             "RCA §9 (over-gating guard): a Failed terminal must still reap the netns {}",
             plan.netns,
         );

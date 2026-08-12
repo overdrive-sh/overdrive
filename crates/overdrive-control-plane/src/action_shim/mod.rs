@@ -923,10 +923,10 @@ fn provision_and_inject_netns(
     // JOIN-2 + JOIN-6: inject the slot-derived netns NAME so ExecDriver::start
     // enters it via setns(CLONE_NEWNET), and the host-veth NAME so
     // start_alloc's install_outbound_tproxy matches the right iifname. Read
-    // both off `plan` before it is dropped. `spec.netns` takes the TYPED
-    // `plan.netns_name` (ADR-0082 §D2, GH #42) — the same value as
-    // `plan.netns`, minted once at `derive_workload_netns_plan`.
-    spec.netns = Some(plan.netns_name.clone());
+    // both off `plan` before it is dropped. `spec.netns` takes `plan.netns`
+    // (the single typed `NetnsName` field, ADR-0082 §D2 / review remediation
+    // F1, GH #42) directly — minted once at `derive_workload_netns_plan`.
+    spec.netns = Some(plan.netns.clone());
     spec.host_veth = Some(plan.host_veth);
     // D-A1 (canonical-workload-address-inbound-tproxy, GH #241): inject the
     // canonical per-workload address — the third member of the slot-derived

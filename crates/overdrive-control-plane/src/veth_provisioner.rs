@@ -275,7 +275,15 @@ pub fn derive_veth_plan(
 /// closed. `ip netns list` shows `ovd-ns-<4hex>`; the human-readable alloc
 /// identity is rendered by tooling against the 02-04 slot↔alloc map (the Cilium
 /// `lxc<hex>` + `cilium endpoint list` model).
-const WORKLOAD_NETNS_PREFIX: &str = "ovd-ns-";
+///
+/// ALIAS of [`overdrive_core::id::NetnsName::PREFIX`] (review remediation,
+/// F1) — there is exactly ONE `"ovd-ns-"` literal in the workspace, so this
+/// assert-site constant, the [`NetnsName::from_hex4`] mint site, and
+/// [`slot_from_netns_name`]'s parse can never drift against each other. Kept
+/// as a local name (rather than every call site spelling
+/// `NetnsName::PREFIX`) so it reads symmetrically with the sibling
+/// [`WORKLOAD_HOST_VETH_PREFIX`] / [`WORKLOAD_VETH_PREFIX`] consts below.
+const WORKLOAD_NETNS_PREFIX: &str = NetnsName::PREFIX;
 /// Host-side veth-end name prefix (`ovd-hv-<4hex-slot>`). This is the end that
 /// stays in the host netns, where nft-TPROXY PREROUTING intercepts the
 /// workload's egress (now ingressing the host veth) and inbound traffic.
@@ -458,20 +466,22 @@ use overdrive_core::id::NetnsName;
 /// provision from `(slot, responder_addr)`; it is never persisted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkloadNetnsPlan {
-    /// Per-allocation network-namespace name (`ovd-ns-<4hex-slot>`). SLOT-keyed
-    /// (B3), so 11 chars ≤ NAME_MAX (255) and ≤ IFNAMSIZ (15) by construction —
-    /// the identical shape to the two veth names.
-    pub netns: String,
-    /// The SAME value as [`Self::netns`], typed. `overdrive_core::id::
-    /// NetnsName` is minted HERE — this is the type's ONLY mint site
-    /// (ADR-0082 §D2, Amendment 2026-08-12, GH #42) — so
-    /// `AllocationSpec.netns` (and, in a later step, `VmConfig.netns`)
-    /// can carry the newtype without re-deriving or re-validating it.
-    /// Every `&str`-shaped netns consumer in this file (the ~30
-    /// `ip netns …` shell-outs below) keeps using [`Self::netns`]
-    /// unchanged; `netns_name` exists ONLY to flow into the two typed
-    /// consumers.
-    pub netns_name: NetnsName,
+    /// Per-allocation network-namespace name (`ovd-ns-<4hex-slot>`).
+    /// SLOT-keyed (B3), so 11 chars ≤ NAME_MAX (255) and ≤ IFNAMSIZ (15) by
+    /// construction — the identical shape to the two veth names.
+    /// `overdrive_core::id::NetnsName` is minted HERE — this is the type's
+    /// ONLY mint site (ADR-0082 §D2, Amendment 2026-08-12, GH #42) — so
+    /// `AllocationSpec.netns` (and, in a later step, `VmConfig.netns`) can
+    /// carry the newtype without re-deriving or re-validating it. Every
+    /// `&str`-shaped netns consumer in this file (the `ip netns …`
+    /// shell-outs below) reads it via [`NetnsName::as_str`].
+    ///
+    /// Review remediation F1: this previously carried BOTH a `String` AND a
+    /// `NetnsName` in lockstep, derived through TWO independent prefix
+    /// constants with nothing asserting they agreed — the exact latent
+    /// divergence the newtype was minted to kill. Collapsed to the ONE
+    /// typed field.
+    pub netns: NetnsName,
     /// Host-side veth-end name (`ovd-hv-<4hex-slot>`) — stays in the host
     /// netns; the nft-TPROXY PREROUTING interception point. SLOT-derived
     /// (not alloc-id-derived) so it fits IFNAMSIZ by construction (D-TME-12).
@@ -538,7 +548,7 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
     // chars (see its own doc comment), so this can never actually fail —
     // `unreachable!` communicates the invariant rather than masking it
     // behind a `?` early-return that would suggest a real fallible path.
-    let netns_name = NetnsName::from_hex4(&hex)
+    let netns = NetnsName::from_hex4(&hex)
         .unwrap_or_else(|_| unreachable!("NetSlot::to_hex4 always renders exactly 4 lowercase hex chars"));
 
     // Carve the per-allocation /30 from the fixed base: slot N owns the four
@@ -551,8 +561,7 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
     let workload_addr = network.saturating_add(2);
 
     WorkloadNetnsPlan {
-        netns: format!("{WORKLOAD_NETNS_PREFIX}{hex}"),
-        netns_name,
+        netns,
         host_veth: format!("{WORKLOAD_HOST_VETH_PREFIX}{hex}"),
         workload_veth: format!("{WORKLOAD_VETH_PREFIX}{hex}"),
         host_addr,
@@ -1777,7 +1786,7 @@ pub fn provision_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProv
 /// [`VethProvisionError::ResolvConfRemoveFailed`] (an absent dir is benign).
 pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
     // `ip netns del <netns>` reaps the in-netns veth end with the namespace.
-    netns_del(&plan.netns)?;
+    netns_del(plan.netns.as_str())?;
     // Belt-and-suspenders: reap the host-side end if it survived (it should
     // die with its peer, but a corrupted half-pair may leave it). `link_del`
     // swallows "absent", so this is a no-op in the common case.
@@ -1786,7 +1795,7 @@ pub fn teardown_workload_netns(plan: &WorkloadNetnsPlan) -> Result<(), VethProvi
     // re-provision under the same slot starts clean (zero residue). An absent
     // dir is benign (NotFound swallowed); any other io::Error is fatal so a
     // permission failure does not silently leave stale DNS config behind.
-    resolv_conf_dir_remove(&plan.netns)
+    resolv_conf_dir_remove(plan.netns.as_str())
 }
 
 // --- Adopt-on-restart boot recovery (step 04-04, D-TME-12 §1–§4) ---------
@@ -2044,7 +2053,7 @@ async fn adopt_observe(
         // `?`: a NON-absent inode `stat` failure refuses the boot — a surviving
         // netns that silently fell out of `by_inode` would be misclassified as
         // an orphan and destructively torn down.
-        if let Some(ino) = netns_file_inode(&plan.netns)? {
+        if let Some(ino) = netns_file_inode(plan.netns.as_str())? {
             by_inode.insert(ino, slot);
         }
         owner.entry(slot).or_insert(None);
@@ -2158,7 +2167,7 @@ pub async fn adopt_on_restart_recovery(
 fn observe_workload_netns(
     plan: &WorkloadNetnsPlan,
 ) -> Result<ObservedWorkloadVeth, VethProvisionError> {
-    let netns_present = netns_exists(&plan.netns)?;
+    let netns_present = netns_exists(plan.netns.as_str())?;
 
     // Host-side end presence + up-state (always in the host netns).
     let (host_veth_present, host_veth_up) = host_link_state(&plan.host_veth)?;
@@ -2168,7 +2177,7 @@ fn observe_workload_netns(
     // narrower fact: present specifically inside the workload netns.
     let workload_in_host = host_link_state(&plan.workload_veth)?.0;
     let (workload_in_ns, workload_veth_up) = if netns_present {
-        netns_link_state(&plan.netns, &plan.workload_veth)?
+        netns_link_state(plan.netns.as_str(), &plan.workload_veth)?
     } else {
         (false, false)
     };
@@ -2181,10 +2190,10 @@ fn observe_workload_netns(
     // once the end is inside the netns.
     let workload_addr_present = netns_present
         && workload_in_ns
-        && netns_iface_has_addr(&plan.netns, &plan.workload_veth, plan.workload_addr)?;
-    let lo_up = netns_present && netns_link_state(&plan.netns, "lo")?.1;
+        && netns_iface_has_addr(plan.netns.as_str(), &plan.workload_veth, plan.workload_addr)?;
+    let lo_up = netns_present && netns_link_state(plan.netns.as_str(), "lo")?.1;
     let default_route_present =
-        netns_present && netns_default_route_present(&plan.netns, plan.gateway)?;
+        netns_present && netns_default_route_present(plan.netns.as_str(), plan.gateway)?;
 
     // TX-offload: only meaningful for a present end. An absent end reads
     // `false`; the converge `pair_rebuilt` path re-emits the disable after a
@@ -2195,7 +2204,7 @@ fn observe_workload_netns(
     // mutants: skip — impure observer, `&&`→`||` is end-state-insensitive
     let workload_tx_offload_on = netns_present
         && workload_in_ns
-        && netns_iface_tx_offload_on(&plan.netns, &plan.workload_veth);
+        && netns_iface_tx_offload_on(plan.netns.as_str(), &plan.workload_veth);
 
     // Host prerequisites — global sysctls + the per-host-veth knob. The
     // per-host-veth knob only exists once the host-side end exists.
@@ -2246,7 +2255,7 @@ fn execute_workload_step(
 ) -> Result<(), VethProvisionError> {
     let prefix = plan.subnet.prefix_len();
     match step {
-        WorkloadVethStep::CreateNetns => netns_add(&plan.netns),
+        WorkloadVethStep::CreateNetns => netns_add(plan.netns.as_str()),
         WorkloadVethStep::CreateVethPair => {
             // `ip link add <workload_veth> type veth peer name <host_veth>`.
             // A fresh pair may collide with a surviving end from a corrupted
@@ -2255,25 +2264,25 @@ fn execute_workload_step(
             link_del(&plan.host_veth)?;
             // The in-netns end may have been moved into the netns; del it
             // there too. Absent (or no netns) is benign.
-            if netns_exists(&plan.netns)? {
-                netns_link_del(&plan.netns, &plan.workload_veth)?;
+            if netns_exists(plan.netns.as_str())? {
+                netns_link_del(plan.netns.as_str(), &plan.workload_veth)?;
             }
             link_del(&plan.workload_veth)?;
             workload_link_add(plan)
         }
-        WorkloadVethStep::MoveWorkloadEndIntoNetns => netns_move(&plan.workload_veth, &plan.netns),
+        WorkloadVethStep::MoveWorkloadEndIntoNetns => netns_move(&plan.workload_veth, plan.netns.as_str()),
         WorkloadVethStep::AddHostAddr => {
             let cidr = format!("{}/{}", plan.host_addr, prefix);
             addr_add(&plan.host_veth, &cidr)
         }
         WorkloadVethStep::AddWorkloadAddr => {
             let cidr = format!("{}/{}", plan.workload_addr, prefix);
-            netns_addr_add(&plan.netns, &plan.workload_veth, &cidr)
+            netns_addr_add(plan.netns.as_str(), &plan.workload_veth, &cidr)
         }
         WorkloadVethStep::SetHostVethUp => link_up(&plan.host_veth),
-        WorkloadVethStep::SetWorkloadVethUp => netns_link_up(&plan.netns, &plan.workload_veth),
-        WorkloadVethStep::SetLoopbackUp => netns_link_up(&plan.netns, "lo"),
-        WorkloadVethStep::AddDefaultRoute => netns_default_route_add(&plan.netns, plan.gateway),
+        WorkloadVethStep::SetWorkloadVethUp => netns_link_up(plan.netns.as_str(), &plan.workload_veth),
+        WorkloadVethStep::SetLoopbackUp => netns_link_up(plan.netns.as_str(), "lo"),
+        WorkloadVethStep::AddDefaultRoute => netns_default_route_add(plan.netns.as_str(), plan.gateway),
         WorkloadVethStep::WriteResolvConf => resolv_conf_write(plan),
         WorkloadVethStep::EnableIpForward => sysctl_set("net.ipv4.ip_forward", "1"),
         WorkloadVethStep::RelaxGlobalRpFilter => {
@@ -2285,7 +2294,7 @@ fn execute_workload_step(
         }
         WorkloadVethStep::DisableHostTxOffload => tx_offload_off(&plan.host_veth),
         WorkloadVethStep::DisableWorkloadTxOffload => {
-            netns_tx_offload_off(&plan.netns, &plan.workload_veth)
+            netns_tx_offload_off(plan.netns.as_str(), &plan.workload_veth)
         }
     }
 }
@@ -2522,12 +2531,12 @@ fn resolv_conf_path(netns: &str) -> String {
 /// boot-time one-shot, NOT an `async fn` (the no-blocking-fs-in-async rule
 /// does not apply).
 fn resolv_conf_write(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-    let dir = resolv_conf_dir(&plan.netns);
+    let dir = resolv_conf_dir(plan.netns.as_str());
     std::fs::create_dir_all(&dir).map_err(|source| VethProvisionError::ResolvConfWriteFailed {
         path: dir.clone(),
         source,
     })?;
-    let path = resolv_conf_path(&plan.netns);
+    let path = resolv_conf_path(plan.netns.as_str());
     std::fs::write(&path, resolv_conf_contents(plan.responder_addr))
         .map_err(|source| VethProvisionError::ResolvConfWriteFailed { path, source })
 }
@@ -2541,7 +2550,7 @@ fn resolv_conf_write(plan: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>
 /// swallowed — it is deferred to the write that refuses the boot.
 fn resolv_conf_has_responder(plan: &WorkloadNetnsPlan) -> bool {
     let want = resolv_conf_contents(plan.responder_addr);
-    matches!(std::fs::read_to_string(resolv_conf_path(&plan.netns)), Ok(body) if body == want)
+    matches!(std::fs::read_to_string(resolv_conf_path(plan.netns.as_str())), Ok(body) if body == want)
 }
 
 /// Remove the per-netns resolv.conf dir `/etc/netns/<netns>/` (teardown). An
@@ -3290,7 +3299,7 @@ mod tests {
         let plan = derive_workload_netns_plan(slot(0), responder());
 
         // Netns name is SLOT-derived (4-hex), same shape as the veths (B3).
-        assert_eq!(plan.netns, "ovd-ns-0000");
+        assert_eq!(plan.netns.as_str(), "ovd-ns-0000");
         // Veth names are SLOT-derived (4-hex), IFNAMSIZ-safe — 11 chars.
         assert_eq!(plan.host_veth, "ovd-hv-0000");
         assert_eq!(plan.workload_veth, "ovd-wl-0000");
@@ -3319,7 +3328,7 @@ mod tests {
         assert_eq!(plan.host_addr, Ipv4Addr::new(10, 99, 0, 5));
         assert_eq!(plan.workload_addr, Ipv4Addr::new(10, 99, 0, 6));
         assert_eq!(plan.gateway, Ipv4Addr::new(10, 99, 0, 5));
-        assert_eq!(plan.netns, "ovd-ns-0001");
+        assert_eq!(plan.netns.as_str(), "ovd-ns-0001");
         assert_eq!(plan.host_veth, "ovd-hv-0001");
         assert_eq!(plan.workload_veth, "ovd-wl-0001");
     }
@@ -3412,7 +3421,7 @@ mod tests {
 
             // (a) IFNAMSIZ — all three names fit by construction for EVERY slot
             // (the netns is slot-keyed and bounded the same as the veths, B3).
-            prop_assert!(plan.netns.len() <= 15, "netns {} > 15", plan.netns);
+            prop_assert!(plan.netns.as_str().len() <= 15, "netns {} > 15", plan.netns);
             prop_assert!(plan.host_veth.len() <= 15, "host_veth {} > 15", plan.host_veth);
             prop_assert!(plan.workload_veth.len() <= 15, "workload_veth {} > 15", plan.workload_veth);
 

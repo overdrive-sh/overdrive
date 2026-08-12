@@ -116,11 +116,9 @@ proptest! {
         bzimage[0x202..0x206].copy_from_slice(b"HdrS");
         prop_assert!(KernelImage::validate(path.clone(), HostArch::X86_64, &bzimage).is_ok());
 
-        let mut pvh_vmlinux_elf = vec![0u8; KERNEL_MAGIC_WINDOW];
-        pvh_vmlinux_elf[0..4].copy_from_slice(b"\x7fELF");
-        prop_assert!(
-            KernelImage::validate(path.clone(), HostArch::X86_64, &pvh_vmlinux_elf).is_ok()
-        );
+        let mut vmlinux_elf = vec![0u8; KERNEL_MAGIC_WINDOW];
+        vmlinux_elf[0..4].copy_from_slice(b"\x7fELF");
+        prop_assert!(KernelImage::validate(path.clone(), HostArch::X86_64, &vmlinux_elf).is_ok());
 
         let mut aarch64_image = vec![0u8; KERNEL_MAGIC_WINDOW];
         aarch64_image[0x38..0x3c].copy_from_slice(b"ARM\x64");

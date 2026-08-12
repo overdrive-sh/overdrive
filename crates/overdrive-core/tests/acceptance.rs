@@ -311,4 +311,11 @@ mod acceptance {
     mod vm_config_pure_functions; // S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20 — ADR-0082 §D2
     mod vm_reclamation_plan_purity; // S-VM-31, S-VM-32, S-VM-92 — ADR-0083 §D7, brief §105a
     mod vm_spec_driver_table_dispatch; // S-VM-06, S-VM-07 — ADR-0083 §D4
+
+    // `CgroupPath` RELOCATED here from `overdrive-worker/tests/acceptance/`
+    // (review remediation, step 01-01 F6) alongside the type itself
+    // (ADR-0082 §D2, gap 1, GH #42) — a scoped `-p overdrive-core`
+    // mutation run must see these `FromStr` rejection killers.
+    mod cgroup_path_roundtrip;
+    mod cgroup_path_validation;
 }

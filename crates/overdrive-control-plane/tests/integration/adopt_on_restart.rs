@@ -350,7 +350,7 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
     }
     let _survivor_netns_guard = NetnsGuard { plan: survivor_plan.clone() };
 
-    let survivor_pid = spawn_survivor_in_netns(&survivor_plan.netns, &survivor_scope);
+    let survivor_pid = spawn_survivor_in_netns(survivor_plan.netns.as_str(), &survivor_scope);
     let _pid_guard = PidGuard { pid: survivor_pid, scope: survivor_scope.clone() };
     // Give the shell a moment to enrol + exec.
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -418,7 +418,7 @@ async fn serve_restart_readopts_surviving_slot_and_gcs_orphan_netns() {
 
     // --- (5c) The ORPHAN netns is GONE (orphan-GC ran). ---
     assert!(
-        !netns_present(&orphan_plan.netns),
+        !netns_present(orphan_plan.netns.as_str()),
         "the orphan netns {} (no live PID) must be reaped by recovery's orphan-GC",
         orphan_plan.netns,
     );

@@ -143,9 +143,14 @@ impl KernelImage {
     /// the first [`KERNEL_MAGIC_WINDOW`] bytes of the candidate file;
     /// this function performs no I/O of its own.
     ///
-    /// - `x86_64` accepts a `bzImage` (`HdrS` at `0x202`) or a
-    ///   PVH-enabled `vmlinux` ELF (`\x7fELF` at `0x0`). A distro
-    ///   `vmlinuz` loads directly.
+    /// - `x86_64` accepts a `bzImage` (`HdrS` at `0x202`) or any
+    ///   ELF-magic image (`\x7fELF` at `0x0`). PVH-ness is NOT
+    ///   verifiable from this fixed [`KERNEL_MAGIC_WINDOW`] header
+    ///   window — the PVH note lives in a `PT_NOTE` segment beyond the
+    ///   window — so this validator accepts any ELF and leaves
+    ///   non-PVH-vmlinux rejection to Cloud Hypervisor's own load-time
+    ///   path (lie 3 / C-7 residual for the ELF class, ADR-0082 §D2.4;
+    ///   review remediation F2). A distro `vmlinuz` loads directly.
     /// - `aarch64` accepts the raw PE `Image` (`ARM\x64` at `0x38`). A
     ///   distro `vmlinuz` is a UKI wrapper and does **not** match —
     ///   unwrapping it is BYO-artifact's job, not the platform's.
@@ -729,6 +734,15 @@ mod tests {
             prop_assert_eq!(run_dir.console_log(), dir.join("console.log"));
 
             let beacon = run_dir.beacon_socket(VsockPort::new(port));
+            // Exact derivation relation (review remediation F5): CH's wire
+            // contract is `<vsock_socket>_<port>` (ADR-0082 §D2.2 / P2) --
+            // pin it precisely, not just "some file under dir whose name
+            // contains the port", which survives a `"vsock_{}"` ->
+            // `"beacon_{}"` prefix mutation.
+            prop_assert_eq!(
+                &beacon,
+                &PathBuf::from(format!("{}_{}", run_dir.vsock_socket().display(), port))
+            );
             prop_assert_eq!(beacon.parent(), Some(dir));
 
             let beacon_name = beacon.file_name().and_then(|n| n.to_str()).unwrap_or_default();
@@ -768,7 +782,13 @@ mod tests {
                 &alloc,
             ),
             cmdline: KernelCmdline::platform_default(HostArch::X86_64),
-            memory: MemoryPlan { guest_bytes, cgroup_max_bytes: guest_bytes },
+            // `guest_bytes == cgroup_max_bytes` is the forbidden state §D2.3
+            // bans (a cgroup OOM by construction) and the pending dst-lint
+            // clause disallows a `MemoryPlan` struct literal outright; switch
+            // this fixture to `MemoryPlan::derive` once `reserve_bytes` lands
+            // GREEN in step 01-05. `rlimit_fsize` only reads `guest_bytes`,
+            // so any non-equal ceiling here is fixture-safe today.
+            memory: MemoryPlan { guest_bytes, cgroup_max_bytes: guest_bytes.saturating_add(1) },
             vcpus: NonZeroU8::new(1).unwrap(),
             run_dir: VmRunDir::for_alloc(&PathBuf::from("/run/overdrive"), &alloc),
             confinement: VmConfinement::confined(

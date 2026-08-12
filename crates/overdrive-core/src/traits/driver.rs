@@ -199,12 +199,21 @@ pub struct AllocationSpec {
     /// (every current test fixture, and any boot where the mTLS composition gate
     /// is off) — the pre-join host-netns behaviour, exactly like `netns`.
     ///
-    /// `Option<String>`, NOT a newtype — the SAME rationale as `netns` (JOIN-1):
-    /// the value is already a validated, bounded, slot-derived name minted ONLY
-    /// by `derive_workload_netns_plan` (a pure projection of the already-newtyped
-    /// `NetSlot`); it has no parse surface, no operator-typed entry point, and no
-    /// `FromStr` round-trip to defend (JOIN-6,
-    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`).
+    /// `Option<String>`, NOT a newtype — on its OWN rationale (JOIN-6; this
+    /// field is not this step's subject): the value is already a validated,
+    /// bounded, slot-derived name minted ONLY by `derive_workload_netns_plan`
+    /// (a pure projection of the already-newtyped `NetSlot`); it has no parse
+    /// surface, no operator-typed entry point, and no `FromStr` round-trip to
+    /// defend.
+    ///
+    /// `netns` above carried the SAME JOIN-1 no-newtype rationale until
+    /// ADR-0082 §D2 (Amendment 2026-08-12, GH #42) reversed it FOR `netns`
+    /// ONLY — `host_veth` was not part of that reversal and stays
+    /// `Option<String>`. JOIN-1 / JOIN-6's canonical archived home,
+    /// `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md`,
+    /// no longer exists on disk; see `docs/architecture/
+    /// transparent-mtls-enrollment/feature-delta.md` and `docs/evolution/
+    /// 2026-06-22-transparent-mtls-enrollment.md` for the surviving record.
     pub host_veth: Option<String>,
 
     /// Canonical per-workload IPv4 address this allocation was provisioned

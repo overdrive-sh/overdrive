@@ -3,10 +3,17 @@
 //! @in-memory @property — proptest over arbitrary valid alloc-derived
 //! paths. PORT-TO-PORT: enters via `CgroupPath::from_str`, asserts
 //! `Display` -> `from_str` cycles to an equal value.
+//!
+//! Relocated from `overdrive-worker/tests/acceptance/` (review remediation,
+//! microvm-driver-cloud-hypervisor step 01-01 F6): `CgroupPath` itself now
+//! lives in `overdrive_core::cgroup` (ADR-0082 §D2, Amendment 2026-08-12,
+//! gap 1, GH #42) — testing it only through the `overdrive_worker`
+//! re-export left a scoped `-p overdrive-core` mutation run blind to this
+//! roundtrip proof. Tests live beside the code they defend.
 
 use std::str::FromStr;
 
-use overdrive_worker::CgroupPath;
+use overdrive_core::cgroup::CgroupPath;
 use proptest::prelude::*;
 
 /// Strategy producing valid alloc IDs (DNS-1123-like: lowercase
