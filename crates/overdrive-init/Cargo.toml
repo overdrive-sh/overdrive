@@ -1,0 +1,59 @@
+# `overdrive-init` — the in-guest PID 1 agent for the Cloud Hypervisor VM
+# driver (ADR-0082 §D7, GH #42). Class `binary`: a static, standalone
+# executable the operator bakes into their BYO ext4 rootfs (per
+# ADR-0082's "Negative, and stated" consequences — the platform ships the
+# artifact and the wire contract, not the image; GH #259's OCI/Dockerfile
+# -> rootfs factory does the baking, out of this feature's scope). Not a
+# library any other crate imports.
+#
+# Target: static `{x86_64,aarch64}-unknown-linux-musl` (ADR-0082 §D7 /
+# §D1). This step compiles against the workspace's default target for
+# `cargo check`/`cargo nextest run`; the two musl cross-targets are a
+# later toolchain/CI concern (per this step's dispatch, explicitly out of
+# scope — the crate's production logic does not depend on musl-specific
+# behaviour, only on `std` + `nix`, both of which support the musl
+# targets as Tier 1/2 Rust targets).
+
+[package]
+name        = "overdrive-init"
+version     = "0.0.0"
+description = "In-guest PID 1: beacons ready over vsock, execs the operator's command, reports the real exit status, honors at most one SHUTDOWN."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "binary"
+
+[[bin]]
+name = "overdrive-init"
+path = "src/main.rs"
+
+[features]
+# Workspace-wide convention (`.claude/rules/testing.md` § "Integration
+# vs unit gating" -> "Workspace convention") — every member declares
+# this even with no integration-tests-gated surface of its own, so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. No-op here: this crate is
+# exercised for real only via a genuine guest boot (Tier-3, step 01-08),
+# which is `overdrive-host`/`overdrive-cli`'s `kvm-tests` gate, not a
+# gate on this crate.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+thiserror.workspace      = true
+# `nix` — safe Rust bindings to the `AF_VSOCK` socket family (the vsock
+# beacon connection) and the `reboot(2)` syscall (`RB_POWER_OFF` once the
+# beacon session ends). No separate "vsock" Cargo feature exists in nix
+# 0.29 — `VsockAddr` lives under the workspace-inherited "socket"
+# feature, cfg-gated internally to `linux_android`/`apple_targets`.
+# `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
+# operator's command — see `main.rs`'s module doc for why.
+nix = { workspace = true, features = ["reboot"] }
+
+[lints]
+workspace = true

@@ -2146,6 +2146,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-init"
+version = "0.0.0"
+dependencies = [
+ "nix",
+ "overdrive-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [

@@ -318,4 +318,12 @@ mod acceptance {
     // mutation run must see these `FromStr` rejection killers.
     mod cgroup_path_roundtrip;
     mod cgroup_path_validation;
+
+    // microvm-driver-cloud-hypervisor step 01-03 (GH #42) — the
+    // `vm::beacon` Published Language (ADR-0082 §D7): the host<->guest
+    // vsock wire protocol round-trips bit-exact and rejects malformed
+    // lines with a structured `BeaconParseError`. No DISTILL scenario
+    // names this module directly (S-VM-01's guest-side prerequisite);
+    // authored fresh per DWD-06a.
+    mod vm_beacon_roundtrip;
 }
