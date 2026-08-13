@@ -1,27 +1,29 @@
 //! Acceptance scenarios for the `VmConfig` anti-corruption pure functions —
-//! `microvm-driver-cloud-hypervisor` (GH #42), Slice 01, step 01-01.
+//! `microvm-driver-cloud-hypervisor` (GH #42), Slice 01, steps 01-01 and
+//! 01-05.
 //!
 //! Per `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
 //! § Slice 01 (S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20) and ADR-0082
 //! §§ D2.1-D2.5. Each of these is a `@property` scenario and a **mandatory
 //! mutation target** per the DESIGN handoff to DELIVER.
 //!
-//! **Step 01-01 activates THREE of the five scaffolds** — S-VM-08
+//! **Step 01-01 activated THREE of the five scaffolds** — S-VM-08
 //! (`VmConfinement::seccomp_arg`), S-VM-16 (`DiskAttachment::to_disk_arg`),
 //! S-VM-17 (`KernelImage::validate`) — against
-//! `overdrive_core::vm::config`. S-VM-18 (`MemoryPlan::derive`'s
-//! `guest_bytes == cgroup_max_bytes` unrepresentability) and S-VM-20
-//! (`reserve_bytes` itself) stay `#[should_panic(expected = "RED
-//! scaffold")]`: both ultimately call `reserve_bytes`, which ships as a
-//! `todo!()` this step (ADR-0082 §D2.3 — a measured DELIVER dependency,
-//! never a guess) and lands GREEN in step 01-05.
+//! `overdrive_core::vm::config`. **Step 01-05 activates the remaining two**
+//! — S-VM-18 (`MemoryPlan::derive`'s `guest_bytes == cgroup_max_bytes`
+//! unrepresentability) and S-VM-20 (`reserve_bytes` itself) — now that
+//! `reserve_bytes` has a real, measured body (see its own docstring in
+//! `overdrive_core::vm::config` for the memory.current / memory.stat
+//! measurement table it is derived from).
 
 #![allow(clippy::missing_panics_doc)]
 
 use std::path::PathBuf;
 
 use overdrive_core::vm::config::{
-    DiskAttachment, Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, VmConfinement, VmmIdentity,
+    DiskAttachment, Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, MemoryPlan, VmConfinement,
+    VmmIdentity, reserve_bytes,
 };
 use proptest::prelude::*;
 
@@ -133,40 +135,117 @@ proptest! {
     }
 }
 
-/// S-VM-18 — `MemoryPlan::derive(declared)` is the ONLY constructor;
-/// `guest_bytes() == cgroup_max_bytes()` is not representable (C-3 / SD-4).
-///
-/// STAYS RED this step: `cgroup_max_bytes()` is derived through
-/// `reserve_bytes(guest_bytes)`, which ships as a `todo!()` until step
-/// 01-05 measures the real figure (ADR-0082 §D2.3 Consequences — a hard
-/// DELIVER dependency, not a guess). Activating this proptest today would
-/// panic on every case, not fail-for-the-right-reason.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn memory_plan_derive_makes_guest_bytes_equal_cgroup_max_unrepresentable() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-18 / for any declared u64, \
-         MemoryPlan::derive(declared).guest_bytes() == declared and \
-         cgroup_max_bytes() is STRICTLY GREATER -- ADR-0082 §D2.3, correction \
-         C-3/SD-4, mandatory mutation target)"
-    );
+proptest! {
+    /// S-VM-18 — `MemoryPlan::derive(declared)` is the ONLY constructor;
+    /// `guest_bytes() == cgroup_max_bytes()` is not representable (C-3 /
+    /// SD-4). Lands GREEN in step 01-05: `cgroup_max_bytes()` is derived
+    /// through `reserve_bytes(guest_bytes)`, which now has a real,
+    /// measured body (see its docstring in `overdrive_core::vm::config`).
+    ///
+    /// `@mandatory:mutation_target` (already carried at DISTILL time,
+    /// `test-scenarios.md:503`).
+    ///
+    /// `declared == u64::MAX` is EXCLUDED via `prop_assume!`, the same
+    /// idiom S-VM-17 above already uses for a structurally-impossible
+    /// input: `declared.saturating_add(reserve_bytes(declared))` cannot
+    /// represent a value greater than `u64::MAX` in a `u64` field, so at
+    /// EXACTLY `declared == u64::MAX` the sum saturates back to `declared`
+    /// itself and the strict inequality is unsatisfiable -- a ceiling of
+    /// the `u64` domain, not a defect in `reserve_bytes` or `derive`. No
+    /// real declared guest-RAM figure is anywhere near this boundary
+    /// (`u64::MAX` bytes is ~18.4 exabytes). The excluded point is pinned
+    /// explicitly by `memory_plan_derive_saturates_at_u64_max` immediately
+    /// below, so the boundary behavior is documented, never silently
+    /// dropped.
+    #[test]
+    fn memory_plan_derive_makes_guest_bytes_equal_cgroup_max_unrepresentable(
+        declared in any::<u64>(),
+    ) {
+        prop_assume!(declared != u64::MAX);
+
+        // Given any declared guest RAM figure (short of the u64 ceiling).
+        let plan = MemoryPlan::derive(declared);
+
+        // When MemoryPlan::derive builds the plan, guest_bytes() is
+        // exactly the declared figure ...
+        prop_assert_eq!(plan.guest_bytes(), declared);
+        // ... and cgroup_max_bytes() is STRICTLY GREATER -- a cgroup
+        // ceiling equal to guest RAM is an OOM by construction (ADR-0082
+        // §D2.3, correction C-3/SD-4).
+        prop_assert!(
+            plan.cgroup_max_bytes() > plan.guest_bytes(),
+            "cgroup_max_bytes ({}) must be strictly greater than guest_bytes \
+             ({}) -- ADR-0082 §D2.3, correction C-3/SD-4",
+            plan.cgroup_max_bytes(),
+            plan.guest_bytes(),
+        );
+    }
 }
 
-/// S-VM-20 — `reserve_bytes(guest_bytes)` is a measured constant (hard
-/// DELIVER dependency), never a guess, and never persisted.
-///
-/// STAYS RED this step: `reserve_bytes`'s body is a `todo!("RED scaffold: \
-/// ...")` until step 01-05 measures the real bound via `memory.current` /
-/// `memory.stat` against a real boot (ADR-0082 §D2.3 Consequences, intake
-/// precedent warning #7).
+/// The single point the S-VM-18 proptest above excludes, pinned
+/// explicitly: at `declared == u64::MAX`,
+/// `declared.saturating_add(reserve_bytes(..))` has nowhere left to go in
+/// a `u64` field and saturates back to `declared` itself, so
+/// `cgroup_max_bytes() == guest_bytes()` there, not strictly greater. A
+/// ceiling of the `u64` domain (no representable value exceeds
+/// `u64::MAX`), not a `reserve_bytes` defect -- documented rather than
+/// silently excluded, per `.claude/rules/development.md`'s "No
+/// aspirational docs" sibling discipline (honest about what the invariant
+/// does NOT cover).
 #[test]
-#[should_panic(expected = "RED scaffold")]
-fn reserve_bytes_is_measured_not_guessed() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-20 / reserve_bytes ships as a \
-         hard DELIVER dependency -- measure via memory.current / memory.stat \
-         against a real boot, NEVER RSS (host page tables are invisible to RSS); \
-         cite the measurement in the function's own docstring before writing a \
-         body -- ADR-0082 §D2.3 Consequences, intake precedent warning #7)"
-    );
+fn memory_plan_derive_saturates_at_u64_max() {
+    let plan = MemoryPlan::derive(u64::MAX);
+    assert_eq!(plan.guest_bytes(), u64::MAX);
+    assert_eq!(plan.cgroup_max_bytes(), u64::MAX);
+}
+
+proptest! {
+    /// S-VM-20 — `reserve_bytes(guest_bytes)` is a measured constant (hard
+    /// DELIVER dependency), never a guess, and never persisted. Lands
+    /// GREEN in step 01-05 -- see `reserve_bytes`'s own docstring in
+    /// `overdrive_core::vm::config` for the real Cloud Hypervisor boot
+    /// measurement (`memory.current` / `memory.stat`, seven guest sizes)
+    /// this policy derives from.
+    ///
+    /// `@mandatory:mutation_target` -- ADDED this step, per
+    /// `test-scenarios.md:563-571`'s own DISTILL-time note: a `todo!()`
+    /// body had nothing to mutate, so the tag was deliberately withheld
+    /// there; "the step that replaces the `todo!()` with a real
+    /// measurement-derived body adds `@mandatory:mutation_target` to this
+    /// scenario in the SAME commit and runs `cargo xtask mutants --file`
+    /// against it before closing that step" -- this commit is that step.
+    ///
+    /// Bounds the returned value for any `guest_bytes`: the lower bound
+    /// (`>= 0`) holds structurally on `u64` (no runtime check needed --
+    /// asserting it would trip rustc's `unused_comparisons` lint on an
+    /// always-true unsigned comparison). The upper bound is a fixed floor
+    /// plus a fraction of `guest_bytes`; implemented here as EXACT
+    /// equality against that floor+fraction formula (the tightest
+    /// possible form of ">= 0 and <= upper bound", and the only shape
+    /// strong enough to be a real mutation target) -- hardcoded
+    /// independently of `reserve_bytes`'s own private policy constants,
+    /// so a mutation to either figure (or the operator between them) is
+    /// caught by THIS test rather than self-cancelling against an
+    /// imported copy of the same numbers.
+    #[test]
+    fn reserve_bytes_is_measured_not_guessed(guest_bytes in any::<u64>()) {
+        // When reserve_bytes computes the reserve for any guest_bytes ...
+        let reserve = reserve_bytes(guest_bytes);
+
+        // Then it equals the documented, measured policy: an 8 MiB floor
+        // (comfortably above the largest floor-dominated small-guest
+        // reading in the measured table, ~3.80 MiB at 256 MiB) plus
+        // guest_bytes/400 (~0.25%, comfortably above the largest observed
+        // large-guest marginal rate, ~0.19% between the 4096/8192 MiB
+        // readings).
+        let upper_bound = (8u64 * 1024 * 1024).saturating_add(guest_bytes / 400);
+        prop_assert_eq!(
+            reserve,
+            upper_bound,
+            "reserve_bytes({}) = {} must equal the documented policy (8 MiB \
+             floor + guest_bytes/400) -- ADR-0082 §D2.3",
+            guest_bytes,
+            reserve,
+        );
+    }
 }

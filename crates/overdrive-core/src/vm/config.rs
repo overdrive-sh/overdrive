@@ -14,8 +14,10 @@
 //!   CH's auto-detect disables sector-0 writes on bare-filesystem images).
 //! - [`MemoryPlan`] + [`reserve_bytes`] (§D2.3) — `guest_bytes !=
 //!   cgroup_max_bytes` by construction (lie: `memory.max == guest RAM` is
-//!   a cgroup OOM by construction). `reserve_bytes` ships as a `todo!()`
-//!   until step 01-05 measures the real bound via a real boot.
+//!   a cgroup OOM by construction). `reserve_bytes` now returns a real,
+//!   measured bound — landed in step 01-05 via a real Cloud Hypervisor
+//!   boot on the project's x86_64 KVM metal box (see its own docstring
+//!   for the full memory.current / memory.stat measurement table).
 //! - [`KernelImage`] (§D2.4) — validates the boot-image magic for the
 //!   host architecture before Cloud Hypervisor ever sees the file (lie:
 //!   an unloadable `--kernel` is silently reinterpreted as UEFI firmware
@@ -61,9 +63,9 @@
 //! without `--landlock`/`--landlock-rules`, so no run-directory grant is
 //! needed until Landlock confinement is opted into in Slice 03.
 //!
-//! [`reserve_bytes`] (§D2.3) still ships as a RED scaffold until step
-//! 01-05 measures the real bound via a real boot — unchanged by this
-//! step.
+//! [`reserve_bytes`] (§D2.3) — measured GREEN in step 01-05 via a real
+//! Cloud Hypervisor boot (see its own docstring for the full
+//! memory.current / memory.stat measurement table).
 
 use std::fmt;
 use std::num::NonZeroU8;
@@ -244,7 +246,7 @@ impl MemoryPlan {
     /// figure the operator wrote, and the RAM the guest observes. The
     /// ceiling adds the result of calling [`reserve_bytes`] on `declared`.
     #[must_use]
-    pub fn derive(declared: u64) -> Self {
+    pub const fn derive(declared: u64) -> Self {
         let cgroup_max_bytes = declared.saturating_add(reserve_bytes(declared));
         Self { guest_bytes: declared, cgroup_max_bytes }
     }
@@ -265,30 +267,65 @@ impl MemoryPlan {
 /// `.claude/rules/development.md` § "Persist inputs, not derived state",
 /// a persisted reserve would be a stale cache of this policy.
 ///
-/// **Ships as a RED scaffold.** The reserve is a hard DELIVER
-/// dependency, not a guess (ADR-0082 §D2.3 Consequences, intake
-/// precedent warning #7's "magic version floor" failure with different
-/// units): RSS structurally cannot supply it (host page tables for the
-/// guest mapping are charged to the allocation's cgroup scope and are
-/// invisible to RSS). Lands GREEN in step 01-05, measured via
-/// `memory.current` / `memory.stat` against a real boot.
+/// **Measured, not guessed (step 01-05).** RSS structurally cannot supply
+/// this figure — host page tables for the guest mapping are charged to
+/// the allocation's cgroup scope via `memory.stat pagetables` and are
+/// invisible to RSS (ADR-0082 §D2.3 Consequences, intake precedent
+/// warning #7's "magic version floor" failure). The bound below is
+/// derived from a REAL Cloud Hypervisor boot: `systemd-run --scope -p
+/// Delegate=yes` wrapping `cloud-hypervisor v53.0` (`uname -r`
+/// `7.0.0-15-generic`) on the project's real x86_64 KVM metal box
+/// (`cargo xtask metal run --`), `--memory size=<N>M,prefault=on` (forces
+/// full guest-RAM residency BEFORE the guest starts, so every reading
+/// below is the worst-case/peak figure, never a transient one) against
+/// the same bzImage-kernel + ext4-rootfs pairing step 01-04's `VmFixture`
+/// stages, `--disk path=...,image_type=raw` (D2.1/C-2 — matches
+/// [`DiskAttachment`]'s own rendering), `--vsock cid=3,socket=...`
+/// (parity with the real launch shape). `memory.current` read at its
+/// settled plateau (never a transient climbing/decaying sample) at seven
+/// guest sizes:
 ///
-/// # Panics
+/// | guest (MiB) | guest_bytes | `memory.current` (plateau) | reserve = current − guest_bytes |
+/// |---:|---:|---:|---:|
+/// | 128  | 134,217,728   | 137,732,096   | 3,514,368 (≈3.35 MiB)   |
+/// | 256  | 268,435,456   | 272,420,864   | 3,985,408 (≈3.80 MiB)   |
+/// | 512  | 536,870,912   | 540,844,032   | 3,973,120 (≈3.79 MiB)   |
+/// | 1024 | 1,073,741,824 | 1,079,177,216 | 5,435,392 (≈5.18 MiB)   |
+/// | 2048 | 2,147,483,648 | 2,154,864,640 | 7,380,992 (≈7.04 MiB)   |
+/// | 4096 | 4,294,967,296 | 4,307,550,208 | 12,582,912 (≈12.00 MiB) |
+/// | 8192 | 8,589,934,592 | 8,610,607,104 | 20,672,512 (≈19.72 MiB) |
 ///
-/// Always, until step 01-05 gives this function a real body.
-#[expect(
-    clippy::todo,
-    reason = "RED scaffold; lands GREEN in step 01-05 -- measured via \
-              memory.current/memory.stat against a real boot, ADR-0082 §D2.3"
-)]
+/// Small guests are floor-dominated (Cloud Hypervisor's own userspace +
+/// fixed emulation overhead — `kernel_stack`, `vmalloc`, `sock`,
+/// `percpu`, process RSS — none of which scale with guest RAM); large
+/// guests trend toward a roughly-linear per-byte cost consistent with the
+/// host page-table overhead theory (an 8-byte PTE per 4096-byte guest
+/// page is 1/512 ≈ 0.195%; `memory.stat pagetables` grew from 344,064 to
+/// 16,883,712 bytes across the same 128 → 8192 MiB span). The
+/// 4096→8192 MiB marginal rate is ≈0.19% (1/531); the noisier
+/// 128→256 MiB marginal rate (small-sample jitter in slab/THP
+/// allocation) is ≈0.35% (1/285).
+///
+/// `reserve_bytes` returns a DELIBERATELY CONSERVATIVE upper bound over
+/// every measured point above, never the tightest fit: a fixed 8 MiB
+/// floor (≈2× the largest floor-dominated reading, 3.80 MiB at 256 MiB)
+/// plus `guest_bytes / 400` (≈0.25%, above the largest observed
+/// large-guest marginal rate, ≈0.19%). The margin absorbs a different
+/// kernel, a different Cloud Hypervisor version, or a host with
+/// marginally higher per-page overhead than the one this was measured
+/// on — a safety-margined ceiling, not "the exact measured number."
 #[must_use]
-pub fn reserve_bytes(guest_bytes: u64) -> u64 {
-    todo!(
-        "RED scaffold: reserve_bytes({guest_bytes}) measured in DELIVER via \
-         memory.current / memory.stat against a real boot, per SD-4 -- \
-         ADR-0082 §D2.3. NEVER RSS (host page tables for the guest mapping \
-         are charged to the cgroup scope and invisible to RSS)."
-    );
+pub const fn reserve_bytes(guest_bytes: u64) -> u64 {
+    // 8 MiB -- comfortably above every floor-dominated small-guest
+    // reading in the measured table above (largest observed: ~3.80 MiB
+    // at 256 MiB guest RAM).
+    const RESERVE_FLOOR_BYTES: u64 = 8 * 1024 * 1024;
+    // guest_bytes / 400 (~0.25%) -- comfortably above the largest
+    // observed large-guest marginal rate (~0.19%, the 4096->8192 MiB
+    // step) and the ~1/512 host page-table theory.
+    const RESERVE_FRACTION_DIVISOR: u64 = 400;
+
+    RESERVE_FLOOR_BYTES.saturating_add(guest_bytes / RESERVE_FRACTION_DIVISOR)
 }
 
 // -----------------------------------------------------------------------
@@ -760,12 +797,11 @@ mod tests {
     // -------------------------------------------------------------------
 
     /// Builds a structurally-valid `VmConfig` fixture, varying only the
-    /// two inputs `rlimit_fsize` derives from. Constructs `MemoryPlan`
-    /// via its private fields (visible to this nested test module)
-    /// rather than `MemoryPlan::derive`, because `derive` calls
-    /// `reserve_bytes`, which is a RED scaffold that panics until step
-    /// 01-05 (§D2.3) — this fixture exercises `VmConfig::rlimit_fsize`,
-    /// not `MemoryPlan::derive`.
+    /// two inputs `rlimit_fsize` derives from. Uses the real
+    /// `MemoryPlan::derive` constructor (switched in step 01-05, now that
+    /// `reserve_bytes` has a real body — `derive` preserves `guest_bytes`
+    /// exactly, so `rlimit_fsize`, which only reads `guest_bytes`, is
+    /// unaffected by the ceiling `derive` computes alongside it).
     fn sample_vm_config(master_bytes: u64, guest_bytes: u64) -> VmConfig {
         let alloc = AllocationId::new("alloc-rlimit-fixture").unwrap();
         let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
@@ -782,13 +818,7 @@ mod tests {
                 &alloc,
             ),
             cmdline: KernelCmdline::platform_default(HostArch::X86_64),
-            // `guest_bytes == cgroup_max_bytes` is the forbidden state §D2.3
-            // bans (a cgroup OOM by construction) and the pending dst-lint
-            // clause disallows a `MemoryPlan` struct literal outright; switch
-            // this fixture to `MemoryPlan::derive` once `reserve_bytes` lands
-            // GREEN in step 01-05. `rlimit_fsize` only reads `guest_bytes`,
-            // so any non-equal ceiling here is fixture-safe today.
-            memory: MemoryPlan { guest_bytes, cgroup_max_bytes: guest_bytes.saturating_add(1) },
+            memory: MemoryPlan::derive(guest_bytes),
             vcpus: NonZeroU8::new(1).unwrap(),
             run_dir: VmRunDir::for_alloc(&PathBuf::from("/run/overdrive"), &alloc),
             confinement: VmConfinement::confined(
