@@ -69,6 +69,12 @@ pub mod journal;
 // ADR-0054 §2. Queue-driven outcome injection. Lands GREEN across
 // slices 01-03.
 pub mod probers;
+// microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `SimVmm`, the
+// in-memory `overdrive_core::traits::vmm::Vmm` double. The
+// `vmm_equivalence` structural guard (`overdrive-host` tests) drives both
+// this and the host `CloudHypervisorVmm` adapter through the same call
+// sequence (ADR-0082 §D6).
+pub mod vmm;
 
 pub use ca::SimCa;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
@@ -77,3 +83,4 @@ pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
+pub use vmm::SimVmm;

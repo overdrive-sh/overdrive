@@ -163,6 +163,18 @@ libc            = "0.2"
 # model — `CNI_NETNS` — applied to native processes). Linux-only
 # consumers in the workspace; no portability shim needed here.
 nix             = { version = "0.29", default-features = false, features = ["net", "sched", "socket", "uio"] }
+# `rustix` — safe Rust bindings to Linux syscalls, used where the primitive
+# has no safe std equivalent. `overdrive-host::vmm::CloudHypervisorVmm`
+# (microvm-driver-cloud-hypervisor step 01-06, GH #42) calls
+# `rustix::fs::ioctl_ficlone` for the per-launch rootfs clone (ADR-0082
+# §D5's self-application rule: the FICLONE ioctl directly, never `cp`) — a
+# SAFE function whose `unsafe` is encapsulated inside rustix itself, which
+# is what lets `overdrive-host` call it under its crate-wide
+# `#![forbid(unsafe_code)]` (mirrors the `linux-keyutils` precedent already
+# in that crate). `default-features = false` + explicit `fs` opts out of
+# rustix's wider surface (net, mm, process, ...) this workspace does not
+# need yet.
+rustix          = { version = "1", default-features = false, features = ["std", "fs"] }
 # `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
 # `serde` feature gates `Deserialize` / `Serialize` impls for `Ipv4Net`,
 # used by the `[dataplane.vip_allocator]` TOML parser in

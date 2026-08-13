@@ -191,6 +191,16 @@ impl KernelImage {
             ),
         })
     }
+
+    /// The validated image's path — the `--kernel` argument value. Step
+    /// 01-06 (`CloudHypervisorVmm::create`) is the first consumer that
+    /// needs the path back out; mirrors the accessor shape every sibling
+    /// type in this file already exposes (`RootfsPlan::master`,
+    /// `KernelCmdline::as_str`, `VmRunDir::*`).
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 // -----------------------------------------------------------------------

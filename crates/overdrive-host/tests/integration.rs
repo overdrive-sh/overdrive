@@ -35,4 +35,14 @@ mod integration {
     // built-in-ca (GH #28, ADR-0063 D3) — SystemdCredsKeyring holds the KEK
     // in the real Linux kernel keyring (add_key/keyctl).
     mod systemd_creds_keyring;
+    // microvm-driver-cloud-hypervisor step 01-06 (GH #42) — real Cloud
+    // Hypervisor boot surface. Additionally gated `kvm-tests`: the x86_64
+    // + nested-KVM floor these need cannot be honoured on arm64 Lima, so
+    // a host that never enables the second feature never compiles them.
+    // See `.claude/rules/testing.md` § "Running tests — bare-metal KVM
+    // box (kvm-tests)".
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_equivalence;
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_ficlone_per_launch;
 }

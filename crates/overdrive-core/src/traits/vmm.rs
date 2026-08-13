@@ -193,6 +193,16 @@ pub struct VmControl {
 pub struct VmExitWatch(oneshot::Receiver<VmmExit>);
 
 impl VmExitWatch {
+    /// Wrap the receiving half of the channel an adapter's watcher task
+    /// sends the process's [`VmmExit`] over. The constructor every
+    /// implementor of [`Vmm::create`] needs — this trait module lands
+    /// (step 01-01) with zero implementors, so no constructor was needed
+    /// until the first one (`CloudHypervisorVmm` / `SimVmm`, step 01-06).
+    #[must_use]
+    pub const fn new(receiver: oneshot::Receiver<VmmExit>) -> Self {
+        Self(receiver)
+    }
+
     /// Await the hypervisor process's exit. The adapter's watcher task
     /// sends exactly one [`VmmExit`] over the wrapped channel when the
     /// process exits.

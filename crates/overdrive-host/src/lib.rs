@@ -26,9 +26,15 @@ pub mod cgroup_fs;
 pub mod clock;
 pub mod entropy;
 pub mod transport;
+// microvm-driver-cloud-hypervisor step 01-06 (GH #42) — `CloudHypervisorVmm`,
+// the production `overdrive_core::traits::vmm::Vmm` binding: real process
+// spawn, FICLONE-ioctl per-launch rootfs clone, and the Earned-Trust probe
+// (ADR-0082 §§D1, D5, D6).
+pub mod vmm;
 
 pub use ca::RcgenCa;
 pub use cgroup_fs::RealCgroupFs;
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;
+pub use vmm::CloudHypervisorVmm;
