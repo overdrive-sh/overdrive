@@ -3,7 +3,11 @@
 //! 01-04).
 //!
 //! [`VmFixture::provision`] is the SINGLE surface every Tier-3 VM test in
-//! this feature calls before attempting a real boot. It:
+//! this feature calls before attempting a real boot. The whole sequence
+//! below runs under one exclusive advisory lock (D2 review remediation —
+//! see [`acquire_provision_lock`]), so nextest's default parallel-process
+//! execution can call `provision()` concurrently against the same shared
+//! `staging_root` without racing. It:
 //!
 //! 1. Runs the [`preflight_kvm_capability`] check (`/dev/kvm` reachable,
 //!    host is not nested-Apple-virtualized) — ADR-0082 §D5 / roadmap AC3.
@@ -15,7 +19,8 @@
 //!    file) — never an fstype string comparison (brief.md §102/§107,
 //!    correction C-1) — AC1.
 //! 4. Stages a kernel image and builds an ext4 rootfs with a static-musl
-//!    `overdrive-init` baked in at [`GUEST_INIT_PATH`] — AC1.
+//!    `overdrive-init` baked in at BOTH [`GUEST_INIT_SBIN_PATH`] and
+//!    [`GUEST_INIT_PATH`] — AC1.
 //!
 //! Every step surfaces a distinct, named [`VmFixtureError`] variant on
 //! failure — never a downstream test timeout, never a silent skip.
@@ -39,25 +44,55 @@
 //! **Pinned kernel source.** "Pinned" here means *the same staged file is
 //! reused across a fixture's lifetime* (AC6), not "downloaded from a
 //! project-wide fixed artifact". The source is the box's OWN running
-//! kernel, `/boot/vmlinuz-$(uname -r)`, copied verbatim on x86_64. This is
-//! not a guess: spike P1 measured exactly this shape as **WORKS** — "the
-//! kernel is the distro `vmlinuz` copied verbatim... `file` identifies it
-//! as a bzImage and CH loads it directly — no UKI, no EFI-zboot, no zstd"
+//! kernel, `/boot/vmlinuz-$(uname -r)`, copied verbatim — **x86_64 only**
+//! (D8 review remediation). This is not a guess: spike P1 measured
+//! exactly this shape as **WORKS** — "the kernel is the distro `vmlinuz`
+//! copied verbatim... `file` identifies it as a bzImage and CH loads it
+//! directly — no UKI, no EFI-zboot, no zstd"
 //! (`docs/feature/microvm-driver-cloud-hypervisor/spike/findings.md`,
 //! § P1). The ADR-0068 pinned-appliance-kernel (6.18 LTS) is a distinct,
 //! out-of-scope concern — spike P3, which would have exercised THAT
 //! kernel, was never run, and building/fetching it is DEVOPS's
 //! `infra/metal/provision.sh` territory, not this fixture's.
 //!
-//! **`GUEST_INIT_PATH`.** `/init`, matching the exact path
-//! `spike-scratch/increment-a/build.sh` staged its guest binary at (the
-//! same P1-proven recipe) and the Linux kernel's own init-search order:
-//! absent an `init=` boot parameter, `kernel_init_freeable()` tries `/init`
-//! first regardless of whether root is an initramfs or a real block
-//! device. [`overdrive_core::vm::config::KernelCmdline::platform_default`]
-//! never sets `init=`, so `/init` is exactly where the kernel looks. No
-//! existing constant in the tree names this path; this module is its first
-//! and, for now, only definition.
+//! **Verbatim copy does NOT extend to aarch64.** The Ubuntu aarch64
+//! `vmlinuz` is a UKI wrapping EFI-zboot wrapping a zstd-compressed raw
+//! `Image` (`spike-scratch/increment-a/build.sh`'s two-layer unwrap);
+//! staged verbatim it always fails [`KernelImage::validate`]. This
+//! fixture does not implement the unwrap — [`stage_kernel`] reports
+//! [`VmFixtureError::KernelImageRequiresUkiUnwrap`] on aarch64 rather
+//! than the generic "should not happen" [`VmFixtureError::KernelImageInvalid`]
+//! it reports for a genuinely-broken x86_64 host.
+//!
+//! **`GUEST_INIT_PATH` and `GUEST_INIT_SBIN_PATH` (D1 review
+//! remediation — was a BLOCKER: the original note here was FALSE and
+//! would have broken the very first real boot).** The claim used to be
+//! that absent an `init=` boot parameter the kernel tries `/init` first
+//! "regardless of whether root is an initramfs or a real block device."
+//! That is wrong. `/init` is the INITRAMFS convention only — it is
+//! `ramdisk_execute_command`'s default, consulted only while unpacking an
+//! initramfs (`rdinit=`'s default), resolved *inside the cpio* before any
+//! `switch_root`. For a **block-device root** (this fixture's ext4 image)
+//! with **no `init=`** on the cmdline, `kernel_init_freeable()` never
+//! looks at `/init` at all: it falls through the (unset) `init=`-supplied
+//! command, then tries, in order, `/sbin/init`, `/etc/init`, `/bin/init`,
+//! `/bin/sh`, and panics with "No working init found" only if every one
+//! of those four is absent (`init/main.c`). `/sbin/init` is therefore the
+//! path a no-`init=` boot ACTUALLY reaches first.
+//!
+//! [`overdrive_core::vm::config::KernelCmdline::platform_default`] sets
+//! NO `init=` today — confirmed by reading its body, not assumed — so
+//! this fixture bakes `overdrive-init` at BOTH [`GUEST_INIT_SBIN_PATH`]
+//! (`/sbin/init`, the load-bearing fix: the path a no-`init=` boot
+//! reaches) and [`GUEST_INIT_PATH`] (`/init`, reached only when the
+//! caller explicitly passes `init=/init` — the shape EVERY spike boot
+//! used, `spike-scratch/increment-a/run.sh:32`, and the exact path
+//! `spike-scratch/increment-a/build.sh` staged its guest binary at).
+//! Landing `init=/init` on `platform_default` itself would be
+//! belt-and-suspenders and is outside this fixture's file boundary —
+//! flagged here, at the SAME prominence as the vsock gap immediately
+//! below, for whichever step finalizes the cmdline against a real boot
+//! (01-08).
 //!
 //! **Known gap this step does NOT close.** Ubuntu kernels build
 //! `CONFIG_VSOCKETS`/`CONFIG_VIRTIO_VSOCKETS` as *modules*
@@ -83,14 +118,38 @@ use std::process::Command;
 
 use overdrive_core::vm::config::{HostArch, KERNEL_MAGIC_WINDOW, KernelFormatError, KernelImage};
 
-/// The in-guest absolute path every fixture rootfs bakes `overdrive-init`
-/// into. See the module doc's "Design decisions" section for why `/init`
-/// is correct and where the precedent comes from.
+/// The in-guest absolute path the kernel's own no-`init=` fallback
+/// search finds FIRST.
+///
+/// `try_to_run_init_process("/sbin/init")` — see the module doc's
+/// "Design decisions" section. This is the LOAD-BEARING path (D1): the
+/// one a real boot with
+/// [`overdrive_core::vm::config::KernelCmdline::platform_default`]'s
+/// cmdline (no `init=`) actually reaches.
+pub const GUEST_INIT_SBIN_PATH: &str = "/sbin/init";
+
+/// The in-guest absolute path this fixture ALSO bakes `overdrive-init`
+/// into.
+///
+/// Reached only when the boot cmdline carries `init=/init` (every spike
+/// boot did this explicitly — `spike-scratch/increment-a/run.sh:32`).
+/// `/init` is the INITRAMFS convention and has NO special standing for a
+/// real block-device root absent an explicit `init=` — see
+/// [`GUEST_INIT_SBIN_PATH`] for the path a no-`init=` boot actually
+/// reaches, and the module doc's "Design decisions" section for the
+/// corrected kernel search order.
 pub const GUEST_INIT_PATH: &str = "/init";
 
 /// `/dev/kvm`'s well-known path — named once so the preflight and its
 /// diagnostics never drift against each other.
 const KVM_DEVICE_PATH: &str = "/dev/kvm";
+
+/// The exclusive advisory-lock file name under `staging_root`.
+///
+/// Serializes the whole [`VmFixture::provision`] body across concurrent
+/// callers (D2). Named once so [`acquire_provision_lock`] and its
+/// diagnostics never drift against each other.
+const PROVISION_LOCK_FILENAME: &str = ".provision-lock";
 
 /// 8 MiB of real, written (non-sparse) bytes — matches `infra/metal/
 /// provision.sh`'s own probe size. A sparse file would let `FICLONE`
@@ -98,12 +157,21 @@ const KVM_DEVICE_PATH: &str = "/dev/kvm";
 /// the dishonest signal correction C-1 exists to refuse.
 const REFLINK_PROBE_BYTES: usize = 8 * 1024 * 1024;
 
+/// The ext4 (and ext2/ext3) superblock's byte offset within the image —
+/// the superblock starts at byte 1024 and `s_magic` is 56 bytes into it.
+const EXT4_SUPERBLOCK_MAGIC_OFFSET: u64 = 1080;
+
+/// `0xEF53` as the two little-endian bytes actually stored on disk at
+/// [`EXT4_SUPERBLOCK_MAGIC_OFFSET`].
+const EXT4_SUPERBLOCK_MAGIC: [u8; 2] = [0x53, 0xEF];
+
 /// Everything a Tier-3 VM test needs to attempt a real Cloud Hypervisor
 /// boot.
 ///
 /// A validated, staged kernel image; an ext4 rootfs with
-/// `overdrive-init` baked in at [`GUEST_INIT_PATH`]; and the confirmed
-/// location/version of a capable `cloud-hypervisor` binary.
+/// `overdrive-init` baked in at [`GUEST_INIT_SBIN_PATH`] and
+/// [`GUEST_INIT_PATH`]; and the confirmed location/version of a capable
+/// `cloud-hypervisor` binary.
 ///
 /// Returned only by [`VmFixture::provision`], which has already run every
 /// precondition check this struct's fields imply — a caller never
@@ -114,7 +182,8 @@ pub struct VmFixture {
     /// (`<staging_root>/kernel`).
     pub kernel_path: PathBuf,
     /// The staged ext4 rootfs image, `overdrive-init` baked in at
-    /// [`GUEST_INIT_PATH`] (`<staging_root>/rootfs.ext4`).
+    /// [`GUEST_INIT_SBIN_PATH`] and [`GUEST_INIT_PATH`]
+    /// (`<staging_root>/rootfs.ext4`).
     pub rootfs_path: PathBuf,
     /// Absolute path to the confirmed-capable `cloud-hypervisor` binary.
     pub cloud_hypervisor_bin: PathBuf,
@@ -128,29 +197,48 @@ impl VmFixture {
     /// Provision (or re-verify) the shared VM-boot fixture rooted at
     /// `staging_root`, creating it if absent.
     ///
-    /// Runs, in order: the KVM/nested-virt preflight, the
-    /// `cloud-hypervisor` presence + capability check, the executed
-    /// `FICLONE` reflink probe on `staging_root`, kernel staging, and
-    /// rootfs staging (which itself builds `overdrive-init` for the
-    /// host's static-musl target). Cheap checks run first so an incapable
-    /// host fails before any expensive staging work begins.
+    /// Acquires the exclusive provisioning lock FIRST (D2 — see
+    /// [`acquire_provision_lock`]), then runs, in order: the
+    /// KVM/nested-virt preflight, the `cloud-hypervisor` presence +
+    /// capability check, the executed `FICLONE` reflink probe on
+    /// `staging_root`, kernel staging, and rootfs staging (which itself
+    /// builds `overdrive-init` for the host's static-musl target). Cheap
+    /// checks run first so an incapable host fails before any expensive
+    /// staging work begins.
+    ///
+    /// # Concurrency
+    ///
+    /// AC5 makes concurrent invocation the DEFAULT, not an edge case:
+    /// nextest runs every Tier-3 test as its own parallel process, and
+    /// every one of them calls `provision()` against the SAME shared
+    /// `staging_root`. The whole body runs under one held-for-the-call
+    /// `flock(2)`-style lock, so interleaved `remove_dir_all`/`create`/
+    /// `mkfs.ext4` calls against the same image paths — and the FICLONE
+    /// probe's fixed filenames — can never race across processes.
     ///
     /// # Idempotency
     ///
     /// A second call against the same `staging_root` re-verifies rather
     /// than re-downloads/re-bakes: an already-staged, still-valid kernel
     /// is reused; the rootfs image is rebuilt only when the freshly-built
-    /// `overdrive-init` binary differs (by size + mtime) from the one the
-    /// last-built image was staged from. The KVM/virt preflight, the
-    /// `cloud-hypervisor` check, and the `FICLONE` probe always re-run in
-    /// full — they are the trust boundary and re-verifying them is cheap.
+    /// `overdrive-init` binary differs (by length + mtime, down to
+    /// nanosecond precision — D11) from the one the last-built image was
+    /// staged from, OR when the staged image itself no longer validates
+    /// as a real ext4 filesystem (D10 — re-verified on every reuse,
+    /// never trusted on the marker file's word alone). The KVM/virt
+    /// preflight, the `cloud-hypervisor` check, and the `FICLONE` probe
+    /// always re-run in full — they are the trust boundary and
+    /// re-verifying them is cheap.
     ///
     /// # Errors
     ///
     /// Returns the first [`VmFixtureError`] any step surfaces; no
     /// partially-staged artifact is left masquerading as complete (a
-    /// failed rootfs build removes its own stale image before returning).
+    /// failed rootfs build invalidates its idempotency marker before the
+    /// rebuild starts and removes its own stale image on an
+    /// `mkfs.ext4` failure).
     pub fn provision(staging_root: &Path) -> Result<Self, VmFixtureError> {
+        let _lock = acquire_provision_lock(staging_root)?;
         preflight_kvm_capability()?;
         let (cloud_hypervisor_bin, cloud_hypervisor_version) = check_cloud_hypervisor()?;
         ensure_reflink_capable(staging_root)?;
@@ -182,6 +270,56 @@ pub fn default_staging_root() -> PathBuf {
     }
 }
 
+/// Acquires an exclusive, held-for-the-whole-body advisory lock on
+/// `<staging_root>/.provision-lock` (D2 — see [`VmFixture::provision`]'s
+/// "Concurrency" doc section for why this is needed by default, not just
+/// under contention). `ensure_reflink_capable` and `stage_rootfs` are
+/// both PRIVATE to this module and reachable only through `provision`,
+/// so holding the lock across the whole call protects both — including
+/// the FICLONE probe's fixed filenames — without a per-caller filename
+/// scheme.
+///
+/// `std::fs::File::lock()` (stable since Rust 1.89; this workspace's
+/// PINNED TOOLCHAIN is 1.95 per `rust-toolchain.toml` — no new
+/// dependency) blocks until the lock is acquired, so a second process
+/// simply waits its turn rather than racing. The lock is released when
+/// the returned `File` (and its underlying fd) is dropped at the end of
+/// the caller's scope.
+///
+/// The `#[clippy::msrv]` override below is a per-item MSRV bump, not a
+/// Cargo.toml edit: the workspace's DECLARED `rust-version` (1.88, one
+/// point below `File::lock`'s 1.89 stabilization) is a metadata floor
+/// with no external consumer to honor (every crate here is `publish =
+/// false`) — the toolchain that actually compiles this code is always
+/// 1.95. Scoping the override to this one function keeps the crate-wide
+/// declared floor untouched while unblocking the exact primitive D2
+/// calls for, entirely within this file.
+///
+/// # Errors
+///
+/// [`VmFixtureError::StagingDirUnusable`] if `staging_root` itself
+/// cannot be created, or [`VmFixtureError::ProvisionLockFailed`] if the
+/// lock file could not be opened/created or the lock itself could not be
+/// acquired (never for lock *contention*, which blocks rather than
+/// erroring).
+#[clippy::msrv = "1.89"]
+fn acquire_provision_lock(staging_root: &Path) -> Result<fs::File, VmFixtureError> {
+    fs::create_dir_all(staging_root).map_err(|source| {
+        VmFixtureError::staging_dir_unusable(staging_root.to_path_buf(), source)
+    })?;
+    let lock_path = staging_root.join(PROVISION_LOCK_FILENAME);
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|source| VmFixtureError::provision_lock_failed(lock_path.clone(), source))?;
+    lock_file
+        .lock()
+        .map_err(|source| VmFixtureError::provision_lock_failed(lock_path.clone(), source))?;
+    Ok(lock_file)
+}
+
 /// Capability preflight (roadmap AC3/AC4).
 ///
 /// Confirms `/dev/kvm` is reachable `O_RDWR` under the current identity
@@ -201,6 +339,8 @@ pub fn default_staging_root() -> PathBuf {
 ///   device.
 /// - [`VmFixtureError::SystemdDetectVirtUnavailable`] — `systemd-detect-
 ///   virt` itself could not be run.
+/// - [`VmFixtureError::SystemdDetectVirtEmptyOutput`] — it ran but
+///   produced no usable output (D12).
 /// - [`VmFixtureError::NestedAppleHost`] — the host reports
 ///   `systemd-detect-virt=apple`.
 pub fn preflight_kvm_capability() -> Result<(), VmFixtureError> {
@@ -240,11 +380,24 @@ fn describe_kvm_device_mode() -> String {
 /// (`"apple"`, `"kvm"`, `"none"`, …). A non-zero exit is NOT a spawn
 /// failure — `systemd-detect-virt` exits non-zero precisely when it
 /// detects no virtualization at all, while still printing `"none"`.
+///
+/// A well-behaved `systemd-detect-virt` ALWAYS prints something (a virt
+/// type name or `"none"`); blank stdout (garbage output, or an internal
+/// tool failure that still exits 0) is therefore its OWN distinct
+/// failure mode (D12) and is never silently read as "not apple" — the
+/// caller's `virt == "apple"` check would otherwise treat "no usable
+/// signal at all" as a clean pass.
 fn detect_virt() -> Result<String, VmFixtureError> {
     let output = Command::new("systemd-detect-virt")
         .output()
         .map_err(VmFixtureError::systemd_detect_virt_unavailable)?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    let virt = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if virt.is_empty() {
+        return Err(VmFixtureError::systemd_detect_virt_empty_output(
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ));
+    }
+    Ok(virt)
 }
 
 /// Confirms `cloud-hypervisor` is on `PATH`, runnable, and carries the
@@ -256,19 +409,38 @@ fn detect_virt() -> Result<String, VmFixtureError> {
 ///
 /// - [`VmFixtureError::CloudHypervisorMissing`] — the binary could not be
 ///   spawned at all (not on `PATH`, or not executable).
-/// - [`VmFixtureError::CloudHypervisorTooOld`] — the binary ran, but its
-///   `--help` output has no `--landlock` flag.
+/// - [`VmFixtureError::CloudHypervisorBroken`] — the binary WAS spawned
+///   but exited non-zero on `--version` or `--help` (D9: present but
+///   broken — corrupted binary, missing shared library, … — never
+///   conflated with "too old", which requires the binary to have
+///   actually run and reported a clean exit).
+/// - [`VmFixtureError::CloudHypervisorTooOld`] — the binary ran cleanly,
+///   but its `--help` output has no `--landlock` flag.
 fn check_cloud_hypervisor() -> Result<(PathBuf, String), VmFixtureError> {
     let version_output = Command::new("cloud-hypervisor")
         .arg("--version")
         .output()
         .map_err(VmFixtureError::cloud_hypervisor_missing)?;
+    if !version_output.status.success() {
+        return Err(VmFixtureError::cloud_hypervisor_broken(
+            "--version",
+            version_output.status.code(),
+            String::from_utf8_lossy(&version_output.stderr).into_owned(),
+        ));
+    }
     let version = String::from_utf8_lossy(&version_output.stdout).trim().to_owned();
 
     let help_output = Command::new("cloud-hypervisor")
         .arg("--help")
         .output()
         .map_err(|source| VmFixtureError::spawn("cloud-hypervisor --help", source))?;
+    if !help_output.status.success() {
+        return Err(VmFixtureError::cloud_hypervisor_broken(
+            "--help",
+            help_output.status.code(),
+            String::from_utf8_lossy(&help_output.stderr).into_owned(),
+        ));
+    }
     let help_text = format!(
         "{}{}",
         String::from_utf8_lossy(&help_output.stdout),
@@ -278,26 +450,26 @@ fn check_cloud_hypervisor() -> Result<(PathBuf, String), VmFixtureError> {
         return Err(VmFixtureError::cloud_hypervisor_too_old(version));
     }
 
-    let bin = resolve_on_path("cloud-hypervisor")?;
-    Ok((bin, version))
+    Ok((resolve_on_path("cloud-hypervisor"), version))
 }
 
 /// Resolves `name` to an absolute path via `which`(1) so the returned
 /// [`VmFixture`] carries an inspectable location rather than a bare
-/// `PATH`-dependent command name. Falls back to the bare name if `which`
-/// itself reports nothing — the earlier spawn already proved the binary
-/// IS runnable, so this is best-effort diagnostic enrichment, not a
-/// second gate.
-fn resolve_on_path(name: &str) -> Result<PathBuf, VmFixtureError> {
-    let output = Command::new("which")
-        .arg(name)
-        .output()
-        .map_err(|source| VmFixtureError::spawn(format!("which {name}"), source))?;
+/// `PATH`-dependent command name. Best-effort and INFALLIBLE by design
+/// (D6): the earlier spawn already proved the binary IS runnable, so a
+/// `which` that cannot even be spawned is diagnostic enrichment falling
+/// short — never a second gate on `provision`. Falls back to the bare
+/// `name` whenever `which` cannot be run, exits non-zero, or prints
+/// nothing.
+fn resolve_on_path(name: &str) -> PathBuf {
+    let Ok(output) = Command::new("which").arg(name).output() else {
+        return PathBuf::from(name);
+    };
     let resolved = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if output.status.success() && !resolved.is_empty() {
-        Ok(PathBuf::from(resolved))
+        PathBuf::from(resolved)
     } else {
-        Ok(PathBuf::from(name))
+        PathBuf::from(name)
     }
 }
 
@@ -350,10 +522,23 @@ fn ensure_reflink_capable(dir: &Path) -> Result<(), VmFixtureError> {
 /// - [`VmFixtureError::UnsupportedHostArch`] — compiled for neither
 ///   `x86_64` nor `aarch64`.
 /// - [`VmFixtureError::KernelImageMissing`] — no
-///   `/boot/vmlinuz-$(uname -r)` on this host.
-/// - [`VmFixtureError::KernelImageInvalid`] — the host's own kernel image
-///   failed [`KernelImage::validate`] (should not happen on a supported
-///   distro kernel; named rather than assumed).
+///   `/boot/vmlinuz-$(uname -r)` at all (D5: a genuinely ABSENT file —
+///   `io::ErrorKind::NotFound` only).
+/// - [`VmFixtureError::KernelImageUnreadable`] — the file exists but
+///   could not be READ (permission denied, EIO, …) (D5: a `0600
+///   root:root` image is unreadable, not missing — never conflated).
+/// - [`VmFixtureError::KernelStagingWriteFailed`] — the validated image
+///   could not be copied into `staging_root` (a write-side failure —
+///   disk full, unwritable staging dir — never conflated with a
+///   read-side/source failure, D5).
+/// - [`VmFixtureError::KernelImageInvalid`] — the host's own kernel
+///   image failed [`KernelImage::validate`] on `x86_64` (should not
+///   happen on a supported distro kernel; named rather than assumed).
+/// - [`VmFixtureError::KernelImageRequiresUkiUnwrap`] — the SAME
+///   validation failure on `aarch64` (D8: this fixture stages `vmlinuz`
+///   VERBATIM, which is x86_64-only per spike P1's arch split — on
+///   aarch64 this is the EXPECTED failure, not a should-never-happen
+///   case; see the module doc's "Pinned kernel source" note).
 fn stage_kernel(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     fs::create_dir_all(staging_root).map_err(|source| {
         VmFixtureError::staging_dir_unusable(staging_root.to_path_buf(), source)
@@ -368,18 +553,42 @@ fn stage_kernel(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     let source = PathBuf::from(format!("/boot/vmlinuz-{release}"));
 
     let header = read_header(&source).map_err(|io_source| {
-        VmFixtureError::kernel_image_missing(source.clone(), release.clone(), io_source)
+        classify_kernel_read_error(source.clone(), release.clone(), io_source)
     })?;
     let arch = host_arch()?;
     KernelImage::validate(source.clone(), arch, &header).map_err(|validate_source| {
-        VmFixtureError::kernel_image_invalid(source.clone(), validate_source)
+        if arch == HostArch::Aarch64 {
+            VmFixtureError::kernel_image_requires_uki_unwrap(source.clone(), validate_source)
+        } else {
+            VmFixtureError::kernel_image_invalid(source.clone(), validate_source)
+        }
     })?;
 
     fs::copy(&source, &dest).map_err(|io_source| {
-        VmFixtureError::kernel_image_missing(source.clone(), release.clone(), io_source)
+        VmFixtureError::kernel_staging_write_failed(dest.clone(), io_source)
     })?;
 
     Ok(dest)
+}
+
+/// Classifies a failure READING the candidate kernel image at `path`
+/// into the two distinct modes `stage_kernel` can report (D5): a
+/// genuinely absent file names [`VmFixtureError::KernelImageMissing`];
+/// any other read failure (permission denied, EIO, …) names
+/// [`VmFixtureError::KernelImageUnreadable`] instead. A `0600 root:root`
+/// `/boot/vmlinuz-*` read as an unprivileged user must never be reported
+/// as "missing" when it genuinely exists.
+fn classify_kernel_read_error(
+    path: PathBuf,
+    kernel_release: String,
+    source: io::Error,
+) -> VmFixtureError {
+    match source.kind() {
+        io::ErrorKind::NotFound => {
+            VmFixtureError::kernel_image_missing(path, kernel_release, source)
+        }
+        _ => VmFixtureError::kernel_image_unreadable(path, kernel_release, source),
+    }
 }
 
 /// `true` iff `path` already holds a kernel image that validates for this
@@ -413,7 +622,10 @@ fn host_kernel_release() -> Result<String, VmFixtureError> {
 
 /// Stages (or re-verifies) the ext4 rootfs at
 /// `<staging_root>/rootfs.ext4`, with a freshly-built static-musl
-/// `overdrive-init` baked in at [`GUEST_INIT_PATH`].
+/// `overdrive-init` baked in at BOTH [`GUEST_INIT_SBIN_PATH`] (`/sbin/
+/// init` — the path a no-`init=` boot actually reaches, D1) and
+/// [`GUEST_INIT_PATH`] (`/init` — reached only under an explicit
+/// `init=/init` cmdline).
 ///
 /// # Errors
 ///
@@ -422,33 +634,95 @@ fn host_kernel_release() -> Result<String, VmFixtureError> {
 /// [`VmFixtureError::RootfsBuildFailed`], or [`VmFixtureError::Spawn`].
 fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     let init_bin = build_overdrive_init_static()?;
-    let init_meta = fs::metadata(&init_bin).map_err(|source| {
-        VmFixtureError::rootfs_staging_failed(
-            format!("reading metadata for built overdrive-init at {}", init_bin.display()),
-            source,
-        )
-    })?;
-    let signature = format!("{}:{}", init_meta.len(), init_meta.mtime());
+    let signature = compute_init_signature(&init_bin)?;
 
     let rootfs_path = staging_root.join("rootfs.ext4");
     let marker_path = staging_root.join(".rootfs-built-from");
 
-    let already_current = rootfs_path.is_file()
+    let already_current = rootfs_image_is_valid(&rootfs_path)
         && fs::read_to_string(&marker_path).is_ok_and(|marker| marker == signature);
     if already_current {
         return Ok(rootfs_path);
     }
 
+    // D4: invalidate the marker BEFORE starting a rebuild -- no
+    // partially-staged artifact is ever left claiming validity, even if
+    // this attempt itself fails partway through.
+    if marker_path.exists() {
+        fs::remove_file(&marker_path).map_err(|source| {
+            VmFixtureError::rootfs_staging_failed(
+                format!("invalidating stale idempotency marker at {}", marker_path.display()),
+                source,
+            )
+        })?;
+    }
+
     let stage_dir = staging_root.join("rootfs-stage");
+    build_staging_tree(&stage_dir, &init_bin)?;
+    mkfs_rootfs_image(&stage_dir, &rootfs_path)?;
+
+    fs::write(&marker_path, &signature).map_err(|source| {
+        VmFixtureError::rootfs_staging_failed(
+            format!("writing idempotency marker at {}", marker_path.display()),
+            source,
+        )
+    })?;
+
+    Ok(rootfs_path)
+}
+
+/// `<len>:<mtime-secs>:<mtime-nanos>` — the idempotency signature
+/// [`stage_rootfs`] compares against the persisted marker to decide
+/// whether a rebuild is needed. Carries nanosecond resolution (D11):
+/// whole-second [`MetadataExt::mtime`] alone could falsely reuse a stale
+/// image when `overdrive-init` is rebuilt more than once within the same
+/// wall-clock second.
+fn compute_init_signature(init_bin: &Path) -> Result<String, VmFixtureError> {
+    let meta = fs::metadata(init_bin).map_err(|source| {
+        VmFixtureError::rootfs_staging_failed(
+            format!("reading metadata for built overdrive-init at {}", init_bin.display()),
+            source,
+        )
+    })?;
+    Ok(format!("{}:{}:{}", meta.len(), meta.mtime(), meta.mtime_nsec()))
+}
+
+/// `true` iff `path` is a plausible ext4 image: present, long enough to
+/// carry a superblock, and holding the ext4 superblock magic (`0xEF53`
+/// at byte offset 1080). Mirrors [`kernel_is_valid`]'s
+/// re-validate-on-reuse discipline (D10) rather than trusting the
+/// idempotency marker file alone — a marker can outlive the image it
+/// describes (truncation, an out-of-band `rm`, disk corruption), so
+/// `stage_rootfs` reads the actual bytes before skipping a rebuild.
+fn rootfs_image_is_valid(path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let Ok(meta) = fs::metadata(path) else { return false };
+    if meta.len() < EXT4_SUPERBLOCK_MAGIC_OFFSET + EXT4_SUPERBLOCK_MAGIC.len() as u64 {
+        return false;
+    }
+    let Ok(mut file) = fs::File::open(path) else { return false };
+    if file.seek(SeekFrom::Start(EXT4_SUPERBLOCK_MAGIC_OFFSET)).is_err() {
+        return false;
+    }
+    let mut magic = [0_u8; 2];
+    file.read_exact(&mut magic).is_ok() && magic == EXT4_SUPERBLOCK_MAGIC
+}
+
+/// Clears and rebuilds the staging tree `mkfs.ext4 -d` will populate the
+/// image from: the kernel-required empty mountpoints, `overdrive-init`
+/// baked in at both in-guest init paths (D1), and the two static device
+/// nodes PID 1 needs before devtmpfs is up.
+fn build_staging_tree(stage_dir: &Path, init_bin: &Path) -> Result<(), VmFixtureError> {
     if stage_dir.exists() {
-        fs::remove_dir_all(&stage_dir).map_err(|source| {
+        fs::remove_dir_all(stage_dir).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("clearing prior staging tree at {}", stage_dir.display()),
                 source,
             )
         })?;
     }
-    for sub in ["proc", "sys", "dev", "tmp"] {
+    for sub in ["proc", "sys", "dev", "tmp", "sbin"] {
         fs::create_dir_all(stage_dir.join(sub)).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("creating {sub} under {}", stage_dir.display()),
@@ -457,20 +731,49 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
         })?;
     }
 
-    let init_dest = stage_dir.join(GUEST_INIT_PATH.trim_start_matches('/'));
-    fs::copy(&init_bin, &init_dest).map_err(|source| {
-        VmFixtureError::rootfs_staging_failed(
-            format!("installing overdrive-init at {}", init_dest.display()),
-            source,
-        )
-    })?;
-    set_executable(&init_dest)?;
+    // D1: bake overdrive-init in at BOTH reachable paths -- /sbin/init is
+    // the load-bearing one (what a no-`init=` boot's kernel fallback
+    // search finds first); /init is kept for an explicit `init=/init`
+    // cmdline (every spike boot's shape). See the module doc's "Design
+    // decisions" section.
+    install_guest_init(stage_dir, init_bin, GUEST_INIT_SBIN_PATH)?;
+    install_guest_init(stage_dir, init_bin, GUEST_INIT_PATH)?;
 
     mknod_char_device(&stage_dir.join("dev/console"), 5, 1, 0o600)?;
     mknod_char_device(&stage_dir.join("dev/null"), 1, 3, 0o666)?;
+    Ok(())
+}
 
+/// Copies `init_bin` into `stage_dir` at the in-guest absolute path
+/// `guest_path` (one of [`GUEST_INIT_SBIN_PATH`] / [`GUEST_INIT_PATH`])
+/// and marks the copy executable.
+fn install_guest_init(
+    stage_dir: &Path,
+    init_bin: &Path,
+    guest_path: &str,
+) -> Result<(), VmFixtureError> {
+    let dest = stage_dir.join(guest_path.trim_start_matches('/'));
+    fs::copy(init_bin, &dest).map_err(|source| {
+        VmFixtureError::rootfs_staging_failed(
+            format!("installing overdrive-init at {}", dest.display()),
+            source,
+        )
+    })?;
+    set_executable(&dest)
+}
+
+/// Sizes a fresh 64 MiB sparse image at `rootfs_path` (removing any stale
+/// one first) and runs `mkfs.ext4 -d stage_dir` to populate it — 64 MiB
+/// matches the spike's proven-sufficient size for a single static binary
+/// plus device nodes (`spike-scratch/increment-a/build.sh`).
+///
+/// # Errors
+///
+/// [`VmFixtureError::RootfsStagingFailed`], [`VmFixtureError::Spawn`], or
+/// [`VmFixtureError::RootfsBuildFailed`].
+fn mkfs_rootfs_image(stage_dir: &Path, rootfs_path: &Path) -> Result<(), VmFixtureError> {
     if rootfs_path.exists() {
-        fs::remove_file(&rootfs_path).map_err(|source| {
+        fs::remove_file(rootfs_path).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("removing stale rootfs image at {}", rootfs_path.display()),
                 source,
@@ -478,15 +781,12 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
         })?;
     }
     {
-        let image_file = fs::File::create(&rootfs_path).map_err(|source| {
+        let image_file = fs::File::create(rootfs_path).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("creating rootfs image at {}", rootfs_path.display()),
                 source,
             )
         })?;
-        // 64 MiB — matches the spike's proven-sufficient size for a
-        // single static binary plus device nodes
-        // (`spike-scratch/increment-a/build.sh`).
         image_file.set_len(64 * 1024 * 1024).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("sizing rootfs image at {}", rootfs_path.display()),
@@ -499,26 +799,22 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
         .arg("-F")
         .args(["-L", "overdrive-vm-fixture"])
         .arg("-d")
-        .arg(&stage_dir)
-        .arg(&rootfs_path)
+        .arg(stage_dir)
+        .arg(rootfs_path)
         .output()
         .map_err(|source| VmFixtureError::spawn("mkfs.ext4", source))?;
     if !mkfs.status.success() {
+        // D4: never leave a partially-populated image masquerading as
+        // staged -- best-effort; the caller reports the real failure
+        // below regardless of whether this cleanup itself succeeds.
+        let _ = fs::remove_file(rootfs_path);
         return Err(VmFixtureError::rootfs_build_failed(
-            rootfs_path,
+            rootfs_path.to_path_buf(),
             mkfs.status.code(),
             String::from_utf8_lossy(&mkfs.stderr).into_owned(),
         ));
     }
-
-    fs::write(&marker_path, &signature).map_err(|source| {
-        VmFixtureError::rootfs_staging_failed(
-            format!("writing idempotency marker at {}", marker_path.display()),
-            source,
-        )
-    })?;
-
-    Ok(rootfs_path)
+    Ok(())
 }
 
 /// `chmod 0755` — `fs::copy` preserves the source's permission bits, but
@@ -583,6 +879,16 @@ fn mknod_char_device(path: &Path, major: u32, minor: u32, mode: u32) -> Result<(
 /// the idempotency logic in [`stage_rootfs`] is about skipping the
 /// (comparatively expensive) `mkfs.ext4` rebuild, not this step.
 ///
+/// **musl cross-compile validated (D3, 2026-08-13).** `cargo xtask metal
+/// run -- cargo check -p overdrive-init --target
+/// x86_64-unknown-linux-musl --release` completed clean in 8s on the
+/// real x86_64 metal box, including every `build.rs` step — the earlier
+/// concern that a C-compiled dependency might not cross-compile cleanly
+/// for musl is refuted; no C toolchain invocation appeared in the trace.
+/// `cargo check` proves the compile graph resolves; the actual LINK this
+/// function runs is exercised for the first time when this fixture
+/// itself runs, at step 01-06.
+///
 /// # Errors
 ///
 /// [`VmFixtureError::UnsupportedHostArch`], [`VmFixtureError::Spawn`], or
@@ -610,9 +916,42 @@ fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
     Ok(cargo_target_dir(&root).join(target).join("release").join("overdrive-init"))
 }
 
-/// The workspace root, derived from this crate's own manifest directory
-/// at compile time (`crates/overdrive-testing` → its grandparent).
+/// The workspace root, resolved at RUNTIME via `cargo locate-project
+/// --workspace` (D13) — never `env!("CARGO_MANIFEST_DIR")` alone, which
+/// bakes in the COMPILE-TIME path of whichever workspace last compiled
+/// this test binary. Conductor runs many workspaces against the SAME
+/// Lima VM's cached `target/`; a stale compiled artifact reused from a
+/// different workspace would then stage/build `overdrive-init` against
+/// the WRONG tree entirely — the exact class documented in
+/// `.claude/rules/development.md` § "Stale Lima xtask test artifacts
+/// across workspaces".
 fn workspace_root() -> PathBuf {
+    locate_workspace_root_via_cargo().unwrap_or_else(compile_time_workspace_root_fallback)
+}
+
+/// Runs `cargo locate-project --workspace --message-format plain` and
+/// returns the workspace root (the located `Cargo.toml`'s parent
+/// directory) — `None` if `cargo` could not be run, exited non-zero, or
+/// produced no usable path.
+fn locate_workspace_root_via_cargo() -> Option<PathBuf> {
+    let output = Command::new("cargo")
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let manifest_path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if manifest_path.is_empty() {
+        return None;
+    }
+    Path::new(&manifest_path).parent().map(Path::to_path_buf)
+}
+
+/// Last-resort fallback when `cargo locate-project` itself could not be
+/// run — the pre-D13 compile-time derivation, kept only as a backstop so
+/// [`workspace_root`] stays infallible.
+fn compile_time_workspace_root_fallback() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -654,6 +993,17 @@ fn musl_target_triple() -> Result<&'static str, VmFixtureError> {
 /// gap an operator (or the next crafter) needs to act on.
 #[derive(Debug, thiserror::Error)]
 pub enum VmFixtureError {
+    /// The exclusive provisioning lock on `<staging_root>/.provision-lock`
+    /// could not be acquired (D2) — either the lock FILE itself could not
+    /// be opened/created, or `flock(2)` itself failed. Never raised for
+    /// lock *contention*, which blocks the caller rather than erroring.
+    #[error("could not acquire the provisioning lock at {path}: {source}")]
+    ProvisionLockFailed {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
     /// `/dev/kvm` does not exist — no KVM support in this kernel, or the
     /// `kvm`/`kvm_intel`/`kvm_amd` modules are not loaded.
     #[error(
@@ -700,6 +1050,18 @@ pub enum VmFixtureError {
         source: io::Error,
     },
 
+    /// `systemd-detect-virt` was spawned successfully but produced no
+    /// usable output (blank stdout) — distinct from
+    /// [`Self::SystemdDetectVirtUnavailable`] (the tool itself could not
+    /// be run) and never silently folded into "not apple" (D12): a
+    /// well-behaved `systemd-detect-virt` always prints a virt type or
+    /// `"none"`.
+    #[error(
+        "systemd-detect-virt ran but produced no output (expected a virtualization type or \
+         \"none\"); stderr: {stderr}"
+    )]
+    SystemdDetectVirtEmptyOutput { stderr: String },
+
     /// The host reports `systemd-detect-virt=apple` — nested virtualization
     /// on Apple Silicon. Cites the spike's own settled finding by name so
     /// this is never mistaken for a driver or Cloud Hypervisor bug.
@@ -720,6 +1082,16 @@ pub enum VmFixtureError {
         #[source]
         source: io::Error,
     },
+
+    /// `cloud-hypervisor` WAS spawned but exited non-zero on `--version`
+    /// or `--help` — present but broken (corrupted binary, missing shared
+    /// library, …) (D9). Never conflated with [`Self::CloudHypervisorTooOld`],
+    /// which requires the binary to have actually run and reported a
+    /// clean exit.
+    #[error(
+        "cloud-hypervisor is present but exited non-zero on `{subcommand}` (exit={status:?}): {stderr}"
+    )]
+    CloudHypervisorBroken { subcommand: &'static str, status: Option<i32>, stderr: String },
 
     /// `cloud-hypervisor` ran, but its `--help` output has no `--landlock`
     /// flag. The floor is named against this capability, not a version
@@ -768,7 +1140,8 @@ pub enum VmFixtureError {
     UnsupportedHostArch { arch: String },
 
     /// No `/boot/vmlinuz-<release>` on this host for the running kernel
-    /// release.
+    /// release — a genuinely ABSENT file (D5: `io::ErrorKind::NotFound`
+    /// only; any other read failure is [`Self::KernelImageUnreadable`]).
     #[error(
         "no kernel image at {path} for the running kernel (uname -r = {kernel_release}): {source}"
     )]
@@ -779,9 +1152,56 @@ pub enum VmFixtureError {
         source: io::Error,
     },
 
-    /// The host's own kernel image failed format validation.
+    /// The candidate kernel image EXISTS but could not be read
+    /// (permission denied, EIO, …) — distinct from
+    /// [`Self::KernelImageMissing`], which is reserved for a genuinely
+    /// absent file (D5).
+    #[error(
+        "kernel image at {path} exists but could not be read (uname -r = {kernel_release}): {source}"
+    )]
+    KernelImageUnreadable {
+        path: PathBuf,
+        kernel_release: String,
+        #[source]
+        source: io::Error,
+    },
+
+    /// The validated kernel image could not be copied into the staging
+    /// root — a write-side failure (staging dir unwritable, disk full,
+    /// …), never conflated with [`Self::KernelImageMissing`] /
+    /// [`Self::KernelImageUnreadable`], which are read-side/source
+    /// failures (D5).
+    #[error("staging the validated kernel image to {dest} failed: {source}")]
+    KernelStagingWriteFailed {
+        dest: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    /// The host's own kernel image failed format validation on `x86_64`.
     #[error("kernel image at {path} failed format validation: {source}")]
     KernelImageInvalid {
+        path: PathBuf,
+        #[source]
+        source: KernelFormatError,
+    },
+
+    /// The SAME format-validation failure, but on `aarch64` — EXPECTED,
+    /// not a surprise (D8). This fixture stages `/boot/vmlinuz-*`
+    /// VERBATIM on every arch, but the Ubuntu aarch64 `vmlinuz` is a UKI
+    /// wrapping a nested EFI-zboot PE wrapping a zstd-compressed raw
+    /// `Image` — CH needs the raw `Image`, and unwrapping both layers is
+    /// BYO-artifact tooling this fixture does not implement (see
+    /// `spike-scratch/increment-a/build.sh`'s `inspect_kernel.py` +
+    /// `zstd -d` dance for the unwrap this host would need).
+    #[error(
+        "kernel image at {path} failed format validation on aarch64: the Ubuntu aarch64 \
+         vmlinuz is a UKI wrapping EFI-zboot wrapping a zstd-compressed raw Image; this \
+         fixture only stages the kernel VERBATIM (x86_64-only) and does not unwrap a UKI -- \
+         see spike-scratch/increment-a/build.sh's inspect_kernel.py + zstd -d dance for the \
+         unwrap this host would need: {source}"
+    )]
+    KernelImageRequiresUkiUnwrap {
         path: PathBuf,
         #[source]
         source: KernelFormatError,
@@ -820,6 +1240,11 @@ pub enum VmFixtureError {
 
 impl VmFixtureError {
     #[must_use]
+    pub const fn provision_lock_failed(path: PathBuf, source: io::Error) -> Self {
+        Self::ProvisionLockFailed { path, source }
+    }
+
+    #[must_use]
     pub const fn no_kvm_device(source: io::Error) -> Self {
         Self::NoKvmDevice { source }
     }
@@ -840,8 +1265,22 @@ impl VmFixtureError {
     }
 
     #[must_use]
+    pub fn systemd_detect_virt_empty_output(stderr: impl Into<String>) -> Self {
+        Self::SystemdDetectVirtEmptyOutput { stderr: stderr.into() }
+    }
+
+    #[must_use]
     pub const fn cloud_hypervisor_missing(source: io::Error) -> Self {
         Self::CloudHypervisorMissing { source }
+    }
+
+    #[must_use]
+    pub fn cloud_hypervisor_broken(
+        subcommand: &'static str,
+        status: Option<i32>,
+        stderr: impl Into<String>,
+    ) -> Self {
+        Self::CloudHypervisorBroken { subcommand, status, stderr: stderr.into() }
     }
 
     #[must_use]
@@ -874,8 +1313,30 @@ impl VmFixtureError {
     }
 
     #[must_use]
+    pub const fn kernel_image_unreadable(
+        path: PathBuf,
+        kernel_release: String,
+        source: io::Error,
+    ) -> Self {
+        Self::KernelImageUnreadable { path, kernel_release, source }
+    }
+
+    #[must_use]
+    pub const fn kernel_staging_write_failed(dest: PathBuf, source: io::Error) -> Self {
+        Self::KernelStagingWriteFailed { dest, source }
+    }
+
+    #[must_use]
     pub const fn kernel_image_invalid(path: PathBuf, source: KernelFormatError) -> Self {
         Self::KernelImageInvalid { path, source }
+    }
+
+    #[must_use]
+    pub const fn kernel_image_requires_uki_unwrap(
+        path: PathBuf,
+        source: KernelFormatError,
+    ) -> Self {
+        Self::KernelImageRequiresUkiUnwrap { path, source }
     }
 
     #[must_use]
@@ -904,5 +1365,119 @@ impl VmFixtureError {
     #[must_use]
     pub fn spawn(command: impl Into<String>, source: io::Error) -> Self {
         Self::Spawn { command: command.into(), source }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Pure-helper unit tests (review remediation 01-04). Real (trivial)
+// filesystem I/O against unique per-test scratch paths -- gated behind
+// `integration-tests` per `.claude/rules/testing.md` § "Integration vs
+// unit gating" ("Real filesystem I/O ... MUST be gated"), even though
+// each write is a handful of bytes under `/tmp`. No `tempfile` dev-dep:
+// out of this step's file boundary (only `vm_fixture.rs` +
+// `overdrive-init/Cargo.toml`), so uniqueness comes from a per-process,
+// per-call atomic counter instead, mirroring what `tempfile::TempDir`
+// would give per `.claude/rules/testing.md` § "Shared filesystem paths".
+//
+// There is no runtime acceptance test at this boundary -- the roadmap's
+// first real exercise of this fixture is step 01-06 -- so these cover
+// only the two genuinely pure-logic helpers the review flagged.
+// ---------------------------------------------------------------------
+#[cfg(all(test, feature = "integration-tests"))]
+mod tests {
+    // Mirrors `overdrive-core`'s crate-level `#![cfg_attr(test,
+    // allow(clippy::unwrap_used, clippy::expect_used))]`
+    // (`crates/overdrive-core/src/lib.rs`) scoped to this module instead
+    // -- `overdrive-testing/src/lib.rs` is outside this step's file
+    // boundary, so the allow lives here rather than crate-wide.
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    fn scratch_path(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!("overdrive-vm-fixture-test-{label}-{}-{n}", std::process::id()))
+    }
+
+    // -------------------------------------------------------------
+    // compute_init_signature (D11 -- nanosecond-resolution signature)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn compute_init_signature_encodes_len_mtime_and_mtime_nsec() {
+        let path = scratch_path("signature");
+        fs::write(&path, b"static-musl-binary-bytes").unwrap();
+        let meta = fs::metadata(&path).unwrap();
+
+        let signature = compute_init_signature(&path).unwrap();
+
+        let expected = format!("{}:{}:{}", meta.len(), meta.mtime(), meta.mtime_nsec());
+        assert_eq!(signature, expected);
+
+        let parts: Vec<&str> = signature.split(':').collect();
+        assert_eq!(parts.len(), 3, "signature must carry exactly len:mtime:mtime_nsec");
+        assert_eq!(parts[0], meta.len().to_string());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn compute_init_signature_reports_rootfs_staging_failed_when_file_absent() {
+        let path = scratch_path("missing");
+        let err = compute_init_signature(&path).unwrap_err();
+        assert!(
+            matches!(err, VmFixtureError::RootfsStagingFailed { .. }),
+            "unexpected error variant: {err:?}"
+        );
+    }
+
+    // -------------------------------------------------------------
+    // rootfs_image_is_valid (D10 -- re-verify on reuse, not just the
+    // marker)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn rootfs_image_is_valid_true_only_when_ext4_magic_present_at_offset() {
+        let path = scratch_path("valid-ext4");
+        let mut bytes = vec![0_u8; 2048];
+        let offset = usize::try_from(EXT4_SUPERBLOCK_MAGIC_OFFSET).expect("offset fits usize");
+        bytes[offset] = EXT4_SUPERBLOCK_MAGIC[0];
+        bytes[offset + 1] = EXT4_SUPERBLOCK_MAGIC[1];
+        fs::write(&path, &bytes).unwrap();
+
+        assert!(rootfs_image_is_valid(&path));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rootfs_image_is_valid_false_when_magic_bytes_wrong() {
+        let path = scratch_path("bad-magic");
+        let bytes = vec![0_u8; 2048]; // zeroed -- no ext4 magic anywhere
+        fs::write(&path, &bytes).unwrap();
+
+        assert!(!rootfs_image_is_valid(&path));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rootfs_image_is_valid_false_when_file_too_short_for_the_magic_offset() {
+        let path = scratch_path("truncated");
+        fs::write(&path, b"too short").unwrap();
+
+        assert!(!rootfs_image_is_valid(&path));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rootfs_image_is_valid_false_when_file_absent() {
+        let path = scratch_path("absent");
+        assert!(!rootfs_image_is_valid(&path));
     }
 }

@@ -8,11 +8,18 @@
 #
 # Target: static `{x86_64,aarch64}-unknown-linux-musl` (ADR-0082 §D7 /
 # §D1). This step compiles against the workspace's default target for
-# `cargo check`/`cargo nextest run`; the two musl cross-targets and their
-# CI/toolchain wiring land at step 01-04 (rootfs baking owns the
-# static-musl target wiring) — the crate's production logic does not
-# depend on musl-specific behaviour, only on `std` + `nix`, both of which
-# support the musl targets as Tier 1/2 Rust targets.
+# `cargo check`/`cargo nextest run` — the crate's production logic does
+# not depend on musl-specific behaviour, only on `std` + `nix`, both of
+# which support the musl targets as Tier 1/2 Rust targets. Step 01-04
+# registered the two musl targets in `rust-toolchain.toml` (rustup
+# auto-installs them) and cross-builds this crate at Tier-3 RUNTIME via
+# `overdrive-testing::vm_fixture::build_overdrive_init_static` — the
+# musl compile itself was validated on the metal box 2026-08-13 (`cargo
+# xtask metal run -- cargo check -p overdrive-init --target
+# x86_64-unknown-linux-musl --release`, clean in 8s). The first CI job
+# that actually exercises the musl BUILD+LINK (not just `cargo check`)
+# is step 01-06's real-Cloud-Hypervisor-boot job — that is where this
+# crate's musl cross-compile is first CI-gated, not here.
 
 [package]
 name        = "overdrive-init"
