@@ -6,6 +6,7 @@
 // Block policy (macOS only):
 //   cargo check ...                use `cargo xtask lima run -- cargo check ...`
 //   cargo xtask lima run -- ...    allowed (already routed through Lima)
+//   cargo xtask metal run -- ...   allowed (routed to the bare-metal x86_64 box)
 //
 // Linux: pass through unconditionally — the host IS the canonical
 // compile environment.
@@ -36,8 +37,11 @@ function segments(cmd: string): string[] {
 }
 
 function isBlockedCargoCheck(cmd: string): boolean {
-  // Already routed through Lima — allow it through.
-  if (/cargo\s+xtask\s+lima\s+run\b/.test(cmd)) return false;
+  // Already routed through Lima, or to the bare-metal x86_64 KVM box —
+  // allow it through. `cargo xtask metal run` ssh-executes on a real
+  // Linux x86_64 host, so the macOS-host-divergence concern is moot
+  // (same rationale block-bare-nextest.ts uses to exempt both).
+  if (/cargo\s+xtask\s+(?:lima|metal)\s+run\b/.test(cmd)) return false;
   return segments(cmd).some((seg) => CARGO_CHECK.test(seg));
 }
 
@@ -72,7 +76,8 @@ if (cmd && isBlockedCargoCheck(cmd)) {
       "  cargo check [ARGS]\n" +
       "  →  cargo xtask lima run -- cargo check [ARGS]\n\n" +
       "Allowed exceptions:\n" +
-      "  cargo xtask lima run -- ...   already routed through Lima\n\n" +
+      "  cargo xtask lima run -- ...   already routed through Lima\n" +
+      "  cargo xtask metal run -- ...  routed to the bare-metal x86_64 KVM box\n\n" +
       "On Linux this hook is a no-op — the host IS the canonical " +
       "compile environment.\n\n" +
       "See .claude/rules/development.md § \"Compile-checking\"."
