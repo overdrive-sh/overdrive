@@ -612,7 +612,7 @@ impl MemoryPlan {
     /// The ONLY constructor. `declared` is `resources.memory_bytes` — the
     /// figure the operator wrote, and the RAM the guest observes (SD-4
     /// option B). The ceiling adds `reserve_bytes(declared)`.
-    pub fn derive(declared: u64) -> Self;
+    pub const fn derive(declared: u64) -> Self;
     pub const fn guest_bytes(&self) -> u64;
     pub const fn cgroup_max_bytes(&self) -> u64;
 }
@@ -622,7 +622,7 @@ impl MemoryPlan {
 /// reserve would be a stale cache of this policy, and — per Hera's DD-5 —
 /// persisting it would *manufacture* the stored-pair invariant that would
 /// then have justified a `VmInstance` aggregate.
-pub fn reserve_bytes(guest_bytes: u64) -> u64;
+pub const fn reserve_bytes(guest_bytes: u64) -> u64;
 ```
 
 This closes the collision Titan traced to **Slice 01**, not Slice 05:
@@ -635,14 +635,24 @@ scope is over its limit the moment the guest touches its RAM — and because
 surfaces as `Failed / WorkloadCrashedImmediately { signal: 9 }`,
 indistinguishable from `kill -9`.
 
-**The reserve's constant is measured in DELIVER, not guessed here.** Titan
-established that RSS structurally cannot supply it — host page tables for the
-guest mapping are charged to the scope via `memory.stat pagetables` and are
-invisible to RSS. The two honest floors are ~5.4 MiB steady-state above a 2 GiB
-guest and ~11.9 MiB before guest RAM is resident. `reserve_bytes`'s body is
-therefore **a `todo!("RED scaffold: measured in DELIVER via memory.current /
-memory.stat, per SD-4")` until measured**, and shipping a guessed constant
-between those floors is the intake-precedent-#7 "magic version floor" failure.
+**The reserve's constant landed measured in DELIVER step 01-05 (commits
+`cc4463e7` + `bc1a1157`), not guessed here.** Titan established that RSS
+structurally cannot supply it — host page tables for the guest mapping are
+charged to the scope via `memory.stat pagetables` and are invisible to RSS —
+so the figure was measured, not estimated: a real Cloud Hypervisor boot
+(`cloud-hypervisor v53.0`, `--memory …,prefault=on`, which forces full
+guest-RAM residency so every reading is the worst-case peak) on the project's
+x86_64 KVM metal box (`cargo xtask metal run --`), reading `memory.current` /
+`memory.stat pagetables` (never RSS) at settled plateaus across seven guest
+sizes (128 MiB → 8192 MiB). The shipped policy is a deliberately conservative
+upper bound over every measured point — `reserve_bytes = 8 MiB floor +
+guest_bytes / 400` — never the tightest fit; the real measured 2 GiB reserve
+is ≈7.04 MiB, superseding the ~5.4 MiB RSS estimate this section originally
+carried (the earlier "~11.9 MiB before residency" floor is likewise moot —
+`prefault=on` measures with residency forced). Shipping a *guessed* constant
+would have been the intake-precedent-#7 "magic version floor" failure; the
+measured bound is not one. The full seven-row measurement table lives on the
+`reserve_bytes` docstring in `crates/overdrive-core/src/vm/config.rs`.
 
 **Its mutation and property obligations attach at the DELIVER step that
 measures it, not at Slice 01** *(corrected at review iteration 1)*. A `todo!()`

@@ -1442,6 +1442,63 @@ this pass.
 
 ---
 
+## DWD-19: Mutation-testing cadence — per-step step-AC mutation gates superseded by one end-of-DELIVER whole-diff gate (2026-08-14, user-approved)
+
+Several DELIVER step ACs pin a **per-step** `cargo xtask mutants` run as a
+step-close gate. The worked example is roadmap step 01-05 AC #4:
+*"`cargo xtask mutants --file crates/overdrive-core/src/vm/config.rs`, scoped
+to `reserve_bytes` AND the `MemoryPlan::cgroup_max_bytes` invariant, is run and
+its kill-rate gate passes before this step closes."* By user approval
+(2026-08-14), those per-step runs are **superseded** by a single
+**end-of-DELIVER, per-feature mutation gate** over the whole phase diff —
+`cargo xtask mutants --diff origin/main`, kill-rate ≥ 80%, run once before the
+feature's PR opens.
+
+**Scope — general, every affected step, not only 01-05.** This applies to
+*every* DELIVER step in this feature whose acceptance criteria named a
+per-step `cargo xtask mutants` run. The cadence for all of them collapses to
+the one end-of-DELIVER whole-phase-diff gate; no step is closed on — or blocked
+by — its own individually-scoped mutation run.
+
+**Why the coverage is equivalent.** `cargo xtask mutants --diff origin/main`
+mutates every mutable operator site in the feature's whole branch diff against
+`main`. `reserve_bytes`, `MemoryPlan::derive`, and the
+`MemoryPlan::cgroup_max_bytes` invariant land in the Slice-01 (step 01-05)
+portion of that diff, so the end-of-DELIVER whole-diff run mutates them exactly
+as a per-step `--file crates/overdrive-core/src/vm/config.rs` run would have.
+Only the *timing/cadence* differs — once, at end-of-DELIVER, rather than once
+per step — never the coverage. (`.claude/rules/testing.md` § "Per-step vs
+per-PR scoping" names the cost the per-step cadence pays: it re-mutates earlier
+commits' code repeatedly across a multi-step feature; the single end-of-phase
+run is that section's own "final check before opening the PR.")
+
+**Authority.** CLAUDE.md § "Mutation Testing Strategy" — *"This project uses
+per-feature mutation testing. Per-PR runs are diff-scoped via `cargo mutants
+--in-diff origin/main` with a kill-rate gate of ≥80%."* — plus the user
+directive of 2026-08-14. The end-of-DELIVER whole-diff gate **is** that project
+policy; the per-step step-AC gates were the local anomaly this decision
+reconciles back to it.
+
+**Unchanged.** The `@mandatory:mutation_target` *tags* on scenarios (S-VM-18,
+S-VM-20, and every other scenario carrying one) still attach **per-step** — the
+tag marks a symbol as a mutation target at the step that lands its body, and
+ADR-0082 §D2.3's note that the mutation obligation "attaches at the DELIVER
+step that measures it" still governs *which* step a tag attaches to. This entry
+governs only *when the run that discharges those tags happens*: it is deferred
+from per-step to the single end-of-DELIVER whole-diff gate. A cadence decision,
+not a coverage decision.
+
+**Files touched by this entry.** `distill/wave-decisions.md` (this entry +
+Changelog, below). `deliver/roadmap.json` — a single one-line pointer appended
+to step 01-05's `implementation_notes` noting the supersession and pointing
+here; the step `criteria` arrays are **not** rewritten (this wave-decision is
+the authoritative reconciliation, and the criteria text is left as the
+historical AC — avoids churning the DES artifact). No ADR, `test-scenarios.md`,
+`brief.md`, or Rust file touched by this entry. No scenario added, removed,
+renumbered, or re-tagged. No GitHub issue created.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1454,3 +1511,4 @@ this pass.
 - 2026-08-11 — Both placement gaps DWD-15 flagged (and declined to fix inline) resolved (DWD-16). **Gap 1 — S-VM-77/S-VM-79**: verified a genuine contradiction, not staleness — `worker/exit_observer.rs` and the `ReclaimAllocation` executor (`execute_reclaim_allocation`, by this crate's existing `action_shim/`-per-action-executor convention) are both `overdrive-control-plane`-resident, and `overdrive-control-plane` depends on `overdrive-core`, never the reverse (Cargo.toml dependency graph checked both directions). Remedy: moved, not rewritten — DWD-04's AC-19 row split, S-VM-78/80 stay at `overdrive-core`, a new row places S-VM-77/79 at `overdrive-control-plane` (`tests/acceptance/vm_reclamation_claim_lifecycle.rs`, NEW file, default lane, matching their existing `@tier1 @in-memory` tags — no tier change). Fabricating a core-side seam was explicitly rejected as an option, per the dispatch's instruction. `test-scenarios.md`'s own top-of-file Driving Ports table carried the identical contradiction independently (its `plan_reclamation` row's exercises column wrongly listed S-VM-77…80) and was corrected the same way, plus a new row added for the `overdrive-control-plane` driving ports. **Gap 2 — S-VM-09/S-VM-19**: confirmed an omission, not a contradiction — both scenarios' own driving-port lines and tags (`@tier3 @real-io`) already match the Tier-3 CLI-driven row's other members exactly; the row's span notation simply never named the two IDs sitting in its own sub-range gaps (06-10, 16-32). Remedy: extended the existing row's span to `S-VM-01…05, 09, 11…15, 19, 33…66, 68` (explicit-inclusion, mirroring DWD-13's explicit-exclusion of S-VM-67 from the same row) rather than a blanket range widen, which would have wrongly swept in S-VM-06/07/08/10 (placed elsewhere by DWD-04's other rows). `test-scenarios.md`'s top-of-file Driving Ports table's `overdrive deploy` row carried the identical omission and was corrected the same way. Neither gap required a tier change; nothing was stopped or reported as blocked. No scenario's tier, tags, ACs, or Gherkin changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
 - 2026-08-12 — `@requires-kvm` capability-class gate recorded (DWD-17), closing a decision `spike/findings.md` explicitly deferred to "Slice 01's first integration test" and that neither the original DISTILL pass nor two adversarial review rounds picked up. Walked all 61 `@tier3`/`@real-io` scenarios; classified 45 as requiring a real `cloud-hypervisor` guest-boot attempt (tagged `@requires-kvm` — including three hybrid scenarios, S-VM-21/22/25, where the tag attaches only to the documented Tier-3-companion clause, not the primary `@tier1`/`@in-memory` shape) and 16 as real I/O that never spawns a guest-booting hypervisor (composition-gate probes S-VM-11/12/75, `SimVmm`-injected faults S-VM-13/51, pre-spawn artifact-validation rejections S-VM-33/34/35/41/58/59, an admission-time rejection S-VM-38, generic host-primitive adapter equivalence S-VM-91/93, and S-VM-94 whose own `Then` states no hypervisor process was spawned). Five dispositions recorded as genuinely ambiguous rather than silently resolved: S-VM-04/S-VM-39 (leaned `@requires-kvm`, happy-path/walking-skeleton-adjacent framing), S-VM-40 (leaned NOT — cron-deferred), S-VM-23/S-VM-28/S-VM-30 (leaned `@requires-kvm` — "No Fixture Theater" + Tier-3-companion intent), S-VM-58/S-VM-59 (leaned NOT — pre-spawn-validation analogy), S-VM-91/S-VM-93 (leaned NOT — generic cgroupfs/filesystem primitives). A top-of-file explanatory note added to `test-scenarios.md` citing the spike's measured asymmetry (bare-metal x86_64 12/12 vs nested-aarch64 ~1-in-3). DWD-04's rows annotated with the capability-lane split where a single row/file mixes `@requires-kvm` and non-`@requires-kvm` members (the walking-skeleton/Tier-3-CLI row, the `Vmm`/`VmHostState` adapter-equivalence row, and the `VmReclamation` Tier-3-shapes row, plus seven individually-noted rows in the DWD-11 addendum table). The concrete Rust-side gating mechanism (feature name, preflight shape) is explicitly NOT invented here — it is pinned by the concurrent `deliver/roadmap.json` pass, which this entry asks to reconcile against; not a deferral requiring a GitHub issue, since the mechanism-naming is in-feature work assigned to that concurrent pass. No scenario's tier, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
 - 2026-08-12 — `@requires-kvm` bound explicitly to the `kvm-tests` Cargo feature the concurrent roadmap pass pinned; DWD-17's ten flagged-ambiguous scenario IDs reconciled against the roadmap's file-level gate (DWD-18). Binding stated in both `test-scenarios.md`'s top-of-file `@requires-kvm` note (replacing the now-stale "pinned by the concurrent roadmap pass" forward pointer) and as an addendum inside DWD-17. Naming reasoning recorded: `bare-metal-tests` rejected as false (CI is a GitHub-hosted VM, not bare metal, and the spike measured it trustworthy); the property gating matters is nesting, not hardware presence (the spike's own diagnosis); `kvm-tests` names the lane generically, shaped like `integration-tests`; declaration is narrow (only `overdrive-host`/`overdrive-cli`, since `kvm-tests` gates no mutation-testing surface); the preflight fails loudly rather than silently skipping. Ten-way reconciliation (S-VM-04, 23, 28, 30, 39, 40, 58, 59, 91, 93) checked in the one dangerous direction (leaned `@requires-kvm` but roadmap file NOT gated) — **zero scenarios land in that bucket**: five (S-VM-04/23/28/30/39) are consistent (leaned yes, file gated `kvm-tests`); five (S-VM-40/58/59/91/93) are either harmlessly over-gated (S-VM-40/58/59/91 — leaned NOT, file gated anyway) or correctly ungated (S-VM-93 — leaned NOT, roadmap explicitly states it "never goes through the `Vmm` port... deliberately NOT `kvm-tests`"). No scenario's own classification needed correction; no roadmap file placement flagged as wrong. Confirmed the two deliberately-ungated files agree with their scenarios' tags: `cgroup_accounting_equivalence.rs` (S-VM-93, synthetic cgroup fixtures, never touches `Vmm`) and `vm_storage_daemon_sandbox_arg.rs` (S-VM-67, Tier-1 pure rendering proptest, `@tier1 @in-memory` — never a `@requires-kvm` candidate). No scenario's tier, tags, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). `deliver/roadmap.json` read-only, not touched. No ADR or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
+- 2026-08-14 — Mutation-testing cadence reconciled (DWD-19), user-approved. The per-step `cargo xtask mutants` gates named in individual DELIVER step ACs (roadmap step 01-05 AC #4 the worked example) are superseded by one end-of-DELIVER, per-feature whole-phase-diff gate (`cargo xtask mutants --diff origin/main`, kill-rate ≥ 80%), per CLAUDE.md § "Mutation Testing Strategy". Coverage is unchanged — the whole-diff run mutates `reserve_bytes` / `MemoryPlan::cgroup_max_bytes` (in the phase-01 diff) exactly as a per-step `--file` run would; only the cadence differs. The `@mandatory:mutation_target` tags on S-VM-18/S-VM-20 still attach per-step; only the run is deferred. A single one-line pointer was appended to step 01-05's `implementation_notes` in `deliver/roadmap.json`; the `criteria` arrays left unchanged (this wave-decision is the authoritative reconciliation). No scenario added, removed, renumbered, or re-tagged; no `test-scenarios.md`, `brief.md`, or Rust file touched by this entry. No GitHub issue created.
