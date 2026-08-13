@@ -249,3 +249,56 @@ proptest! {
         );
     }
 }
+
+/// S-VM-20 review remediation (MAJOR M1, step 01-05) --
+/// `reserve_bytes_is_measured_not_guessed` above binds `reserve_bytes` to
+/// an independently-retyped copy of its OWN formula (self-consistency): it
+/// catches operator/constant drift, but it never checks the formula
+/// against the real measured ground truth the `reserve_bytes` docstring
+/// cites as its evidence base. A future edit that lowers
+/// `RESERVE_FLOOR_BYTES` or `RESERVE_FRACTION_DIVISOR` below what a real
+/// guest needs -- updating the self-consistency proptest's hardcoded
+/// literal in lockstep -- would pass that proptest while silently
+/// under-provisioning `memory.max`.
+///
+/// This test closes that gap: it asserts `reserve_bytes(guest_bytes) >=
+/// measured_reserve` for the seven real `(guest_bytes, memory.current -
+/// guest_bytes)` pairs taken VERBATIM from the `reserve_bytes` docstring's
+/// real Cloud Hypervisor boot measurement table in
+/// `overdrive_core::vm::config` -- the ground-truth oracle, never a copy
+/// of the policy under test. A concrete `#[test]`, not a proptest: these
+/// are seven fixed measured points, not a generated equivalence class.
+///
+/// The codified policy must COVER (be `>=`) every real measured boot
+/// plateau. A future floor/fraction reduction below a measured point
+/// fails HERE even if the self-consistency proptest above is edited in
+/// lockstep to match.
+#[test]
+fn reserve_bytes_covers_every_measured_boot_plateau() {
+    // (guest_bytes, measured `memory.current - guest_bytes` reserve) --
+    // the seven real readings from the `reserve_bytes` docstring's Cloud
+    // Hypervisor boot measurement table (settled `memory.current`
+    // plateau, `--memory size=<N>M,prefault=on`, real x86_64 KVM metal
+    // box). Pulled verbatim from the table -- never re-derived from the
+    // policy under test.
+    const MEASURED_PLATEAUS: [(u64, u64); 7] = [
+        (134_217_728, 3_514_368),    // 128 MiB guest
+        (268_435_456, 3_985_408),    // 256 MiB guest
+        (536_870_912, 3_973_120),    // 512 MiB guest
+        (1_073_741_824, 5_435_392),  // 1024 MiB guest
+        (2_147_483_648, 7_380_992),  // 2048 MiB guest
+        (4_294_967_296, 12_582_912), // 4096 MiB guest
+        (8_589_934_592, 20_672_512), // 8192 MiB guest
+    ];
+
+    for (guest_bytes, measured_reserve) in MEASURED_PLATEAUS {
+        let policy_reserve = reserve_bytes(guest_bytes);
+        assert!(
+            policy_reserve >= measured_reserve,
+            "reserve_bytes({guest_bytes}) = {policy_reserve} must cover \
+             the real measured boot plateau of {measured_reserve} bytes \
+             -- a policy reduction below a measured memory.current \
+             reading under-provisions memory.max",
+        );
+    }
+}
