@@ -397,47 +397,63 @@ test-group = 'host-kernel-shared'
 # Matched BY-MODULE (`test(dns_responder_bind)`), rename-proof.
 
 # microvm-driver-cloud-hypervisor 01-08 review remediation (GH #42) —
-# `overdrive-cli`'s vm_walking_skeleton.rs → `host-kernel-shared`, by FN.
+# `overdrive-cli`'s vm_walking_skeleton.rs → `host-kernel-shared`, by MODULE
+# (widened from the original by-FN pair; see history below).
 #
-# `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) and
-# `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`
-# (S-VM-74) are the only two scenarios in this file that call
-# `spawn_vm_server_mtls_composed` → `serve::run_with_vm_artifacts`, which
-# leaves `dataplane_override` UNSET so production `run_server` composes a
-# REAL `EbpfDataplane` — the SAME XDP attach to the FIXED `ovd-veth-cli` /
-# `ovd-veth-bk` ifaces as `serve_boot_provisions_veth` /
-# `dns_responder_walking_skeleton` above. Both scenarios were introduced in
-# step 01-08 and were MISSING from this group — the exact same gap the
-# dial-by-name-responder 02-02 note above describes for that step.
+# Two INDEPENDENT reasons put this file's tests in the single-writer group,
+# and between them they cover all 8 scenarios:
 #
-# Reproduced directly on the metal box: on a freshly-rebooted, verified-
-# clean host (no leftover XDP program, no leftover veth, no leftover
-# process), running S-VM-05 or S-VM-74 ALONE never hits an attach failure;
-# running BOTH concurrently (unserialized, the nextest default), the
-# loser's `EbpfDataplane::new_with_pin_dir` deterministically hit
-# `XDP slot on interface 'ovd-veth-cli' is already occupied (EBUSY)` at
-# the winner's already-succeeded attach. This is a test-harness
-# concurrency gap, not a production defect: `overdrive serve` composes its
-# dataplane exactly once per node boot (`run_server` → `EbpfDataplane::
-# new_with_pin_dir` is a single call site), so two concurrent test
-# PROCESSES independently simulating that boot against the SAME shared
-# kernel veth/XDP state is exactly the condition this group exists to
-# prevent — never a state a real deploy can reach.
+# 1. **XDP/EbpfDataplane attach (2 of 8 scenarios).**
+#    `vm_platform_contains_the_hypervisor_it_started` (S-VM-05) and
+#    `vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install`
+#    (S-VM-74) call `spawn_vm_server_mtls_composed` → `serve::
+#    run_with_vm_artifacts`, which leaves `dataplane_override` UNSET so
+#    production `run_server` composes a REAL `EbpfDataplane` — the SAME XDP
+#    attach to the FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces as
+#    `serve_boot_provisions_veth` / `dns_responder_walking_skeleton` above.
+#    Reproduced directly on the metal box: on a freshly-rebooted, verified-
+#    clean host, running S-VM-05 or S-VM-74 ALONE never hits an attach
+#    failure; running BOTH concurrently (unserialized, the nextest
+#    default), the loser's `EbpfDataplane::new_with_pin_dir`
+#    deterministically hit `XDP slot on interface 'ovd-veth-cli' is already
+#    occupied (EBUSY)` at the winner's already-succeeded attach.
 #
-# Matched BY-FN, not by-module: unlike the dns_responder module (where
-# every test in the file shares the real-dataplane risk), only 2 of this
-# file's 8 scenarios construct a real `EbpfDataplane` — the other six
-# (S-VM-01/02/03/04/14/15) call `spawn_vm_server` (`SimDataplane`, no real
-# XDP attach) and do not need to join the single-writer group.
+# 2. **Real host cgroupfs boot (all 8 scenarios).** EVERY test in this file
+#    drives a full production `run_server` boot against the REAL host
+#    cgroupfs (`RealCgroupFs`; see the file's own module doc) — not just
+#    the two EbpfDataplane-composed ones. The file carries `#[serial
+#    (cgroup)]` on every test hoping to enforce this, but `serial_test`'s
+#    lock is IN-PROCESS ONLY (see this group's own rationale above: "nextest
+#    spawns each test in its own PROCESS, and `serial_test` only
+#    synchronises within a single process") — under nextest's per-test-
+#    process execution model that annotation enforces NOTHING across the 8
+#    scenarios. Confirmed directly on the metal box (01-08 review
+#    remediation, GH #42): `vm_deadline_arm_leaks_nothing` (S-VM-14, a
+#    scenario that does NOT compose a real EbpfDataplane) run in true
+#    isolation cleans up its VMM process, rootfs clone, run directory, and
+#    cgroup scope perfectly every time. The SAME scenario run concurrently
+#    with `vm_platform_contains_the_hypervisor_it_started` (S-VM-05,
+#    unserialized against S-VM-14 under the PRE-widening filter below)
+#    reproduced exactly the symptom this step was dispatched to fix: S-VM-05
+#    timed out reaching `Running` within 60s (real cgroup/kernel contention
+#    from S-VM-14's concurrently-booting VM), and a prior run under the same
+#    gap left S-VM-05's `find_cloud_hypervisor_pid()` resolving to S-VM-14's
+#    OWN `alloc-vm-deadline-0.scope` rather than its own allocation. This
+#    was a test-harness concurrency gap, not a defect in `VmDriver::
+#    cleanup_after_start_failure` / `CloudHypervisorVmm::terminate`
+#    (`crates/overdrive-worker/src/vm_driver.rs`,
+#    `crates/overdrive-host/src/vmm.rs`) — mirrors the EBUSY finding in
+#    reason 1 above almost exactly, one layer down the shared-substrate
+#    stack (cgroupfs instead of XDP/veth).
+#
+# Matched BY-MODULE (widened from the original by-FN pair once reason 2
+# above was found — the original filter covered only the 2 fns needed for
+# reason 1, leaving S-VM-01/02/03/04/14/15 unserialized against reason 2):
+# every scenario in this file boots against the shared real host cgroupfs,
+# so every scenario joins. Rename-proof, mirrors the dns_responder module
+# pattern.
 [[profile.default.overrides]]
-filter = '''
-    package(overdrive-cli)
-    & binary(integration)
-    & (
-        test(vm_platform_contains_the_hypervisor_it_started)
-        | test(vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install)
-    )
-'''
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
 
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice

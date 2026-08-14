@@ -217,7 +217,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use overdrive_cli::commands::deploy::{DeployArgs, deploy};
+use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::VmBootArtifacts;
@@ -725,28 +725,6 @@ fn find_cloud_hypervisor_pid() -> u32 {
 /// feature deliberately re-proves closed).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "NEW BLOCKER, DISTINCT FROM THE CLOSED EBUSY GAP (see module doc): the EBUSY \
-            XDP double-attach is CLOSED (host-kernel-shared serialization in \
-            .config/nextest.toml) -- confirmed by S-VM-74 (same mTLS-composed real-\
-            EbpfDataplane path) passing cleanly across two full-suite runs. This scenario \
-            instead now fails deterministically (reproduced identically twice) with the \
-            allocation's cloud-hypervisor PID resolving to a DIFFERENT allocation's cgroup \
-            scope: 'the cloud-hypervisor process's cgroup must resolve to the allocation's \
-            own workload scope, got: 0::/overdrive.slice/workloads.slice/alloc-vm-deadline-0.scope' \
-            -- alloc-vm-deadline-0 is S-VM-14's allocation, not this test's own \
-            (alloc-vm-contained-0). Root cause: S-VM-14's own leak-verification helper \
-            (no_cloud_hypervisor_process_running, this file) still matches on the truncated \
-            /proc/<pid>/comm (TASK_COMM_LEN=16 caps comm at 15 visible chars -- the SAME bug \
-            just fixed in find_cloud_hypervisor_pid, but not fixed there), so it is \
-            vacuously always-true and silently masks a REAL cloud-hypervisor process that \
-            outlives S-VM-14's own deadline-cleanup path (crates/overdrive-worker/src/\
-            vm_driver.rs::cleanup_after_start_failure) long enough to contaminate the NEXT \
-            serialized test's /proc scan. Fixing this needs (a) the comm->argv0 fix mirrored \
-            into no_cloud_hypervisor_process_running so S-VM-14 actually verifies its own \
-            claim, and (b) an investigation into why cleanup_after_start_failure does not \
-            reliably/promptly terminate the VMM process on boot-deadline -- both outside \
-            this step's file boundary and requiring further investigation, not a design \
-            decision this step can improvise."]
 async fn vm_platform_contains_the_hypervisor_it_started() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -829,6 +807,40 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
          scope, got: {cgroup_contents}"
     );
 
+    // Hygiene, not a new acceptance claim: the "spin" guest loops forever
+    // and never beacons EXIT, so unlike every other scenario in this file
+    // its allocation cannot reach a terminal state on its own. Explicitly
+    // stopping it through the production stop verb -- then confirming the
+    // row actually reaches Terminated -- drives it through VmDriver::stop's
+    // real teardown (guest SHUTDOWN write -> VM_SHUTDOWN_REQUEST_DEADLINE
+    // -> Vmm::terminate's VM_STOP_GRACE -> forceful kill+reap,
+    // crates/overdrive-worker/src/vm_driver.rs) before this test's own
+    // `handle.shutdown()` tears down the server. Without this, the real
+    // `cloud-hypervisor` process is orphaned: `Command::kill_on_drop` is
+    // deliberately `false` on the production spawn (crates/overdrive-host/
+    // src/vmm.rs), so nothing kills a still-Running VM merely because the
+    // test process housing it exits -- confirmed directly on the metal box
+    // (01-08 review remediation): a "PASS" run of this scenario without
+    // this stop step left its own `alloc-vm-contained-0` cloud-hypervisor
+    // process alive in `/proc`, which a LATER test's system-wide `/proc`
+    // scan (S-VM-14's `no_cloud_hypervisor_process_running`) then read as
+    // a leak. `VmDriver::stop`'s cleanup path was never at fault -- the gap
+    // was this test never invoking it for a workload that cannot reach a
+    // terminal state by itself.
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the long-lived spin workload before shutdown");
+    let stopped = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    let stopped_row =
+        stopped.snapshot.rows.first().expect("one allocation row for the stopped workload");
+    assert_eq!(
+        stopped_row.state,
+        AllocStateWire::Terminated,
+        "an operator stop must drive the never-self-terminating spin allocation to Terminated \
+         before this test tears down the server, got {:?}",
+        stopped_row.state,
+    );
+
     handle.shutdown().await.expect("clean shutdown");
 }
 
@@ -900,15 +912,25 @@ async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
 /// that function's doc comment) makes "no CH process found anywhere" an
 /// honest "this allocation's VMM is gone" signal under
 /// `#[serial(cgroup)]`'s exclusivity.
+///
+/// Matches on `argv[0]` via `/proc/<pid>/cmdline`, NOT `/proc/<pid>/comm`
+/// -- the SAME `TASK_COMM_LEN`=16 truncation bug [`find_cloud_hypervisor_pid`]
+/// above was fixed to avoid. `comm` caps at 15 visible characters and
+/// `"cloud-hypervisor"` is exactly 16, so a `comm`-based match against
+/// the real binary can NEVER succeed: this helper was vacuously always
+/// `true` regardless of whether a real VMM process remained, silently
+/// masking the deadline-arm cleanup leak this file's own module doc
+/// documents (01-08 review remediation).
 fn no_cloud_hypervisor_process_running() -> bool {
     let Ok(entries) = std::fs::read_dir("/proc") else { return true };
     for entry in entries {
         let Ok(entry) = entry else { continue };
         let Ok(_pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
-        let comm_path = entry.path().join("comm");
-        if let Ok(comm) = std::fs::read_to_string(&comm_path)
-            && comm.trim() == "cloud-hypervisor"
-        {
+        let cmdline_path = entry.path().join("cmdline");
+        let Ok(cmdline) = std::fs::read(&cmdline_path) else { continue };
+        let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
+        let argv0 = String::from_utf8_lossy(argv0);
+        if Path::new(argv0.as_ref()).file_name() == Some(std::ffi::OsStr::new("cloud-hypervisor")) {
             return false;
         }
     }
