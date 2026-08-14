@@ -1847,6 +1847,140 @@ reconciliation of an already-shipped-and-safe behavior is not a deferral).
 
 ---
 
+### DWD-23 — `[vm]` "at admission" capability rejection: dispatch-time fallback ratified as a SAFE INTERIM; "at admission" stays required DESIGN intent, scoped to a follow-up (2026-08-14, DESIGN ruling — Morgan, GH #42)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`) per an
+explicit dispatch**, closing the 01-09 review's MEDIUM finding **D2**. Docs-only;
+**no code change in this entry** — the follow-up implementation is *surfaced for
+user approval*, not performed here.
+
+**The finding.** Roadmap step 01-09 AC #1: *"CH present+healthy composes the Vm
+driver entry; CH absent boots the node with no Vm entry **and rejects `[vm]` at
+admission naming the capability**."* Shipped behavior (verified by the review and
+by S-VM-12): the CH-absent case does **not** reject at admission.
+`handlers.rs::submit_workload` carries ZERO driver-capability logic — a `[vm]`
+spec is admitted (`IdempotencyOutcome::Inserted`) and the capability enforcement
+happens LATER at dispatch (`action_shim/mod.rs:1399-1407`: `drivers.get(kind) →
+None → DriverError::StartRejected`), so the alloc reaches `Failed` naming the
+capability ("no vm driver composed on this node"). **SAFE** (never silently
+accepted-and-hung), but not the literal "at admission." The crafter disclosed the
+gap in S-VM-12's docstring rather than inventing the gate (CLAUDE.md § "Implement
+to the design").
+
+**Investigation (from the artifacts, not assumed).**
+
+1. **"At admission" is deliberate, cross-artifact DESIGN intent, not loose
+   phrasing.** SD-5 (`brief.md` § 625, Titan): *"serve boots normally; `[vm]`
+   deploys are rejected at admission naming the absent capability. Not a fault."*
+   ADR-0083 §§ D1.3 / D2 / D4 (Morgan): § D4 is an entire subsection — *"The
+   capability rejection is separate from the parse rejection … fails at admission,
+   naming the absent capability and the node … the deploy still fails; the message
+   improves."* `brief.md` § 104 repeats it. Even `DriverRegistry::kinds()`'s own
+   docstring reads *"iterated for the admission-rejection message."* The surfaces
+   were built FOR this gate.
+2. **The safety intent IS met by the dispatch-time fallback.** S-VM-12 proves: CH
+   absent → node boots, no `Vm` entry; `[vm]` deploy → alloc reaches `Failed`,
+   `reason.human_readable()` contains "no"/"vm"/"composed"; never a hang, never a
+   parse error. The `action_shim` arm's own comment calls this "the dispatch-time
+   fallback for whatever reaches here regardless."
+3. **The finding's cost premise is STALE — the gate is cheap.** The S-VM-12 note
+   (and the review) state a true admission gate "would require … `AppState`
+   widening to carry the `DriverRegistry`." **That widening already landed in step
+   01-08**: `AppState.drivers: Arc<DriverRegistry>` (`lib.rs:200`),
+   `submit_workload` already takes `State(state)`, and `DriverRegistry::{supports,
+   kinds}` already exist. The only genuinely-missing pieces are a
+   `WorkloadDriver::driver_type()` helper, the check in `submit_workload`, and one
+   typed `ControlPlaneError` variant — a small, well-supported addition, NOT the
+   AppState surgery the note implies.
+4. **Step 01-09 never owned the gate.** 01-09's `implementation_scope.
+   source_directories` is `lib.rs` + `cgroup_accounting.rs` + `exit_observer.rs`
+   — **not `handlers.rs`**. The admission gate lives in
+   `handlers.rs::submit_workload`, which 01-09 does not touch. AC #1's "at
+   admission" clause was therefore **mis-scoped against its own step** —
+   unbuildable within 01-09's declared surface. 01-09's correct deliverable for
+   its scope IS the composition gate + dispatch-time fallback.
+5. **Multi-node nuance (recorded, shapes the ruling).** The dispatch-time fallback
+   is **node-correct and multi-node-ready** — at dispatch the alloc's node is
+   known, so `state.drivers` is that node's capability set. A submit-time
+   admission gate checks the LOCAL registry, correct for **Phase 1 single-node**
+   (submit handler and the one node co-located) but in multi-node evolving into a
+   **scheduler-admission** check. So the two gates are complementary, not
+   redundant: the dispatch-time fallback STAYS as defense-in-depth; the admission
+   gate is the Phase-1 operator fast-fail layered above it.
+
+**Ruling — (b): "at admission" stays REQUIRED DESIGN intent; the dispatch-time
+behavior is ratified as a SAFE INTERIM (not the final design); the admission gate
+is scoped to a follow-up step.** Justification:
+
+- **Do not amend deliberate, cheap-to-honor design out of the record.** "At
+  admission" is specified across SD-5, ADR-0083 §§ D1/D2/D4, `brief.md` § 104, the
+  roadmap AC, and even the `kinds()` docstring, with an explicit rationale (§ D4).
+  Ratifying dispatch-time as *final* (option (a)) would require rewriting all of
+  it AND contradicts § D4's own words ("the deploy still fails") — under
+  dispatch-time the deploy *succeeds* (`Inserted`). With the gate cheap
+  (finding #3), there is no cost justification for discarding the intent.
+- **But the interim is genuinely SAFE (finding #2), so nothing is urgent.** This
+  is a MEDIUM operator-UX + design-consistency gap, not a safety hole.
+- **Option (a) rejected** (ratify dispatch-time, amend the design): discards
+  deliberate intent for no cost saving, contradicts § D4's "the deploy still
+  fails," and leaves a committed dead `[vm]` intent on an uncomposed node
+  (perpetual `Failed` / eventual `BackoffExhausted`) the operator must manually
+  stop.
+- **Parser-placement variants rejected**: § D4 already ruled the capability
+  rejection is NOT a parse concern (a host property must not masquerade as a spec
+  property). The `[vm]`+`[service]` PARSE rejection (S-VM-38, US-VM-6 / AC-10) is
+  a DIFFERENT rejection and is untouched by this ruling.
+
+**The one genuine scope decision — SURFACED for the user, NOT decided here.**
+Whether to **build the Phase-1 admission gate now** vs **defer it** (to the
+multi-node scheduler-admission work) is a real sequencing call, and the follow-up
+needs a GitHub issue (which requires user approval per CLAUDE.md § "Deferrals
+require GitHub issues"). Tradeoff — *build now*: honor the design, better
+operator-UX (synchronous "no", no dead intent), cheap; *defer*: accept the safe
+interim, avoid a Phase-1-specific gate that evolves when the scheduler lands.
+**Recommendation: build it as a small follow-up step** (cheap, honors deliberate
+design), pending the user's go-ahead + issue approval.
+
+**Crafter instruction (for the follow-up step, once approved).** In
+`handlers.rs::submit_workload`, after the `intent` is built and BEFORE the
+`state.store.put_if_absent(...)` at `:443`: derive the workload's `DriverType`
+from the intent's `WorkloadDriver` (add `WorkloadDriverV2::driver_type(&self) ->
+DriverType`, `Exec→Exec` / `Vm→Vm`, mirroring `DriverPayload::driver_type()` at
+`traits/driver.rs:311`); if `!state.drivers.supports(dt)`, return a NEW typed
+`ControlPlaneError::DriverCapabilityUnavailable { requested: DriverType, node:
+NodeId, supported: Vec<DriverType> }` (message iterates `state.drivers.kinds()`
+and names the node) — mapped in `to_response` to **HTTP 422 Unprocessable Entity**
+with a distinct `error: "capability_unavailable"` discriminator (NOT 400
+"validation" — that would blur § D4's parse-vs-capability separation; NOT a
+transient 503). This is pre-`Inserted`, so nothing is committed. **Do NOT remove
+the `action_shim` dispatch-time fallback** — it stays as defense-in-depth. The
+follow-up step's `implementation_scope` MUST add `handlers.rs` (+ `error.rs`,
+`aggregate/mod.rs`), and MUST update S-VM-12 (its assertion FLIPS: the deploy now
+returns the typed rejection at admission, not `Inserted`-then-`Failed`).
+
+**Doc reconciliation done in THIS entry (docs only).** (1) `deliver/roadmap.json`
+step 01-09 AC #1 reworded to the SHIPPED dispatch-time behavior (removes the false
+"at admission" claim from a step whose scope excludes `handlers.rs`) + a scope
+note appended to its `implementation_notes`. (2) `brief.md` § 104 + ADR-0083
+status header gain an implementation-status note: "at admission" stays design
+intent; current impl is the safe dispatch-time interim; the gate is a
+pending-approval follow-up. (3) Code forward-references that name a non-existent
+"step 01-09 admission gate" are **SPECIFIED for correction, not applied**
+(docs-only): `action_shim/mod.rs:1396-1397`, `error.rs:706` (`VmmBoot` docstring
+"rejected at admission"), and the `vm_walking_skeleton.rs` S-VM-12 note — each
+must point to this DWD / the follow-up step rather than "step 01-09."
+
+**Files touched by this entry.** `distill/wave-decisions.md` (this entry +
+Changelog); `deliver/roadmap.json` (step 01-09 AC #1 + `implementation_notes`);
+`docs/product/architecture/brief.md` (§ 104 status note);
+`docs/product/architecture/adr-0083-…md` (status-header amendment note). No Rust
+file touched — the code-comment corrections and the gate itself are crafter-facing
+and pending approval. **No GitHub issue created — the follow-up is SURFACED for
+user build-vs-defer approval; on approval the orchestrator creates the issue and
+adds the roadmap step.**
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1863,3 +1997,4 @@ reconciliation of an already-shipped-and-safe behavior is not a deferral).
 - 2026-08-14 — 01-07 review reconciliations (DWD-20), three items, all rulable without a user scope decision. **Item 1 (PRIMARY)**: the `Driver` post-stop `status() → NotFound` contract (`traits/driver.rs`) was violated by the shipped `VmDriver::stop`, which left the live-map entry `Live`. Ruled (reviewer option (c)): `stop` transitions the entry `Live → EndingInFlight` under the same lock it extracts the live state with, so `status()` (which already maps `EndingInFlight → NotFound`) satisfies the contract synchronously while `live_allocations()` still reports the entry, keeping the authorship claim for `VmReclamation` (`EndingInFlightIsNeverReclaimed`, § 105a.11 — whose wording already presupposes "its stop has been issued" ⇒ `EndingInFlight`). NOT the `ExecDriver` full-removal shape (would reopen NEW-1); NOT a trait carve-out (contract stands, no `driver.rs` docstring edit). Pinned in `brief.md` § 105a.3 (new transition 3b + amendment) and ADR-0082 § D4; the release side (transitions 5/6) stays step 02-02. **Item 2**: ADR § D7's ownership table already assigns the `VmDriver` `EXEC` write to 01-07, but the shipped beacon-win arm omits it (the guest would block forever at 01-08); ruled a scoped 01-07 addendum (not reassignment to 01-08) — roadmap 01-07 gains a fifth criterion, ADR § D7 gains a not-yet-wired amendment naming 01-07 as the wiring step. **Item 3**: ADR § D2.4 gains a "gap 6" note blessing `KernelImage::path` (`config.rs:201`) and `VmExitWatch::new` (`vmm.rs:202`) as sanctioned 01-06 first-implementor surface. Files touched: `adr-0082-…md` (§§ D2.4 / D4 / D7), `brief.md` (§ 105a.3), `deliver/roadmap.json` (step 01-07 criteria), this file. No Rust file touched — the crafter-facing instructions go to the 01-07 review-remediation dispatch. No GitHub issue created.
 - 2026-08-14 — Guest vsock provisioning ruled (DWD-21), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch. Step 01-08's walking skeleton surfaced a spike→ship regression: the 01-03 `overdrive-init` + 01-04 fixture lost the spike's proven vsock module-load, so on the stock `CONFIG_VSOCKETS=m` kernel the fixture stages, the guest's `socket(AF_VSOCK)` fails `EAFNOSUPPORT` and never beacons — `#[ignore]`ing S-VM-01/02/05/74. Ruled (c) reconcile: `overdrive-init` `finit_module`-loads the three staged vsock `.ko` before `connect_beacon` (no-op on a vsock=y kernel) and the 01-04 fixture stages them from the same `uname -r` as the kernel (the spike's proven-12/12 mechanism / the `[D2]` fallback), WHILE the production appliance kernel builds vsock in (ADR-0068 §4). Lands as the 01-08 review-remediation touching `overdrive-init/src/main.rs` + `overdrive-testing/src/vm_fixture.rs` (both added to 01-08's `source_directories`). ADR-0068 gains §4; ADR-0082 §D4 gains a loader/staging amendment; ADR-0083 unaffected; `brief.md` consistent, untouched. `deliver/roadmap.json` step 01-08: one additive criterion + two source files + an `implementation_notes` remediation note. No scenario changed; no GitHub issue created.
 - 2026-08-14 — Alloc→driver index MISS disposition ruled (DWD-22), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-08 review's MAJOR finding D1. ADR-0083 §D2a(b) pinned a typed `ShimError::UnknownDriverForAlloc { alloc_id }` on an `alloc_drivers` index miss; the shipped `resolve_drivers_for_alloc` (`action_shim/mod.rs:668-678`) instead **broadcasts** the stop/terminal call to every composed driver, and the variant exists nowhere in the tree. Investigated the four consumer arms (`FinalizeFailed` `:1291`, `RestartAllocation` stop-half `:1604`, `StopAllocation` `:1858`/`:1922`) and the regression that forced the fallback (`stable_does_not_stop_probe_supervision.rs` calls `on_alloc_running` directly, leaving the per-boot index empty). Ruled **(a) bless the broadcast, retire the typed-error pin**: the ADR's rationale attacked a strawman (broadcast reaches the *owning* driver — including `VmDriver` — so no orphan is stranded, unlike the "route to `ExecDriver`" fallback it feared), and the typed error taken literally would route a legitimate per-boot miss to nobody and *create* the orphan SD-1 prevents; runtime confirmed safe (every `Driver::stop`/`on_alloc_*` is NotFound-tolerant/no-op). Options (b)/(c) rejected — they reintroduce the orphan on the stop arms. **No code change** — the shipped code and all four call-site comments already match the amended contract; the crafter only confirms the § D2a(b) citations resolve to the amended text, and MUST NOT implement `UnknownDriverForAlloc`. Amended ADR-0083 § D2a(b) + `brief.md` § 104; § D3 / § D2a(c) name no typed error and are untouched. `deliver/roadmap.json` not touched (no code change ⇒ no AC/scope edit). No `test-scenarios.md` or Rust file touched. No GitHub issue created.
+- 2026-08-14 — `[vm]` "at admission" capability rejection ruled (DWD-23), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-09 review's MEDIUM finding D2. Roadmap step 01-09 AC #1 promised "rejects `[vm]` at admission"; the shipped behavior admits the spec (`Inserted`) and rejects at DISPATCH (`action_shim` `drivers.get(kind) → None → StartRejected → Failed` naming the capability, S-VM-12) — SAFE, but not "at admission," and never in 01-09's `handlers.rs`-excluding scope. Ruled **(b)**: "at admission" stays required DESIGN intent (SD-5, ADR-0083 §§ D1/D2/D4, `brief.md` § 104); the dispatch-time fallback is ratified as a SAFE INTERIM and STAYS as multi-node-ready defense-in-depth; the admission gate (`handlers.rs::submit_workload` → `state.drivers.supports(..)` before `put_if_absent`, a cheap addition since `AppState.drivers` + `DriverRegistry::{supports,kinds}` exist since 01-08) is scoped to a **follow-up step, pending user build-vs-defer approval**. Option (a) (ratify dispatch-time, drop "at admission") rejected — discards deliberate design, contradicts § D4's "the deploy still fails." Reworded step 01-09 AC #1 to shipped behavior + `implementation_notes` scope note; added implementation-status notes to `brief.md` § 104 + ADR-0083 status header; SPECIFIED (not applied — docs-only) the `action_shim`/`error.rs`/`vm_walking_skeleton.rs` "step 01-09" comment corrections. **No GitHub issue created — follow-up surfaced for approval.**

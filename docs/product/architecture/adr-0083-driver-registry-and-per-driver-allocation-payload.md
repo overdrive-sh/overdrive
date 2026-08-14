@@ -49,6 +49,21 @@ second construction site) — never through a real `overdrive serve`.
 **No storage-daemon supervision port is minted by this feature.** Path (a)
 is explicitly not taken. No prior decision is reversed; this closes the one
 item § D8 deliberately left open.
+**Amended 2026-08-14 (DWD-23, closes 01-09 review finding D2 — implementation
+status, no decision reversed).** §§ D1.3 / D2 / D4's *"`[vm]` rejected at
+**admission** naming the absent capability"* is ratified design intent that
+**remains in force and is NOT amended**. Recorded for the reader: step 01-09
+shipped the **dispatch-time fallback only** (the `drivers.get(kind) → None` arm in
+`action_shim`, SAFE — the deploy is *admitted* and the alloc then reaches `Failed`
+naming the capability, S-VM-12); the *admission-time* gate in
+`handlers.rs::submit_workload` was never in 01-09's `implementation_scope`
+(`lib.rs` / `cgroup_accounting` / `exit_observer` — not `handlers.rs`) and is
+scoped to a **follow-up step, pending user build-vs-defer approval**. The gate is
+cheap — `AppState.drivers: Arc<DriverRegistry>` and `DriverRegistry::{supports,
+kinds}` (whose doc already reads *"iterated for the admission-rejection message"*)
+have existed since step 01-08. The dispatch-time fallback stays as multi-node-ready
+defense-in-depth. `brief.md` § 104 carries the same status note; see
+`distill/wave-decisions.md` DWD-23.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,

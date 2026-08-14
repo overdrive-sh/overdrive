@@ -8381,6 +8381,26 @@ admission. Putting it in the parser would make a **host** property look like a
 **spec** property — which is the refinement Titan flagged against Slice 02, whose
 ACs are unaffected: the deploy still fails, the message improves.
 
+> **Implementation status (2026-08-14, DWD-23 — closes 01-09 review finding D2).**
+> The *admission-time* rejection above is **ratified design intent that stays in
+> force**; it is **not yet built**. Step 01-09 shipped — and its
+> `implementation_scope` only ever covered — the **dispatch-time fallback**
+> (`action_shim`'s `drivers.get(kind) → None` arm): a `[vm]` deploy on a node with
+> no `Vm` entry is *admitted* (`IdempotencyOutcome::Inserted`) and the allocation
+> then reaches `Failed` at dispatch, its reason naming the absent capability
+> (S-VM-12). That is **SAFE** — never silently accepted-and-hung — but it is not
+> the "the deploy still fails" shape above (under it the deploy *succeeds*). The
+> true admission gate (`handlers.rs::submit_workload` consulting
+> `state.drivers.supports(..)` before the intent `put_if_absent`, returning a typed
+> capability rejection) is a **small, well-supported addition** — `AppState`
+> already carries `drivers: Arc<DriverRegistry>` (step 01-08) and
+> `DriverRegistry::{supports, kinds}` already exist for exactly this message — and
+> is scoped to a **follow-up step, pending user build-vs-defer approval** (DWD-23).
+> The dispatch-time fallback **STAYS** regardless: at dispatch the alloc's node is
+> known, so it is the node-correct check that generalises to the multi-node
+> scheduler-admission form; the admission gate is the Phase-1 single-node operator
+> fast-fail layered above it, not a replacement for it.
+
 **Fourteen `TransitionReason::Vm*` cause variants** are named in ADR-0083 § D5
 (cause-variant naming was re-assigned to me by Hera's DD-3) — twelve from the
 original design, plus `VmOutOfMemory` (the D-3 fold-in) and
