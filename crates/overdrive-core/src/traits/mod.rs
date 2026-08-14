@@ -53,6 +53,11 @@ pub mod transport;
 // 01-06 (`CloudHypervisorVmm` / `SimVmm`); the trait compiles with zero
 // implementors, which is expected for this step.
 pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42). The
+// host-observation-driven port `VmReclamation` hydrates its `actual` half
+// from — a NEW port, not a widened `CgroupFs` (ADR-0083 §A8). Composed
+// unconditionally, never gated on `Vmm`.
+pub mod vm_host_state;
 
 pub use ca::{
     Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
@@ -75,3 +80,4 @@ pub use mtls_enforcement::{
 pub use mtls_resolve::{MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend};
 pub use observation_store::ObservationStore;
 pub use transport::Transport;
+pub use vm_host_state::{ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError};

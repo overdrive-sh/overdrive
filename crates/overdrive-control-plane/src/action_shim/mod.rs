@@ -2059,6 +2059,30 @@ async fn dispatch_single(
             issue_svid::dispatch_drop(&action, identity);
             Ok(())
         }
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+        // brief.md §105a.5/§105a.9, GH #42) — SKELETON, deliberately
+        // unimplemented. `execute_reclaim_allocation` /
+        // `execute_discard_stranded_artifacts` are a LATER step's
+        // executors. Nothing in THIS step's production wiring can ever
+        // construct these actions: `VmReclamation` is not registered in
+        // `lib.rs`, and its `hydrate_actual`/`hydrate_desired` skeleton
+        // arms both return the safe empty default (this step's own
+        // roadmap note), so `plan_reclamation` can only ever return an
+        // empty `Vec<Action>` today. This arm is therefore structurally
+        // unreachable on every live path — a RED scaffold for the step
+        // that adds the two real executors.
+        #[expect(
+            clippy::todo,
+            reason = "RED scaffold; the real executor dispatch lands with \
+                      execute_reclaim_allocation / execute_discard_stranded_artifacts \
+                      in a later step (brief.md §105a.5) — see step 02-01's DES report"
+        )]
+        Action::ReclaimAllocation { .. } | Action::DiscardStrandedArtifacts { .. } => {
+            todo!(
+                "RED scaffold: VmReclamation executors (execute_reclaim_allocation / \
+                 execute_discard_stranded_artifacts, brief.md §105a.5) land in a later step"
+            )
+        }
     }
 }
 

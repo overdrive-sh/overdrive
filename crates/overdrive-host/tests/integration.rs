@@ -52,4 +52,12 @@ mod integration {
     mod vmm_equivalence;
     #[cfg(feature = "kvm-tests")]
     mod vmm_ficlone_per_launch;
+    // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+    // `VmHostState` adapter equivalence (S-VM-91). Additionally gated
+    // `kvm-tests`: the real-adapter half boots a real Cloud Hypervisor
+    // VMM (via `Vmm` directly) so `kill_scope`'s settle postcondition is
+    // exercised against a real cgroup v2 scope holding a real live
+    // process, same x86_64 + nested-KVM floor as `vmm_equivalence`.
+    #[cfg(feature = "kvm-tests")]
+    mod vm_host_state_equivalence;
 }

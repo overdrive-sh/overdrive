@@ -124,6 +124,20 @@ enum AnyViewMap {
     /// failed `IssueSvid` backs off instead of re-firing every tick. The map
     /// holds per-target persisted views per ADR-0035 §5.
     SvidLifecycle(BTreeMap<TargetResource, SvidLifecycleView>),
+    /// `VmReclamation` carries `View = VmReclamationView`; FIELD-LESS per
+    /// the ADR-0079 precedent (`brief.md` §105a.1 — SD-1's Bar-2
+    /// reconciler, ADR-0083 §D7, GH #42, step 02-01). The per-target map
+    /// shape mirrors every other reconciler kind so the runtime dispatch
+    /// stays uniform; the View gains a field (and this expect
+    /// self-removes) if a retry/backoff policy ever lands.
+    #[expect(
+        clippy::zero_sized_map_values,
+        reason = "VmReclamationView is deliberately field-less (brief.md §105a.1, ADR-0079 \
+                  precedent) -- nothing this reconciler emits is ever consulted, so retry falls \
+                  out of the runtime's has_work self-re-enqueue. Same precedent as \
+                  AnyViewMap::BackendDiscoveryBridge above."
+    )]
+    VmReclamation(BTreeMap<TargetResource, overdrive_core::reconcilers::VmReclamationView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -236,6 +250,12 @@ impl ReconcilerRuntime {
     ///   bulk-load round-trip fails (CBOR decode error, underlying I/O
     ///   error). Both are hard boot failures — the composition root
     ///   refuses to come up.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "per-variant typed bulk-load is the same fixed shape repeated once per \
+                  reconciler kind; extracting would require a higher-rank generic helper \
+                  without changing the per-arm logic. Same precedent as persist_view above."
+    )]
     pub async fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
@@ -355,6 +375,26 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::SvidLifecycle(loaded)
             }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — bulk-load the persisted `VmReclamationView` map.
+            // Field-less (ADR-0079 precedent); shape mirrors
+            // `BackendDiscoveryBridge` exactly.
+            AnyReconciler::VmReclamation(_) => {
+                #[expect(
+                    clippy::zero_sized_map_values,
+                    reason = "VmReclamationView is deliberately field-less (brief.md §105a.1); \
+                              self-removes when the View gains a field. See \
+                              AnyViewMap::VmReclamation."
+                )]
+                let loaded: BTreeMap<TargetResource, overdrive_core::reconcilers::VmReclamationView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::VmReclamation(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -439,7 +479,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
         }
     }
 
@@ -505,6 +546,12 @@ impl ReconcilerRuntime {
             // WorkflowLifecycle arm (Slice-01 empty view; ADR-0067 D8).
             AnyViewMap::SvidLifecycle(map) => {
                 AnyReconcilerView::SvidLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — same shape as the WorkflowLifecycle arm
+            // (field-less view; brief.md §105a.1).
+            AnyViewMap::VmReclamation(map) => {
+                AnyReconcilerView::VmReclamation(map.get(target).cloned().unwrap_or_default())
             }
         })
     }
@@ -591,7 +638,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => WorkloadLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => WorkloadLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -643,7 +691,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => WorkflowLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => WorkflowLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -684,7 +733,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => ServiceMapHydratorView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => ServiceMapHydratorView::default(),
                     }
                 };
                 if current == view {
@@ -729,7 +779,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::ServiceLifecycle(_)
-                        | AnyViewMap::SvidLifecycle(_) => BackendDiscoveryBridgeView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => BackendDiscoveryBridgeView::default(),
                     }
                 };
                 if current == view {
@@ -772,7 +823,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::SvidLifecycle(_) => ServiceLifecycleView::default(),
+                        | AnyViewMap::SvidLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => ServiceLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -819,7 +871,8 @@ impl ReconcilerRuntime {
                         | AnyViewMap::WorkloadLifecycle(_)
                         | AnyViewMap::ServiceMapHydrator(_)
                         | AnyViewMap::BackendDiscoveryBridge(_)
-                        | AnyViewMap::ServiceLifecycle(_) => SvidLifecycleView::default(),
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::VmReclamation(_) => SvidLifecycleView::default(),
                     }
                 };
                 if current == view {
@@ -842,6 +895,56 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::SvidLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+            // GH #42) — Eq-diff skip + fsync-then-memory write-through,
+            // mirrors the WorkflowLifecycle arm above. `VmReclamationView`
+            // is field-less (brief.md §105a.1), so the current-vs-next
+            // comparison is always equal and this arm elides the fsync
+            // every tick; kept full so a future non-empty view persists
+            // through the same ordering.
+            AnyReconcilerView::VmReclamation(view) => {
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::VmReclamation(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit
+                        | AnyViewMap::WorkflowLifecycle(_)
+                        | AnyViewMap::WorkloadLifecycle(_)
+                        | AnyViewMap::ServiceMapHydrator(_)
+                        | AnyViewMap::BackendDiscoveryBridge(_)
+                        | AnyViewMap::ServiceLifecycle(_)
+                        | AnyViewMap::SvidLifecycle(_) => {
+                            overdrive_core::reconcilers::VmReclamationView::default()
+                        }
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::VmReclamation(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -900,7 +1003,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -977,7 +1081,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1039,7 +1144,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::ServiceLifecycle(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1098,7 +1204,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::SvidLifecycle(_) => None,
+            | AnyViewMap::SvidLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1156,7 +1263,8 @@ impl ReconcilerRuntime {
             | AnyViewMap::WorkloadLifecycle(_)
             | AnyViewMap::ServiceMapHydrator(_)
             | AnyViewMap::BackendDiscoveryBridge(_)
-            | AnyViewMap::ServiceLifecycle(_) => None,
+            | AnyViewMap::ServiceLifecycle(_)
+            | AnyViewMap::VmReclamation(_) => None,
         }
     }
 
@@ -1645,7 +1753,12 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // carries no backoff-pending signal; the §18 re-enqueue for a
         // running-no-task instance is driven by the action-emitted gate
         // (the reconciler returns a `StartWorkflow`), not this predicate.
-        | AnyReconcilerView::WorkflowLifecycle(_) => false,
+        | AnyReconcilerView::WorkflowLifecycle(_)
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH
+        // #42) — the VmReclamation view is field-less (brief.md §105a.1):
+        // retry falls out of the runtime's has_work self-re-enqueue, no
+        // View-carried backoff-pending signal at all.
+        | AnyReconcilerView::VmReclamation(_) => false,
         // The svid-lifecycle view carries per-allocation issue-retry
         // memory (ADR-0067 D8). A `retry` entry is written on EVERY
         // `IssueSvid` emit — the record-on-emit / `bump_if_dispatched`
@@ -1884,6 +1997,23 @@ async fn hydrate_desired(
                 // OBSERVED input; the desired side carries none.
                 prior_backend_row_at: None,
             }))
+        }
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42) — SKELETON. The two-surface join
+        // (intent-side `WorkloadDriver == Vm`, joined against
+        // `alloc_status_rows()`) that populates `allocations` is a
+        // LATER step's obligation (this step's roadmap note: "step
+        // 02-02 fills hydrate_actual's read-order body" — the desired
+        // side's join is the same shape, deferred alongside it since
+        // neither is exercised by this step's acceptance tests, which
+        // drive `plan_reclamation` / `SupervisionSet` / `VmHostState`
+        // directly as pure functions, not through this hydration path).
+        // `Default` leaves `allocations` empty, matching
+        // `VmReclamationState`'s documented desired-side shape (the
+        // other two fields are actual-side and stay at `Default` here
+        // regardless).
+        AnyReconciler::VmReclamation(_) => {
+            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState::default()))
         }
     }
 }
@@ -2846,6 +2976,27 @@ async fn hydrate_actual(
         AnyReconciler::ServiceLifecycle(_) => {
             let workload_id = workload_id_from_target(target)?;
             hydrate_service_lifecycle_actual(state, &workload_id).await
+        }
+        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42) — SKELETON, deliberately incomplete.
+        // The pinned production body calls `VmHostState::observe()`
+        // FIRST, then reads the supervision set LAST (brief.md §105a.2's
+        // asymmetry argument — reading supervision last is what makes a
+        // freshly-started allocation read as held rather than
+        // authorised). Neither a `VmHostState` instance nor a driver
+        // registry is threaded into `AppState` by this step (no
+        // `AppState`/composition-root file is in this step's scope) --
+        // that wiring, and the pinned read order, are this step's
+        // roadmap note's explicit deferral ("step 02-02 fills
+        // hydrate_actual's read-order body"). Returns the safe DEFAULT:
+        // `host: VmHostObservation::default()` (nothing observed),
+        // `supervision: SupervisionSet::Unavailable` (authorises
+        // nothing) -- so a `VmReclamation` reconciler registered before
+        // 02-02 lands can only ever produce an EMPTY `Vec<Action>`
+        // (`plan_reclamation` walks `actual.host`'s three surfaces,
+        // all empty), never a wrong one.
+        AnyReconciler::VmReclamation(_) => {
+            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState::default()))
         }
     }
 }

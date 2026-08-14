@@ -82,6 +82,13 @@ pub mod probers;
 // this and the host `CloudHypervisorVmm` adapter through the same call
 // sequence (ADR-0082 §D6).
 pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+// `SimVmHostState`, the in-memory
+// `overdrive_core::traits::vm_host_state::VmHostState` double. The
+// `vm_host_state_equivalence` structural guard (`overdrive-host` tests,
+// S-VM-91) drives both this and the host `RealVmHostState` adapter
+// through the same call sequence.
+pub mod vm_host_state;
 
 pub use ca::SimCa;
 pub use cgroup_accounting::SimCgroupAccounting;
@@ -91,4 +98,5 @@ pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
+pub use vm_host_state::SimVmHostState;
 pub use vmm::{SimVmm, SimVmmProbeFault};

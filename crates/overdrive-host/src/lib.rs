@@ -36,6 +36,13 @@ pub mod transport;
 // spawn, FICLONE-ioctl per-launch rootfs clone, and the Earned-Trust probe
 // (ADR-0082 §§D1, D5, D6).
 pub mod vmm;
+// microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7, GH #42) —
+// `RealVmHostState`, the production
+// `overdrive_core::traits::vm_host_state::VmHostState` binding: real
+// cgroupfs + real filesystem directory walks over
+// `overdrive.slice/workloads.slice/`, the VM run root, and the
+// rootfs-clone staging directory.
+pub mod vm_host_state;
 
 pub use ca::RcgenCa;
 pub use cgroup_accounting::RealCgroupAccounting;
@@ -43,4 +50,5 @@ pub use cgroup_fs::RealCgroupFs;
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;
+pub use vm_host_state::RealVmHostState;
 pub use vmm::CloudHypervisorVmm;

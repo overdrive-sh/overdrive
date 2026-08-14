@@ -170,6 +170,7 @@ pub mod backend_discovery_bridge;
 pub mod noop_heartbeat;
 pub mod service_map_hydrator;
 pub mod svid_lifecycle;
+pub mod vm_reclamation;
 pub mod workflow_lifecycle;
 pub mod workload_lifecycle;
 
@@ -183,6 +184,10 @@ pub use service_map_hydrator::{
 };
 pub use svid_lifecycle::{
     HeldSvidFacts, RunningAlloc, SvidLifecycle, SvidLifecycleState, SvidLifecycleView,
+};
+pub use vm_reclamation::{
+    SupervisionSet, VmAllocFacts, VmReclamation, VmReclamationState, VmReclamationView,
+    is_intentional_stop, is_platform_reclamation, is_workload_failure, plan_reclamation,
 };
 pub use workflow_lifecycle::{
     WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,
@@ -356,6 +361,10 @@ pub enum AnyState {
     /// [`SvidLifecycleState`] (ADR-0067 D1: `desired = running allocs`,
     /// `actual = the IdentityMgr held set`).
     SvidLifecycle(SvidLifecycleState),
+    /// `VmReclamation` reconciler's typed projection — see
+    /// [`vm_reclamation::VmReclamationState`] (SD-1's Bar-2 reconciler,
+    /// ADR-0083 §D7 / `brief.md` §105a).
+    VmReclamation(vm_reclamation::VmReclamationState),
 }
 
 // ---------------------------------------------------------------------------
@@ -578,6 +587,45 @@ pub enum Action {
         /// `CorrelationKey::derive("svid-lifecycle/<alloc>", spec_hash,
         /// "drop-svid")` — NOT a per-attempt request id.
         correlation: CorrelationKey,
+    },
+
+    /// Author a Platform-Reclamation ending for `alloc_id` (ADR-0081 D1 /
+    /// D2; SD-1). Emitted by the pure [`vm_reclamation::plan_reclamation`]
+    /// diff when a non-terminal VM allocation's supervision is NOT held
+    /// (`SupervisionSet::reclamation_authorised` is `true`); dispatched
+    /// by a later step's `action_shim::reclamation::execute_reclaim_allocation`
+    /// executor, which `kill_scope`s, `discard_artifacts`, and writes the
+    /// terminal row (`brief.md` §105a.5).
+    ///
+    /// `alloc_id`-only payload, deliberately (DD-5, binding): no
+    /// disposition parameter (the variant IS the class), no regime field
+    /// (`boot_epoch` / `is_boot`) — the kill-authorising check reads the
+    /// observed live-handle set, never a caller-declared boolean. The
+    /// executor re-observes rather than trusting anything carried here;
+    /// an observation carried from the diff into the plan goes stale
+    /// between emit and execute.
+    ReclaimAllocation {
+        /// Target allocation.
+        alloc_id: AllocationId,
+    },
+
+    /// Dispose of host state backing NO live instance of a non-terminal
+    /// allocation (ADR-0081 D2 / D4 — Artifact Disposal, NOT an Ending
+    /// Class: authors no ending, writes no row). Emitted by
+    /// [`vm_reclamation::plan_reclamation`] for a terminal VM allocation
+    /// (the disposal-not-reclamation exemption) or an unknown allocation
+    /// on a VM-exclusive host surface whose supervision is not held.
+    ///
+    /// `alloc_id`-only payload, same DD-5 payload prohibitions as
+    /// [`Action::ReclaimAllocation`]. Dispatched by a later step's
+    /// `execute_discard_stranded_artifacts` executor, which `kill_scope`s
+    /// and `discard_artifacts`s and NOTHING else — no row write, no
+    /// evaluation submitted (the declared delta over the observation
+    /// universe is structurally empty: the executor takes no
+    /// `ObservationStore` and no broker parameter at all).
+    DiscardStrandedArtifacts {
+        /// Target allocation.
+        alloc_id: AllocationId,
     },
 }
 
@@ -814,6 +862,12 @@ pub enum AnyReconciler {
     /// Converges `desired = running allocs` against `actual = held set`,
     /// emitting `IssueSvid` / `DropSvid`. See [`SvidLifecycle`].
     SvidLifecycle(SvidLifecycle),
+    /// SD-1's Bar-2 reconciler — `vm-reclamation` per ADR-0083 §D7 /
+    /// `brief.md` §105a. Converges `desired = VM allocations` against
+    /// `actual = observed host state + supervision`, emitting
+    /// `ReclaimAllocation` / `DiscardStrandedArtifacts`. See
+    /// [`vm_reclamation::VmReclamation`].
+    VmReclamation(vm_reclamation::VmReclamation),
 }
 
 impl AnyReconciler {
@@ -828,6 +882,7 @@ impl AnyReconciler {
             Self::BackendDiscoveryBridge(r) => r.name(),
             Self::ServiceLifecycle(r) => r.name(),
             Self::SvidLifecycle(r) => r.name(),
+            Self::VmReclamation(r) => r.name(),
         }
     }
 
@@ -843,6 +898,7 @@ impl AnyReconciler {
             Self::BackendDiscoveryBridge(_) => <BackendDiscoveryBridge as Reconciler>::NAME,
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
             Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
+            Self::VmReclamation(_) => <vm_reclamation::VmReclamation as Reconciler>::NAME,
         }
     }
 
@@ -915,6 +971,15 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::SvidLifecycle(next_view))
             }
+            (
+                Self::VmReclamation(r),
+                AnyState::VmReclamation(desired),
+                AnyState::VmReclamation(actual),
+                AnyReconcilerView::VmReclamation(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::VmReclamation(next_view))
+            }
             _ => {
                 panic!(
                     "AnyReconciler::reconcile dispatch mismatch — \
@@ -949,4 +1014,9 @@ pub enum AnyReconcilerView {
     /// decision is pure over `desired`/`actual`; retry memory lands in
     /// 03-01). ADR-0067 D8.
     SvidLifecycle(SvidLifecycleView),
+    /// `VmReclamation` reconciler's view — FIELD-LESS per the ADR-0079
+    /// precedent (`brief.md` §105a.1): nothing this reconciler emitted is
+    /// ever consulted, so retry falls out of the runtime's `has_work`
+    /// self-re-enqueue.
+    VmReclamation(vm_reclamation::VmReclamationView),
 }
