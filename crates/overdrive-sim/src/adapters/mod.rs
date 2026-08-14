@@ -17,6 +17,13 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+// `SimCgroupAccounting`, the in-memory
+// `overdrive_core::traits::cgroup_accounting::CgroupAccounting` double.
+// The `cgroup_accounting_equivalence` structural guard (`overdrive-host`
+// tests) drives both this and the host `RealCgroupAccounting` adapter
+// through the same call sequence.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 // built-in-ca-operator-composition step 02-02 — `SimKek`, the in-memory
@@ -77,10 +84,11 @@ pub mod probers;
 pub mod vmm;
 
 pub use ca::SimCa;
+pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
 pub use mtls_intercept::{SimInterceptFault, SimMtlsIntercept};
 pub use mtls_resolve::SimMtlsResolve;
-pub use vmm::SimVmm;
+pub use vmm::{SimVmm, SimVmmProbeFault};

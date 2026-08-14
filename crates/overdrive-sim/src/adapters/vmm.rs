@@ -28,8 +28,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::traits::vmm::{
-    Result, Vmm, VmControl, VmExitWatch, VmProcess, VmTermination, VmmError, VmmExit,
-    VmmProbeError,
+    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::VmConfig;
 use parking_lot::Mutex;
@@ -48,6 +47,34 @@ struct SimProcessEntry {
 #[derive(Default)]
 struct State {
     processes: BTreeMap<u32, SimProcessEntry>,
+}
+
+/// Injectable probe-fault CLASS for [`SimVmm::probe`] (ADR-0083 §D8, GH #42).
+///
+/// A one-shot fault consumed by the NEXT `probe()` call, mirroring
+/// [`SimVmm::inject_create_failure`]'s one-shot-per-call style.
+///
+/// Carries only the ADR-0082 §D5 **capability-flag** classes
+/// (`LandlockFlagAbsent`, `LandlockLsmAbsent`, `KvmUnreachable`) plus
+/// `RunDirUnusable` — per S-VM-13's crafter note, these are the classes for
+/// which "no genuinely lying host exists in the Lima test envelope" is
+/// true. The non-reflink class (§D5 scenario 1) is deliberately NOT
+/// injectable here — S-VM-75 proves it against a REAL non-reflink
+/// substrate instead (a real `CloudHypervisorVmm` constructed with
+/// `.with_image_dir(...)` pointed at a genuinely non-reflink directory,
+/// injected via the SAME `ServerConfig.vmm_override` seam this fault type
+/// serves — the seam is adapter-agnostic, `Arc<dyn Vmm>`, so either a
+/// faulty `SimVmm` or a differently-configured real adapter satisfies it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimVmmProbeFault {
+    /// The installed `cloud-hypervisor` has no `--landlock` flag.
+    LandlockFlagAbsent,
+    /// The host kernel does not expose the Landlock LSM.
+    LandlockLsmAbsent,
+    /// `/dev/kvm` is not openable under the target identity.
+    KvmUnreachable,
+    /// The run-directory root is absent or unwritable.
+    RunDirUnusable,
 }
 
 /// Sim binding of the [`Vmm`] port trait.
@@ -75,6 +102,9 @@ pub struct SimVmm {
     /// succeeded" edge case needs this to be exercisable on `SimVmm`
     /// too, per S-VM-90's driving sequence.
     fail_next_create: Arc<std::sync::atomic::AtomicBool>,
+    /// Consumed by the NEXT `probe` call only — ADR-0083 §D8's
+    /// `ServerConfig.vmm_override` fault-injection seam (S-VM-13).
+    probe_fault: Arc<Mutex<Option<SimVmmProbeFault>>>,
 }
 
 impl Default for SimVmm {
@@ -93,6 +123,7 @@ impl SimVmm {
             state: Arc::new(Mutex::new(State::default())),
             next_pid: Arc::new(AtomicU32::new(1_000_000)),
             fail_next_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            probe_fault: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -104,6 +135,14 @@ impl SimVmm {
     /// fails" edge case against this adapter.
     pub fn inject_create_failure(&self) {
         self.fail_next_create.store(true, Ordering::SeqCst);
+    }
+
+    /// Arm a one-shot [`SimVmmProbeFault`] for the NEXT [`Vmm::probe`]
+    /// call (ADR-0083 §D8, step 01-09) — the `ServerConfig.vmm_override`
+    /// injection mechanism S-VM-13 drives through a real in-process
+    /// `overdrive serve` boot.
+    pub fn inject_probe_failure(&self, fault: SimVmmProbeFault) {
+        *self.probe_fault.lock() = Some(fault);
     }
 
     /// **TEST-HOOK-ONLY.** `true` iff `pid` is currently tracked as a
@@ -121,8 +160,31 @@ impl Vmm for SimVmm {
     }
 
     async fn probe(&self) -> std::result::Result<(), VmmProbeError> {
-        // Pure and stateless: nothing to round-trip, nothing that can
-        // leave residue. Trivially idempotent (§D6).
+        // One-shot fault consumption BEFORE the (otherwise pure,
+        // stateless, trivially idempotent per §D6) healthy default —
+        // mirrors `create`'s `fail_next_create.swap(...)` shape.
+        let pending_fault = self.probe_fault.lock().take();
+        if let Some(fault) = pending_fault {
+            return Err(match fault {
+                SimVmmProbeFault::LandlockFlagAbsent => VmmProbeError::landlock_flag_absent(
+                    std::path::PathBuf::from("cloud-hypervisor"),
+                    "sim-injected: no --landlock flag",
+                ),
+                SimVmmProbeFault::LandlockLsmAbsent => {
+                    VmmProbeError::landlock_lsm_absent("sim-injected: landlock LSM absent")
+                }
+                SimVmmProbeFault::KvmUnreachable => VmmProbeError::kvm_unreachable(
+                    0,
+                    0,
+                    0o660,
+                    std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                ),
+                SimVmmProbeFault::RunDirUnusable => VmmProbeError::run_dir_unusable(
+                    std::path::PathBuf::from("/sim/run-dir"),
+                    std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+                ),
+            });
+        }
         Ok(())
     }
 
@@ -145,7 +207,10 @@ impl Vmm for SimVmm {
 
         let pid = self.next_pid.fetch_add(1, Ordering::SeqCst);
         let (exit_tx, exit_rx) = oneshot::channel::<VmmExit>();
-        self.state.lock().processes.insert(pid, SimProcessEntry { terminated: false, exit_tx: Some(exit_tx) });
+        self.state
+            .lock()
+            .processes
+            .insert(pid, SimProcessEntry { terminated: false, exit_tx: Some(exit_tx) });
 
         Ok(VmProcess {
             control: VmControl { pid, api_socket: config.run_dir.api_socket() },

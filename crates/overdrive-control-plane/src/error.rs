@@ -693,8 +693,38 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     DnsResponderBoot(#[from] crate::dns_responder::responder::DnsResponderError),
 
+    /// VM driver composition boot-time refusal (ADR-0082 §D8 / ADR-0083
+    /// §D8, GH #42, step 01-09). Fires ONLY when the composition root (or
+    /// an injected `ServerConfig.vmm_override` test seam declaring
+    /// cloud-hypervisor PRESENT) ran `Vmm::probe()` / `CgroupAccounting::
+    /// probe()` against an adapter it already knows is present, and that
+    /// probe caught a genuine substrate lie (ADR-0082 §D5's catalogued
+    /// capability-flag / non-reflink classes). Distinct from capability
+    /// ABSENCE (no cloud-hypervisor binary at all, or `vm_artifacts`
+    /// unset) — that path is NOT a fault (SD-5) and does not construct
+    /// this variant; it soft-skips composing the `Vm` driver entry and
+    /// boots the node with `[vm]` rejected at admission instead. Same
+    /// boot-path shape as `MtlsBoot` / `DnsResponderBoot`: happens BEFORE
+    /// the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    VmmBoot(#[from] VmmBootError),
+
     #[error("internal: {0}")]
     Internal(String),
+}
+
+/// Boot-time failure from the VM driver composition path. See
+/// [`ControlPlaneError::VmmBoot`]'s docs for the ONLY circumstance under
+/// which this is constructed (an adapter demonstrably present, not
+/// absent). `cause` carries the underlying typed `VmmProbeError` /
+/// `CgroupAccountingProbeError`'s `Display` rendering — pass-through, not
+/// reinterpreted, per `.claude/rules/development.md` § "Distinct failure
+/// modes get distinct error variants".
+#[derive(Debug, Error)]
+#[error("VM driver probe refused: {cause}")]
+pub struct VmmBootError {
+    pub cause: String,
 }
 
 /// Service-health-check-probes ProbeRunner Earned-Trust boot
@@ -1023,6 +1053,16 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // `health.startup.refused` with a per-variant reason and refuse to
             // boot fail-closed; the typed `DnsResponderError`'s own `Display`
             // carries the distinct cause (bind vs List-seed vs probe vs socket).
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VmmBoot(e) => (
+            // Same boot-path shape as `DnsResponderBoot` / `MtlsBoot` above:
+            // the VM driver's probe (an adapter the composition root already
+            // knows is present) runs BEFORE the listener binds, so this arm
+            // is exhaustiveness-only. The composition root branches on
+            // `matches!(e, ControlPlaneError::VmmBoot(_))` to emit
+            // `health.startup.refused` and refuse to boot fail-closed.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

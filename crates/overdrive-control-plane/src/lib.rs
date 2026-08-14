@@ -925,6 +925,37 @@ pub struct ServerConfig {
     /// `IdentityMgr`), NOT the operator HTTPS CA.
     #[cfg(feature = "integration-tests")]
     pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
+
+    /// Test-only adapter-substitution seam for the `Vmm` port (ADR-0083
+    /// §D8, GH #42, step 01-09). When `Some(v)`, `compose_vm_driver` uses
+    /// THIS adapter in place of discovering/constructing
+    /// `CloudHypervisorVmm`, so a real in-process `overdrive serve` runs
+    /// the SAME discover → probe → insert sequence against an adapter
+    /// carrying an injected fault (a `SimVmm`), or against a REAL
+    /// `CloudHypervisorVmm` constructed with a test-only builder override
+    /// (e.g. `.with_image_dir(tmpfs_path)` — a genuinely non-reflink real
+    /// substrate, no injection), rather than against the production
+    /// discovery path. `None` in production; the field does not exist in
+    /// a production binary.
+    ///
+    /// Shaped after `mtls_identity_override` above (a whole-**port**-
+    /// implementation swap, `Arc<dyn Trait>`) — deliberately NOT after
+    /// `dataplane_override`'s whole-**subsystem** gate (ADR-0083 §A10
+    /// considers and rejects that shape by name). Every downstream
+    /// consumer (`DriverRegistry`, the exit-observer loop, `VmDriver`)
+    /// sees `Arc<dyn Vmm>` and is unaware the seam exists.
+    /// `Vmm::probe()` (and `CgroupAccounting::probe()`) run
+    /// UNCONDITIONALLY against whichever adapter is bound — Earned Trust
+    /// is never skipped for the injected case.
+    ///
+    /// Gated behind `#[cfg(feature = "integration-tests")]` on both this
+    /// field declaration and its one use site in `compose_vm_driver`,
+    /// mirroring `mtls_identity_override`'s discipline.
+    ///
+    /// Excluded from [`Debug`] (beyond the adapter-presence marker) —
+    /// `Arc<dyn Vmm>` is neither `Debug` nor `Default`.
+    #[cfg(feature = "integration-tests")]
+    pub vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -961,6 +992,8 @@ impl std::fmt::Debug for ServerConfig {
             "mtls_identity_override",
             &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
         );
+        #[cfg(feature = "integration-tests")]
+        dbg.field("vmm_override", &self.vmm_override.as_ref().map(|_| "<dyn Vmm>"));
         dbg.finish()
     }
 }
@@ -1059,6 +1092,12 @@ impl ServerConfig {
             // leg-B trusts the test peer's server cert.
             #[cfg(feature = "integration-tests")]
             mtls_identity_override: None,
+            // ADR-0083 §D8 step 01-09: default no Vmm override; the
+            // composition root discovers/constructs the production
+            // `CloudHypervisorVmm`. S-VM-13/S-VM-75 set `Some(..)` to
+            // exercise the probe-refusal fail-closed branch.
+            #[cfg(feature = "integration-tests")]
+            vmm_override: None,
         }
     }
 }
@@ -1458,27 +1497,54 @@ pub async fn run_server(
     let mut registry = DriverRegistry::new();
     registry.insert(driver);
 
-    // ADR-0082/ADR-0083 (GH #42, step 01-08): discover -> probe -> insert
-    // `cloud-hypervisor`, mirroring `compose_mtls`'s composition-gated
-    // shape. `CloudHypervisorVmm::new()` is cheap/no-I/O ("discover");
-    // `.probe()` is the real Earned-Trust capability check. Capability
-    // ABSENCE (no `[vm]` boot artifacts configured, or a probe failure of
-    // any kind) is NOT a fault this step refuses the boot on — the node
-    // simply has no `Vm` entry and `[vm]` deploys are rejected at
-    // admission. SD-5's fuller admission-time capability-gate UX and the
-    // hard-refusal-on-genuine-fault path (`ServerConfig.vmm_override`
-    // fault injection) are step 01-09's scope; this composition root's
-    // job is the happy path the walking skeleton needs.
+    // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09): discover -> probe ->
+    // insert `cloud-hypervisor`, mirroring `compose_mtls`'s
+    // composition-gated shape. Capability ABSENCE (no `[vm]` boot
+    // artifacts configured, or the real, non-injected discover/probe
+    // sequence failing — SD-5's "no genuinely lying host exists in the
+    // real test envelope for these classes" case) is NOT a fault: the
+    // node simply has no `Vm` entry and `[vm]` deploys are rejected at
+    // admission (`VmComposeError::NotAvailable`). A GENUINE substrate lie
+    // caught on an adapter the composition root already knows is PRESENT
+    // — the real adapter discovered successfully-but-then-failed-probe is
+    // not reachable in this codebase's test envelope, so in practice this
+    // is exclusively the injected `ServerConfig.vmm_override` path (ADR-
+    // 0083 §D8) declaring presence — hard-refuses the whole boot with
+    // `health.startup.refused` (`VmComposeError::Refused`).
     #[cfg(feature = "integration-tests")]
     if let Some(artifacts) = config.vm_artifacts.clone() {
-        match compose_vm_driver(&artifacts, cgroup_root_path, Arc::clone(&clock), fs).await {
+        let cgroup_accounting: Arc<
+            dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
+        > = Arc::new(overdrive_host::RealCgroupAccounting::new());
+        match compose_vm_driver(
+            &artifacts,
+            cgroup_root_path,
+            Arc::clone(&clock),
+            fs,
+            cgroup_accounting,
+            config.vmm_override.clone(),
+        )
+        .await
+        {
             Ok(vm_driver) => registry.insert(Arc::new(vm_driver)),
-            Err(reason) => {
+            Err(VmComposeError::NotAvailable(reason)) => {
                 tracing::info!(
                     name: "driver.vm.not_composed",
                     reason = %reason,
                     "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
                 );
+            }
+            Err(VmComposeError::Refused(reason)) => {
+                tracing::error!(
+                    name: "health.startup.refused",
+                    target: "overdrive::health",
+                    reason = "vmm.probe",
+                    cause = %reason,
+                    "VM driver probe refused; composition root will not start"
+                );
+                return Err(error::ControlPlaneError::VmmBoot(error::VmmBootError {
+                    cause: reason,
+                }));
             }
         }
     }
@@ -1486,29 +1552,85 @@ pub async fn run_server(
     run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
 }
 
-/// Compose the production `VmDriver` — discover `CloudHypervisorVmm`
-/// (cheap/no-I/O construction), run its Earned-Trust `.probe()`, and
-/// validate the configured kernel image's boot-format magic against the
-/// host architecture. ADR-0082/ADR-0083 (GH #42, step 01-08).
+/// Outcome of a failed [`compose_vm_driver`] attempt — distinguishes
+/// capability ABSENCE (soft: the node simply has no `Vm` entry) from a
+/// genuine substrate lie caught by a probe against an adapter the
+/// composition root (or an injected `ServerConfig.vmm_override` test
+/// seam) already knows is present (hard: refuses the whole boot).
+/// ADR-0083 §D8.
+#[cfg(feature = "integration-tests")]
+#[derive(Debug)]
+enum VmComposeError {
+    /// No override was injected, and the real discover/probe/kernel-
+    /// validation sequence failed. Capability absence is not a fault
+    /// (SD-5) — the caller logs `driver.vm.not_composed` and continues
+    /// booting with no `Vm` entry.
+    NotAvailable(String),
+    /// An override WAS injected (`ServerConfig.vmm_override`) — the test
+    /// is declaring "cloud-hypervisor IS present" — and its probe (or
+    /// `CgroupAccounting`'s probe) failed. Unambiguously a genuine
+    /// substrate lie, never absence: the caller refuses the whole boot
+    /// with `health.startup.refused`.
+    Refused(String),
+}
+
+/// Compose the production `VmDriver` — resolve `Vmm` (the injected
+/// `vmm_override`, when present, or a freshly discovered
+/// `CloudHypervisorVmm`), run its Earned-Trust `.probe()` (and
+/// `CgroupAccounting`'s, gated alongside it per ADR-0082 §D8's
+/// "Composition" section), and validate the configured kernel image's
+/// boot-format magic against the host architecture. ADR-0082/ADR-0083
+/// (GH #42, steps 01-08/01-09).
 ///
-/// Returns a human-readable reason on any failure — the caller treats
-/// every failure identically (capability absence, not a fault) per this
-/// step's scope; see `run_server`'s call site doc comment.
+/// See [`VmComposeError`] for the two-way error split; see
+/// `run_server`'s call site doc comment for the ABSENCE-vs-REFUSAL
+/// framing.
 #[cfg(feature = "integration-tests")]
 async fn compose_vm_driver(
     artifacts: &VmBootArtifacts,
     cgroup_root: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
-) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, String> {
+    cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
+    vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
+) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
     use overdrive_core::vm::config::{
         HostArch, KERNEL_MAGIC_WINDOW, KernelImage, VmConfinement, VmmIdentity,
     };
     use overdrive_worker::vm_driver::VmHostLayout;
 
-    let vmm = overdrive_host::CloudHypervisorVmm::new();
-    vmm.probe().await.map_err(|source| source.to_string())?;
+    // §D8's resolution: the override, when present, replaces discovery
+    // entirely. `injected` records WHICH branch was taken so a
+    // subsequent probe failure is classified correctly — see
+    // `VmComposeError`'s own docs.
+    let injected = vmm_override.is_some();
+    let vmm: Arc<dyn Vmm> = match vmm_override {
+        Some(injected_vmm) => injected_vmm,
+        None => Arc::new(overdrive_host::CloudHypervisorVmm::new()),
+    };
+    // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
+    // WHATEVER adapter is bound, production or injected — there is no
+    // `if injected { skip probe }` branch anywhere in this function.
+    if let Err(source) = vmm.probe().await {
+        let reason = source.to_string();
+        return Err(if injected {
+            VmComposeError::Refused(reason)
+        } else {
+            VmComposeError::NotAvailable(reason)
+        });
+    }
+    // `CgroupAccounting` rides the SAME composition gate as `Vmm`
+    // (ADR-0082 §D8 "Composition"): probed alongside it, refusing the
+    // node on the same substrate-lie / capability-absence split.
+    if let Err(source) = cgroup_accounting.probe().await {
+        let reason = source.to_string();
+        return Err(if injected {
+            VmComposeError::Refused(reason)
+        } else {
+            VmComposeError::NotAvailable(reason)
+        });
+    }
 
     // Host architecture — `cfg(target_arch)` at compile time, matching
     // the binary that is actually running (the same substrate `probe()`
@@ -1516,11 +1638,14 @@ async fn compose_vm_driver(
     let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
 
     let header = tokio::fs::read(&artifacts.kernel_path).await.map_err(|source| {
-        format!("read kernel header {}: {source}", artifacts.kernel_path.display())
+        VmComposeError::NotAvailable(format!(
+            "read kernel header {}: {source}",
+            artifacts.kernel_path.display()
+        ))
     })?;
     let window = &header[..header.len().min(KERNEL_MAGIC_WINDOW)];
     let kernel = KernelImage::validate(artifacts.kernel_path.clone(), arch, window)
-        .map_err(|source| source.to_string())?;
+        .map_err(|source| VmComposeError::NotAvailable(source.to_string()))?;
 
     let layout = VmHostLayout {
         cgroup_root,
@@ -1547,7 +1672,7 @@ async fn compose_vm_driver(
         ),
     };
 
-    Ok(overdrive_worker::vm_driver::VmDriver::new(Arc::new(vmm), clock, fs, layout))
+    Ok(overdrive_worker::vm_driver::VmDriver::new(vmm, clock, fs, cgroup_accounting, layout))
 }
 
 /// Compose the production `ExecDriver` with its Earned-Trust-vetted

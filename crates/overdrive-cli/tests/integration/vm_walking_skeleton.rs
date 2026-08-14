@@ -238,11 +238,13 @@ use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::VmBootArtifacts;
-use overdrive_control_plane::api::AllocStateWire;
+use overdrive_control_plane::api::{AllocStateWire, IdempotencyOutcome};
 use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
-use overdrive_core::vm::config::{RootfsPlan, VmRunDir};
+use overdrive_core::vm::config::{MemoryPlan, RootfsPlan, VmRunDir};
+use overdrive_host::CloudHypervisorVmm;
+use overdrive_sim::{SimVmm, SimVmmProbeFault};
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -1319,6 +1321,511 @@ async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
          teardown exit) instead of the guest's real 7; got reason={:?}",
         row.reason,
     );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-11 — cloud-hypervisor present and healthy composes the Vm driver.
+// ---------------------------------------------------------------------
+
+/// S-VM-11 — cloud-hypervisor present and healthy composes the `Vm`
+/// driver entry: a real substrate (no injection) boot accepts a `[vm]`
+/// deploy. The registry reporting `DriverType::Vm` as supported is
+/// observable ONLY through deploy-acceptance at the CLI driving port —
+/// had the composition gate NOT composed a `Vm` entry, this exact deploy
+/// would instead reach S-VM-12's dispatch-time-fallback classification
+/// (`DriverError::StartRejected` → `Failed`), never `Inserted`.
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_registry_reports_vm_supported_when_cloud_hypervisor_present_and_healthy() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let exit0 = build_exit_code_binary(tmp.path(), 0);
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0vm11");
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-registry-supported.toml",
+        &vm_job_toml(
+            "vm-registry-supported",
+            "/sbin/exit0vm11",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect(
+        "a [vm] deploy must be ACCEPTED when cloud-hypervisor is present and healthy -- the \
+             composition gate composed a Vm driver entry",
+    );
+    assert_eq!(
+        submit.outcome,
+        IdempotencyOutcome::Inserted,
+        "the driver registry reporting DriverType::Vm as supported is proven by deploy \
+         acceptance -- a rejected/failed deploy would mean no Vm entry was composed"
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-12 — cloud-hypervisor absent: no Vm entry, deploy classified
+// naming the capability.
+// ---------------------------------------------------------------------
+
+/// Every directory in `PATH` EXCEPT the one containing `cloud-hypervisor`
+/// — mirrors `overdrive-host`'s
+/// `vmm_equivalence.rs::path_without_cloud_hypervisor` exactly (same
+/// technique, duplicated here rather than shared since neither crate
+/// exposes it as a reusable test helper). S-VM-12's "host with no
+/// cloud-hypervisor binary installed" is this REAL `PATH`-resolution
+/// fact, not a `SimVmm` stand-in — `cloud-hypervisor` genuinely cannot be
+/// `exec`'d by this process for the duration of the mutation.
+fn path_without_cloud_hypervisor() -> String {
+    let ch_dir = Command::new("which")
+        .arg("cloud-hypervisor")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .and_then(|resolved| Path::new(&resolved).parent().map(Path::to_path_buf))
+        .expect(
+            "cloud-hypervisor must be resolvable via `which` on this host before we can hide it",
+        );
+
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|dir| Path::new(dir) != ch_dir.as_path())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// S-VM-12 — cloud-hypervisor absent: the node boots successfully with
+/// no `Vm` entry in the driver registry, and a subsequent `[vm]` deploy
+/// is not silently accepted-and-hung — it is classified `Failed`, naming
+/// the absent capability, not a parse error.
+///
+/// **Honest scope note.** This proves the CURRENTLY-SHIPPED dispatch-time
+/// fallback (`action_shim::mod.rs`'s `drivers.get(driver_kind) -> None`
+/// arm — itself commented "SD-5's admission-time capability gate (step
+/// 01-09) is a separate, earlier check; this is the dispatch-time
+/// fallback for whatever reaches here regardless"): the deploy is
+/// ACCEPTED at admission (`IdempotencyOutcome::Inserted`) and the
+/// allocation transitions Pending → Failed at SCHEDULING/DISPATCH time.
+/// It does NOT prove a hard admission-time (pre-`Inserted`) rejection —
+/// building that would require a NEW capability check in the HTTP
+/// submission handler (`handlers.rs::submit_workload`, plus `AppState`
+/// widening to carry the `DriverRegistry`), which sits outside this
+/// step's declared `implementation_scope`. See this step's final report
+/// for the explicit gap flag.
+#[tokio::test]
+#[serial(cgroup, env)]
+async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capability() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let exit0 = build_exit_code_binary(tmp.path(), 0);
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0vm12");
+
+    let original_path = std::env::var_os("PATH");
+    let broken_path = path_without_cloud_hypervisor();
+    // SAFETY: `#[serial(env)]` guarantees exclusive access to `PATH` for
+    // the duration of this test.
+    unsafe {
+        std::env::set_var("PATH", &broken_path);
+    }
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+
+    // SAFETY: restoring the pre-test PATH; still inside the
+    // `#[serial(env)]` window. Safe to restore NOW — the composition
+    // root's discover/probe already ran SYNCHRONOUSLY inside
+    // `spawn_vm_server(...).await` above (the driver registry is fully
+    // decided by the time that call returns); the `deploy()` call below
+    // never touches `PATH`.
+    unsafe {
+        match &original_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-absent.toml",
+        &vm_job_toml("vm-absent", "/sbin/exit0vm12", &[], &fixture.kernel_path, &rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect(
+        "deploy of a [vm] spec must be ACCEPTED at admission even when no Vm driver is \
+             composed -- SD-5: capability absence is not a parse error",
+    );
+    assert_eq!(
+        submit.outcome,
+        IdempotencyOutcome::Inserted,
+        "today's shipped behavior: the spec parses and is admitted; absence is classified at \
+         dispatch time, not rejected as a malformed spec"
+    );
+
+    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    let row = out.snapshot.rows.first().expect("one allocation row for a freshly-deployed job");
+    assert_eq!(
+        row.state,
+        AllocStateWire::Failed,
+        "a [vm] deploy on a node with NO Vm driver entry must reach Failed (never hang Pending \
+         forever, never silently succeed), got {:?}",
+        row.state,
+    );
+    let reason_text = row.reason.as_ref().map(TransitionReason::human_readable).unwrap_or_default();
+    assert!(
+        reason_text.contains("vm")
+            && reason_text.contains("no")
+            && reason_text.contains("composed"),
+        "the classification must NAME the absent capability (\"no vm driver composed on this \
+         node\"), not a generic/unnamed failure -- got reason={:?}",
+        row.reason,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-13 / S-VM-75 — genuine substrate lies refuse the boot, injected
+// via ServerConfig.vmm_override.
+// ---------------------------------------------------------------------
+
+/// Spawns a real in-process `overdrive serve` with the given real VM
+/// boot artifacts composed AND `vmm_override` set (ADR-0083 §D8, step
+/// 01-09) — the composition root's `discover -> probe -> insert`
+/// sequence resolves `vmm` first, then calls `.probe()` UNCONDITIONALLY
+/// against it, exactly as it does for the production
+/// `CloudHypervisorVmm`. `SimDataplane`-composed (not mTLS), matching
+/// [`spawn_vm_server`] — S-VM-13/S-VM-75 are boot-refusal scenarios that
+/// need no mesh composition. Returns `Result` (not `.expect()`-unwrapped)
+/// since both callers assert on the `Err` arm.
+async fn spawn_vm_server_with_vmm_override(
+    vm_artifacts: VmBootArtifacts,
+    vmm_override: std::sync::Arc<dyn overdrive_core::traits::vmm::Vmm>,
+) -> Result<(ServeHandle, TempDir), overdrive_cli::http_client::CliError> {
+    let tmp = TempDir::new().expect("tempdir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir };
+    let result = overdrive_cli::commands::serve::run_with_dataplane_and_vmm_override(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        vm_artifacts,
+        vmm_override,
+    )
+    .await;
+    result.map(|handle| (handle, tmp))
+}
+
+/// S-VM-13 — cloud-hypervisor present but a capability the host cannot
+/// supply is missing: the node refuses to boot with a
+/// `health.startup.refused`-shaped event naming the probe. Injected via
+/// `ServerConfig.vmm_override` (ADR-0083 §D8) — a `SimVmm` carrying a
+/// capability-flag probe fault, declaring "cloud-hypervisor IS present"
+/// so the composition root's `VmComposeError::Refused` (hard-refusal)
+/// path fires, never `NotAvailable` (capability-ABSENCE soft-skip,
+/// S-VM-12's path). Per S-VM-13's own crafter note, this fault class has
+/// no genuinely-lying real host in the Lima/metal test envelope — the
+/// injection is the sanctioned mechanism (ADR-0083 §D8's own ruling).
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+
+    let sim_vmm = SimVmm::new();
+    sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
+
+    let result = spawn_vm_server_with_vmm_override(
+        VmBootArtifacts {
+            kernel_path: fixture.kernel_path.clone(),
+            rootfs_path: fixture.rootfs_path.clone(),
+        },
+        std::sync::Arc::new(sim_vmm),
+    )
+    .await;
+
+    let err = result.expect_err(
+        "a boot against an INJECTED vmm carrying a capability-flag probe fault must be REFUSED \
+         -- Earned Trust ran .probe() unconditionally against the injected adapter and it failed",
+    );
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("VM driver probe refused") && rendered.contains("Landlock"),
+        "the boot refusal must surface a message naming the probe failure, mirroring \
+         MtlsEnforcement::probe's refusal shape -- got: {rendered}"
+    );
+}
+
+/// S-VM-75 — cloud-hypervisor present, capability flags all satisfied,
+/// but the VM staging directory is genuinely non-reflink: the node
+/// refuses to boot via an EXECUTED FICLONE ioctl, never an fstype string
+/// comparison. Uses a REAL `CloudHypervisorVmm` (not `SimVmm`)
+/// constructed with its own test-only `.with_image_dir(...)` builder
+/// pointed at a REAL tmpfs directory (`/dev/shm`, guaranteed tmpfs on
+/// Linux — never `tmpdir_in(shared_staging_root())`, which is the
+/// XFS-backed reflink-capable root every OTHER scenario in this file
+/// deliberately uses), injected through the SAME `vmm_override` seam
+/// S-VM-13 uses — the seam is `Arc<dyn Vmm>`, adapter-agnostic, and a
+/// REAL differently-configured adapter satisfies it exactly as a
+/// fault-injecting `SimVmm` does.
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_non_reflink_staging_directory_refuses_boot_via_executed_ficlone() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+
+    let non_reflink_dir = tempfile::Builder::new()
+        .prefix("overdrive-vm-ws-s-vm-75-")
+        .tempdir_in("/dev/shm")
+        .expect("create a tmpfs probe-image-dir under /dev/shm (guaranteed tmpfs on Linux)");
+    let real_vmm_non_reflink =
+        CloudHypervisorVmm::new().with_image_dir(non_reflink_dir.path().to_path_buf());
+
+    let result = spawn_vm_server_with_vmm_override(
+        VmBootArtifacts {
+            kernel_path: fixture.kernel_path.clone(),
+            rootfs_path: fixture.rootfs_path.clone(),
+        },
+        std::sync::Arc::new(real_vmm_non_reflink),
+    )
+    .await;
+
+    let err = result.expect_err(
+        "a boot whose REAL CloudHypervisorVmm probes a genuinely non-reflink tmpfs directory \
+         must be REFUSED -- an executed FICLONE ioctl against tmpfs returns EOPNOTSUPP/ENOTTY, \
+         never an fstype string comparison",
+    );
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("VM driver probe refused") && rendered.contains("reflink"),
+        "the boot refusal must name ReflinkUnsupported -- got: {rendered}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// S-VM-19 — a genuine cgroup OOM is diagnosed as VmOutOfMemory, never a
+// bare signal 9.
+// ---------------------------------------------------------------------
+
+/// Cross-builds a tiny static-musl binary that repeatedly grows and
+/// touches an anonymous buffer without bound — a "memory hog" that keeps
+/// consuming and dirtying real pages until killed. Mirrors
+/// `build_spin_binary`'s cross-build shape. `buf.resize(..., 0xAB)`
+/// forces every new byte's page to be written (genuinely committed,
+/// never a lazy zero-page); the explicit stride-touch loop afterward is
+/// cheap insurance against any future stdlib fast-path.
+fn build_memory_hog_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("memhog.rs");
+    std::fs::write(
+        &src,
+        "fn main() {\n\
+         \x20   let mut buf: Vec<u8> = Vec::new();\n\
+         \x20   let chunk: usize = 2 * 1024 * 1024;\n\
+         \x20   loop {\n\
+         \x20       let start = buf.len();\n\
+         \x20       buf.resize(start + chunk, 0xABu8);\n\
+         \x20       let mut i = start;\n\
+         \x20       while i < buf.len() {\n\
+         \x20           buf[i] = buf[i].wrapping_add(1);\n\
+         \x20           i += 4096;\n\
+         \x20       }\n\
+         \x20       std::thread::sleep(std::time::Duration::from_millis(100));\n\
+         \x20   }\n\
+         }\n",
+    )
+    .expect("write memhog source");
+    let out = tmp.join("memhog");
+    let status = Command::new("rustc")
+        .arg("--edition")
+        .arg("2021")
+        .arg("-C")
+        .arg("opt-level=0")
+        .arg("-C")
+        .arg("target-feature=+crt-static")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-musl")
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for the memory-hog binary");
+    assert!(status.success(), "rustc must build the memory-hog binary");
+    out
+}
+
+/// S-VM-19 — A VM that exceeds its declared memory is diagnosed as OOM,
+/// not a bare signal 9.
+///
+/// Forces a REAL, genuine kernel cgroup-OOM (per this step's "Ground the
+/// premise" obligation — the diagnosis must observe a REAL kernel
+/// `memory.events` increment, never a synthesized classification). The
+/// deploy declares `memory_bytes` at the SAME 128 MiB every other
+/// scenario in this file uses (empirically the smallest point this
+/// kernel/rootfs/CH combination is proven to boot at — a first cut of
+/// this test at 64 MiB never reached Running within 60s on the real
+/// metal box: the guest kernel's OWN boot footprint, before
+/// `overdrive-init` ever dials the beacon, did not fit; that failure is
+/// orthogonal to this scenario's actual claim, which is about a POST-boot
+/// cgroup ceiling breach). Once the allocation is confirmed Running (its
+/// cgroup scope exists, and the guest has ALREADY booted successfully
+/// under the full, proven 128 MiB budget), this test DIRECTLY overwrites
+/// the REAL `<scope>/memory.max` pseudo-file to a much tighter value
+/// than what `MemoryPlan` computed — reproducing the D-3 "wrong
+/// `reserve_bytes`" state the diagnosis exists to catch (ADR-0082
+/// §D2.3's own bug report: a cgroup-OOM under a wrong `reserve_bytes`
+/// "surfaces as `Failed / WorkloadCrashedImmediately {signal: 9}`,
+/// indistinguishable from `kill -9`"). This is a REAL host-kernel
+/// perturbation (the SAME class of direct real-substrate action
+/// `.claude/rules/testing.md`'s fault-injection catalogue already
+/// sanctions — `tc qdisc … netem`-style, applied to cgroupfs instead of
+/// the network), not a fake at any layer of the diagnosis code path
+/// itself: the memory-hog guest, already Running and growing without
+/// bound WITHIN its own 128 MiB guest-visible RAM ceiling (comfortably
+/// under it — the artificially tightened 24 MiB host ceiling, applied
+/// AFTER boot, is what actually bites), genuinely breaches the tightened
+/// ceiling and the REAL kernel OOM-kills the confined `cloud-hypervisor`
+/// process — `memory.events`'s `oom_kill` counter is a REAL,
+/// kernel-incremented fact by the time the exit watcher reads it.
+///
+/// `limit_bytes` on the resulting `TransitionReason::VmOutOfMemory` is
+/// asserted against `MemoryPlan::derive(declared).cgroup_max_bytes()`
+/// (the ORIGINALLY-COMPUTED ceiling `VmDriver` captured at `start` — per
+/// ADR-0082 §D8, "costs no I/O", never a live re-read of the
+/// artificially-tightened value this test wrote afterward).
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9() {
+    const DECLARED_MEMORY_BYTES: u64 = 134_217_728; // 128 MiB -- matches every other scenario's proven-to-boot budget
+    const TIGHTENED_MEMORY_MAX_BYTES: u64 = 24 * 1024 * 1024; // 24 MiB
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let memhog = build_memory_hog_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &memhog, "memhog");
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-oom.toml",
+        &format!(
+            "[job]\nid = \"vm-oom\"\n\n[vm]\ncommand = \"/sbin/memhog\"\nargs = []\n\
+             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
+             memory_bytes = {DECLARED_MEMORY_BYTES}\n",
+            fixture.kernel_path.display(),
+            rootfs.display(),
+        ),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the [vm] spec whose guest deliberately exceeds a tightened memory.max");
+
+    // Poll until Running -- the cgroup scope must exist before this test
+    // can tighten its real memory.max file. Captures the server-echoed
+    // alloc_id at the same instant, per S-VM-14's established pattern
+    // (never hand-assume the "alloc-<name>-0" naming convention).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let running_alloc_id: String = loop {
+        let out =
+            describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if let Some(row) = out.snapshot.rows.first()
+            && row.state == AllocStateWire::Running
+        {
+            break row.alloc_id.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "allocation must reach Running within 60s so its cgroup scope exists"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    let alloc = AllocationId::new(&running_alloc_id)
+        .expect("server-echoed alloc_id parses as AllocationId");
+
+    // Force a REAL undersized memory.max -- reproducing the D-3 "wrong
+    // reserve_bytes" state directly against the real kernel pseudo-file
+    // production already wrote (MemoryPlan::cgroup_max_bytes()).
+    let scope_memory_max =
+        CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup")).join("memory.max");
+    std::fs::write(&scope_memory_max, TIGHTENED_MEMORY_MAX_BYTES.to_string()).unwrap_or_else(
+        |err| {
+            panic!(
+                "write a tightened real memory.max at {}: {err} -- the alloc's cgroup scope must \
+                 already exist (Running was confirmed above)",
+                scope_memory_max.display()
+            )
+        },
+    );
+
+    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let row = out.snapshot.rows.first().expect("one allocation row for a freshly-deployed job");
+    assert_eq!(
+        row.state,
+        AllocStateWire::Failed,
+        "a genuinely cgroup-OOM-killed VM must reach Failed (a crash), never Terminated, got {:?} \
+         (reason={:?})",
+        row.state,
+        row.reason,
+    );
+    let expected_limit_bytes = MemoryPlan::derive(DECLARED_MEMORY_BYTES).cgroup_max_bytes();
+    match &row.reason {
+        Some(TransitionReason::VmOutOfMemory { limit_bytes, oom_kill_count }) => {
+            assert_eq!(
+                *limit_bytes, expected_limit_bytes,
+                "limit_bytes must be MemoryPlan::cgroup_max_bytes() -- the ORIGINALLY-COMPUTED \
+                 ceiling VmDriver captured at start, never this test's artificially-tightened value"
+            );
+            assert!(
+                *oom_kill_count > 0,
+                "oom_kill_count must be a REAL, kernel-incremented positive fact -- got 0"
+            );
+        }
+        other => panic!(
+            "a VM whose real, artificially-tightened memory.max was genuinely breached must be \
+             diagnosed TransitionReason::VmOutOfMemory{{limit_bytes, oom_kill_count}}, NEVER a \
+             bare signal 9 / WorkloadCrashedImmediately -- got {other:?}"
+        ),
+    }
 
     handle.shutdown().await.expect("clean shutdown");
 }

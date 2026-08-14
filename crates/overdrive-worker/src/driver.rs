@@ -886,7 +886,8 @@ fn spawn_exit_watcher(
         } else {
             None
         };
-        let event = ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail };
+        let event =
+            ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail, oom: None };
         // Running-confirmed gate: await the action-shim signal that
         // the corresponding `obs.write(Running)` row has committed
         // (or that the May-2 retry path has degraded to

@@ -40,7 +40,7 @@ use overdrive_core::vm::config::{
     VmmIdentity,
 };
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::{SimCgroupFs, SimVmm};
+use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
@@ -117,7 +117,11 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
     let clock = SimClock::new();
     let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
         std::sync::Arc::new(SimCgroupFs::new());
-    let driver = VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, layout);
+    let cgroup_accounting: std::sync::Arc<
+        dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
+    > = std::sync::Arc::new(SimCgroupAccounting::new());
+    let driver =
+        VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, cgroup_accounting, layout);
     (driver, clock)
 }
 
@@ -136,7 +140,11 @@ fn build_driver_with_cgroup_fs(
     let cgroup_fs = SimCgroupFs::new();
     let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
         std::sync::Arc::new(cgroup_fs.clone());
-    let driver = VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, layout);
+    let cgroup_accounting: std::sync::Arc<
+        dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
+    > = std::sync::Arc::new(SimCgroupAccounting::new());
+    let driver =
+        VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, cgroup_accounting, layout);
     (driver, clock, cgroup_fs)
 }
 

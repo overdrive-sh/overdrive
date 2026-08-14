@@ -3142,6 +3142,71 @@ components:
             type: string
             enum:
             - workload_netns_provision_failed
+      - type: object
+        description: |-
+          A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+          from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+          the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+          `memory.max` ceiling the VM was confined to
+          (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+          observed kernel counter at read time. Emitted by the exit
+          observer's `classify()` precedence check, checked ahead of the
+          default `WorkloadCrashedImmediately` mapping for the SAME
+          `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+          `StoppedBy` disposition is `Process`, same as any other crash;
+          **not** `PlatformReclaimed` (DD-1's third ending class is about
+          the platform losing supervision, never about *why* a supervised
+          VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+          any other crash does, no exemption.
+
+          **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+          to keep every pre-existing rkyv discriminant stable — the same
+          discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+          never populates `ExitEvent::oom`, so every Exec crash falls
+          through unchanged to `WorkloadCrashedImmediately`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+              from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+              the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+              `memory.max` ceiling the VM was confined to
+              (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+              observed kernel counter at read time. Emitted by the exit
+              observer's `classify()` precedence check, checked ahead of the
+              default `WorkloadCrashedImmediately` mapping for the SAME
+              `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+              `StoppedBy` disposition is `Process`, same as any other crash;
+              **not** `PlatformReclaimed` (DD-1's third ending class is about
+              the platform losing supervision, never about *why* a supervised
+              VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+              any other crash does, no exemption.
+
+              **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+              to keep every pre-existing rkyv discriminant stable — the same
+              discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+              never populates `ExitEvent::oom`, so every Exec crash falls
+              through unchanged to `WorkloadCrashedImmediately`.
+            required:
+            - limit_bytes
+            - oom_kill_count
+            properties:
+              limit_bytes:
+                type: integer
+                format: int64
+                minimum: 0
+              oom_kill_count:
+                type: integer
+                format: int64
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_out_of_memory
       description: |-
         Structured reason for a lifecycle transition.
 

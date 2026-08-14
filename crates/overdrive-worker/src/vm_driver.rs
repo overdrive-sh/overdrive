@@ -26,10 +26,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
+use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources,
+    ExitKind, OomFacts, Resources,
 };
 use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
@@ -252,6 +253,7 @@ pub struct VmDriver {
     vmm: Arc<dyn Vmm>,
     clock: Arc<dyn Clock>,
     cgroup_manager: CgroupManager,
+    cgroup_accounting: Arc<dyn CgroupAccounting>,
     layout: VmHostLayout,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -262,12 +264,16 @@ impl VmDriver {
     /// Every port is a mandatory constructor parameter — no
     /// `with_vmm`-style builder override
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// Arity and parameter order are pinned by ADR-0082 §D1.
+    /// Arity and parameter order are pinned by ADR-0082 §§D1, D8 —
+    /// `cgroup_accounting` was added ahead of `layout` by the D-3 fold-in
+    /// (`VmDriver::new(Arc::new(vmm), clock, fs, cgroup_accounting,
+    /// vm_layout)`).
     #[must_use]
     pub fn new(
         vmm: Arc<dyn Vmm>,
         clock: Arc<dyn Clock>,
         fs: Arc<dyn CgroupFs>,
+        cgroup_accounting: Arc<dyn CgroupAccounting>,
         layout: VmHostLayout,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
@@ -276,6 +282,7 @@ impl VmDriver {
             vmm,
             clock,
             cgroup_manager,
+            cgroup_accounting,
             layout,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
@@ -433,7 +440,39 @@ impl VmDriver {
             }
         };
 
-        Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, rootfs })
+        Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, rootfs, memory })
+    }
+
+    /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
+    /// it. Split out of `start`'s beacon-win arm purely to stay under the
+    /// file's line-count budget — every parameter and the spawned body
+    /// are otherwise unchanged from the pre-split call.
+    fn spawn_exit_watcher_task(
+        &self,
+        alloc: AllocationId,
+        exit: VmExitWatch,
+        reader: BufReader<OwnedReadHalf>,
+        scope: CgroupPath,
+        limit_bytes: u64,
+    ) {
+        let watcher_live = Arc::clone(&self.live);
+        let watcher_tx = self.exit_tx.clone();
+        let watcher_cgroup_accounting = Arc::clone(&self.cgroup_accounting);
+        let watcher_cgroup_root = self.layout.cgroup_root.clone();
+        tokio::spawn(async move {
+            run_exit_watcher(
+                alloc,
+                exit,
+                reader,
+                watcher_live,
+                watcher_tx,
+                watcher_cgroup_accounting,
+                watcher_cgroup_root,
+                scope,
+                limit_bytes,
+            )
+            .await;
+        });
     }
 }
 
@@ -456,6 +495,11 @@ struct ProvisionedVmm {
     control: VmControl,
     exit: VmExitWatch,
     rootfs: RootfsPlan,
+    /// Carried through to the exit watcher so its post-mortem
+    /// `CgroupAccounting::oom_kill_count` read (ADR-0082 §D8) can report
+    /// `OomFacts::limit_bytes` at zero extra I/O —
+    /// `MemoryPlan::cgroup_max_bytes()` is already known from `start`.
+    memory: MemoryPlan,
 }
 
 #[async_trait]
@@ -465,7 +509,7 @@ impl Driver for VmDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let ProvisionedVmm { run_dir, listener, scope, control, mut exit, rootfs } =
+        let ProvisionedVmm { run_dir, listener, scope, control, mut exit, rootfs, memory } =
             self.provision_vmm(spec).await?;
 
         // Transition Starting -> Live (still §103 step 0's Held phase;
@@ -543,12 +587,13 @@ impl Driver for VmDriver {
                         live_vm.beacon = Some(BeaconSession { write_half });
                     }
                 }
-                let watcher_alloc = spec.alloc.clone();
-                let watcher_live = Arc::clone(&self.live);
-                let watcher_tx = self.exit_tx.clone();
-                tokio::spawn(async move {
-                    run_exit_watcher(watcher_alloc, exit, reader, watcher_live, watcher_tx).await;
-                });
+                self.spawn_exit_watcher_task(
+                    spec.alloc.clone(),
+                    exit,
+                    reader,
+                    scope,
+                    memory.cgroup_max_bytes(),
+                );
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(control.pid) })
             }
             // @mandatory:mutation_target — every non-Ok race arm below
@@ -829,15 +874,45 @@ fn finish_guest_report_line(
 /// Owns `exit` (the `VmExitWatch` moved intact out of the boot race —
 /// ADR-0082 §D3's correction: `VmExitWatch::recv` borrows so it can be
 /// raced and then handed on) and the accepted connection's read half.
+///
+/// # OOM diagnosis (ADR-0082 §D8, the D-3 fold-in)
+///
+/// Immediately after `drain_guest_report` resolves and BEFORE any
+/// teardown — this watcher performs none of its own; teardown happens
+/// later, in `stop` or `cleanup_after_start_failure`, both driven by a
+/// SEPARATE caller — reads `cgroup_accounting.oom_kill_count` against
+/// this allocation's own `memory.events`, but ONLY on the "no agent EXIT
+/// report, VMM died" branch (`guest_report.is_none()`). A guest that
+/// self-reported an exit status is never second-guessed by a cgroup
+/// read: the guest's own report is authoritative (the same precedence
+/// `classify_vm_exit` already gives it over the VMM's own signal).
+#[allow(clippy::too_many_arguments)]
 async fn run_exit_watcher(
     alloc: AllocationId,
     mut exit: VmExitWatch,
     reader: BufReader<OwnedReadHalf>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
+    cgroup_accounting: Arc<dyn CgroupAccounting>,
+    cgroup_root: PathBuf,
+    scope: CgroupPath,
+    limit_bytes: u64,
 ) {
     let (guest_report, vmm_signal) = drain_guest_report(&mut exit, reader).await;
     let kind = classify_vm_exit(guest_report, vmm_signal);
+    let oom = if guest_report.is_none() {
+        let memory_events_path = scope.resolve(&cgroup_root).join("memory.events");
+        match cgroup_accounting.oom_kill_count(&memory_events_path).await {
+            Ok(count) if count > 0 => Some(OomFacts { limit_bytes, oom_kill_count: count }),
+            // A read error, or a genuinely-zero counter, both collapse to
+            // "not observed to be OOM" per `ExitEvent::oom`'s own
+            // documented contract -- `None` does NOT mean "confirmed not
+            // OOM."
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     let mut guard = ClaimGuard::new(alloc.clone(), live);
     if guard.try_begin_ending() {
@@ -853,6 +928,7 @@ async fn run_exit_watcher(
             // misclassification of anything this step's ACs assert on.
             intentional_stop: false,
             stderr_tail: None,
+            oom,
         };
         let _ = exit_tx.send(event).await;
     }

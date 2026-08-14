@@ -22,6 +22,11 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+// `RealCgroupAccounting`, the production
+// `overdrive_core::traits::cgroup_accounting::CgroupAccounting` binding:
+// a real `tokio::fs::read` over `memory.events`.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod entropy;
@@ -33,6 +38,7 @@ pub mod transport;
 pub mod vmm;
 
 pub use ca::RcgenCa;
+pub use cgroup_accounting::RealCgroupAccounting;
 pub use cgroup_fs::RealCgroupFs;
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};

@@ -216,6 +216,27 @@ pub enum TransitionReason {
     /// `MtlsInterceptInstallFailed { stage, detail }` cause-class shape — `stage`
     /// is a `String` carrying a closed vocabulary, NOT a sub-enum.
     WorkloadNetnsProvisionFailed { stage: String, detail: String },
+    /// A VM allocation's cgroup scope was OOM-killed mid-run — diagnosed
+    /// from a post-mortem `memory.events` `oom_kill` read (ADR-0082 §D8,
+    /// the D-3 fold-in; ADR-0083 §D5 row 13). `limit_bytes` is the
+    /// `memory.max` ceiling the VM was confined to
+    /// (`MemoryPlan::cgroup_max_bytes()`); `oom_kill_count` is the
+    /// observed kernel counter at read time. Emitted by the exit
+    /// observer's `classify()` precedence check, checked ahead of the
+    /// default `WorkloadCrashedImmediately` mapping for the SAME
+    /// `ExitKind::Crashed` case — never for `ExitKind::CleanExit`.
+    /// `StoppedBy` disposition is `Process`, same as any other crash;
+    /// **not** `PlatformReclaimed` (DD-1's third ending class is about
+    /// the platform losing supervision, never about *why* a supervised
+    /// VM died) — so `VmOutOfMemory` consumes restart budget exactly as
+    /// any other crash does, no exemption.
+    ///
+    /// **Additive position**: appended after `WorkloadNetnsProvisionFailed`
+    /// to keep every pre-existing rkyv discriminant stable — the same
+    /// discipline `StoppedBy` states verbatim at `:237-241`. `ExecDriver`
+    /// never populates `ExitEvent::oom`, so every Exec crash falls
+    /// through unchanged to `WorkloadCrashedImmediately`.
+    VmOutOfMemory { limit_bytes: u64, oom_kill_count: u64 },
 }
 
 /// Initiator of a `Stopped` transition.
@@ -802,6 +823,9 @@ impl TransitionReason {
             Self::WorkloadNetnsProvisionFailed { stage, detail } => {
                 format!("workload netns provision failed ({stage}): {detail}")
             }
+            Self::VmOutOfMemory { limit_bytes, oom_kill_count } => {
+                format!("VM out of memory (limit {limit_bytes}b, oom_kill_count {oom_kill_count})")
+            }
         }
     }
 
@@ -835,7 +859,8 @@ impl TransitionReason {
             | Self::OutOfMemory { .. }
             | Self::WorkloadCrashedImmediately { .. }
             | Self::MtlsInterceptInstallFailed { .. }
-            | Self::WorkloadNetnsProvisionFailed { .. } => true,
+            | Self::WorkloadNetnsProvisionFailed { .. }
+            | Self::VmOutOfMemory { .. } => true,
         }
     }
 }

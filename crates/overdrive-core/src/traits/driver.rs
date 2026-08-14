@@ -463,6 +463,31 @@ pub struct ExitEvent {
     ///   want to exercise the tail-rendering path inject explicit
     ///   stderr via the sim driver's tail-injection API.
     pub stderr_tail: Option<String>,
+    /// Set only when the driver observed, immediately after exit and
+    /// before any teardown, that the allocation's cgroup scope had a
+    /// nonzero `oom_kill` counter (ADR-0082 §D8, the D-3 fold-in).
+    /// `ExecDriver` never sets this (its own OOM diagnosis is the
+    /// unreduced half of D-3, still deferred). `None` means "not
+    /// observed to be OOM" -- it does NOT mean "confirmed not OOM": a
+    /// read error also yields `None`, per this fold-in's best-effort
+    /// scope.
+    ///
+    /// Producer: `VmDriver`'s per-alloc exit watcher
+    /// (`overdrive_worker::vm_driver::run_exit_watcher`) — read via
+    /// [`crate::traits::cgroup_accounting::CgroupAccounting::oom_kill_count`]
+    /// exactly once, on the "no agent EXIT report, VMM died" branch
+    /// only (never when the guest self-reported an exit status).
+    pub oom: Option<OomFacts>,
+}
+
+/// The observed cgroup-OOM facts threaded onto [`ExitEvent::oom`]
+/// (ADR-0082 §D8). `limit_bytes` costs no I/O — it is
+/// `MemoryPlan::cgroup_max_bytes()`, already held by `VmDriver` from
+/// `start`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OomFacts {
+    pub limit_bytes: u64,
+    pub oom_kill_count: u64,
 }
 
 /// Number of trailing stderr lines `ExecDriver` retains for inclusion

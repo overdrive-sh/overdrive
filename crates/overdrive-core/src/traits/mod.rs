@@ -14,6 +14,11 @@
 //! crate.
 
 pub mod ca;
+// microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42). The
+// post-mortem `memory.events` `oom_kill` read port — a NEW port beside
+// `CgroupFs`, not a widening of it (ADR-0083 §A8). Composed gated
+// alongside `Vmm`; consulted only by the VM per-alloc exit watcher.
+pub mod cgroup_accounting;
 pub mod cgroup_fs;
 pub mod clock;
 pub mod dataplane;
@@ -53,6 +58,7 @@ pub use ca::{
     Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
     SvidRequest, TrustBundle, TrustBundlePem,
 };
+pub use cgroup_accounting::{CgroupAccounting, CgroupAccountingError, CgroupAccountingProbeError};
 pub use cgroup_fs::{CgroupFs, ProbeError};
 pub use clock::Clock;
 pub use dataplane::Dataplane;

@@ -35,6 +35,13 @@ mod integration {
     // built-in-ca (GH #28, ADR-0063 D3) — SystemdCredsKeyring holds the KEK
     // in the real Linux kernel keyring (add_key/keyctl).
     mod systemd_creds_keyring;
+    // microvm-driver-cloud-hypervisor step 01-09 (ADR-0082 §D8, GH #42) —
+    // `CgroupAccounting` adapter equivalence (S-VM-93). Drives both
+    // `RealCgroupAccounting` and `SimCgroupAccounting` against real
+    // tempfile fixtures / injection hooks. Never goes through the `Vmm`
+    // port and never spawns cloud-hypervisor, so this stays gated by
+    // `integration-tests` alone — deliberately NOT `kvm-tests`.
+    mod cgroup_accounting_equivalence;
     // microvm-driver-cloud-hypervisor step 01-06 (GH #42) — real Cloud
     // Hypervisor boot surface. Additionally gated `kvm-tests`: the x86_64
     // + nested-KVM floor these need cannot be honoured on arm64 Lima, so

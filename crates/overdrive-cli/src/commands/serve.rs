@@ -199,6 +199,33 @@ pub async fn run_with_vm_artifacts(
         .await
 }
 
+/// Test-only sibling of [`run_with_dataplane_and_vm_artifacts`] that ALSO
+/// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
+///
+/// A real in-process `overdrive serve` runs the SAME discover → probe →
+/// insert sequence against a substituted `Arc<dyn Vmm>` — a `SimVmm`
+/// carrying an injected capability-flag fault (S-VM-13), or a REAL
+/// `CloudHypervisorVmm` constructed with a test-only builder override
+/// pointed at a genuinely non-reflink directory (S-VM-75) — rather than
+/// against the production discovery path. `Vmm::probe()` still runs
+/// unconditionally against whichever adapter is bound. Gated behind
+/// `integration-tests`, mirroring `vmm_override`'s own gate.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_dataplane_and_vmm_override(
+    args: ServeArgs,
+    dataplane: Arc<dyn Dataplane>,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
+    vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
+        vm_artifacts: Some(vm_artifacts),
+        vmm_override: Some(vmm_override),
+        ..c
+    })
+    .await
+}
+
 async fn run_inner(
     args: ServeArgs,
     dataplane_override: Option<Arc<dyn Dataplane>>,

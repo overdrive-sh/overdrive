@@ -296,6 +296,7 @@ impl SimDriver {
                 kind: final_kind,
                 intentional_stop: intentional,
                 stderr_tail: None,
+                oom: None,
             };
             // Running-confirmed gate await: symmetric with
             // `ExecDriver`'s watcher per
