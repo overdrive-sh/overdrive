@@ -548,8 +548,9 @@ pub fn derive_workload_netns_plan(slot: NetSlot, responder_addr: Ipv4Addr) -> Wo
     // chars (see its own doc comment), so this can never actually fail —
     // `unreachable!` communicates the invariant rather than masking it
     // behind a `?` early-return that would suggest a real fallible path.
-    let netns = NetnsName::from_hex4(&hex)
-        .unwrap_or_else(|_| unreachable!("NetSlot::to_hex4 always renders exactly 4 lowercase hex chars"));
+    let netns = NetnsName::from_hex4(&hex).unwrap_or_else(|_| {
+        unreachable!("NetSlot::to_hex4 always renders exactly 4 lowercase hex chars")
+    });
 
     // Carve the per-allocation /30 from the fixed base: slot N owns the four
     // contiguous addresses at base + N*4. A /30 always has exactly two usable
@@ -2270,7 +2271,9 @@ fn execute_workload_step(
             link_del(&plan.workload_veth)?;
             workload_link_add(plan)
         }
-        WorkloadVethStep::MoveWorkloadEndIntoNetns => netns_move(&plan.workload_veth, plan.netns.as_str()),
+        WorkloadVethStep::MoveWorkloadEndIntoNetns => {
+            netns_move(&plan.workload_veth, plan.netns.as_str())
+        }
         WorkloadVethStep::AddHostAddr => {
             let cidr = format!("{}/{}", plan.host_addr, prefix);
             addr_add(&plan.host_veth, &cidr)
@@ -2280,9 +2283,13 @@ fn execute_workload_step(
             netns_addr_add(plan.netns.as_str(), &plan.workload_veth, &cidr)
         }
         WorkloadVethStep::SetHostVethUp => link_up(&plan.host_veth),
-        WorkloadVethStep::SetWorkloadVethUp => netns_link_up(plan.netns.as_str(), &plan.workload_veth),
+        WorkloadVethStep::SetWorkloadVethUp => {
+            netns_link_up(plan.netns.as_str(), &plan.workload_veth)
+        }
         WorkloadVethStep::SetLoopbackUp => netns_link_up(plan.netns.as_str(), "lo"),
-        WorkloadVethStep::AddDefaultRoute => netns_default_route_add(plan.netns.as_str(), plan.gateway),
+        WorkloadVethStep::AddDefaultRoute => {
+            netns_default_route_add(plan.netns.as_str(), plan.gateway)
+        }
         WorkloadVethStep::WriteResolvConf => resolv_conf_write(plan),
         WorkloadVethStep::EnableIpForward => sysctl_set("net.ipv4.ip_forward", "1"),
         WorkloadVethStep::RelaxGlobalRpFilter => {

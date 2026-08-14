@@ -134,21 +134,47 @@
 //! vsock-dependent) remain GREEN throughout. This is the maximal
 //! evidence available that the guest-vsock transport itself works.
 //!
-//! **One blocker remains — S-VM-05 / S-VM-74 — neither the vsock gap nor
-//! fixable within this step's file boundary
-//! (`crates/overdrive-init`, `crates/overdrive-testing`,
-//! `crates/overdrive-core`'s beacon module, this file).** It was
-//! UNREACHABLE before the vsock fix (every scenario that would have hit
-//! it was vsock-blocked first), so its `#[ignore]` reason names it
-//! explicitly rather than reusing the vsock text:
+//! **The EBUSY blocker — S-VM-05 / S-VM-74, both mTLS-composed, real
+//! `EbpfDataplane` — is CLOSED (01-08 review remediation, third pass,
+//! 2026-08-14).** Root cause was NOT a production double-attach:
+//! `EbpfDataplane::new_with_pin_dir` is called from exactly one
+//! `map_or_else` site in `run_server`
+//! (`crates/overdrive-control-plane/src/lib.rs`), so a real boot never
+//! attaches twice. The EBUSY was two TEST PROCESSES independently
+//! simulating that boot concurrently against the SAME fixed, shared
+//! kernel interface names (`ovd-veth-cli` / `ovd-veth-bk`) — nextest's
+//! default per-test-process concurrency racing the same host-kernel XDP
+//! slot, never a state a real deploy (one `overdrive serve` per node)
+//! can reach. Fixed by adding both scenarios to the pre-existing
+//! `host-kernel-shared` single-writer test-group (`.config/nextest.toml`)
+//! — the SAME serialization pattern already applied to
+//! `serve_boot_provisions_veth` and `dns_responder_walking_skeleton` for
+//! the identical class of gap. Confirmed CLOSED: S-VM-74 passes cleanly
+//! and repeatably across two full-suite metal-box runs.
 //!
-//! - **S-VM-05 / S-VM-74** (both mTLS-composed, real `EbpfDataplane`):
-//!   deterministic `EbpfDataplane` construction failure — `XDP slot on
-//!   interface 'ovd-veth-cli' is already occupied (EBUSY)` — reproduced
-//!   on a freshly-rebooted box with a verified-clean XDP/veth/bpftool
-//!   state beforehand, ruling out the routine leftover-attachment class
-//!   `debugging.md` documents. Root cause is in `overdrive-dataplane` /
-//!   the veth-provisioner, outside this step's scope.
+//! **S-VM-05 has a SECOND, DISTINCT, newly-discovered blocker — cross-test
+//! contamination, not EBUSY.** Deterministically reproduced (identical
+//! failure, two consecutive full-suite runs): the real `cloud-hypervisor`
+//! process this scenario's `find_cloud_hypervisor_pid()` locates resolves
+//! to `alloc-vm-deadline-0.scope` (S-VM-14's allocation) rather than this
+//! scenario's own `alloc-vm-contained-0.scope`. Root cause: S-VM-14's own
+//! `no_cloud_hypervisor_process_running()` leak-verification helper still
+//! matches on the truncated `/proc/<pid>/comm` (the SAME
+//! `TASK_COMM_LEN`=16 truncation bug `find_cloud_hypervisor_pid` below was
+//! just fixed to avoid, via `argv[0]`) — it is vacuously always-`true`
+//! and silently masks a REAL `cloud-hypervisor` process that outlives
+//! S-VM-14's own `cleanup_after_start_failure` path
+//! (`crates/overdrive-worker/src/vm_driver.rs`) long enough to
+//! contaminate the next serialized test's `/proc` scan. Fixing this needs
+//! (a) the same `comm`→`argv0` fix mirrored into
+//! `no_cloud_hypervisor_process_running` so S-VM-14 actually verifies its
+//! own claim, which will likely flip S-VM-14 itself to failing, and then
+//! (b) an investigation into why `cleanup_after_start_failure` does not
+//! reliably/promptly terminate the VMM process on boot-deadline. Both are
+//! outside this step's file boundary (`overdrive-worker`'s driver
+//! internals) and are a genuine investigation, not a design decision this
+//! step can improvise (CLAUDE.md § "Implement to the design"). S-VM-05
+//! keeps its `#[ignore]`, updated to name this new root cause.
 //!
 //! **S-VM-01 (the walking skeleton itself) — CLOSED (step 01-08 review
 //! remediation, second pass, 2026-08-14).** The guest-side mechanism
@@ -175,10 +201,12 @@
 //! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
-//! S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-14, and S-VM-15 are GREEN
-//! and carry no `#[ignore]`. S-VM-05 and S-VM-74 carry the EBUSY
-//! `#[ignore]` above — never the (now-closed) vsock reason and never
-//! the (now-closed) terminal-row-classification reason.
+//! S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-14, S-VM-15, and S-VM-74 are
+//! GREEN and carry no `#[ignore]`. S-VM-05 carries an `#[ignore]` above —
+//! never the (now-closed) vsock reason, never the (now-closed)
+//! terminal-row-classification reason, and never the (now-closed) EBUSY
+//! reason — naming the newly-discovered cross-test-contamination root
+//! cause instead (see above).
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -661,17 +689,29 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
 // ---------------------------------------------------------------------
 
 /// Finds the single running `cloud-hypervisor` process's pid by scanning
-/// `/proc` for a matching `comm`. Assumes exactly one VM is booted at
-/// the time of the call (true for every scenario in this file — each
-/// test uses its own server + its own single allocation).
+/// `/proc` for a matching `argv[0]` basename. Assumes exactly one VM is
+/// booted at the time of the call (true for every scenario in this file
+/// — each test uses its own server + its own single allocation).
+///
+/// Matches on `argv[0]` (the first NUL-delimited field of
+/// `/proc/<pid>/cmdline`), NOT `/proc/<pid>/comm`: the kernel's
+/// `TASK_COMM_LEN` caps `comm` at 15 visible characters (16 bytes
+/// including the trailing NUL), and `"cloud-hypervisor"` is exactly 16
+/// characters, so the kernel-reported `comm` for the real binary is
+/// always truncated to `"cloud-hyperviso"` — confirmed directly against
+/// the real binary on the metal box (`argv[0]` reads `cloud-hypervisor`,
+/// len 16; `comm` reads `cloud-hyperviso`, len 15). A `comm`-based exact
+/// match can never succeed against this binary name, which is why this
+/// helper previously panicked even when a real VMM was running.
 fn find_cloud_hypervisor_pid() -> u32 {
     for entry in std::fs::read_dir("/proc").expect("read /proc") {
         let Ok(entry) = entry else { continue };
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
-        let comm_path = entry.path().join("comm");
-        if let Ok(comm) = std::fs::read_to_string(&comm_path)
-            && comm.trim() == "cloud-hypervisor"
-        {
+        let cmdline_path = entry.path().join("cmdline");
+        let Ok(cmdline) = std::fs::read(&cmdline_path) else { continue };
+        let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
+        let argv0 = String::from_utf8_lossy(argv0);
+        if Path::new(argv0.as_ref()).file_name() == Some(std::ffi::OsStr::new("cloud-hypervisor")) {
             return pid;
         }
     }
@@ -685,7 +725,28 @@ fn find_cloud_hypervisor_pid() -> u32 {
 /// feature deliberately re-proves closed).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): EbpfDataplane construction fails deterministically with 'XDP slot on interface ovd-veth-cli is already occupied (EBUSY)' on the mTLS-composed serve path -- reproduced on a freshly-rebooted metal box with a verified-clean veth/XDP/bpftool state beforehand (no leftover program, no leftover process), so this is not the routine leftover-attachment class debugging.md already documents. Root cause is in overdrive-dataplane's EbpfDataplane::new / the veth-provisioner's XDP attach, outside this step's file boundary -- never previously exercisable since this scenario was always vsock-blocked until now."]
+#[ignore = "NEW BLOCKER, DISTINCT FROM THE CLOSED EBUSY GAP (see module doc): the EBUSY \
+            XDP double-attach is CLOSED (host-kernel-shared serialization in \
+            .config/nextest.toml) -- confirmed by S-VM-74 (same mTLS-composed real-\
+            EbpfDataplane path) passing cleanly across two full-suite runs. This scenario \
+            instead now fails deterministically (reproduced identically twice) with the \
+            allocation's cloud-hypervisor PID resolving to a DIFFERENT allocation's cgroup \
+            scope: 'the cloud-hypervisor process's cgroup must resolve to the allocation's \
+            own workload scope, got: 0::/overdrive.slice/workloads.slice/alloc-vm-deadline-0.scope' \
+            -- alloc-vm-deadline-0 is S-VM-14's allocation, not this test's own \
+            (alloc-vm-contained-0). Root cause: S-VM-14's own leak-verification helper \
+            (no_cloud_hypervisor_process_running, this file) still matches on the truncated \
+            /proc/<pid>/comm (TASK_COMM_LEN=16 caps comm at 15 visible chars -- the SAME bug \
+            just fixed in find_cloud_hypervisor_pid, but not fixed there), so it is \
+            vacuously always-true and silently masks a REAL cloud-hypervisor process that \
+            outlives S-VM-14's own deadline-cleanup path (crates/overdrive-worker/src/\
+            vm_driver.rs::cleanup_after_start_failure) long enough to contaminate the NEXT \
+            serialized test's /proc scan. Fixing this needs (a) the comm->argv0 fix mirrored \
+            into no_cloud_hypervisor_process_running so S-VM-14 actually verifies its own \
+            claim, and (b) an investigation into why cleanup_after_start_failure does not \
+            reliably/promptly terminate the VMM process on boot-deadline -- both outside \
+            this step's file boundary and requiring further investigation, not a design \
+            decision this step can improvise."]
 async fn vm_platform_contains_the_hypervisor_it_started() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -784,7 +845,6 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
 /// allocation's netns.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): times out at 120s on an mTLS-composed serve boot, reason=Stopped{by:Process} once terminal. Same mTLS-composed-serve path as S-VM-05 (also blocked, see its own #[ignore] reason for the EbpfDataplane EBUSY finding) -- may share that root cause or compound it. Root cause is outside this step's file boundary; never previously exercisable since this scenario was always vsock-blocked until now."]
 async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -919,8 +979,8 @@ async fn vm_deadline_arm_leaks_nothing() {
         row.state,
     );
 
-    let alloc = AllocationId::new(&row.alloc_id)
-        .expect("server-echoed alloc_id parses as AllocationId");
+    let alloc =
+        AllocationId::new(&row.alloc_id).expect("server-echoed alloc_id parses as AllocationId");
 
     assert!(
         no_cloud_hypervisor_process_running(),
