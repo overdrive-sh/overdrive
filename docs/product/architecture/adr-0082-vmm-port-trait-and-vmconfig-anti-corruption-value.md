@@ -1028,6 +1028,55 @@ three modules load in dependency order before the beacon — **built-in is
 strongly preferable** in the appliance kernel and removes a rootfs↔kernel
 coupling from the one path the Running gate rides on.
 
+> **Amendment 2026-08-14 (guest vsock provisioning — who loads the modules, GH #42, DISTILL DWD-21).**
+> The paragraph above named the choice ("built-in in the appliance kernel,
+> *or* three modules load before the beacon") but never pinned the loader or
+> the staging path, and step 01-08's walking skeleton hit exactly that gap:
+> on the stock `CONFIG_VSOCKETS=m` kernel the 01-04 fixture stages, the
+> guest's `socket(AF_VSOCK, …)` fails `EAFNOSUPPORT` and never reaches the
+> beacon (`vm_walking_skeleton.rs` module doc; console captured 2026-08-14).
+> Pinned here, matching the spike's proven-12/12 mechanism
+> (`spike-scratch/increment-a/build.sh:76-84`,
+> `probe/src/bin/guest_init.rs:82-231`; findings § P2):
+>
+> 1. **`overdrive-init` is the loader.** Before `connect_beacon`, it
+>    `finit_module(2)`-loads the three vsock modules — `vsock.ko`,
+>    `vmw_vsock_virtio_transport_common.ko`, `vmw_vsock_virtio_transport.ko`,
+>    **in that dependency order** — from a well-known in-guest directory (the
+>    spike's `/modules/`; the fixture and `overdrive-init` share one pinned
+>    path const so they cannot drift), tolerating "already loaded / built-in"
+>    (`EEXIST`) as success and "module file absent" as skip.
+>    `nix::kmod::finit_module` (nix "kmod" feature) keeps the crate's
+>    `#![forbid(unsafe_code)]` intact. A genuine load failure surfaces as a
+>    typed `InitError` variant logged to `/dev/console` (development.md §
+>    "Errors"), never swallowed; a still-unavailable `AF_VSOCK` remains the
+>    existing typed `EAFNOSUPPORT` surface, never a silent hang.
+> 2. **The rootfs contract stages the `.ko`s.** The 01-04 fixture (and any
+>    non-`vsock=y` rootfs) stages those three modules, zstd-decompressed
+>    (`finit_module` takes uncompressed ELF), from
+>    `/lib/modules/$(uname -r)/kernel/net/vmw_vsock/*.ko.zst` — the **same
+>    `uname -r`** the staged kernel came from, so modules and kernel cannot
+>    version-skew. This is appliance/rootfs contract, like `/dev/console`
+>    above.
+> 3. **No-op on a vsock=y appliance kernel.** ADR-0068 §4 (amendment
+>    2026-08-14) requires the production appliance kernel to build vsock in;
+>    such an image stages **no** modules, so step 1's load finds nothing to do
+>    and `connect_beacon` proceeds directly. The SAME `overdrive-init` binary
+>    is correct on both kernels with no `#[cfg(test)]` branch and no
+>    test-only parameter — kernel-config-variance resilience and the
+>    documented `[D2]` fallback, NOT production shaped by simulation
+>    (development.md § "Production code is not shaped by simulation": the
+>    audit checklist passes — an absent module dir is one `read_dir`→`ENOENT`,
+>    no production degradation, self-explaining from this contract).
+>
+> **Scope:** a **01-08 review-remediation** touching
+> `crates/overdrive-init/src/main.rs` (01-03's file) and
+> `crates/overdrive-testing/src/vm_fixture.rs` (01-04's file) — both
+> cross-step, added to step 01-08's `implementation_scope`. Unblocks the
+> `#[ignore]`d S-VM-01/02/05/74; enables authoring S-VM-15 (needs a live
+> beacon). `Vmm` / `DriverRegistry` / the allocation payload are untouched,
+> so **ADR-0083 is unaffected**.
+
 **`ExitKind::CleanExit` for a VM means "the guest agent reported a clean exit",
 never "the platform verified the workload succeeded"** (Hera's DD-4). No
 artifact may state or imply otherwise.

@@ -1614,6 +1614,129 @@ renumbered, or re-tagged. No GitHub issue created.
 
 ---
 
+### DWD-21 — Guest vsock provisioning: overdrive-init loads the modules on the stock-kernel test path; the appliance kernel builds vsock in (2026-08-14, DESIGN ruling — Morgan, GH #42)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`)
+per an explicit dispatch**, because step 01-08's walking skeleton surfaced a
+cross-step design decision the crafter had no authority to invent
+(`vm_walking_skeleton.rs` module doc; CLAUDE.md § "Implement to the design").
+Docs-only; the code lands via the 01-08 review-remediation dispatch.
+
+**The blocker.** A real `[vm]+[job]` boot reaches the guest, but
+`overdrive-init`'s `socket(AF_VSOCK, …)` fails `EAFNOSUPPORT`, so the guest
+never dials the beacon and the allocation never reaches Running. Real console,
+metal box, kernel 7.0.0-15-generic, 2026-08-14:
+
+```
+[    0.781590] Run /sbin/init as init process
+overdrive-init: fatal: could not create the beacon vsock socket: EAFNOSUPPORT: Address family not supported by protocol
+[    0.786611] reboot: Power down
+```
+
+`#[ignore]`s S-VM-01/02/05/74 in `crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs`.
+
+**Investigation (from the artifacts, not assumed).**
+
+1. **The spike SOLVED this via module-load — it is a spike→ship regression,
+   not a new capability.** `spike-scratch/increment-a/build.sh:76-84` stages
+   three vsock `.ko` (`vsock`, `vmw_vsock_virtio_transport_common`,
+   `vmw_vsock_virtio_transport`), zstd-decompressed from
+   `/lib/modules/$(uname -r)/kernel/net/vmw_vsock/*.ko.zst`;
+   `probe/src/bin/guest_init.rs:82-106,219-231` `finit_module(2)`-loads them
+   in dependency order **before** dialing. The spike's kernel is the box's
+   stock distro `vmlinuz` (vsock=m), NOT a vsock=y build. `findings.md` § P2
+   proves the beacon works this way (`/dev/vsock present BEFORE insmod =
+   false → insmod ×3 OK → present AFTER = true`; READY + EXIT 7 received in
+   order), and the **12/12 bare-metal run is a genuine vsock end-to-end
+   proof** — not something else. `[D2]` (findings § "Design implications"):
+   *"Either set them built-in in the appliance kernel, or `overdrive-init`
+   must `finit_module` three `.ko`s in dependency order before the beacon.
+   Built-in is strongly preferable."*
+2. **The 01-04 fixture lost BOTH halves.** `vm_fixture.rs::stage_kernel`
+   (`:542-572`) stages the stock `/boot/vmlinuz-$(uname -r)` (vsock=m)
+   verbatim; `build_staging_tree` (`:716-745`) stages `/sbin/init`, `/init`,
+   `/dev/console`, `/dev/null` — and **no `.ko` modules**. The module doc
+   (`:97-108`) explicitly flags this as a "Known gap this step does NOT
+   close," deferred to "whichever step first drives a REAL guest boot."
+3. **`overdrive-init` (01-03) loads nothing.** `main.rs::connect_beacon`
+   (`:159-170`) goes straight to `socket(AF_VSOCK)` → `connect`; the crate is
+   `#![forbid(unsafe_code)]` and has no `finit_module`.
+4. **Production model (ADR-0068).** Overdrive "controls the kernel image it
+   boots" — a pinned, controlled 6.18-LTS appliance build. So **vsock=y
+   built-in is the natural production answer**. But ADR-0068 was silent on
+   vsock, and the spike's P3 (pinned-kernel boot) was **never run** — every
+   measured boot used the stock vsock=m kernel.
+
+**Ruling — (c): reconcile both, each on the kernel it applies to.** The
+spike's (b) module-load and production's (a) vsock=y are NOT in conflict —
+they target two different kernels:
+
+- **Stock-kernel TEST path (the fixture) → module-load, exactly as the spike
+  proved.** `overdrive-init` `finit_module`-loads the three staged `.ko` in
+  dependency order before `connect_beacon`, tolerating already-loaded
+  (`EEXIST`) and absent; the 01-04 fixture stages those three `.ko`
+  (zstd-decompressed) from the **same `uname -r`** the staged kernel came
+  from (no rootfs↔kernel skew). The fixture cannot practically make the stock
+  distro kernel vsock=y without building a custom kernel — out of its stated
+  scope, and a far larger lift than the proven mechanism.
+- **Production APPLIANCE kernel (ADR-0068) → vsock built-in.**
+  `CONFIG_VSOCKETS=y` + `CONFIG_VIRTIO_VSOCKETS=y` (+ host-side
+  `CONFIG_VHOST_VSOCK=y`), per `[D2]` "built-in is strongly preferable."
+  Recorded as ADR-0068 §4 (amendment 2026-08-14).
+
+The two coexist in **one** `overdrive-init` binary with no `#[cfg(test)]`
+branch: a vsock=y image simply stages no modules, so the load is a no-op and
+`connect_beacon` proceeds directly. This is **not** "production shaped by
+simulation" (development.md): it is the documented `[D2]` fallback and genuine
+kernel-config-variance resilience; the audit checklist passes (an absent
+module dir is one `read_dir`→`ENOENT`, no production degradation,
+self-explaining from the ADR-0082 §D4 contract). It is also fail-closed /
+Earned-Trust honest: a load failure is a typed `InitError` on `/dev/console`,
+and a still-unavailable `AF_VSOCK` is the existing `EAFNOSUPPORT` typed error,
+never a silent hang.
+
+**Ownership — 01-08 review-remediation.** The walking skeleton is 01-08's to
+make GREEN (CLAUDE.md § "Build vertical slices"), so the fix rides 01-08 even
+though it touches two cross-step files, now added to step 01-08's
+`implementation_scope.source_directories`:
+
+- `crates/overdrive-init/src/main.rs` — module-load before `connect_beacon`
+  (`nix::kmod::finit_module`, nix "kmod" feature, zero-unsafe preserved).
+- `crates/overdrive-testing/src/vm_fixture.rs` — `build_staging_tree` stages
+  the three `.ko` into the shared pinned in-guest dir.
+
+ACs the fix satisfies: **unblock** S-VM-01/02/05/74 (remove `#[ignore]`; the
+guest reaches READY and the exit code reaches the operator); **author** S-VM-15
+(needs a live beacon) and S-VM-14 (deadline arm) — both already belong to
+01-08 (criteria 6/7 + `scenario_name`), authored only after the fix so
+S-VM-14's "never beacons" is a genuine no-beacon, not an `EAFNOSUPPORT`
+false-green. Verification: a REAL `cargo xtask metal run --` boot reaching the
+READY beacon (never `--no-run`).
+
+**ADR reconciliation.** ADR-0068 gains §4 (amendment): the appliance kernel
+builds vsock in, verified by the existing pinned-kernel Tier-3 leg (DWD-10),
+not assumed. ADR-0082 §D4 gains an amendment (2026-08-14) pinning the loader
+(`overdrive-init`), the staging-path/`uname -r` invariant, and the
+no-op-on-vsock=y contract — reconciling the section's own "built-in preferable,
+*or* modules load" note that never said who loads them. **ADR-0083 is
+unaffected** (`Vmm`/`DriverRegistry`/allocation payload untouched). `brief.md`
+§105a is **consistent** with this ruling (it already anticipates the module
+load) and needs no edit; the crafter marks any adjacent stale comment the fix
+makes false, naming the later step (behavior-change-marks-stale-docs rule).
+
+**Files touched by this entry.** `distill/wave-decisions.md` (this entry +
+Changelog). `docs/product/architecture/adr-0068-…md` (§4 amendment).
+`docs/product/architecture/adr-0082-…md` (§D4 amendment 2026-08-14).
+`deliver/roadmap.json` (step 01-08: one additive criterion, two
+`source_directories`, an `implementation_notes` remediation note — additive,
+no removals; JSON validity preserved). No `test-scenarios.md`, `brief.md`, or
+Rust file touched by this docs pass. No scenario added, removed, renumbered, or
+re-tagged. No GitHub issue created (the appliance-kernel vsock=y verification
+is existing appliance-kernel Tier-3 work owned by ADR-0068 §1's tested-image
+discipline / DWD-10, not a new deferral).
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1628,3 +1751,4 @@ renumbered, or re-tagged. No GitHub issue created.
 - 2026-08-12 — `@requires-kvm` bound explicitly to the `kvm-tests` Cargo feature the concurrent roadmap pass pinned; DWD-17's ten flagged-ambiguous scenario IDs reconciled against the roadmap's file-level gate (DWD-18). Binding stated in both `test-scenarios.md`'s top-of-file `@requires-kvm` note (replacing the now-stale "pinned by the concurrent roadmap pass" forward pointer) and as an addendum inside DWD-17. Naming reasoning recorded: `bare-metal-tests` rejected as false (CI is a GitHub-hosted VM, not bare metal, and the spike measured it trustworthy); the property gating matters is nesting, not hardware presence (the spike's own diagnosis); `kvm-tests` names the lane generically, shaped like `integration-tests`; declaration is narrow (only `overdrive-host`/`overdrive-cli`, since `kvm-tests` gates no mutation-testing surface); the preflight fails loudly rather than silently skipping. Ten-way reconciliation (S-VM-04, 23, 28, 30, 39, 40, 58, 59, 91, 93) checked in the one dangerous direction (leaned `@requires-kvm` but roadmap file NOT gated) — **zero scenarios land in that bucket**: five (S-VM-04/23/28/30/39) are consistent (leaned yes, file gated `kvm-tests`); five (S-VM-40/58/59/91/93) are either harmlessly over-gated (S-VM-40/58/59/91 — leaned NOT, file gated anyway) or correctly ungated (S-VM-93 — leaned NOT, roadmap explicitly states it "never goes through the `Vmm` port... deliberately NOT `kvm-tests`"). No scenario's own classification needed correction; no roadmap file placement flagged as wrong. Confirmed the two deliberately-ungated files agree with their scenarios' tags: `cgroup_accounting_equivalence.rs` (S-VM-93, synthetic cgroup fixtures, never touches `Vmm`) and `vm_storage_daemon_sandbox_arg.rs` (S-VM-67, Tier-1 pure rendering proptest, `@tier1 @in-memory` — never a `@requires-kvm` candidate). No scenario's tier, tags, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). `deliver/roadmap.json` read-only, not touched. No ADR or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
 - 2026-08-14 — Mutation-testing cadence reconciled (DWD-19), user-approved. The per-step `cargo xtask mutants` gates named in individual DELIVER step ACs (roadmap step 01-05 AC #4 the worked example) are superseded by one end-of-DELIVER, per-feature whole-phase-diff gate (`cargo xtask mutants --diff origin/main`, kill-rate ≥ 80%), per CLAUDE.md § "Mutation Testing Strategy". Coverage is unchanged — the whole-diff run mutates `reserve_bytes` / `MemoryPlan::cgroup_max_bytes` (in the phase-01 diff) exactly as a per-step `--file` run would; only the cadence differs. The `@mandatory:mutation_target` tags on S-VM-18/S-VM-20 still attach per-step; only the run is deferred. A single one-line pointer was appended to step 01-05's `implementation_notes` in `deliver/roadmap.json`; the `criteria` arrays left unchanged (this wave-decision is the authoritative reconciliation). No scenario added, removed, renumbered, or re-tagged; no `test-scenarios.md`, `brief.md`, or Rust file touched by this entry. No GitHub issue created.
 - 2026-08-14 — 01-07 review reconciliations (DWD-20), three items, all rulable without a user scope decision. **Item 1 (PRIMARY)**: the `Driver` post-stop `status() → NotFound` contract (`traits/driver.rs`) was violated by the shipped `VmDriver::stop`, which left the live-map entry `Live`. Ruled (reviewer option (c)): `stop` transitions the entry `Live → EndingInFlight` under the same lock it extracts the live state with, so `status()` (which already maps `EndingInFlight → NotFound`) satisfies the contract synchronously while `live_allocations()` still reports the entry, keeping the authorship claim for `VmReclamation` (`EndingInFlightIsNeverReclaimed`, § 105a.11 — whose wording already presupposes "its stop has been issued" ⇒ `EndingInFlight`). NOT the `ExecDriver` full-removal shape (would reopen NEW-1); NOT a trait carve-out (contract stands, no `driver.rs` docstring edit). Pinned in `brief.md` § 105a.3 (new transition 3b + amendment) and ADR-0082 § D4; the release side (transitions 5/6) stays step 02-02. **Item 2**: ADR § D7's ownership table already assigns the `VmDriver` `EXEC` write to 01-07, but the shipped beacon-win arm omits it (the guest would block forever at 01-08); ruled a scoped 01-07 addendum (not reassignment to 01-08) — roadmap 01-07 gains a fifth criterion, ADR § D7 gains a not-yet-wired amendment naming 01-07 as the wiring step. **Item 3**: ADR § D2.4 gains a "gap 6" note blessing `KernelImage::path` (`config.rs:201`) and `VmExitWatch::new` (`vmm.rs:202`) as sanctioned 01-06 first-implementor surface. Files touched: `adr-0082-…md` (§§ D2.4 / D4 / D7), `brief.md` (§ 105a.3), `deliver/roadmap.json` (step 01-07 criteria), this file. No Rust file touched — the crafter-facing instructions go to the 01-07 review-remediation dispatch. No GitHub issue created.
+- 2026-08-14 — Guest vsock provisioning ruled (DWD-21), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch. Step 01-08's walking skeleton surfaced a spike→ship regression: the 01-03 `overdrive-init` + 01-04 fixture lost the spike's proven vsock module-load, so on the stock `CONFIG_VSOCKETS=m` kernel the fixture stages, the guest's `socket(AF_VSOCK)` fails `EAFNOSUPPORT` and never beacons — `#[ignore]`ing S-VM-01/02/05/74. Ruled (c) reconcile: `overdrive-init` `finit_module`-loads the three staged vsock `.ko` before `connect_beacon` (no-op on a vsock=y kernel) and the 01-04 fixture stages them from the same `uname -r` as the kernel (the spike's proven-12/12 mechanism / the `[D2]` fallback), WHILE the production appliance kernel builds vsock in (ADR-0068 §4). Lands as the 01-08 review-remediation touching `overdrive-init/src/main.rs` + `overdrive-testing/src/vm_fixture.rs` (both added to 01-08's `source_directories`). ADR-0068 gains §4; ADR-0082 §D4 gains a loader/staging amendment; ADR-0083 unaffected; `brief.md` consistent, untouched. `deliver/roadmap.json` step 01-08: one additive criterion + two source files + an `implementation_notes` remediation note. No scenario changed; no GitHub issue created.
