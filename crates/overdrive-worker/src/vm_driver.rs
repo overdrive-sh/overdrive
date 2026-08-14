@@ -277,12 +277,34 @@ impl VmDriver {
         }
     }
 
-    /// Transition 2: `Held -> ∅` on any non-`Ok` return of `start`.
-    /// Unconditional removal is correct here — nothing else touches
-    /// THIS allocation's entry while `start` is still unwinding its own
-    /// failure (the watcher is never spawned on a non-`Ok` path).
+    /// Transition 2: `Held -> ∅` on any non-`Ok` return of `start` — but
+    /// ONLY when the entry is STILL `Held` (`Starting` or `Live`) at the
+    /// moment `start`'s failure-cleanup runs. A CONDITIONAL removal
+    /// (`.claude/rules/development.md` § "Check-and-act must be
+    /// atomic"), mirroring [`ClaimGuard::drop`]'s same guard.
+    ///
+    /// 01-07 RE-REVIEW remediation (HIGH): this corrects the PRIOR
+    /// premise that nothing else could touch this entry while `start`
+    /// unwinds. It is false — an operator `stop()` call (brief §105a.3
+    /// transition 3b) can race `start`'s own boot-failure cleanup: a
+    /// PRE-BEACON `stop()` moves this SAME entry `Live -> EndingInFlight`
+    /// synchronously under the lock, then calls `Vmm::terminate`, which
+    /// is exactly what resolves the in-flight `start`'s `exit.recv()`
+    /// race arm and drives it into THIS cleanup path. When that
+    /// interleaving occurs, `stop` — not `start`'s unwind — owns the
+    /// ending, and this method must NOT clobber it: an unconditional
+    /// remove would strip the allocation out of `live_allocations()`
+    /// entirely, reopening the second-authorship hazard
+    /// `EndingInFlightIsNeverReclaimed` (brief §105a.11) forbids.
+    /// `@mandatory:mutation_target` — a mutant that widens this back to
+    /// an unconditional remove must be caught by
+    /// `stop_sequence_a_pre_beacon_stop_skips_write_and_terminates`'s
+    /// post-interleaving `live_allocations()` retention assertion.
     fn release_claim(&self, alloc: &AllocationId) {
-        self.live.lock().remove(alloc);
+        let mut live = self.live.lock();
+        if matches!(live.get(alloc), Some(VmSupervision::Starting | VmSupervision::Live(_))) {
+            live.remove(alloc);
+        }
     }
 
     /// Cleanup shared by every non-`Ok` arm of `start`'s boot sequence:

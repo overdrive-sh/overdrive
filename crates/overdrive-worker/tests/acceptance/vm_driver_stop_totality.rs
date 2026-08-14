@@ -589,6 +589,22 @@ impl Vmm for SignalsOnceLive {
 /// `None`). `stop` must skip the beacon write entirely and go straight
 /// to `Vmm::terminate`; the allocation reaches a terminal disposition,
 /// never a crash.
+///
+/// 01-07 RE-REVIEW remediation (HIGH) — this SAME interleaving is also
+/// the ONLY reachable case that races `stop`'s transition 3b
+/// (`Live -> EndingInFlight`, taken synchronously under the lock before
+/// `Vmm::terminate` is even called) against `start`'s OWN unwind
+/// cleanup: `stop`'s `Vmm::terminate` call is exactly what resolves the
+/// in-flight `start`'s `exit.recv()` race arm, which then runs
+/// `cleanup_after_start_failure` -> `release_claim` on the SAME entry
+/// `stop` just moved to `EndingInFlight`. Pre-fix, `release_claim` was
+/// an UNCONDITIONAL remove, so it silently clobbered `stop`'s hand-off
+/// and stripped the allocation out of `live_allocations()` entirely — a
+/// full-remove shape brief §105a.11's `EndingInFlightIsNeverReclaimed`
+/// forbids (the entry must stay reported as claimed while its ending is
+/// in flight, or a reclamation-shaped consumer treats an abandoned
+/// entry as fair game). The retention assertion below is this fix's
+/// regression test.
 #[tokio::test]
 async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let tmp = TempDir::new().expect("tempdir");
@@ -630,6 +646,25 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     // start()'s exit.recv() arm — it must reject, never panic.
     let start_result = start_task.await.expect("start task did not panic");
     assert!(start_result.is_err(), "the in-flight start must reject once stop terminates the VMM");
+
+    // 01-07 RE-REVIEW remediation (HIGH) — `stop`'s own transition 3b
+    // set this entry to `EndingInFlight` BEFORE `Vmm::terminate` ever
+    // ran, so it strictly happens-before `start`'s unwind cleanup
+    // (which only begins once `exit.recv()` resolves, i.e. once
+    // `terminate` has already fired). `start`'s `release_claim` must
+    // see `EndingInFlight` here and leave it alone — `stop` owns this
+    // allocation's ending, not `start`'s failure path. A full removal
+    // (the pre-fix unconditional `release_claim`) would report the
+    // allocation as unclaimed, reopening the second-authorship hazard
+    // `EndingInFlightIsNeverReclaimed` (brief §105a.11) exists to
+    // forbid.
+    assert_eq!(
+        driver.live_allocations(),
+        Some(vec![alloc.clone()]),
+        "the allocation must remain claimed (EndingInFlight) after stop's transition 3b \
+         races start's own unwind cleanup -- release_claim must not clobber a \
+         concurrently-set EndingInFlight entry"
+    );
 }
 
 /// S-VM-76 sequence (b) — stop arrives after the guest has beaconed,
