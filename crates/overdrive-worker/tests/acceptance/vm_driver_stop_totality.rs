@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
+use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, ExitKind, Resources,
@@ -114,6 +115,25 @@ fn build_driver(vmm: std::sync::Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver
         std::sync::Arc::new(SimCgroupFs::new());
     let driver = VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, layout);
     (driver, clock)
+}
+
+/// Like [`build_driver`], but additionally returns the concrete
+/// [`SimCgroupFs`] handle so callers can assert on cgroup-scope
+/// removal via [`SimCgroupFs::snapshot`] (01-07 review remediation,
+/// BLOCKER D2). Mirrors the established `SimVmm`-handle-retention
+/// pattern already used throughout this file: the fs is cloned before
+/// being erased to the trait object, so both the driver and the test
+/// observe the same `Arc<Mutex<...>>`-backed mutations.
+fn build_driver_with_cgroup_fs(
+    vmm: std::sync::Arc<dyn Vmm>,
+    layout: VmHostLayout,
+) -> (VmDriver, SimClock, SimCgroupFs) {
+    let clock = SimClock::new();
+    let cgroup_fs = SimCgroupFs::new();
+    let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
+        std::sync::Arc::new(cgroup_fs.clone());
+    let driver = VmDriver::new(vmm, std::sync::Arc::new(clock.clone()), fs, layout);
+    (driver, clock, cgroup_fs)
 }
 
 fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
@@ -207,9 +227,11 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = layout.rootfs_master.clone();
+    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     sim.inject_create_failure();
-    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, cgroup_fs) =
+        build_driver_with_cgroup_fs(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
     let spec = build_spec(&alloc);
@@ -242,20 +264,22 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
         rootfs_plan.clone_dest().display()
     );
 
-    // NOT asserted: cgroup-scope removal via `SimCgroupFs::snapshot`.
-    // Empirically, `cleanup_after_start_failure`'s `remove_workload_scope`
-    // call fails silently here — `SimCgroupFs::remove_dir`'s
-    // "any descendant path blocks removal" check treats the
+    // 01-07 review D2 closure: cgroup-scope removal via
+    // `SimCgroupFs::snapshot`. `SimCgroupFs::remove_dir` now models
+    // real cgroup v2 `rmdir` semantics faithfully — the
     // controller-interface files this arm already wrote
     // (`cpu.weight`, `memory.max` from `write_resource_limits`, plus
-    // `cgroup.kill` from this same cleanup path) as blocking children,
-    // so the scope directory is never actually removed from the sim's
-    // state — a `SimCgroupFs` modeling gap relative to a real cgroup
-    // v2 `rmdir` (which succeeds regardless of these interface-file
-    // writes), out of this file's boundary to fix. See the 01-07
-    // review remediation FIX 3 report for the full finding; the
-    // `cleanup_after_start_failure` call sequence itself is unchanged
-    // by this step.
+    // `cgroup.kill` from this same cleanup path) are kernel-managed
+    // pseudo-files that real cgroupfs auto-reaps on `rmdir(2)` and
+    // must not block removal (see the `CgroupFs::remove_dir` trait
+    // rustdoc + the Tier-3 `rmdir_auto_reap` evidence).
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
+    let snap = cgroup_fs.snapshot();
+    assert!(
+        !snap.contains_key(&scope_dir),
+        "cgroup scope must be removed after a Vmm::create failure, still present at {}",
+        scope_dir.display()
+    );
 }
 
 /// Crafter-authored race-arm example: the VMM exits before the guest
@@ -268,9 +292,11 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = layout.rootfs_master.clone();
+    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
-    let (driver, _clock) = build_driver(std::sync::Arc::new(dies_before_beacon), layout);
+    let (driver, _clock, cgroup_fs) =
+        build_driver_with_cgroup_fs(std::sync::Arc::new(dies_before_beacon), layout);
 
     let alloc = AllocationId::new("alloc-exit-before-beacon").expect("valid alloc id");
     let spec = build_spec(&alloc);
@@ -309,10 +335,18 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         rootfs_plan.clone_dest().display()
     );
 
-    // NOT asserted: cgroup-scope removal — see the identical finding
-    // documented in `create_failure_releases_claim_and_cleans_up_run_directory`
-    // above (`SimCgroupFs::remove_dir` modeling gap, 01-07 review
-    // remediation FIX 3 report).
+    // 01-07 review D2 closure: cgroup-scope removal — see the
+    // rationale documented in
+    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // above (`SimCgroupFs::remove_dir` now models real cgroup v2
+    // `rmdir` auto-reap of kernel-managed pseudo-files).
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
+    let snap = cgroup_fs.snapshot();
+    assert!(
+        !snap.contains_key(&scope_dir),
+        "cgroup scope must be removed on the exit-before-beacon arm, still present at {}",
+        scope_dir.display()
+    );
 }
 
 /// Crafter-authored race-arm example: nothing ever beacons and nothing
@@ -326,8 +360,10 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = layout.rootfs_master.clone();
+    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
-    let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
+    let (driver, clock, cgroup_fs) =
+        build_driver_with_cgroup_fs(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-deadline").expect("valid alloc id");
     let spec = build_spec(&alloc);
@@ -393,10 +429,18 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
         rootfs_plan.clone_dest().display()
     );
 
-    // NOT asserted: cgroup-scope removal — see the identical finding
-    // documented in `create_failure_releases_claim_and_cleans_up_run_directory`
-    // above (`SimCgroupFs::remove_dir` modeling gap, 01-07 review
-    // remediation FIX 3 report).
+    // 01-07 review D2 closure: cgroup-scope removal — see the
+    // rationale documented in
+    // `create_failure_releases_claim_and_cleans_up_run_directory`
+    // above (`SimCgroupFs::remove_dir` now models real cgroup v2
+    // `rmdir` auto-reap of kernel-managed pseudo-files).
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
+    let snap = cgroup_fs.snapshot();
+    assert!(
+        !snap.contains_key(&scope_dir),
+        "cgroup scope must be removed on the deadline arm, still present at {}",
+        scope_dir.display()
+    );
 }
 
 // ---------------------------------------------------------------------

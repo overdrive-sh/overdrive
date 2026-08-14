@@ -9,9 +9,14 @@
 //! `unlink`ed individually and are reaped automatically by
 //! `rmdir(2)`."
 //!
-//! `SimCgroupFs`'s `remove_dir` returns `DirectoryNotEmpty` if children
-//! are present — the in-memory store cannot model the kernel's
-//! auto-reap. `RealCgroupFs`'s `remove_dir` (which delegates to
+//! As of the 01-07 review D2 closure, `SimCgroupFs`'s `remove_dir`
+//! ALSO models this auto-reap for controller-interface pseudo-files —
+//! it returns `DirectoryNotEmpty` only when a child SUB-DIRECTORY
+//! (a nested cgroup) is present; File-only children never block.
+//! Live-PID `cgroup.procs` occupancy stays out of scope for both
+//! adapters per the trait's own Scope section — this Tier-3 test is
+//! the real-kernel evidence backing that fidelity fix.
+//! `RealCgroupFs`'s `remove_dir` (which delegates to
 //! `tokio::fs::remove_dir`) succeeds against an "empty" workload scope
 //! (no live PIDs, no child cgroup directories) even though the scope
 //! technically contains kernel-managed pseudo-files like

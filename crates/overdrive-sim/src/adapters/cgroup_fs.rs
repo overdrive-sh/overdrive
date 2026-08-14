@@ -309,13 +309,47 @@ impl CgroupFs for SimCgroupFs {
             if matches!(entry.0, SimEntry::File) {
                 return Err(io::Error::from(io::ErrorKind::NotADirectory));
             }
-            // DirectoryNotEmpty if any other path is a direct or transitive
-            // child of `path`.
-            let has_children = state.keys().any(|k| k != path && k.starts_with(path));
-            if has_children {
+            // cgroup-v2 `rmdir` semantics (01-07 review remediation,
+            // BLOCKER D2). The ONLY thing that blocks removal is a
+            // child SUB-DIRECTORY (a nested cgroup). Controller-
+            // interface files written directly under `path`
+            // (`cpu.weight`, `memory.max`, `cgroup.procs`,
+            // `cgroup.kill`, `cgroup.subtree_control`, `cgroup.events`,
+            // `io.max`, ...) are kernel-managed pseudo-files that real
+            // cgroupfs auto-reaps as part of `rmdir(2)` — they never
+            // block removal, regardless of their byte content. This
+            // matches the `CgroupFs::remove_dir` trait contract
+            // verbatim ("the kernel-managed pseudo-files inside a
+            // scope are reaped automatically by rmdir(2)") and the
+            // Tier-3 `rmdir_auto_reap` evidence
+            // (`tests/integration/real_cgroup_fs/rmdir_auto_reap.rs`).
+            //
+            // Live-PID occupancy of `cgroup.procs` is deliberately NOT
+            // modeled as a blocking condition here: per the trait's
+            // own Scope section, "EBUSY when modifying a parent whose
+            // descendants have live processes" is an explicitly
+            // out-of-scope KERNEL-side effect for this byte-store-only
+            // port — and modeling it would require ALSO modeling
+            // `cgroup.kill`'s mass-kill effect on `cgroup.procs`
+            // (equally out of scope, same Scope section), since
+            // production's `cleanup_after_start_failure` always issues
+            // `cgroup_kill` immediately before `remove_workload_scope`
+            // and relies on the kernel reaping the killed process
+            // before `rmdir` runs.
+            let has_child_subdir = state.iter().any(|(k, (child_entry, _))| {
+                k != path && k.starts_with(path) && matches!(child_entry, SimEntry::Dir)
+            });
+            if has_child_subdir {
                 return Err(io::Error::from(io::ErrorKind::DirectoryNotEmpty));
             }
-            state.remove(path);
+            // Remove `path` itself AND every descendant entry under it
+            // (necessarily File-only per the check above) — mirrors
+            // the kernel reclaiming a scope's auto-created pseudo-
+            // files when the directory itself is removed.
+            // `Path::starts_with` is reflexive (`k.starts_with(path)`
+            // is true for `k == path` too), so this single retain
+            // covers both.
+            state.retain(|k, _| !k.starts_with(path));
         }
         Ok(())
     }
