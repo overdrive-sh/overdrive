@@ -28,7 +28,7 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverType,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -637,13 +637,54 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
     }
 }
 
-/// Dispatch a reconciler's emitted `Vec<Action>` against the active
-/// driver and observation store. Called by the runtime's tick loop
-/// after every `reconcile` call.
+/// Alloc → driver-kind index (ADR-0083 §D2a(b), GH #42). `StopAllocation`
+/// and `FinalizeFailed` carry no `spec` (and hence no `DriverPayload`), so
+/// the shim cannot re-derive which driver started the allocation from the
+/// action alone. Written on the `StartAllocation` / `RestartAllocation`
+/// arms (where the payload IS in hand) and read on every stop/terminal
+/// arm. `parking_lot::Mutex`, per `.claude/rules/development.md` §
+/// "Concurrency & async": lock → clone the `DriverType` → drop the guard
+/// → THEN `.await` the resolved driver call — the read sites all
+/// immediately `.await` a driver method, the textbook "never hold a lock
+/// across `.await`" trap.
+pub type AllocDriverIndex =
+    parking_lot::Mutex<std::collections::BTreeMap<AllocationId, DriverType>>;
+
+/// Resolve the driver(s) a stop/terminal arm should act on for `alloc`.
 ///
-/// Per ADR-0023 §2:
-/// - Takes `&dyn Driver` and `&dyn ObservationStore` (NOT Arc; the
-///   caller holds the Arcs).
+/// The common case is an index hit: exactly the one driver that started
+/// this allocation. When the index has NO entry — an allocation whose
+/// `Running`/lifecycle state was established without a corresponding
+/// `StartAllocation`/`RestartAllocation` dispatch (e.g. a still-Running
+/// alloc surviving a `serve` restart with a freshly-empty per-boot index,
+/// or a driver's lifecycle hook exercised directly in a test) — this
+/// falls back to EVERY composed driver rather than silently no-op'ing.
+/// Every `Driver::stop`/`on_alloc_terminal`/`on_alloc_stable` call is
+/// already documented best-effort / idempotent for an alloc the driver
+/// does not track (`DriverError::NotFound` is tolerated; the lifecycle
+/// hooks default to a no-op), so broadcasting is safe — and it is the
+/// only way to guarantee the hook/stop still reaches the right driver
+/// when the index cannot say which one that is.
+fn resolve_drivers_for_alloc<'a>(
+    drivers: &'a DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
+    alloc: &AllocationId,
+) -> Vec<&'a Arc<dyn Driver>> {
+    let known_kind = alloc_drivers.lock().get(alloc).copied();
+    known_kind.and_then(|kind| drivers.get(kind)).map_or_else(
+        || drivers.kinds().filter_map(|kind| drivers.get(kind)).collect(),
+        |driver| vec![driver],
+    )
+}
+
+/// Dispatch a reconciler's emitted `Vec<Action>` against the composed
+/// driver registry and observation store. Called by the runtime's tick
+/// loop after every `reconcile` call.
+///
+/// Per ADR-0023 §2 (amended by ADR-0083 §D1/§D2a for the registry, GH
+/// #42):
+/// - Takes `&DriverRegistry` (not a single `&dyn Driver`) and
+///   `&dyn ObservationStore` (NOT Arc; the caller holds the Arcs).
 /// - Each [`Action`] variant gets its own match arm; the compiler
 ///   enforces exhaustiveness across the [`Action`] enum.
 /// - A driver `StartRejected` writes a `Failed` [`AllocStatusRow`]
@@ -670,7 +711,8 @@ fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
 )]
 pub async fn dispatch(
     actions: Vec<Action>,
-    driver: &dyn Driver,
+    drivers: &DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
     obs: &dyn ObservationStore,
     dataplane: &dyn Dataplane,
     ca: &dyn Ca,
@@ -690,7 +732,8 @@ pub async fn dispatch(
     for action in actions {
         let result = dispatch_single(
             action,
-            driver,
+            drivers,
+            alloc_drivers,
             obs,
             dataplane,
             ca,
@@ -849,7 +892,8 @@ pub async fn dispatch_with_workflow_intent(
 
     let dispatch_result = dispatch(
         dispatchable,
-        state.driver.as_ref(),
+        state.drivers.as_ref(),
+        &state.alloc_drivers,
         state.obs.as_ref(),
         state.dataplane.as_ref(),
         state.ca.as_ref(),
@@ -984,7 +1028,8 @@ fn teardown_and_release_netns(
 )]
 async fn dispatch_single(
     action: Action,
-    driver: &dyn Driver,
+    drivers: &DriverRegistry,
+    alloc_drivers: &AllocDriverIndex,
     obs: &dyn ObservationStore,
     dataplane: &dyn Dataplane,
     ca: &dyn Ca,
@@ -1207,10 +1252,23 @@ async fn dispatch_single(
             // A genuine terminal (BackoffExhausted / Completed / Failed)
             // still tears the whole supervisor down. Both hooks default to
             // no-op when no ProbeRunner is wired.
-            if is_stable {
-                driver.on_alloc_stable(&row.alloc_id);
-            } else {
-                driver.on_alloc_terminal(&row.alloc_id);
+            //
+            // ADR-0083 §D2a(b) (GH #42): `FinalizeFailed` carries no spec,
+            // so the driver is read from the alloc→driver-kind index
+            // written at Start/Restart (falling back to every composed
+            // driver on a miss — see `resolve_drivers_for_alloc`). The
+            // index entry is removed ONLY on a genuine terminal — a
+            // `Stable` claim keeps the alloc Running, so a later
+            // stop/terminal arm still needs the entry.
+            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
+                if is_stable {
+                    driver.on_alloc_stable(&row.alloc_id);
+                } else {
+                    driver.on_alloc_terminal(&row.alloc_id);
+                }
+            }
+            if !is_stable {
+                alloc_drivers.lock().remove(&row.alloc_id);
             }
             // The mTLS-intercept detach and the C3 netns teardown are both
             // gated on `!is_stable`: a `Stable` FinalizeFailed is a success
@@ -1300,7 +1358,25 @@ async fn dispatch_single(
                 .await;
             }
 
-            let driver_kind = driver.r#type();
+            // Registry lookup (ADR-0083 §D1/§D2a, GH #42): the routing
+            // key is the payload's own driver kind — the driver names
+            // itself, no second source of truth to drift. A missing
+            // registry entry (no such driver composed on this node)
+            // synthesizes the identical `StartRejected` shape a real
+            // driver's own rejection would produce, so the SAME
+            // Failed-row construction path below handles both —
+            // SD-5's admission-time capability gate (step 01-09) is a
+            // separate, earlier check; this is the dispatch-time
+            // fallback for whatever reaches here regardless.
+            let driver_kind = spec.driver.driver_type();
+            let start_outcome: Result<AllocationHandle, DriverError> =
+                match drivers.get(driver_kind) {
+                    Some(driver) => driver.start(&spec).await,
+                    None => Err(DriverError::StartRejected {
+                        driver: driver_kind,
+                        reason: format!("no {driver_kind} driver composed on this node"),
+                    }),
+                };
             // Per ADR-0032 §4 Amendment 2026-04-30: classify the
             // driver's `StartRejected.reason` text into a typed
             // cause-class `TransitionReason` variant. State on
@@ -1312,7 +1388,7 @@ async fn dispatch_single(
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
-            ) = match driver.start(&spec).await {
+            ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
                     AllocState::Running,
@@ -1321,7 +1397,7 @@ async fn dispatch_single(
                     TransitionSource::Driver(driver_kind),
                 ),
                 Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
-                    let cause = classify_driver_failure(&reason_text, drv, &spec.command);
+                    let cause = classify_driver_failure(&reason_text, drv, spec.driver.command());
                     (
                         None,
                         AllocState::Failed,
@@ -1400,16 +1476,34 @@ async fn dispatch_single(
             // the AC contract structurally readable at the call site.
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             if state == AllocState::Running {
+                // ADR-0083 §D2a(b) (GH #42): record the alloc→driver-kind
+                // routing entry now, while the payload is in hand — the
+                // stop/terminal Actions (StopAllocation, FinalizeFailed)
+                // carry no spec and read this back.
+                alloc_drivers.lock().insert(row.alloc_id.clone(), driver_kind);
+                // `state == Running` was reached only via `Ok(handle)` from
+                // `drivers.get(driver_kind)` above, so the registry entry
+                // is guaranteed present here.
+                let driver = drivers.get(driver_kind).unwrap_or_else(|| {
+                    unreachable!(
+                        "state == Running implies driver.start() succeeded via a registry \
+                         entry for driver_kind"
+                    )
+                });
                 // transparent-mtls-host-socket (D-MTLS-15/16/17, step
                 // 06-03): fire the (β) mTLS intercept-and-enforce
                 // lifecycle alongside the driver hook. `Some` only on the
                 // production boot (real `EbpfDataplane` + `MtlsDataplane`
                 // composed post-`IdentityMgr`); `None` for the non-mTLS
-                // fixture surface. Every exec alloc is intercepted
-                // (D-MTLS-15: the predicate is `DriverType::Exec`, true on
-                // the worker's exec path) — `start_alloc` installs the
-                // intercept but does NOT program `MTLS_REDIRECT_DEST`
-                // (#241-deferred). `ExecDriver` is UNTOUCHED.
+                // fixture surface. Gated on `DriverType::Exec`
+                // (ADR-0083 §D2a(c), GH #42) — a microVM terminates TCP
+                // INSIDE the guest (GH #222), so `cgroup_connect4` / sockops
+                // are structurally blind to it; an ungated install would
+                // host-socket-intercept a veth the guest's traffic never
+                // traverses and present it as mesh-enrolled when it is not.
+                // `start_alloc` installs the intercept but does NOT program
+                // `MTLS_REDIRECT_DEST` (#241-deferred). `ExecDriver` is
+                // UNTOUCHED.
                 //
                 // Fail-closed (D-MTLS-18): the install is a security
                 // control, not a best-effort hook. On `Err` the alloc MUST
@@ -1424,10 +1518,11 @@ async fn dispatch_single(
                 // install failure leaves the watcher un-released, exactly as a
                 // never-Running alloc does.
                 if let Some(worker) = mtls_worker
+                    && spec.driver.driver_type() == DriverType::Exec
                     && let Err(cause) = worker.start_alloc(&spec)
                 {
                     return fail_closed_on_mtls_install(
-                        driver,
+                        driver.as_ref(),
                         obs,
                         bus,
                         tick,
@@ -1471,7 +1566,16 @@ async fn dispatch_single(
             // and `NotFound` is silently absorbed (the alloc may have
             // already terminated on a prior failed start).
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
-            let _ = driver.stop(&handle).await;
+            // Read-then-write (ADR-0083 §D2a(b), GH #42): the stop-half
+            // reads the alloc→driver-kind index for the PRIOR instance
+            // before the start-half re-inserts under the (possibly
+            // unchanged) new spec's driver kind. Falls back to every
+            // composed driver on a miss (see `resolve_drivers_for_alloc`)
+            // — best-effort either way, mirroring the existing NotFound-
+            // tolerant `driver.stop` semantics.
+            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
+                let _ = driver.stop(&handle).await;
+            }
 
             // Recover `(workload_id, node_id)` for the AllocStatusRow write
             // BEFORE the provision seam — the AC14 provision-failure → Failed-row
@@ -1515,7 +1619,17 @@ async fn dispatch_single(
                 .await;
             }
 
-            let driver_kind = driver.r#type();
+            // Registry lookup (ADR-0083 §D1/§D2a, GH #42) — same shape as
+            // the StartAllocation arm above.
+            let driver_kind = spec.driver.driver_type();
+            let start_outcome: Result<AllocationHandle, DriverError> =
+                match drivers.get(driver_kind) {
+                    Some(driver) => driver.start(&spec).await,
+                    None => Err(DriverError::StartRejected {
+                        driver: driver_kind,
+                        reason: format!("no {driver_kind} driver composed on this node"),
+                    }),
+                };
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
@@ -1525,7 +1639,7 @@ async fn dispatch_single(
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
-            ) = match driver.start(&spec).await {
+            ) = match start_outcome {
                 Ok(handle) => (
                     Some(handle),
                     AllocState::Running,
@@ -1534,7 +1648,7 @@ async fn dispatch_single(
                     TransitionSource::Driver(driver_kind),
                 ),
                 Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
-                    let cause = classify_driver_failure(&reason_text, drv, &spec.command);
+                    let cause = classify_driver_failure(&reason_text, drv, spec.driver.command());
                     (
                         None,
                         AllocState::Failed,
@@ -1632,6 +1746,16 @@ async fn dispatch_single(
             obs.write(ObservationRow::AllocStatus(Box::new(row.clone()))).await?;
             // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
+                // ADR-0083 §D2a(b) (GH #42): re-insert (the read-then-write
+                // this arm's stop-half read before) — a restart re-inserts
+                // the SAME key, so the index does not grow per restart.
+                alloc_drivers.lock().insert(row.alloc_id.clone(), driver_kind);
+                let driver = drivers.get(driver_kind).unwrap_or_else(|| {
+                    unreachable!(
+                        "state == Running implies driver.start() succeeded via a registry \
+                         entry for driver_kind"
+                    )
+                });
                 // transparent-mtls-host-socket (step 06-03): re-install
                 // the mTLS intercept for the restarted alloc (reuses the
                 // alloc id). `start_alloc` is idempotent — it tears the
@@ -1641,11 +1765,14 @@ async fn dispatch_single(
                 // just-spawned driver process and supersede the `Running`
                 // row with a `Failed` row, BEFORE releasing the exit-emission
                 // gate (so a now-`Failed` restart never releases the watcher).
+                // Gated on `DriverType::Exec` (ADR-0083 §D2a(c)) — symmetric
+                // with the StartAllocation arm above.
                 if let Some(worker) = mtls_worker
+                    && spec.driver.driver_type() == DriverType::Exec
                     && let Err(cause) = worker.start_alloc(&spec)
                 {
                     return fail_closed_on_mtls_install(
-                        driver,
+                        driver.as_ref(),
                         obs,
                         bus,
                         tick,
@@ -1692,11 +1819,17 @@ async fn dispatch_single(
             let prior_state: AllocStateWire = prior_row.state.into();
 
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
-            // Driver stop is best-effort — NotFound and other
-            // failures are absorbed; the Terminated row records the
-            // outcome regardless. This mirrors the Restart variant's
-            // stop-half pattern.
-            let _ = driver.stop(&handle).await;
+            // ADR-0083 §D2a(b) (GH #42): `StopAllocation` carries no spec,
+            // so the driver that owns this alloc is read from the index
+            // written at Start/Restart, falling back to every composed
+            // driver on a miss (see `resolve_drivers_for_alloc`). Driver
+            // stop is best-effort — NotFound and other failures are
+            // absorbed; the Terminated row records the outcome
+            // regardless. This mirrors the Restart variant's stop-half
+            // pattern.
+            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id) {
+                let _ = driver.stop(&handle).await;
+            }
             // The `reason` field carries the cause-class summary on
             // the row; the `terminal` field is the reconciler's
             // typed terminal claim and is the source of truth for
@@ -1755,8 +1888,22 @@ async fn dispatch_single(
             // alloc's supervisor. Default no-op for drivers wired
             // without a `ProbeRunner`. We use `row.alloc_id` rather
             // than the moved `alloc_id` binding because the latter
-            // was consumed by `build_alloc_status_row` above.
-            driver.on_alloc_terminal(&row.alloc_id);
+            // was consumed by `build_alloc_status_row` above. Falls back
+            // to every composed driver on an index miss (see
+            // `resolve_drivers_for_alloc`).
+            for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
+                driver.on_alloc_terminal(&row.alloc_id);
+            }
+            // ADR-0083 §D2a(b) (GH #42) — transition 6: this IS the
+            // operator-stop terminal-row authoring the shim's stop arm
+            // owns (brief §105a.3 transition 3b / ADR-0082 §D4
+            // reconciliation) — the exit watcher no longer emits an
+            // ExitEvent for an operator stop, so this write is the sole
+            // author of the Terminated row above. Remove the routing
+            // entry now that the terminal write has landed — lifetime
+            // bounded by "started this boot", per the ADR's own
+            // accounting.
+            alloc_drivers.lock().remove(&row.alloc_id);
             // transparent-mtls-host-socket (step 06-03): tear down the
             // alloc's mTLS intercept on Stop — symmetric with the
             // FinalizeFailed arm above. Idempotent.

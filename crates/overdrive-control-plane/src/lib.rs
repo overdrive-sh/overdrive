@@ -148,7 +148,7 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
-use overdrive_core::traits::driver::Driver;
+use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
@@ -188,14 +188,25 @@ pub struct AppState {
     /// `AppState` so the `cluster_status` handler can render the
     /// registry and broker counters without a side channel.
     pub runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
-    /// Production `Driver` impl per ADR-0022 (amended by ADR-0029):
-    /// the action shim's reference to the workload driver. In Phase
-    /// 1 single-mode this is `Arc<ExecDriver>` from
-    /// `overdrive-worker`; under DST tests it is `Arc<SimDriver>`.
-    /// SCAFFOLD: true — every test caller (`run_server_with_obs`)
-    /// is mechanically migrated by DELIVER to pass an
-    /// `Arc<SimDriver>` value.
-    pub driver: Arc<dyn Driver>,
+    /// Driver registry per ADR-0022 (pre-committed migration) / ADR-0083
+    /// §D1 (GH #42, step 01-08): replaces the former single
+    /// `driver: Arc<dyn Driver>` field. **Absence of a key is a
+    /// first-class answer, not an error state** — a node with no
+    /// `cloud-hypervisor` installed simply has no `DriverType::Vm` entry
+    /// (SD-5's capability gate). Production composes `ExecDriver` always
+    /// and `VmDriver` when the discover→probe Earned-Trust sequence
+    /// succeeds (`compose_production_driver`); DST/test fixtures compose
+    /// a registry holding whichever `Sim*`/test driver(s) they need.
+    pub drivers: Arc<DriverRegistry>,
+    /// Alloc → driver-kind routing index (ADR-0083 §D2a(b), GH #42).
+    /// `Action::StopAllocation` / `Action::FinalizeFailed` carry no
+    /// `AllocationSpec`, so the action shim cannot re-derive which driver
+    /// started a given allocation from the action alone — this in-memory,
+    /// per-boot index is written on `StartAllocation` / `RestartAllocation`
+    /// (where the payload IS in hand) and read on every stop/terminal arm.
+    /// See `action_shim::AllocDriverIndex`'s own doc comment for the full
+    /// lock discipline.
+    pub alloc_drivers: Arc<action_shim::AllocDriverIndex>,
     /// Broadcast channel for `LifecycleEvent`s emitted by the action
     /// shim after every successful `obs.write()`. Per architecture.md
     /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
@@ -489,6 +500,13 @@ impl AppState {
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        // `driver` stays a single `Arc<dyn Driver>` on this convenience
+        // constructor — it is wrapped into a fresh single-entry
+        // `DriverRegistry` below (ADR-0083 §D1, GH #42) so every existing
+        // Exec-only fixture caller is unaffected. Multi-driver composition
+        // (production `run_server`, or a test that needs both Exec and Vm
+        // registered) goes through [`Self::new_with_workflow_engine`]
+        // directly with a caller-built `Arc<DriverRegistry>`.
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
@@ -512,6 +530,13 @@ impl AppState {
         // shim) while the convenience constructor stays
         // ripple-free for the fixture surface.
         let workflow_engine = test_default_workflow_engine(Arc::clone(&obs), Arc::clone(&clock));
+        // Wrap the single driver into a fresh, single-entry `DriverRegistry`
+        // (ADR-0083 §D1, GH #42) — the field-level migration this
+        // convenience constructor absorbs so its ~50 existing Exec-only
+        // fixture callers stay unchanged.
+        let mut registry = DriverRegistry::new();
+        registry.insert(driver);
+        let drivers = Arc::new(registry);
         // The broad fixture surface has no transparent-mTLS layer (no real
         // `EbpfDataplane` to intercept on) — `None` mirrors the
         // empty-registry `WorkflowEngine` default above. The PRODUCTION
@@ -522,7 +547,7 @@ impl AppState {
             intent_redb_path,
             obs,
             runtime,
-            driver,
+            drivers,
             clock,
             dataplane,
             ca,
@@ -558,7 +583,13 @@ impl AppState {
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
-        driver: Arc<dyn Driver>,
+        // ADR-0083 §D1 (GH #42, step 01-08): the composed driver set —
+        // replaces the former single `driver: Arc<dyn Driver>` parameter.
+        // Callers that only ever run one driver build a single-entry
+        // registry (see [`Self::new`]); the production boot path and any
+        // Vm-aware test build one with both `ExecDriver` and `VmDriver`
+        // composed.
+        drivers: Arc<DriverRegistry>,
         clock: Arc<dyn Clock>,
         dataplane: Arc<dyn Dataplane>,
         ca: Arc<dyn Ca>,
@@ -578,7 +609,10 @@ impl AppState {
             intent_redb_path,
             obs,
             runtime,
-            driver,
+            drivers,
+            // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
+            // allocation has started yet at construction time.
+            alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
@@ -615,6 +649,22 @@ impl AppState {
             frontend_addr_allocator,
         }
     }
+}
+
+/// Pre-staged, format-validated VM boot artifacts (ADR-0082/ADR-0083,
+/// GH #42, step 01-08). See [`ServerConfig::vm_artifacts`]'s doc comment.
+#[cfg(feature = "integration-tests")]
+#[derive(Debug, Clone)]
+pub struct VmBootArtifacts {
+    /// Path to a kernel image whose boot-format magic
+    /// [`overdrive_core::vm::config::KernelImage::validate`] has already
+    /// accepted for the host's [`overdrive_core::vm::config::HostArch`]
+    /// (the composition root re-validates before use — Earned Trust, not
+    /// a bypass).
+    pub kernel_path: std::path::PathBuf,
+    /// Path to an ext4 rootfs image with `overdrive-init` baked in at its
+    /// well-known path.
+    pub rootfs_path: std::path::PathBuf,
 }
 
 /// Configuration for the Phase 1 control-plane server. Populated at
@@ -808,6 +858,25 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub dataplane_probe_fault: Option<String>,
 
+    /// Test-only VM boot-artifact seam (ADR-0082/ADR-0083, GH #42, step
+    /// 01-08). `Slice 01 ships a single fixed template per node — no
+    /// per-allocation BYO kernel/rootfs surface exists yet`
+    /// (`VmHostLayout`'s own doc comment) and no ADR pins how the
+    /// PRODUCTION composition root's kernel/rootfs paths are supplied —
+    /// that is DEVOPS's `infra/metal/provision.sh` territory, out of this
+    /// step's scope. `Some((kernel_path, rootfs_path))` points the
+    /// composition root at a pre-staged, format-validated kernel and
+    /// ext4 rootfs (with `overdrive-init` baked in) — the
+    /// `overdrive-testing::vm_fixture` 01-04 fixture is the only current
+    /// producer. `None` (production default): the composition root never
+    /// attempts to compose a `Vm` driver at all — the identical
+    /// capability-absence posture as a host with no `cloud-hypervisor`
+    /// installed. Gated behind `#[cfg(feature = "integration-tests")]`
+    /// on both this field and its one use site, mirroring
+    /// `dataplane_probe_fault` above.
+    #[cfg(feature = "integration-tests")]
+    pub vm_artifacts: Option<VmBootArtifacts>,
+
     /// Test-only fault-injection seam for the transparent-mTLS proxy
     /// Earned-Trust probe (transparent-mtls-host-socket, step 06-03,
     /// criteria[0]). When `Some(msg)`, the boot path forces
@@ -881,6 +950,8 @@ impl std::fmt::Debug for ServerConfig {
             );
         #[cfg(feature = "integration-tests")]
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
+        #[cfg(feature = "integration-tests")]
+        dbg.field("vm_artifacts", &self.vm_artifacts);
         #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
         #[cfg(feature = "integration-tests")]
@@ -964,6 +1035,12 @@ impl ServerConfig {
             // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
             #[cfg(feature = "integration-tests")]
             dataplane_probe_fault: None,
+            // ADR-0082/ADR-0083 step 01-08: `None` (production default) —
+            // the composition root never attempts to compose a `Vm`
+            // driver. The walking-skeleton test sets `Some(..)` from the
+            // 01-04 `vm_fixture` staged artifacts.
+            #[cfg(feature = "integration-tests")]
+            vm_artifacts: None,
             // transparent-mtls-host-socket step 06-03: default no
             // mTLS-probe fault; the e2e criteria[0] test sets
             // `Some(..)` to exercise the `MtlsBootError::Probe`
@@ -1000,24 +1077,30 @@ pub struct ServerHandle {
     /// action shim. See [`run_server_with_obs_and_driver`] for the
     /// spawn site. Per `fix-convergence-loop-not-spawned` Step 01-02.
     convergence_task: tokio::task::JoinHandle<()>,
-    /// `JoinHandle` for the `worker::exit_observer` task — consumes
-    /// `ExitEvent`s from the `Driver`'s watcher and writes
-    /// `AllocStatusRow`s to the `ObservationStore`. Per
-    /// `fix-exec-driver-exit-watcher` Step 01-02.
+    /// One `JoinHandle` PER REGISTRY ENTRY for the `worker::exit_observer`
+    /// task — each consumes `ExitEvent`s from its OWN driver's watcher and
+    /// writes `AllocStatusRow`s to the `ObservationStore`. Per
+    /// `fix-exec-driver-exit-watcher` Step 01-02, widened to a `Vec` by
+    /// ADR-0083 §D2a(a)/(a5) (GH #42, step 01-08): a naive per-driver loop
+    /// would leak N-1 tasks (dropping a `JoinHandle` DETACHES, it does not
+    /// abort) and — because the token was previously minted per spawn
+    /// call — retain a cancel path for only the LAST driver. Every task
+    /// shares ONE cloned `exit_observer_shutdown` token; `shutdown()`
+    /// cancels it once and awaits every task in this `Vec`.
     ///
     /// Shutdown ordering: per RCA §Approved fix item 5 the convergence
     /// task is signalled to drain FIRST, then axum drains, THEN the
-    /// observer's `exit_observer_shutdown` token is cancelled so the
-    /// observer's `tokio::select!` resolves and the task exits.
+    /// observer's `exit_observer_shutdown` token is cancelled so every
+    /// observer task's `tokio::select!` resolves and each task exits.
     ///
     /// The token-driven shutdown is the fallback path for the case
     /// where a watcher task is still alive at shutdown time (e.g. a
     /// `/bin/sleep` workload that did not reap before convergence was
     /// cancelled, or a `SimDriver`-backed test where `exit_tx` is held
     /// by the test's `Arc<dyn Driver>` until the test fn returns).
-    /// Without this, `await exit_observer_task` would block
-    /// indefinitely on `rx.recv()`. With it, shutdown is bounded.
-    exit_observer_task: tokio::task::JoinHandle<()>,
+    /// Without this, awaiting these tasks would block indefinitely on
+    /// `rx.recv()`. With it, shutdown is bounded.
+    exit_observer_tasks: Vec<tokio::task::JoinHandle<()>>,
     /// `JoinHandle` for the workflow emit-drain task — the production
     /// consumer of the [`workflow_runtime::WorkflowEngine`]'s Action
     /// channel. It takes the channel receiver once at boot and forwards
@@ -1133,7 +1216,9 @@ impl ServerHandle {
         //    `rx.recv()` blocked indefinitely, deadlocking shutdown.
         //    Per `fix-exec-driver-exit-watcher` Step 01-02 follow-up.
         self.exit_observer_shutdown.cancel();
-        let _ = self.exit_observer_task.await;
+        for task in self.exit_observer_tasks {
+            let _ = task.await;
+        }
 
         // 5. Stop the dial-by-name `DnsResponder` serve loop (step 02-01).
         //    `stop()` sets the loop's flag; the `SO_RCVTIMEO`-bounded `recvmsg`
@@ -1358,18 +1443,111 @@ pub async fn run_server(
     // invariant per ADR-0054 § Composition root wiring): `cgroup_root_path`
     // and `fs` are threaded through rather than re-deriving the literal
     // `/sys/fs/cgroup`.
+    let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
     let (driver, _) = compose_production_driver(
         Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
         Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
         Arc::new(overdrive_worker::probe_runner::CgroupExecProber::new(Arc::clone(&fs))),
-        cgroup_root_path,
-        Arc::new(overdrive_host::SystemClock),
-        fs,
+        cgroup_root_path.clone(),
+        Arc::clone(&clock),
+        Arc::clone(&fs),
         Arc::clone(&obs),
     )
     .await?;
 
-    run_server_with_obs_and_driver(config, obs, driver).await
+    let mut registry = DriverRegistry::new();
+    registry.insert(driver);
+
+    // ADR-0082/ADR-0083 (GH #42, step 01-08): discover -> probe -> insert
+    // `cloud-hypervisor`, mirroring `compose_mtls`'s composition-gated
+    // shape. `CloudHypervisorVmm::new()` is cheap/no-I/O ("discover");
+    // `.probe()` is the real Earned-Trust capability check. Capability
+    // ABSENCE (no `[vm]` boot artifacts configured, or a probe failure of
+    // any kind) is NOT a fault this step refuses the boot on — the node
+    // simply has no `Vm` entry and `[vm]` deploys are rejected at
+    // admission. SD-5's fuller admission-time capability-gate UX and the
+    // hard-refusal-on-genuine-fault path (`ServerConfig.vmm_override`
+    // fault injection) are step 01-09's scope; this composition root's
+    // job is the happy path the walking skeleton needs.
+    #[cfg(feature = "integration-tests")]
+    if let Some(artifacts) = config.vm_artifacts.clone() {
+        match compose_vm_driver(&artifacts, cgroup_root_path, Arc::clone(&clock), fs).await {
+            Ok(vm_driver) => registry.insert(Arc::new(vm_driver)),
+            Err(reason) => {
+                tracing::info!(
+                    name: "driver.vm.not_composed",
+                    reason = %reason,
+                    "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
+                );
+            }
+        }
+    }
+
+    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+}
+
+/// Compose the production `VmDriver` — discover `CloudHypervisorVmm`
+/// (cheap/no-I/O construction), run its Earned-Trust `.probe()`, and
+/// validate the configured kernel image's boot-format magic against the
+/// host architecture. ADR-0082/ADR-0083 (GH #42, step 01-08).
+///
+/// Returns a human-readable reason on any failure — the caller treats
+/// every failure identically (capability absence, not a fault) per this
+/// step's scope; see `run_server`'s call site doc comment.
+#[cfg(feature = "integration-tests")]
+async fn compose_vm_driver(
+    artifacts: &VmBootArtifacts,
+    cgroup_root: std::path::PathBuf,
+    clock: Arc<dyn Clock>,
+    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, String> {
+    use overdrive_core::traits::vmm::Vmm;
+    use overdrive_core::vm::config::{
+        HostArch, KERNEL_MAGIC_WINDOW, KernelImage, VmConfinement, VmmIdentity,
+    };
+    use overdrive_worker::vm_driver::VmHostLayout;
+
+    let vmm = overdrive_host::CloudHypervisorVmm::new();
+    vmm.probe().await.map_err(|source| source.to_string())?;
+
+    // Host architecture — `cfg(target_arch)` at compile time, matching
+    // the binary that is actually running (the same substrate `probe()`
+    // just validated).
+    let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
+
+    let header = tokio::fs::read(&artifacts.kernel_path).await.map_err(|source| {
+        format!("read kernel header {}: {source}", artifacts.kernel_path.display())
+    })?;
+    let window = &header[..header.len().min(KERNEL_MAGIC_WINDOW)];
+    let kernel = KernelImage::validate(artifacts.kernel_path.clone(), arch, window)
+        .map_err(|source| source.to_string())?;
+
+    let layout = VmHostLayout {
+        cgroup_root,
+        run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
+        rootfs_master: artifacts.rootfs_path.clone(),
+        kernel,
+        arch,
+        vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
+        // Confined identity per ADR-0082 §D2.5. NO production system
+        // user/group is designated for the confined VMM identity by any
+        // ADR or roadmap step — this is a flagged gap (see this step's
+        // final report), not a considered choice. `1000`/`994` mirrors
+        // the only existing precedent in the tree
+        // (`crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs`),
+        // itself unsourced from a real deployment identity. Root (0/0)
+        // is deliberately avoided — it would defeat confinement outright.
+        confinement: VmConfinement::confined(
+            VmmIdentity {
+                uid: 1000,
+                gid: overdrive_core::vm::config::Gid::new(994),
+                supplementary: vec![],
+            },
+            1024,
+        ),
+    };
+
+    Ok(overdrive_worker::vm_driver::VmDriver::new(Arc::new(vmm), clock, fs, layout))
 }
 
 /// Compose the production `ExecDriver` with its Earned-Trust-vetted
@@ -1427,27 +1605,46 @@ pub async fn compose_production_driver(
     Ok((driver, probe_runner))
 }
 
-/// Start the control-plane server with caller-supplied observation
-/// store and driver.
-///
-/// Per ADR-0022 (amended by ADR-0029), the binary owns the
-/// composition: the CLI's `serve` subcommand instantiates
-/// `Arc<ExecDriver>` (Linux production) or `Arc<SimDriver>`
-/// (non-Linux dev host) and threads it through this function.
-/// Test callers pass `Arc::new(SimDriver::new(DriverType::Exec))`.
-///
-/// Used by integration tests that need to retain a handle to the
-/// observation store the server is reading from.
-// `async` is kept to preserve the public-API shape: every caller
-// invokes `run_server_with_obs_and_driver(...).await`, and the function
-// may grow real `.await` points as the boot sequence evolves
-// (observation provisioning, lifecycle handshakes). Removing it now
-// would churn every call site for no functional gain.
-#[allow(clippy::unused_async, clippy::too_many_lines)]
+/// Start the control-plane server with caller-supplied observation store
+/// and a SINGLE driver, wrapped into a fresh single-entry
+/// [`DriverRegistry`] (ADR-0083 §D1, GH #42). Convenience sibling of
+/// [`run_server_with_obs_and_drivers`] — kept so this crate's ~11 existing
+/// Exec-only integration-test callers are unaffected by the registry
+/// migration. Multi-driver composition (production `run_server`, or a
+/// test that needs both `ExecDriver` and `VmDriver` registered) calls
+/// [`run_server_with_obs_and_drivers`] directly with a caller-built
+/// registry.
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
+) -> Result<ServerHandle, error::ControlPlaneError> {
+    let mut registry = DriverRegistry::new();
+    registry.insert(driver);
+    run_server_with_obs_and_drivers(config, obs, Arc::new(registry)).await
+}
+
+/// Start the control-plane server with caller-supplied observation
+/// store and driver registry.
+///
+/// Per ADR-0022 (amended by ADR-0029) / ADR-0083 §D1 (GH #42), the
+/// binary owns the composition: the CLI's `serve` subcommand composes
+/// `DriverRegistry` (always `ExecDriver`; `VmDriver` when the
+/// discover→probe Earned-Trust sequence succeeds) and threads it through
+/// this function.
+///
+/// Used by integration tests that need to retain a handle to the
+/// observation store the server is reading from.
+// `async` is kept to preserve the public-API shape: every caller
+// invokes `run_server_with_obs_and_drivers(...).await`, and the function
+// may grow real `.await` points as the boot sequence evolves
+// (observation provisioning, lifecycle handshakes). Removing it now
+// would churn every call site for no functional gain.
+#[allow(clippy::unused_async, clippy::too_many_lines)]
+pub async fn run_server_with_obs_and_drivers(
+    config: ServerConfig,
+    obs: Arc<dyn ObservationStore>,
+    drivers: Arc<DriverRegistry>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     // ADR-0028 preflight, parent-slice delegation, and workloads-slice
     // bootstrap all run in `run_server` (the outer composition
@@ -2066,7 +2263,7 @@ pub async fn run_server_with_obs_and_driver(
         store_path,
         obs,
         runtime,
-        driver,
+        drivers,
         config.clock.clone(),
         dataplane,
         ca,
@@ -2287,15 +2484,29 @@ pub async fn run_server_with_obs_and_driver(
     // and reconciler-driven recovery). Per
     // `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved fix
     // item 5.
+    // ADR-0083 §D2a(a)/(a5) (GH #42, step 01-08): one observer task PER
+    // registry entry — `spawn_with_runtime`'s early-return-on-`None`
+    // contract already assumes exactly one observer per driver instance,
+    // and `ExitEvent` carries no driver discriminator, so merging
+    // receivers cannot recover provenance. ONE shutdown token, CLONED per
+    // spawn (never re-minted) — a per-driver token would retain a cancel
+    // path for only the last one.
     let exit_observer_shutdown = CancellationToken::new();
-    let exit_observer_task = worker::exit_observer::spawn_with_runtime(
-        state.obs.clone(),
-        state.driver.clone(),
-        state.lifecycle_events.clone(),
-        config.clock.clone(),
-        Some(state.runtime.clone()),
-        exit_observer_shutdown.clone(),
-    );
+    let exit_observer_tasks: Vec<tokio::task::JoinHandle<()>> = state
+        .drivers
+        .kinds()
+        .filter_map(|kind| state.drivers.get(kind).cloned())
+        .map(|driver| {
+            worker::exit_observer::spawn_with_runtime(
+                state.obs.clone(),
+                driver,
+                state.lifecycle_events.clone(),
+                config.clock.clone(),
+                Some(state.runtime.clone()),
+                exit_observer_shutdown.clone(),
+            )
+        })
+        .collect();
 
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
@@ -2385,7 +2596,7 @@ pub async fn run_server_with_obs_and_driver(
         inner: axum_handle,
         server_task,
         convergence_task,
-        exit_observer_task,
+        exit_observer_tasks,
         emit_drain_task,
         dns_responder_task,
         dns_responder,

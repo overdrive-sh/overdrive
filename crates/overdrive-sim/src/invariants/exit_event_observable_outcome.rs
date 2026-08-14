@@ -491,7 +491,12 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
 
     exit_observer::spawn(
         state.obs.clone(),
-        state.driver.clone(),
+        // `AppState::new` wraps its single `driver` param into a
+        // single-entry `DriverRegistry` keyed on `DriverType::Exec`
+        // (ADR-0083 §D1, GH #42) — the same entry `driver` bound above.
+        state.drivers.get(DriverType::Exec).cloned().unwrap_or_else(|| {
+            unreachable!("AppState::new always composes a single-entry Exec registry")
+        }),
         state.lifecycle_events.clone(),
         sim_clock.clone(),
     );

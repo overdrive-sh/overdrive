@@ -70,9 +70,15 @@ pub enum ParseError {
     #[error("missing required section: exactly one of [service] or [job] is required")]
     MissingKindSection,
 
-    /// `[exec]` is missing.
-    #[error("missing required section: [exec]")]
-    MissingExec,
+    /// Neither `[exec]` nor `[vm]` is present. Replaces the former
+    /// `MissingExec` (single cut, ADR-0083 §D4, GH #42).
+    #[error("missing required section: exactly one of [exec] or [vm] is required")]
+    MissingDriverSection,
+
+    /// Both `[exec]` and `[vm]` are present. Per ADR-0083 §D4, exactly
+    /// one driver table is required.
+    #[error("both [exec] and [vm] are present; exactly one driver section is required")]
+    MultipleDriverSections,
 
     /// `[resources]` is missing.
     #[error("missing required section: [resources]")]
@@ -468,6 +474,72 @@ pub struct ExecInput {
     pub args: Vec<String>,
 }
 
+/// Wire-side `[vm]` block (ADR-0083 §D4, GH #42). Mirrors
+/// `aggregate::VmInput` in shape, kept private to the new parser surface
+/// for the same reason `ExecInput` above is — see that type's doc
+/// comment.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct VmInput {
+    /// Command run INSIDE the guest.
+    pub command: String,
+    /// Argv passed verbatim to the in-guest command.
+    pub args: Vec<String>,
+    /// Operator-supplied kernel artifact path (BYO).
+    pub kernel: String,
+    /// Operator-supplied rootfs artifact path (BYO).
+    pub rootfs: String,
+}
+
+/// Driver-table dispatch on a `[job]` / `[schedule]` body (ADR-0083 §D4,
+/// GH #42). `[exec]` and `[vm]` are siblings; the presence-walk in
+/// [`WorkloadSpecInput::from_toml_str`] enforces exactly one is present
+/// before either variant is constructed.
+///
+/// This is a SEPARATE type from `aggregate::DriverInput` — see
+/// [`ExecInput`]'s doc comment for why this parser surface keeps its own
+/// wire-shape family (rkyv-archivable; the legacy `aggregate::DriverInput`
+/// is not).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DriverInput {
+    Exec(ExecInput),
+    Vm(VmInput),
+}
+
+impl DriverInput {
+    /// Both variants carry a command; borrow it regardless of kind.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        match self {
+            Self::Exec(e) => &e.command,
+            Self::Vm(v) => &v.command,
+        }
+    }
+}
+
 /// Wire-side `[resources]` block.
 #[derive(
     Debug,
@@ -575,7 +647,10 @@ pub use crate::aggregate::service_spec::ServiceSpec;
 )]
 pub struct JobSpec {
     pub id: String,
-    pub exec: ExecInput,
+    /// Driver-table choice (ADR-0083 §D4, GH #42) — `[exec]` or `[vm]`,
+    /// exactly one, enforced by [`WorkloadSpecInput::from_toml_str`]'s
+    /// presence-walk before this value is ever constructed.
+    pub driver: DriverInput,
     pub resources: ResourcesInput,
 }
 
@@ -681,13 +756,16 @@ impl WorkloadSpecInput {
         }
     }
 
-    /// Borrow the `[exec]` command as `&str` regardless of kind.
+    /// Borrow the driver-table command as `&str` regardless of kind —
+    /// `[exec]`'s command for every kind today; `[job]` / `[schedule]`
+    /// may instead carry a `[vm]` in-guest command (ADR-0083 §D4, GH
+    /// #42). `Service` stays `[exec]`-only.
     #[must_use]
     pub fn exec_command(&self) -> &str {
         match self {
             Self::Service(s) => &s.exec.command,
-            Self::Job(j) => &j.exec.command,
-            Self::Schedule(s) => &s.job_inner.exec.command,
+            Self::Job(j) => j.driver.command(),
+            Self::Schedule(s) => s.job_inner.driver.command(),
         }
     }
 
@@ -704,9 +782,19 @@ impl WorkloadSpecInput {
     /// combination per the AC matrix in `slice-01-parser-kind-discriminator.md`:
     /// `[service]+[job]` → `MixedServiceAndJob`; `[schedule]` alone →
     /// `ScheduleWithoutJob`; `[schedule]+[service]` → `ScheduleWithService`;
-    /// missing `[exec]` → `MissingExec`; missing `[resources]` →
+    /// both `[exec]` and `[vm]` present → `MultipleDriverSections`; neither
+    /// present → `MissingDriverSection` (ADR-0083 §D4, GH #42 — replaces
+    /// the former `MissingExec`, single cut); missing `[resources]` →
     /// `MissingResources`; missing `cron` in `[schedule]` →
     /// `MissingCron`; underlying TOML parse failures → `Toml(_)`.
+    ///
+    /// `[vm]` is a job-family driver table only (`[job]` / `[schedule]`) —
+    /// `[service]` keeps its original `[exec]`-only requirement. Rejecting
+    /// `[vm]` + `[service]` with ADR-0083 §D4's dedicated guest-networking
+    /// message is a later slice's concern (AC-10); today it falls out of
+    /// the unchanged `[service]` branch requiring `[exec]` and surfaces as
+    /// `MissingDriverSection` — safe (no allocation created), not yet the
+    /// fully-named rejection.
     pub fn from_toml_str(src: &str) -> Result<Self, ParseError> {
         // Parse to a generic TOML value so we can inspect section presence
         // before mapping to the variant. `toml` is a dev-dep on this
@@ -723,6 +811,7 @@ impl WorkloadSpecInput {
         let has_job = table.contains_key("job");
         let has_schedule = table.contains_key("schedule");
         let has_exec = table.contains_key("exec");
+        let has_vm = table.contains_key("vm");
         let has_resources = table.contains_key("resources");
 
         // Kind-discrimination matrix per ADR-0047 §1.
@@ -740,8 +829,20 @@ impl WorkloadSpecInput {
         if !has_service && !has_job {
             return Err(ParseError::MissingKindSection);
         }
-        if !has_exec {
-            return Err(ParseError::MissingExec);
+        // Driver-table dispatch (ADR-0083 §D4, GH #42): exactly one of
+        // [exec] / [vm] is required on the job-family path. `[service]`
+        // is unchanged — still [exec]-only (see this fn's doc comment).
+        if has_service {
+            if !has_exec {
+                return Err(ParseError::MissingDriverSection);
+            }
+        } else {
+            if has_exec && has_vm {
+                return Err(ParseError::MultipleDriverSections);
+            }
+            if !has_exec && !has_vm {
+                return Err(ParseError::MissingDriverSection);
+            }
         }
         if !has_resources {
             return Err(ParseError::MissingResources);
@@ -750,7 +851,6 @@ impl WorkloadSpecInput {
         // Inner-section deserialisation. Each section is parsed into its
         // typed shape; failures map to ParseError::Field with the
         // section name.
-        let exec: ExecInput = parse_section(table, "exec")?;
         let resources: ResourcesInput = parse_section(table, "resources")?;
 
         if has_service {
@@ -764,6 +864,11 @@ impl WorkloadSpecInput {
                 })?;
             let id = parse_string_field(svc_table, "id", "[service]")?;
             let replicas = parse_u32_field_default(svc_table, "replicas", 1, "[service]")?;
+            // `[service]` stays `[exec]`-only — `[vm]` + `[service]` is
+            // rejected upstream by the driver-table dispatch above (this
+            // branch is reached only when `has_exec` is true, per the
+            // `if has_service { if !has_exec { ... } }` gate).
+            let exec: ExecInput = parse_section(table, "exec")?;
             // [[listener]] is a top-level array-of-tables ALONGSIDE
             // [service] (NOT nested under it) per #164 converged
             // decision. Walk the top-level table for a `listener` key
@@ -832,7 +937,14 @@ impl WorkloadSpecInput {
             ParseError::Field { section: "[job]", message: "must be a table".to_string() }
         })?;
         let id = parse_string_field(job_table, "id", "[job]")?;
-        let job_inner = JobSpec { id, exec, resources };
+        // Driver-table dispatch (ADR-0083 §D4, GH #42): the presence-walk
+        // above already enforced exactly one of [exec] / [vm] is present.
+        let driver: DriverInput = if has_vm {
+            DriverInput::Vm(parse_section(table, "vm")?)
+        } else {
+            DriverInput::Exec(parse_section(table, "exec")?)
+        };
+        let job_inner = JobSpec { id, driver, resources };
 
         if has_schedule {
             let sched_table =

@@ -555,8 +555,12 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
                 "spiffe://overdrive.local/workload/svc/alloc/x",
             )
             .expect("valid spiffe"),
-            command: "/bin/svc".to_string(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/svc".to_string(),
+                    args: vec![],
+                },
+            ),
             resources: overdrive_core::traits::driver::Resources {
                 cpu_milli: 100,
                 memory_bytes: 64 * 1024 * 1024,
@@ -661,8 +665,12 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
                 "spiffe://overdrive.local/workload/svc/alloc/x",
             )
             .expect("valid spiffe"),
-            command: "/bin/svc".to_string(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/svc".to_string(),
+                    args: vec![],
+                },
+            ),
             resources: overdrive_core::traits::driver::Resources {
                 cpu_milli: 100,
                 memory_bytes: 64 * 1024 * 1024,

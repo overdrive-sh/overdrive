@@ -32,7 +32,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, ExitKind, Resources,
 };
 use overdrive_core::traits::vmm::{
-    Result as VmmResult, Vmm, VmControl, VmExitWatch, VmProcess, VmTermination, VmmProbeError,
+    Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
@@ -41,8 +41,8 @@ use overdrive_core::vm::config::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::{SimCgroupFs, SimVmm};
-use overdrive_worker::vm_driver::VmHostLayout;
 use overdrive_worker::VmDriver;
+use overdrive_worker::vm_driver::VmHostLayout;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -98,8 +98,12 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-driver-test/alloc/x")
             .expect("valid spiffe id"),
-        command: "/sbin/init".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/sbin/init".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,
@@ -230,8 +234,7 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     sim.inject_create_failure();
-    let (driver, _clock, cgroup_fs) =
-        build_driver_with_cgroup_fs(std::sync::Arc::new(sim), layout);
+    let (driver, _clock, cgroup_fs) = build_driver_with_cgroup_fs(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
     let spec = build_spec(&alloc);
@@ -256,7 +259,8 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     // mutant that drops either cleanup call in
     // `cleanup_after_start_failure` must not survive with only the
     // run-directory assertion above.
-    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let master_bytes =
+        std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
     assert!(
         !rootfs_plan.clone_dest().exists(),
@@ -327,7 +331,8 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     );
 
     // @mandatory:mutation_target companions (01-07 review D2).
-    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let master_bytes =
+        std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
     assert!(
         !rootfs_plan.clone_dest().exists(),
@@ -415,13 +420,11 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
         "run directory must be removed on the deadline arm, still present at {}",
         run_dir.path().display()
     );
-    assert!(
-        !sim.is_live(1_000_000),
-        "Vmm::terminate must have been invoked on the deadline arm"
-    );
+    assert!(!sim.is_live(1_000_000), "Vmm::terminate must have been invoked on the deadline arm");
 
     // @mandatory:mutation_target companions (01-07 review D2).
-    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let master_bytes =
+        std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
     assert!(
         !rootfs_plan.clone_dest().exists(),
@@ -529,7 +532,8 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
         .expect("read the first host -> guest line within 5s")
         .expect("read the first host -> guest line");
 
-    let message: BeaconMessage = line.trim_end().parse().expect("EXEC line parses as a BeaconMessage");
+    let message: BeaconMessage =
+        line.trim_end().parse().expect("EXEC line parses as a BeaconMessage");
     assert_eq!(
         message,
         BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
@@ -637,10 +641,7 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     // map, never `handle.pid`.
     let handle = AllocationHandle { alloc: alloc.clone(), pid: None };
     let stop_result = driver.stop(&handle).await;
-    assert!(
-        stop_result.is_ok(),
-        "pre-beacon stop must return Ok, never a crash: {stop_result:?}"
-    );
+    assert!(stop_result.is_ok(), "pre-beacon stop must return Ok, never a crash: {stop_result:?}");
 
     // The terminate() call inside stop() resolves the in-flight
     // start()'s exit.recv() arm — it must reject, never panic.
@@ -724,8 +725,7 @@ async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
     // The VMM dies on its own BEFORE the operator's stop arrives.
-    let control =
-        VmControl { pid: handle.pid.expect("pid populated"), api_socket: PathBuf::new() };
+    let control = VmControl { pid: handle.pid.expect("pid populated"), api_socket: PathBuf::new() };
     sim.terminate(&control, Duration::ZERO).await.expect("pre-kill the VMM");
     assert!(!sim.is_live(control.pid), "precondition: the VMM is already dead");
 

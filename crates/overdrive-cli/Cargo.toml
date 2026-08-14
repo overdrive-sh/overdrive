@@ -38,8 +38,25 @@ workspace = true
 # Opt-in gate for slow / real-infra tests in this crate. Off by
 # default so `cargo nextest run --workspace` stays under the 60s
 # slow-test budget; CI exercises the gate in a dedicated
-# `integration` job. Per `.claude/rules/testing.md`.
-integration-tests = []
+# `integration` job. Per `.claude/rules/testing.md`. Forwards to
+# `overdrive-control-plane/integration-tests` (step 01-08, GH #42) —
+# `commands::serve::run_with_dataplane_and_vm_artifacts` and the
+# `ServerConfig.vm_artifacts` / `VmBootArtifacts` surface it needs are
+# themselves gated there, and a `-p overdrive-cli --features
+# integration-tests` invocation does not otherwise unify the
+# same-named feature across the dependency graph (unlike a
+# `--workspace --features integration-tests` invocation, which enables
+# the bare flag per-member directly).
+integration-tests = ["overdrive-control-plane/integration-tests"]
+# Capability-scoped sibling of `integration-tests` (first declared at
+# overdrive-host, step 01-06 of microvm-driver-cloud-hypervisor) —
+# gates every real-Cloud-Hypervisor-boot Tier-3 test in this crate.
+# NOT declared workspace-wide: Cloud Hypervisor microVMs need
+# x86_64 + nested KVM, which Lima on Apple Silicon cannot provide, so
+# these tests run on a real x86_64 box (`cargo xtask metal run --`),
+# never in the macOS/Lima dev loop. See `.claude/rules/testing.md`
+# § "Running tests — bare-metal KVM box".
+kvm-tests = []
 
 [dependencies]
 overdrive-core.workspace           = true
@@ -119,6 +136,15 @@ overdrive-store-local.path   = "../overdrive-store-local"
 # (architecture.md § 4.7) prescribes `SimDataplane` injection for this
 # lane.
 overdrive-sim.path           = "../overdrive-sim"
+# `overdrive-testing` provides the shared 01-04 real-boot VM fixture
+# (`vm_fixture::VmFixture::provision`) — stages a pinned kernel + ext4
+# rootfs (`overdrive-init` baked in) + confirms `cloud-hypervisor` on a
+# reflink-capable directory. `overdrive-cli` is the first CLI-side
+# consumer; `vm_walking_skeleton.rs` calls it so the real
+# `[vm]`+`[job]` boot never hand-stages its own artifacts. Dev-dep
+# only, per `.claude/rules/development.md` § "Shared real-infra test
+# fixtures — overdrive-testing".
+overdrive-testing.path       = "../overdrive-testing"
 # `serial_test` serialises tests that mutate process-wide environment
 # variables. Rust edition 2024 + `unsafe_op_in_unsafe_fn = deny` makes
 # `std::env::set_var` / `std::env::remove_var` explicit unsafe, but

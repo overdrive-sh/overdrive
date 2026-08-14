@@ -1991,6 +1991,7 @@ dependencies = [
  "overdrive-host",
  "overdrive-sim",
  "overdrive-store-local",
+ "overdrive-testing",
  "proptest",
  "reqwest",
  "rkyv",

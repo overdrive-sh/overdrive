@@ -203,13 +203,14 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     match &actions[0] {
         Action::StartAllocation { spec, .. } => {
             assert_eq!(
-                spec.command, "/opt/payments/bin/server",
-                "spec.command must equal the operator's declared command, NOT the deleted /bin/sleep literal",
+                spec.driver.command(),
+                "/opt/payments/bin/server",
+                "spec.driver.command() must equal the operator's declared command, NOT the deleted /bin/sleep literal",
             );
             assert_eq!(
-                spec.args,
+                spec.driver.args().to_vec(),
                 vec!["--port".to_string(), "8080".to_string()],
-                "spec.args must equal the operator's declared args, NOT the deleted [\"60\"] literal",
+                "spec.driver.args() must equal the operator's declared args, NOT the deleted [\"60\"] literal",
             );
             assert_eq!(
                 spec.resources, job_resources,
@@ -286,14 +287,15 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
             assert_eq!(
-                spec.command, "/opt/x/y",
-                "Restart spec.command must equal the live Job.command \
+                spec.driver.command(),
+                "/opt/x/y",
+                "Restart spec.driver.command() must equal the live Job.command \
                  (NOT the deleted action_shim::default fabrication)",
             );
             assert_eq!(
-                spec.args,
+                spec.driver.args().to_vec(),
                 vec!["--mode=fast".to_string()],
-                "Restart spec.args must equal the live Job.args",
+                "Restart spec.driver.args() must equal the live Job.args",
             );
             assert_eq!(
                 spec.resources, job_resources,
@@ -381,8 +383,8 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     );
     match &actions_a[0] {
         Action::StartAllocation { spec, .. } => {
-            assert_eq!(spec.command, "/opt/payments/bin/server");
-            assert_eq!(spec.args, vec!["--port".to_string(), "8080".to_string()]);
+            assert_eq!(spec.driver.command(), "/opt/payments/bin/server");
+            assert_eq!(spec.driver.args().to_vec(), vec!["--port".to_string(), "8080".to_string()]);
         }
         other => panic!("expected StartAllocation, got {other:?}"),
     }

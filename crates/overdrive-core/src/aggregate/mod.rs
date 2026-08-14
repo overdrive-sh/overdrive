@@ -55,7 +55,8 @@ pub use self::workload_spec::{
     WorkloadSpecInput,
 };
 pub use self::workload_spec::{
-    ExecInput as ParserExecInput, ResourcesInput as ParserResourcesInput,
+    DriverInput as ParserDriverInput, ExecInput as ParserExecInput,
+    ResourcesInput as ParserResourcesInput, VmInput as ParserVmInput,
 };
 
 mod workload_spec;
@@ -390,13 +391,37 @@ impl JobV2 {
         // — argv is opaque to the platform per ADR-0031 §4. Casing is
         // preserved verbatim — the validator is a predicate, not a
         // normaliser.
-        let DriverInput::Exec(exec_input) = driver;
-        if exec_input.command.trim().is_empty() {
-            return Err(AggregateError::Validation {
-                field: "exec.command",
-                message: "command must be non-empty".to_string(),
-            });
-        }
+        //
+        // ADR-0083 (GH #42, step 01-08): the `Vm` arm applies the
+        // identical non-empty-after-trim rule to the in-guest command —
+        // `kernel` / `rootfs` existence is a runtime (Vmm::create-time)
+        // concern, not a parse-time one, mirroring how `Exec.command`'s
+        // referenced binary existence is never checked here either.
+        let driver = match driver {
+            DriverInput::Exec(exec_input) => {
+                if exec_input.command.trim().is_empty() {
+                    return Err(AggregateError::Validation {
+                        field: "exec.command",
+                        message: "command must be non-empty".to_string(),
+                    });
+                }
+                WorkloadDriver::Exec(Exec { command: exec_input.command, args: exec_input.args })
+            }
+            DriverInput::Vm(vm_input) => {
+                if vm_input.command.trim().is_empty() {
+                    return Err(AggregateError::Validation {
+                        field: "vm.command",
+                        message: "command must be non-empty".to_string(),
+                    });
+                }
+                WorkloadDriver::Vm(Vm {
+                    command: vm_input.command,
+                    args: vm_input.args,
+                    kernel: vm_input.kernel,
+                    rootfs: vm_input.rootfs,
+                })
+            }
+        };
         Ok(Self {
             id,
             replicas,
@@ -404,10 +429,7 @@ impl JobV2 {
                 cpu_milli: resources.cpu_milli,
                 memory_bytes: resources.memory_bytes,
             },
-            driver: WorkloadDriver::Exec(Exec {
-                command: exec_input.command,
-                args: exec_input.args,
-            }),
+            driver,
         })
     }
 }
@@ -824,7 +846,28 @@ impl ServiceV2 {
         }
 
         // Driver projection — same shape as `JobV2::from_submit`.
-        let DriverInput::Exec(exec_input) = driver;
+        //
+        // ADR-0083 §D4 (GH #42): `[vm]` + `[service]` is rejected — a
+        // microVM terminates TCP inside the guest (GH #222), so it is not
+        // mesh-enrolled and cannot back a Service. The `workload_spec.rs`
+        // TOML parser already keeps `[service]` `[exec]`-only (never
+        // constructs `DriverInput::Vm` for a Service body), but
+        // `ServiceSpecInput` is also the direct wire-ingress shape
+        // (ADR-0015 defence-in-depth) — an API client posting
+        // `driver: {"vm": ...}` bypasses that gate, so this arm rejects it
+        // explicitly rather than silently constructing an invalid state.
+        // The fully-named guest-networking/probes/mTLS rejection message
+        // (citing GH #257 / #222) is a later slice's AC-10 — this is the
+        // safe, minimal rejection for today.
+        let DriverInput::Exec(exec_input) = driver else {
+            return Err(AggregateError::Validation {
+                field: "driver",
+                message: "[vm] is not supported for Service-kind workloads (guest networking \
+                          is not mesh-enrolled, GH #222) — use [exec], or deploy Job/Schedule \
+                          instead"
+                    .to_string(),
+            });
+        };
         if exec_input.command.trim().is_empty() {
             return Err(AggregateError::Validation {
                 field: "exec.command",
@@ -1211,14 +1254,18 @@ pub struct ResourcesInput {
 /// → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
 /// unknown driver tables.
 ///
-/// Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
-/// new variants additively; no shape change to surrounding code.
+/// Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
+/// `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
+/// variants additively; no shape change to surrounding code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum DriverInput {
     /// Native binary under cgroups v2 — the `[exec]` table in TOML.
     Exec(ExecInput),
-    // Future (step 01-08): Vm(VmInput); later Wasm(WasmInput)
+    /// Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
+    /// ADR-0083, GH #42).
+    Vm(VmInput),
+    // Future: Wasm(WasmInput)
 }
 
 /// Operator-facing `[exec]` table fields per ADR-0031 §2.
@@ -1234,6 +1281,24 @@ pub struct ExecInput {
     pub args: Vec<String>,
 }
 
+/// Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
+/// Mirrors the runtime `traits::driver::VmPayload` shape MINUS `volumes`
+/// (deferred to Slice 04) — `String`, not `PathBuf`, for both `kernel`
+/// and `rootfs` (serde-clean wire shape, matches `ExecInput.command`'s
+/// shape).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VmInput {
+    /// Command run INSIDE the guest.
+    pub command: String,
+    /// Argv passed verbatim to the in-guest command.
+    pub args: Vec<String>,
+    /// Operator-supplied kernel artifact path (BYO).
+    pub kernel: String,
+    /// Operator-supplied rootfs artifact path (BYO).
+    pub rootfs: String,
+}
+
 /// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
 /// validated `Job` aggregate. Used by `describe_workload` (ADR-0008 §GET
 /// /v1/workloads/{id}) to render the stored spec back onto the wire after
@@ -1245,21 +1310,23 @@ pub struct ExecInput {
 impl From<&Job> for JobSpecInput {
     fn from(job: &Job) -> Self {
         // Per ADR-0031 Amendment 1, project the intent-shape
-        // `WorkloadDriver` back to the wire-shape `DriverInput`.
-        // `DriverInput` is still Exec-only — the `[vm]` wire/parser
-        // dispatch (`DriverInput::Vm`) lands in step 01-08 (ADR-0083
-        // Amendment 2026-08-12, GH #42) — so the `Vm` arm is a RED
-        // scaffold until that step wires a sibling `DriverInput`
-        // variant to project onto.
-        let (command, args) = match &job.driver {
-            WorkloadDriver::Exec(exec) => (exec.command.clone(), exec.args.clone()),
-            #[expect(
-                clippy::todo,
-                reason = "RED scaffold: DriverInput has no Vm sibling until step 01-08 wires the [vm] wire/parser dispatch (ADR-0083 Amendment 2026-08-12, GH #42)"
-            )]
-            WorkloadDriver::Vm(_) => todo!(
-                "RED scaffold: Job describe-wire projection for the Vm driver lands at step 01-08"
-            ),
+        // `WorkloadDriver` back to the wire-shape `DriverInput`,
+        // preserving the driver KIND rather than collapsing to a flat
+        // (command, args) tuple and always rewrapping as `Exec` — that
+        // would silently mis-render a Vm-driven Job as Exec-driven on
+        // `GET /v1/workloads/{id}`. `DriverInput::Vm` lands here per
+        // ADR-0083 Amendment 2026-08-12 (GH #42, step 01-08).
+        let driver = match &job.driver {
+            WorkloadDriver::Exec(exec) => DriverInput::Exec(ExecInput {
+                command: exec.command.clone(),
+                args: exec.args.clone(),
+            }),
+            WorkloadDriver::Vm(vm) => DriverInput::Vm(VmInput {
+                command: vm.command.clone(),
+                args: vm.args.clone(),
+                kernel: vm.kernel.clone(),
+                rootfs: vm.rootfs.clone(),
+            }),
         };
         Self {
             id: job.id.to_string(),
@@ -1268,7 +1335,7 @@ impl From<&Job> for JobSpecInput {
                 cpu_milli: job.resources.cpu_milli,
                 memory_bytes: job.resources.memory_bytes,
             },
-            driver: DriverInput::Exec(ExecInput { command, args }),
+            driver,
         }
     }
 }
@@ -1337,17 +1404,17 @@ impl ServiceV2 {
         &self,
         vip: crate::id::ServiceVip,
     ) -> crate::api::describe::ServiceSpecOutput {
-        // Per ADR-0083 Amendment 2026-08-12 (GH #42) — same rationale
-        // as `From<&Job> for JobSpecInput` above: `DriverInput` has no
-        // `Vm` sibling until step 01-08.
+        // Per ADR-0083 §D4 (GH #42): a `ServiceV2` can never legitimately
+        // hold `WorkloadDriver::Vm` — `ServiceV2::from_submit` rejects
+        // `driver: DriverInput::Vm(_)` before a `ServiceV2` is ever
+        // constructed (guest networking is not mesh-enrolled, GH #222).
+        // Reaching this arm would mean that invariant was bypassed
+        // elsewhere — a logic bug, not a runtime condition to render.
         let (command, args) = match &self.driver {
             WorkloadDriver::Exec(exec) => (exec.command.clone(), exec.args.clone()),
-            #[expect(
-                clippy::todo,
-                reason = "RED scaffold: DriverInput has no Vm sibling until step 01-08 wires the [vm] wire/parser dispatch (ADR-0083 Amendment 2026-08-12, GH #42)"
-            )]
-            WorkloadDriver::Vm(_) => todo!(
-                "RED scaffold: Service describe-wire projection for the Vm driver lands at step 01-08"
+            WorkloadDriver::Vm(_) => unreachable!(
+                "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
+                 WorkloadDriver::Vm should never exist"
             ),
         };
         let listeners = self

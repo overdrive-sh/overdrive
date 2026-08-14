@@ -109,8 +109,12 @@ fn fact_with_readiness(
         restart_spec: overdrive_core::traits::driver::AllocationSpec {
             alloc: alloc(&format!("svc-{index}")),
             identity: spiffe(index),
-            command: "/bin/svc".to_string(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/svc".to_string(),
+                    args: vec![],
+                },
+            ),
             resources: overdrive_core::traits::driver::Resources {
                 cpu_milli: 100,
                 memory_bytes: 64 * 1024 * 1024,
@@ -154,8 +158,12 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         restart_spec: overdrive_core::traits::driver::AllocationSpec {
             alloc: alloc(&format!("svc-{index}")),
             identity: spiffe(index),
-            command: "/bin/svc".to_string(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/svc".to_string(),
+                    args: vec![],
+                },
+            ),
             resources: overdrive_core::traits::driver::Resources {
                 cpu_milli: 100,
                 memory_bytes: 64 * 1024 * 1024,

@@ -42,8 +42,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use overdrive_core::traits::driver::STDERR_TAIL_LINES;
 use overdrive_core::traits::vmm::{
-    Result, Vmm, VmControl, VmExitWatch, VmProcess, VmTermination, VmmError, VmmExit,
-    VmmProbeError,
+    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::{DiskAttachment, VmConfig};
 use parking_lot::Mutex;
@@ -223,7 +222,7 @@ impl Vmm for CloudHypervisorVmm {
             Err(source) => {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
-                let _ = std::fs::remove_file(config.rootfs.clone_dest());
+                let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
                 return Err(VmmError::create(format!(
                     "spawning {} failed: {source}",
                     self.binary.display()
@@ -232,7 +231,7 @@ impl Vmm for CloudHypervisorVmm {
         };
 
         let Some(pid) = child.id() else {
-            let _ = std::fs::remove_file(config.rootfs.clone_dest());
+            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
             return Err(VmmError::create(
                 "spawned cloud-hypervisor child reported no pid".to_string(),
             ));
@@ -248,7 +247,8 @@ impl Vmm for CloudHypervisorVmm {
         tokio::spawn(async move {
             let ring: Arc<Mutex<VecDeque<String>>> =
                 Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
-            let reader_handle = stderr_pipe.map(|pipe| spawn_stderr_tail_reader(pipe, Arc::clone(&ring)));
+            let reader_handle =
+                stderr_pipe.map(|pipe| spawn_stderr_tail_reader(pipe, Arc::clone(&ring)));
 
             let status = tokio::select! {
                 biased;
@@ -270,7 +270,11 @@ impl Vmm for CloudHypervisorVmm {
             }
             let stderr_tail = {
                 let guard = ring.lock();
-                if guard.is_empty() { None } else { Some(guard.iter().cloned().collect::<Vec<_>>().join("\n")) }
+                if guard.is_empty() {
+                    None
+                } else {
+                    Some(guard.iter().cloned().collect::<Vec<_>>().join("\n"))
+                }
             };
 
             let vmm_exit = classify_exit(status, stderr_tail);
@@ -316,10 +320,9 @@ impl Vmm for CloudHypervisorVmm {
         };
 
         if exited_within_grace {
-            let exit = rx
-                .borrow()
-                .clone()
-                .unwrap_or_else(|| unreachable!("changed() resolves Ok only after outcome is Some"));
+            let exit = rx.borrow().clone().unwrap_or_else(|| {
+                unreachable!("changed() resolves Ok only after outcome is Some")
+            });
             return Ok(VmTermination::ExitedWithinGrace(exit));
         }
 
@@ -357,7 +360,10 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
 
 /// Classify a resolved (or failed-to-observe) child exit into the
 /// adapter-agnostic [`VmmExit`] shape.
-fn classify_exit(status: io::Result<std::process::ExitStatus>, stderr_tail: Option<String>) -> VmmExit {
+fn classify_exit(
+    status: io::Result<std::process::ExitStatus>,
+    stderr_tail: Option<String>,
+) -> VmmExit {
     match status {
         Ok(status) => VmmExit {
             exit_code: status.code(),
@@ -417,8 +423,9 @@ where
 /// §D5 scenario 1 — an EXECUTED `FICLONE` self-test against `dir`, never
 /// an `fstype` string comparison.
 fn probe_reflink(dir: &Path) -> std::result::Result<(), VmmProbeError> {
-    std::fs::create_dir_all(dir)
-        .map_err(|source| VmmProbeError::reflink_unsupported(dir.to_path_buf(), probe_fstype(dir), source))?;
+    std::fs::create_dir_all(dir).map_err(|source| {
+        VmmProbeError::reflink_unsupported(dir.to_path_buf(), probe_fstype(dir), source)
+    })?;
 
     let probe = dir.join(format!(".overdrive-vmm-probe-{}", uuid::Uuid::new_v4()));
     let clone = probe.with_extension("clone");
@@ -429,7 +436,11 @@ fn probe_reflink(dir: &Path) -> std::result::Result<(), VmmProbeError> {
 
     if let Err(source) = std::fs::write(&probe, vec![0xCD_u8; REFLINK_PROBE_BYTES]) {
         cleanup();
-        return Err(VmmProbeError::reflink_unsupported(dir.to_path_buf(), probe_fstype(dir), source));
+        return Err(VmmProbeError::reflink_unsupported(
+            dir.to_path_buf(),
+            probe_fstype(dir),
+            source,
+        ));
     }
 
     let result = (|| -> io::Result<()> {
@@ -439,7 +450,9 @@ fn probe_reflink(dir: &Path) -> std::result::Result<(), VmmProbeError> {
     })();
 
     cleanup();
-    result.map_err(|source| VmmProbeError::reflink_unsupported(dir.to_path_buf(), probe_fstype(dir), source))
+    result.map_err(|source| {
+        VmmProbeError::reflink_unsupported(dir.to_path_buf(), probe_fstype(dir), source)
+    })
 }
 
 /// Best-effort `stat -f -c %T <dir>` for [`VmmProbeError::ReflinkUnsupported`]'s
@@ -463,9 +476,13 @@ fn probe_fstype(dir: &Path) -> String {
 /// AND the host kernel exposes the Landlock LSM
 /// (`/sys/kernel/security/lsm`).
 async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<(), VmmProbeError> {
-    let version_output = Command::new(binary).arg("--version").output().await.map_err(|source| {
-        VmmProbeError::landlock_flag_absent(binary.to_path_buf(), format!("spawn failed: {source}"))
-    })?;
+    let version_output =
+        Command::new(binary).arg("--version").output().await.map_err(|source| {
+            VmmProbeError::landlock_flag_absent(
+                binary.to_path_buf(),
+                format!("spawn failed: {source}"),
+            )
+        })?;
     let version = String::from_utf8_lossy(&version_output.stdout).trim().to_owned();
 
     let help_output = Command::new(binary).arg("--help").output().await.map_err(|source| {
@@ -480,7 +497,7 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
         return Err(VmmProbeError::landlock_flag_absent(binary.to_path_buf(), version));
     }
 
-    let lsms = std::fs::read_to_string("/sys/kernel/security/lsm").unwrap_or_default();
+    let lsms = tokio::fs::read_to_string("/sys/kernel/security/lsm").await.unwrap_or_default();
     if !lsms.split(',').any(|lsm| lsm.trim() == "landlock") {
         return Err(VmmProbeError::landlock_lsm_absent(lsms.trim().to_owned()));
     }
@@ -496,9 +513,12 @@ fn probe_kvm_reachable() -> std::result::Result<(), VmmProbeError> {
     let meta = std::fs::metadata(KVM_DEVICE_PATH);
     let (uid, gid, mode) =
         meta.as_ref().map_or((0, 0, 0), |m| (m.uid(), m.gid(), m.mode() & 0o777));
-    std::fs::OpenOptions::new().read(true).write(true).open(KVM_DEVICE_PATH).map(|_handle| ()).map_err(
-        |source| VmmProbeError::kvm_unreachable(uid, gid, mode, source),
-    )
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(KVM_DEVICE_PATH)
+        .map(|_handle| ())
+        .map_err(|source| VmmProbeError::kvm_unreachable(uid, gid, mode, source))
 }
 
 /// §D5 scenario 5 — an EXECUTED `mkdir` → `bind` → `unlink` round-trip on
@@ -522,9 +542,8 @@ fn probe_run_dir(root: &Path) -> std::result::Result<(), VmmProbeError> {
     let cleanup_result = std::fs::remove_dir_all(&probe_dir);
 
     match bind_result {
-        Ok(_listener) => {
-            cleanup_result.map_err(|source| VmmProbeError::run_dir_unusable(root.to_path_buf(), source))
-        }
+        Ok(_listener) => cleanup_result
+            .map_err(|source| VmmProbeError::run_dir_unusable(root.to_path_buf(), source)),
         Err(source) => {
             let _ = cleanup_result;
             Err(VmmProbeError::run_dir_unusable(root.to_path_buf(), source))

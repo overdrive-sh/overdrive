@@ -15,26 +15,62 @@
 
 #![allow(clippy::missing_panics_doc)]
 
+use overdrive_core::aggregate::{ParseError, WorkloadSpecInput};
+
 /// S-VM-06 — a spec declaring BOTH `[exec]` and `[vm]` is rejected with
 /// `MultipleDriverSections` naming both tables; no allocation is created.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn spec_with_both_exec_and_vm_tables_is_rejected() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-06 / [exec]+[vm] both \
-         present -- ParseError::MultipleDriverSections naming both tables, \
-         no intent committed -- ADR-0083 §D4)"
+    let toml = r#"
+        [job]
+        id = "batch-render"
+
+        [exec]
+        command = "/bin/true"
+        args = []
+
+        [vm]
+        command = "/usr/bin/render"
+        args = []
+        kernel = "/srv/vm/kernel"
+        rootfs = "/srv/vm/rootfs.ext4"
+
+        [resources]
+        cpu_milli = 100
+        memory_bytes = 1048576
+    "#;
+
+    let err = WorkloadSpecInput::from_toml_str(toml)
+        .expect_err("both [exec] and [vm] present must be rejected");
+
+    assert!(
+        matches!(err, ParseError::MultipleDriverSections),
+        "expected ParseError::MultipleDriverSections, got {err:?}"
     );
+    // The Display form names both tables (ADR-0083 §D4).
+    let message = err.to_string();
+    assert!(message.contains("[exec]"), "message must name [exec]: {message}");
+    assert!(message.contains("[vm]"), "message must name [vm]: {message}");
 }
 
 /// S-VM-07 — a spec declaring NEITHER `[exec]` nor `[vm]` is rejected
 /// with `MissingDriverSection`.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn spec_with_neither_exec_nor_vm_table_is_rejected() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-07 / neither [exec] nor \
-         [vm] present -- ParseError::MissingDriverSection -- replaces the \
-         deleted ParseError::MissingExec, single cut -- ADR-0083 §D4)"
+    let toml = r#"
+        [job]
+        id = "batch-render"
+
+        [resources]
+        cpu_milli = 100
+        memory_bytes = 1048576
+    "#;
+
+    let err = WorkloadSpecInput::from_toml_str(toml)
+        .expect_err("neither [exec] nor [vm] present must be rejected");
+
+    assert!(
+        matches!(err, ParseError::MissingDriverSection),
+        "expected ParseError::MissingDriverSection, got {err:?}"
     );
 }

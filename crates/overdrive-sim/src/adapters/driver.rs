@@ -485,7 +485,7 @@ mod release_for_exit_emission_tests {
     //! once step 01-03 wires the firing site.
     use super::*;
     use overdrive_core::SpiffeId;
-    use overdrive_core::traits::driver::{AllocationSpec, Resources};
+    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, Resources};
     use std::str::FromStr;
 
     fn sample_spec(name: &str) -> AllocationSpec {
@@ -493,8 +493,10 @@ mod release_for_exit_emission_tests {
             alloc: AllocationId::from_str(name).expect("valid AllocationId"),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),
-            command: "/bin/true".to_owned(),
-            args: vec![],
+            driver: DriverPayload::Exec(ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            }),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             netns: None,

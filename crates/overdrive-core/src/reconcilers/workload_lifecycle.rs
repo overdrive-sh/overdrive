@@ -1,12 +1,13 @@
 //! `WorkloadLifecycle` reconciler — first real reconciler (US-03).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, WorkloadDriver, WorkloadKind};
+use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, WorkloadKind};
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
-use crate::traits::driver::AllocationSpec;
+use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
 use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
@@ -732,32 +733,36 @@ impl WorkloadLifecycle {
                     // preserves the shim's stateless-dispatcher
                     // contract per ADR-0023.
                     let identity = SpiffeId::for_allocation(&job.id, &failed.alloc_id);
-                    // Per ADR-0031 Amendment 1: destructure the
-                    // tagged-enum `WorkloadDriver` to project to the
-                    // flat `AllocationSpec` (which stays flat per
-                    // ADR-0030 §6 until step 01-08 replaces it with
-                    // `AllocationSpec.driver: DriverPayload` per
-                    // ADR-0083 § D3). `WorkloadDriverV2::Vm` landed at
-                    // step 01-02 (ADR-0083 Amendment 2026-08-12,
-                    // GH #42) but placing a Vm-driven restart onto the
-                    // flat spec needs that future typed payload.
-                    let (command, args) = match &job.driver {
-                        WorkloadDriver::Exec(Exec { command, args }) => (command, args),
-                        #[expect(
-                            clippy::todo,
-                            reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — WorkloadLifecycle cannot place a Vm-driven restart until then"
-                        )]
-                        WorkloadDriver::Vm(_) => todo!(
-                            "RED scaffold: WorkloadLifecycle restart placement for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
-                        ),
+                    // Per ADR-0031 Amendment 1 + ADR-0083 § D3 (GH #42,
+                    // step 01-08): project the tagged-enum `WorkloadDriver`
+                    // to the tagged-enum `AllocationSpec.driver:
+                    // DriverPayload`, preserving the driver kind rather
+                    // than collapsing to a flat (command, args) pair.
+                    let driver = match &job.driver {
+                        WorkloadDriver::Exec(Exec { command, args }) => {
+                            DriverPayload::Exec(ExecPayload {
+                                command: command.clone(),
+                                args: args.clone(),
+                            })
+                        }
+                        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
+                            DriverPayload::Vm(VmPayload {
+                                command: command.clone(),
+                                args: args.clone(),
+                                kernel: PathBuf::from(kernel),
+                                rootfs: PathBuf::from(rootfs),
+                                // `[[vm.volume]]` is a Slice 04 concern —
+                                // empty for every Slice 01-03 allocation.
+                                volumes: Vec::new(),
+                            })
+                        }
                     };
                     let action = Action::RestartAllocation {
                         alloc_id: failed.alloc_id.clone(),
                         spec: AllocationSpec {
                             alloc: failed.alloc_id.clone(),
                             identity,
-                            command: command.clone(),
-                            args: args.clone(),
+                            driver,
                             resources: job.resources,
                             // Per ADR-0054 §3 + GAP-8 close-out: the
                             // descriptor vec is projected from the live
@@ -857,25 +862,31 @@ impl WorkloadLifecycle {
                         let attempt = u32::try_from(allocs_vec.len()).unwrap_or(u32::MAX);
                         let alloc_id = mint_alloc_id(&job.id, attempt);
                         let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
-                        // Per ADR-0031 §5 + Amendment 1: the Start
-                        // action carries the operator-declared command
-                        // + args projected from the tagged-enum
-                        // `WorkloadDriver` field on `Job`. No more
+                        // Per ADR-0031 §5 + Amendment 1 + ADR-0083 § D3
+                        // (GH #42, step 01-08): the Start action carries
+                        // the operator-declared driver payload projected
+                        // from the tagged-enum `WorkloadDriver` field on
+                        // `Job`, preserving the driver kind. No more
                         // literal `/bin/sleep` / `["60"]`.
-                        // `WorkloadDriverV2::Vm` landed at step 01-02
-                        // (ADR-0083 Amendment 2026-08-12, GH #42) but
-                        // placing a Vm-driven start onto the flat spec
-                        // needs step 01-08's `AllocationSpec.driver:
-                        // DriverPayload` (ADR-0083 § D3).
-                        let (command, args) = match &job.driver {
-                            WorkloadDriver::Exec(Exec { command, args }) => (command, args),
-                            #[expect(
-                                clippy::todo,
-                                reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — WorkloadLifecycle cannot place a Vm-driven start until then"
-                            )]
-                            WorkloadDriver::Vm(_) => todo!(
-                                "RED scaffold: WorkloadLifecycle start placement for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
-                            ),
+                        let driver = match &job.driver {
+                            WorkloadDriver::Exec(Exec { command, args }) => {
+                                DriverPayload::Exec(ExecPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
+                                })
+                            }
+                            WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
+                                DriverPayload::Vm(VmPayload {
+                                    command: command.clone(),
+                                    args: args.clone(),
+                                    kernel: PathBuf::from(kernel),
+                                    rootfs: PathBuf::from(rootfs),
+                                    // `[[vm.volume]]` is a Slice 04
+                                    // concern — empty for every Slice
+                                    // 01-03 allocation.
+                                    volumes: Vec::new(),
+                                })
+                            }
                         };
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
@@ -884,8 +895,7 @@ impl WorkloadLifecycle {
                             spec: AllocationSpec {
                                 alloc: alloc_id,
                                 identity,
-                                command: command.clone(),
-                                args: args.clone(),
+                                driver,
                                 resources: job.resources,
                                 // Per ADR-0054 §3 + GAP-8 close-out:
                                 // projected from the live intent at

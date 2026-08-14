@@ -118,6 +118,9 @@ fn build_state_with_range(
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
+    // `AppState::new` (below) wraps `driver` into its own single-entry
+    // registry internally (ADR-0083 §D1, GH #42) — no separate registry
+    // needed at this call site.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         vip_range,
@@ -243,6 +246,12 @@ async fn dispatch_release(
     // The dispatch path's Driver port is not touched by the
     // ReleaseServiceVip arm — a SimDriver is sufficient.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let writer_node = NodeId::new("writer-1").expect("NodeId");
 
@@ -257,7 +266,8 @@ async fn dispatch_release(
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -577,6 +587,9 @@ async fn build_state_with_range_and_reconciler(
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
+    // `AppState::new` (below) wraps `driver` into its own single-entry
+    // registry internally (ADR-0083 §D1, GH #42) — no separate registry
+    // needed at this call site.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
         vip_range,

@@ -83,11 +83,15 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let spec = AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        command: "/bin/sh".to_string(),
-        args: vec![
-            "-c".to_string(),
-            "for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait".to_string(),
-        ],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sh".to_string(),
+                args: vec![
+                    "-c".to_string(),
+                    "for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait".to_string(),
+                ],
+            },
+        ),
         resources: Resources { cpu_milli: 1000, memory_bytes: 256 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

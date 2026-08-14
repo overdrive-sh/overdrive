@@ -7,10 +7,13 @@
 //!
 //! See `docs/whitepaper.md` §6 for the driver catalogue.
 
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
+use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -134,13 +137,19 @@ pub struct Resources {
 pub struct AllocationSpec {
     pub alloc: AllocationId,
     pub identity: SpiffeId,
-    /// Host filesystem path to the binary the driver execs (e.g. `/bin/sleep`).
-    /// Container drivers (Phase 2+ MicroVm/Wasm) carry their own
-    /// `ContentHash`-typed image field on per-driver-type spec types.
-    pub command: String,
-    /// Argv passed verbatim to the binary; the driver invokes
-    /// `Command::new(&self.command).args(&self.args)`.
-    pub args: Vec<String>,
+    /// Tagged per-driver invocation payload (ADR-0083 §D3, GH #42).
+    /// Replaces the former flat `command: String` / `args: Vec<String>`
+    /// fields — every read goes through [`DriverPayload::command`] /
+    /// [`DriverPayload::args`] (or a full `match` where the driver-kind
+    /// distinction matters, e.g. the `[vm]`-only fields). The routing
+    /// key for [`DriverRegistry::get`] is [`DriverPayload::driver_type`].
+    ///
+    /// Per `.claude/rules/development.md` § "Type-driven design": a
+    /// second, `Option`-shaped field alongside the existing flat ones
+    /// (`vm: Option<VmPayload>`) was rejected — it would let `vm:
+    /// Some(..)` coexist with a meaningful top-level `command`, the
+    /// exact sentinel shape that rule forbids.
+    pub driver: DriverPayload,
     pub resources: Resources,
     /// Validated health-check probe declarations per ADR-0054 §3.
     ///
@@ -251,6 +260,124 @@ pub struct AllocationSpec {
     /// `probe_descriptors`. Same pure-in-memory derive discipline as the
     /// fields above (no serde / rkyv).
     pub service_ports: Vec<NonZeroU16>,
+}
+
+/// Tagged per-driver invocation payload (ADR-0083 §D3). The routing key
+/// [`DriverPayload::driver_type`] is what [`DriverRegistry::get`] indexes
+/// on; `command()` / `args()` are the two fields every variant carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriverPayload {
+    Exec(ExecPayload),
+    Vm(VmPayload),
+}
+
+/// `[exec]` invocation fields — the native-binary-under-cgroups-v2 driver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecPayload {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+/// `[vm]` invocation fields — the Cloud Hypervisor microVM driver
+/// (ADR-0082 / ADR-0083, GH #42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmPayload {
+    /// Command run INSIDE the guest.
+    pub command: String,
+    /// Argv passed verbatim to the in-guest command.
+    pub args: Vec<String>,
+    /// Operator-supplied kernel artifact path (BYO).
+    pub kernel: PathBuf,
+    /// Operator-supplied rootfs artifact path (BYO).
+    pub rootfs: PathBuf,
+    /// Per-VM volume mounts. `vec![]` for every Slice 01-03 allocation —
+    /// `[[vm.volume]]` is a Slice 04 concern (design not yet written);
+    /// the field is threaded now so `VmPayload`'s shape does not change
+    /// again when Slice 04 lands. `AllocationSpec` derives neither serde
+    /// nor rkyv, so widening [`VmVolume`] later is not a schema-evolution
+    /// event.
+    pub volumes: Vec<VmVolume>,
+}
+
+/// Placeholder for a future per-VM volume mount (Slice 04 — not yet
+/// designed). Carries no fields; [`VmPayload::volumes`] stays `vec![]`
+/// until that slice's design lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmVolume {}
+
+impl DriverPayload {
+    /// The routing key — [`DriverRegistry::get`] indexes on this.
+    #[must_use]
+    pub const fn driver_type(&self) -> DriverType {
+        match self {
+            Self::Exec(_) => DriverType::Exec,
+            Self::Vm(_) => DriverType::Vm,
+        }
+    }
+
+    /// Both variants carry a command; borrow it regardless of kind.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        match self {
+            Self::Exec(e) => &e.command,
+            Self::Vm(v) => &v.command,
+        }
+    }
+
+    /// Both variants carry argv; borrow it regardless of kind.
+    #[must_use]
+    pub fn args(&self) -> &[String] {
+        match self {
+            Self::Exec(e) => &e.args,
+            Self::Vm(v) => &v.args,
+        }
+    }
+}
+
+/// The set of workload drivers this node composed (ADR-0022's
+/// pre-committed registry migration; ADR-0083 §D1, GH #42).
+///
+/// **Absence of a key is a first-class answer**, not an error state: a
+/// node with no `cloud-hypervisor` installed simply has no [`DriverType::Vm`]
+/// entry, and that absence *is* SD-5's capability gate.
+pub struct DriverRegistry {
+    by_type: BTreeMap<DriverType, Arc<dyn Driver>>,
+}
+
+impl DriverRegistry {
+    #[must_use]
+    pub fn new() -> Self {
+        Self { by_type: BTreeMap::new() }
+    }
+
+    /// Keyed on `driver.r#type()` — the driver names itself; no second
+    /// source of truth to drift.
+    pub fn insert(&mut self, driver: Arc<dyn Driver>) {
+        self.by_type.insert(driver.r#type(), driver);
+    }
+
+    #[must_use]
+    pub fn get(&self, t: DriverType) -> Option<&Arc<dyn Driver>> {
+        self.by_type.get(&t)
+    }
+
+    #[must_use]
+    pub fn supports(&self, t: DriverType) -> bool {
+        self.by_type.contains_key(&t)
+    }
+
+    /// `BTreeMap`, not `HashMap`: iterated for the admission-rejection
+    /// message and `health.startup` logging — ordering is observed
+    /// (`.claude/rules/development.md` § "Ordered-collection choice").
+    pub fn kinds(&self) -> impl Iterator<Item = DriverType> + '_ {
+        self.by_type.keys().copied()
+    }
+}
+
+impl Default for DriverRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Opaque handle returned by the driver at start. The node agent does not

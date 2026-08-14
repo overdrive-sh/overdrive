@@ -91,6 +91,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let driver = Arc::new(RecordingDriver::new());
     let captured = driver.captured_specs();
     let driver_dyn: Arc<dyn Driver> = driver.clone();
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver_dyn));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
@@ -135,8 +141,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let restart_spec = AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        command: "/opt/x/y".to_string(),
-        args: vec!["--mode=fast".to_string()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/opt/x/y".to_string(),
+                args: vec!["--mode=fast".to_string()],
+            },
+        ),
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
@@ -184,7 +194,8 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver_dyn.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -222,11 +233,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         specs[0].clone()
     };
     assert_eq!(
-        captured_spec.command, "/opt/x/y",
+        captured_spec.driver.command(),
+        "/opt/x/y",
         "Driver::start must receive the action's command, NOT the deleted /bin/sleep literal",
     );
     assert_eq!(
-        captured_spec.args,
+        captured_spec.driver.args().to_vec(),
         vec!["--mode=fast".to_string()],
         "Driver::start must receive the action's args, NOT the deleted [\"60\"] literal",
     );

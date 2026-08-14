@@ -85,8 +85,12 @@ fn crashing_spec(alloc: &AllocationId, exit_code: u8) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs2/alloc/0")
             .expect("valid spiffe id"),
-        command: "/bin/sh".to_owned(),
-        args: vec!["-c".to_owned(), format!("sleep 0.3; exit {exit_code}")],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sh".to_owned(),
+                args: vec!["-c".to_owned(), format!("sleep 0.3; exit {exit_code}")],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,
@@ -101,7 +105,12 @@ fn crashing_spec(alloc: &AllocationId, exit_code: u8) -> AllocationSpec {
 /// The cleanup guard reaps it.
 fn long_lived_spec(alloc: &AllocationId) -> AllocationSpec {
     let mut spec = crashing_spec(alloc, 0);
-    spec.args = vec!["-c".to_owned(), "sleep 3600".to_owned()];
+    spec.driver = overdrive_core::traits::driver::DriverPayload::Exec(
+        overdrive_core::traits::driver::ExecPayload {
+            command: spec.driver.command().to_owned(),
+            args: vec!["-c".to_owned(), "sleep 3600".to_owned()],
+        },
+    );
     spec
 }
 
@@ -146,6 +155,12 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
     let driver_concrete = Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), clock.clone(), fs));
     let driver: Arc<dyn Driver> = driver_concrete.clone();
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     let node_id = NodeId::new("local").expect("valid node id");
     let obs: Arc<dyn ObservationStore> =
@@ -172,7 +187,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     // ---- Cycle 1: StartAllocation -> Running, crash -> Failed. --------
     dispatch_one(
         obs.as_ref(),
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         &store,
         &events,
         Action::StartAllocation {
@@ -222,7 +238,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     // ---- Cycle 1 recovery: RestartAllocation -> Running (restarts 1). --
     dispatch_one(
         obs.as_ref(),
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         &store,
         &events,
         Action::RestartAllocation {
@@ -289,7 +306,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     // ---- Cycle 2 recovery: RestartAllocation -> Running (restarts 2). --
     dispatch_one(
         obs.as_ref(),
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         &store,
         &events,
         Action::RestartAllocation {
@@ -340,7 +358,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
     // row that genuinely carries crash history.
     dispatch_one(
         obs.as_ref(),
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         &store,
         &events,
         Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
@@ -371,7 +390,8 @@ async fn two_crash_cycles_count_two_restarts_and_describe_the_second_terminal() 
 /// `action_shim::dispatch` with sim adapters for every orthogonal port.
 async fn dispatch_one(
     obs: &dyn ObservationStore,
-    driver: &dyn Driver,
+    drivers: &overdrive_core::traits::driver::DriverRegistry,
+    alloc_drivers: &overdrive_control_plane::action_shim::AllocDriverIndex,
     store: &Arc<dyn IntentStore>,
     events: &Arc<broadcast::Sender<LifecycleEvent>>,
     action: Action,
@@ -399,7 +419,8 @@ async fn dispatch_one(
 
     dispatch(
         vec![action],
-        driver,
+        drivers,
+        alloc_drivers,
         obs,
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(

@@ -185,8 +185,12 @@ pub fn build_inbound_spec(
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("valid spiffe id"),
-        command: "/bin/true".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,

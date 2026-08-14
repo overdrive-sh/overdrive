@@ -63,8 +63,12 @@ async fn live_map_returns_to_zero_after_eight_start_stop_cycles() {
                 "spiffe://overdrive.local/workload/livemap/alloc/{cycle}"
             ))
             .expect("valid spiffe id"),
-            command: "/bin/sleep".to_owned(),
-            args: vec!["60".to_owned()],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/sleep".to_owned(),
+                    args: vec!["60".to_owned()],
+                },
+            ),
             resources: Resources { cpu_milli: 50, memory_bytes: 16 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

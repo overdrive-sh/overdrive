@@ -30,8 +30,8 @@ use overdrive_control_plane::streaming::JobSubmitEvent;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
-    JobSpecInput, ParseError, ResourcesInput as LegacyResourcesInput, ServiceSpec, ServiceV2,
-    WorkloadSpecInput,
+    JobSpecInput, ParseError, ParserDriverInput, ResourcesInput as LegacyResourcesInput,
+    ServiceSpec, ServiceV2, VmInput, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
@@ -199,10 +199,17 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         Ok(WorkloadSpecInput::Job(job_spec)) => JobSpecInput {
             id: job_spec.id,
             replicas: 1,
-            driver: DriverInput::Exec(LegacyExecInput {
-                command: job_spec.exec.command,
-                args: job_spec.exec.args,
-            }),
+            driver: match job_spec.driver {
+                ParserDriverInput::Exec(exec) => {
+                    DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
+                }
+                ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+                    command: vm.command,
+                    args: vm.args,
+                    kernel: vm.kernel,
+                    rootfs: vm.rootfs,
+                }),
+            },
             resources: LegacyResourcesInput {
                 cpu_milli: job_spec.resources.cpu_milli,
                 memory_bytes: job_spec.resources.memory_bytes,
@@ -549,10 +556,17 @@ async fn deploy_streaming_job(
     let spec_input = JobSpecInput {
         id: job_spec.id,
         replicas: 1,
-        driver: DriverInput::Exec(LegacyExecInput {
-            command: job_spec.exec.command,
-            args: job_spec.exec.args,
-        }),
+        driver: match job_spec.driver {
+            ParserDriverInput::Exec(exec) => {
+                DriverInput::Exec(LegacyExecInput { command: exec.command, args: exec.args })
+            }
+            ParserDriverInput::Vm(vm) => DriverInput::Vm(VmInput {
+                command: vm.command,
+                args: vm.args,
+                kernel: vm.kernel,
+                rootfs: vm.rootfs,
+            }),
+        },
         resources: LegacyResourcesInput {
             cpu_milli: job_spec.resources.cpu_milli,
             memory_bytes: job_spec.resources.memory_bytes,

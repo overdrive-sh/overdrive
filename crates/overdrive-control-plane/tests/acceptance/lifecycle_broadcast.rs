@@ -172,8 +172,12 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
     AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        command: "/bin/true".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
@@ -239,6 +243,12 @@ proptest! {
             let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(256);
 
             let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
+            let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+                let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+                r.insert(Arc::clone(&driver));
+                Arc::new(r)
+            };
+            let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
             let obs: Arc<dyn ObservationStore> =
                 Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
             let workload_id = WorkloadId::new("payments").expect("job id");
@@ -271,7 +281,7 @@ proptest! {
             let test_broker = parking_lot::Mutex::new(
                 overdrive_core::eval_broker::EvaluationBroker::new(),
             );
-            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(),
+            dispatch(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
@@ -316,6 +326,12 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
     let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
 
     let driver: Arc<dyn Driver> = Arc::new(FailingDriver::new(reason_text));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
 
@@ -342,7 +358,8 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
@@ -455,6 +472,12 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
 
     let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
 
@@ -500,7 +523,8 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(

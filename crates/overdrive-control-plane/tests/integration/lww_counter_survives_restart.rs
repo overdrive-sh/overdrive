@@ -126,6 +126,12 @@ async fn dispatch_one_at_tick(
     tick: u64,
 ) -> Result<(), overdrive_control_plane::action_shim::ShimError> {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
@@ -134,7 +140,8 @@ async fn dispatch_one_at_tick(
 
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs,
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(

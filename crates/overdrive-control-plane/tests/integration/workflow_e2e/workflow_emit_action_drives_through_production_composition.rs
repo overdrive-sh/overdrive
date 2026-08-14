@@ -251,6 +251,11 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(driver);
+        Arc::new(r)
+    };
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -261,7 +266,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         store_path,
         Arc::clone(&obs),
         Arc::new(runtime),
-        driver,
+        drivers,
         Arc::clone(&clock),
         Arc::new(SimDataplane::new()),
         Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(

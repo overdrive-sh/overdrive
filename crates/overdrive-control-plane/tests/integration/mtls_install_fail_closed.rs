@@ -242,8 +242,12 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/mif/alloc/01")
             .expect("valid spiffe id"),
-        command: "/bin/true".to_owned(),
-        args: Vec::new(),
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: Vec::new(),
+            },
+        ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // The C3 provision seam SETS these — supplied `None` so the seam's own
@@ -356,7 +360,8 @@ impl Driver for RecordingDriver {
 /// orthogonal port is a sim double.
 async fn dispatch_one(
     action: Action,
-    driver: &dyn Driver,
+    drivers: &overdrive_core::traits::driver::DriverRegistry,
+    alloc_drivers: &overdrive_control_plane::action_shim::AllocDriverIndex,
     obs: &dyn ObservationStore,
     store: Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
     worker: &Arc<MtlsInterceptWorker>,
@@ -370,7 +375,8 @@ async fn dispatch_one(
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver,
+        drivers,
+        alloc_drivers,
         obs,
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -502,7 +508,13 @@ async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailC
     intercept.script_bind_fault(SimInterceptFault::TransparentListener { errno: libc::EPERM });
     let worker = build_worker(Arc::clone(&intercept) as Arc<dyn MtlsIntercept>);
 
-    let driver = RecordingDriver::new();
+    let driver = Arc::new(RecordingDriver::new());
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver) as Arc<dyn Driver>);
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let allocator = allocator_positioned_at(slot_index);
     let _guard = arm_netns_guard(NetSlot::new(slot_index).expect("slot in range"));
 
@@ -537,12 +549,20 @@ async fn drive_fail_closed(arm: Arm, slot_index: u16, alloc_name: &str) -> FailC
     let mut subscription: LagAwareSubscription =
         obs.subscribe_all_events().await.expect("subscribe to the observation store");
 
-    dispatch_one(action, &driver, obs.as_ref(), Arc::clone(&store), &worker, &allocator)
-        .await
-        .expect(
-            "the install failure must be RECORDED and the dispatch return Ok — a bubbled Err is \
+    dispatch_one(
+        action,
+        drivers.as_ref(),
+        &alloc_drivers,
+        obs.as_ref(),
+        Arc::clone(&store),
+        &worker,
+        &allocator,
+    )
+    .await
+    .expect(
+        "the install failure must be RECORDED and the dispatch return Ok — a bubbled Err is \
              the indefinite-Pending-retry regression",
-        );
+    );
 
     let rows = drain_alloc_rows(&mut subscription, &alloc).await;
     let outcome = FailClosedOutcome {

@@ -45,8 +45,12 @@ async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/sleep/alloc/ws22")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

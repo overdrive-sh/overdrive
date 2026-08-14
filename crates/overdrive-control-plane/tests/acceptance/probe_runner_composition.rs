@@ -73,8 +73,12 @@ fn sample_spec(alloc_id: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc_id.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl").expect("valid SpiffeId"),
-        command: "/bin/true".to_owned(),
-        args: vec![],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/true".to_owned(),
+                args: vec![],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::<ProbeDescriptor>::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.

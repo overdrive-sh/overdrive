@@ -155,8 +155,9 @@ fn build_spec(alloc: &AllocationId, command: &str, args: Vec<String>) -> Allocat
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/anl/alloc/01")
             .expect("valid spiffe id"),
-        command: command.to_owned(),
-        args,
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload { command: command.to_owned(), args },
+        ),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // The C3 provision seam SETS these (JOIN-2/6) — supplied None so the
@@ -212,7 +213,8 @@ async fn latest_row(obs: &dyn ObservationStore, alloc: &AllocationId) -> Option<
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_one(
     action: Action,
-    driver: &dyn Driver,
+    drivers: &overdrive_core::traits::driver::DriverRegistry,
+    alloc_drivers: &overdrive_control_plane::action_shim::AllocDriverIndex,
     obs: &dyn ObservationStore,
     store: Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
     worker: &Arc<MtlsInterceptWorker>,
@@ -226,7 +228,8 @@ async fn dispatch_one(
     let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver,
+        drivers,
+        alloc_drivers,
         obs,
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
@@ -268,6 +271,12 @@ async fn provision_failure_drives_alloc_to_failed_row_not_pending_retry() {
     // A SimDriver suffices — the provision seam fails (slot exhaustion) BEFORE
     // `Driver::start` is ever reached, so the driver is not exercised.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     // SATURATE the allocator: hold every slot `0..=NET_SLOT_MAX` so the NEW
     // alloc's `assign` returns `NetSlotExhausted`. Each `assign` is an in-memory
@@ -294,7 +303,8 @@ async fn provision_failure_drives_alloc_to_failed_row_not_pending_retry() {
             spec,
             kind: WorkloadKind::Service,
         },
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         Arc::clone(&store),
         &worker,
@@ -363,6 +373,12 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
         sim_clock,
         Arc::new(overdrive_host::RealCgroupFs::new()),
     ));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     // Fresh empty allocator → the alloc gets slot 0 → ovd-ns-0000. Derive the
     // plan for the RAII sweep + the expected-name assertion.
@@ -391,7 +407,8 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
             spec,
             kind: WorkloadKind::Service,
         },
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         Arc::clone(&store),
         &worker,
@@ -472,7 +489,8 @@ async fn alloc_lands_in_slot_netns_and_teardown_reaps_it_on_terminal() {
     // --- Terminal: StopAllocation tears the netns down + releases the slot ---
     let stop = dispatch_one(
         Action::StopAllocation { alloc_id: alloc.clone(), terminal: None },
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         Arc::clone(&store),
         &worker,
@@ -590,6 +608,12 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
     let worker = build_worker();
     // No driver call on the FinalizeFailed arm — a SimDriver is sufficient.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     let alloc = AllocationId::new("anl-stable").expect("valid alloc id");
     let workload = WorkloadId::new("svc-anl-stable").expect("valid workload id");
@@ -619,7 +643,8 @@ async fn finalize_failed_stable_does_not_tear_down_live_running_alloc() {
             alloc_id: alloc.clone(),
             terminal: Some(opt_out_stable_terminal()),
         },
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         Arc::clone(&store),
         &worker,
@@ -671,6 +696,12 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
     let obs = build_obs();
     let worker = build_worker();
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
 
     let alloc = AllocationId::new("anl-failed").expect("valid alloc id");
     let workload = WorkloadId::new("svc-anl-failed").expect("valid workload id");
@@ -695,7 +726,8 @@ async fn finalize_failed_genuine_failure_still_tears_down_alloc() {
             alloc_id: alloc.clone(),
             terminal: Some(TerminalCondition::Failed { exit_code: Some(1) }),
         },
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         Arc::clone(&store),
         &worker,

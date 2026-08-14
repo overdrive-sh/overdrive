@@ -350,8 +350,8 @@ impl ExecDriver {
     /// reference into the child's `nsproxy`, so closing the parent's
     /// FD after `spawn()` is safe.
     fn build_command(spec: &AllocationSpec, netns_fd: Option<std::os::fd::OwnedFd>) -> Command {
-        let mut cmd = Command::new(&spec.command);
-        cmd.args(&spec.args);
+        let mut cmd = Command::new(spec.driver.command());
+        cmd.args(spec.driver.args());
         cmd.kill_on_drop(false);
         // Pipe stderr per ADR-0033 Amendment 2026-05-10 / step 02-05:
         // the per-alloc watcher consumes lines into a bounded ring
@@ -489,7 +489,7 @@ impl Driver for ExecDriver {
                         source: err,
                     });
                 }
-                return Err(start_rejected(format!("spawn {}: {err}", spec.command)));
+                return Err(start_rejected(format!("spawn {}: {err}", spec.driver.command())));
             }
         };
 
@@ -1217,8 +1217,12 @@ mod lifecycle_hook_tests {
             alloc: alloc_id.clone(),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),
-            command: "/bin/true".to_owned(),
-            args: vec![],
+            driver: overdrive_core::traits::driver::DriverPayload::Exec(
+                overdrive_core::traits::driver::ExecPayload {
+                    command: "/bin/true".to_owned(),
+                    args: vec![],
+                },
+            ),
             resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
             probe_descriptors: Vec::<ProbeDescriptor>::new(),
             netns: None,

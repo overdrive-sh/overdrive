@@ -961,7 +961,8 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         // direct test-bench dispatch) emit `terminal: None` — the
         // reconciler is the single source of every terminal claim.
         vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
-        state.driver.as_ref(),
+        state.drivers.as_ref(),
+        &state.alloc_drivers,
         state.obs.as_ref(),
         state.dataplane.as_ref(),
         state.ca.as_ref(),

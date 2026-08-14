@@ -129,6 +129,12 @@ async fn release_action_dispatch_invokes_allocator_release() {
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let driver: Arc<dyn Driver> = Arc::new(InertDriver);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let writer_node = NodeId::new("writer-1").expect("NodeId");
 
@@ -144,7 +150,8 @@ async fn release_action_dispatch_invokes_allocator_release() {
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     dispatch(
         vec![action],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(

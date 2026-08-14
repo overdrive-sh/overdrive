@@ -52,8 +52,12 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/x/alloc/sg")
             .expect("valid spiffe id"),
-        command: "/bin/sleep".to_owned(),
-        args: vec!["60".to_owned()],
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: "/bin/sleep".to_owned(),
+                args: vec!["60".to_owned()],
+            },
+        ),
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the

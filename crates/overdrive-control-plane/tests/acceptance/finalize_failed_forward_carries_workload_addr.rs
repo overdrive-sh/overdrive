@@ -181,6 +181,12 @@ async fn finalize_and_read_successor(
     let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
         Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let driver: Arc<dyn Driver> = Arc::new(InertDriver);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::clone(&driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
     let writer_node = NodeId::new("writer-1").expect("NodeId");
     let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
@@ -200,7 +206,8 @@ async fn finalize_and_read_successor(
 
     dispatch(
         vec![Action::FinalizeFailed { alloc_id: alloc.clone(), terminal: Some(terminal) }],
-        driver.as_ref(),
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         dataplane.as_ref(),
         &overdrive_sim::adapters::ca::SimCa::new(Arc::new(

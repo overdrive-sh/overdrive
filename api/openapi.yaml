@@ -757,6 +757,18 @@ components:
           exec:
             $ref: '#/components/schemas/ExecInput'
             description: Native binary under cgroups v2 — the `[exec]` table in TOML.
+      - type: object
+        description: |-
+          Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
+          ADR-0083, GH #42).
+        required:
+        - vm
+        properties:
+          vm:
+            $ref: '#/components/schemas/VmInput'
+            description: |-
+              Cloud Hypervisor microVM — the `[vm]` table in TOML (ADR-0082 /
+              ADR-0083, GH #42).
       description: |-
         Driver dispatch on a [`JobSpecInput`].
 
@@ -765,8 +777,9 @@ components:
         → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
         unknown driver tables.
 
-        Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
-        new variants additively; no shape change to surrounding code.
+        Two variants as of ADR-0083 (GH #42, step 01-08): `Exec` (Phase 1) and
+        `Vm` (Cloud Hypervisor microVM). Future drivers (`wasm`) add new
+        variants additively; no shape change to surrounding code.
     DriverType:
       type: string
       description: |-
@@ -3279,6 +3292,35 @@ components:
         `{"kind": "driver", "data": "exec"}` for the typed variant
         (`DriverType` itself serialises as a kebab-case string per its own
         `#[serde(rename_all = "kebab-case")]`).
+    VmInput:
+      type: object
+      description: |-
+        Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
+        Mirrors the runtime `traits::driver::VmPayload` shape MINUS `volumes`
+        (deferred to Slice 04) — `String`, not `PathBuf`, for both `kernel`
+        and `rootfs` (serde-clean wire shape, matches `ExecInput.command`'s
+        shape).
+      required:
+      - command
+      - args
+      - kernel
+      - rootfs
+      properties:
+        args:
+          type: array
+          items:
+            type: string
+          description: Argv passed verbatim to the in-guest command.
+        command:
+          type: string
+          description: Command run INSIDE the guest.
+        kernel:
+          type: string
+          description: Operator-supplied kernel artifact path (BYO).
+        rootfs:
+          type: string
+          description: Operator-supplied rootfs artifact path (BYO).
+      additionalProperties: false
     WorkloadDescription:
       type: object
       description: |-

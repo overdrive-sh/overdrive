@@ -101,6 +101,12 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
 
     // --- Remaining action-shim ports (untouched by StartWorkflow) -----
     let driver = SimDriver::new(DriverType::Exec);
+    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
+        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
+        r.insert(Arc::new(driver));
+        Arc::new(r)
+    };
+    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let dataplane = SimDataplane::new();
@@ -127,7 +133,8 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     // --- Driving port: the action shim, off which the engine runs -----
     dispatch(
         vec![Action::StartWorkflow { start: spec, correlation }],
-        &driver,
+        drivers.as_ref(),
+        &alloc_drivers,
         obs.as_ref(),
         &dataplane,
         &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(

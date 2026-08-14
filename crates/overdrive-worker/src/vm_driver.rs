@@ -31,7 +31,7 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
 };
-use overdrive_core::traits::vmm::{Vmm, VmControl, VmExitWatch};
+use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig, VmConfinement, VmRunDir,
@@ -216,7 +216,8 @@ impl ClaimGuard {
     /// atomicity exists to close.
     fn try_begin_ending(&mut self) -> bool {
         let mut live = self.live.lock();
-        let held = matches!(live.get(&self.alloc), Some(VmSupervision::Starting | VmSupervision::Live(_)));
+        let held =
+            matches!(live.get(&self.alloc), Some(VmSupervision::Starting | VmSupervision::Live(_)));
         if held {
             live.insert(self.alloc.clone(), VmSupervision::EndingInFlight);
             self.emitted = true;
@@ -263,7 +264,12 @@ impl VmDriver {
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
     /// Arity and parameter order are pinned by ADR-0082 §D1.
     #[must_use]
-    pub fn new(vmm: Arc<dyn Vmm>, clock: Arc<dyn Clock>, fs: Arc<dyn CgroupFs>, layout: VmHostLayout) -> Self {
+    pub fn new(
+        vmm: Arc<dyn Vmm>,
+        clock: Arc<dyn Clock>,
+        fs: Arc<dyn CgroupFs>,
+        layout: VmHostLayout,
+    ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
         Self {
@@ -379,9 +385,12 @@ impl VmDriver {
         // — a limit-write failure must not abort a boot that is
         // otherwise healthy.
         let memory = MemoryPlan::derive(spec.resources.memory_bytes);
-        let cgroup_resources =
-            Resources { cpu_milli: spec.resources.cpu_milli, memory_bytes: memory.cgroup_max_bytes() };
-        if let Err(err) = self.cgroup_manager.write_resource_limits(&scope, &cgroup_resources).await {
+        let cgroup_resources = Resources {
+            cpu_milli: spec.resources.cpu_milli,
+            memory_bytes: memory.cgroup_max_bytes(),
+        };
+        if let Err(err) = self.cgroup_manager.write_resource_limits(&scope, &cgroup_resources).await
+        {
             warn!(
                 alloc = %spec.alloc,
                 scope = %scope,
@@ -397,7 +406,8 @@ impl VmDriver {
                 return Err(start_rejected(format!("stat rootfs master: {err}")));
             }
         };
-        let rootfs = RootfsPlan::for_alloc(self.layout.rootfs_master.clone(), master_bytes, &spec.alloc);
+        let rootfs =
+            RootfsPlan::for_alloc(self.layout.rootfs_master.clone(), master_bytes, &spec.alloc);
         let cmdline = KernelCmdline::platform_default(self.layout.arch);
         let config = VmConfig {
             alloc: spec.alloc.clone(),
@@ -506,8 +516,9 @@ impl Driver for VmDriver {
                 // failure still takes the ordinary cleanup-and-reject
                 // path below rather than leaving a Live entry with no
                 // EXEC ever sent.
-                let argv: Vec<String> =
-                    std::iter::once(spec.command.clone()).chain(spec.args.iter().cloned()).collect();
+                let argv: Vec<String> = std::iter::once(spec.driver.command().to_owned())
+                    .chain(spec.driver.args().iter().cloned())
+                    .collect();
                 let exec_message = BeaconMessage::Exec { argv };
                 let exec_write = async {
                     write_half.write_all(format!("{exec_message}\n").as_bytes()).await?;
@@ -572,7 +583,9 @@ impl Driver for VmDriver {
                     Some((&control, &rootfs)),
                 )
                 .await;
-                Err(start_rejected(format!("boot deadline ({VM_BOOT_DEADLINE:?}) elapsed with no beacon")))
+                Err(start_rejected(format!(
+                    "boot deadline ({VM_BOOT_DEADLINE:?}) elapsed with no beacon"
+                )))
             }
         }
     }
@@ -655,7 +668,11 @@ impl Driver for VmDriver {
         }
     }
 
-    async fn resize(&self, handle: &AllocationHandle, _resources: Resources) -> Result<(), DriverError> {
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        _resources: Resources,
+    ) -> Result<(), DriverError> {
         // Hotplug resize needs Cloud Hypervisor's `--api-socket` (kept
         // in `VmConfig` for exactly this future use, ADR-0082 §D4) —
         // not exercised by any ACL in this feature. This minimal body
@@ -708,9 +725,9 @@ async fn accept_ready(
         Ok(other) => {
             Err(std::io::Error::other(format!("beacon accept: expected READY, got {other:?}")))
         }
-        Err(parse_err) => {
-            Err(std::io::Error::other(format!("beacon accept: unparseable first line: {parse_err}")))
-        }
+        Err(parse_err) => Err(std::io::Error::other(format!(
+            "beacon accept: unparseable first line: {parse_err}"
+        ))),
     }
 }
 

@@ -3029,21 +3029,20 @@ async fn hydrate_service_alloc_facts(
     let restart_target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     // Slice 05 — the live driver command/args the liveness restart
     // replays. Same projection the WorkloadLifecycle Run branch uses
-    // (`workload_lifecycle.rs`). `WorkloadDriverV2::Vm` landed at step
-    // 01-02 (ADR-0083 Amendment 2026-08-12, GH #42) but replaying a
-    // Vm-driven restart needs step 01-08's `AllocationSpec.driver:
-    // DriverPayload` (ADR-0083 § D3).
+    // (`workload_lifecycle.rs`). `spec` here is a `ServiceV2` — per
+    // ADR-0083 §D4, `ServiceV2::from_submit` rejects `DriverInput::Vm`
+    // before a `ServiceV2` is ever constructed (a microVM is not
+    // mesh-enrolled, GH #222), so `WorkloadDriver::Vm` is provably
+    // unreachable here — reaching it would mean that invariant was
+    // bypassed elsewhere, a logic bug rather than a runtime condition.
     let (live_command, live_args) = match &spec.driver {
         overdrive_core::aggregate::WorkloadDriver::Exec(overdrive_core::aggregate::Exec {
             command,
             args,
         }) => (command, args),
-        #[expect(
-            clippy::todo,
-            reason = "RED scaffold: AllocationSpec.driver/DriverPayload (ADR-0083 § D3) lands at step 01-08 — liveness restart cannot replay a Vm-driven alloc until then"
-        )]
-        overdrive_core::aggregate::WorkloadDriver::Vm(_) => todo!(
-            "RED scaffold: liveness restart replay for the Vm driver lands at step 01-08 (AllocationSpec.driver: DriverPayload)"
+        overdrive_core::aggregate::WorkloadDriver::Vm(_) => unreachable!(
+            "ServiceV2::from_submit rejects DriverInput::Vm; a ServiceV2 with \
+             WorkloadDriver::Vm should never exist"
         ),
     };
     let rows = state
@@ -3186,8 +3185,12 @@ fn liveness_restart_spec(
     overdrive_core::traits::driver::AllocationSpec {
         alloc: alloc_id.clone(),
         identity: identity.clone(),
-        command: command.to_owned(),
-        args: args.to_vec(),
+        driver: overdrive_core::traits::driver::DriverPayload::Exec(
+            overdrive_core::traits::driver::ExecPayload {
+                command: command.to_owned(),
+                args: args.to_vec(),
+            },
+        ),
         resources: spec.resources,
         probe_descriptors: spec
             .startup_probes

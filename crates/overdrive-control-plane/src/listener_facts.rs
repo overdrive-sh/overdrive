@@ -932,7 +932,16 @@ mod tests {
             state.intent_redb_path.clone(),
             Arc::clone(&state.obs),
             Arc::clone(&state.runtime),
-            Arc::clone(&state.driver),
+            // `AppState::new` accepts a single driver and wraps it into a
+            // fresh registry (ADR-0083 §D1, GH #42); this test fixture
+            // only ever composes a single Exec entry.
+            state
+                .drivers
+                .get(overdrive_core::traits::driver::DriverType::Exec)
+                .cloned()
+                .unwrap_or_else(|| {
+                    unreachable!("test fixture always composes a single Exec driver")
+                }),
             Arc::clone(&state.clock),
             Arc::clone(&state.dataplane),
             Arc::clone(&state.ca),

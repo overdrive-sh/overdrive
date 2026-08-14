@@ -119,7 +119,7 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
     // test-injection precedent as the `dataplane` parameter below.
     let kek: Arc<dyn overdrive_core::ca::kek::Kek> =
         Arc::new(overdrive_host::ca::SystemdCredsKeyring::new());
-    run_inner(args, None, kek).await
+    run_inner(args, None, kek, |c| c).await
 }
 
 /// Test-only sibling of [`run`].
@@ -147,13 +147,63 @@ pub async fn run_with_dataplane(
     dataplane: Arc<dyn Dataplane>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane), kek).await
+    run_inner(args, Some(dataplane), kek, |c| c).await
+}
+
+/// Test-only sibling of [`run_with_dataplane`] that ALSO points the
+/// composition root at real, pre-staged VM boot artifacts.
+///
+/// ADR-0082 / ADR-0083, GH #42, step 01-08 — the 01-04 `vm_fixture`'s
+/// staged kernel + ext4 rootfs. `overdrive serve` then attempts the real
+/// discover→probe→insert sequence for the `Vm` driver (production
+/// `run_server`'s own composition, unchanged from every other caller):
+/// a `[vm]` deploy against the resulting handle drives a REAL Cloud
+/// Hypervisor VM. Gated behind `integration-tests` — mirrors
+/// `ServerConfig.vm_artifacts`'s own gate. The `VmBootArtifacts` type is
+/// itself gated the same way, so it is threaded in via a closure over
+/// `ServerConfig` — that keeps `run_inner`'s own signature free of the
+/// gated type, since `run_inner` is also called from the two ungated
+/// siblings above.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_dataplane_and_vm_artifacts(
+    args: ServeArgs,
+    dataplane: Arc<dyn Dataplane>,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
+        vm_artifacts: Some(vm_artifacts),
+        ..c
+    })
+    .await
+}
+
+/// Test-only sibling of [`run`] (NOT of [`run_with_dataplane`]) used only
+/// to prove the mTLS-composition invariant against a REAL `[vm]` boot.
+///
+/// S-VM-05 / S-VM-74, GH #248 / ADR-0074 trap. Unlike
+/// [`run_with_dataplane_and_vm_artifacts`], this sibling leaves
+/// `dataplane_override` **unset** — production `run_server` therefore
+/// composes the real `EbpfDataplane` and `compose_mtls =
+/// dataplane_override.is_none()` evaluates `true`, exactly as it does on
+/// the production `run` path. The KEK is still injected (a hermetic
+/// `SimKek`) since KEK choice is orthogonal to the mTLS-composition gate
+/// this sibling exists to exercise faithfully.
+#[cfg(feature = "integration-tests")]
+pub async fn run_with_vm_artifacts(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
+) -> Result<ServeHandle, CliError> {
+    run_inner(args, None, kek, move |c| ServerConfig { vm_artifacts: Some(vm_artifacts), ..c })
+        .await
 }
 
 async fn run_inner(
     args: ServeArgs,
     dataplane_override: Option<Arc<dyn Dataplane>>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+    with_config: impl FnOnce(ServerConfig) -> ServerConfig,
 ) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
@@ -220,13 +270,13 @@ async fn run_inner(
     // consumes `config.kek` and never constructs the production binding inline
     // (inline construction was the regression). The KEK injection mirrors the
     // `dataplane_override` test-injection precedent above.
-    let config = ServerConfig {
+    let config = with_config(ServerConfig {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         dataplane_override,
         ..ServerConfig::new(kek)
-    };
+    });
     let inner = run_server(config, fs.clone()).await.map_err(|e| {
         // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
         // `ViewStore` boot-time failure (open RedbViewStore, probe,
