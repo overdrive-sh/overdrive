@@ -31,18 +31,19 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, ExitKind, Resources,
 };
 use overdrive_core::traits::vmm::{
-    Result as VmmResult, Vmm, VmControl, VmProcess, VmTermination, VmmProbeError,
+    Result as VmmResult, Vmm, VmControl, VmExitWatch, VmProcess, VmTermination, VmmProbeError,
 };
-use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
+use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, RootfsPlan, VmConfig, VmConfinement, VmRunDir,
+    VmmIdentity,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::{SimCgroupFs, SimVmm};
 use overdrive_worker::vm_driver::VmHostLayout;
 use overdrive_worker::VmDriver;
 use tempfile::TempDir;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 // ---------------------------------------------------------------------
@@ -205,6 +206,7 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
+    let rootfs_master = layout.rootfs_master.clone();
     let sim = SimVmm::new();
     sim.inject_create_failure();
     let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
@@ -227,6 +229,33 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
         "run directory must be removed after a Vmm::create failure, still present at {}",
         run_dir.path().display()
     );
+
+    // @mandatory:mutation_target companions (01-07 review D2) — a
+    // mutant that drops either cleanup call in
+    // `cleanup_after_start_failure` must not survive with only the
+    // run-directory assertion above.
+    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
+    assert!(
+        !rootfs_plan.clone_dest().exists(),
+        "rootfs clone must be removed after a Vmm::create failure, still present at {}",
+        rootfs_plan.clone_dest().display()
+    );
+
+    // NOT asserted: cgroup-scope removal via `SimCgroupFs::snapshot`.
+    // Empirically, `cleanup_after_start_failure`'s `remove_workload_scope`
+    // call fails silently here — `SimCgroupFs::remove_dir`'s
+    // "any descendant path blocks removal" check treats the
+    // controller-interface files this arm already wrote
+    // (`cpu.weight`, `memory.max` from `write_resource_limits`, plus
+    // `cgroup.kill` from this same cleanup path) as blocking children,
+    // so the scope directory is never actually removed from the sim's
+    // state — a `SimCgroupFs` modeling gap relative to a real cgroup
+    // v2 `rmdir` (which succeeds regardless of these interface-file
+    // writes), out of this file's boundary to fix. See the 01-07
+    // review remediation FIX 3 report for the full finding; the
+    // `cleanup_after_start_failure` call sequence itself is unchanged
+    // by this step.
 }
 
 /// Crafter-authored race-arm example: the VMM exits before the guest
@@ -238,6 +267,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
+    let rootfs_master = layout.rootfs_master.clone();
     let sim = SimVmm::new();
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
     let (driver, _clock) = build_driver(std::sync::Arc::new(dies_before_beacon), layout);
@@ -269,6 +299,20 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         !sim.is_live(1_000_000),
         "Vmm::terminate must have been invoked on the exit-before-beacon arm"
     );
+
+    // @mandatory:mutation_target companions (01-07 review D2).
+    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
+    assert!(
+        !rootfs_plan.clone_dest().exists(),
+        "rootfs clone must be removed on the exit-before-beacon arm, still present at {}",
+        rootfs_plan.clone_dest().display()
+    );
+
+    // NOT asserted: cgroup-scope removal — see the identical finding
+    // documented in `create_failure_releases_claim_and_cleans_up_run_directory`
+    // above (`SimCgroupFs::remove_dir` modeling gap, 01-07 review
+    // remediation FIX 3 report).
 }
 
 /// Crafter-authored race-arm example: nothing ever beacons and nothing
@@ -281,6 +325,7 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
+    let rootfs_master = layout.rootfs_master.clone();
     let sim = SimVmm::new();
     let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
 
@@ -338,6 +383,20 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
         !sim.is_live(1_000_000),
         "Vmm::terminate must have been invoked on the deadline arm"
     );
+
+    // @mandatory:mutation_target companions (01-07 review D2).
+    let master_bytes = std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
+    let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
+    assert!(
+        !rootfs_plan.clone_dest().exists(),
+        "rootfs clone must be removed on the deadline arm, still present at {}",
+        rootfs_plan.clone_dest().display()
+    );
+
+    // NOT asserted: cgroup-scope removal — see the identical finding
+    // documented in `create_failure_releases_claim_and_cleans_up_run_directory`
+    // above (`SimCgroupFs::remove_dir` modeling gap, 01-07 review
+    // remediation FIX 3 report).
 }
 
 // ---------------------------------------------------------------------
@@ -368,17 +427,24 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 
     let (handle, mut stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
-    // The guest reports its supervised workload's exit status FIRST —
-    // bytes are queued in the kernel socket buffer as soon as
-    // `write_all` resolves.
-    stream.write_all(b"EXIT 7\n").await.expect("write EXIT report");
-
-    // THEN the VMM's own teardown exit follows (the same event a
-    // self-powered-off guest triggers on the real substrate) — this
-    // must never overwrite the already-reported guest status.
+    // The VMM's OWN teardown exit (the same event a self-powered-off
+    // guest triggers on the real substrate) resolves FIRST this time
+    // (01-07 review D4) — forcing the exit watcher's
+    // `GUEST_REPORT_DRAIN_MAX_YIELDS` retry loop to actually iterate
+    // while it waits out the guest's own report, written only after a
+    // short cooperative-yield delay below. A prior version of this test
+    // wrote the guest's EXIT line BEFORE calling `terminate`, which let
+    // the watcher's FIRST `select!` poll win on the guest-line arm
+    // outright and never exercised the retry loop at all.
     let control =
         VmControl { pid: handle.pid.expect("VmDriver populates pid"), api_socket: PathBuf::new() };
     sim.terminate(&control, Duration::ZERO).await.expect("terminate the VMM process");
+
+    // THEN the guest reports its supervised workload's exit status,
+    // deliberately delayed so the watcher's retry loop has already
+    // started polling before this line becomes readable.
+    yield_for_task_poll().await;
+    stream.write_all(b"EXIT 7\n").await.expect("write EXIT report");
 
     let event = exit_rx.recv().await.expect("exit watcher emits exactly one ExitEvent");
     assert_eq!(event.alloc, alloc);
@@ -386,6 +452,44 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
         event.kind,
         ExitKind::Crashed { exit_code: Some(7), signal: None },
         "ExitKind must reflect the guest's EXIT report, never the VMM's own exit status"
+    );
+}
+
+/// ADR-0082 §D7 amendment (GH #42, item 2 / 01-07 review remediation
+/// FIX 2) — once the beacon accepts and reads `READY`, `start` writes
+/// the operator's command to the guest as one `EXEC <json-argv>` line
+/// BEFORE returning `Ok`. `argv` is `[spec.command, ...spec.args]` —
+/// the kernel cmdline never carries it (`KernelCmdline` stays
+/// platform-only, ADR-0082 §D2).
+#[tokio::test]
+async fn start_writes_exec_message_with_spec_command_and_args_before_returning_ok() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+
+    let alloc = AllocationId::new("alloc-exec-write").expect("valid alloc id");
+    let spec = build_spec(&alloc);
+
+    let (_handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    // Bounded real-wall-clock timeout, not a `SimClock` wait — this
+    // test has no reason for the driver to ever hang on the EXEC
+    // write, so a bug here should fail fast and cleanly rather than
+    // riding nextest's own 120s slow-test kill.
+    tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+        .await
+        .expect("read the first host -> guest line within 5s")
+        .expect("read the first host -> guest line");
+
+    let message: BeaconMessage = line.trim_end().parse().expect("EXEC line parses as a BeaconMessage");
+    assert_eq!(
+        message,
+        BeaconMessage::Exec { argv: vec!["/sbin/init".to_owned()] },
+        "the first host -> guest line after READY must be EXEC with spec.command/args as argv"
     );
 }
 
@@ -569,18 +673,17 @@ async fn stop_sequence_c_already_dead_vmm_returns_ok() {
 /// terminal disposition — AC #3's "never a crash", not "the second
 /// call is always `Ok`".
 ///
-/// The second call's `Result` is legitimately racy against the exit
-/// watcher `start`'s beacon-win arm spawned (ADR-0082 §D3): the first
-/// call's `Vmm::terminate` wakes that watcher's `exit.recv()`, and the
-/// watcher's `try_begin_ending` (brief §105a.3 transition 3, `Live ->
-/// EndingInFlight`) races independently of `stop`'s own extraction —
-/// by design, the claim's lifecycle is the exit watcher's / shim's to
-/// advance (transitions 3-6), not `stop`'s. If the watcher wins that
-/// race first, the second `stop` finds no `Live` entry and returns
-/// `Err(NotFound)` — the SAME idempotent-double-stop outcome
-/// `ExecDriver::stop` returns unconditionally (it removes its live
-/// entry on the FIRST call: `driver.rs:590`). Both outcomes are
-/// therefore correct; only a panic would be a defect.
+/// The FIRST call moves the entry `Live -> EndingInFlight`
+/// synchronously, under the SAME lock as its own extraction (brief
+/// §105a.3 transition 3b, 01-07 review remediation FIX 1) — no longer
+/// racing the exit watcher's independent `try_begin_ending` (transition
+/// 3) to decide who wins. The second call therefore deterministically
+/// finds no `Live` entry and returns `Err(NotFound)` — the SAME
+/// idempotent-double-stop outcome `ExecDriver::stop` returns
+/// unconditionally (it removes its live entry on the FIRST call:
+/// `driver.rs:590`). The assertion still accepts `Ok(())` as well —
+/// AC #3's "never a crash" contract, not a claim about which arm fires
+/// — but only the `Err(NotFound)` arm is reachable post-fix.
 #[tokio::test]
 async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let tmp = TempDir::new().expect("tempdir");
@@ -602,14 +705,10 @@ async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let first_result = first_stop.await.expect("first stop task did not panic");
     assert!(first_result.is_ok(), "first stop must return Ok: {first_result:?}");
 
-    // Second call — races the exit watcher's independent claim
-    // transition (see the test's doc comment above). Both `Ok` (the
-    // watcher hasn't yet claimed `EndingInFlight`, so this call
-    // redundantly but harmlessly re-runs the idempotent
-    // terminate/cleanup steps) and `Err(NotFound)` (the watcher won
-    // first) are the terminal, non-crashing dispositions AC #3
-    // requires; the call already did not panic by virtue of reaching
-    // this line.
+    // Second call — deterministically Err(NotFound) post-FIX-1 (see the
+    // test's doc comment above); the union match still stands as the
+    // honest AC #3 contract ("never a crash"), not a claim about which
+    // arm fires.
     let second_result = driver.stop(&handle).await;
     assert!(
         matches!(
@@ -624,6 +723,87 @@ async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
         !run_dir.path().exists(),
         "run directory must be removed after stop, still present at {}",
         run_dir.path().display()
+    );
+}
+
+/// Test-only `Vmm` decorator: hands back a [`VmExitWatch`] that NEVER
+/// resolves (backed by a fresh oneshot pair whose sender is
+/// deliberately leaked). Structurally rules out the SPAWNED EXIT
+/// WATCHER's own independent `try_begin_ending` transition as an
+/// alternative explanation for `status()` reporting `NotFound` after
+/// `stop()` — without this isolation, `stop_ok_then_status_reports_not_found`
+/// below observably PASSED even against the pre-fix `stop` (01-07
+/// review remediation FIX 1 / BLOCKER D1), because the watcher's own
+/// exit-driven transition won the race often enough to produce the
+/// SAME correct-looking outcome by coincidence. A dropped sender would
+/// ALSO resolve `recv()` (to `None`) — itself an observable "exited"
+/// signal — so the sender must stay alive, never dropped and never
+/// sent, for the rest of the process.
+#[derive(Clone)]
+struct NeverSignalsExit {
+    inner: SimVmm,
+}
+
+#[async_trait]
+impl Vmm for NeverSignalsExit {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config).await?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        // Deliberate permanent leak — see the struct doc comment.
+        std::mem::forget(tx);
+        Ok(VmProcess { control: process.control, exit: VmExitWatch::new(rx) })
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+/// The `Driver::stop` post-condition (driver.rs, binding): after
+/// `stop()` returns `Ok(())`, a subsequent `status()` against the SAME
+/// handle returns `Err(DriverError::NotFound)`. 01-07 review
+/// remediation FIX 1 / BLOCKER D1 regression test — `stop` moves the
+/// entry `Live -> EndingInFlight` synchronously (transition 3b) so
+/// `status`'s existing `EndingInFlight -> NotFound` mapping applies
+/// immediately. Uses [`NeverSignalsExit`] so the spawned exit watcher
+/// can never independently race to the SAME observable outcome — the
+/// ONLY path that can move this allocation out of `Live` here is
+/// `stop`'s own synchronous transition.
+#[tokio::test]
+async fn stop_ok_then_status_reports_not_found() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let never_signals_exit = NeverSignalsExit { inner: sim };
+    let (driver, clock) = build_driver(std::sync::Arc::new(never_signals_exit), layout);
+
+    let alloc = AllocationId::new("alloc-stop-then-status").expect("valid alloc id");
+    let spec = build_spec(&alloc);
+
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+
+    let driver_for_task = driver.clone();
+    let handle_owned = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_task.stop(&handle_owned).await });
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(2));
+    let stop_result = stop_task.await.expect("stop task did not panic");
+    assert!(stop_result.is_ok(), "stop must return Ok: {stop_result:?}");
+
+    let status_result = driver.status(&handle).await;
+    assert!(
+        matches!(status_result, Err(overdrive_core::traits::driver::DriverError::NotFound { .. })),
+        "status after a successful stop must report NotFound per the Driver::stop \
+         post-condition (driver.rs), got {status_result:?}"
     );
 }
 

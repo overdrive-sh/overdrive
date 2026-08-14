@@ -176,8 +176,13 @@ enum VmSupervision {
     /// Running: the claim plus the per-allocation live state.
     Live(LiveVm),
     /// The ending is being authored; the live state has been released.
-    /// Reachable only via [`ClaimGuard::try_begin_ending`] — no caller
-    /// in this step's scope transitions into it a second way.
+    /// Reachable via [`ClaimGuard::try_begin_ending`] (transition 3 —
+    /// the exit watcher's natural-exit path) OR synchronously from
+    /// [`VmDriver::stop`] on the operator-initiated stop path (brief
+    /// §105a.3 transition 3b) — two independent producers of this SAME
+    /// terminal-pending state, both satisfying the `Driver::stop`
+    /// post-condition (driver.rs) that a subsequent `status()` reports
+    /// `Err(NotFound)`.
     EndingInFlight,
 }
 
@@ -469,7 +474,36 @@ impl Driver for VmDriver {
         };
 
         match outcome {
-            BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
+            BootRaceOutcome::Beacon(Ok((reader, mut write_half))) => {
+                // ADR-0082 §D7 amendment (GH #42, item 2): the
+                // operator's command travels host -> guest as EXEC,
+                // immediately after READY is accepted and before
+                // anything else touches this connection — the kernel
+                // cmdline never carries it. Written BEFORE the beacon
+                // session is stored / start returns Ok, so a write
+                // failure still takes the ordinary cleanup-and-reject
+                // path below rather than leaving a Live entry with no
+                // EXEC ever sent.
+                let argv: Vec<String> =
+                    std::iter::once(spec.command.clone()).chain(spec.args.iter().cloned()).collect();
+                let exec_message = BeaconMessage::Exec { argv };
+                let exec_write = async {
+                    write_half.write_all(format!("{exec_message}\n").as_bytes()).await?;
+                    write_half.flush().await
+                }
+                .await;
+
+                if let Err(err) = exec_write {
+                    self.cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some((&control, &rootfs)),
+                    )
+                    .await;
+                    return Err(start_rejected(format!("EXEC write failed: {err}")));
+                }
+
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
@@ -524,7 +558,7 @@ impl Driver for VmDriver {
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
         let extracted = {
             let mut live = self.live.lock();
-            match live.get_mut(&handle.alloc) {
+            let fields = match live.get_mut(&handle.alloc) {
                 Some(VmSupervision::Live(live_vm)) => Some((
                     live_vm.control.clone(),
                     live_vm.beacon.take(),
@@ -533,7 +567,30 @@ impl Driver for VmDriver {
                     live_vm.rootfs.clone(),
                 )),
                 _ => None,
+            };
+            // Transition 3b (brief §105a.3): the operator-stop path's
+            // OWN synchronous Live -> EndingInFlight move, under the
+            // SAME lock as the extraction above. Required by the
+            // `Driver::stop` post-condition (driver.rs) — a subsequent
+            // `status()` must report `Err(NotFound)` immediately, not
+            // only once the exit watcher's independent transition 3
+            // eventually runs. Never a full remove: `status` and
+            // `live_allocations` both already treat `EndingInFlight`
+            // as "not Held", and a full remove would reopen a second
+            // authorship path onto the SAME allocation's ending
+            // (`VmReclamation`'s future `PlatformReclaimed`, ADR-0082
+            // §D4) — exactly the hazard `EndingInFlightIsNeverReclaimed`
+            // exists to forbid.
+            // `@mandatory:mutation_target` — a mutant that drops or
+            // no-ops this insert leaves the entry `Live` after `stop`
+            // returns `Ok`, so `status` keeps reporting `Running`
+            // instead of the `Driver::stop` post-condition's
+            // `Err(NotFound)`; `stop_ok_then_status_reports_not_found`
+            // exists to catch exactly that.
+            if fields.is_some() {
+                live.insert(handle.alloc.clone(), VmSupervision::EndingInFlight);
             }
+            fields
         };
         let Some((control, beacon, scope, run_dir, rootfs)) = extracted else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
