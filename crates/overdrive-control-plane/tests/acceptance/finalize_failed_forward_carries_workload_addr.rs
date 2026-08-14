@@ -273,14 +273,41 @@ proptest! {
         );
     }
 
-    /// PROPERTY (genuine terminal drops): for ANY IPv4 `addr` AND ANY genuine
-    /// terminal (`Failed` / `Completed` / `BackoffExhausted`), a `FinalizeFailed`
-    /// against the SAME `Running` `Some(addr)` prior row writes a successor row
-    /// that lands `Failed` AND drops `workload_addr` to `None` — a dead alloc is
-    /// not a live backend.
+    /// PROPERTY (genuine terminal drops `workload_addr`; row `state` follows
+    /// the terminal claim's own success/failure identity): for ANY IPv4
+    /// `addr` AND ANY non-`Stable` terminal (`Failed` / `Completed` /
+    /// `BackoffExhausted`), a `FinalizeFailed` against the SAME `Running`
+    /// `Some(addr)` prior row drops `workload_addr` to `None` — a dead alloc
+    /// is not a live backend, whether the terminal is success or failure.
+    /// The row's `state` mirrors the terminal's own variant (per
+    /// `TerminalCondition::Completed` / `::Failed`'s docs: "branch on the
+    /// variant, never on exit_code != 0"): `Completed` (a Job-kind clean
+    /// exit — the success case) lands `Terminated`; `Failed` /
+    /// `BackoffExhausted` land `Failed`.
     ///
-    /// Kills: always-`prior` (would keep `Some(addr)` on a genuine terminal) and
-    /// swap-arms (would keep addr on the genuine arm).
+    /// **Corrected** (microvm-driver-cloud-hypervisor step 01-08 review
+    /// remediation, S-VM-01): this property previously asserted
+    /// `state == AllocState::Failed` uniformly, including for `Completed`.
+    /// That was wrong — `TerminalCondition::Completed`'s own doc names exit
+    /// code 0 "the canonical success", and the production
+    /// `action_shim::dispatch` `FinalizeFailed` arm forcing `Completed` to
+    /// `AllocState::Failed` (while forward-carrying the prior row's
+    /// `reason: Stopped { by: Process }`, written by
+    /// `exit_observer::classify()`'s `CleanExit` branch) produced a
+    /// `Failed` + `Stopped { by: Process }` row `classify()` itself never
+    /// constructs — the exact S-VM-01 walking-skeleton finding (a VM guest
+    /// that exited 0 was reported Failed to the operator). This was already
+    /// the ONLY place asserting that pairing: `streaming.rs`'s
+    /// `workload_event_from_terminal` independently projects
+    /// `Completed -> JobSubmitEvent::Succeeded`, `streaming_submit.rs`
+    /// hand-builds `Terminated` + `Completed` fixtures, and
+    /// `job_kind_streaming.rs`'s S-02-01/S-02-04 assert `Succeeded` on the
+    /// streaming path for a zero-exit Job — this property's `state`
+    /// assertion had not caught up.
+    ///
+    /// Kills: always-`prior` (would keep `Some(addr)` on a genuine terminal),
+    /// swap-arms (would keep addr on the genuine arm), and a regression of
+    /// the `Completed -> Terminated` mapping back to unconditional `Failed`.
     #[test]
     fn finalize_failed_genuine_terminal_drops_workload_addr(
         a in any::<u8>(), b in any::<u8>(), c in any::<u8>(), d in any::<u8>(),
@@ -292,12 +319,18 @@ proptest! {
         ],
     ) {
         let addr = Ipv4Addr::new(a, b, c, d);
+        let expected_state = if matches!(terminal, TerminalCondition::Completed { .. }) {
+            AllocState::Terminated
+        } else {
+            AllocState::Failed
+        };
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let (state, carried) = rt.block_on(finalize_and_read_successor(terminal, addr));
         prop_assert_eq!(
             state,
-            AllocState::Failed,
-            "a genuine FinalizeFailed terminal must land the row Failed",
+            expected_state,
+            "Completed (success) must land Terminated; Failed/BackoffExhausted (genuine \
+             failure) must land Failed",
         );
         prop_assert_eq!(
             carried,

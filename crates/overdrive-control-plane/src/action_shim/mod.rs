@@ -1185,7 +1185,35 @@ async fn dispatch_single(
             // the alloc. Hoisted once here and reused at both teardown
             // sites so the row-state and teardown decisions cannot drift.
             let is_stable = matches!(terminal, Some(TerminalCondition::Stable { .. }));
-            let finalized_state = if is_stable { prior_row.state } else { AllocState::Failed };
+            // The `terminal` claim's own variant identity IS the success/failure
+            // classification (per `TerminalCondition::Completed`'s and `::Failed`'s
+            // own docs: "downstream consumers must not redo the comparison ...
+            // branch on the variant, never on exit_code != 0"). `Stable` keeps the
+            // row `Running` (handled above, and unaffected by this addition — every
+            // OTHER `is_stable`-gated decision in this function, e.g. `workload_addr`
+            // forward-carry and the driver/teardown hooks below, still keys off
+            // `is_stable` alone; only the STATE computation gains a second case).
+            // Of the remaining terminal claims, `Completed` is ALSO a success (a
+            // Job-kind clean exit) and MUST land `Terminated`, matching
+            // `exit_observer::classify()`'s own `ExitKind::CleanExit ->
+            // AllocState::Terminated` mapping (the observer's own row, written on
+            // the prior tick, already carries `Terminated`). Forcing it to `Failed`
+            // here silently overwrote that success with a failure while still
+            // forward-carrying the observer's `reason: Stopped { by: Process }`
+            // verbatim (a few lines below) -- landing a `Failed` + `Stopped { by:
+            // Process }` row that `classify()` itself never constructs (the
+            // microvm-driver-cloud-hypervisor S-VM-01 walking-skeleton finding: a
+            // VM guest that exited 0 was reported Failed to the operator). Every
+            // OTHER terminal claim (`Failed` / `BackoffExhausted` / `ServiceFailed`
+            // / `Stopped` / `Custom`) is a genuine failure and lands `Failed`.
+            let is_completed = matches!(terminal, Some(TerminalCondition::Completed { .. }));
+            let finalized_state = if is_stable {
+                prior_row.state
+            } else if is_completed {
+                AllocState::Terminated
+            } else {
+                AllocState::Failed
+            };
             let updated_at = LogicalTimestamp::dominating(
                 tick.tick,
                 prior_row.node_id.clone(),

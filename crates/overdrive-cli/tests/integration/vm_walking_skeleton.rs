@@ -134,12 +134,12 @@
 //! vsock-dependent) remain GREEN throughout. This is the maximal
 //! evidence available that the guest-vsock transport itself works.
 //!
-//! **Two SEPARATE, NEWLY-EXPOSED blockers remain — neither is the vsock
-//! gap, and neither is fixable within this step's file boundary
+//! **One blocker remains — S-VM-05 / S-VM-74 — neither the vsock gap nor
+//! fixable within this step's file boundary
 //! (`crates/overdrive-init`, `crates/overdrive-testing`,
-//! `crates/overdrive-core`'s beacon module, this file).** Both were
-//! UNREACHABLE before this fix (every scenario that would have hit them
-//! was vsock-blocked first), so their `#[ignore]` reasons name them
+//! `crates/overdrive-core`'s beacon module, this file).** It was
+//! UNREACHABLE before the vsock fix (every scenario that would have hit
+//! it was vsock-blocked first), so its `#[ignore]` reason names it
 //! explicitly rather than reusing the vsock text:
 //!
 //! - **S-VM-05 / S-VM-74** (both mTLS-composed, real `EbpfDataplane`):
@@ -149,25 +149,36 @@
 //!   state beforehand, ruling out the routine leftover-attachment class
 //!   `debugging.md` documents. Root cause is in `overdrive-dataplane` /
 //!   the veth-provisioner, outside this step's scope.
-//! - **S-VM-01** (the walking skeleton itself): the guest-side mechanism
-//!   works correctly (READY, EXEC, `EXIT 0` all confirmed over vsock —
-//!   the SAME mechanism S-VM-02/S-VM-15 prove GREEN), but the terminal
-//!   observation row lands `AllocStateWire::Failed` with
-//!   `TransitionReason::Stopped{by:Process}` — a state/reason pairing
-//!   `exit_observer.rs`'s own `classify()` never produces (that reason
-//!   always pairs with `Terminated`). Reproduced twice, deterministically.
-//!   Root cause is downstream of the vsock/exit-report mechanism —
-//!   likely the observation-store write path or a reconciler's row
-//!   mutation, not the per-driver exit-observer dispatch itself (which
-//!   reads architecturally sound at a glance) — outside this step's
-//!   scope. This is 01-08's own newly-introduced multi-driver
-//!   exit-observer machinery, never previously exercisable through a
-//!   REAL VM exit until this fix unblocked vsock.
 //!
-//! S-VM-02, S-VM-03, S-VM-04, S-VM-14, and S-VM-15 are GREEN and carry
-//! no `#[ignore]`. S-VM-01, S-VM-05, and S-VM-74 carry a NEW
-//! `#[ignore]` each, citing the specific finding above — never the
-//! (now-closed) vsock reason.
+//! **S-VM-01 (the walking skeleton itself) — CLOSED (step 01-08 review
+//! remediation, second pass, 2026-08-14).** The guest-side mechanism
+//! always worked correctly (READY, EXEC, `EXIT 0` all confirmed over
+//! vsock — the SAME mechanism S-VM-02/S-VM-15 prove GREEN); the terminal
+//! observation row landed `AllocStateWire::Failed` with
+//! `TransitionReason::Stopped{by:Process}` — a state/reason pairing
+//! `exit_observer.rs`'s own `classify()` never produces (that reason
+//! always pairs with `Terminated`). Root cause was downstream of the
+//! vsock/exit-report mechanism, confirming the original finding's own
+//! hypothesis: `action_shim::dispatch`'s `Action::FinalizeFailed` arm
+//! (`crates/overdrive-control-plane/src/action_shim/mod.rs`) collapsed
+//! EVERY non-`Stable` `TerminalCondition` — including `Completed` (the
+//! Job-kind clean-exit SUCCESS terminal `WorkloadLifecycle::
+//! classify_natural_exit_terminal` emits for exactly this row) — to
+//! `AllocState::Failed`, while forward-carrying the prior row's
+//! `reason: Stopped{by:Process}` (written correctly by `exit_observer`'s
+//! `classify()` a tick earlier) unchanged. Fixed by giving `Completed`
+//! its own `AllocState::Terminated` case, alongside the pre-existing
+//! `Stable` special-case — matching `TerminalCondition::Completed`'s own
+//! documented "exit code 0 is the canonical success" contract and the
+//! already-correct sibling `streaming.rs::workload_event_from_terminal`
+//! projection (`Completed -> JobSubmitEvent::Succeeded`). The
+//! per-driver exit-observer dispatch itself (one task per `DriverRegistry`
+//! entry, ADR-0083 §D2a) was never at fault.
+//!
+//! S-VM-01, S-VM-02, S-VM-03, S-VM-04, S-VM-14, and S-VM-15 are GREEN
+//! and carry no `#[ignore]`. S-VM-05 and S-VM-74 carry the EBUSY
+//! `#[ignore]` above — never the (now-closed) vsock reason and never
+//! the (now-closed) terminal-row-classification reason.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -432,7 +443,6 @@ async fn poll_until_terminal(
 /// the operator.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): the guest reaches READY, execs, and reports EXIT 0 over vsock correctly (confirmed -- S-VM-02/S-VM-15's identical mechanism passes cleanly), but the terminal row lands AllocStateWire::Failed with TransitionReason::Stopped{by:Process} -- a combination exit_observer.rs's own classify() never produces (Stopped{by:Process} always pairs with AllocState::Terminated). Reproduced twice, deterministically, after clean cgroup/veth/run-dir state. Root cause not yet in overdrive-init/vm_fixture.rs/beacon.rs (all outside this crate); the per-driver exit-observer dispatch in overdrive-control-plane/src/lib.rs looks architecturally sound at a glance, so the defect likely sits downstream in the observation-store write path or a reconciler's row mutation, not the dispatch itself. Needs investigation in overdrive-control-plane (exit_observer.rs / the WorkloadLifecycle reconciler), outside this step's file boundary."]
 async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
