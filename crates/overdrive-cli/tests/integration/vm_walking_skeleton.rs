@@ -1577,6 +1577,21 @@ async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot
         "a boot against an INJECTED vmm carrying a capability-flag probe fault must be REFUSED \
          -- Earned Trust ran .probe() unconditionally against the injected adapter and it failed",
     );
+    // `err` here is `overdrive_cli::http_client::CliError::Transport { cause:
+    // String, .. }` -- `run_inner` (overdrive-cli/src/commands/serve.rs)
+    // flattens EVERY `ControlPlaneError` variant (not just `VmmBoot`) into
+    // that `cause: String` field before this test ever sees it, so a
+    // `matches!()` on the underlying `error::VmmBootError::Probe { source:
+    // VmmProbeError::LandlockLsmAbsent { .. } }` variant is unreachable at
+    // this boundary without touching `overdrive-cli` production code (out
+    // of step 01-09's declared scope). The STRUCTURAL proof that
+    // `compose_vm_driver` wires this into a distinct typed variant (D1
+    // review remediation) lives in
+    // `overdrive-control-plane::tests::vm_compose_error_typing::
+    // injected_vmm_probe_failure_is_refused_with_typed_probe_variant` --
+    // this scenario keeps its Display-based assertion as the honest E2E
+    // proof of the composed boot path at the layer where only `Display`
+    // is observable.
     let rendered = err.to_string();
     assert!(
         rendered.contains("VM driver probe refused") && rendered.contains("Landlock"),
@@ -1624,6 +1639,20 @@ async fn vm_non_reflink_staging_directory_refuses_boot_via_executed_ficlone() {
          must be REFUSED -- an executed FICLONE ioctl against tmpfs returns EOPNOTSUPP/ENOTTY, \
          never an fstype string comparison",
     );
+    // Same `CliError::Transport { cause: String }` boundary as S-VM-13
+    // above -- see that scenario's comment for why this stays
+    // Display-based. The structural `matches!()` proof for the
+    // `ReflinkUnsupported` source (via the SAME `VmmBootError::Probe`
+    // variant) is out of reach here since `overdrive-cli` re-stringifies
+    // every `ControlPlaneError` before this test observes it; a real
+    // `CloudHypervisorVmm` probing a genuinely non-reflink directory is
+    // exercised structurally at the control-plane layer only through the
+    // `SimVmm`-injected sibling tests in
+    // `overdrive-control-plane::tests::vm_compose_error_typing` (the
+    // `VmmProbeError::ReflinkUnsupported` source itself is adapter-real
+    // only — `SimVmm` cannot fabricate it — so this real-substrate E2E
+    // scenario remains the sole proof of THIS specific source class; its
+    // Display assertion is what is available at this boundary).
     let rendered = err.to_string();
     assert!(
         rendered.contains("VM driver probe refused") && rendered.contains("reflink"),

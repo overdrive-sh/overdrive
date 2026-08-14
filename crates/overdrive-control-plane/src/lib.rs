@@ -1527,24 +1527,22 @@ pub async fn run_server(
         .await
         {
             Ok(vm_driver) => registry.insert(Arc::new(vm_driver)),
-            Err(VmComposeError::NotAvailable(reason)) => {
+            Err(VmComposeError::NotAvailable(cause)) => {
                 tracing::info!(
                     name: "driver.vm.not_composed",
-                    reason = %reason,
+                    reason = %cause,
                     "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
                 );
             }
-            Err(VmComposeError::Refused(reason)) => {
+            Err(VmComposeError::Refused(cause)) => {
                 tracing::error!(
                     name: "health.startup.refused",
                     target: "overdrive::health",
                     reason = "vmm.probe",
-                    cause = %reason,
+                    cause = %cause,
                     "VM driver probe refused; composition root will not start"
                 );
-                return Err(error::ControlPlaneError::VmmBoot(error::VmmBootError {
-                    cause: reason,
-                }));
+                return Err(error::ControlPlaneError::VmmBoot(cause));
             }
         }
     }
@@ -1564,14 +1562,22 @@ enum VmComposeError {
     /// No override was injected, and the real discover/probe/kernel-
     /// validation sequence failed. Capability absence is not a fault
     /// (SD-5) — the caller logs `driver.vm.not_composed` and continues
-    /// booting with no `Vm` entry.
-    NotAvailable(String),
+    /// booting with no `Vm` entry. Carries the typed
+    /// [`error::VmmBootError`] cause (not a pre-flattened `String`) per
+    /// `.claude/rules/development.md` § "Never flatten a typed error to
+    /// `Internal(String)` at a composition boundary" — the
+    /// `driver.vm.not_composed` log line renders it via `Display`
+    /// (`%cause`), and a test can `matches!()` on the variant.
+    NotAvailable(error::VmmBootError),
     /// An override WAS injected (`ServerConfig.vmm_override`) — the test
     /// is declaring "cloud-hypervisor IS present" — and its probe (or
-    /// `CgroupAccounting`'s probe) failed. Unambiguously a genuine
-    /// substrate lie, never absence: the caller refuses the whole boot
-    /// with `health.startup.refused`.
-    Refused(String),
+    /// `CgroupAccounting`'s probe, or the kernel-header read/validate)
+    /// failed. Unambiguously a genuine substrate lie, never absence: the
+    /// caller refuses the whole boot with `health.startup.refused`,
+    /// converting directly into `ControlPlaneError::VmmBoot` — the SAME
+    /// typed [`error::VmmBootError`] value, no re-stringification at the
+    /// boundary.
+    Refused(error::VmmBootError),
 }
 
 /// Compose the production `VmDriver` — resolve `Vmm` (the injected
@@ -1613,22 +1619,22 @@ async fn compose_vm_driver(
     // WHATEVER adapter is bound, production or injected — there is no
     // `if injected { skip probe }` branch anywhere in this function.
     if let Err(source) = vmm.probe().await {
-        let reason = source.to_string();
+        let cause = error::VmmBootError::Probe { source };
         return Err(if injected {
-            VmComposeError::Refused(reason)
+            VmComposeError::Refused(cause)
         } else {
-            VmComposeError::NotAvailable(reason)
+            VmComposeError::NotAvailable(cause)
         });
     }
     // `CgroupAccounting` rides the SAME composition gate as `Vmm`
     // (ADR-0082 §D8 "Composition"): probed alongside it, refusing the
     // node on the same substrate-lie / capability-absence split.
     if let Err(source) = cgroup_accounting.probe().await {
-        let reason = source.to_string();
+        let cause = error::VmmBootError::CgroupAccountingProbe { source };
         return Err(if injected {
-            VmComposeError::Refused(reason)
+            VmComposeError::Refused(cause)
         } else {
-            VmComposeError::NotAvailable(reason)
+            VmComposeError::NotAvailable(cause)
         });
     }
 
@@ -1638,14 +1644,15 @@ async fn compose_vm_driver(
     let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
 
     let header = tokio::fs::read(&artifacts.kernel_path).await.map_err(|source| {
-        VmComposeError::NotAvailable(format!(
-            "read kernel header {}: {source}",
-            artifacts.kernel_path.display()
-        ))
+        VmComposeError::NotAvailable(error::VmmBootError::KernelHeaderRead {
+            path: artifacts.kernel_path.clone(),
+            source,
+        })
     })?;
     let window = &header[..header.len().min(KERNEL_MAGIC_WINDOW)];
-    let kernel = KernelImage::validate(artifacts.kernel_path.clone(), arch, window)
-        .map_err(|source| VmComposeError::NotAvailable(source.to_string()))?;
+    let kernel = KernelImage::validate(artifacts.kernel_path.clone(), arch, window).map_err(
+        |source| VmComposeError::NotAvailable(error::VmmBootError::KernelFormat { source }),
+    )?;
 
     let layout = VmHostLayout {
         cgroup_root,
@@ -3108,5 +3115,152 @@ mod tests {
             matches!(result, Err(ControlPlaneError::Validation { .. })),
             "expected the resolution failure to propagate unchanged, got {result:?}",
         );
+    }
+
+    /// D1 review remediation (step 01-09, GH #42): proves `compose_vm_driver`
+    /// wires each of its fallible steps into its OWN [`error::VmmBootError`]
+    /// variant rather than a flattened `String` — a `matches!()` on the
+    /// specific variant, not a `Display` substring, per
+    /// `.claude/rules/development.md` § "Never flatten a typed error to
+    /// `Internal(String)` at a composition boundary".
+    ///
+    /// The CLI-level walking-skeleton scenarios (S-VM-13, S-VM-75 in
+    /// `overdrive-cli/tests/integration/vm_walking_skeleton.rs`) observe
+    /// this same failure ONLY through
+    /// `overdrive_cli::http_client::CliError::Transport`, whose
+    /// `cause: String` field is a SEPARATE, pre-existing
+    /// composition-boundary flattening at the CLI layer (`run_inner`'s
+    /// `run_server(..).await.map_err(|e| CliError::Transport { cause:
+    /// stripped_server_error(&e.to_string()), .. })` — out of this step's
+    /// declared scope, and unconditional for every `ControlPlaneError`
+    /// variant, not specific to `VmmBoot`). A `matches!()` is therefore
+    /// unreachable from those integration tests without touching
+    /// `overdrive-cli` production code; the structural proof lives here,
+    /// at the layer where the typed enum is actually observable.
+    #[cfg(feature = "integration-tests")]
+    mod vm_compose_error_typing {
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        use overdrive_sim::adapters::clock::SimClock;
+        use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
+
+        use crate::error::VmmBootError;
+        use crate::{VmBootArtifacts, VmComposeError, compose_vm_driver};
+
+        /// Never read on the three probe-failure paths these tests
+        /// exercise — `vmm.probe()` and `cgroup_accounting.probe()` both
+        /// return before `compose_vm_driver` ever touches
+        /// `kernel_path`/`rootfs_path`.
+        fn unread_artifacts() -> VmBootArtifacts {
+            VmBootArtifacts {
+                kernel_path: PathBuf::from("/unread/kernel"),
+                rootfs_path: PathBuf::from("/unread/rootfs"),
+            }
+        }
+
+        #[tokio::test]
+        async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
+            let sim_vmm = SimVmm::new();
+            sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
+
+            // `.err()` rather than binding the raw `Result`: the `Ok`
+            // side is `VmDriver`, which does not implement `Debug`
+            // (per `overdrive_worker::vm_driver::VmDriver`), so
+            // formatting the whole `Result` on assertion failure would
+            // not compile. Neither of these tests reaches `Ok`.
+            let err = compose_vm_driver(
+                &unread_artifacts(),
+                PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                Arc::new(SimClock::new()),
+                Arc::new(SimCgroupFs::new()),
+                Arc::new(SimCgroupAccounting::new()),
+                Some(Arc::new(sim_vmm)),
+            )
+            .await
+            .err();
+
+            assert!(
+                matches!(
+                    err,
+                    Some(VmComposeError::Refused(VmmBootError::Probe {
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent {
+                            ..
+                        }
+                    }))
+                ),
+                "expected Refused(VmmBootError::Probe{{LandlockLsmAbsent}}), got {err:?}"
+            );
+        }
+
+        /// `VmComposeError::NotAvailable` and `::Refused` share the SAME
+        /// typed `VmmBootError` payload — the soft/hard split lives
+        /// entirely in which wrapper holds the cause, never in a second,
+        /// differently-shaped copy of it (enforced by the type
+        /// declaration itself: both variants are declared as
+        /// `(error::VmmBootError)`). Constructed directly — no adapter,
+        /// no `.await` — because `compose_vm_driver`'s `injected` flag
+        /// is DEFINED as `vmm_override.is_some()`: there is no way to
+        /// reach `NotAvailable` through the function itself with a
+        /// CONTROLLED fault. `vmm_override = None` always constructs the
+        /// REAL, un-injectable `overdrive_host::CloudHypervisorVmm`
+        /// (confirmed empirically: on the Lima dev box this genuinely
+        /// fails probe with `ReflinkUnsupported` on `/srv/vm`, a real
+        /// substrate fact of THIS host — exactly the kind of
+        /// environment-dependent outcome a deterministic unit test must
+        /// not assert a specific variant of).
+        #[test]
+        fn not_available_wraps_the_same_typed_boot_error_as_refused() {
+            let cause = VmmBootError::Probe {
+                source: overdrive_core::traits::vmm::VmmProbeError::landlock_lsm_absent(
+                    "unit-test-constructed",
+                ),
+            };
+
+            assert!(
+                matches!(
+                    VmComposeError::NotAvailable(cause),
+                    VmComposeError::NotAvailable(VmmBootError::Probe {
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent {
+                            ..
+                        }
+                    })
+                ),
+                "VmComposeError::NotAvailable must carry the typed VmmBootError variant unchanged"
+            );
+        }
+
+        /// The second fallible step — `CgroupAccounting`'s own probe —
+        /// gets its OWN distinct variant, never collapsed into `Probe`.
+        #[tokio::test]
+        async fn injected_cgroup_accounting_probe_failure_is_refused_with_typed_variant() {
+            // No fault injected on `sim_vmm` — its `.probe()` succeeds,
+            // so control reaches `cgroup_accounting.probe()`.
+            let sim_vmm = SimVmm::new();
+            let sim_cgroup_accounting = SimCgroupAccounting::new();
+            sim_cgroup_accounting
+                .inject_probe_substrate_error(std::io::ErrorKind::PermissionDenied);
+
+            let err = compose_vm_driver(
+                &unread_artifacts(),
+                PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                Arc::new(SimClock::new()),
+                Arc::new(SimCgroupFs::new()),
+                Arc::new(sim_cgroup_accounting),
+                Some(Arc::new(sim_vmm)),
+            )
+            .await
+            .err();
+
+            assert!(
+                matches!(
+                    err,
+                    Some(VmComposeError::Refused(VmmBootError::CgroupAccountingProbe {
+                        source: overdrive_core::traits::cgroup_accounting::CgroupAccountingProbeError::Substrate { .. }
+                    }))
+                ),
+                "expected Refused(VmmBootError::CgroupAccountingProbe{{Substrate}}), got {err:?}"
+            );
+        }
     }
 }

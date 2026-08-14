@@ -14,6 +14,9 @@ use thiserror::Error;
 
 use overdrive_core::reconcilers::ReconcilerName;
 use overdrive_core::traits::ca::CaError;
+use overdrive_core::traits::cgroup_accounting::CgroupAccountingProbeError;
+use overdrive_core::traits::vmm::VmmProbeError;
+use overdrive_core::vm::config::KernelFormatError;
 
 use crate::api::ErrorBody;
 use crate::view_store::{ProbeError, ViewStoreError};
@@ -717,14 +720,64 @@ pub enum ControlPlaneError {
 /// Boot-time failure from the VM driver composition path. See
 /// [`ControlPlaneError::VmmBoot`]'s docs for the ONLY circumstance under
 /// which this is constructed (an adapter demonstrably present, not
-/// absent). `cause` carries the underlying typed `VmmProbeError` /
-/// `CgroupAccountingProbeError`'s `Display` rendering — pass-through, not
-/// reinterpreted, per `.claude/rules/development.md` § "Distinct failure
-/// modes get distinct error variants".
+/// absent). Each variant embeds its originating typed cause via
+/// `#[source]` — pass-through, not reinterpreted, per
+/// `.claude/rules/development.md` § "Distinct failure modes get
+/// distinct error variants" / "Never flatten a typed error to
+/// `Internal(String)` at a composition boundary": the CLI / §12
+/// investigation agent can branch on e.g.
+/// `matches!(err, VmmBootError::CgroupAccountingProbe { .. })` without
+/// `Display`-grepping. `Probe` is ADR-0083 §D2's own pinned shape
+/// (`VmmBootError::Probe { source }`); the other three variants cover
+/// the remaining fallible steps `compose_vm_driver` folds into the same
+/// Earned-Trust composition gate (ADR-0082 §D8 "Composition") —
+/// `CgroupAccounting`'s probe, the kernel-header read, and the
+/// kernel-format validation. The SAME enum backs both the hard
+/// [`crate::VmComposeError::Refused`]-shaped disposition and the soft
+/// not-available one at the `compose_vm_driver` call site — the
+/// soft/hard split lives entirely in which wrapper holds it, never in a
+/// second copy of these four causes.
 #[derive(Debug, Error)]
-#[error("VM driver probe refused: {cause}")]
-pub struct VmmBootError {
-    pub cause: String,
+pub enum VmmBootError {
+    /// [`overdrive_core::traits::vmm::Vmm::probe`] caught a genuine
+    /// substrate lie — ADR-0082 §D5's five fault classes
+    /// (`ReflinkUnsupported` / `LandlockFlagAbsent` /
+    /// `LandlockLsmAbsent` / `KvmUnreachable` / `RunDirUnusable`).
+    #[error("VM driver probe refused: {source}")]
+    Probe {
+        #[source]
+        source: VmmProbeError,
+    },
+
+    /// [`overdrive_core::traits::cgroup_accounting::CgroupAccounting::probe`]
+    /// caught a genuine substrate lie — ADR-0082 §D8's three fault
+    /// classes (`Substrate` / `SubstrateCorrupt` / `MissingOomKillKey`).
+    /// Probed alongside `Vmm` under the same composition gate (ADR-0082
+    /// §D8 "Composition").
+    #[error("VM driver cgroup accounting probe refused: {source}")]
+    CgroupAccountingProbe {
+        #[source]
+        source: CgroupAccountingProbeError,
+    },
+
+    /// The configured kernel image's leading bytes could not be read off
+    /// disk (`tokio::fs::read` on `VmBootArtifacts::kernel_path`).
+    #[error("VM driver kernel header read failed for {path}: {source}")]
+    KernelHeaderRead {
+        /// The kernel image path the failing read targeted.
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The configured kernel image's boot-format magic did not validate
+    /// for the host architecture (ADR-0082 §D2.4,
+    /// [`overdrive_core::vm::config::KernelImage::validate`]).
+    #[error("VM driver kernel format refused: {source}")]
+    KernelFormat {
+        #[source]
+        source: KernelFormatError,
+    },
 }
 
 /// Service-health-check-probes ProbeRunner Earned-Trust boot
