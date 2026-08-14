@@ -690,6 +690,8 @@ impl KernelImage {
 (ADR-0083 § D5). The operator never reads `UefiTooBig`; CH's verbatim text
 lives in `AllocStatusRow.detail`, never in the variant's meaning.
 
+> **Amendment 2026-08-14 (gap 6 — two 01-06 first-implementor accessors blessed, 01-07 review, user ruling).** Matching gaps 1–5 of the 2026-08-12 amendment, this records two accessors step 01-06 (the `CloudHypervisorVmm` / `SimVmm` adapters) added that the design had not named, both sanctioned here as first-implementor surface (the 01-06 review ACCEPTED both on substance): **`KernelImage::path(&self) -> &Path`** (`crate::vm::config`, `config.rs:201`) — a plain validated-path read, the sibling of `RootfsPlan::master()` (§ D2) and `KernelCmdline::as_str()` (§ D2), which the adapter needs to hand the validated `--kernel` path to the spawn; and **`VmExitWatch::new(oneshot::Receiver<VmmExit>) -> Self`** (§ D3, `vmm.rs:202`) — the only constructor for that private-field return type, structurally forced (the adapter's watcher task must build the value it fills). Both are additive, non-lie-bearing accessors; neither reopens any § D2 substrate-lie decision. Documentation-trail entry only, not a design change.
+
 #### D2.5 — seccomp: three variants, one reachable constructor
 
 ```rust
@@ -884,6 +886,8 @@ half. `VmDriver::stop`'s edge cases — pre-beacon stop, unresponsive guest,
 already-dead VMM, double stop — are therefore asserted by a **`VmDriver`-level
 acceptance case against `SimVmm`**, named here so the move does not quietly shed
 the enforcement it was partly justified on.
+
+> **Amendment 2026-08-14 (01-07 review, item 1 — the post-stop `status()` contract).** `Driver::status`'s post-stop contract (`traits/driver.rs`: after `stop() → Ok(())`, `status() → Err(NotFound)`) binds `VmDriver`. The shipped `VmDriver::stop` left the live-map entry `Live` and so returned `Running` from `status()` until the exit watcher happened to fire — a real violation. `VmDriver::stop` now transitions the entry `Live → EndingInFlight` under the same lock it extracts the live state with (control/beacon/scope/run_dir/rootfs), **before** the SHUTDOWN/terminate/teardown steps above; `VmDriver::status` maps `EndingInFlight → NotFound`, so the contract holds synchronously. The claim is **retained** (`live_allocations()` reports `EndingInFlight`), so `VmReclamation`'s `EndingInFlightIsNeverReclaimed` (brief § 105a.11) holds across the stop→terminal-row window — a full removal (the `ExecDriver` shape) would drop the claim and let a reclamation author a competing `PlatformReclaimed` ending. This mints **no** `Driver`-trait carve-out: `EndingInFlight` is an in-flight authorship claim, not the terminal-state memory the contract forbids. The transition (row **3b**), its race-safety with the watcher's transition 3, and the operator-stop authorship on the stop path (transition 6) are pinned in brief § 105a.3. Lands as the 01-07 review-remediation; DWD-20.
 
 **Rejected: CH's `PUT /api/v1/vm.power-button` over `--api-socket`.** It is the
 obvious mechanism and it is wrong here for a measured reason: our guest is a
@@ -1171,6 +1175,8 @@ artifact may state or imply otherwise.
 > distinct from init's own console logging, that framing is a separate,
 > currently-unpinned concern — it does not block Slice 01 and is deliberately not
 > decided here.
+
+> **Amendment 2026-08-14 (01-07 review, item 2 — the `EXEC` write is not yet wired; ownership reaffirmed as 01-07).** The ownership table above assigns *"VmDriver **writes** `EXEC` on the § D3 Ok continuation, gates Running, stores the session only after"* to **step 01-07** — but 01-07's four roadmap criteria never encoded it, and the shipped `VmDriver::start` beacon-win arm (`crates/overdrive-worker/src/vm_driver.rs`, commit `e4f6602e`) stores the accepted session and spawns the exit watcher **without** writing `EXEC`. So the "folded into § D3's Ok continuation and gates Running" text above is **not yet implemented** (not wrong): a real 01-08 boot would leave the guest — which already blocks on exactly one `EXEC`, landed 01-03 (`BeaconMessage::Exec` + its JSON codec in `overdrive_core::vm::beacon`) — waiting forever. It lands as the **01-07 review-remediation** (a fifth 01-07 criterion; roadmap step 01-07, DWD-20), **not** reassigned to 01-08: `vm_driver.rs` is 01-07's scope, not 01-08's, and this table's own row already owns the write there. The mechanism is 01-07 (VmDriver writes `EXEC <serde_json argv>` from `spec.command`/`spec.args` via the landed `BeaconMessage::Exec` `Display`; a write error is treated as `StartRejected` with the same cleanup + claim release as every other non-Ok race arm; `LiveVm.beacon` becomes `Some` only after the write succeeds). The operator command **source** (`[vm]+[job]` → `AllocationSpec.command`/`args`, threaded through `DriverInput::Vm`) and the real-guest **proof** remain **01-08** (S-VM-01), exactly as the table's last two rows assign — `EXEC`'s first real evidence is still the 01-08 Tier-3 walking skeleton, unchanged.
 
 ### D8 — the cgroup-OOM diagnosis gap (deferral D-3, reduced form): a new `CgroupAccounting` port, read once at exit time
 

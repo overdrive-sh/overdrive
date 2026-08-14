@@ -1499,6 +1499,121 @@ renumbered, or re-tagged. No GitHub issue created.
 
 ---
 
+## DWD-20: 01-07 review reconciliations — the `Driver` post-stop `status()` contract (item 1), the unwired `EXEC` write (item 2), two 01-06 accessors blessed (item 3) (2026-08-14)
+
+Three design items surfaced by the step 01-07 review, ruled and pinned in
+the design SSOT. All three are reconciliations of already-shipped 01-07/01-06
+code against the design; none required a user scope decision. **No Rust file
+touched by this entry** — the crafter-facing instructions are handed to the
+01-07 review-remediation dispatch; the pins below are the authority the crafter
+implements to.
+
+### Item 1 (PRIMARY) — the `Driver` post-stop `status()` contract vs § 105a.3's exit-watcher-owned claim
+
+**The conflict.** The base `Driver` trait binds every implementor
+(`crates/overdrive-core/src/traits/driver.rs`, post-stop contract): *after
+`stop()` returns `Ok(())`, a subsequent `status()` returns `Err(NotFound)`.*
+The shipped `VmDriver::stop` (`crates/overdrive-worker/src/vm_driver.rs`,
+commit `e4f6602e`) extracts the live state but leaves the live-map entry
+`Live`, so `status()` returns `Running` until the exit watcher happens to fire
+— a real violation. Reading the conflict as "§ 105a.3 gives the watcher
+*exclusive* ownership of `Live → EndingInFlight`, so `stop` cannot drive it"
+would make the trait contract unsatisfiable for `VmDriver`.
+
+**Ruling — a refinement that dissolves the conflict (the reviewer's option
+(c), which is the "marks the claim" half of option (a), and the *only* correct
+reconciliation).** `VmDriver::stop` transitions the entry `Held → EndingInFlight`
+(new transition **3b**, brief § 105a.3) under the same lock it extracts the
+live state with. Because `VmDriver::status` already maps `EndingInFlight →
+NotFound`, the trait contract holds **synchronously**; because `live_allocations()`
+reports `EndingInFlight`, the authorship claim is **retained**, so
+`VmReclamation`'s `EndingInFlightIsNeverReclaimed` (§ 105a.11) holds across the
+stop→terminal-row window. This is not an invention: § 105a.11's own invariant
+wording already names *"or its stop has been issued"* as an `EndingInFlight`
+trigger — the FSM already presupposes this transition; the shipped code merely
+never performed it.
+
+**Why the three offered options resolve to exactly this one:**
+- **NOT option (a)'s full removal (the `ExecDriver` mirror).** `ExecDriver::stop`
+  may remove its entry because nothing consults its supervision set
+  (`live_allocations() → None`). `VmDriver`'s set IS consumed by `VmReclamation`,
+  so removing the entry at `stop` drops the claim during the stop→terminal-row
+  window and lets `plan_reclamation` author a competing `PlatformReclaimed`
+  ending — the NEW-1 failure, a direct violation of `EndingInFlightIsNeverReclaimed`.
+  This is the load-bearing reason `VmDriver` must differ from `ExecDriver`.
+- **NOT option (b)'s separate "stopping" marker.** A second field/map read by
+  `status()` is exactly the "two representations of one fact that can disagree"
+  shape § 105a.3 already rejected for the claim; `EndingInFlight` is the one
+  representation and it already carries both meanings (status → NotFound AND
+  still-claimed).
+- **No `Driver`-trait carve-out is minted, and no `driver.rs` trait-docstring
+  edit is needed.** `EndingInFlight` is an in-flight authorship claim released
+  once the ending is authored (transitions 5/6), not the permanent
+  "terminal-state memory" the contract forbids. The contract stands unweakened.
+
+**Stop/watcher race safety.** Transitions 3 (watcher) and 3b (stop) are both
+`Held → EndingInFlight` check-and-acts under the one `parking_lot` map lock.
+Whoever reaches `Held` first wins: the entry becomes `EndingInFlight` exactly
+once, an `ExitEvent` is emitted at most once (only if the *watcher* won — a
+natural exit that beat the stop), and the loser observes non-`Held` and takes
+its idempotent no-op / `NotFound` path. On the stop-wins ordering the watcher
+later fails its transition and emits nothing; the operator-stop ending is
+authored on the **stop path** (transition 6, the shim's terminal-row write),
+which also retires the `intentional_stop: false` the watcher hard-codes (the
+shim knows the stop was operator-initiated; the watcher cannot).
+
+**Scope.** Lands as the **01-07 review-remediation** (`VmDriver::stop`/`status`
+only). The release side — transitions 5/6, the exit observer's
+release-on-every-arm, the shim's terminal-row authorship — is unchanged and
+remains step **02-02**'s; 02-02's transition-table proptest (S-VM-77) picks up
+row 3b. No existing 01-07 acceptance test breaks (verified against all eight in
+`vm_driver_stop_totality.rs`); `stop_sequence_d`'s doc comment becomes
+deterministic-`NotFound` and is updated by the crafter.
+
+### Item 2 — the § D7 `EXEC` write is not yet wired; ownership reaffirmed as 01-07 (scoped addendum, NOT reassigned to 01-08)
+
+ADR-0082 § D7's ownership table already assigns *"VmDriver **writes** `EXEC` on
+the § D3 Ok continuation"* to **step 01-07** — but 01-07's four roadmap criteria
+never encoded it, and the shipped `VmDriver::start` beacon-win arm stores the
+session + spawns the watcher WITHOUT writing `EXEC`, so a 01-08 boot would leave
+the guest (which already blocks on one `EXEC`, landed 01-03) waiting forever.
+
+**Ruling: scoped addendum to 01-07 (the reviewer's second option), not
+reassignment to 01-08.** `vm_driver.rs` is 01-07's scope, not 01-08's, and the
+§ D7 table already owns the write there — reassigning would *contradict* the
+table. Roadmap 01-07 gains a fifth criterion for the `EXEC` write (mechanism:
+write `EXEC <serde_json argv>` from `spec.command`/`spec.args` via the landed
+`BeaconMessage::Exec` `Display`; write-err → `StartRejected` with full cleanup +
+claim release; `LiveVm.beacon` stored `Some` only after the write succeeds). The
+operator command **source** (`[vm]+[job]` → `AllocationSpec.command`/`args` via
+`DriverInput::Vm`) and the real-guest **proof** stay **01-08** (S-VM-01), exactly
+as the § D7 table's last two rows assign; `EXEC`'s first real evidence remains
+the 01-08 Tier-3 walking skeleton. ADR § D7 gained an amendment stating the
+mechanism is not-yet-wired and naming 01-07 as the wiring step; the "folded into
+§ D3's Ok continuation and gates Running" design text is unchanged (it is
+correct, just not yet implemented).
+
+### Item 3 (trivial) — two 01-06 first-implementor accessors blessed as sanctioned surface
+
+ADR-0082 § D2.4 gained a one-line "gap 6" amendment (matching gaps 1–5 of the
+2026-08-12 amendment) blessing `KernelImage::path(&self) -> &Path`
+(`config.rs:201`, sibling of `RootfsPlan::master()` / `KernelCmdline::as_str()`)
+and `VmExitWatch::new(oneshot::Receiver<VmmExit>) -> Self` (`vmm.rs:202`, the
+structurally-forced sole constructor for the § D3 private-field return type).
+Both accessors verified present in tree; the 01-06 review already ACCEPTED both
+on substance. Documentation-trail consistency only.
+
+**Files touched by this entry.** `distill/wave-decisions.md` (this entry +
+Changelog). `docs/product/architecture/adr-0082-…md` (§ D2.4 gap-6 note, § D4
+item-1 amendment, § D7 item-2 amendment). `docs/product/architecture/brief.md`
+(§ 105a.3 transition 3b + item-1 amendment blockquote). `deliver/roadmap.json`
+(step 01-07: two review-remediation criteria; no `implementation_scope` change
+needed — `vm_driver.rs` and `traits/driver.rs` are already in 01-07's scope). No
+`test-scenarios.md` or Rust file touched. No scenario added, removed,
+renumbered, or re-tagged. No GitHub issue created.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1512,3 +1627,4 @@ renumbered, or re-tagged. No GitHub issue created.
 - 2026-08-12 — `@requires-kvm` capability-class gate recorded (DWD-17), closing a decision `spike/findings.md` explicitly deferred to "Slice 01's first integration test" and that neither the original DISTILL pass nor two adversarial review rounds picked up. Walked all 61 `@tier3`/`@real-io` scenarios; classified 45 as requiring a real `cloud-hypervisor` guest-boot attempt (tagged `@requires-kvm` — including three hybrid scenarios, S-VM-21/22/25, where the tag attaches only to the documented Tier-3-companion clause, not the primary `@tier1`/`@in-memory` shape) and 16 as real I/O that never spawns a guest-booting hypervisor (composition-gate probes S-VM-11/12/75, `SimVmm`-injected faults S-VM-13/51, pre-spawn artifact-validation rejections S-VM-33/34/35/41/58/59, an admission-time rejection S-VM-38, generic host-primitive adapter equivalence S-VM-91/93, and S-VM-94 whose own `Then` states no hypervisor process was spawned). Five dispositions recorded as genuinely ambiguous rather than silently resolved: S-VM-04/S-VM-39 (leaned `@requires-kvm`, happy-path/walking-skeleton-adjacent framing), S-VM-40 (leaned NOT — cron-deferred), S-VM-23/S-VM-28/S-VM-30 (leaned `@requires-kvm` — "No Fixture Theater" + Tier-3-companion intent), S-VM-58/S-VM-59 (leaned NOT — pre-spawn-validation analogy), S-VM-91/S-VM-93 (leaned NOT — generic cgroupfs/filesystem primitives). A top-of-file explanatory note added to `test-scenarios.md` citing the spike's measured asymmetry (bare-metal x86_64 12/12 vs nested-aarch64 ~1-in-3). DWD-04's rows annotated with the capability-lane split where a single row/file mixes `@requires-kvm` and non-`@requires-kvm` members (the walking-skeleton/Tier-3-CLI row, the `Vmm`/`VmHostState` adapter-equivalence row, and the `VmReclamation` Tier-3-shapes row, plus seven individually-noted rows in the DWD-11 addendum table). The concrete Rust-side gating mechanism (feature name, preflight shape) is explicitly NOT invented here — it is pinned by the concurrent `deliver/roadmap.json` pass, which this entry asks to reconcile against; not a deferral requiring a GitHub issue, since the mechanism-naming is in-feature work assigned to that concurrent pass. No scenario's tier, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). No ADR, `brief.md`, `deliver/roadmap.json`, or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
 - 2026-08-12 — `@requires-kvm` bound explicitly to the `kvm-tests` Cargo feature the concurrent roadmap pass pinned; DWD-17's ten flagged-ambiguous scenario IDs reconciled against the roadmap's file-level gate (DWD-18). Binding stated in both `test-scenarios.md`'s top-of-file `@requires-kvm` note (replacing the now-stale "pinned by the concurrent roadmap pass" forward pointer) and as an addendum inside DWD-17. Naming reasoning recorded: `bare-metal-tests` rejected as false (CI is a GitHub-hosted VM, not bare metal, and the spike measured it trustworthy); the property gating matters is nesting, not hardware presence (the spike's own diagnosis); `kvm-tests` names the lane generically, shaped like `integration-tests`; declaration is narrow (only `overdrive-host`/`overdrive-cli`, since `kvm-tests` gates no mutation-testing surface); the preflight fails loudly rather than silently skipping. Ten-way reconciliation (S-VM-04, 23, 28, 30, 39, 40, 58, 59, 91, 93) checked in the one dangerous direction (leaned `@requires-kvm` but roadmap file NOT gated) — **zero scenarios land in that bucket**: five (S-VM-04/23/28/30/39) are consistent (leaned yes, file gated `kvm-tests`); five (S-VM-40/58/59/91/93) are either harmlessly over-gated (S-VM-40/58/59/91 — leaned NOT, file gated anyway) or correctly ungated (S-VM-93 — leaned NOT, roadmap explicitly states it "never goes through the `Vmm` port... deliberately NOT `kvm-tests`"). No scenario's own classification needed correction; no roadmap file placement flagged as wrong. Confirmed the two deliberately-ungated files agree with their scenarios' tags: `cgroup_accounting_equivalence.rs` (S-VM-93, synthetic cgroup fixtures, never touches `Vmm`) and `vm_storage_daemon_sandbox_arg.rs` (S-VM-67, Tier-1 pure rendering proptest, `@tier1 @in-memory` — never a `@requires-kvm` candidate). No scenario's tier, tags, ACs, or Gherkin body changed; no scenario added, removed, or renumbered. Scenario count re-verified mechanically unchanged at 88 (`grep -c '^#### S-VM-'` and `grep -c '^\*\*Tags\*\*:'`, both 88). `deliver/roadmap.json` read-only, not touched. No ADR or Rust file touched. No GitHub issue created; #92, #222, #248, #257, #259–#263 remain the only real numbers in scope, #264 closed, none newly cited here. No commit made by this pass.
 - 2026-08-14 — Mutation-testing cadence reconciled (DWD-19), user-approved. The per-step `cargo xtask mutants` gates named in individual DELIVER step ACs (roadmap step 01-05 AC #4 the worked example) are superseded by one end-of-DELIVER, per-feature whole-phase-diff gate (`cargo xtask mutants --diff origin/main`, kill-rate ≥ 80%), per CLAUDE.md § "Mutation Testing Strategy". Coverage is unchanged — the whole-diff run mutates `reserve_bytes` / `MemoryPlan::cgroup_max_bytes` (in the phase-01 diff) exactly as a per-step `--file` run would; only the cadence differs. The `@mandatory:mutation_target` tags on S-VM-18/S-VM-20 still attach per-step; only the run is deferred. A single one-line pointer was appended to step 01-05's `implementation_notes` in `deliver/roadmap.json`; the `criteria` arrays left unchanged (this wave-decision is the authoritative reconciliation). No scenario added, removed, renumbered, or re-tagged; no `test-scenarios.md`, `brief.md`, or Rust file touched by this entry. No GitHub issue created.
+- 2026-08-14 — 01-07 review reconciliations (DWD-20), three items, all rulable without a user scope decision. **Item 1 (PRIMARY)**: the `Driver` post-stop `status() → NotFound` contract (`traits/driver.rs`) was violated by the shipped `VmDriver::stop`, which left the live-map entry `Live`. Ruled (reviewer option (c)): `stop` transitions the entry `Live → EndingInFlight` under the same lock it extracts the live state with, so `status()` (which already maps `EndingInFlight → NotFound`) satisfies the contract synchronously while `live_allocations()` still reports the entry, keeping the authorship claim for `VmReclamation` (`EndingInFlightIsNeverReclaimed`, § 105a.11 — whose wording already presupposes "its stop has been issued" ⇒ `EndingInFlight`). NOT the `ExecDriver` full-removal shape (would reopen NEW-1); NOT a trait carve-out (contract stands, no `driver.rs` docstring edit). Pinned in `brief.md` § 105a.3 (new transition 3b + amendment) and ADR-0082 § D4; the release side (transitions 5/6) stays step 02-02. **Item 2**: ADR § D7's ownership table already assigns the `VmDriver` `EXEC` write to 01-07, but the shipped beacon-win arm omits it (the guest would block forever at 01-08); ruled a scoped 01-07 addendum (not reassignment to 01-08) — roadmap 01-07 gains a fifth criterion, ADR § D7 gains a not-yet-wired amendment naming 01-07 as the wiring step. **Item 3**: ADR § D2.4 gains a "gap 6" note blessing `KernelImage::path` (`config.rs:201`) and `VmExitWatch::new` (`vmm.rs:202`) as sanctioned 01-06 first-implementor surface. Files touched: `adr-0082-…md` (§§ D2.4 / D4 / D7), `brief.md` (§ 105a.3), `deliver/roadmap.json` (step 01-07 criteria), this file. No Rust file touched — the crafter-facing instructions go to the 01-07 review-remediation dispatch. No GitHub issue created.
