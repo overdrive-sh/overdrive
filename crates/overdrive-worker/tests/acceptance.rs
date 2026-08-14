@@ -29,4 +29,8 @@ mod acceptance {
     // `.context/01-03-structural-gap-audit.md` GAP-7.
     mod probe_runner_supervised_tick;
     mod probe_runner_tcp_outcome;
+    // microvm-driver-cloud-hypervisor (GH #42), step 01-07 — S-VM-76 +
+    // crafter-authored race-arm examples against SimVmm (ADR-0082
+    // §§D3-D4).
+    mod vm_driver_stop_totality;
 }

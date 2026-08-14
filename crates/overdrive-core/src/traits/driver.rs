@@ -549,4 +549,58 @@ pub trait Driver: Send + Sync + 'static {
     /// Default no-op — symmetric with [`Self::on_alloc_running`] /
     /// [`Self::on_alloc_terminal`].
     fn on_alloc_stable(&self, _alloc_id: &AllocationId) {}
+
+    /// The allocations for which this driver currently holds a live
+    /// supervision handle — an authorship claim on that allocation's
+    /// ending, in EITHER phase (claimed-and-running, or
+    /// ending-being-authored). Reporting only the running phase is
+    /// exactly the defect this method's contract refuses (microvm-driver
+    /// brief §105a.3 DD-1(b.i)): a reclamation-shaped consumer that reads
+    /// this set to decide whether it may safely kill a survivor must see
+    /// an allocation whose ending is already in flight as SUPERVISED,
+    /// not as abandoned.
+    ///
+    /// `None` = "this driver does not report supervision" — the caller
+    /// MUST read that as "supervision is unavailable", never as
+    /// "supervises nothing". An empty `Some(vec![])` and a `None` are
+    /// different claims; conflating them authorises a kill-capable
+    /// consumer to act on absence of evidence as if it were evidence of
+    /// absence.
+    ///
+    /// Sync deliberately: the live map behind this accessor is a
+    /// `parking_lot` guard, and a lock must not be held across
+    /// `.await` (`.claude/rules/development.md` § "Concurrency &
+    /// async").
+    ///
+    /// Default: `None`, for drivers that do not report supervision
+    /// (`overdrive_worker::ExecDriver` keeps the default — correct
+    /// rather than an omission, since a reclamation-shaped consumer
+    /// only ever acts on VM allocations).
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        None
+    }
+
+    /// Retire this driver's claim to author `alloc`'s ending. The
+    /// reporter of a claim ([`Self::live_allocations`]) is its releaser
+    /// — symmetric by design.
+    ///
+    /// Called strictly AFTER the ending has been authored (a terminal
+    /// row committed) or authorship has been abandoned as impossible;
+    /// never at process death, never at a watcher's return, and never
+    /// while an exit report is still in flight. The intended callers
+    /// are: an exit-observer-shaped consumer, once per exit event, on
+    /// every retry-outcome arm — not only a successful write — and any
+    /// ending-authoring path that writes a terminal row, strictly after
+    /// that write resolves `Ok`.
+    ///
+    /// IDEMPOTENT: an unknown or already-released `alloc` is a no-op,
+    /// never a panic. This is load-bearing — both an exit-observer-shaped
+    /// caller and an ending-authoring caller may race to release the
+    /// same allocation's claim, and both must be safe to call.
+    ///
+    /// Sync, for the same reason [`Self::live_allocations`] is: the live
+    /// map is a `parking_lot` guard.
+    ///
+    /// Default: no-op, for drivers that do not report supervision.
+    fn release_supervision(&self, _alloc: &AllocationId) {}
 }
