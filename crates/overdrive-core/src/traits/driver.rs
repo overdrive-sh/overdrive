@@ -27,10 +27,20 @@ use crate::{AllocationId, SpiffeId};
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `exec`, `microvm`, `vm`,
-/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
-/// `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
-/// terminology (see ADR-0029 amendment 2026-04-28).
+/// wire form. [`Display`] and [`FromStr`] emit `exec`, `vm`, `unikernel`,
+/// `wasm` — matching `docs/whitepaper.md` §6. The `exec` vocabulary aligns
+/// with Nomad's `exec` task driver and Talos's terminology (see ADR-0029
+/// amendment 2026-04-28).
+///
+/// `MicroVm` (`"microvm"`) was deleted as a single-cut, greenfield
+/// migration (step 01-10, GH #42 — `docs/feature/
+/// microvm-driver-cloud-hypervisor/intake.md` Decision I-5): it was never
+/// reachable — no [`DriverPayload`] variant, no `Driver` impl, and no
+/// operator TOML table ever constructed or consumed it — so its removal is
+/// not the "stable wire form" exception the sentence above forbids. The
+/// microVM driver this feature ships is `Self::Vm` (`"vm"`); the
+/// microVM-vs-full-VM distinction that once justified two variants does not
+/// exist (Overdrive does not support full VMs).
 ///
 /// Carries `utoipa::ToSchema` so the wire-typed `TransitionSource::Driver`
 /// variant in `overdrive-control-plane::api` can register the schema
@@ -43,9 +53,7 @@ use crate::{AllocationId, SpiffeId};
 pub enum DriverType {
     /// Native binary under cgroups v2 (`tokio::process`).
     Exec,
-    /// Fast-boot Cloud Hypervisor microVM.
-    MicroVm,
-    /// Full Cloud Hypervisor VM (hotplug, virtiofs, any OS).
+    /// Cloud Hypervisor microVM (hotplug, virtiofs, any OS).
     Vm,
     /// Cloud Hypervisor + Unikraft unikernel.
     Unikernel,
@@ -59,7 +67,6 @@ impl DriverType {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Exec => "exec",
-            Self::MicroVm => "microvm",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
             Self::Wasm => "wasm",
@@ -79,7 +86,6 @@ impl FromStr for DriverType {
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
             "exec" => Ok(Self::Exec),
-            "microvm" => Ok(Self::MicroVm),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),
             "wasm" => Ok(Self::Wasm),

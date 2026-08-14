@@ -361,12 +361,12 @@ async fn sim_driver_start_stop_status_round_trip() {
 
 #[tokio::test]
 async fn sim_driver_honours_configured_start_failure() {
-    let driver = SimDriver::new(DriverType::MicroVm).fail_on_start_with("disk full".to_owned());
+    let driver = SimDriver::new(DriverType::Vm).fail_on_start_with("disk full".to_owned());
     let err = driver.start(&sample_spec()).await.expect_err("start must fail");
 
     match err {
         DriverError::StartRejected { driver, reason } => {
-            assert_eq!(driver, DriverType::MicroVm);
+            assert_eq!(driver, DriverType::Vm);
             assert_eq!(reason, "disk full");
         }
         other => panic!("expected StartRejected, got {other:?}"),

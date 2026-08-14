@@ -223,6 +223,11 @@
 //! this file's history above documents (vsock EAFNOSUPPORT, the terminal-row
 //! misclassification, the XDP EBUSY race, and S-VM-05's cross-test
 //! contamination) is CLOSED.
+//!
+//! **Step 01-10** adds a 9th scenario, S-VM-09 (per-thread seccomp
+//! verification — the C-5 correction, see
+//! [`vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader`]'s
+//! own doc comment).
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -846,6 +851,176 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
     // a leak. `VmDriver::stop`'s cleanup path was never at fault -- the gap
     // was this test never invoking it for a workload that cannot reach a
     // terminal state by itself.
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the long-lived spin workload before shutdown");
+    let stopped = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    let stopped_row =
+        stopped.snapshot.rows.first().expect("one allocation row for the stopped workload");
+    assert_eq!(
+        stopped_row.state,
+        AllocStateWire::Terminated,
+        "an operator stop must drive the never-self-terminating spin allocation to Terminated \
+         before this test tears down the server, got {:?}",
+        stopped_row.state,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-09 — seccomp is verified per-thread, not on the thread-group leader.
+// ---------------------------------------------------------------------
+
+/// The parsed `Seccomp:` mode from one `/proc/<pid>/task/<tid>/status`
+/// file. `0` is `SECCOMP_MODE_DISABLED` (no filter installed on that
+/// thread); a confined thread reports `2` (`SECCOMP_MODE_FILTER`, the mode
+/// `--seccomp true` installs).
+fn thread_seccomp_mode(vmm_pid: u32, tid: &str) -> u32 {
+    let path = format!("/proc/{vmm_pid}/task/{tid}/status");
+    let status =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Seccomp:") {
+            return rest
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_else(|e| panic!("parse Seccomp: field in {path}: {e}"));
+        }
+    }
+    panic!("no Seccomp: field found in {path}")
+}
+
+/// Every thread's `comm` name for `vmm_pid`, keyed by tid, read via
+/// `/proc/<pid>/task/<tid>/comm`. Cloud Hypervisor names its threads
+/// distinctly (`vmm`, `http-server`, `vcpu0`, ...) -- all well under
+/// `TASK_COMM_LEN`'s 15-visible-character cap, unlike `cloud-hypervisor`
+/// itself (see [`find_cloud_hypervisor_pid`]'s doc comment).
+fn thread_names(vmm_pid: u32) -> std::collections::BTreeMap<String, String> {
+    let task_dir = format!("/proc/{vmm_pid}/task");
+    let mut out = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(&task_dir).unwrap_or_else(|e| panic!("read {task_dir}: {e}")) {
+        let entry = entry.unwrap_or_else(|e| panic!("read {task_dir} entry: {e}"));
+        let tid = entry.file_name().to_string_lossy().into_owned();
+        let comm_path = entry.path().join("comm");
+        let comm = std::fs::read_to_string(&comm_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", comm_path.display()));
+        out.insert(tid, comm.trim().to_owned());
+    }
+    out
+}
+
+/// `SECCOMP_MODE_DISABLED` — the mode a bare `/proc/<pid>/status` read
+/// (the thread-group leader) correctly reports on a properly-confined CH
+/// (C-5, spike P5 correction 2). Named so both assertions below read as
+/// "must equal the disabled mode" / "must NOT equal the disabled mode"
+/// rather than a bare magic `0`.
+const SECCOMP_MODE_DISABLED: u32 = 0;
+
+/// S-VM-09 -- Seccomp is verified per-thread, not on the thread-group
+/// leader. **C-5 correction** (brief.md §102 row C-5, §113; DESIGN
+/// 2026-08-11): the original Slice 01 AC read a bare `/proc/<pid>/status`,
+/// which FAILS against correct cloud-hypervisor behaviour -- spike P5
+/// measured `Seccomp: 0` on the thread-group leader of a *correctly*
+/// confined CH, because the filters are installed per-thread, after the
+/// `vmm` / `http-server` / `vcpu0` threads are spawned, never re-applied to
+/// (or inherited retroactively by) the leader's own status. A regression
+/// that dropped `--seccomp` from the argv renderer entirely would ALSO read
+/// `Seccomp: 0` on the leader -- so a leader-only check cannot distinguish
+/// "confined correctly" from "not confined at all"; this scenario is the
+/// runtime regression guard S-VM-08's argv-level assertion is paired with
+/// (S-VM-08 is the binding mutation-kill site; this is the `/proc`-level
+/// half, satisfied by CH's own default and therefore not itself proof this
+/// slice acted -- see brief.md §106 / slice-01's `[D7]` item 6).
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    // A long-lived guest (never exits on its own) -- this scenario needs
+    // the real cloud-hypervisor process alive so its threads can be
+    // inspected via /proc while Running. Reuses the S-VM-74 helper rather
+    // than a third inline copy of the same spin.rs shape.
+    let spin_bin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinseccomp");
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-seccomp.toml",
+        &vm_job_toml("vm-seccomp", "/sbin/spinseccomp", &[], &fixture.kernel_path, &rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the [vm] spec");
+
+    // Poll until Running (the spin guest never exits on its own).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let out =
+            describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if out.snapshot.rows.first().is_some_and(|r| r.state == AllocStateWire::Running) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "allocation must reach Running within 60s"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    let vmm_pid = find_cloud_hypervisor_pid();
+    let names = thread_names(vmm_pid);
+
+    // The thread-group leader's OWN status (tid == pid) is NEVER used as
+    // the sole evidence -- confirm it, on its own, reports the DISABLED
+    // mode a bare `/proc/<pid>/status` read would see, and document that
+    // this alone must not fail the scenario (C-5's correction).
+    let leader_mode = thread_seccomp_mode(vmm_pid, &vmm_pid.to_string());
+    assert_eq!(
+        leader_mode, SECCOMP_MODE_DISABLED,
+        "the thread-group leader's own status is expected to report SECCOMP_MODE_DISABLED \
+         on a correctly-confined cloud-hypervisor -- this is not a failure, it documents why \
+         a bare /proc/<pid>/status read is the wrong evidence (C-5); observed threads: \
+         {names:?}"
+    );
+
+    let vmm_tid = names.iter().find(|(_, name)| name.as_str() == "vmm").map_or_else(
+        || panic!("no thread named 'vmm' among {names:?}"),
+        |(tid, _)| tid.clone(),
+    );
+    let http_server_tid = names.iter().find(|(_, name)| name.contains("http")).map_or_else(
+        || panic!("no thread with 'http' in its name among {names:?}"),
+        |(tid, _)| tid.clone(),
+    );
+    let vcpu0_tid = names.iter().find(|(_, name)| name.contains("vcpu0")).map_or_else(
+        || panic!("no thread with 'vcpu0' in its name among {names:?}"),
+        |(tid, _)| tid.clone(),
+    );
+
+    for (label, tid) in
+        [("vmm", &vmm_tid), ("http-server", &http_server_tid), ("vcpu0", &vcpu0_tid)]
+    {
+        let mode = thread_seccomp_mode(vmm_pid, tid);
+        assert_ne!(
+            mode, SECCOMP_MODE_DISABLED,
+            "the {label} thread (tid={tid}) must report a non-default Seccomp mode; got \
+             {mode} (0 = disabled) -- observed threads: {names:?}"
+        );
+    }
+
     stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
         .expect("stop the long-lived spin workload before shutdown");
