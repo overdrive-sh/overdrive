@@ -94,18 +94,19 @@
 //! below, for whichever step finalizes the cmdline against a real boot
 //! (01-08).
 //!
-//! **Known gap this step does NOT close.** Ubuntu kernels build
-//! `CONFIG_VSOCKETS`/`CONFIG_VIRTIO_VSOCKETS` as *modules*
-//! (spike finding `[D2]`), and `overdrive-init` (as landed in step 01-03)
-//! has no `finit_module` logic — it goes straight to
-//! `socket(AF_VSOCK, ...)`. A guest booted from a verbatim-copied stock
-//! kernel may therefore fail to open the beacon socket with
-//! `EAFNOSUPPORT` unless the host kernel happens to carry vsock built in.
-//! Staging the three `.ko` modules without a loader to `finit_module` them
-//! would be inert, so this step deliberately does not attempt it — flagged
-//! here for whichever step first drives a REAL guest boot (01-06) to
-//! discover and resolve, per this feature's design-context note that
-//! "kernel/rootfs staging here is TEST-envelope provisioning" and no more.
+//! **Guest vsock modules — closed at step 01-08 (DISTILL DWD-21).**
+//! Ubuntu kernels build `CONFIG_VSOCKETS`/`CONFIG_VIRTIO_VSOCKETS` as
+//! *modules* (spike finding `[D2]`), so a guest booted from a
+//! verbatim-copied stock kernel needs them `finit_module`-loaded before
+//! it can open the beacon socket, or it fails `EAFNOSUPPORT`. This
+//! fixture's [`build_staging_tree`] now stages the three vsock `.ko`
+//! (zstd-decompressed, from the SAME `uname -r` [`stage_kernel`] copied
+//! the kernel from — no rootfs↔kernel skew) into the shared in-guest
+//! directory [`overdrive_core::vm::beacon::GUEST_VSOCK_MODULE_DIR`]
+//! pins; `overdrive-init` (step 01-03's crate) is the loader that reads
+//! them, tolerating "already loaded" and "absent" (the vsock=y
+//! appliance-kernel case, ADR-0068 §4) as success. See ADR-0082 §D4's
+//! 2026-08-14 amendment for the full contract both sides honor.
 
 #![allow(clippy::doc_markdown)]
 #![cfg(target_os = "linux")]
@@ -116,6 +117,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use overdrive_core::vm::beacon::{GUEST_VSOCK_MODULE_DIR, GUEST_VSOCK_MODULE_FILES};
 use overdrive_core::vm::config::{HostArch, KERNEL_MAGIC_WINDOW, KernelFormatError, KernelImage};
 
 /// The in-guest absolute path the kernel's own no-`init=` fallback
@@ -517,6 +519,26 @@ fn ensure_reflink_capable(dir: &Path) -> Result<(), VmFixtureError> {
 /// it is trusted. See the module doc's "Pinned kernel source" design
 /// note.
 ///
+/// Re-verification is release-aware, not just format-aware (review
+/// finding, 01-08 review remediation): [`kernel_is_valid`] alone only
+/// confirms the STAGED file still parses as a valid bzImage for this
+/// arch — it says nothing about whether that bzImage still matches the
+/// CURRENTLY RUNNING kernel. A host kernel package upgrade (`apt
+/// upgrade`, unattended-upgrades) changes `uname -r` and the module set
+/// under `/lib/modules/<new-release>/` WITHOUT touching a
+/// previously-staged `<staging_root>/kernel` copy, which stays
+/// syntactically valid forever. [`build_staging_tree`]'s vsock modules
+/// (ADR-0082 §D4 amendment 2026-08-14) are staged from the CURRENT
+/// `uname -r`, so a stale kernel copy silently paired with fresh
+/// modules is a real kernel/module ABI mismatch — confirmed on the real
+/// metal box: a guest booting the stale `7.0.0-15-generic` copy against
+/// modules built for the box's current `7.0.0-29-generic` failed
+/// `finit_module` with `ENOEXEC` ("vsock: disagrees about version of
+/// symbol module_layout"). The `.kernel-staged-from` marker (mirroring
+/// [`stage_rootfs`]'s own `.rootfs-built-from` marker shape) pins the
+/// release the staged copy came from, so a release change invalidates
+/// it the same way a rebuilt `overdrive-init` invalidates the rootfs.
+///
 /// # Errors
 ///
 /// - [`VmFixtureError::UnsupportedHostArch`] — compiled for neither
@@ -528,9 +550,10 @@ fn ensure_reflink_capable(dir: &Path) -> Result<(), VmFixtureError> {
 ///   could not be READ (permission denied, EIO, …) (D5: a `0600
 ///   root:root` image is unreadable, not missing — never conflated).
 /// - [`VmFixtureError::KernelStagingWriteFailed`] — the validated image
-///   could not be copied into `staging_root` (a write-side failure —
-///   disk full, unwritable staging dir — never conflated with a
-///   read-side/source failure, D5).
+///   could not be copied into `staging_root`, or the release marker
+///   could not be written (a write-side failure — disk full, unwritable
+///   staging dir — never conflated with a read-side/source failure,
+///   D5).
 /// - [`VmFixtureError::KernelImageInvalid`] — the host's own kernel
 ///   image failed [`KernelImage::validate`] on `x86_64` (should not
 ///   happen on a supported distro kernel; named rather than assumed).
@@ -544,12 +567,16 @@ fn stage_kernel(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
         VmFixtureError::staging_dir_unusable(staging_root.to_path_buf(), source)
     })?;
     let dest = staging_root.join("kernel");
+    let marker_path = staging_root.join(".kernel-staged-from");
 
-    if kernel_is_valid(&dest) {
+    let release = host_kernel_release()?;
+
+    let already_current = kernel_is_valid(&dest)
+        && fs::read_to_string(&marker_path).is_ok_and(|marker| marker == release);
+    if already_current {
         return Ok(dest);
     }
 
-    let release = host_kernel_release()?;
     let source = PathBuf::from(format!("/boot/vmlinuz-{release}"));
 
     let header = read_header(&source).map_err(|io_source| {
@@ -566,6 +593,10 @@ fn stage_kernel(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
 
     fs::copy(&source, &dest).map_err(|io_source| {
         VmFixtureError::kernel_staging_write_failed(dest.clone(), io_source)
+    })?;
+
+    fs::write(&marker_path, &release).map_err(|io_source| {
+        VmFixtureError::kernel_staging_write_failed(marker_path.clone(), io_source)
     })?;
 
     Ok(dest)
@@ -634,7 +665,12 @@ fn host_kernel_release() -> Result<String, VmFixtureError> {
 /// [`VmFixtureError::RootfsBuildFailed`], or [`VmFixtureError::Spawn`].
 fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     let init_bin = build_overdrive_init_static()?;
-    let signature = compute_init_signature(&init_bin)?;
+    // The SAME `uname -r` used both to derive the invalidation
+    // signature below AND to locate the `.ko.zst` sources
+    // `build_staging_tree` stages (ADR-0082 §D4 amendment 2026-08-14) —
+    // computed once here so the two can never skew against each other.
+    let kernel_release = host_kernel_release()?;
+    let signature = format!("{}:{kernel_release}", compute_init_signature(&init_bin)?);
 
     let rootfs_path = staging_root.join("rootfs.ext4");
     let marker_path = staging_root.join(".rootfs-built-from");
@@ -658,7 +694,7 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     }
 
     let stage_dir = staging_root.join("rootfs-stage");
-    build_staging_tree(&stage_dir, &init_bin)?;
+    build_staging_tree(&stage_dir, &init_bin, &kernel_release)?;
     mkfs_rootfs_image(&stage_dir, &rootfs_path)?;
 
     fs::write(&marker_path, &signature).map_err(|source| {
@@ -671,12 +707,20 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     Ok(rootfs_path)
 }
 
-/// `<len>:<mtime-secs>:<mtime-nanos>` — the idempotency signature
-/// [`stage_rootfs`] compares against the persisted marker to decide
-/// whether a rebuild is needed. Carries nanosecond resolution (D11):
-/// whole-second [`MetadataExt::mtime`] alone could falsely reuse a stale
-/// image when `overdrive-init` is rebuilt more than once within the same
+/// `<len>:<mtime-secs>:<mtime-nanos>` — the `overdrive-init` binary's
+/// own contribution to the idempotency signature [`stage_rootfs`]
+/// compares against the persisted marker to decide whether a rebuild is
+/// needed. Carries nanosecond resolution (D11): whole-second
+/// [`MetadataExt::mtime`] alone could falsely reuse a stale image when
+/// `overdrive-init` is rebuilt more than once within the same
 /// wall-clock second.
+///
+/// [`stage_rootfs`] appends the host's `uname -r` release to THIS
+/// function's return value before comparing/persisting (ADR-0082 §D4
+/// amendment 2026-08-14) — a kernel change invalidates the staged
+/// `.ko` set [`build_staging_tree`] stages, so it must invalidate the
+/// rootfs too. This function's own contract (the binary-artifact
+/// signature) is unchanged; the composition happens at the call site.
 fn compute_init_signature(init_bin: &Path) -> Result<String, VmFixtureError> {
     let meta = fs::metadata(init_bin).map_err(|source| {
         VmFixtureError::rootfs_staging_failed(
@@ -711,9 +755,24 @@ fn rootfs_image_is_valid(path: &Path) -> bool {
 
 /// Clears and rebuilds the staging tree `mkfs.ext4 -d` will populate the
 /// image from: the kernel-required empty mountpoints, `overdrive-init`
-/// baked in at both in-guest init paths (D1), and the two static device
-/// nodes PID 1 needs before devtmpfs is up.
-fn build_staging_tree(stage_dir: &Path, init_bin: &Path) -> Result<(), VmFixtureError> {
+/// baked in at both in-guest init paths (D1), the guest vsock transport
+/// modules `overdrive-init` `finit_module`-loads before dialing the
+/// beacon (ADR-0082 §D4 amendment 2026-08-14, DISTILL DWD-21), and the
+/// two static device nodes PID 1 needs before devtmpfs is up.
+///
+/// `kernel_release` is the SAME `uname -r` [`stage_kernel`] copied
+/// `/boot/vmlinuz-<release>` from (computed once, by [`stage_rootfs`],
+/// and threaded through here) — the `.ko.zst` sources
+/// [`stage_vsock_modules`] reads live at
+/// `/lib/modules/<release>/kernel/net/vmw_vsock/`, so staging against a
+/// DIFFERENT release than the copied kernel would be exactly the
+/// rootfs↔kernel skew this fixture's own "Pinned kernel source" design
+/// note warns against.
+fn build_staging_tree(
+    stage_dir: &Path,
+    init_bin: &Path,
+    kernel_release: &str,
+) -> Result<(), VmFixtureError> {
     if stage_dir.exists() {
         fs::remove_dir_all(stage_dir).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
@@ -739,8 +798,74 @@ fn build_staging_tree(stage_dir: &Path, init_bin: &Path) -> Result<(), VmFixture
     install_guest_init(stage_dir, init_bin, GUEST_INIT_SBIN_PATH)?;
     install_guest_init(stage_dir, init_bin, GUEST_INIT_PATH)?;
 
+    stage_vsock_modules(stage_dir, kernel_release)?;
+
     mknod_char_device(&stage_dir.join("dev/console"), 5, 1, 0o600)?;
     mknod_char_device(&stage_dir.join("dev/null"), 1, 3, 0o666)?;
+    Ok(())
+}
+
+/// Stages the three vsock transport `.ko` (ADR-0082 §D4 amendment
+/// 2026-08-14, DISTILL DWD-21) into the shared in-guest directory
+/// [`overdrive_core::vm::beacon::GUEST_VSOCK_MODULE_DIR`] pins,
+/// zstd-decompressed (`finit_module` takes uncompressed ELF, per
+/// `overdrive-init`'s loader) from
+/// `/lib/modules/<kernel_release>/kernel/net/vmw_vsock/<name>.ko.zst`
+/// — the SAME `kernel_release` [`stage_kernel`] copied
+/// `/boot/vmlinuz-<release>` from, so the staged modules and the
+/// staged kernel can never version-skew. Matches the spike's
+/// proven-12/12 mechanism
+/// (`spike-scratch/increment-a/build.sh:76-84`).
+///
+/// A source `.ko.zst` that does not exist for this `kernel_release` is
+/// the vsock=y appliance-kernel case (ADR-0068 §4: vsock built in, no
+/// modules to stage at all) — SKIPPED, never an error; `overdrive-init`
+/// mirrors this exact tolerance on the read side.
+///
+/// # Errors
+///
+/// [`VmFixtureError::RootfsStagingFailed`] if the module directory
+/// cannot be created, or [`VmFixtureError::Spawn`] /
+/// [`VmFixtureError::RootfsStagingFailed`] if `zstd -d` cannot be run
+/// or exits non-zero on a source that DOES exist.
+fn stage_vsock_modules(stage_dir: &Path, kernel_release: &str) -> Result<(), VmFixtureError> {
+    let module_dir = stage_dir.join(GUEST_VSOCK_MODULE_DIR.trim_start_matches('/'));
+    fs::create_dir_all(&module_dir).map_err(|source| {
+        VmFixtureError::rootfs_staging_failed(
+            format!("creating vsock module directory at {}", module_dir.display()),
+            source,
+        )
+    })?;
+
+    for filename in GUEST_VSOCK_MODULE_FILES {
+        let src = PathBuf::from(format!(
+            "/lib/modules/{kernel_release}/kernel/net/vmw_vsock/{filename}.zst"
+        ));
+        if !src.exists() {
+            continue;
+        }
+        let dest = module_dir.join(filename);
+        let status = Command::new("zstd")
+            .arg("-d")
+            .arg("-f")
+            .arg("-q")
+            .arg(&src)
+            .arg("-o")
+            .arg(&dest)
+            .status()
+            .map_err(|source| VmFixtureError::spawn(format!("zstd -d {}", src.display()), source))?;
+        if !status.success() {
+            return Err(VmFixtureError::rootfs_staging_failed(
+                format!(
+                    "zstd -d {} -o {} exited {:?}",
+                    src.display(),
+                    dest.display(),
+                    status.code()
+                ),
+                io::Error::other(format!("zstd -d {} failed", src.display())),
+            ));
+        }
+    }
     Ok(())
 }
 

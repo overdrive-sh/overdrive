@@ -1,11 +1,18 @@
 //! `overdrive-init` — the in-guest PID 1 agent (ADR-0082 §D7, §D4, GH #42).
 //!
-//! Six duties, matching ADR-0082 §D4's guest half of the beacon
+//! Seven duties, matching ADR-0082 §D4's guest half of the beacon
 //! lifecycle plus the §D7 amendment (2026-08-12) that pins the
-//! operator-command channel:
+//! operator-command channel, plus the §D4 amendment (2026-08-14,
+//! DISTILL DWD-21) that pins the guest vsock transport's load path:
 //!
+//! 0. Load the guest vsock transport modules ([`load_vsock_modules`])
+//!    — a no-op on a vsock=y appliance kernel (ADR-0068 §4), required
+//!    on the stock `CONFIG_VSOCKETS=m` kernel the Tier-3 fixture
+//!    stages.
 //! 1. Dial the host over the beacon vsock connection
-//!    ([`beacon::VMADDR_CID_HOST`] / [`beacon::BEACON_VSOCK_PORT`]).
+//!    ([`beacon::VMADDR_CID_HOST`] / [`beacon::BEACON_VSOCK_PORT`]),
+//!    retrying with a bounded backoff — the virtio-vsock PCI probe
+//!    completes asynchronously after step 0's module load.
 //! 2. Send `READY` — exactly once, before exec'ing anything.
 //! 3. Block for exactly one host -> guest message and require it to be
 //!    `EXEC { argv }` — the operator's command arrives here, over the
@@ -57,9 +64,10 @@
 // conventions on `expect_used`).
 #![allow(clippy::print_stderr)]
 // See `main.rs`'s module doc — every syscall this binary needs
-// (`AF_VSOCK` socket/connect, `reboot(2)`) has a safe nix wrapper, and
-// `std::process::Command` (not raw `fork`/`exec`) spawns the operator's
-// command. Zero `unsafe` is required anywhere in this crate.
+// (`AF_VSOCK` socket/connect, `reboot(2)`, `finit_module(2)`) has a
+// safe nix wrapper, and `std::process::Command` (not raw `fork`/`exec`)
+// spawns the operator's command. Zero `unsafe` is required anywhere in
+// this crate.
 #![forbid(unsafe_code)]
 
 use std::fs::File;
@@ -67,7 +75,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
 use std::process::Command;
+use std::time::Duration;
 
+use nix::errno::Errno;
+use nix::kmod::{ModuleInitFlags, finit_module};
 use nix::sys::reboot::{self, RebootMode};
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
 use overdrive_core::vm::beacon::{self, BeaconMessage};
@@ -88,6 +99,7 @@ fn main() {
 /// returns control to this function at all.
 fn run() -> Result<(), InitError> {
     let pid = std::process::id();
+    load_vsock_modules()?;
     let mut conn = connect_beacon()?;
 
     send(&mut conn, &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT })?;
@@ -113,12 +125,40 @@ fn run() -> Result<(), InitError> {
 /// `/dev/console` rather than a flattened string.
 #[derive(Debug, thiserror::Error)]
 enum InitError {
+    /// A staged vsock module file exists but could not be opened for a
+    /// reason other than absence (permission, I/O, ...). Absence itself
+    /// is NOT an error — see [`load_vsock_modules`] — this variant is
+    /// every other read failure (ADR-0082 §D4 amendment 2026-08-14).
+    #[error("could not open staged vsock module {path}: {source}")]
+    ModuleOpen {
+        /// The in-guest module path that could not be opened.
+        path: String,
+        /// The underlying open failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// `finit_module(2)` itself failed for a reason other than "already
+    /// loaded" (`EEXIST`, tolerated as success — either a prior module
+    /// in this boot already loaded it, or the appliance kernel carries
+    /// it built in).
+    #[error("finit_module({path}) failed: {source}")]
+    ModuleLoad {
+        /// The in-guest module path whose load failed.
+        path: String,
+        /// The underlying `finit_module(2)` failure.
+        #[source]
+        source: Errno,
+    },
     /// Creating the `AF_VSOCK` beacon socket failed.
     #[error("could not create the beacon vsock socket: {0}")]
-    Socket(#[source] nix::errno::Errno),
-    /// Connecting the beacon socket to the host failed.
-    #[error("could not connect the beacon vsock socket to the host: {0}")]
-    Connect(#[source] nix::errno::Errno),
+    Socket(#[source] Errno),
+    /// Connecting the beacon socket to the host failed after
+    /// [`VSOCK_CONNECT_MAX_ATTEMPTS`] retries — the virtio-vsock PCI
+    /// probe completes asynchronously after [`load_vsock_modules`]
+    /// returns, so a single attempt would race it (ADR-0082 §D4
+    /// amendment 2026-08-14). Carries the LAST attempt's failure.
+    #[error("could not connect the beacon vsock socket to the host after repeated retries: {0}")]
+    Connect(#[source] Errno),
     /// A read or write on the beacon connection failed.
     #[error("beacon connection I/O failed: {0}")]
     Io(#[source] std::io::Error),
@@ -150,13 +190,90 @@ enum InitError {
     },
     /// `reboot(RB_POWER_OFF)` failed.
     #[error("reboot(RB_POWER_OFF) failed: {0}")]
-    Reboot(#[source] nix::errno::Errno),
+    Reboot(#[source] Errno),
 }
+
+/// The in-guest module directory + ordered filename list — see
+/// [`beacon::GUEST_VSOCK_MODULE_DIR`] / [`beacon::GUEST_VSOCK_MODULE_FILES`]'s
+/// own docs for the shared-const contract with the staging fixture.
+/// Loads the guest vsock transport before [`connect_beacon`] dials
+/// `AF_VSOCK` (ADR-0082 §D4 amendment 2026-08-14, DISTILL DWD-21) —
+/// matches the spike's proven-12/12 mechanism
+/// (`spike-scratch/increment-a/probe/src/bin/guest_init.rs`).
+///
+/// Two tolerated outcomes, both success, so this ONE binary is correct
+/// on both the stock `CONFIG_VSOCKETS=m` test kernel and a vsock=y
+/// appliance kernel (ADR-0068 §4) with no `#[cfg(test)]` branch and no
+/// test-only parameter (kernel-config-variance resilience, the
+/// documented `[D2]` fallback — never "production shaped by
+/// simulation", `.claude/rules/development.md`):
+///
+/// - **The staged file is absent** (`io::ErrorKind::NotFound`) — a
+///   vsock=y image stages none of these, so there is nothing to load;
+///   skip to the next filename.
+/// - **`finit_module` returns `EEXIST`** — the module is already
+///   loaded (a dependency loaded transitively, or built into the
+///   kernel); already-satisfied, not a failure.
+///
+/// A genuine failure on either the open or the load surfaces as a
+/// typed [`InitError`] — logged to `/dev/console` by `main`'s existing
+/// emergency path, never swallowed.
+fn load_vsock_modules() -> Result<(), InitError> {
+    for filename in beacon::GUEST_VSOCK_MODULE_FILES {
+        let path = format!("{}/{filename}", beacon::GUEST_VSOCK_MODULE_DIR);
+        let file = match File::open(&path) {
+            Ok(file) => file,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => return Err(InitError::ModuleOpen { path, source }),
+        };
+        match finit_module(&file, c"", ModuleInitFlags::empty()) {
+            Ok(()) | Err(Errno::EEXIST) => {}
+            Err(source) => return Err(InitError::ModuleLoad { path, source }),
+        }
+    }
+    Ok(())
+}
+
+/// Bounded retry budget for [`connect_beacon`] — matches the spike's
+/// proven-12/12 shape (`probe/src/bin/guest_init.rs`): the
+/// virtio-vsock PCI probe completes ASYNCHRONOUSLY after
+/// [`load_vsock_modules`] returns, so a single connect attempt races
+/// it. Harmless on a vsock=y kernel (the first attempt succeeds);
+/// required on the stock `CONFIG_VSOCKETS=m` test kernel.
+const VSOCK_CONNECT_MAX_ATTEMPTS: u32 = 25;
+
+/// Delay between [`connect_beacon`] retry attempts — matches the
+/// spike's measured `sleep_ms(100)`.
+const VSOCK_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Opens the guest -> host beacon connection: `AF_VSOCK`, dialing
 /// [`beacon::VMADDR_CID_HOST`] on [`beacon::BEACON_VSOCK_PORT`]
-/// (ADR-0082 §§D2.2/D7).
+/// (ADR-0082 §§D2.2/D7), retrying up to [`VSOCK_CONNECT_MAX_ATTEMPTS`]
+/// times with a [`VSOCK_CONNECT_RETRY_DELAY`] pause between attempts
+/// (ADR-0082 §D4 amendment 2026-08-14) — see [`connect_beacon_once`]
+/// for the single-attempt body this loop retries.
 fn connect_beacon() -> Result<File, InitError> {
+    let mut last_err = Errno::UnknownErrno;
+    for _attempt in 0..VSOCK_CONNECT_MAX_ATTEMPTS {
+        match connect_beacon_once() {
+            Ok(conn) => return Ok(conn),
+            Err(InitError::Socket(errno) | InitError::Connect(errno)) => {
+                last_err = errno;
+                std::thread::sleep(VSOCK_CONNECT_RETRY_DELAY);
+            }
+            // `connect_beacon_once` only ever returns `Socket` or
+            // `Connect` — every other `InitError` variant is
+            // unreachable from this call site.
+            Err(other) => return Err(other),
+        }
+    }
+    Err(InitError::Connect(last_err))
+}
+
+/// One `AF_VSOCK` socket-then-connect attempt — the body
+/// [`connect_beacon`]'s retry loop repeats. Returns only
+/// [`InitError::Socket`] or [`InitError::Connect`] on failure.
+fn connect_beacon_once() -> Result<File, InitError> {
     let sock = socket::socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None)
         .map_err(InitError::Socket)?;
     let addr = VsockAddr::new(beacon::VMADDR_CID_HOST, beacon::BEACON_VSOCK_PORT.as_u32());

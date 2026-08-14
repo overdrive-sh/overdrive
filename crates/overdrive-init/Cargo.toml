@@ -54,13 +54,17 @@ integration-tests = []
 overdrive-core.workspace = true
 thiserror.workspace      = true
 # `nix` — safe Rust bindings to the `AF_VSOCK` socket family (the vsock
-# beacon connection) and the `reboot(2)` syscall (`RB_POWER_OFF` once the
-# beacon session ends). No separate "vsock" Cargo feature exists in nix
-# 0.29 — `VsockAddr` lives under the workspace-inherited "socket"
-# feature, cfg-gated internally to `linux_android`/`apple_targets`.
+# beacon connection), the `reboot(2)` syscall (`RB_POWER_OFF` once the
+# beacon session ends), and `finit_module(2)` (loading the guest vsock
+# transport modules before dialing the beacon, ADR-0082 §D4 amendment
+# 2026-08-14 / DWD-21 — see `main.rs`'s `load_vsock_modules`). No
+# separate "vsock" Cargo feature exists in nix 0.29 — `VsockAddr` lives
+# under the workspace-inherited "socket" feature, cfg-gated internally
+# to `linux_android`/`apple_targets`. `nix::kmod::finit_module` is a
+# safe wrapper (`#![forbid(unsafe_code)]` stays intact).
 # `std::process::Command` (not nix's raw `fork`/`exec`) spawns the
 # operator's command — see `main.rs`'s module doc for why.
-nix = { workspace = true, features = ["reboot"] }
+nix = { workspace = true, features = ["reboot", "kmod"] }
 
 [lints]
 workspace = true

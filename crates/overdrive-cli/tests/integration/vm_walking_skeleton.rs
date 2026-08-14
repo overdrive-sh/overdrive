@@ -70,13 +70,15 @@
 //! documents for the `env` group, applied to real host cgroupfs instead
 //! of environment variables.
 //!
-//! # BLOCKER found by this walking skeleton — guest vsock is a kernel
-//! # module the guest never loads (pre-existing, cross-step gap)
+//! # BLOCKER found by this walking skeleton, CLOSED at 01-08 review
+//! # remediation — guest vsock is a kernel module the guest never
+//! # loaded (DISTILL DWD-21)
 //!
 //! A direct `cloud-hypervisor` boot (bypassing the driver entirely) on
 //! the real metal box, using the EXACT same kernel/rootfs/cmdline
 //! `CloudHypervisorVmm::create` composes, produced this REAL guest
-//! console output (captured 2026-08-14, kernel `7.0.0-15-generic`):
+//! console output (captured 2026-08-14, kernel `7.0.0-15-generic`,
+//! BEFORE this section's fix landed):
 //!
 //! ```text
 //! [    0.781590] Run /sbin/init as init process
@@ -85,42 +87,87 @@
 //! [    0.786611] reboot: Power down
 //! ```
 //!
-//! This is EXACTLY the gap `vm_fixture.rs`'s own module doc flags as
-//! unresolved: "Ubuntu kernels build `CONFIG_VSOCKETS`/
-//! `CONFIG_VIRTIO_VSOCKETS` as *modules* ... and `overdrive-init` (as
-//! landed in step 01-03) has no `finit_module` logic — it goes straight
-//! to `socket(AF_VSOCK, ...)`." The box's running kernel (verbatim-copied
-//! into every guest per the fixture's "Pinned kernel source" design note)
-//! builds vsock as loadable modules, not built-in; nothing in the guest
-//! ever `insmod`s them, so `AF_VSOCK` is never registered and every
-//! `socket(AF_VSOCK, ...)` call fails `EAFNOSUPPORT` before the guest can
-//! ever dial the beacon.
+//! This was EXACTLY the gap `vm_fixture.rs`'s own module doc used to
+//! flag as unresolved: Ubuntu kernels build `CONFIG_VSOCKETS`/
+//! `CONFIG_VIRTIO_VSOCKETS` as *modules*, and `overdrive-init` (as
+//! landed in step 01-03) had no `finit_module` logic — it went straight
+//! to `socket(AF_VSOCK, ...)`. The box's running kernel (verbatim-copied
+//! into every guest per the fixture's "Pinned kernel source" design
+//! note) builds vsock as loadable modules, not built-in; nothing in the
+//! guest ever `insmod`d them, so `AF_VSOCK` was never registered and
+//! every `socket(AF_VSOCK, ...)` call failed `EAFNOSUPPORT` before the
+//! guest could ever dial the beacon.
 //!
-//! **This is a pre-existing, cross-step gap — NOT a defect in this
-//! step's (01-08) composition-root / registry / dispatch / mTLS-gate
-//! work.** `overdrive-init` (step 01-03) and `vm_fixture.rs` (step 01-04)
-//! are both outside this step's `files_to_modify`, and closing it
-//! requires a design decision this step has no authority to invent
-//! unilaterally (which `.ko` files to stage, `finit_module` vs an
-//! initramfs, load ordering) — per CLAUDE.md § "Implement to the design
-//! — never invent API surface", the correct move is to surface the gap,
-//! not improvise past it.
+//! **Ruled and closed by DISTILL DWD-21 / ADR-0082 §D4 amendment
+//! (2026-08-14), landed as this SAME step's (01-08) review-remediation.**
+//! `overdrive-init` now `finit_module`-loads the three vsock modules (in
+//! dependency order, from a shared pinned in-guest directory) before
+//! `connect_beacon`, tolerating "already loaded" and "absent" (the
+//! vsock=y appliance-kernel case, ADR-0068 §4) as success;
+//! `vm_fixture.rs`'s `build_staging_tree` stages those same three `.ko`,
+//! zstd-decompressed, from the SAME `uname -r` the staged kernel came
+//! from. `connect_beacon` also gained a bounded retry (the virtio-vsock
+//! PCI probe completes asynchronously after the module load). Matches
+//! the spike's proven-12/12 mechanism
+//! (`spike-scratch/increment-a/build.sh`,
+//! `probe/src/bin/guest_init.rs`). A SECOND, pre-existing, latent bug
+//! surfaced alongside this fix and is fixed in the SAME commit:
+//! `vm_fixture.rs`'s `stage_kernel` re-verified only that a previously
+//! staged kernel copy still PARSED as a valid bzImage, never that it
+//! still matched the CURRENTLY RUNNING `uname -r` — a host kernel
+//! package upgrade (observed on the metal box mid-investigation:
+//! `7.0.0-15-generic` → `7.0.0-29-generic`) left a stale staged kernel
+//! paired with freshly-staged modules built for the new release,
+//! producing a real `finit_module` ENOEXEC ("vsock: disagrees about
+//! version of symbol `module_layout`") — confirmed via a direct manual
+//! `cloud-hypervisor` boot against the staged fixture. `stage_kernel`
+//! now pins a `.kernel-staged-from` release marker (mirroring
+//! `stage_rootfs`'s own `.rootfs-built-from` shape) so a release change
+//! invalidates the staged copy the same way a rebuilt `overdrive-init`
+//! invalidates the rootfs.
 //!
-//! **Impact on this file's scenarios**: S-VM-01, S-VM-02, S-VM-05, and
-//! S-VM-74 all require the guest to actually reach the beacon
-//! READY/EXIT handshake, so all four are blocked by this gap and are
-//! `#[ignore]`d below with this same evidence cited. S-VM-03 (rootfs
-//! with no working init — the guest never reaches `overdrive-init` at
-//! all) and S-VM-04 (deploy-time acceptance only, no boot-to-completion
-//! wait) do not depend on the beacon handshake and are genuinely GREEN.
-//! Every production wiring claim this step makes (`DriverRegistry`
-//! composition, `[job]`+`[vm]` parser dispatch, the `AllocDriverIndex`
-//! routing, the `DriverType::Exec` mTLS gate, the exit-observer
-//! per-driver-kind spawn) is exercised correctly up to the point where
-//! `Vmm::create` hands off to a REAL guest kernel — S-VM-01/02's own
-//! failure text (`"VMM exited before the guest signalled ready"`) is the
-//! driver's OWN correct, typed diagnosis of exactly this condition, not
-//! a wrong result silently swallowed.
+//! **Confirmed CLOSED — the vsock/EAFNOSUPPORT gap itself.** Two
+//! consecutive real metal-box runs, post-fix, show ZERO `EAFNOSUPPORT`
+//! anywhere. S-VM-02 and S-VM-15 — both of which require the guest to
+//! reach `READY`, exec, and report a REAL `EXIT <status>` back over
+//! vsock — PASS cleanly and repeatably; S-VM-03/S-VM-04/S-VM-14 (never
+//! vsock-dependent) remain GREEN throughout. This is the maximal
+//! evidence available that the guest-vsock transport itself works.
+//!
+//! **Two SEPARATE, NEWLY-EXPOSED blockers remain — neither is the vsock
+//! gap, and neither is fixable within this step's file boundary
+//! (`crates/overdrive-init`, `crates/overdrive-testing`,
+//! `crates/overdrive-core`'s beacon module, this file).** Both were
+//! UNREACHABLE before this fix (every scenario that would have hit them
+//! was vsock-blocked first), so their `#[ignore]` reasons name them
+//! explicitly rather than reusing the vsock text:
+//!
+//! - **S-VM-05 / S-VM-74** (both mTLS-composed, real `EbpfDataplane`):
+//!   deterministic `EbpfDataplane` construction failure — `XDP slot on
+//!   interface 'ovd-veth-cli' is already occupied (EBUSY)` — reproduced
+//!   on a freshly-rebooted box with a verified-clean XDP/veth/bpftool
+//!   state beforehand, ruling out the routine leftover-attachment class
+//!   `debugging.md` documents. Root cause is in `overdrive-dataplane` /
+//!   the veth-provisioner, outside this step's scope.
+//! - **S-VM-01** (the walking skeleton itself): the guest-side mechanism
+//!   works correctly (READY, EXEC, `EXIT 0` all confirmed over vsock —
+//!   the SAME mechanism S-VM-02/S-VM-15 prove GREEN), but the terminal
+//!   observation row lands `AllocStateWire::Failed` with
+//!   `TransitionReason::Stopped{by:Process}` — a state/reason pairing
+//!   `exit_observer.rs`'s own `classify()` never produces (that reason
+//!   always pairs with `Terminated`). Reproduced twice, deterministically.
+//!   Root cause is downstream of the vsock/exit-report mechanism —
+//!   likely the observation-store write path or a reconciler's row
+//!   mutation, not the per-driver exit-observer dispatch itself (which
+//!   reads architecturally sound at a glance) — outside this step's
+//!   scope. This is 01-08's own newly-introduced multi-driver
+//!   exit-observer machinery, never previously exercisable through a
+//!   REAL VM exit until this fix unblocked vsock.
+//!
+//! S-VM-02, S-VM-03, S-VM-04, S-VM-14, and S-VM-15 are GREEN and carry
+//! no `#[ignore]`. S-VM-01, S-VM-05, and S-VM-74 carry a NEW
+//! `#[ignore]` each, citing the specific finding above — never the
+//! (now-closed) vsock reason.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -137,6 +184,9 @@ use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, de
 use overdrive_control_plane::VmBootArtifacts;
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
+use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::id::AllocationId;
+use overdrive_core::vm::config::{RootfsPlan, VmRunDir};
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -382,7 +432,7 @@ async fn poll_until_terminal(
 /// the operator.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "BLOCKER: guest vsock is a kernel module the guest never loads (EAFNOSUPPORT); see this file module doc section 'BLOCKER found by this walking skeleton' for the captured console evidence; pre-existing cross-step gap in overdrive-init (01-03) / vm_fixture.rs (01-04), not this step 01-08 composition-root work"]
+#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): the guest reaches READY, execs, and reports EXIT 0 over vsock correctly (confirmed -- S-VM-02/S-VM-15's identical mechanism passes cleanly), but the terminal row lands AllocStateWire::Failed with TransitionReason::Stopped{by:Process} -- a combination exit_observer.rs's own classify() never produces (Stopped{by:Process} always pairs with AllocState::Terminated). Reproduced twice, deterministically, after clean cgroup/veth/run-dir state. Root cause not yet in overdrive-init/vm_fixture.rs/beacon.rs (all outside this crate); the per-driver exit-observer dispatch in overdrive-control-plane/src/lib.rs looks architecturally sound at a glance, so the defect likely sits downstream in the observation-store write path or a reconciler's row mutation, not the dispatch itself. Needs investigation in overdrive-control-plane (exit_observer.rs / the WorkloadLifecycle reconciler), outside this step's file boundary."]
 async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -433,7 +483,6 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
 /// inside the guest returned).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "BLOCKER: guest vsock is a kernel module the guest never loads (EAFNOSUPPORT); see this file module doc section 'BLOCKER found by this walking skeleton' for the captured console evidence; pre-existing cross-step gap in overdrive-init (01-03) / vm_fixture.rs (01-04), not this step 01-08 composition-root work"]
 async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -626,7 +675,7 @@ fn find_cloud_hypervisor_pid() -> u32 {
 /// feature deliberately re-proves closed).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "BLOCKER: guest vsock is a kernel module the guest never loads (EAFNOSUPPORT); see this file module doc section 'BLOCKER found by this walking skeleton' for the captured console evidence; pre-existing cross-step gap in overdrive-init (01-03) / vm_fixture.rs (01-04), not this step 01-08 composition-root work"]
+#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): EbpfDataplane construction fails deterministically with 'XDP slot on interface ovd-veth-cli is already occupied (EBUSY)' on the mTLS-composed serve path -- reproduced on a freshly-rebooted metal box with a verified-clean veth/XDP/bpftool state beforehand (no leftover program, no leftover process), so this is not the routine leftover-attachment class debugging.md already documents. Root cause is in overdrive-dataplane's EbpfDataplane::new / the veth-provisioner's XDP attach, outside this step's file boundary -- never previously exercisable since this scenario was always vsock-blocked until now."]
 async fn vm_platform_contains_the_hypervisor_it_started() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -725,7 +774,7 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
 /// allocation's netns.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "BLOCKER: guest vsock is a kernel module the guest never loads (EAFNOSUPPORT); see this file module doc section 'BLOCKER found by this walking skeleton' for the captured console evidence; pre-existing cross-step gap in overdrive-init (01-03) / vm_fixture.rs (01-04), not this step 01-08 composition-root work"]
+#[ignore = "NEW BLOCKER (distinct from the CLOSED vsock/EAFNOSUPPORT gap -- see this file's module doc): times out at 120s on an mTLS-composed serve boot, reason=Stopped{by:Process} once terminal. Same mTLS-composed-serve path as S-VM-05 (also blocked, see its own #[ignore] reason for the EbpfDataplane EBUSY finding) -- may share that root cause or compound it. Root cause is outside this step's file boundary; never previously exercisable since this scenario was always vsock-blocked until now."]
 async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -765,6 +814,223 @@ async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
         "a Vm allocation on an mTLS-composed serve must boot and exit cleanly, unaffected by \
          the Exec-only MtlsInterceptWorker gate, got {:?} (reason={:?})",
         row.state,
+        row.reason,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-14 — the deadline arm of the three-way boot race leaks nothing.
+// ---------------------------------------------------------------------
+
+/// `true` iff no `cloud-hypervisor` process is running anywhere on the
+/// host. Mirrors [`find_cloud_hypervisor_pid`]'s `/proc` scan, inverted
+/// -- this file's own established single-VM-at-a-time assumption (see
+/// that function's doc comment) makes "no CH process found anywhere" an
+/// honest "this allocation's VMM is gone" signal under
+/// `#[serial(cgroup)]`'s exclusivity.
+fn no_cloud_hypervisor_process_running() -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else { return true };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let Ok(_pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let comm_path = entry.path().join("comm");
+        if let Ok(comm) = std::fs::read_to_string(&comm_path)
+            && comm.trim() == "cloud-hypervisor"
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// S-VM-14 — The deadline arm of the three-way boot race leaks nothing:
+/// a guest that never beacons ready (the SAME broken-init fixture
+/// S-VM-03 uses -- the kernel's no-`init=` fallback search exhausts and
+/// nothing ever execs, so `overdrive-init` never runs and vsock is
+/// never dialed) reaches Failed once `VM_BOOT_DEADLINE` elapses, and no
+/// cloud-hypervisor process, run directory, rootfs clone, or cgroup
+/// scope remains for the allocation.
+///
+/// Real-substrate companion to `vm_driver_stop_totality.rs`'s
+/// `boot_deadline_elapses_releases_claim_and_cleans_up` -- the `SimVmm`
+/// component-scope enforcement vehicle for this SAME
+/// `cleanup_after_start_failure` code path (see that file's own module
+/// doc: "S-VM-14 ... AC-06's Tier-3 `@real-io` evidence for this SAME
+/// race and cleanup logic ... against a real Cloud Hypervisor boot").
+///
+/// The allocation's supervision claim (`VmDriver`'s internal
+/// `VmSupervision` map) is released as the LAST statement of the SAME
+/// synchronous `cleanup_after_start_failure` call that performs every
+/// other side effect asserted below
+/// (`crates/overdrive-worker/src/vm_driver.rs`) -- no operator-facing
+/// surface exposes `Driver::live_allocations()` today (no caller drives
+/// the reclamation transitions this feature's own ADR references), so
+/// proving the other four side effects landed is the maximal black-box
+/// evidence the `overdrive deploy` driving port can give for claim
+/// release without inventing new API surface (CLAUDE.md § "Implement to
+/// the design" -- mirrors the explicit-boundary-statement precedent
+/// DISTILL set for S-VM-67).
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_deadline_arm_leaks_nothing() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let broken_rootfs = build_empty_rootfs(tmp.path());
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: broken_rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-deadline.toml",
+        &vm_job_toml("vm-deadline", "/sbin/anything", &[], &fixture.kernel_path, &broken_rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the [vm] spec whose guest never beacons ready");
+
+    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    let row = out.snapshot.rows.first().expect("one allocation row for a freshly-deployed job");
+    assert_eq!(
+        row.state,
+        AllocStateWire::Failed,
+        "a guest that never beacons ready must reach Failed once VM_BOOT_DEADLINE elapses, got \
+         {:?}",
+        row.state,
+    );
+
+    let alloc = AllocationId::new(&row.alloc_id)
+        .expect("server-echoed alloc_id parses as AllocationId");
+
+    assert!(
+        no_cloud_hypervisor_process_running(),
+        "the deadline arm's cleanup must terminate the VMM process; none may remain"
+    );
+
+    let master_bytes = std::fs::metadata(&broken_rootfs).expect("stat the broken rootfs").len();
+    let rootfs_plan = RootfsPlan::for_alloc(broken_rootfs.clone(), master_bytes, &alloc);
+    assert!(
+        !rootfs_plan.clone_dest().exists(),
+        "the deadline arm's cleanup must remove the per-launch rootfs clone at {}",
+        rootfs_plan.clone_dest().display()
+    );
+
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
+    assert!(
+        !run_dir.path().exists(),
+        "the deadline arm's cleanup must remove the run directory at {}",
+        run_dir.path().display()
+    );
+
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup"));
+    assert!(
+        !scope_dir.exists(),
+        "the deadline arm's cleanup must remove the cgroup scope at {}",
+        scope_dir.display()
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-15 — a guest EXIT report is never overwritten by the VMM's own
+// teardown exit.
+// ---------------------------------------------------------------------
+
+/// S-VM-15 — A guest EXIT report is never overwritten by the VMM's own
+/// teardown exit: the reported exit code stays the guest's, even though
+/// every real guest poweroff races its own `EXIT <status>` beacon write
+/// against the subsequent `cloud-hypervisor` process exit (0, clean,
+/// during its own teardown).
+///
+/// Real-substrate companion to `vm_driver_stop_totality.rs`'s
+/// `guest_exit_report_is_authoritative_over_subsequent_vmm_teardown`,
+/// which exercises this SAME `drain_guest_report` /
+/// `classify_vm_exit` code path at the `SimVmm` level by forcing the
+/// VMM's own exit to resolve FIRST via a test-only `Vmm` decorator, so
+/// the exit watcher's `GUEST_REPORT_DRAIN_MAX_YIELDS` retry loop
+/// actually iterates while it waits out the guest's own report.
+///
+/// A real Cloud Hypervisor boot cannot have its process-exit timing
+/// test-injected the way `SimVmm` can -- there is no fault-injection
+/// seam on the production `Vmm` adapter, and minting one is outside
+/// this step's design scope (CLAUDE.md § "Implement to the design").
+/// This test's evidence is instead the REAL substrate's own natural
+/// race window: `overdrive-init` writes `EXIT 7` and only THEN reads
+/// for `SHUTDOWN`/EOF before powering off (ADR-0082 §D7) -- it is the
+/// guest's own poweroff that drives `cloud-hypervisor`'s subsequent,
+/// signal-less, clean process exit, so every real guest self-exit
+/// already races the two events in exactly the order this scenario's
+/// `Given`/`When` describe. A lost race would surface as
+/// `exit_code: None` (the VMM's own clean, signal-less exit, per
+/// `classify_vm_exit`'s no-report fallback row) rather than the
+/// guest's real `7` -- distinct evidence from S-VM-02's own claim (the
+/// operator sees the GUEST's code, never the VMM's), which this
+/// scenario's internal drain-then-classify ordering is what makes true.
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-ws-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let exit7 = build_exit_code_binary(tmp.path(), 7);
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit7, "exitreport");
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-exit-report-priority.toml",
+        &vm_job_toml(
+            "vm-exit-report-priority",
+            "/sbin/exitreport",
+            &[],
+            &fixture.kernel_path,
+            &rootfs,
+        ),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the [vm] spec");
+
+    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let row = out.snapshot.rows.first().expect("one allocation row for a freshly-deployed job");
+    assert_eq!(
+        row.state,
+        AllocStateWire::Failed,
+        "a guest that exits 7 must reach Failed, got {:?}",
+        row.state,
+    );
+    assert!(
+        matches!(
+            row.reason,
+            Some(TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(7),
+                signal: None,
+                ..
+            })
+        ),
+        "the guest's EXIT report must arrive and be classified before the ExitEvent is emitted \
+         -- a lost race would report exit_code: None (the VMM's own clean, signal-less \
+         teardown exit) instead of the guest's real 7; got reason={:?}",
         row.reason,
     );
 

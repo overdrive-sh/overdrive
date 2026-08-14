@@ -57,6 +57,31 @@ pub const BEACON_VSOCK_PORT: VsockPort = VsockPort::new(1234);
 /// choice.
 pub const VMADDR_CID_HOST: u32 = 2;
 
+/// The in-guest directory `overdrive-init` loads the vsock transport
+/// modules from, before dialing the beacon (ADR-0082 §D4 amendment
+/// 2026-08-14, DISTILL DWD-21). Matches the spike's proven-12/12
+/// mechanism (`spike-scratch/increment-a/build.sh`,
+/// `probe/src/bin/guest_init.rs`). Shared by BOTH the loader
+/// (`overdrive-init`, this module's consumer) and the stager
+/// (`overdrive_testing::vm_fixture::build_staging_tree`) so the two
+/// sides cannot drift — a single pinned path const, not two
+/// independently-typed literals.
+pub const GUEST_VSOCK_MODULE_DIR: &str = "/modules";
+
+/// The three vsock transport modules, in the dependency order
+/// `finit_module(2)` requires: the core `vsock` module first, then the
+/// shared virtio transport helper, then the virtio transport that
+/// binds the PCI device. Matches
+/// `spike-scratch/increment-a/probe/src/bin/guest_init.rs`'s proven
+/// load order exactly. A vsock=y appliance kernel (ADR-0068 §4) stages
+/// none of these — the loader's read of each path is a tolerated
+/// no-op skip, never an error (the `[D2]` fallback contract).
+pub const GUEST_VSOCK_MODULE_FILES: [&str; 3] = [
+    "vsock.ko",
+    "vmw_vsock_virtio_transport_common.ko",
+    "vmw_vsock_virtio_transport.ko",
+];
+
 /// A beacon line that failed to parse. Carries the raw line and the
 /// specific field that rejected it so a caller can log the exact wire
 /// content that misbehaved.
