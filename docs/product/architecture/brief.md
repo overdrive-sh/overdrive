@@ -8349,12 +8349,19 @@ traffic never traverses:
 | `MtlsInterceptWorker::start_alloc` (`action_shim/mod.rs:1425`, `:1643`) | fired for **every** alloc reaching `Running` on an mTLS-composed boot — gated on `state == Running` (`:1400`, `:1632`) and `mtls_worker.is_some()` (`:1424`, `:1642`), and on **nothing driver-shaped**. Its docstring says the predicate is `DriverType::Exec`, *"unconditionally true on the worker's exec lifecycle path"* (`mtls_intercept_worker.rs:474-477`) | **gated on `DriverType::Exec`.** A microVM terminates TCP *inside the guest*, so host sockops are structurally blind — GH #222's whole premise. The install is fail-closed (`:482-497`), so ungated it either kills the VM or makes a silent false confidentiality claim |
 | **`ServerHandle`'s shutdown** (`lib.rs:1020`, `:1135-1136`) — *the fifth seam, reached by the fix for the second* | a **scalar** `exit_observer_task: JoinHandle<()>`, one token minted at `:2290`, one await | `exit_observer_tasks: Vec<JoinHandle<()>>`, cancel-once-then-await-all, and the loop **clones** the single token. Dropping a tokio `JoinHandle` **detaches** rather than aborts, so N−1 observers would outlive `shutdown()` holding `Arc` clones; and a token minted per driver leaves N−1 tasks parked on `rx.recv()` with no cancel path |
 
-A miss on the `alloc_drivers` lookup is a typed
-`ShimError::UnknownDriverForAlloc`, **never** a silent fallback to `ExecDriver`
-— `ExecDriver::stop` on a VM alloc returns `NotFound`, which `let _ =`
-(`:1694-1697`) swallows, producing exactly the unstoppable orphan SD-1 exists to
-prevent. `provision_and_inject_netns` is deliberately **not** gated: a VM
-allocation still gets its netns, and an empty netns is stronger confinement.
+A miss on the `alloc_drivers` lookup **broadcasts the stop/terminal call to every
+composed driver** — which includes the driver that owns the alloc, so it is *not*
+a silent fallback to `ExecDriver` and strands no orphan *(amended 2026-08-14,
+DWD-22 / GH #42; the earlier `ShimError::UnknownDriverForAlloc` pin rested on a
+strawman fallback the shipped code never implemented and is retired — see
+ADR-0083 § D2a(b))*. The index is in-memory and per-boot, so a miss is a
+legitimate state (an operator `stop` of an alloc `Running` since before a `serve`
+restart; a lifecycle hook exercised directly in a test), not a bug — a hard error
+would route the stop to nobody and create the very orphan SD-1 prevents.
+Broadcast is safe because every `Driver::stop` / `on_alloc_*` is NotFound-tolerant
+/ no-op for an alloc it does not own. `provision_and_inject_netns` is deliberately
+**not** gated: a VM allocation still gets its netns, and an empty netns is stronger
+confinement.
 
 `AllocationSpec.command` / `.args` are replaced by
 `AllocationSpec.driver: DriverPayload` — the routing key the shim currently

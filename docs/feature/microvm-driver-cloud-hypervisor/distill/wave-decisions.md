@@ -1737,6 +1737,116 @@ discipline / DWD-10, not a new deferral).
 
 ---
 
+### DWD-22 — Alloc→driver index MISS broadcasts to all composed drivers; the `ShimError::UnknownDriverForAlloc` pin is retired (2026-08-14, DESIGN ruling — Morgan, GH #42)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`) per
+an explicit dispatch**, closing the 01-08 review's MAJOR finding **D1** — a
+design-conformance defect (the shipped shim silently contradicts a pinned ADR
+contract), not a correctness landmine. Docs-only; **no code change** (the shipped
+code already matches the amended contract).
+
+**The finding.** ADR-0083 § D2a(b) pinned: *"A miss resolves to a typed
+`ShimError::UnknownDriverForAlloc { alloc_id }` and is never silently routed to
+`ExecDriver`."* The shipped `resolve_drivers_for_alloc`
+(`action_shim/mod.rs:668-678`) does the **opposite**: on an `alloc_drivers` index
+MISS it **broadcasts** the stop/terminal call to *every* composed driver. The
+variant `UnknownDriverForAlloc` **does not exist anywhere in the tree** (`grep`:
+named only in the ADR + `brief.md`). No prior ADR amendment / DWD / execution-log
+ESCALATION documented the deviation — the 01-08 GREEN log records "AllocDriverIndex
+routing" but never flags the broadcast-vs-typed-error divergence.
+
+**Investigation (from the artifacts, not assumed).**
+
+1. **The four consumers, classified.** `resolve_drivers_for_alloc` is read by four
+   arms: `FinalizeFailed` → `on_alloc_stable`/`on_alloc_terminal` (`:1291`);
+   `RestartAllocation` stop-half → `stop` (`:1604`); `StopAllocation` → `stop`
+   (`:1858`) and → `on_alloc_terminal` (`:1922`). All are ending/lifecycle-authoring
+   arms consumed *after* dispatch; none carries a spec, so none can re-derive the
+   driver from the action alone (the whole reason the index exists).
+2. **Why the miss happens — a test seam, and a per-boot production state.** The
+   regression `stable_does_not_stop_probe_supervision.rs` calls
+   `driver.on_alloc_running(&spec)` **directly** (`:294/:352/:395/:431`) to register
+   the ProbeRunner supervisor, then dispatches `FinalizeFailed`/`StopAllocation`
+   through the real `dispatch`. Because the supervisor was registered *without* a
+   `StartAllocation` dispatch, the index is empty → the terminal arm MISSES. In
+   production `on_alloc_running` fires **only** inside the Start/Restart arms
+   (`:1572`/`:1819`), *after* the index is written — so the "supervisor live, index
+   empty" state is a pure **test-seam artifact** for the lifecycle hooks. **But** the
+   index is in-memory and per-boot (§ D2a(b) "Rejected"), so an empty-index miss is
+   *also* a legitimate production state for any alloc not started in the current
+   boot epoch (operator `stop` of a workload `Running` since before a `serve`
+   restart). The crafter chose broadcast over a silent no-op or the typed error to
+   keep the regression green; the review confirmed the runtime is SAFE (every
+   `Driver::stop`/`on_alloc_*` is NotFound-tolerant / no-op for an alloc it does not
+   own).
+3. **The ADR's typed-error rationale attacked a strawman.** Its stated fear was a
+   fallback that *"silently routes to `ExecDriver`"* → `ExecDriver::stop` no-ops on
+   a VM alloc → GiB-scale unstoppable orphan. The shipped fallback routes to **all**
+   drivers, **including the `VmDriver`** — so a VM alloc's `stop` reaches its owning
+   driver and the orphan is never stranded. Broadcast satisfies the ADR's safety
+   *intent* by a different mechanism than the ADR's literal *text*.
+
+**Ruling — (a) bless the broadcast-fallback; retire the typed-error pin.** Three
+independent legs:
+
+- **The typed error's own justification does not hold against the shipped design.**
+  Broadcast ≠ "route to `ExecDriver`"; it reaches the owning driver, so the specific
+  orphan-stranding failure the variant was chosen to prevent *cannot occur* under
+  broadcast.
+- **Taken literally, the typed error inverts its safety goal.** On a legitimate
+  per-boot miss (post-`serve`-restart operator stop; the probe-lifecycle test seam),
+  returning `Err(UnknownDriverForAlloc)` routes the stop to **nobody** → creates the
+  very orphan SD-1 prevents. A typed error is correct only if a miss is *always* a
+  bug; it is not, and the shim cannot distinguish same-boot from cross-boot misses
+  without a `boot_epoch` flag — the self-declared boolean § D7 item 1 rejects on the
+  kill-authorising path.
+- **The runtime is confirmed safe and the code already reads as broadcast.** All
+  four call-site comments + the `resolve_drivers_for_alloc` docstring already
+  describe the broadcast fallback and cite § D2a(b); only the ADR/brief *text*
+  contradicted the tree.
+
+**Options (b) typed error and (c) split rejected.** Both reintroduce the orphan on
+exactly the stop arms (`:1604`/`:1858`) the ADR cares most about: those must reach
+the owning driver on a post-restart miss, and a typed error there refuses to route.
+The lifecycle arms (`:1291`/`:1922`) miss only via the test seam or post-restart
+(where the ProbeRunner supervisor is *also* empty per-boot, making the hook a
+harmless no-op). No arm has a miss that is "always a bug," so no arm benefits from
+the typed error; (c) collapses into (b)'s failure.
+
+**Residual, recorded (not glossed).** Broadcast masks a genuine *same-boot* miss (an
+index entry lost to a real defect) that a hard error would surface, and fans the
+call out to N drivers (N=2 today, Exec+Vm — negligible). The mask is unavoidable
+without the rejected epoch flag; the sanctioned recovery is observability, not
+refusal — an **optional, non-blocking** `tracing::debug!(name:
+"shim.alloc_driver.index_miss", %alloc_id)` on the fallback arm. The broadcast's
+safety leans entirely on the NotFound-tolerant/no-op `Driver` contract, which is now
+declared load-bearing: if a future driver's lifecycle hook ever acquires a
+non-idempotent side effect for an alloc it does not own, this ruling must be
+revisited (index repopulation or a per-boot-scoped typed error).
+
+**Crafter instruction — NO CODE CHANGE.** The shipped `resolve_drivers_for_alloc`
+and all four call-site comments already match the amended contract; every comment
+already cites § D2a(b) and describes the broadcast fallback. The crafter's only
+action is to **confirm** those citations now resolve to the amended § D2a(b) (they
+do, textually — no edit). The `ShimError::UnknownDriverForAlloc` variant is retired
+and MUST NOT be implemented. The optional `index_miss` observability event above may
+be added at the crafter's discretion but is not required and is not a deferral.
+
+**ADR reconciliation.** ADR-0083 § D2a(b) amended (the typed-error paragraph
+rewritten to pin broadcast + retire the variant). `brief.md` § 104's miss-disposition
+sentence amended to match. § D3 (the `DriverPayload` shape) names no typed error and
+is untouched; § D2a(c) (mTLS gating) untouched. No other ADR affected.
+
+**Files touched by this entry.** `distill/wave-decisions.md` (this entry +
+Changelog). `docs/product/architecture/adr-0083-…md` (§ D2a(b) amendment).
+`docs/product/architecture/brief.md` (§ 104 miss-disposition sentence). No
+`deliver/roadmap.json` edit — the ruling requires no code change, so no AC / source
+file / step scope changes (no roadmap step describes the typed-error variant). No
+`test-scenarios.md` or Rust file touched. No GitHub issue created (a design-conformance
+reconciliation of an already-shipped-and-safe behavior is not a deferral).
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1752,3 +1862,4 @@ discipline / DWD-10, not a new deferral).
 - 2026-08-14 — Mutation-testing cadence reconciled (DWD-19), user-approved. The per-step `cargo xtask mutants` gates named in individual DELIVER step ACs (roadmap step 01-05 AC #4 the worked example) are superseded by one end-of-DELIVER, per-feature whole-phase-diff gate (`cargo xtask mutants --diff origin/main`, kill-rate ≥ 80%), per CLAUDE.md § "Mutation Testing Strategy". Coverage is unchanged — the whole-diff run mutates `reserve_bytes` / `MemoryPlan::cgroup_max_bytes` (in the phase-01 diff) exactly as a per-step `--file` run would; only the cadence differs. The `@mandatory:mutation_target` tags on S-VM-18/S-VM-20 still attach per-step; only the run is deferred. A single one-line pointer was appended to step 01-05's `implementation_notes` in `deliver/roadmap.json`; the `criteria` arrays left unchanged (this wave-decision is the authoritative reconciliation). No scenario added, removed, renumbered, or re-tagged; no `test-scenarios.md`, `brief.md`, or Rust file touched by this entry. No GitHub issue created.
 - 2026-08-14 — 01-07 review reconciliations (DWD-20), three items, all rulable without a user scope decision. **Item 1 (PRIMARY)**: the `Driver` post-stop `status() → NotFound` contract (`traits/driver.rs`) was violated by the shipped `VmDriver::stop`, which left the live-map entry `Live`. Ruled (reviewer option (c)): `stop` transitions the entry `Live → EndingInFlight` under the same lock it extracts the live state with, so `status()` (which already maps `EndingInFlight → NotFound`) satisfies the contract synchronously while `live_allocations()` still reports the entry, keeping the authorship claim for `VmReclamation` (`EndingInFlightIsNeverReclaimed`, § 105a.11 — whose wording already presupposes "its stop has been issued" ⇒ `EndingInFlight`). NOT the `ExecDriver` full-removal shape (would reopen NEW-1); NOT a trait carve-out (contract stands, no `driver.rs` docstring edit). Pinned in `brief.md` § 105a.3 (new transition 3b + amendment) and ADR-0082 § D4; the release side (transitions 5/6) stays step 02-02. **Item 2**: ADR § D7's ownership table already assigns the `VmDriver` `EXEC` write to 01-07, but the shipped beacon-win arm omits it (the guest would block forever at 01-08); ruled a scoped 01-07 addendum (not reassignment to 01-08) — roadmap 01-07 gains a fifth criterion, ADR § D7 gains a not-yet-wired amendment naming 01-07 as the wiring step. **Item 3**: ADR § D2.4 gains a "gap 6" note blessing `KernelImage::path` (`config.rs:201`) and `VmExitWatch::new` (`vmm.rs:202`) as sanctioned 01-06 first-implementor surface. Files touched: `adr-0082-…md` (§§ D2.4 / D4 / D7), `brief.md` (§ 105a.3), `deliver/roadmap.json` (step 01-07 criteria), this file. No Rust file touched — the crafter-facing instructions go to the 01-07 review-remediation dispatch. No GitHub issue created.
 - 2026-08-14 — Guest vsock provisioning ruled (DWD-21), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch. Step 01-08's walking skeleton surfaced a spike→ship regression: the 01-03 `overdrive-init` + 01-04 fixture lost the spike's proven vsock module-load, so on the stock `CONFIG_VSOCKETS=m` kernel the fixture stages, the guest's `socket(AF_VSOCK)` fails `EAFNOSUPPORT` and never beacons — `#[ignore]`ing S-VM-01/02/05/74. Ruled (c) reconcile: `overdrive-init` `finit_module`-loads the three staged vsock `.ko` before `connect_beacon` (no-op on a vsock=y kernel) and the 01-04 fixture stages them from the same `uname -r` as the kernel (the spike's proven-12/12 mechanism / the `[D2]` fallback), WHILE the production appliance kernel builds vsock in (ADR-0068 §4). Lands as the 01-08 review-remediation touching `overdrive-init/src/main.rs` + `overdrive-testing/src/vm_fixture.rs` (both added to 01-08's `source_directories`). ADR-0068 gains §4; ADR-0082 §D4 gains a loader/staging amendment; ADR-0083 unaffected; `brief.md` consistent, untouched. `deliver/roadmap.json` step 01-08: one additive criterion + two source files + an `implementation_notes` remediation note. No scenario changed; no GitHub issue created.
+- 2026-08-14 — Alloc→driver index MISS disposition ruled (DWD-22), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-08 review's MAJOR finding D1. ADR-0083 §D2a(b) pinned a typed `ShimError::UnknownDriverForAlloc { alloc_id }` on an `alloc_drivers` index miss; the shipped `resolve_drivers_for_alloc` (`action_shim/mod.rs:668-678`) instead **broadcasts** the stop/terminal call to every composed driver, and the variant exists nowhere in the tree. Investigated the four consumer arms (`FinalizeFailed` `:1291`, `RestartAllocation` stop-half `:1604`, `StopAllocation` `:1858`/`:1922`) and the regression that forced the fallback (`stable_does_not_stop_probe_supervision.rs` calls `on_alloc_running` directly, leaving the per-boot index empty). Ruled **(a) bless the broadcast, retire the typed-error pin**: the ADR's rationale attacked a strawman (broadcast reaches the *owning* driver — including `VmDriver` — so no orphan is stranded, unlike the "route to `ExecDriver`" fallback it feared), and the typed error taken literally would route a legitimate per-boot miss to nobody and *create* the orphan SD-1 prevents; runtime confirmed safe (every `Driver::stop`/`on_alloc_*` is NotFound-tolerant/no-op). Options (b)/(c) rejected — they reintroduce the orphan on the stop arms. **No code change** — the shipped code and all four call-site comments already match the amended contract; the crafter only confirms the § D2a(b) citations resolve to the amended text, and MUST NOT implement `UnknownDriverForAlloc`. Amended ADR-0083 § D2a(b) + `brief.md` § 104; § D3 / § D2a(c) name no typed error and are untouched. `deliver/roadmap.json` not touched (no code change ⇒ no AC/scope edit). No `test-scenarios.md` or Rust file touched. No GitHub issue created.

@@ -374,11 +374,51 @@ pub type AllocDriverIndex = parking_lot::Mutex<BTreeMap<AllocationId, DriverType
 `dispatch_with_workflow_intent` (`:842`) is the call site that supplies
 `state.driver.as_ref()` today and changes with them.
 
-A miss resolves to a typed `ShimError::UnknownDriverForAlloc { alloc_id }` and
-is **never** silently routed to `ExecDriver` — calling `ExecDriver::stop` on a
-VM alloc returns `DriverError::NotFound`, which `let _ =`
-(`action_shim/mod.rs:1694-1697`) swallows, and the result is exactly the
-GiB-scale unstoppable orphan SD-1 exists to prevent.
+**A miss broadcasts the stop/terminal call to every composed driver — the driver
+that owns the alloc is always in that set, so this is *not* wrong-driver routing
+and strands no orphan.** *(Amended 2026-08-14 by user ruling — DWD-22 / GH #42,
+closing the 01-08 review's MAJOR finding D1. The first draft pinned a typed
+`ShimError::UnknownDriverForAlloc { alloc_id }` here. That verdict rested on a
+strawman fallback the shipped `resolve_drivers_for_alloc`
+(`action_shim/mod.rs:668-678`) never implemented, and — taken literally — would
+have inverted its own safety goal. The variant is **retired, not implemented**;
+it never existed in the tree.)*
+
+On a miss, `resolve_drivers_for_alloc` returns **all** composed drivers and the
+shim fires the stop/terminal call on each. This is safe, and it is *stronger*
+than the typed error the strawman rejected, for two reasons:
+
+1. **Broadcast is not "silently routed to `ExecDriver`."** The rejected fallback
+   was *pick the default (exec) driver* — which would no-op `stop` on a VM alloc
+   (`DriverError::NotFound`, swallowed by `let _ =` at `:1859`) and strand the
+   GiB-scale orphan SD-1 exists to prevent. Broadcast routes to the **`VmDriver`
+   too**, so a VM alloc's `stop` reaches the driver that owns it — the orphan is
+   *never* stranded. Every `Driver::stop` / `on_alloc_stable` /
+   `on_alloc_terminal` is documented NotFound-tolerant / no-op for an alloc it
+   does not track, so the fan-out to non-owning drivers is harmless. **That
+   NotFound-tolerant/no-op property is now load-bearing** — it is what makes the
+   broadcast safe, and it must hold for every driver this registry composes.
+2. **The index is in-memory and per-boot, so a miss is a legitimate expected
+   state, not a bug.** It arises whenever `dispatch` acts on an alloc not started
+   in the current boot epoch — an operator `stop` of a workload that has been
+   `Running` since before a `serve` restart (freshly-empty index), or a driver
+   lifecycle hook exercised directly in a test
+   (`stable_does_not_stop_probe_supervision.rs` calls `on_alloc_running` without
+   a `StartAllocation` dispatch, so the index carries no entry). Returning
+   `Err(UnknownDriverForAlloc)` on such a miss would route the stop to **nobody**
+   and create the very orphan the typed error meant to prevent. A typed error is
+   correct only if a miss is *always* a bug; here it is not — and the shim cannot
+   tell a same-boot miss from a cross-boot one without a `boot_epoch` flag,
+   precisely the self-declared-boolean check § D7 item 1 rejects on the
+   kill-authorising path for the same reason.
+
+**Diagnostic residual (recorded, non-blocking).** Broadcast does mask a genuine
+*same-boot* miss (an index entry lost to a real defect) that a hard error would
+surface. The blanket typed error cannot recover that without the rejected epoch
+flag; the honest recovery is observability, not refusal — an optional
+`tracing::debug!(name: "shim.alloc_driver.index_miss", %alloc_id)` on the
+fallback arm makes it non-silent without changing routing. It is **not** required
+for conformance.
 
 **Rejected: add `workload_id` to `StopAllocation` / `FinalizeFailed` and do
 D7's intent-side join.** It is the more principled shape and it widens two
