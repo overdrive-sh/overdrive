@@ -1998,22 +1998,25 @@ async fn hydrate_desired(
                 prior_backend_row_at: None,
             }))
         }
-        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
-        // brief.md §105a.2, GH #42) — SKELETON. The two-surface join
+        // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
+        // brief.md §105a.2/§105a.6, GH #42). The two-surface join
         // (intent-side `WorkloadDriver == Vm`, joined against
-        // `alloc_status_rows()`) that populates `allocations` is a
-        // LATER step's obligation (this step's roadmap note: "step
-        // 02-02 fills hydrate_actual's read-order body" — the desired
-        // side's join is the same shape, deferred alongside it since
-        // neither is exercised by this step's acceptance tests, which
-        // drive `plan_reclamation` / `SupervisionSet` / `VmHostState`
-        // directly as pure functions, not through this hydration path).
-        // `Default` leaves `allocations` empty, matching
-        // `VmReclamationState`'s documented desired-side shape (the
-        // other two fields are actual-side and stay at `Default` here
-        // regardless).
+        // `alloc_status_rows()`) that populates `allocations` is
+        // extracted to `hydrate_vm_reclamation_desired` — both so this
+        // match arm stays within `clippy::too_many_lines` (same
+        // extraction precedent as `hydrate_vm_reclamation_actual` a few
+        // hundred lines below) AND so `vm_reclamation_boot::converge`
+        // (the boot-epoch drive) can call the SAME function: brief.md
+        // §105a.6 — "one observation function, one pure diff, one
+        // executor pair" — extends to the desired-side join too. `host`
+        // and `supervision` are actual-side and stay at `Default` here,
+        // matching `VmReclamationState`'s documented desired-side shape.
         AnyReconciler::VmReclamation(_) => {
-            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState::default()))
+            let allocations = hydrate_vm_reclamation_desired(state).await?;
+            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
+                allocations,
+                ..Default::default()
+            }))
         }
     }
 }
@@ -3023,6 +3026,102 @@ async fn hydrate_vm_reclamation_actual(state: &AppState) -> Result<AnyState, Con
         host,
         supervision,
     }))
+}
+
+/// Desired-side two-surface join for `VmReclamation` (ADR-0083 §D7,
+/// brief.md §105a.2/§105a.6, GH #42) — the SHARED function this
+/// module's `hydrate_desired` `VmReclamation` arm (steady-state tick)
+/// and `vm_reclamation_boot::converge` (boot epoch) both call. Per
+/// brief.md §105a.6: "one observation function, one pure diff, one
+/// executor pair" — this is that one observation function for the
+/// desired side; there is no second implementation.
+///
+/// Scans the whole-node `workloads/` intent prefix — mirrors
+/// `listener_facts::ListenerFactStore::rebuild_from_intent` and
+/// `dns_responder::boot_rebuild::rebuild_frontend_addrs_from_intent`'s
+/// own `workloads/` scans — for `WorkloadIntent::Job` intents whose
+/// `driver` is `WorkloadDriver::Vm`. `Service` intents never carry a
+/// `Vm` driver (`ServiceV2::from_submit` rejects it, ADR-0083 §D4) and
+/// `Schedule` intents cannot be persisted in Phase 1
+/// (`ScheduleV2::from_submit` is a RED scaffold, ADR-0064 OQ-5) — both
+/// are skipped by the same `let WorkloadIntent::Job(job) = &intent else
+/// { continue }` filter that also skips a decode failure. The
+/// `workloads/<id>/stop` and `workloads/<id>/kind` sub-keys are skipped
+/// by the same suffix guard the two precedents use.
+///
+/// Joins the resulting VM-driven `WorkloadId` set against
+/// `ObservationStore::alloc_status_rows()` to populate `VmAllocFacts {
+/// workload_id, terminal }` per `AllocationId` — the second surface of
+/// the two-surface join. An allocation whose owning workload is not
+/// Vm-driven is absent from the returned map (`plan_reclamation` reads
+/// that as "no entry", the same as before this join existed).
+///
+/// # Errors
+///
+/// [`ConvergenceError::IntentRead`] when the `workloads/` prefix scan
+/// fails; [`ConvergenceError::ObservationRead`] when the alloc-status
+/// read fails. A per-record intent decode failure is skipped (not
+/// fatal), per the established `rebuild_from_intent` precedent.
+pub(crate) async fn hydrate_vm_reclamation_desired(
+    state: &AppState,
+) -> Result<BTreeMap<AllocationId, overdrive_core::reconcilers::VmAllocFacts>, ConvergenceError> {
+    let rows = state
+        .store
+        .scan_prefix(b"workloads/")
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+
+    let mut vm_workloads: BTreeSet<WorkloadId> = BTreeSet::new();
+    for (key_bytes, value_bytes) in rows {
+        // Only the canonical `workloads/<id>` records carry the intent
+        // payload — skip the `workloads/<id>/stop` and
+        // `workloads/<id>/kind` sub-keys.
+        let Ok(key_str) = std::str::from_utf8(&key_bytes) else { continue };
+        let suffix = &key_str["workloads/".len()..];
+        if suffix.is_empty() || suffix.contains('/') {
+            continue;
+        }
+        // A non-intent payload under the prefix (or a decode failure)
+        // declares no VM-driven workload — skip it.
+        let Ok(intent) = overdrive_core::aggregate::WorkloadIntent::from_store_bytes(
+            value_bytes.as_ref(),
+            &state.intent_redb_path,
+            Some(key_str),
+        ) else {
+            continue;
+        };
+        // Only `Job` intents can legitimately carry `WorkloadDriver::Vm`
+        // (Service rejects it at submit time; Schedule cannot be
+        // persisted in Phase 1) — both other variants are skipped.
+        let overdrive_core::aggregate::WorkloadIntent::Job(job) = &intent else { continue };
+        if matches!(job.driver, overdrive_core::aggregate::WorkloadDriver::Vm(_)) {
+            vm_workloads.insert(job.id.clone());
+        }
+    }
+
+    if vm_workloads.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let alloc_rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+
+    let mut allocations = BTreeMap::new();
+    for row in alloc_rows {
+        if vm_workloads.contains(&row.workload_id) {
+            allocations.insert(
+                row.alloc_id.clone(),
+                overdrive_core::reconcilers::VmAllocFacts {
+                    workload_id: row.workload_id.clone(),
+                    terminal: row.state.is_terminal(),
+                },
+            );
+        }
+    }
+    Ok(allocations)
 }
 
 /// Actual-side projection for the `WorkloadLifecycle` reconciler.

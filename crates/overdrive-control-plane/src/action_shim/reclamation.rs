@@ -16,14 +16,15 @@
 //! `svid_lifecycle`, whose omission leaves the node holding the dead
 //! allocation's leaf private key; ADR-0083 §D7).
 //!
-//! [`crate::vm_reclamation_boot::converge`] calls
-//! [`execute_discard_stranded_artifacts`] directly for every
-//! `Action::DiscardStrandedArtifacts` `plan_reclamation` emits, and
-//! never reaches `Action::ReclaimAllocation` — the boot drive's own
-//! `desired` is hardcoded empty (see that module's docs), so
-//! `plan_reclamation` can only route through the "no entry" branch of
-//! the decision table there. The steady-state tick, via
-//! `action_shim::dispatch_single`, reaches both.
+//! [`crate::vm_reclamation_boot::converge`] calls both executors
+//! directly on the `Vec<Action>` `plan_reclamation` returns. Step 02-03
+//! fills the boot drive's own `desired` via
+//! [`crate::reconciler_runtime::hydrate_vm_reclamation_desired`] — the
+//! SAME join the steady-state tick's `hydrate_desired` arm calls — so
+//! `Action::ReclaimAllocation` (this module's [`execute_reclaim_allocation`])
+//! is reachable from BOTH drives, not only the steady-state tick. The
+//! steady-state tick reaches both executors via
+//! `action_shim::dispatch_single`.
 
 use overdrive_core::AllocationId;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
@@ -270,8 +271,58 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::vm_host_state::SimVmHostState;
+    use tracing_subscriber::layer::SubscriberExt as _;
 
     use super::*;
+
+    // -----------------------------------------------------------------
+    // D2 (02-03 review) — a minimal in-memory tracing-event capture.
+    // This crate carries no `tracing-test` dependency; a custom
+    // `tracing_subscriber::Layer` recording each event's
+    // `metadata().name()` (the `name: "..."` macro override — e.g.
+    // "vm.reclamation.refused" — confirmed against the `tracing` 0.1.44
+    // `event!` macro expansion to set `Metadata::name` directly) plus its
+    // fields is enough to assert S-VM-79's event clause without adding a
+    // new dependency.
+    // -----------------------------------------------------------------
+
+    #[derive(Debug, Clone)]
+    struct CapturedEvent {
+        name: String,
+        fields: std::collections::BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Default)]
+    struct EventCapture(std::sync::Arc<std::sync::Mutex<Vec<CapturedEvent>>>);
+
+    impl EventCapture {
+        fn events(&self) -> Vec<CapturedEvent> {
+            self.0.lock().expect("capture lock").clone()
+        }
+    }
+
+    struct FieldRecorder<'a>(&'a mut std::collections::BTreeMap<String, String>);
+
+    impl tracing::field::Visit for FieldRecorder<'_> {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_owned(), format!("{value:?}"));
+        }
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for EventCapture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut fields = std::collections::BTreeMap::new();
+            event.record(&mut FieldRecorder(&mut fields));
+            self.0
+                .lock()
+                .expect("capture lock")
+                .push(CapturedEvent { name: event.metadata().name().to_owned(), fields });
+        }
+    }
 
     fn alloc(id: &str) -> AllocationId {
         AllocationId::new(id).expect("valid AllocationId")
@@ -355,7 +406,8 @@ mod tests {
         let n = node("vm-reclaim-node");
         let host = seeded_host(&a);
         let obs = SimObservationStore::single_peer(n.clone(), 0);
-        obs.write(ObservationRow::AllocStatus(Box::new(running_row(&a, &w, &n))))
+        let prior = running_row(&a, &w, &n);
+        obs.write(ObservationRow::AllocStatus(Box::new(prior.clone())))
             .await
             .expect("seed the prior Running row");
         let clock = SimClock::new();
@@ -390,6 +442,26 @@ mod tests {
         assert!(
             overdrive_core::transition_reason::is_platform_reclaimed(&row),
             "the written row must classify as a Platform Reclamation"
+        );
+
+        // D5 (02-03 review) — complement-equality: fields OUTSIDE the
+        // declared delta (state, reason, terminal, updated_at) must be
+        // carried forward from the prior row byte-for-byte, not
+        // silently dropped or defaulted at the `build_alloc_status_row`
+        // call site. `workload_id` / `node_id` / `kind` / `started_at`
+        // are the fields whose fixture value is non-trivial enough
+        // (a real workload id, a real node id, `WorkloadKind::Job`, a
+        // real `Some(UnixInstant)`) that a mutation dropping the
+        // carry-forward would be caught here.
+        assert_eq!(
+            row.workload_id, prior.workload_id,
+            "workload_id must be carried forward from the prior row"
+        );
+        assert_eq!(row.node_id, prior.node_id, "node_id must be carried forward from the prior row");
+        assert_eq!(row.kind, prior.kind, "kind must be carried forward from the prior row");
+        assert_eq!(
+            row.started_at, prior.started_at,
+            "started_at must be carried forward from the prior row"
         );
 
         // The four evaluations, all targeting workload/<id>.
@@ -438,9 +510,35 @@ mod tests {
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
 
+        // D2 (02-03 review) — capture tracing events for the duration of
+        // the call under test so the `vm.reclamation.refused` event
+        // (S-VM-79's event clause) can be asserted on directly, rather
+        // than assumed from the code path taken.
+        let capture = EventCapture::default();
+        let subscriber = tracing_subscriber::Registry::default().with(capture.clone());
+        let guard = tracing::subscriber::set_default(subscriber);
+
         execute_reclaim_allocation(&a, &host, &obs, &clock, &n, &broker)
             .await
             .expect("a refusal is Ok(()), never an error");
+
+        drop(guard);
+        let refused = capture
+            .events()
+            .into_iter()
+            .find(|e| e.name == "vm.reclamation.refused")
+            .expect("the vm.reclamation.refused event must fire for a terminal-row refusal");
+        assert_eq!(
+            refused.fields.get("alloc_id").map(String::as_str),
+            Some(a.as_str()),
+            "the event must carry the refused allocation's id, got {:?}",
+            refused.fields
+        );
+        assert!(
+            refused.fields.get("observed_state").is_some_and(|s| s.contains("Terminated")),
+            "the event must carry the observed (terminal) state, got {:?}",
+            refused.fields
+        );
 
         // No kill, no discard: every host artifact is exactly as seeded.
         let observed = host.observe().await.expect("observe succeeds");

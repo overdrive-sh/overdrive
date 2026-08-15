@@ -34,11 +34,13 @@
 //! - S-VM-25 shape (a): [`restart_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
 //! - S-VM-25 shape (b): [`failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
 //! - S-VM-81: [`reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`]
-//!   — see that test's own doc comment for the residual gap this suite
-//!   surfaces rather than papers over (a Tier-1 proof of the SAME claim
-//!   already exists in `action_shim::reclamation::tests` and is GREEN;
-//!   this Tier-3 test proves what real infra makes reachable and is
-//!   explicit about what it does not).
+//!   — step 02-03 completion: now drives a GENUINE `Action::
+//!   ReclaimAllocation` (not `stop()`) via the boot-epoch drive and
+//!   asserts `Stopped { by: PlatformReclaimed }` on real infra. See that
+//!   test's own doc comment for the residual gap this suite surfaces
+//!   rather than papers over (no production surface exposes `IdentityMgr`
+//!   state to a real-serve test; the four-evaluations claim IS fully
+//!   proven, executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
 //!
 //! # Fixture construction — why not a plain fault-injection seam
 //!
@@ -882,41 +884,68 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-81 -- reclaiming an SVID-holding allocation submits the fourth
+// S-VM-81 -- reclaiming an SVID-holding allocation via a GENUINE
+// `Action::ReclaimAllocation` (not `stop()`) submits the fourth
 // evaluation (svid_lifecycle), alongside the other three.
 // ---------------------------------------------------------------------
 
-/// **Residual gap, surfaced rather than papered over.** The FULL claim
-/// (`execute_reclaim_allocation`'s AUTHORISED branch firing through a
-/// real end-to-end `overdrive deploy` -> reclamation-tick path, dropping
-/// a REAL held SVID) requires `reconciler_runtime::hydrate_desired`'s
-/// `VmReclamation` arm to be populated (the two-surface intent join,
-/// `crates/overdrive-control-plane/src/reconciler_runtime.rs:2015-2017`)
-/// -- today it is hardcoded to an empty `VmReclamationState::default()`
-/// (still marked "a later step's obligation" in its own doc comment, and
-/// NOT in this step's `files_to_modify`). Without it, `desired.allocations`
-/// is empty for EVERY tick (boot-epoch AND steady-state), so
-/// `plan_reclamation` can only ever route through the "no entry" branch
-/// of the decision table -- `Action::ReclaimAllocation` (which requires
-/// `Some(facts)` with `facts.terminal == false`) is structurally
-/// unreachable from any real `overdrive serve` + `overdrive deploy` flow
-/// today. Extending `hydrate_desired` is a genuinely new, non-trivial
-/// piece (a node-scoped `TargetResource` parse plus a whole-node intent
-/// scan -- no existing reconciler's `hydrate_desired` arm is node-scoped,
-/// only workload-scoped) that this step's dispatch did not pin a
-/// signature for; per CLAUDE.md "Implement to the design" this is a gap
-/// to surface, not improvise.
+/// Step 02-03 completion. Prior to this step `Action::ReclaimAllocation`
+/// was structurally unreachable from any real `overdrive serve` +
+/// `overdrive deploy` flow -- `reconciler_runtime::hydrate_desired`'s
+/// `VmReclamation` arm was hardcoded to an empty
+/// `VmReclamationState::default()`, so `plan_reclamation` could only
+/// ever route through the "no entry" branch of the decision table. This
+/// test's earlier shape reflected that gap honestly: it deployed a VM,
+/// confirmed a real SVID was issued, then drove the workload to
+/// `Terminated` via the ordinary `stop()` verb before shutdown -- which
+/// proved SVID issuance, not reclamation (`stop()` authors
+/// `Stopped { by: Reconciler }`, never `Stopped { by:
+/// PlatformReclaimed }`).
 ///
-/// This test proves everything real infra makes reachable today: a real
-/// mTLS-composed `overdrive serve`, a real deployed VM, and a real
-/// issued SVID observable via `overdrive workload describe`'s
-/// `issued_certificates` (built-in-ca #215's consumer-side surface). It
-/// stops short of asserting the reclaim-triggered `DropSvid` because no
-/// production path reaches it yet. The SAME four-evaluations claim
-/// (including `svid_lifecycle`) IS fully proven, executor-direct, at
-/// Tier-1: `action_shim::reclamation::tests::
-/// execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_four_evaluations`
-/// (`crates/overdrive-control-plane/src/action_shim/reclamation.rs`).
+/// Now that [`crate` (`overdrive_control_plane`)`::reconciler_runtime::
+/// hydrate_vm_reclamation_desired`] fills the join for both drives, this
+/// test drives a GENUINE `Action::ReclaimAllocation` through the
+/// boot-epoch drive -- the SAME S-VM-30 / S-VM-23 fixture shape (a VM
+/// that survives an unclean `handle.shutdown()`, so its `AllocStatusRow`
+/// stays non-terminal, then a fresh boot whose brand-new `VmDriver` has
+/// tracked nothing yet reads `Observed(∅)`) -- and asserts the ONE thing
+/// that is unambiguous proof `execute_reclaim_allocation`'s AUTHORISED
+/// branch (not `stop()`, not `DiscardStrandedArtifacts`) actually ran:
+/// the row transitions to `Terminated` / `Stopped { by:
+/// PlatformReclaimed }`, a disposition written by NO other code path in
+/// this crate (`stop()` writes `Stopped { by: Reconciler }`;
+/// `DiscardStrandedArtifacts` writes no row at all -- it takes no
+/// `ObservationStore` parameter by construction, DD-5). By construction
+/// (already Tier-1-proven, executor-direct, in
+/// `action_shim::reclamation::tests::
+/// execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_four_evaluations`)
+/// the SAME unconditional code path that writes this row also submits
+/// the four evaluations, including `svid_lifecycle`.
+///
+/// **Residual gap, surfaced rather than papered over.** Observing that
+/// the `svid_lifecycle` evaluation is subsequently DEQUEUED by a live
+/// `SvidLifecycle` tick and that its `DropSvid` action actually removes
+/// the entry from THIS process's `IdentityMgr` requires reading
+/// `IdentityMgr::held_snapshot()` -- and no production surface exposes
+/// it from outside the process. `overdrive_cli::commands::serve::
+/// ServeHandle` and `overdrive_control_plane::ServerHandle` are fully
+/// opaque (`endpoint()`/`local_addr()` and `shutdown()` only); `identity`
+/// is constructed INSIDE `run_server`'s own composition with no caller
+/// injection point -- unlike `obs` / `drivers`, which
+/// `run_server_with_obs_and_driver(s)` already exposes for exactly this
+/// "integration tests that need to retain a handle" purpose (per that
+/// function's own doc comment). Exposing `IdentityMgr` state to a
+/// real-serve Tier-3 test needs a new test-support entry point mirroring
+/// that existing `obs`-retention pattern -- a small, genuine new surface
+/// this step's dispatch did not pin a signature for. Per CLAUDE.md
+/// "Implement to the design" this is a gap to surface, not improvise; it
+/// is called out in the step's own report rather than worked around with
+/// an invented `pub` accessor. `dispatch_drop`'s own effect (it calls
+/// `identity.drop_svid(alloc_id)`, which removes the held entry) is a
+/// concern unit-tested independently of `VmReclamation`, at
+/// `identity_mgr.rs` / `issue_svid.rs`; the FOUR-evaluations claim
+/// (including `svid_lifecycle`) is Tier-1-proven, executor-direct, at
+/// the site named above.
 #[tokio::test]
 #[serial(cgroup)]
 async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
@@ -927,11 +956,14 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
+    // Boot #1 -- mTLS-composed -- deploy and confirm a REAL SVID is
+    // issued and held.
     let handle = spawn_vm_server_mtls_composed(
         VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
         &data_dir,
@@ -948,20 +980,66 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     let submit =
         deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
     let out = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
 
     assert!(
         !out.snapshot.issued_certificates.is_empty(),
         "a Running mTLS-composed VM allocation must hold a real issued SVID -- \
          reclaiming it is the precondition S-VM-81 depends on"
     );
+    assert!(scope_path(&alloc_id).exists(), "sanity: the scope must exist while Running");
 
-    // Hygiene: drive the never-self-terminating spin workload to
-    // Terminated via the production stop verb before shutdown (mirrors
-    // vm_walking_skeleton.rs's own precedent for this exact guest shape).
-    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+    // Boot #1 shuts down WITHOUT stopping the workload -- an "unclean"
+    // shutdown (mirrors S-VM-30 / S-VM-23): the real cloud-hypervisor
+    // process survives (`kill_on_drop(false)`) and the alloc's row stays
+    // non-terminal (Running), never transitioning through the ordinary
+    // `stop()` path.
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 -- SAME data_dir, mTLS-composed again. Its brand-new
+    // `VmDriver` has supervised nothing yet in THIS process
+    // (`live_allocations()` reads empty) -> `SupervisionSet::Observed(∅)`
+    // -> `reclamation_authorised` is true. The desired-side join now
+    // finds this alloc: a Vm-driven `Job` intent (`vm-s81`'s persisted
+    // `WorkloadIntent::Job` with `driver: Vm`) joined against a
+    // NON-TERMINAL `AllocStatusRow` (still Running -- the unclean
+    // shutdown never wrote a terminal row) -> `plan_reclamation`'s row 1
+    // -> `Action::ReclaimAllocation`, NOT row 4's
+    // `DiscardStrandedArtifacts` (which requires "no entry"). The
+    // boot-epoch `VmReclamation` drive runs synchronously inside
+    // `run_server`, before this call returns.
+    let handle2 = spawn_vm_server_mtls_composed(
+        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
+        &data_dir,
+        &config_dir,
+    )
+    .await
+    .expect("boot #2 (mTLS-composed) must succeed");
+
+    let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
         .await
-        .expect("stop the long-lived spin workload before shutdown");
-    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+        .expect("describe after reclamation");
+    let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
+    assert_eq!(
+        after_row.state,
+        AllocStateWire::Terminated,
+        "the boot-epoch drive must reclaim the surviving non-terminal allocation, got {after_row:?}"
+    );
+    assert!(
+        matches!(
+            after_row.reason,
+            Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+        ),
+        "Stopped {{ by: PlatformReclaimed }} is written ONLY by execute_reclaim_allocation's \
+         AUTHORISED branch -- observing it here on real infra is unambiguous proof that \
+         ReclaimAllocation (not stop(), not DiscardStrandedArtifacts) actually ran; got {:?}",
+        after_row.reason
+    );
 
-    handle.shutdown().await.expect("clean shutdown");
+    assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed");
+    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed");
+    assert!(!clone_path(&staging_dir, &alloc_id).exists(), "the clone must be reclaimed");
+
+    handle2.shutdown().await.expect("clean shutdown");
 }

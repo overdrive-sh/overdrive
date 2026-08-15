@@ -27,18 +27,19 @@
 //! takes fifteen parameters (`driver`, `dataplane`, `ca`, `identity`,
 //! `mtls_worker`, ...) none of which reclamation touches.
 //!
-//! `desired.allocations` (the intent-side two-surface join) is left
-//! EMPTY here, mirroring `reconciler_runtime::hydrate_desired`'s own
-//! still-skeletal `VmReclamation` arm (unchanged by this step; a later
-//! step's obligation alongside `execute_reclaim_allocation` — see
-//! `action_shim::reclamation`'s module docs). `Action::ReclaimAllocation`
-//! is therefore NOT executed by this drive in this step: with desired
-//! empty, `plan_reclamation` can only route through the "no entry"
-//! branch of the decision table (brief.md §105a.4 rows 4-6), never rows
-//! 1-3, so `ReclaimAllocation` cannot be emitted against a
-//! `VmReclamationState` this function builds. Every action this drive's
-//! `plan_reclamation` call CAN produce today is
-//! `Action::DiscardStrandedArtifacts`, which IS fully executed.
+//! `desired.allocations` (the intent-side two-surface join) is populated
+//! by [`crate::reconciler_runtime::hydrate_vm_reclamation_desired`] —
+//! the SAME function `reconciler_runtime::hydrate_desired`'s
+//! `VmReclamation` arm calls for the steady-state tick (step 02-03;
+//! brief.md §105a.6: "one observation function, one pure diff, one
+//! executor pair" extends to the desired-side join). `Action::
+//! ReclaimAllocation` is therefore reachable from this drive: a
+//! first-seen or reboot-surviving VM allocation whose row is
+//! non-terminal and whose claim is unsupervised (`Observed(∅)` at a
+//! fresh boot, per the composition table above — a brand-new
+//! `VmDriver`/`DriverRegistry` has not tracked anything yet) authors a
+//! Platform Reclamation ending exactly as it would at a steady-state
+//! tick — same input, same `plan_reclamation`, same executor.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -47,7 +48,10 @@ use overdrive_core::reconcilers::vm_reclamation::SupervisionSet;
 use overdrive_core::traits::driver::DriverType;
 
 use crate::AppState;
-use crate::action_shim::reclamation::{ReclamationError, execute_discard_stranded_artifacts};
+use crate::action_shim::reclamation::{
+    ReclamationError, execute_discard_stranded_artifacts, execute_reclaim_allocation,
+};
+use crate::reconciler_runtime::hydrate_vm_reclamation_desired;
 
 /// Run one boot-epoch `VmReclamation` pass against `state`. Idempotent —
 /// safe to call on every boot regardless of whether any VM allocation
@@ -56,19 +60,29 @@ use crate::action_shim::reclamation::{ReclamationError, execute_discard_stranded
 ///
 /// # Errors
 ///
-/// Returns [`ConvergeError::Host`] on a genuine (non-benign-absence)
+/// Returns [`ConvergeError::Desired`] when the desired-side two-surface
+/// join fails to read the IntentStore or ObservationStore,
+/// [`ConvergeError::Host`] on a genuine (non-benign-absence)
 /// `VmHostState::observe` substrate failure, or
-/// [`ConvergeError::Reclamation`] when an executor fails. Either refuses
-/// the whole boot (mirroring `adopt_on_restart_recovery`'s own
-/// fail-closed posture) — the same cgroup tree `adopt_on_restart_recovery`
-/// reads next must not be read out from under a still-in-flight `rmdir`.
+/// [`ConvergeError::Reclamation`] when an executor fails. Any of the
+/// three refuses the whole boot (mirroring `adopt_on_restart_recovery`'s
+/// own fail-closed posture) — the same cgroup tree
+/// `adopt_on_restart_recovery` reads next must not be read out from
+/// under a still-in-flight `rmdir`.
 pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
-    // brief.md §105a.2's pinned order: `observe()` FIRST, supervision
-    // LAST. At the boot epoch this ordering has no observable
-    // consequence on its own (nothing races the boot drive), but it is
-    // the SAME hydration path the steady-state tick uses — brief.md
-    // §105a.6: "one observation function," not a second one that happens
-    // to differ in ordering.
+    // brief.md §105a.2's pinned order, extended to the desired side by
+    // §105a.6: rows (this drive's own `hydrate_vm_reclamation_desired`
+    // call) FIRST, THEN `observe()`, supervision LAST. The
+    // kill-authorising input is the freshest thing the pass reads; the
+    // desired-side intent join is the stalest — exactly the SAME
+    // hydration path and the SAME ordering argument the steady-state
+    // tick uses (`reconciler_runtime::run_convergence_tick` calls
+    // `hydrate_desired` before `hydrate_actual` on every tick).
+    let allocations = hydrate_vm_reclamation_desired(state)
+        .await
+        .map_err(|e| ConvergeError::Desired(Box::new(e)))?;
+    let desired = VmReclamationState { allocations, ..VmReclamationState::default() };
+
     let host = state.vm_host_state.observe().await.map_err(ConvergeError::Host)?;
 
     // Composition table (brief.md §105a.3): no `Vm` registry entry ⇒
@@ -84,19 +98,34 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
         },
     );
 
-    let desired = VmReclamationState::default();
     let actual = VmReclamationState { allocations: BTreeMap::new(), host, supervision };
 
     for action in plan_reclamation(&desired, &actual) {
-        if let Action::DiscardStrandedArtifacts { alloc_id } = action {
-            execute_discard_stranded_artifacts(&alloc_id, state.vm_host_state.as_ref())
+        match action {
+            Action::DiscardStrandedArtifacts { alloc_id } => {
+                execute_discard_stranded_artifacts(&alloc_id, state.vm_host_state.as_ref())
+                    .await
+                    .map_err(ConvergeError::Reclamation)?;
+            }
+            Action::ReclaimAllocation { alloc_id } => {
+                execute_reclaim_allocation(
+                    &alloc_id,
+                    state.vm_host_state.as_ref(),
+                    state.obs.as_ref(),
+                    state.clock.as_ref(),
+                    &state.node_id,
+                    state.runtime.broker_mutex(),
+                )
                 .await
                 .map_err(ConvergeError::Reclamation)?;
+            }
+            // `plan_reclamation` (this reconciler's own pure diff) never
+            // emits any other `Action` variant — the wildcard exists
+            // only because `Action` is the workspace-shared action enum;
+            // no production `Vec<Action>` reaching this loop can
+            // populate it.
+            _ => {}
         }
-        // Action::ReclaimAllocation — see this module's own docs for why
-        // it is unreachable from this function's own `desired` (always
-        // empty) and, independent of that, why its executor does not
-        // exist yet in this step's scope.
     }
     Ok(())
 }
@@ -104,6 +133,14 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
 /// Failure surface for [`converge`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConvergeError {
+    /// The desired-side two-surface join
+    /// ([`hydrate_vm_reclamation_desired`]) failed to read the
+    /// IntentStore or ObservationStore. Boxed: `ConvergenceError` embeds
+    /// `ControlPlaneError` (its `ViewPersist` variant), which itself
+    /// embeds `ConvergeError` (`VmReclamationBoot`) — an unboxed payload
+    /// here closes that cycle into infinite-size recursion (E0072).
+    #[error("desired-side hydration failed: {0}")]
+    Desired(Box<crate::reconciler_runtime::ConvergenceError>),
     /// `VmHostState::observe` failed at the substrate level (a
     /// non-benign-absence I/O error).
     #[error("VmHostState observe failed: {0}")]
@@ -120,6 +157,7 @@ mod tests {
 
     use overdrive_core::id::NodeId;
     use overdrive_core::traits::driver::{Driver, DriverType};
+    use overdrive_core::traits::intent_store::IntentStore;
     use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vm_host_state::VmHostState;
     use overdrive_sim::adapters::vm_host_state::SimVmHostState;
@@ -200,6 +238,98 @@ mod tests {
         assert!(
             !observed.run_dirs.contains(&alloc),
             "the run-dir orphan must be discarded by the boot drive; still present: {observed:?}"
+        );
+    }
+
+    /// Step 02-03 completion — the desired-side join makes
+    /// `Action::ReclaimAllocation` reachable from THIS drive (previously
+    /// only `DiscardStrandedArtifacts` was reachable; see this module's
+    /// own docs). A non-terminal `AllocStatusRow` owned by a Vm-driven
+    /// `Job` intent, with a live cgroup scope and no `Vm` registry entry
+    /// (`SimDriver::new(DriverType::Exec)` — the same fixture the
+    /// `converge_discards_a_run_dir_orphan_...` test above uses),
+    /// authorises reclamation: `supervision` reads `Observed(∅)`, the
+    /// join finds `desired.allocations[alloc] = VmAllocFacts { terminal:
+    /// false, .. }`, and `plan_reclamation`'s row 1 fires
+    /// `ReclaimAllocation` — writing `Terminated` /
+    /// `StoppedBy::PlatformReclaimed`, the disposition ONLY that
+    /// executor ever writes (never `DiscardStrandedArtifacts`, which
+    /// authors no row at all).
+    #[tokio::test]
+    async fn converge_reclaims_a_non_terminal_unsupervised_vm_driven_allocation() {
+        use overdrive_core::TransitionReason;
+        use overdrive_core::aggregate::{IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind};
+        use overdrive_core::id::{AllocationId, WorkloadId};
+        use overdrive_core::traits::driver::Resources;
+        use overdrive_core::traits::observation_store::{
+            AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow,
+        };
+        use overdrive_core::transition_reason::StoppedBy;
+
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let alloc = AllocationId::new("vm-boot-desired-0").expect("valid id");
+        // A live cgroup scope is the minimal fixture that brings this
+        // alloc_id into `plan_reclamation`'s `host_ids` walk (any of the
+        // three `VmHostObservation` surfaces suffices).
+        host.set_scope(alloc.clone(), std::collections::BTreeSet::from([4242]));
+        let state = app_state(&tmp, Arc::new(host));
+
+        // Seed a Vm-driven Job intent — the desired-side surface
+        // `hydrate_vm_reclamation_desired` now scans via `scan_prefix`.
+        let workload_id = WorkloadId::new("vm-boot-desired-workload").expect("valid id");
+        let job = Job {
+            id: workload_id.clone(),
+            replicas: std::num::NonZeroU32::new(1).expect("nonzero"),
+            resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
+            driver: WorkloadDriver::Vm(Vm {
+                command: "/sbin/init".to_owned(),
+                args: Vec::new(),
+                kernel: "/boot/vmlinux".to_owned(),
+                rootfs: "/boot/rootfs.ext4".to_owned(),
+            }),
+        };
+        let intent = WorkloadIntent::Job(job);
+        let key = IntentKey::for_workload(&workload_id);
+        let archived = intent.archive_for_store().expect("rkyv archive");
+        state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put intent");
+
+        // Seed a NON-TERMINAL AllocStatusRow for `alloc` under
+        // `workload_id` — the observation-side surface of the join.
+        let n = NodeId::new("writer-1").expect("valid NodeId");
+        let row = AllocStatusRow {
+            alloc_id: alloc.clone(),
+            workload_id: workload_id.clone(),
+            node_id: n.clone(),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp { counter: 1, writer: n.clone() },
+            reason: Some(TransitionReason::Started),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        };
+        state.obs.write(ObservationRow::AllocStatus(Box::new(row))).await.expect("seed row");
+
+        converge(&state).await.expect("converge succeeds");
+
+        let after = state
+            .obs
+            .alloc_status_row(&alloc)
+            .await
+            .expect("read succeeds")
+            .expect("row exists after converge");
+        assert_eq!(after.state, AllocState::Terminated);
+        assert!(
+            matches!(after.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })),
+            "a non-terminal, unsupervised, Vm-driven allocation reached via the desired-side \
+             join must be reclaimed via Action::ReclaimAllocation, got {:?}",
+            after.reason
         );
     }
 }
