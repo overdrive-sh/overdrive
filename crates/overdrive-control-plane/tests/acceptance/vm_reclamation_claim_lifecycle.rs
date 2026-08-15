@@ -51,6 +51,7 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_store_local::LocalIntentStore;
 use parking_lot::Mutex;
+use proptest::prelude::*;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
@@ -82,6 +83,20 @@ impl ClaimTrackingDriver {
 
     fn claim(&self, alloc: &AllocationId) {
         self.held.lock().insert(alloc.clone());
+    }
+
+    /// Models transition 4 (brief.md §105a.3 row 4) — the exit watcher's
+    /// OWN drop-guard abandoning a claim it never handed off, valid
+    /// ONLY while the claim is still `Held`. Deliberately a DIFFERENT
+    /// code path from `release_supervision` (transitions 5/6's
+    /// mechanism, the observer's/a shim arm's release): production
+    /// models transition 4 as the watcher's own map mutation, never a
+    /// `release_supervision` call. "Held → ∅, and only from Held" is
+    /// exactly `BTreeSet::remove`'s own no-op-if-absent semantics — a
+    /// claim already handed off (or already released by any other path)
+    /// is untouched.
+    fn abandon_if_held(&self, alloc: &AllocationId) {
+        self.held.lock().remove(alloc);
     }
 }
 
@@ -257,6 +272,26 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocationId {
     }
 }
 
+/// D3 complement-equality (@contract-shape:bounded-change, 02-02
+/// review): seeds an unrelated, ALREADY-held "noise" claim so the
+/// caller can assert it survives the alloc-under-test's release
+/// untouched. Shared by all four S-VM-77 example tests below.
+fn seed_noise_claim(h: &Harness, label: &str) -> AllocationId {
+    let noise = AllocationId::new(&format!("alloc-s-vm-77-{label}-noise-0")).expect("valid id");
+    h.driver.claim(&noise);
+    noise
+}
+
+/// Pairs with [`seed_noise_claim`] — asserts the noise claim was never
+/// touched by another allocation's release.
+fn assert_noise_claim_untouched(h: &Harness, noise: &AllocationId) {
+    assert!(
+        h.driver.held.lock().contains(noise),
+        "an unrelated allocation's claim must never be touched by another's release \
+         (complement-equality, D3)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // S-VM-77 — the claim releases on every `RetryOutcome` arm.
 // ---------------------------------------------------------------------------
@@ -266,6 +301,7 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocationId {
 async fn release_supervision_fires_on_wrote_arm() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp, "s-vm-77-wrote", DriverType::Exec).await;
+    let noise = seed_noise_claim(&h, "wrote");
     let start = Instant::now();
     let alloc = drive_to_first_running(&h, start).await;
     assert!(h.driver.held.lock().contains(&alloc), "the driver must hold the claim before exit");
@@ -286,6 +322,7 @@ async fn release_supervision_fires_on_wrote_arm() {
         "release_supervision must fire exactly once on the Wrote arm"
     );
     assert!(!h.driver.held.lock().contains(&alloc), "the claim must converge to absent");
+    assert_noise_claim_untouched(&h, &noise);
 }
 
 /// `Failed` arm: the obs write is rejected on every attempt (a retryable
@@ -298,6 +335,7 @@ async fn release_supervision_fires_on_wrote_arm() {
 async fn release_supervision_fires_on_failed_arm() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp, "s-vm-77-failed", DriverType::Exec).await;
+    let noise = seed_noise_claim(&h, "failed");
     let start = Instant::now();
     let alloc = drive_to_first_running(&h, start).await;
 
@@ -324,6 +362,7 @@ async fn release_supervision_fires_on_failed_arm() {
          leaves a Failed allocation claimed forever (SD-1's unstoppable-orphan failure)"
     );
     assert!(!h.driver.held.lock().contains(&alloc), "the claim must converge to absent");
+    assert_noise_claim_untouched(&h, &noise);
 }
 
 /// `NoPriorRow` arm: an `ExitEvent` arrives for an allocation the
@@ -333,6 +372,7 @@ async fn release_supervision_fires_on_failed_arm() {
 async fn release_supervision_fires_on_no_prior_row_arm() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp, "s-vm-77-noprior", DriverType::Vm).await;
+    let noise = seed_noise_claim(&h, "noprior");
 
     // `driver.start()` directly (mirrors VmDriver::start's step-0 claim,
     // brief.md §105a.3 transition 1) WITHOUT ever routing through
@@ -383,6 +423,7 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
          never author an ending must still be concluded"
     );
     assert!(!h.driver.held.lock().contains(&alloc), "the claim must converge to absent");
+    assert_noise_claim_untouched(&h, &noise);
 }
 
 /// A claim never taken (start never reached step 0) is unaffected by a
@@ -391,6 +432,11 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
 async fn release_supervision_on_unclaimed_alloc_is_idempotent_noop() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp, "s-vm-77-unclaimed", DriverType::Vm).await;
+    // D3 complement-equality: unlike the other three sites, THIS noise
+    // claim proves "release is idempotent" is distinct from "release
+    // corrupts unrelated state" — an ACTUALLY-held claim must survive
+    // releasing a never-claimed id untouched.
+    let noise = seed_noise_claim(&h, "unclaimed");
     let unclaimed = AllocationId::new("alloc-never-claimed-0").expect("valid id");
     let driver_dyn: &dyn Driver = &h.driver;
     driver_dyn.release_supervision(&unclaimed);
@@ -399,7 +445,97 @@ async fn release_supervision_on_unclaimed_alloc_is_idempotent_noop() {
         !h.driver.held.lock().contains(&unclaimed),
         "an unclaimed alloc must never appear in the held set"
     );
+    assert_noise_claim_untouched(&h, &noise);
     let _ = h.state.obs.alloc_status_rows().await; // keep `state` alive/used
+}
+
+/// One releasing "arm" in the transition table (brief.md §105a.3). Three
+/// variants model transition 5 — the exit observer's release, fired
+/// identically on EVERY `RetryOutcome` (the abandonment-boundary rule:
+/// "one release call at the bottom of the observer's loop body, outside
+/// `match outcome`, covering all three arms" — the arm never changes
+/// WHICH call fires, only WHY it fires); `ShimArm` models transition 6
+/// (a shim arm's terminal-row release); `WatcherAbandoned` models
+/// transition 4 (the watcher's own drop-guard abandonment, "Held → ∅,
+/// and only from Held").
+#[derive(Debug, Clone, Copy)]
+enum ReleaseOrigin {
+    ObserverWrote,
+    ObserverFailed,
+    ObserverNoPriorRow,
+    ShimArm,
+    WatcherAbandoned,
+}
+
+fn release_origin_strategy() -> impl Strategy<Value = ReleaseOrigin> {
+    prop_oneof![
+        Just(ReleaseOrigin::ObserverWrote),
+        Just(ReleaseOrigin::ObserverFailed),
+        Just(ReleaseOrigin::ObserverNoPriorRow),
+        Just(ReleaseOrigin::ShimArm),
+        Just(ReleaseOrigin::WatcherAbandoned),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// S-VM-77 / brief.md §113 "P5" — the MANDATED proptest over the
+    /// transition table (§105a.3): "from any interleaving of transitions
+    /// 3–6 for one allocation the map converges to absent, and no
+    /// interleaving leaves an entry when both the watcher has finished
+    /// and an authorship attempt has concluded." Generates an arbitrary
+    /// sequence of 1..=6 releases drawn from BOTH actors this scenario's
+    /// own Given/When/Then names — "ANY interleaving of the observer's
+    /// release and a shim terminal-row arm's release for the same
+    /// allocation" — plus the watcher's own transition-4 abandonment,
+    /// and asserts convergence to absent under every generated ordering
+    /// and multiplicity, with no panic. This is the coverage the four
+    /// hand-picked examples above cannot provide: each of them releases
+    /// its claim EXACTLY ONCE, so a release that is only safe the FIRST
+    /// time it is called (broken idempotency) would slip past all four
+    /// while still violating the map's convergence property — exactly
+    /// the "two callers may both fire for one allocation" contract
+    /// `Driver::release_supervision`'s docstring (`driver.rs`) commits
+    /// to. D3 complement-equality: a second, unrelated "noise" claim
+    /// must survive every generated sequence untouched
+    /// (@contract-shape:bounded-change).
+    #[test]
+    fn release_supervision_converges_to_absent_under_any_interleaving(
+        origins in prop::collection::vec(release_origin_strategy(), 1..=6),
+    ) {
+        let driver = ClaimTrackingDriver::new(Arc::new(SimDriver::new(DriverType::Vm)));
+        let driver_dyn: &dyn Driver = &driver;
+
+        let target = AllocationId::new("alloc-svm77-pbt-target").expect("valid id");
+        let noise = AllocationId::new("alloc-svm77-pbt-noise").expect("valid id");
+
+        // Transition 1: both allocations start Held.
+        driver.claim(&target);
+        driver.claim(&noise);
+
+        for origin in &origins {
+            match origin {
+                ReleaseOrigin::ObserverWrote
+                | ReleaseOrigin::ObserverFailed
+                | ReleaseOrigin::ObserverNoPriorRow
+                | ReleaseOrigin::ShimArm => driver_dyn.release_supervision(&target),
+                ReleaseOrigin::WatcherAbandoned => driver.abandon_if_held(&target),
+            }
+        }
+
+        prop_assert!(
+            !driver.held.lock().contains(&target),
+            "the claim must converge to absent under ANY interleaving/count of releases: {:?}",
+            origins,
+        );
+        prop_assert!(
+            driver.held.lock().contains(&noise),
+            "an unrelated allocation's claim must never be touched by another's release \
+             (complement-equality, D3): {:?}",
+            origins,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +544,19 @@ async fn release_supervision_on_unclaimed_alloc_is_idempotent_noop() {
 // observed as held, so the arriving allocation is never reclaimed.
 // ---------------------------------------------------------------------------
 
+/// Restructured per 02-02 review D2: the ORIGINAL shape took the claim
+/// before `hydrate_actual` was even called, so it could not distinguish
+/// `observe()`-first from supervision-first — both orders would observe
+/// the SAME pre-existing claim identically. This version schedules the
+/// two reads as genuinely separate steps with the claim interleaved
+/// BETWEEN them (t1 < t2 < t3, matching S-VM-78's own Given/When/Then):
+/// `hydrate_actual` runs as a spawned task and pauses INSIDE
+/// `observe()` (t1) via [`SimVmHostState::arm_observe_barrier`]; the
+/// test waits for that pause to be genuinely entered, THEN takes the
+/// claim (t2), THEN releases the barrier so `observe()` returns and the
+/// LAST step — the supervision read — runs afterward (t3 > t2). Only
+/// this shape can distinguish the two orderings (see the deletion-test
+/// proof recorded in this step's commit).
 #[tokio::test]
 async fn hydrate_actual_observes_a_freshly_taken_claim_and_never_authorises_it() {
     let tmp = TempDir::new().expect("tempdir");
@@ -420,20 +569,41 @@ async fn hydrate_actual_observes_a_freshly_taken_claim_and_never_authorises_it()
     let arriving = AllocationId::new("alloc-s-vm-78-arriving-0").expect("valid id");
     let sim_host = SimVmHostState::new();
     sim_host.set_run_dir(arriving.clone());
+    // Arm the interleaving seam BEFORE the sim is handed to the runtime
+    // — the NEXT `observe()` call (the one `hydrate_actual`'s spawned
+    // task is about to make) will pause here.
+    let barrier = sim_host.arm_observe_barrier();
     let vm_host_state: Arc<dyn VmHostState> = Arc::new(sim_host);
-    let mut state = h.state;
-    state.vm_host_state = vm_host_state;
 
-    // The claim is taken BEFORE `hydrate_actual` runs (§103 step 0 — the
-    // claim precedes the run directory's existence in real `VmDriver`
-    // boot ordering; this harness models the operationally-relevant
-    // consequence: by the time the supervision read happens, the claim
-    // is visible).
+    let mut state_for_task = h.state.clone();
+    state_for_task.vm_host_state = vm_host_state;
+
+    // t1 (scheduled): `hydrate_actual` runs concurrently and will block
+    // inside `observe()` the instant it starts.
+    let hydrate_handle = tokio::spawn(async move {
+        let reconciler = AnyReconciler::VmReclamation(VmReclamation::new());
+        let target = TargetResource::new("node/local").expect("valid target");
+        hydrate_actual_for_test(&reconciler, &target, &state_for_task)
+            .await
+            .expect("hydrate_actual")
+    });
+
+    // t1 (observed): block until `observe()` has GENUINELY started —
+    // not merely until the task was scheduled.
+    barrier.wait_for_observe_started().await;
+
+    // t2: the claim is taken strictly BETWEEN `observe()`'s start and
+    // its return — the only shape that can distinguish
+    // `observe()`-first from supervision-first hydration ordering
+    // (§103 step 0 / §105a.2's asymmetry argument).
     h.driver.claim(&arriving);
 
-    let reconciler = AnyReconciler::VmReclamation(VmReclamation::new());
-    let target = TargetResource::new("node/local").expect("valid target");
-    let result = hydrate_actual_for_test(&reconciler, &target, &state).await.expect("hydrate_actual");
+    // t3: release `observe()` so it returns and the supervision read —
+    // the LAST step of `hydrate_vm_reclamation_actual` — runs after the
+    // claim is visible.
+    barrier.release_observe();
+
+    let result = hydrate_handle.await.expect("hydrate_actual task must not panic");
     let AnyState::VmReclamation(vm_state) = result else {
         panic!("expected AnyState::VmReclamation");
     };
@@ -444,8 +614,8 @@ async fn hydrate_actual_observes_a_freshly_taken_claim_and_never_authorises_it()
     );
     assert!(
         !vm_state.supervision.reclamation_authorised(&arriving),
-        "the supervision read (LAST) must see the claim taken before hydrate_actual ran — a \
-         booting VM must never be authorised for reclamation (brief.md §105a.2's asymmetry \
-         argument)"
+        "the supervision read (LAST) must see the claim taken strictly between observe()'s \
+         start and return — a booting VM must never be authorised for reclamation (brief.md \
+         §105a.2's asymmetry argument)"
     );
 }

@@ -28,6 +28,7 @@ use overdrive_core::traits::vm_host_state::{
     ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError,
 };
 use parking_lot::Mutex;
+use tokio::sync::Notify;
 
 /// The fixed relative path segment every workload cgroup scope lives
 /// under — mirrors `overdrive_core::cgroup::CgroupPath::for_alloc`'s own
@@ -52,6 +53,44 @@ struct Inner {
     probe_fault: Option<io::ErrorKind>,
 }
 
+/// **TEST-HOOK-ONLY** interleaving seam for [`VmHostState::observe`]
+/// (S-VM-78, ADR-0083 §D7 / `brief.md` §105a.2 — the `observe()`-first,
+/// supervision-LAST hydration read order). Armed via
+/// [`SimVmHostState::arm_observe_barrier`]; the NEXT `observe()` call
+/// signals `entered` the instant its body starts running, then blocks
+/// until the test calls [`ObserveBarrierHandle::release_observe`]. This
+/// is what lets a test prove a mutation happened strictly BETWEEN
+/// `observe()`'s start and its return — the only shape that can
+/// distinguish `observe()`-first from supervision-first hydration
+/// ordering (a claim taken merely "before `hydrate_actual` is called"
+/// is observed identically under either order).
+#[derive(Debug, Default)]
+struct ObserveBarrier {
+    entered: Notify,
+    release: Notify,
+}
+
+/// Handle returned by [`SimVmHostState::arm_observe_barrier`].
+#[derive(Debug)]
+pub struct ObserveBarrierHandle {
+    barrier: Arc<ObserveBarrier>,
+}
+
+impl ObserveBarrierHandle {
+    /// Resolves once the armed `observe()` call has genuinely STARTED —
+    /// its body has begun executing — not merely been scheduled as a
+    /// task.
+    pub async fn wait_for_observe_started(&self) {
+        self.barrier.entered.notified().await;
+    }
+
+    /// Releases the paused `observe()` call so it proceeds to build and
+    /// return its snapshot.
+    pub fn release_observe(&self) {
+        self.barrier.release.notify_one();
+    }
+}
+
 /// Sim binding of the [`VmHostState`] port trait.
 ///
 /// # Construction
@@ -70,6 +109,11 @@ struct Inner {
 #[derive(Clone, Debug, Default)]
 pub struct SimVmHostState {
     inner: Arc<Mutex<Inner>>,
+    /// **TEST-HOOK-ONLY** — one-shot interleaving seam for `observe()`,
+    /// armed via [`Self::arm_observe_barrier`]. `None` (the default)
+    /// means `observe()` runs uninterrupted, exactly as before this
+    /// seam existed.
+    observe_barrier: Arc<Mutex<Option<Arc<ObserveBarrier>>>>,
 }
 
 impl SimVmHostState {
@@ -78,6 +122,16 @@ impl SimVmHostState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// **TEST-HOOK-ONLY**. Arms a ONE-SHOT interleaving barrier on the
+    /// NEXT `observe()` call — see [`ObserveBarrier`]'s doc comment for
+    /// why this exists (S-VM-78).
+    #[must_use]
+    pub fn arm_observe_barrier(&self) -> ObserveBarrierHandle {
+        let barrier = Arc::new(ObserveBarrier::default());
+        *self.observe_barrier.lock() = Some(barrier.clone());
+        ObserveBarrierHandle { barrier }
     }
 
     /// Seed a cgroup scope with the given live PIDs (may be empty).
@@ -136,6 +190,17 @@ impl VmHostState for SimVmHostState {
     }
 
     async fn observe(&self) -> std::io::Result<VmHostObservation> {
+        // Interleaving seam (S-VM-78): if a barrier is armed, signal
+        // that this call has genuinely STARTED, then pause until the
+        // test releases it. The guard is a temporary and is dropped at
+        // the end of this statement -- never held across the `.await`
+        // below, per this module's own concurrency discipline (see the
+        // crate doc comment at the top of this file).
+        let armed = self.observe_barrier.lock().take();
+        if let Some(barrier) = &armed {
+            barrier.entered.notify_one();
+            barrier.release.notified().await;
+        }
         let inner = self.inner.lock();
         Ok(VmHostObservation {
             scopes: inner.scopes.clone(),
