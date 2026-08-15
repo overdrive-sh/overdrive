@@ -478,6 +478,19 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 /// `[server] streaming_submit_cap_seconds`.
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
 
+/// Node-scoped `vm-reclamation` sweep cadence (ADR-0083 §D7, brief.md
+/// §105a.8, GH #42). `spawn_convergence_loop` submits one
+/// `Evaluation { vm-reclamation, node/<node_id> }` every time this
+/// interval elapses on its own already-injected `Clock`.
+///
+/// A **compile-time constant** — not operator-tunable, and no knob is
+/// promised (both the mechanism and this value were ratified by the
+/// user on 2026-08-11). It bounds the unstoppable-orphan window after a
+/// failed stop and the repair latency for a clone stranded by a crash
+/// between teardown steps, while sitting ~300× above the 100ms tick
+/// cadence so the three-surface host walk never lands on the hot path.
+pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
 /// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
 /// mirrors the `mtls_worker: None` / empty-registry `workflow_engine`
@@ -1927,6 +1940,18 @@ pub async fn run_server_with_obs_and_drivers(
     // holds with it registered (the reconcile body holds no `.await`, reaches
     // for no CA / ObservationStore handle, and reads no wall-clock).
     runtime.register(svid_lifecycle()).await?;
+    // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+    // §105a.7, GH #42) — the `vm-reclamation` reconciler. Registration is
+    // INERT (probes the ViewStore + bulk-loads the field-less
+    // `VmReclamationView` map; drives no tick) — `spawn_convergence_loop`,
+    // spawned strictly AFTER the boot passes below, is the only production
+    // driver of ticks, so no tick can interleave with the boot-epoch
+    // `vm_reclamation_boot::converge` drive regardless of registration
+    // order. Registered here (not gated on `Vm` driver composition) for
+    // the same reason `state.vm_host_state` composes unconditionally
+    // (S-VM-30): a node with no `Vm` registry entry still reclaims via
+    // `Observed(∅)`.
+    runtime.register(vm_reclamation()).await?;
 
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
@@ -2884,6 +2909,16 @@ pub async fn run_server_with_obs_and_drivers(
 /// the harness calls `sim_clock.tick(cadence)` to advance logical time
 /// past the deadline. Either way the loop suspends between ticks
 /// rather than busy-polling.
+///
+/// microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+/// §105a.8, GH #42): also submits one `vm-reclamation` `Evaluation`
+/// every [`VM_RECLAMATION_SWEEP_INTERVAL`], measured on THIS loop's
+/// already-injected `clock` (DST-controllable, never wall-clock). The
+/// broker is purely event-driven and nothing else in the tree would
+/// ever submit a `vm-reclamation` evaluation, so without this the
+/// reconciler would never tick after boot — S-VM-21's "a later
+/// steady-state tick, WITHOUT restarting serve" claim depends on this
+/// wake actually firing.
 fn spawn_convergence_loop(
     state: AppState,
     clock: Arc<dyn overdrive_core::traits::clock::Clock>,
@@ -2892,9 +2927,30 @@ fn spawn_convergence_loop(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_n: u64 = 0;
+        let mut next_vm_reclamation_sweep_at = clock.now() + VM_RECLAMATION_SWEEP_INTERVAL;
         loop {
             let now = clock.now();
             let deadline = now + cadence;
+
+            if now >= next_vm_reclamation_sweep_at {
+                next_vm_reclamation_sweep_at = now + VM_RECLAMATION_SWEEP_INTERVAL;
+                if let Ok(target) =
+                    overdrive_core::reconcilers::TargetResource::new(&format!(
+                        "node/{}",
+                        state.node_id
+                    ))
+                {
+                    #[allow(clippy::expect_used)]
+                    let reconciler = overdrive_core::reconcilers::ReconcilerName::new(
+                        <overdrive_core::reconcilers::vm_reclamation::VmReclamation as overdrive_core::reconcilers::Reconciler>::NAME,
+                    )
+                    .expect("VmReclamation::NAME is a valid ReconcilerName by construction");
+                    state
+                        .runtime
+                        .broker()
+                        .submit(overdrive_core::eval_broker::Evaluation { reconciler, target });
+                }
+            }
 
             // Drain the broker into a local Vec — the
             // parking_lot::MutexGuard MUST be dropped before any
@@ -3143,6 +3199,24 @@ pub fn service_lifecycle() -> overdrive_core::reconcilers::AnyReconciler {
     use overdrive_core::service_lifecycle::ServiceLifecycleReconciler;
 
     AnyReconciler::ServiceLifecycle(ServiceLifecycleReconciler::new())
+}
+
+/// Construct the `vm-reclamation` reconciler per ADR-0083 §D7 /
+/// `brief.md` §105a.1.
+///
+/// SD-1's Bar-2 registered reconciler (`.claude/rules/reconcilers.md`):
+/// converges `desired` (VM-driver allocations) against `actual` (the
+/// three `VmHostState::observe()` surfaces + the supervision set),
+/// emitting `Action::ReclaimAllocation` / `Action::DiscardStrandedArtifacts`.
+/// Carries no per-node state of its own — `VmReclamation::new()` takes no
+/// arguments; the node it observes comes from the `TargetResource`
+/// (`node/<node_id>`) the runtime evaluates it against.
+#[must_use]
+pub fn vm_reclamation() -> overdrive_core::reconcilers::AnyReconciler {
+    use overdrive_core::reconcilers::AnyReconciler;
+    use overdrive_core::reconcilers::vm_reclamation::VmReclamation;
+
+    AnyReconciler::VmReclamation(VmReclamation::new())
 }
 
 /// Construct the `service-map-hydrator` reconciler.

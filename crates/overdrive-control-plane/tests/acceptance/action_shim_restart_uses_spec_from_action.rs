@@ -214,6 +214,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

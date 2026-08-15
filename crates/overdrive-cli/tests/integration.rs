@@ -129,4 +129,11 @@ mod integration {
     // the start of their own RED phase, per `distill/wave-decisions.md`
     // DWD-06.
     mod vm_walking_skeleton;
+
+    // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
+    // §105a, GH #42) — the Tier-3 suite for the `VmReclamation`
+    // reconciler's two executors: S-VM-21/22/25 (both shapes)/23/30/81.
+    // See the file's own module doc for the scenario map and the
+    // cgroup-child-blocker fixture-construction rationale.
+    mod vm_reclamation_tier3;
 }

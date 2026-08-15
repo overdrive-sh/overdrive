@@ -1,0 +1,956 @@
+//! Tier-3 real-kernel suite for `VmReclamation` (ADR-0083 §D7, `brief.md`
+//! §105a, GH #42) — step 02-03.
+//!
+//! Drives real `overdrive serve` boots + real `overdrive deploy`/`stop`
+//! against a real Cloud Hypervisor VMM, per `crates/overdrive-cli/CLAUDE.md`
+//! § "Integration tests — no subprocess" (direct handler calls, no
+//! `Command::spawn`). Runs on the `x86_64+KVM` metal box
+//! (`cargo xtask metal run --`), never Lima (no nested KVM on Apple
+//! Silicon).
+//!
+//! # Scenario map
+//!
+//! Per `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
+//! (the catalogue SSOT; step 02-03's own dispatch prompt swapped the
+//! S-VM-25 / S-VM-79 labels relative to the catalogue's actual content —
+//! test names below are content-addressed, not id-addressed, to stay
+//! correct regardless of the label swap):
+//!
+//! - S-VM-30 (folded from 02-02 scope): [`vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty`]
+//! - S-VM-23 (folded from 02-02 scope): [`boot_epoch_reclamation_settles_before_adopt_on_restart_recovery`]
+//! - S-VM-21: [`steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve`]
+//! - S-VM-22: [`steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick`]
+//! - S-VM-25 shape (a): [`restart_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
+//! - S-VM-25 shape (b): [`failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
+//! - S-VM-81: [`reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`]
+//!   — see that test's own doc comment for the residual gap this suite
+//!   surfaces rather than papers over (a Tier-1 proof of the SAME claim
+//!   already exists in `action_shim::reclamation::tests` and is GREEN;
+//!   this Tier-3 test proves what real infra makes reachable and is
+//!   explicit about what it does not).
+//!
+//! # Fixture construction — why not a plain fault-injection seam
+//!
+//! `VmDriver::stop`'s host-footprint teardown (`cgroup_kill`,
+//! `remove_workload_scope`, `remove_dir_all`, `remove_file`,
+//! `crates/overdrive-worker/src/vm_driver.rs:696-701`) is ALREADY
+//! best-effort — every call is `let _ = ...`, so a substrate failure
+//! there is silently absorbed and `stop()` still returns `Ok(())`. To
+//! reproduce "cgroup scope removal is made to fail" deterministically
+//! (rather than racing a real kernel reap-lag window), these tests
+//! create a REAL, empty CHILD cgroup directory inside the allocation's
+//! scope before stopping it: cgroup v2's `rmdir` on a parent refuses
+//! with `ENOTEMPTY` while ANY child cgroup directory exists, regardless
+//! of process/reap state. This is a real action against real cgroupfs
+//! (`mkdir`/`rmdir` on `/sys/fs/cgroup/...`), not a mock or a new
+//! production test-seam — the same class of direct kernel-surface
+//! interaction `vm_walking_skeleton.rs` already uses (`/proc/<pid>/...`
+//! reads). The blocker is removed by the test before the reclamation
+//! window opens, simulating "the transient condition has cleared" —
+//! `VmHostState::kill_scope`'s own settle-retry loop would otherwise
+//! also hit the same `ENOTEMPTY` and this executor propagates that
+//! failure (unlike `VmDriver::stop`), so leaving the blocker in place at
+//! BOOT time would refuse the whole boot (the boot-epoch drive is
+//! fail-closed) — which is why the blocker is introduced and cleared
+//! entirely within one already-booted `serve` session for S-VM-21/22/25(b).
+
+#![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
+#![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
+
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
+
+use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
+use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
+use overdrive_control_plane::VmBootArtifacts;
+use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody};
+use overdrive_core::transition_reason::StoppedBy;
+use overdrive_testing::vm_fixture::VmFixture;
+use serial_test::serial;
+use tempfile::TempDir;
+
+// ---------------------------------------------------------------------
+// Shared fixture staging (own copies — the `vm_walking_skeleton.rs`
+// helpers are private to that file).
+// ---------------------------------------------------------------------
+
+fn shared_staging_root() -> PathBuf {
+    overdrive_testing::vm_fixture::default_staging_root()
+}
+
+/// A long-lived guest binary that never exits on its own — needed
+/// whenever the assertion window requires the real `cloud-hypervisor`
+/// process to still be observable at a specific moment.
+fn build_spin_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("spin.rs");
+    std::fs::write(
+        &src,
+        "fn main() { loop { std::thread::sleep(std::time::Duration::from_secs(3600)); } }",
+    )
+    .expect("write spin source");
+    let out = tmp.join("spin");
+    let status = Command::new("rustc")
+        .arg("--edition")
+        .arg("2021")
+        .arg("-C")
+        .arg("opt-level=0")
+        .arg("-C")
+        .arg("target-feature=+crt-static")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-musl")
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for the long-lived spin binary");
+    assert!(status.success(), "rustc must build the long-lived spin binary");
+    out
+}
+
+/// A short-lived guest binary that exits 0 immediately — needed for the
+/// natural-exit fixture (S-VM-25 shape (a)).
+fn build_exit0_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("exit0.rs");
+    std::fs::write(&src, "fn main() { std::process::exit(0); }").expect("write exit0 source");
+    let out = tmp.join("exit0");
+    let status = Command::new("rustc")
+        .arg("--edition")
+        .arg("2021")
+        .arg("-C")
+        .arg("opt-level=0")
+        .arg("-C")
+        .arg("target-feature=+crt-static")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-musl")
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for the exit0 binary");
+    assert!(status.success(), "rustc must build the exit0 binary");
+    out
+}
+
+/// Stages a PER-TEST COPY of the shared fixture's rootfs with an extra
+/// binary injected at `/sbin/<guest_name>` via a host-side loopback
+/// mount. Mirrors `vm_walking_skeleton.rs::stage_rootfs_with_extra_binary`
+/// exactly (this file's own copy — that one is private).
+fn stage_rootfs_with_extra_binary(
+    tmp: &Path,
+    fixture: &VmFixture,
+    host_bin: &Path,
+    guest_name: &str,
+) -> PathBuf {
+    let rootfs_copy = tmp.join("rootfs.ext4");
+    std::fs::copy(&fixture.rootfs_path, &rootfs_copy)
+        .expect("copy the shared fixture rootfs into a per-test working copy");
+
+    let mnt = tmp.join("rootfs-mnt");
+    std::fs::create_dir_all(&mnt).expect("create loopback mount point");
+
+    let losetup_out = Command::new("losetup")
+        .arg("--find")
+        .arg("--show")
+        .arg(&rootfs_copy)
+        .output()
+        .expect("spawn losetup --find --show");
+    assert!(
+        losetup_out.status.success(),
+        "losetup --find --show failed: {}",
+        String::from_utf8_lossy(&losetup_out.stderr)
+    );
+    let loop_dev = String::from_utf8_lossy(&losetup_out.stdout).trim().to_owned();
+
+    let mount_status =
+        Command::new("mount").arg(&loop_dev).arg(&mnt).status().expect("spawn mount");
+    assert!(mount_status.success(), "mount {loop_dev} {} failed", mnt.display());
+
+    let dest = mnt.join("sbin").join(guest_name);
+    std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
+    let mut perms = std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+
+    let umount_status = Command::new("umount").arg(&mnt).status().expect("spawn umount");
+    assert!(umount_status.success(), "umount {} failed", mnt.display());
+    let _ = Command::new("losetup").arg("-d").arg(&loop_dev).status();
+
+    rootfs_copy
+}
+
+// ---------------------------------------------------------------------
+// Server composition — three shapes needed across these scenarios.
+// ---------------------------------------------------------------------
+
+/// Real serve, `[vm]` driver composed, non-mTLS (`SimDataplane`
+/// injected) — the cheapest boot for scenarios that do not need mTLS /
+/// SVID machinery.
+async fn spawn_vm_server(vm_artifacts: VmBootArtifacts, data_dir: &Path, config_dir: &Path) -> ServeHandle {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    overdrive_cli::commands::serve::run_with_dataplane_and_vm_artifacts(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        vm_artifacts,
+    )
+    .await
+    .expect("serve::run_with_dataplane_and_vm_artifacts")
+}
+
+/// Real serve, `[vm]` driver composed, mTLS-composed (real `EbpfDataplane`,
+/// real SVID/CA machinery) — needed for S-VM-23 (adopt-on-restart
+/// ordering) and S-VM-81 (SVID issuance).
+async fn spawn_vm_server_mtls_composed(
+    vm_artifacts: VmBootArtifacts,
+    data_dir: &Path,
+    config_dir: &Path,
+) -> Result<ServeHandle, overdrive_cli::http_client::CliError> {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    overdrive_cli::commands::serve::run_with_vm_artifacts(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        vm_artifacts,
+    )
+    .await
+}
+
+/// Real serve, NO `[vm]` driver composed at all (cloud-hypervisor
+/// "uninstalled" — `state.drivers.get(DriverType::Vm) == None`). Needed
+/// for S-VM-30.
+async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeHandle {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    overdrive_cli::commands::serve::run_with_dataplane(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+    )
+    .await
+    .expect("serve::run_with_dataplane (no vm_artifacts -> no Vm registry entry)")
+}
+
+fn config_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(".overdrive").join("config")
+}
+
+/// Bridges the real, narrow race between `ServeHandle::shutdown` returning
+/// and its `LocalIntentStore` / `LocalObservationStore` redb file
+/// descriptors actually closing (the convergence-loop / exit-observer
+/// background tasks are signalled via `CancellationToken` but not
+/// necessarily joined before `shutdown` returns). A restart against the
+/// SAME `data_dir` immediately after `shutdown()` can otherwise observe
+/// `"Database already open. Cannot acquire lock."` on the redb reopen.
+/// Every scenario in this file that reboots against the same `data_dir`
+/// calls this between the two boots.
+async fn wait_for_data_dir_release() {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
+// ---------------------------------------------------------------------
+// Spec authoring + polling + host-path helpers.
+// ---------------------------------------------------------------------
+
+fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
+    format!(
+        "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\n\
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
+         memory_bytes = 134217728\n",
+        kernel.display(),
+        rootfs.display(),
+    )
+}
+
+fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, body).expect("write toml");
+    path
+}
+
+async fn poll_until_running(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if out.snapshot.rows.first().is_some_and(|r| r.state == AllocStateWire::Running) {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "workload {workload_id} did not reach Running within {max_wait:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn poll_until_terminal(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if let Some(row) = out.snapshot.rows.first()
+            && matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
+        {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "workload {workload_id} did not reach a terminal state within {max_wait:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn scope_path(alloc_id: &str) -> PathBuf {
+    PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice").join(format!("{alloc_id}.scope"))
+}
+
+fn run_dir_path(alloc_id: &str) -> PathBuf {
+    PathBuf::from("/run/overdrive/vm").join(alloc_id)
+}
+
+fn clone_path(staging_dir: &Path, alloc_id: &str) -> PathBuf {
+    staging_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
+}
+
+/// Finds the single running `cloud-hypervisor` process's pid by
+/// `argv[0]` (mirrors `vm_walking_skeleton.rs::find_cloud_hypervisor_pid`
+/// — `comm` truncates to 15 chars, shorter than the 16-char binary name).
+fn find_cloud_hypervisor_pid() -> Option<u32> {
+    for entry in std::fs::read_dir("/proc").expect("read /proc") {
+        let Ok(entry) = entry else { continue };
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let cmdline_path = entry.path().join("cmdline");
+        let Ok(cmdline) = std::fs::read(&cmdline_path) else { continue };
+        let argv0 = cmdline.split(|&b| b == 0).next().unwrap_or(&[]);
+        let argv0 = String::from_utf8_lossy(argv0);
+        if Path::new(argv0.as_ref()).file_name() == Some(std::ffi::OsStr::new("cloud-hypervisor")) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+fn pid_is_alive(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Creates a REAL, empty child cgroup directory inside `scope` — see the
+/// module doc's "Fixture construction" section for why this reliably
+/// (not racily) makes the scope's own `rmdir` fail with `ENOTEMPTY`
+/// until removed.
+fn add_cgroup_child_blocker(scope: &Path) -> PathBuf {
+    let blocker = scope.join("blocker");
+    std::fs::create_dir(&blocker).expect("mkdir a real child cgroup inside the scope");
+    blocker
+}
+
+fn remove_cgroup_child_blocker(blocker: &Path) {
+    // A child cgroup directory can only be rmdir'd once its own
+    // `cgroup.procs` is empty -- true here since nothing was ever added
+    // to it -- and once its own subtree_control has nothing enabled.
+    std::fs::remove_dir(blocker).expect("rmdir the child cgroup blocker (clearing the induced fault)");
+}
+
+/// `VmDriver::stop`'s own teardown (`crates/overdrive-worker/src/vm_driver.rs:696-701`)
+/// unconditionally removes the run dir and rootfs clone as two SEPARATE,
+/// non-cgroup filesystem operations -- the cgroup-child blocker above
+/// only defeats the scope's `rmdir`, so by the time `stop()` returns the
+/// run dir and clone are already gone. `plan_reclamation`'s decision
+/// table deliberately does NOT reclaim a cgroup-scope-ONLY leftover (Row
+/// 6 -- "shared with exec allocations and is left alone"), so a fixture
+/// with only the scope stranded is unreclaimable BY DESIGN.
+///
+/// This recreates the run dir (empty) and clone (empty file) directly on
+/// the real filesystem -- the same "the VM-exclusive artifacts survived
+/// a crash between teardown steps" shape `brief.md` §105a.5 itself names
+/// ("a clone leaked by a crash between teardown steps"), and mirrors the
+/// established Tier-1 precedent (`vm_reclamation_boot.rs`'s own tests
+/// call `host.set_run_dir(alloc.clone())` directly to seed the SAME
+/// GIVEN state) -- elevated here to real paths so the real production
+/// `execute_discard_stranded_artifacts` genuinely discovers and removes
+/// them via `VmHostState::observe()` / `discard_artifacts`.
+fn restrand_vm_exclusive_artifacts(alloc_id: &str, staging_dir: &Path) {
+    std::fs::create_dir_all(run_dir_path(alloc_id)).expect("recreate the stranded run dir");
+    std::fs::write(clone_path(staging_dir, alloc_id), b"stranded-clone-placeholder")
+        .expect("recreate the stranded clone file");
+}
+
+/// Polls up to `max_wait` for `scope_path`/`run_dir_path`/`clone_path`
+/// to ALL be absent -- the steady-state sweep's reclaim postcondition.
+/// `VM_RECLAMATION_SWEEP_INTERVAL` is 30s; the ceiling gives headroom
+/// for scheduling jitter plus the sweep's own real filesystem I/O.
+async fn poll_until_reclaimed(alloc_id: &str, staging_dir: &Path, max_wait: Duration) {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let scope_gone = !scope_path(alloc_id).exists();
+        let run_dir_gone = !run_dir_path(alloc_id).exists();
+        let clone_gone = !clone_path(staging_dir, alloc_id).exists();
+        if scope_gone && run_dir_gone && clone_gone {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "reclamation did not complete within {max_wait:?} for {alloc_id}: \
+             scope_gone={scope_gone} run_dir_gone={run_dir_gone} clone_gone={clone_gone}"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+// ---------------------------------------------------------------------
+// S-VM-30 (folded) — a node with no `Vm` registry entry still reclaims
+// its VM survivors via `Observed(∅)`.
+// ---------------------------------------------------------------------
+
+/// A node that "uninstalled cloud-hypervisor" (no `[vm]` driver
+/// composed) still reclaims surviving VM artifacts at boot, because
+/// `VmHostState` composes unconditionally and `Observed(∅)` (no
+/// registry entry) authorises reclamation rather than blocking it
+/// (brief.md §105a.3's composition table).
+#[tokio::test]
+#[serial(cgroup)]
+async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s30-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    // Boot #1 -- with the [vm] driver -- deploy and let the VM survive
+    // an unclean shutdown (kill_on_drop(false) on the spawned VMM means
+    // it is NOT killed merely because this process's handle is dropped).
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s30.toml",
+        &vm_job_toml("vm-s30", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+    assert!(scope_path(&alloc_id).exists(), "sanity: the scope must exist while Running");
+    let _ = &staging_dir; // see the clone-assertion note below
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 -- SAME data_dir, NO vm_artifacts at all (no [vm] driver
+    // composed): `state.drivers.get(DriverType::Vm)` reads `None`.
+    let handle2 = spawn_server_no_vm_driver(&data_dir, &config_dir).await;
+
+    // The boot-epoch VmReclamation drive runs synchronously inside
+    // `run_server`, before this call returns -- reclamation has already
+    // happened by the time boot #2's handle is available.
+    assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the surviving run dir must be reclaimed at boot");
+    // NOTE: the clone is NOT asserted here. `RealVmHostState`'s staging
+    // directory is derived from `ServerConfig.vm_artifacts.rootfs_path`'s
+    // parent (`crates/overdrive-control-plane/src/lib.rs`); boot #2
+    // deliberately composes NO `vm_artifacts` (that IS S-VM-30's fixture),
+    // so its own `VmHostState` falls back to the fixed default staging
+    // root -- a DIFFERENT path from boot #1's per-test tempdir. A real
+    // "cloud-hypervisor uninstalled" node has no vm_artifacts configured
+    // either and would never have a clone staged under a one-off custom
+    // directory to find in the first place; asserting the clone's removal
+    // here would only be testing this fixture's own directory mismatch,
+    // not production behaviour. The run dir (fixed `/run/overdrive/vm`,
+    // independent of vm_artifacts) and the scope (independent of
+    // vm_artifacts entirely) ARE staging-dir-independent and are asserted
+    // above.
+    handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-23 (folded) — boot-epoch reclamation settles BEFORE
+// adopt_on_restart_recovery reads the tree.
+// ---------------------------------------------------------------------
+
+/// A restart whose boot-epoch `VmReclamation` drive reclaims N surviving
+/// VM cgroup scopes must NOT have `adopt_on_restart_recovery` refuse the
+/// boot with `NetnsRecoveryError::ObserveRead` -- the load-bearing
+/// PINNED ORDER (reclaim -> settle -> adopt reads the tree) is observed
+/// indirectly: if the ordering regressed, this boot would refuse.
+#[tokio::test]
+#[serial(cgroup)]
+async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s23-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    let handle = spawn_vm_server_mtls_composed(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await
+    .expect("boot #1 (mTLS-composed) must succeed");
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s23.toml",
+        &vm_job_toml("vm-s23", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 -- SAME data_dir, mTLS-composed again (so
+    // adopt_on_restart_recovery's netns-adopt pass genuinely runs and
+    // reads the same cgroup tree the reclamation drive just touched).
+    let handle2 = spawn_vm_server_mtls_composed(
+        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
+        &data_dir,
+        &config_dir,
+    )
+    .await
+    .expect(
+        "boot #2 must NOT refuse -- a NetnsRecoveryError::ObserveRead would surface here if the \
+         reclaim-before-adopt ordering (or kill_scope's settle postcondition) regressed",
+    );
+
+    assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the surviving run dir must be reclaimed at boot");
+    assert!(
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "the surviving clone must be reclaimed at boot"
+    );
+
+    handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-21 -- mid-run drift repairs without a `serve` restart.
+// ---------------------------------------------------------------------
+
+/// THE AC that distinguishes Bar 2 from Bar 1 (brief §105a.10 AC1): a
+/// SINGLE `serve` session (no restart anywhere in this test) whose
+/// boot-epoch drive finds nothing (the workload does not exist yet at
+/// boot), then strands a scope WHILE ALREADY RUNNING, and the periodic
+/// `VM_RECLAMATION_SWEEP_INTERVAL` tick -- with NO manual nudge --
+/// reclaims it. Proves the WAKE mechanism (§105a.8) actually fires.
+#[tokio::test]
+#[serial(cgroup)]
+async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s21-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    // ONE boot for the whole test -- no restart anywhere below.
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s21.toml",
+        &vm_job_toml("vm-s21", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+
+    // Induce the "scope removal is made to fail" fault (see module doc)
+    // BEFORE stopping -- VmDriver::stop's own teardown will hit it.
+    let blocker = add_cgroup_child_blocker(&scope_path(&alloc_id));
+
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop must succeed even though its own scope-removal step failed (best-effort)");
+    let stopped = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    assert_eq!(
+        stopped.snapshot.rows.first().expect("one row").state,
+        AllocStateWire::Terminated,
+        "the stop must still author a Terminated row despite the scope surviving"
+    );
+    assert!(
+        scope_path(&alloc_id).exists(),
+        "sanity: the scope must have SURVIVED the stop (the induced fault worked)"
+    );
+
+    // stop()'s own teardown already removed the run dir / clone (both
+    // unrelated to the cgroup blocker) -- restrand them so the leftover
+    // is VM-exclusive, not scope-only (see the helper's own doc comment
+    // for why a scope-only leftover is unreclaimable by design).
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+
+    // Clear the induced fault -- "the transient condition has cleared".
+    remove_cgroup_child_blocker(&blocker);
+
+    // WITHOUT restarting serve: wait for the natural periodic sweep,
+    // NO manual evaluation submission.
+    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-22 -- a live VMM whose allocation row is already terminal is
+// killed at a later tick.
+// ---------------------------------------------------------------------
+
+/// Same fixture shape as S-VM-21 (one boot, no restart, the real
+/// `stop()` writes a Terminated row while the induced cgroup fault
+/// survives it) -- this scenario's own emphasis is on the SURVIVING
+/// PID: `VmDriver::stop`'s `Vmm::terminate` call is unconditional
+/// (`crates/overdrive-worker/src/vm_driver.rs:694`), so the real
+/// `cloud-hypervisor` process IS killed as part of the same `stop()`
+/// call that authors the terminal row -- there is no production path
+/// that authors a terminal row while deliberately leaving the VMM PID
+/// alive without ALSO inventing a fault-injection seam on `Vmm::terminate`
+/// itself (out of this step's pinned scope). This test therefore proves
+/// the postcondition the AC's Then clause actually asserts on -- "the
+/// surviving VMM process, its cgroup scope, run directory and rootfs
+/// clone are all gone after the sweep" -- by capturing the real PID
+/// BEFORE the stop (proving a real VMM existed) and asserting it is
+/// gone AFTER the sweep, alongside the scope/run-dir/clone.
+#[tokio::test]
+#[serial(cgroup)]
+async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s22-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s22.toml",
+        &vm_job_toml("vm-s22", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+
+    let vmm_pid = find_cloud_hypervisor_pid().expect("a real cloud-hypervisor process is running");
+    assert!(pid_is_alive(vmm_pid), "sanity: the real VMM process must be alive before stop");
+
+    let blocker = add_cgroup_child_blocker(&scope_path(&alloc_id));
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop must succeed even though its own scope-removal step failed");
+    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+    remove_cgroup_child_blocker(&blocker);
+
+    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+    assert!(
+        !pid_is_alive(vmm_pid),
+        "the real cloud-hypervisor process must be gone after the sweep"
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-25 shape (a) -- the restart orphan: a terminal row survives a
+// restart, byte-unchanged after reclamation.
+// ---------------------------------------------------------------------
+
+/// A row that reached Terminated via a NATURAL exit (the real
+/// `exit_observer` path, not reclamation) survives a `serve` restart
+/// with its artifacts (run dir / clone) still on disk. The next boot's
+/// reclamation drive discards the stranded artifacts (`DiscardStranded
+/// Artifacts` — no row write, no evaluation, structurally per DD-5) and
+/// the row is BYTE-UNCHANGED at every field this wire surface exposes.
+#[tokio::test]
+#[serial(cgroup)]
+async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s25a-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let exit0 = build_exit0_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s25a.toml",
+        &vm_job_toml("vm-s25a", "/sbin/exit0", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+    let seeded_row: AllocStatusRowBody =
+        out.snapshot.rows.first().expect("one row for the exited alloc").clone();
+    assert_eq!(seeded_row.state, AllocStateWire::Terminated, "a clean guest exit reaches Terminated");
+    handle.shutdown().await.expect("shutdown boot #1 (no further action against this row)");
+    wait_for_data_dir_release().await;
+
+    // If a natural exit's artifacts survive to disk (SD-2's framing --
+    // VmReclamation is the general sweep, not only the failure-path
+    // cleanup), boot #2's reclamation drive discards them.
+    let handle2 = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+
+    assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
+    assert!(
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "the clone must be reclaimed at boot"
+    );
+
+    let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg })
+        .await
+        .expect("describe after reclamation");
+    let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
+    assert_eq!(
+        after_row, &seeded_row,
+        "DiscardStrandedArtifacts writes no row at all (DD-5, structural: the executor takes no \
+         ObservationStore parameter) -- the row observed on every field this wire surface \
+         exposes (state, reason, restart_count, last_terminated, started_at, error) must be \
+         byte-identical to what the natural exit wrote"
+    );
+
+    handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-25 shape (b) -- the failed-stop orphan: an operator stop
+// authored the terminal row but the scope removal failed; byte-unchanged
+// after reclamation.
+// ---------------------------------------------------------------------
+
+/// An operator `stop()` authors the terminal row (state: Terminated,
+/// `reason: Stopped { by: Reconciler }` -- the shim's own `StopAllocation`
+/// arm disposition) while the scope removal genuinely fails (the induced
+/// cgroup-child fault). The later sweep's `DiscardStrandedArtifacts`
+/// reclaims the artifacts and writes NO row -- the row is byte-unchanged
+/// at every field this wire surface exposes, same shape as S-VM-25
+/// shape (a).
+#[tokio::test]
+#[serial(cgroup)]
+async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s25b-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s25b.toml",
+        &vm_job_toml("vm-s25b", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+
+    let blocker = add_cgroup_child_blocker(&scope_path(&alloc_id));
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop succeeds (best-effort teardown) despite the induced scope-removal fault");
+    let stopped = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    let seeded_row: AllocStatusRowBody =
+        stopped.snapshot.rows.first().expect("one row after the stop").clone();
+    assert!(
+        matches!(
+            seeded_row.reason,
+            Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::Reconciler })
+        ),
+        "the shim's StopAllocation arm authors Stopped {{ by: Reconciler }}, got {:?}",
+        seeded_row.reason
+    );
+    assert!(scope_path(&alloc_id).exists(), "sanity: the scope survived the failed removal");
+
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+    remove_cgroup_child_blocker(&blocker);
+    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+
+    let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg })
+        .await
+        .expect("describe after reclamation");
+    let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
+    assert_eq!(
+        after_row, &seeded_row,
+        "the row must be byte-unchanged on every field this wire surface exposes -- \
+         DiscardStrandedArtifacts writes no row at all"
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-81 -- reclaiming an SVID-holding allocation submits the fourth
+// evaluation (svid_lifecycle), alongside the other three.
+// ---------------------------------------------------------------------
+
+/// **Residual gap, surfaced rather than papered over.** The FULL claim
+/// (`execute_reclaim_allocation`'s AUTHORISED branch firing through a
+/// real end-to-end `overdrive deploy` -> reclamation-tick path, dropping
+/// a REAL held SVID) requires `reconciler_runtime::hydrate_desired`'s
+/// `VmReclamation` arm to be populated (the two-surface intent join,
+/// `crates/overdrive-control-plane/src/reconciler_runtime.rs:2015-2017`)
+/// -- today it is hardcoded to an empty `VmReclamationState::default()`
+/// (still marked "a later step's obligation" in its own doc comment, and
+/// NOT in this step's `files_to_modify`). Without it, `desired.allocations`
+/// is empty for EVERY tick (boot-epoch AND steady-state), so
+/// `plan_reclamation` can only ever route through the "no entry" branch
+/// of the decision table -- `Action::ReclaimAllocation` (which requires
+/// `Some(facts)` with `facts.terminal == false`) is structurally
+/// unreachable from any real `overdrive serve` + `overdrive deploy` flow
+/// today. Extending `hydrate_desired` is a genuinely new, non-trivial
+/// piece (a node-scoped `TargetResource` parse plus a whole-node intent
+/// scan -- no existing reconciler's `hydrate_desired` arm is node-scoped,
+/// only workload-scoped) that this step's dispatch did not pin a
+/// signature for; per CLAUDE.md "Implement to the design" this is a gap
+/// to surface, not improvise.
+///
+/// This test proves everything real infra makes reachable today: a real
+/// mTLS-composed `overdrive serve`, a real deployed VM, and a real
+/// issued SVID observable via `overdrive workload describe`'s
+/// `issued_certificates` (built-in-ca #215's consumer-side surface). It
+/// stops short of asserting the reclaim-triggered `DropSvid` because no
+/// production path reaches it yet. The SAME four-evaluations claim
+/// (including `svid_lifecycle`) IS fully proven, executor-direct, at
+/// Tier-1: `action_shim::reclamation::tests::
+/// execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_four_evaluations`
+/// (`crates/overdrive-control-plane/src/action_shim/reclamation.rs`).
+#[tokio::test]
+#[serial(cgroup)]
+async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s81-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    let handle = spawn_vm_server_mtls_composed(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await
+    .expect("boot #1 (mTLS-composed) must succeed");
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s81.toml",
+        &vm_job_toml("vm-s81", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    let out = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+
+    assert!(
+        !out.snapshot.issued_certificates.is_empty(),
+        "a Running mTLS-composed VM allocation must hold a real issued SVID -- \
+         reclaiming it is the precondition S-VM-81 depends on"
+    );
+
+    // Hygiene: drive the never-self-terminating spin workload to
+    // Terminated via the production stop verb before shutdown (mirrors
+    // vm_walking_skeleton.rs's own precedent for this exact guest shape).
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the long-lived spin workload before shutdown");
+    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+
+    handle.shutdown().await.expect("clean shutdown");
+}

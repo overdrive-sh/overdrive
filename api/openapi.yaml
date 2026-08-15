@@ -2163,6 +2163,7 @@ components:
       - reconciler
       - process
       - system_gc
+      - platform_reclaimed
     SubmitSpecInput:
       oneOf:
       - allOf:

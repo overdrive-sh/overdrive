@@ -224,6 +224,7 @@ async fn finalize_and_read_successor(
         // No mTLS worker — the genuine-terminal teardown seam is a no-op.
         None,
         &net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("FinalizeFailed dispatch must succeed (records a successor row, never an Err)");

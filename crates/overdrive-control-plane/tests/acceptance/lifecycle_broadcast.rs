@@ -289,6 +289,7 @@ proptest! {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
                 .await
                 .expect("dispatch must succeed");
@@ -377,6 +378,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed even on driver failure (failure is recorded)");
@@ -542,6 +544,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

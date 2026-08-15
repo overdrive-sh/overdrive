@@ -245,6 +245,7 @@ async fn dispatch_one(
         None,
         Some(worker),
         net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
 }

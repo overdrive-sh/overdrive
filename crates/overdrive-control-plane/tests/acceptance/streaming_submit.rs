@@ -979,6 +979,7 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         // transparent-mtls-enrollment step 04-01: the AppState-owned per-host
         // slot allocator (this fixture exercises no netns provisioning).
         &state.net_slot_allocator,
+        state.vm_host_state.as_ref(),
     )
     .await
     .expect("dispatch succeeds");

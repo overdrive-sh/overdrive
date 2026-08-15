@@ -245,6 +245,7 @@ async fn dispatch_with_driver(
         None,
         None,
         &net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

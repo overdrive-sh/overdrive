@@ -262,6 +262,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         // clean no-op, keeping this default-lane (no netns, no root).
         None,
         &net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

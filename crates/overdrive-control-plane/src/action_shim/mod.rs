@@ -34,6 +34,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
 };
+use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServiceVipAllocator};
 use tokio::sync::broadcast;
@@ -731,6 +732,7 @@ pub async fn dispatch(
     workflow_engine: Option<&WorkflowEngine>,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
     net_slot_allocator: &NetSlotAllocator,
+    host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
@@ -752,6 +754,7 @@ pub async fn dispatch(
             workflow_engine,
             mtls_worker,
             net_slot_allocator,
+            host,
         )
         .await;
         if let Err(err) = result {
@@ -912,6 +915,7 @@ pub async fn dispatch_with_workflow_intent(
         Some(state.workflow_engine.as_ref()),
         state.mtls_worker.as_ref(),
         &state.net_slot_allocator,
+        state.vm_host_state.as_ref(),
     )
     .await;
 
@@ -1048,6 +1052,7 @@ async fn dispatch_single(
     workflow_engine: Option<&WorkflowEngine>,
     mtls_worker: Option<&Arc<MtlsInterceptWorker>>,
     net_slot_allocator: &NetSlotAllocator,
+    host: &dyn VmHostState,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop) and the Phase 3 HttpCall placeholder are
@@ -1926,16 +1931,35 @@ async fn dispatch_single(
             // `resolve_drivers_for_alloc`).
             for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {
                 driver.on_alloc_terminal(&row.alloc_id);
+                // brief.md §105a.3 transition 6 / DD-1(b.i) (ADR-0083 §D7,
+                // GH #42): every shim arm that writes a terminal row calls
+                // `release_supervision` AFTER the write resolves `Ok` — the
+                // claim is on AUTHORING AN ENDING, not a grip on a running
+                // process, and this write IS that authored ending. Without
+                // this call a driver whose claim carries a phase (VmDriver:
+                // `Live` -> `EndingInFlight` on `stop()`) never releases —
+                // `live_allocations()` reports `EndingInFlight` entries as
+                // still held (by construction: it returns every key in the
+                // map), so `SupervisionSet::reclamation_authorised` would
+                // read `false` for this alloc forever, and `VmReclamation`
+                // could never reclaim an artifact this same stop() left
+                // stranded. Idempotent / a no-op for drivers that do not
+                // report supervision (`ExecDriver` keeps the trait default),
+                // so this fires unconditionally alongside `on_alloc_terminal`
+                // for every driver kind.
+                driver.release_supervision(&row.alloc_id);
             }
-            // ADR-0083 §D2a(b) (GH #42) — transition 6: this IS the
-            // operator-stop terminal-row authoring the shim's stop arm
-            // owns (brief §105a.3 transition 3b / ADR-0082 §D4
-            // reconciliation) — the exit watcher no longer emits an
-            // ExitEvent for an operator stop, so this write is the sole
-            // author of the Terminated row above. Remove the routing
-            // entry now that the terminal write has landed — lifetime
-            // bounded by "started this boot", per the ADR's own
-            // accounting.
+            // ADR-0083 §D2a(b) (GH #42) — this IS the operator-stop
+            // terminal-row authoring the shim's stop arm owns (brief
+            // §105a.3 transition 3b / ADR-0082 §D4 reconciliation) — the
+            // exit watcher no longer emits an ExitEvent for an operator
+            // stop, so this write is the sole author of the Terminated
+            // row above. Remove the alloc_drivers ROUTING INDEX entry now
+            // that the terminal write has landed — lifetime bounded by
+            // "started this boot", per the ADR's own accounting. Distinct
+            // from `release_supervision` immediately above: this index is
+            // the shim's own alloc-to-driver-kind lookup table, not the
+            // driver's supervision claim.
             alloc_drivers.lock().remove(&row.alloc_id);
             // transparent-mtls-host-socket (step 06-03): tear down the
             // alloc's mTLS intercept on Stop — symmetric with the
@@ -2064,29 +2088,25 @@ async fn dispatch_single(
             issue_svid::dispatch_drop(&action, identity);
             Ok(())
         }
-        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
-        // brief.md §105a.5/§105a.9, GH #42) — SKELETON, deliberately
-        // unimplemented. `execute_reclaim_allocation` /
-        // `execute_discard_stranded_artifacts` are a LATER step's
-        // executors. Nothing in THIS step's production wiring can ever
-        // construct these actions: `VmReclamation` is not registered in
-        // `lib.rs`, and its `hydrate_actual`/`hydrate_desired` skeleton
-        // arms both return the safe empty default (this step's own
-        // roadmap note), so `plan_reclamation` can only ever return an
-        // empty `Vec<Action>` today. This arm is therefore structurally
-        // unreachable on every live path — a RED scaffold for the step
-        // that adds the two real executors.
-        #[expect(
-            clippy::todo,
-            reason = "RED scaffold; the real executor dispatch lands with \
-                      execute_reclaim_allocation / execute_discard_stranded_artifacts \
-                      in a later step (brief.md §105a.5) — see step 02-01's DES report"
-        )]
-        Action::ReclaimAllocation { .. } | Action::DiscardStrandedArtifacts { .. } => {
-            todo!(
-                "RED scaffold: VmReclamation executors (execute_reclaim_allocation / \
-                 execute_discard_stranded_artifacts, brief.md §105a.5) land in a later step"
-            )
+        // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
+        // brief.md §105a.5/§105a.6, GH #42). `ReclaimAllocation` authors a
+        // Platform Reclamation ending (write-time terminality guard ->
+        // kill -> discard -> write -> four evaluations); a refused race
+        // returns `Ok(())` by design, never a `ShimError`.
+        Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
+            &alloc_id, host, obs, clock, writer_node, broker,
+        )
+        .await
+        .map_err(ShimError::from),
+        // `DiscardStrandedArtifacts` authors NO ending: kill -> discard,
+        // nothing else (no row write, no evaluation — DD-5's "declared
+        // delta empty over the observation universe" is structural, per
+        // the executor's own signature carrying no `ObservationStore`
+        // and no broker parameter).
+        Action::DiscardStrandedArtifacts { alloc_id } => {
+            reclamation::execute_discard_stranded_artifacts(&alloc_id, host)
+                .await
+                .map_err(ShimError::from)
         }
     }
 }
@@ -2187,6 +2207,14 @@ pub enum ShimError {
     /// collision the slot model exists to prevent). Pass-through `#[from]`.
     #[error("network slot exhausted")]
     NetSlotExhausted(#[from] NetSlotExhausted),
+    /// A `VmReclamation` executor failed (`Action::ReclaimAllocation` /
+    /// `Action::DiscardStrandedArtifacts`, ADR-0083 §D7, brief.md
+    /// §105a.5). Pass-through `#[from]` preserves the typed
+    /// `reclamation::ReclamationError` (itself a `VmHostState` or
+    /// `ObservationStore` substrate failure) — never emitted for a
+    /// refused race, which returns `Ok(())` by design.
+    #[error("VmReclamation executor failed")]
+    Reclamation(#[from] reclamation::ReclamationError),
 }
 
 #[cfg(test)]

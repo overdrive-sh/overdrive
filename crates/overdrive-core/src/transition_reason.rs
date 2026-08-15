@@ -284,6 +284,22 @@ pub enum StoppedBy {
     /// discriminants stable. This variant takes discriminant `3`.
     /// Existing archived rows decode unchanged.
     SystemGc,
+    /// The platform (a `VmReclamation` reclamation tick) authored this
+    /// allocation's ending — DD-1's third Ending Class, Platform
+    /// Reclamation. Distinct from every other variant: the workload's
+    /// intent still stands (the platform owes a replacement) rather
+    /// than the workload itself having failed or an operator/reconciler
+    /// having stopped it deliberately. The FIRST real producer is
+    /// `action_shim::reclamation::execute_reclaim_allocation`
+    /// (`brief.md` §105a.5, ADR-0083 §D7, GH #42); this disposition is
+    /// otherwise a *constant* on that executor's terminal-row write —
+    /// never caller-supplied (DD-5).
+    ///
+    /// Appended after `SystemGc` (discriminant `4`) to keep every
+    /// pre-existing rkyv discriminant stable, per this enum's own
+    /// additive-position discipline stated above. Existing archived
+    /// rows decode unchanged.
+    PlatformReclaimed,
 }
 
 #[cfg(test)]
@@ -782,6 +798,9 @@ impl TransitionReason {
             Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
             Self::Stopped { by: StoppedBy::Process } => "stopped (by process)".to_owned(),
             Self::Stopped { by: StoppedBy::SystemGc } => "stopped (by system gc)".to_owned(),
+            Self::Stopped { by: StoppedBy::PlatformReclaimed } => {
+                "stopped (platform reclaimed)".to_owned()
+            }
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
@@ -874,17 +893,15 @@ impl TransitionReason {
 /// by design — ADR-0083 §D6 names exactly ONE new PUBLIC Ending-Class
 /// predicate, this one).
 ///
-/// Structurally `false` for every row representable today:
-/// `StoppedBy::PlatformReclaimed` (ADR-0081 D5) has not landed. Its
-/// addition is bundled, per ADR-0081's "Narrows ADR-0078 §D1" section, with
-/// a same-commit ADR-0078 amendment and an `observation_store.rs` docstring
-/// correction — landing alongside `execute_reclaim_allocation` (the first
-/// real producer of the disposition; ADR-0083 §D6). `by_reclaims_platform`
-/// below exhaustively matches every `StoppedBy` variant that exists today
-/// (all `false`), so adding the new variant is a compile error here until
-/// the `PlatformReclaimed` arm is filled in — the smallest possible future
-/// diff, never a silent no-op that a bare `false` would have required
-/// rewriting from scratch.
+/// `StoppedBy::PlatformReclaimed` (ADR-0081 D5) is the one disposition
+/// `by_reclaims_platform` reads `true` for; every other `StoppedBy`
+/// variant reads `false`. The variant's first real producer is
+/// `action_shim::reclamation::execute_reclaim_allocation`
+/// (ADR-0083 §D6/§D7, `brief.md` §105a.5, GH #42), landed in the same
+/// step as this predicate's completion — before that, the match was
+/// exhaustive-but-`false` over the four pre-existing `StoppedBy`
+/// variants, a deliberate compile error on the new variant's addition
+/// rather than a silent no-op (the smallest possible future diff).
 #[must_use]
 pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
     const fn by_reclaims_platform(by: StoppedBy) -> bool {
@@ -893,6 +910,7 @@ pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
             | StoppedBy::Reconciler
             | StoppedBy::Process
             | StoppedBy::SystemGc => false,
+            StoppedBy::PlatformReclaimed => true,
         }
     }
 

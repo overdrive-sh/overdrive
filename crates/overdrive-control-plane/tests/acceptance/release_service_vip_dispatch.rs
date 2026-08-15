@@ -170,6 +170,7 @@ async fn release_action_dispatch_invokes_allocator_release() {
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
     .expect("dispatch must succeed");

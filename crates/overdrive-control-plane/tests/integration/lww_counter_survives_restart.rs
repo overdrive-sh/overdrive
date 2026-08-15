@@ -157,6 +157,7 @@ async fn dispatch_one_at_tick(
         None,
         None,
         &net_slot_allocator,
+        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await
 }

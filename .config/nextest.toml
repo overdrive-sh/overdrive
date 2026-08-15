@@ -456,6 +456,28 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
 
+# microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, GH #42) —
+# `overdrive-cli`'s vm_reclamation_tier3.rs → `host-kernel-shared`, by
+# MODULE. Same TWO reasons as `vm_walking_skeleton.rs` immediately
+# above, verified empirically the same way (a full unserialized
+# `--no-fail-fast` run of this file's 7 tests produced the identical
+# symptom signature: real `EbpfDataplane`-composed boots hitting `XDP
+# slot ... already occupied (EBUSY)`, and non-EbpfDataplane boots
+# timing out `did not reach Running within 60s` from concurrent
+# real-cgroupfs contention). Every scenario in this file drives a full
+# production `run_server` boot against the real host cgroupfs
+# (`#[serial(cgroup)]` on every test is the SAME in-process-only
+# annotation that enforces nothing under nextest's per-test-process
+# model — this group is what makes it load-bearing), and two of the
+# seven (`boot_epoch_reclamation_settles_before_adopt_on_restart_recovery`,
+# `reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`)
+# additionally compose a real `EbpfDataplane` (mTLS-composed boots) onto
+# the same FIXED `ovd-veth-cli` / `ovd-veth-bk` ifaces `vm_walking_skeleton.rs`
+# already serializes. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_reclamation_tier3)'
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,
