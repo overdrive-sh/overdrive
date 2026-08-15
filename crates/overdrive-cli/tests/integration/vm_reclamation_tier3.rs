@@ -34,13 +34,21 @@
 //! - S-VM-25 shape (a): [`restart_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
 //! - S-VM-25 shape (b): [`failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
 //! - S-VM-81: [`reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`]
-//!   — step 02-03 completion: now drives a GENUINE `Action::
+//!   — step 02-03 completion: drives a GENUINE `Action::
 //!   ReclaimAllocation` (not `stop()`) via the boot-epoch drive and
-//!   asserts `Stopped { by: PlatformReclaimed }` on real infra. See that
-//!   test's own doc comment for the residual gap this suite surfaces
-//!   rather than papers over (no production surface exposes `IdentityMgr`
-//!   state to a real-serve test; the four-evaluations claim IS fully
-//!   proven, executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
+//!   observes `Stopped { by: PlatformReclaimed }` on real infra as an
+//!   intermediate checkpoint, well inside the 1s restart-backoff window.
+//!   Step 02-04 re-scope: S-VM-26's guard makes restart-after-reclaim the
+//!   correct behavior for this never-stopped Job-kind allocation, so the
+//!   checkpoint's terminal row is superseded by the SAME live `serve`
+//!   session's `WorkloadLifecycle` re-drive -- the test's FINAL assertion
+//!   is the DURABLE occurrence proof (`restart_count` +
+//!   `last_terminated.reason`, ADR-0078) that survives the restart, not
+//!   the transient terminal row it supersedes. See that test's own doc
+//!   comment for the residual gap this suite surfaces rather than papers
+//!   over (no production surface exposes `IdentityMgr` state to a
+//!   real-serve test; the four-evaluations claim IS fully proven,
+//!   executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
 //! - S-VM-28 (step 02-04): [`reclaim_then_restart_populates_restart_count_and_last_terminated_together`]
 //!   — the SAME boot-epoch-reclaim fixture shape as S-VM-81, but the
 //!   workload is never `stop()`-ed: its intent still stands, so the SAME
@@ -922,7 +930,8 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 // ---------------------------------------------------------------------
 // S-VM-81 -- reclaiming an SVID-holding allocation via a GENUINE
 // `Action::ReclaimAllocation` (not `stop()`) submits the fourth
-// evaluation (svid_lifecycle), alongside the other three.
+// evaluation (svid_lifecycle), alongside the other three; the durable
+// reclaim occurrence survives the S-VM-26-mandated restart.
 // ---------------------------------------------------------------------
 
 /// Step 02-03 completion. Prior to this step `Action::ReclaimAllocation`
@@ -944,19 +953,56 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// boot-epoch drive -- the SAME S-VM-30 / S-VM-23 fixture shape (a VM
 /// that survives an unclean `handle.shutdown()`, so its `AllocStatusRow`
 /// stays non-terminal, then a fresh boot whose brand-new `VmDriver` has
-/// tracked nothing yet reads `Observed(∅)`) -- and asserts the ONE thing
-/// that is unambiguous proof `execute_reclaim_allocation`'s AUTHORISED
-/// branch (not `stop()`, not `DiscardStrandedArtifacts`) actually ran:
-/// the row transitions to `Terminated` / `Stopped { by:
-/// PlatformReclaimed }`, a disposition written by NO other code path in
-/// this crate (`stop()` writes `Stopped { by: Reconciler }`;
-/// `DiscardStrandedArtifacts` writes no row at all -- it takes no
-/// `ObservationStore` parameter by construction, DD-5). By construction
-/// (already Tier-1-proven, executor-direct, in
-/// `action_shim::reclamation::tests::
+/// tracked nothing yet reads `Observed(∅)`). By construction (already
+/// Tier-1-proven, executor-direct, in `action_shim::reclamation::tests::
 /// execute_reclaim_allocation_authorised_kills_discards_writes_and_submits_four_evaluations`)
-/// the SAME unconditional code path that writes this row also submits
-/// the four evaluations, including `svid_lifecycle`.
+/// the SAME unconditional code path that writes the reclaimed row also
+/// submits the four evaluations, including `svid_lifecycle`.
+///
+/// **Step 02-04 re-scope.** The workload's intent is never withdrawn
+/// here (no `stop()` before boot #1's unclean shutdown) -- so per
+/// S-VM-26's guard (`is_natural_exit && !is_platform_reclaimed(row)`,
+/// `transition_reason.rs`), the reclaim is NOT this test's final word:
+/// the SAME live `serve` session's `WorkloadLifecycle` reconcile loop
+/// re-drives the allocation once the 1s `RESTART_BACKOFF_DURATION`
+/// elapses, which is the correct, intended behavior for a reclaimed
+/// Job-kind allocation, not the bug S-VM-26 fixed (pre-fix,
+/// `is_natural_exit` finalised the row via a fabricated `Failed {
+/// exit_code: Some(0) }` claim instead of ever restarting it).
+///
+/// This test does NOT assert an intermediate "reclaimed, not yet
+/// restarted" checkpoint. `WorkloadLifecycle`'s convergence loop runs
+/// CONCURRENTLY with (not strictly after) `run_server`'s own mTLS/SVID
+/// boot sequence, so there is no reliable window in which the reclaim's
+/// terminal row is guaranteed still observable -- confirmed empirically:
+/// a real-metal run of this exact fixture asserted the reclaim's
+/// discarded scope gone synchronously right after boot #2 returned, well
+/// inside the nominal 1s backoff margin, and still observed the scope
+/// PRESENT -- the restart had already re-created it. The mTLS/SVID boot
+/// sequence's own wall-clock cost is apparently enough, on real
+/// hardware, for the concurrently-running convergence loop to observe
+/// the freshly-written terminal row, wait out the backoff, and complete
+/// a full restart before control even returns to the test. Per ADR-0078
+/// ("a convergent record cannot answer 'did it happen'" --
+/// `development.md` § "A convergent record cannot answer 'did it
+/// happen'"), the test therefore asserts ONLY the DURABLE occurrence
+/// proof that survives the restart: `restart_count` (the budget) and
+/// `last_terminated` (the disposition), once `poll_until_restarted`
+/// confirms the cycle has genuinely settled.
+/// `last_terminated.reason == Stopped { by: PlatformReclaimed }` is
+/// exactly as strong a claim that `execute_reclaim_allocation`'s
+/// AUTHORISED branch (not `stop()`, not `DiscardStrandedArtifacts`) ran
+/// as a synchronous checkpoint would have been -- ADR-0078's crash-facts
+/// snapshot preserves the terminal disposition the row passed through,
+/// observed without racing the restart. `Action::RestartAllocation`
+/// reuses the SAME `alloc_id`, so there is no "old alloc_id" distinct
+/// from the current one whose artifacts this test could check post-
+/// restart either. This is what keeps S-VM-81 a genuine end-to-end
+/// witness that a reclaimed **SVID-holder** specifically is handled
+/// correctly through a real restart -- distinct from S-VM-28, which
+/// drives the SAME boot-epoch-reclaim-then-restart cycle without the
+/// SVID precondition, asserting the identical restart_count /
+/// last_terminated pair.
 ///
 /// **Residual gap, surfaced rather than papered over.** Observing that
 /// the `svid_lifecycle` evaluation is subsequently DEQUEUED by a live
@@ -992,7 +1038,6 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
@@ -1029,7 +1074,9 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     // shutdown (mirrors S-VM-30 / S-VM-23): the real cloud-hypervisor
     // process survives (`kill_on_drop(false)`) and the alloc's row stays
     // non-terminal (Running), never transitioning through the ordinary
-    // `stop()` path.
+    // `stop()` path. The intent is never withdrawn either -- this is
+    // what makes the boot-epoch reclaim's restart (S-VM-26), not a
+    // stay-terminal finish, the correct next act.
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
     wait_for_data_dir_release().await;
 
@@ -1053,29 +1100,59 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     .await
     .expect("boot #2 (mTLS-composed) must succeed");
 
-    let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("describe after reclamation");
-    let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
+    // The DURABLE occurrence proof (ADR-0078: "a convergent record
+    // cannot answer 'did it happen'"). The workload's intent was never
+    // withdrawn, so the SAME live `serve` session's `WorkloadLifecycle`
+    // reconcile loop re-drives the boot-epoch reclaim's terminal row
+    // once the backoff window elapses -- per S-VM-26 this is now the
+    // correct, intended behavior. No intermediate "reclaimed, not yet
+    // restarted" checkpoint is asserted here -- see the test's own doc
+    // comment: `WorkloadLifecycle`'s convergence loop runs concurrently
+    // with the mTLS/SVID boot sequence, leaving no reliable pre-restart
+    // observation window (confirmed on real metal). What survives the
+    // restart durably is `restart_count` (the budget) and
+    // `last_terminated` (the disposition -- unambiguous proof
+    // `execute_reclaim_allocation`'s AUTHORISED branch ran, since
+    // ADR-0078's crash-facts snapshot preserves the SAME `Stopped {
+    // by: PlatformReclaimed }` disposition a synchronous checkpoint
+    // would have observed), asserted together per S-VM-28's own
+    // reasoning: only together do they rule out both an implementation
+    // that erases the occurrence and one that silently consumes the
+    // budget.
+    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
     assert_eq!(
-        after_row.state,
-        AllocStateWire::Terminated,
-        "the boot-epoch drive must reclaim the surviving non-terminal allocation, got {after_row:?}"
+        restarted_row.restart_count, 1,
+        "restart_count must have incremented by EXACTLY one across the reclaim-then-restart \
+         cycle; got {restarted_row:?}"
     );
+    let last_terminated = restarted_row
+        .last_terminated
+        .as_ref()
+        .expect("last_terminated must be populated by the SAME restart that bumped restart_count");
     assert!(
         matches!(
-            after_row.reason,
+            last_terminated.reason,
             Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
         ),
-        "Stopped {{ by: PlatformReclaimed }} is written ONLY by execute_reclaim_allocation's \
-         AUTHORISED branch -- observing it here on real infra is unambiguous proof that \
-         ReclaimAllocation (not stop(), not DiscardStrandedArtifacts) actually ran; got {:?}",
-        after_row.reason
+        "last_terminated must describe the reclamation disposition (StoppedBy::PlatformReclaimed) \
+         this SVID-holding allocation actually underwent -- written ONLY by \
+         execute_reclaim_allocation's AUTHORISED branch (stop() writes Stopped {{ by: Reconciler }}; \
+         DiscardStrandedArtifacts writes no row at all, DD-5) -- not silently erased or describing \
+         something else; got {:?}",
+        last_terminated.reason
     );
 
-    assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed");
-    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed");
-    assert!(!clone_path(&staging_dir, &alloc_id).exists(), "the clone must be reclaimed");
+    // Reap the restarted (still-live) spin VM via the PRODUCTION stop
+    // path before shutdown: `Command::kill_on_drop` is deliberately
+    // `false` on the production spawn, so nothing kills a still-Running
+    // VM merely because this test process exits (same leak class
+    // `vm_walking_skeleton.rs`'s long-lived-spin scenarios guard
+    // against; mirrors S-VM-28's own closing sequence).
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the restarted spin workload before shutdown to avoid leaking the VMM process");
+    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");
 }
