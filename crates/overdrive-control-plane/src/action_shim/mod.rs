@@ -102,6 +102,11 @@ pub mod deregister_local_backend;
 /// on [`issue_svid::dispatch_issue`] for the audit-before-hold contract.
 pub mod issue_svid;
 
+/// `VmReclamation` executor(s) (ADR-0083 §D7, brief.md §105a.5, GH #42).
+/// See the module docstring on [`reclamation::execute_discard_stranded_artifacts`]
+/// for the scope of what this step implements.
+pub mod reclamation;
+
 /// Reconcile-output invariant validator — rejects post-`reconcile`
 /// `Vec<Action>` returns that contain two or more write-actions
 /// targeting the same service-LB VIP (see the module docstring on

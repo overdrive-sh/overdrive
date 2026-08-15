@@ -2977,28 +2977,52 @@ async fn hydrate_actual(
             let workload_id = workload_id_from_target(target)?;
             hydrate_service_lifecycle_actual(state, &workload_id).await
         }
-        // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7,
-        // brief.md §105a.2, GH #42) — SKELETON, deliberately incomplete.
-        // The pinned production body calls `VmHostState::observe()`
-        // FIRST, then reads the supervision set LAST (brief.md §105a.2's
-        // asymmetry argument — reading supervision last is what makes a
-        // freshly-started allocation read as held rather than
-        // authorised). Neither a `VmHostState` instance nor a driver
-        // registry is threaded into `AppState` by this step (no
-        // `AppState`/composition-root file is in this step's scope) --
-        // that wiring, and the pinned read order, are this step's
-        // roadmap note's explicit deferral ("step 02-02 fills
-        // hydrate_actual's read-order body"). Returns the safe DEFAULT:
-        // `host: VmHostObservation::default()` (nothing observed),
-        // `supervision: SupervisionSet::Unavailable` (authorises
-        // nothing) -- so a `VmReclamation` reconciler registered before
-        // 02-02 lands can only ever produce an EMPTY `Vec<Action>`
-        // (`plan_reclamation` walks `actual.host`'s three surfaces,
-        // all empty), never a wrong one.
-        AnyReconciler::VmReclamation(_) => {
-            Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState::default()))
-        }
+        // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42) — the pinned read order, filled in.
+        // Extracted to keep this match arm within the
+        // `clippy::too_many_lines` budget (same precedent as
+        // `hydrate_workload_lifecycle_actual` / `hydrate_service_lifecycle_actual`).
+        AnyReconciler::VmReclamation(_) => hydrate_vm_reclamation_actual(state).await,
     }
+}
+
+/// Actual-side projection for the `VmReclamation` reconciler
+/// (ADR-0083 §D7, brief.md §105a.2, GH #42).
+///
+/// `VmHostState::observe()` runs FIRST; the supervision set is read
+/// LAST (brief.md §105a.2's asymmetry argument — reading supervision
+/// last is what makes a freshly-started allocation read as held rather
+/// than authorised: an allocation that STARTS between the two reads is
+/// present in `S(t3)` and therefore fails `reclamation_authorised`,
+/// never reaching a live VMM; S-VM-78). `allocations` (desired-side) is
+/// left EMPTY here — `hydrate_desired`'s own VmReclamation arm owns it
+/// (still a skeleton; a later step's obligation, mirroring
+/// `BackendDiscoveryBridge`'s exact two-arm split).
+async fn hydrate_vm_reclamation_actual(state: &AppState) -> Result<AnyState, ConvergenceError> {
+    let host = state
+        .vm_host_state
+        .observe()
+        .await
+        .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+    // Composition table (brief.md §105a.3 "Where the set comes from"):
+    // no `Vm` registry entry ⇒ `Observed(∅)` — a KNOWN fact about the
+    // world (the platform provably holds no VM supervision handle), not
+    // a missing observation. This is what lets a node that uninstalled
+    // cloud-hypervisor still reclaim its survivors (S-VM-30).
+    let supervision = state.drivers.get(overdrive_core::traits::driver::DriverType::Vm).map_or_else(
+        || overdrive_core::reconcilers::SupervisionSet::Observed(BTreeSet::new()),
+        |driver| {
+            driver.live_allocations().map_or(
+                overdrive_core::reconcilers::SupervisionSet::Unavailable,
+                |ids| overdrive_core::reconcilers::SupervisionSet::Observed(ids.into_iter().collect()),
+            )
+        },
+    );
+    Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
+        allocations: BTreeMap::new(),
+        host,
+        supervision,
+    }))
 }
 
 /// Actual-side projection for the `WorkloadLifecycle` reconciler.

@@ -713,6 +713,17 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     VmmBoot(#[from] VmmBootError),
 
+    /// `VmReclamation` boot-epoch drive refusal (ADR-0083 §D7, brief.md
+    /// §105a.6, GH #42, step 02-02). Fires when [`crate::vm_reclamation_boot::converge`]
+    /// fails — a genuine `VmHostState` substrate error (not a
+    /// benign-absence) or a reclamation-executor failure. Same boot-path
+    /// shape as `NetnsRecovery` / `NftRuleSweep`: the drive runs AFTER
+    /// `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+    /// `health.startup.refused` (reason `vm_reclamation.boot`) itself;
+    /// this arm is exhaustiveness-only.
+    #[error(transparent)]
+    VmReclamationBoot(#[from] crate::vm_reclamation_boot::ConvergeError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -972,6 +983,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // the listener binds (step 04-04 §5), emitting `health.startup.
             // refused` (reason `nft.sweep`) itself; this arm is
             // exhaustiveness-only.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VmReclamationBoot(e) => (
+            // Same boot-path shape as `NetnsRecovery` / `NftRuleSweep`
+            // above: the boot-epoch VmReclamation drive runs AFTER
+            // `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+            // `health.startup.refused` (reason `vm_reclamation.boot`)
+            // itself; this arm is exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

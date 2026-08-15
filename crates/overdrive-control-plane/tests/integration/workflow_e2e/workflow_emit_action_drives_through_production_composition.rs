@@ -281,6 +281,10 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         // No transparent-mTLS layer in the workflow e2e (no real
         // dataplane to intercept on) — step 06-03 `Option` field.
         None,
+        // microvm-driver-cloud-hypervisor step 02-02: composed
+        // unconditionally (`AppState::vm_host_state`'s own doc comment);
+        // this suite never seeds VM host state.
+        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         // dial-by-name-responder step 02-01: a fresh empty per-host
         // frontend-address allocator (the workflow e2e composes no DNS
         // responder; this fixture never exercises dial-by-name).

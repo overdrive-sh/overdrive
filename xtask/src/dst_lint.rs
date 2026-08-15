@@ -264,6 +264,26 @@ pub enum BannedKind {
     /// D2.3 invariant (`guest_bytes == cgroup_max_bytes` unrepresentable)
     /// that `MemoryPlan::derive` exists to enforce.
     MemoryPlanStructLiteral,
+    /// `worker/exit_observer.rs`'s exit-observer loop body contains more
+    /// than one `release_supervision` call, or contains one placed inside
+    /// `match outcome` — DWD-09 clause 5 (brief.md §105a.3 / §113): "the
+    /// exit observer's loop body contains EXACTLY ONE `release_supervision`
+    /// call, sitting OUTSIDE `match outcome`" (S-VM-77).
+    ///
+    /// The structural guard against release-only-on-`Wrote` (NEW-1): a
+    /// call placed inside a `match outcome` arm can trivially be scoped to
+    /// only ONE `RetryOutcome` variant, silently leaving a `Failed` or
+    /// `NoPriorRow` allocation claimed forever — SD-1's unstoppable-orphan
+    /// failure reintroduced by the very fix meant to close it. Two calls
+    /// (even both outside the match) risk a double-release race with a
+    /// concurrent shim terminal-row arm in ways a single call at the
+    /// bottom of the loop body does not.
+    ///
+    /// Path-scoped to `worker/exit_observer.rs` only — this clause does
+    /// not walk the whole workspace for `release_supervision` call sites
+    /// (the shim's terminal-row arms release too, per brief.md §105a.3's
+    /// site table, and are out of this clause's scope by design).
+    ReleaseSupervisionMisplacement,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -2839,6 +2859,123 @@ fn scan_memory_plan_literal_workspace(
     Ok(violations)
 }
 
+/// DWD-09 clause 5 — the exact file this clause is scoped to. Purely a
+/// path-equality check (not a directory prefix like the other clauses'
+/// `path_in_scope` predicates) because the clause is about ONE specific
+/// function's loop body, not a crate-wide banned-symbol rule.
+const RELEASE_SUPERVISION_SCOPED_FILE: &str = "worker/exit_observer.rs";
+
+/// Collects `release_supervision` method-call sites in a source file,
+/// tracking whether each is lexically nested inside a `match` expression
+/// (`match_depth > 0`). Purely syntactic — no `overdrive-*` import, per
+/// the xtask boundary in `.claude/rules/development.md` § "xtask is
+/// build / test / dev orchestration, NOT a runtime entry point".
+struct ReleaseSupervisionCollector {
+    /// Every `release_supervision(...)` call site found, in visitation
+    /// order, paired with whether it was nested inside a `match` at the
+    /// time it was visited.
+    calls: Vec<(proc_macro2::LineColumn, bool)>,
+    match_depth: usize,
+}
+
+impl ReleaseSupervisionCollector {
+    const fn new() -> Self {
+        Self { calls: Vec::new(), match_depth: 0 }
+    }
+}
+
+impl<'ast> Visit<'ast> for ReleaseSupervisionCollector {
+    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+        self.match_depth += 1;
+        visit::visit_expr_match(self, node);
+        self.match_depth -= 1;
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if node.method == "release_supervision" {
+            self.calls.push((node.method.span().start(), self.match_depth > 0));
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+}
+
+/// Scan `source` for the `release_supervision` placement clause.
+///
+/// The loop body must contain EXACTLY ONE `release_supervision` call,
+/// and it must NOT be nested inside a `match` expression. Returns one
+/// [`Violation`] per offending call site — either every call beyond the
+/// first (a `count > 1` violation), or any call found inside a `match`
+/// (a `match_depth > 0` violation), or both simultaneously.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` fails to parse as a Rust file, matching
+/// the convention used by the other `scan_source_*` entry points in this
+/// module.
+pub fn scan_source_release_supervision_placement(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = ReleaseSupervisionCollector::new();
+    collector.visit_file(&parsed);
+
+    let mut violations = Vec::new();
+    for (index, (loc, in_match)) in collector.calls.iter().enumerate() {
+        // Every call beyond the first is a "more than one call" violation
+        // regardless of match-nesting; a call inside a `match` is ALSO a
+        // violation regardless of its ordinal position. The two reject
+        // conditions are independent (AC-5: "more than one ... call, OR
+        // one placed inside `match outcome`").
+        let too_many = index > 0;
+        if too_many || *in_match {
+            violations.push(Violation {
+                file: file.clone(),
+                line: loc.line,
+                column: loc.column + 1,
+                banned_path: "release_supervision(..)".to_owned(),
+                replacement_trait: "exactly one release_supervision(..) call, at the bottom of \
+                                     the loop body, outside match outcome"
+                    .to_owned(),
+                kind: BannedKind::ReleaseSupervisionMisplacement,
+            });
+        }
+    }
+    Ok(violations)
+}
+
+/// Dispatch the `release_supervision` placement clause against
+/// [`RELEASE_SUPERVISION_SCOPED_FILE`] only, across every workspace
+/// crate's `src/` tree. In practice this finds the file in exactly one
+/// crate (`overdrive-control-plane`); walking every crate rather than
+/// hardcoding the crate name keeps the clause resilient to a future
+/// module relocation.
+fn scan_release_supervision_placement_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(root).unwrap_or(&rs).to_path_buf();
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if !rel_str.ends_with(RELEASE_SUPERVISION_SCOPED_FILE) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_release_supervision_placement(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+    Ok(violations)
+}
+
 // -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
@@ -2980,6 +3117,11 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // DWD-09 clause 4 (brief.md §113) — `MemoryPlan { .. }` struct literal
     // outside overdrive-core.
     violations.extend(scan_memory_plan_literal_workspace(&classes, &metadata)?);
+
+    // DWD-09 clause 5 (brief.md §105a.3 / §113) — the exit observer's loop
+    // body must contain exactly one `release_supervision` call, never
+    // inside `match outcome`.
+    violations.extend(scan_release_supervision_placement_workspace(&classes)?);
     Ok(violations)
 }
 
@@ -3235,6 +3377,16 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
                 v.replacement_trait,
             ),
             "see ADR-0082 §D2.3, brief.md §102 / §113 (DWD-09 clause 4)",
+        ),
+        BannedKind::ReleaseSupervisionMisplacement => (
+            "error: `release_supervision` call misplaced in the exit-observer loop body",
+            format!(
+                "use {} — release-only-on-one-arm (or a call reachable only via `match \
+                 outcome`) leaves a Failed/NoPriorRow allocation claimed forever, the \
+                 unstoppable-orphan failure SD-1 exists to close.",
+                v.replacement_trait,
+            ),
+            "see brief.md §105a.3 / §113 (DWD-09 clause 5), S-VM-77",
         ),
     }
 }
@@ -5300,6 +5452,112 @@ mod tests {
             "no crate outside overdrive-core may construct a MemoryPlan literal; \
              got {violations:?}"
         );
+    }
+
+    // ------- DWD-09 clause 5: release_supervision placement -------
+
+    /// (a) The real `worker/exit_observer.rs` file scans clean — exactly
+    /// one `release_supervision` call, outside `match outcome`.
+    #[test]
+    fn release_supervision_real_exit_observer_is_clean() {
+        let path = workspace_root()
+            .join("crates/overdrive-control-plane/src/worker/exit_observer.rs");
+        let source =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations = scan_source_release_supervision_placement(
+            &source,
+            Path::new("worker/exit_observer.rs"),
+        )
+        .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the real exit_observer.rs must carry exactly one release_supervision call \
+             outside match outcome; got {violations:?}"
+        );
+    }
+
+    /// (b) A SECOND `release_supervision` call (even both outside any
+    /// `match`) is flagged — "more than one call" is banned regardless of
+    /// where each call sits.
+    #[test]
+    fn release_supervision_two_calls_outside_match_is_flagged() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {}
+                        }
+                        driver.release_supervision(&event.alloc);
+                        driver.release_supervision(&event.alloc);
+                    }
+                });
+            }
+        ";
+        let violations = scan_source_release_supervision_placement(
+            source,
+            Path::new("worker/exit_observer.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation (the 2nd call); got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
+    }
+
+    /// (c) A call placed INSIDE `match outcome` is flagged, even when it
+    /// is the only call in the function — the release-only-on-one-arm
+    /// shape.
+    #[test]
+    fn release_supervision_call_inside_match_is_flagged() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {
+                                driver.release_supervision(&event.alloc);
+                            }
+                            RetryOutcome::Failed { .. } => {}
+                            RetryOutcome::NoPriorRow => {}
+                        }
+                    }
+                });
+            }
+        ";
+        let violations = scan_source_release_supervision_placement(
+            source,
+            Path::new("worker/exit_observer.rs"),
+        )
+        .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation (inside match); got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
+    }
+
+    /// (d) Exactly one call, sitting outside `match outcome` — the
+    /// sanctioned shape — is accepted.
+    #[test]
+    fn release_supervision_one_call_outside_match_is_accepted() {
+        let source = r"
+            fn spawn_with_runtime() {
+                tokio::spawn(async move {
+                    loop {
+                        match outcome {
+                            RetryOutcome::Wrote { .. } => {}
+                            RetryOutcome::Failed { .. } => {}
+                            RetryOutcome::NoPriorRow => {}
+                        }
+                        if let Some(driver) = driver_weak.upgrade() {
+                            driver.release_supervision(&event.alloc);
+                        }
+                    }
+                });
+            }
+        ";
+        let violations = scan_source_release_supervision_placement(
+            source,
+            Path::new("worker/exit_observer.rs"),
+        )
+        .expect("parses");
+        assert!(violations.is_empty(), "the sanctioned shape must not be flagged; got {violations:?}");
     }
 
     /// (b) A `MemoryPlan` literal outside overdrive-core is flagged.

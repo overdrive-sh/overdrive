@@ -458,4 +458,11 @@ mod acceptance {
     // audit-before-hold semantics and the `IdentityRead` read contract.
     mod identity_mgr_read_contract;
     mod issue_svid_action_shim;
+
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, GH #42) —
+    // S-VM-77 (the claim releases on every `RetryOutcome` arm) and S-VM-78
+    // (`hydrate_actual`'s observe-first/supervision-last read order). See
+    // this file's own module docs for why it lives here rather than at the
+    // `crates/overdrive-core/` path the roadmap note suggested.
+    mod vm_reclamation_claim_lifecycle;
 }

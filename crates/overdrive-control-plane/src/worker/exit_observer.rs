@@ -369,6 +369,24 @@ pub fn spawn_with_runtime(
                     }
                 }
             }
+            // brief.md §105a.3 — the abandonment boundary: EXACTLY ONE
+            // release call, OUTSIDE `match outcome`, covering all THREE
+            // `RetryOutcome` arms (Wrote/Failed/NoPriorRow). Release-only-
+            // on-`Wrote` leaves a `Failed`/`NoPriorRow` allocation claimed
+            // forever — SD-1's unstoppable-orphan failure reintroduced by
+            // the very fix meant to close it (NEW-1). `release_supervision`
+            // is idempotent and a no-op for drivers that do not report
+            // supervision (`ExecDriver` keeps the trait default), so this
+            // fires unconditionally for every exit event regardless of
+            // driver kind. Distinct from `release_for_exit_emission` above
+            // (the UNRELATED Running-confirmed liveness gate) — this is the
+            // authorship-claim release (§105a.3 transitions 5/6). The
+            // `xtask dst-lint` `release-supervision-placement` clause
+            // (DWD-09 clause 5) statically enforces this shape: exactly one
+            // call, never inside `match outcome`.
+            if let Some(driver) = driver_weak.upgrade() {
+                driver.release_supervision(&event.alloc);
+            }
         }
     })
 }

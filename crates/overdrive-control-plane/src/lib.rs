@@ -127,6 +127,7 @@ pub mod veth_provisioner;
 // structured `health.startup.refused` event on refusal.
 pub mod view_store;
 pub mod vip_allocator_config;
+pub mod vm_reclamation_boot;
 pub mod worker;
 // `workflow_runtime` — the durable-async `WorkflowEngine` (ADR-0064 §1,
 // §3, §5). Drives author `async fn run` futures off the action-shim with
@@ -198,6 +199,17 @@ pub struct AppState {
     /// succeeds (`compose_production_driver`); DST/test fixtures compose
     /// a registry holding whichever `Sim*`/test driver(s) they need.
     pub drivers: Arc<DriverRegistry>,
+    /// The host-observation-driven port `VmReclamation` hydrates its
+    /// `actual` half from (ADR-0083 §D7, brief.md §105a.2, GH #42).
+    /// Composed **unconditionally** — never gated on [`DriverRegistry`]'s
+    /// `Vm` entry — so a node that uninstalled `cloud-hypervisor` still
+    /// observes and still reclaims (S-VM-30). Production wires
+    /// `Arc::new(overdrive_host::RealVmHostState::new(..))`; the broad
+    /// Exec-only fixture surface ([`AppState::new`]) default-composes
+    /// [`NoopVmHostState`] (observes nothing, ripple-free — mirrors the
+    /// `mtls_worker: None` / empty-registry `workflow_engine` defaults on
+    /// that constructor).
+    pub vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     /// Alloc → driver-kind routing index (ADR-0083 §D2a(b), GH #42).
     /// `Action::StopAllocation` / `Action::FinalizeFailed` carry no
     /// `AllocationSpec`, so the action shim cannot re-derive which driver
@@ -466,6 +478,44 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 /// `[server] streaming_submit_cap_seconds`.
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
 
+/// Default [`overdrive_core::traits::vm_host_state::VmHostState`] for
+/// [`AppState::new`]'s ~50 Exec-only fixture callers (ripple-free —
+/// mirrors the `mtls_worker: None` / empty-registry `workflow_engine`
+/// defaults on that constructor). Observes nothing, refuses nothing;
+/// correct for a fixture surface that never seeds VM host state.
+///
+/// Deliberately NOT `overdrive_sim::adapters::vm_host_state::SimVmHostState`
+/// — `overdrive-sim` is a `[dev-dependencies]`-only crate
+/// (`.claude/rules/development.md` § "Port-trait dependencies") and
+/// cannot be named from this non-`#[cfg(test)]` production constructor.
+#[derive(Debug, Clone, Copy, Default)]
+struct NoopVmHostState;
+
+#[async_trait::async_trait]
+impl overdrive_core::traits::vm_host_state::VmHostState for NoopVmHostState {
+    fn kind(&self) -> &'static str {
+        "overdrive_control_plane::NoopVmHostState"
+    }
+
+    async fn probe(&self) -> std::result::Result<(), overdrive_core::traits::vm_host_state::VmHostStateProbeError> {
+        Ok(())
+    }
+
+    async fn observe(
+        &self,
+    ) -> std::io::Result<overdrive_core::traits::vm_host_state::VmHostObservation> {
+        Ok(overdrive_core::traits::vm_host_state::VmHostObservation::default())
+    }
+
+    async fn kill_scope(&self, _scope: &overdrive_core::cgroup::CgroupPath) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    async fn discard_artifacts(&self, _alloc: &overdrive_core::AllocationId) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl AppState {
     /// Build an `AppState` with a fresh `LifecycleEvent` broadcast
     /// channel of default capacity. Used by every test fixture and
@@ -558,6 +608,11 @@ impl AppState {
             host_ipv4,
             workflow_engine,
             None,
+            // Fixture surface: a ripple-free no-op VmHostState (see
+            // `NoopVmHostState`'s own doc comment) — the ~50 Exec-only
+            // fixture callers of this convenience constructor need no
+            // change.
+            Arc::new(NoopVmHostState),
             // Fixture surface: a fresh empty per-host frontend-address allocator
             // (ripple-free, same posture as the `None` mtls_worker default). The
             // PRODUCTION boot path (`run_server`) constructs the ONE shared
@@ -600,6 +655,11 @@ impl AppState {
         host_ipv4: std::net::Ipv4Addr,
         workflow_engine: Arc<workflow_runtime::WorkflowEngine>,
         mtls_worker: Option<Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>>,
+        // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7,
+        // brief.md §105a.2, GH #42): composed unconditionally, never
+        // gated on `Vm` registry presence. See `AppState::vm_host_state`'s
+        // own doc comment.
+        vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
         frontend_addr_allocator:
             crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
     ) -> Self {
@@ -610,6 +670,7 @@ impl AppState {
             obs,
             runtime,
             drivers,
+            vm_host_state,
             // Fresh, empty per-boot index (ADR-0083 §D2a(b), GH #42) — no
             // allocation has started yet at construction time.
             alloc_drivers: Arc::new(action_shim::AllocDriverIndex::default()),
@@ -2390,6 +2451,41 @@ pub async fn run_server_with_obs_and_drivers(
             None
         };
 
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
+    // §105a.2, GH #42): `VmHostState` is composed UNCONDITIONALLY — never
+    // gated on the `Vm` registry entry / `integration-tests` feature /
+    // `config.vm_artifacts` presence — so a node that uninstalled
+    // `cloud-hypervisor` still observes and still reclaims (S-VM-30).
+    // `run_dir_root` mirrors `compose_vm_driver`'s own hardcoded
+    // `/run/overdrive/vm` literal (the two composition sites must agree
+    // on the same VM run root); `staging_dir` derives from the
+    // configured rootfs artifact's parent directory when one is
+    // configured (matching `RootfsPlan::for_alloc`'s real clone
+    // destination), falling back to a fixed default when no VM boot
+    // artifacts are configured at all (a node with no VM config has no
+    // clones to enumerate there regardless of the path — `RealVmHostState`'s
+    // own contract treats an absent root as `Ok`, not an error).
+    // `ServerConfig.vm_artifacts` is itself `#[cfg(feature =
+    // "integration-tests")]` (mirrors `VmBootArtifacts`'s own gate) —
+    // `vm_host_state` composition must still be unconditional (see above),
+    // so the staging-dir derivation is split by feature the same way the
+    // `dns_probe_fault` seam above is.
+    #[cfg(feature = "integration-tests")]
+    let vm_staging_dir: std::path::PathBuf = config
+        .vm_artifacts
+        .as_ref()
+        .and_then(|a| a.rootfs_path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::path::PathBuf::from("/run/overdrive/vm-rootfs-staging"));
+    #[cfg(not(feature = "integration-tests"))]
+    let vm_staging_dir: std::path::PathBuf =
+        std::path::PathBuf::from("/run/overdrive/vm-rootfs-staging");
+    let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
+        Arc::new(overdrive_host::RealVmHostState::new(
+            std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT),
+            std::path::PathBuf::from("/run/overdrive/vm"),
+            vm_staging_dir,
+        ));
+
     let state: AppState = AppState::new_with_workflow_engine(
         store,
         store_path,
@@ -2409,6 +2505,7 @@ pub async fn run_server_with_obs_and_drivers(
         // production / Tier-3 boot (real dataplane), `None` under a
         // `SimDataplane` override.
         mtls_worker,
+        vm_host_state,
         // dial-by-name-responder step 02-01: the ONE shared per-host
         // `FrontendAddrAllocator` (DDN-2). Cloned (self-shares the held map) so
         // the original binding survives to construct the `DnsResponder` after
@@ -2417,6 +2514,26 @@ pub async fn run_server_with_obs_and_drivers(
         // re-keyed `MtlsResolve` above.
         frontend_addr_allocator.clone(),
     );
+
+    // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
+    // §105a.6/§105a.10 AC3, GH #42): the `VmReclamation` boot-epoch drive
+    // runs IMMEDIATELY BEFORE `adopt_on_restart_recovery` below, so any
+    // `rmdir` it issues via `kill_scope` has settled (succeeded or
+    // NotFound) before that pass reads the same cgroup tree
+    // (`VmHostState::kill_scope`'s own settle postcondition; S-VM-23).
+    // Deliberately OUTSIDE the `state.mtls_worker.is_some()` gate below —
+    // VM allocations exist whether or not mTLS is composed, and
+    // `state.vm_host_state` is composed unconditionally (never gated on
+    // the `Vm` registry entry either — S-VM-30).
+    vm_reclamation_boot::converge(&state).await.map_err(|source| {
+        tracing::warn!(
+            name: "health.startup.refused",
+            reason = "vm_reclamation.boot",
+            error = %source,
+            "boot-epoch VmReclamation drive failed; refusing to boot"
+        );
+        error::ControlPlaneError::VmReclamationBoot(source)
+    })?;
 
     // The dial-by-name `DnsResponder` serve-loop `JoinHandle`, held on the
     // `ServerHandle` (dial-by-name-responder step 02-01, DDN-6). `None` on a
