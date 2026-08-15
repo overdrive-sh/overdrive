@@ -187,7 +187,7 @@ pub use svid_lifecycle::{
 };
 pub use vm_reclamation::{
     SupervisionSet, VmAllocFacts, VmReclamation, VmReclamationState, VmReclamationView,
-    is_intentional_stop, is_platform_reclamation, is_workload_failure, plan_reclamation,
+    plan_reclamation,
 };
 pub use workflow_lifecycle::{
     WorkflowInstanceState, WorkflowLifecycle, WorkflowLifecycleState, WorkflowLifecycleView,

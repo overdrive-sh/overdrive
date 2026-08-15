@@ -29,6 +29,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::traits::observation_store::{AllocState, AllocStatusRow};
+
 /// Structured reason for a lifecycle transition.
 ///
 /// Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
@@ -863,4 +865,43 @@ impl TransitionReason {
             | Self::VmOutOfMemory { .. } => true,
         }
     }
+}
+
+/// True iff this terminal row is a Platform Reclamation (DD-1): the platform
+/// destroyed one runtime instance while the workload's intent still stands.
+/// Reads `reason` OR `terminal`, mirroring `is_intentionally_stopped`'s
+/// shape (`overdrive_core::reconcilers::workload_lifecycle`, module-private
+/// by design — ADR-0083 §D6 names exactly ONE new PUBLIC Ending-Class
+/// predicate, this one).
+///
+/// Structurally `false` for every row representable today:
+/// `StoppedBy::PlatformReclaimed` (ADR-0081 D5) has not landed. Its
+/// addition is bundled, per ADR-0081's "Narrows ADR-0078 §D1" section, with
+/// a same-commit ADR-0078 amendment and an `observation_store.rs` docstring
+/// correction — landing alongside `execute_reclaim_allocation` (the first
+/// real producer of the disposition; ADR-0083 §D6). `by_reclaims_platform`
+/// below exhaustively matches every `StoppedBy` variant that exists today
+/// (all `false`), so adding the new variant is a compile error here until
+/// the `PlatformReclaimed` arm is filled in — the smallest possible future
+/// diff, never a silent no-op that a bare `false` would have required
+/// rewriting from scratch.
+#[must_use]
+pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
+    const fn by_reclaims_platform(by: StoppedBy) -> bool {
+        match by {
+            StoppedBy::Operator
+            | StoppedBy::Reconciler
+            | StoppedBy::Process
+            | StoppedBy::SystemGc => false,
+        }
+    }
+
+    row.state == AllocState::Terminated
+        && (matches!(
+            row.terminal,
+            Some(TerminalCondition::Stopped { by }) if by_reclaims_platform(by)
+        ) || matches!(
+            row.reason,
+            Some(TransitionReason::Stopped { by }) if by_reclaims_platform(by)
+        ))
 }

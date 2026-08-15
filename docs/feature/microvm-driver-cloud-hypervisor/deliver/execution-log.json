@@ -449,6 +449,209 @@
       "s": "EXECUTED",
       "d": "PASS: DriverRegistry+composition root+[job]/[vm] parser dispatch+AllocDriverIndex routing+DriverType::Exec mTLS gate all implemented and verified; S-VM-06/07 (parser) and S-VM-03/04 (walking skeleton) genuinely GREEN on real metal-box KVM boots; S-VM-01/02/05/74 correctly implemented but BLOCKER-ignored with cited real-console evidence (guest vsock is a kernel module, EAFNOSUPPORT, pre-existing cross-step gap in overdrive-init 01-03/vm_fixture.rs 01-04, outside this step files_to_modify); full workspace 2606/2606 tests green, 0 regressions, clippy+openapi-check clean",
       "t": "2026-08-14T12:27:54Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 62993138, 76 files changed (2957 insertions, 504 deletions); lefthook pre-commit gates (fmt, nextest-affected 1940/1940, doctest, clippy) all green",
+      "t": "2026-08-14T12:31:08Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T13:56:28Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T13:56:31Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T13:57:06Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T14:30:51Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T14:30:54Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T14:31:13Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T17:08:49Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T17:09:36Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T17:45:11Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T17:45:21Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T17:46:23Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T18:44:02Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T18:44:06Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T18:44:53Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T19:47:56Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T19:47:57Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T20:11:59Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T20:54:21Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T20:59:56Z"
+    },
+    {
+      "sid": "01-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T21:04:49Z"
+    },
+    {
+      "sid": "01-10",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T21:29:52Z"
+    },
+    {
+      "sid": "01-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T21:55:03Z"
+    },
+    {
+      "sid": "01-10",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T22:10:21Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T23:20:18Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T23:20:22Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-14T23:21:15Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-15T07:35:06Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-15T07:35:06Z"
     }
   ]
 }

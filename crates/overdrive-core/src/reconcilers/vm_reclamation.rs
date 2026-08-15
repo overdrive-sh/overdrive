@@ -9,35 +9,28 @@
 //! ending) and [`Action::DiscardStrandedArtifacts`] (authors none) — ARE the
 //! plan; the executors (a later step) are the impure half.
 //!
-//! This module also carries the ADR-0081 D1 Ending-Class classification
-//! (`is_intentional_stop` / `is_workload_failure` / `is_platform_reclamation`)
-//! as pure predicates over a terminal [`AllocStatusRow`] — kept as
-//! predicates rather than a stored `EndingClass` enum per `brief.md`'s
-//! Domain Model section ("VM workloads — the ending taxonomy"): the
-//! totality/disjointness property (P1, `brief.md` §105a.10) is proven by
-//! proptest, not by a compile-time exhaustive match. **This step does NOT
-//! wire these predicates into `is_natural_exit` /
-//! `startup_probe_failed_action`** (ADR-0081's binding-sites table,
-//! `brief.md` lines ~900-910) — that integration is a later step's
-//! obligation; this module only defines the classification itself, proven
-//! total and disjoint in isolation.
-//!
-//! `is_platform_reclamation` is structurally `false` for every row
-//! representable today: `StoppedBy::PlatformReclaimed` (ADR-0081 D5) has
-//! not landed. ADR-0081's "Narrows ADR-0078 §D1" section binds the commit
-//! that appends that variant to ALSO carry a same-commit amendment note on
-//! ADR-0078 §D1 and a docstring correction in `observation_store.rs` —
-//! that bundle lands with `execute_reclaim_allocation` (the first real
-//! producer of the disposition), not with this reconciler skeleton. See
-//! this feature's DELIVER step notes for the explicit flag.
+//! ADR-0081 D1's Ending-Class classification (Intentional Stop / Workload
+//! Failure / Platform Reclamation) is NOT defined in this module (02-01
+//! review D1 correction — a prior revision duplicated it here as
+//! `is_intentional_stop` / `is_workload_failure` / `is_platform_reclamation`,
+//! which this fix removes). Per ADR-0083 §D6, exactly ONE new PUBLIC
+//! predicate is sanctioned: `is_platform_reclaimed`, co-located with the
+//! vocabulary it reads in `crate::transition_reason`. The Intentional Stop
+//! leg REUSES the existing `workload_lifecycle::is_intentionally_stopped`
+//! (module-private, unchanged in meaning — Platform Reclamation must not
+//! match it); Workload Failure has no named predicate at all — it is the
+//! unnamed residual `state.is_terminal() && !is_intentionally_stopped(row)
+//! && !is_platform_reclaimed(row)`, expressed inline wherever it is
+//! needed. This module does NOT wire these predicates into
+//! `is_natural_exit` / `startup_probe_failed_action` (ADR-0081's
+//! binding-sites table, `brief.md` lines ~900-910) — that integration is a
+//! later step's obligation.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::AllocationId;
 use crate::id::WorkloadId;
-use crate::traits::observation_store::{AllocState, AllocStatusRow};
 use crate::traits::vm_host_state::VmHostObservation;
-use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 use super::{Action, Reconciler, ReconcilerName, TickContext};
 
@@ -246,53 +239,6 @@ impl Reconciler for VmReclamation {
     ) -> (Vec<Action>, Self::View) {
         (plan_reclamation(desired, actual), VmReclamationView::default())
     }
-}
-
-// ---------------------------------------------------------------------------
-// Ending Class — ADR-0081 D1, three classes, total and disjoint
-// ---------------------------------------------------------------------------
-
-/// "Intentional Stop" (ADR-0081 D1) — `state == Terminated` AND
-/// `StoppedBy::{Operator, SystemGc}` on EITHER `terminal` or `reason`.
-/// Mirrors `workload_lifecycle::is_intentionally_stopped`'s semantics
-/// exactly (`brief.md` §Domain Model's binding-sites table: "unchanged in
-/// meaning — Platform Reclamation must not match it").
-#[must_use]
-pub fn is_intentional_stop(row: &AllocStatusRow) -> bool {
-    row.state == AllocState::Terminated
-        && (matches!(
-            row.terminal,
-            Some(TerminalCondition::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc })
-        ) || matches!(
-            row.reason,
-            Some(TransitionReason::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc })
-        ))
-}
-
-/// "Platform Reclamation" (ADR-0081 D1) — the platform destroyed one
-/// runtime instance while the workload's intent still stands.
-///
-/// Structurally `false` for every row representable today:
-/// `StoppedBy::PlatformReclaimed` (ADR-0081 D5) has not landed — its
-/// addition is bundled by ADR-0081's own "Narrows ADR-0078 §D1" section
-/// with a same-commit ADR-0078 amendment and an `observation_store.rs`
-/// docstring correction, which lands with `execute_reclaim_allocation`
-/// (the first real producer of the disposition), not with this
-/// reconciler skeleton.
-#[must_use]
-pub const fn is_platform_reclamation(_row: &AllocStatusRow) -> bool {
-    false
-}
-
-/// "Workload Failure" (ADR-0081 D1) — the workload's own run concluded
-/// (successfully or not) with no authority withdrawal and no platform
-/// destruction: `state.is_terminal() && !is_intentional_stop(row) &&
-/// !is_platform_reclamation(row)`. Today (with
-/// [`is_platform_reclamation`] structurally `false`) this is exactly
-/// `workload_lifecycle::is_natural_exit`'s bucket.
-#[must_use]
-pub fn is_workload_failure(row: &AllocStatusRow) -> bool {
-    row.state.is_terminal() && !is_intentional_stop(row) && !is_platform_reclamation(row)
 }
 
 #[cfg(test)]

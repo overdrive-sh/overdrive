@@ -1875,3 +1875,85 @@ mod current_alloc_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod is_intentionally_stopped_tests {
+    //! Ground-truth sub-predicate assertions for [`is_intentionally_stopped`]
+    //! — closes 02-01 review finding D2 (testing theater in S-VM-32).
+    //!
+    //! `is_intentionally_stopped` is module-private — exposing it purely
+    //! for an acceptance test would invent surface ADR-0083 §D6 does not
+    //! name (the ADR sanctions exactly ONE new *public* Ending-Class
+    //! predicate, `crate::transition_reason::is_platform_reclaimed`; per
+    //! CLAUDE.md "Implement to the design — never invent API surface").
+    //! Reached here because private items are visible to in-crate
+    //! `#[cfg(test)]` siblings, mirroring [`super::current_alloc_tests`].
+    //!
+    //! `tests/acceptance/vm_reclamation_plan_purity.rs`'s S-VM-32 totality/
+    //! disjointness property is structurally unable to pin the
+    //! classifier's CORRECTNESS: with `is_platform_reclaimed` structurally
+    //! `false` today, `workload-failure := terminal &&
+    //! !intentional-stop && !platform-reclaimed` absorbs whatever
+    //! `intentional-stop` misclassifies, so "exactly one of three" holds
+    //! regardless of what the intentional-stop leg actually computes — a
+    //! tautology, not a check (confirmed by the gut-and-revert proof in
+    //! this feature's 02-01 review remediation). These assertions pin the
+    //! REAL classifier's behaviour on named `StoppedBy` fixtures directly,
+    //! independent of that tautology.
+
+    use crate::id::{AllocationId, NodeId, WorkloadId};
+    use crate::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+    use crate::transition_reason::{StoppedBy, TransitionReason};
+
+    use super::{WorkloadKind, is_intentionally_stopped};
+
+    /// Terminal alloc row whose `reason` carries `Stopped { by }` — the
+    /// exit-observer write shape named in [`is_intentionally_stopped`]'s
+    /// own docstring.
+    fn stopped_by_reason_row(by: StoppedBy) -> AllocStatusRow {
+        AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-ending-class-0").expect("valid AllocationId"),
+            workload_id: WorkloadId::new("wl-ending-class").expect("valid WorkloadId"),
+            node_id: NodeId::new("local").expect("valid NodeId"),
+            state: AllocState::Terminated,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new("local").expect("valid NodeId"),
+            },
+            reason: Some(TransitionReason::Stopped { by }),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    #[test]
+    fn system_gc_terminal_row_is_intentionally_stopped() {
+        assert!(
+            is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::SystemGc)),
+            "a SystemGc-stopped terminal row must classify as intentionally stopped",
+        );
+    }
+
+    #[test]
+    fn operator_terminal_row_is_intentionally_stopped() {
+        assert!(
+            is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::Operator)),
+            "an Operator-stopped terminal row must classify as intentionally stopped",
+        );
+    }
+
+    #[test]
+    fn reconciler_terminal_row_is_not_intentionally_stopped() {
+        assert!(
+            !is_intentionally_stopped(&stopped_by_reason_row(StoppedBy::Reconciler)),
+            "a Reconciler/crash-terminal row must NOT classify as intentionally stopped",
+        );
+    }
+}

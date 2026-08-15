@@ -16,12 +16,21 @@
 //! §D1" section with a same-commit ADR-0078 amendment + an
 //! `observation_store.rs` docstring correction, which lands with
 //! `execute_reclaim_allocation` (the first real producer of the
-//! disposition), not with this reconciler skeleton (step 02-01). The
-//! totality/disjointness property below is proven over the two classes
-//! representable today (`is_intentional_stop`, `is_workload_failure`) plus
-//! the structurally-`false` `is_platform_reclamation` placeholder — see
-//! `overdrive_core::reconcilers::vm_reclamation`'s module docs for the full
-//! reasoning.
+//! disposition), not with this reconciler skeleton (step 02-01).
+//!
+//! Per ADR-0083 §D6, exactly ONE new PUBLIC Ending-Class predicate is
+//! sanctioned: `overdrive_core::transition_reason::is_platform_reclaimed`.
+//! The Intentional Stop leg's real classifier
+//! (`is_intentionally_stopped`, `overdrive_core::reconcilers::
+//! workload_lifecycle`) is module-private by design and unreachable from
+//! this integration-test crate, so the totality/disjointness property
+//! below expresses that leg with a LOCAL structural stand-in
+//! (`intentional_stop_leg`) — see its docs for why. Independent
+//! ground-truth assertions against the REAL, private classifier live in
+//! `workload_lifecycle`'s own `#[cfg(test)] mod
+//! is_intentionally_stopped_tests` (same crate, reaches the private fn);
+//! see that module's docs for why this property test structurally cannot
+//! make those assertions itself (02-01 review finding D2).
 
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::expect_used)]
@@ -33,12 +42,13 @@ use overdrive_core::AllocationId;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::reconcilers::{
-    Action, SupervisionSet, VmAllocFacts, VmReclamationState, is_intentional_stop,
-    is_platform_reclamation, is_workload_failure, plan_reclamation,
+    Action, SupervisionSet, VmAllocFacts, VmReclamationState, plan_reclamation,
 };
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::traits::vm_host_state::ScopeFacts;
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::transition_reason::{
+    StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
+};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -206,6 +216,34 @@ fn arb_terminal_alloc_state() -> impl Strategy<Value = AllocState> {
     prop_oneof![Just(AllocState::Terminated), Just(AllocState::Failed)]
 }
 
+/// STRUCTURAL STAND-IN for the Intentional Stop leg of S-VM-32's totality
+/// property below — NOT a reusable production predicate, and deliberately
+/// NOT a new named `pub` fn (02-01 review finding D1 forbids reintroducing
+/// exactly that shape). The real classifier
+/// (`overdrive_core::reconcilers::workload_lifecycle::is_intentionally_stopped`)
+/// is module-private by design (ADR-0083 §D6 names exactly ONE new public
+/// Ending-Class predicate, `is_platform_reclaimed`) and unreachable from
+/// this integration-test crate.
+///
+/// This inline copy does NOT close review finding D2 by itself: with
+/// `is_platform_reclaimed` structurally `false` today, the
+/// totality/disjointness property below holds by tautology (the
+/// residual `workload-failure` absorbs whatever this leg misclassifies)
+/// regardless of what this function actually computes. The real,
+/// load-bearing ground-truth assertions against the REAL classifier live
+/// in `workload_lifecycle`'s own `#[cfg(test)] mod
+/// is_intentionally_stopped_tests` (same crate, reaches the private fn).
+fn intentional_stop_leg(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Terminated
+        && (matches!(
+            row.terminal,
+            Some(TerminalCondition::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc })
+        ) || matches!(
+            row.reason,
+            Some(TransitionReason::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc })
+        ))
+}
+
 proptest! {
     /// S-VM-31 — `plan_reclamation(desired, actual) -> Vec<Action>` is
     /// pure and matches the design's six-row decision table exactly for
@@ -225,19 +263,26 @@ proptest! {
             "row {:?} did not match the six-row decision table", row
         );
 
-        // PURITY / no I/O: a second call over the SAME (unmutated,
-        // `&`-borrowed) inputs is byte-identical — "the observe pass
-        // wrote something" is structurally unrepresentable (the function
-        // takes no port), and determinism is this claim's behavioural
-        // witness.
-        let actions_second = plan_reclamation(&desired, &actual);
-        prop_assert_eq!(actions_first, actions_second, "plan_reclamation must be deterministic");
+        // PURITY (02-01 review finding D3): `plan_reclamation` takes
+        // `&VmReclamationState` — no `&mut`, no port parameter — and
+        // `VmReclamationState` has no interior mutability, so purity is
+        // structurally guaranteed by the signature. A second call proves
+        // nothing a type-check doesn't already guarantee; not re-asserted.
     }
 
     /// S-VM-32 — every terminal `AllocStatusRow` the design's
     /// classification can produce belongs to EXACTLY ONE of the three
     /// Ending Classes (Intentional Stop, Workload Failure, Platform
     /// Reclamation).
+    ///
+    /// STRUCTURAL property only (see `intentional_stop_leg`'s docs above
+    /// and the module docs at the top of this file): with
+    /// `is_platform_reclaimed` structurally `false` today, "exactly one
+    /// of three" is a tautology of how `workload-failure` is defined (the
+    /// residual), not a check on the classifier's correctness. The real
+    /// classifier is pinned by `workload_lifecycle`'s
+    /// `is_intentionally_stopped_tests` ground-truth assertions instead
+    /// (02-01 review finding D2).
     #[test]
     fn ending_class_is_total_and_disjoint_over_terminal_rows(
         state in arb_terminal_alloc_state(),
@@ -247,8 +292,11 @@ proptest! {
         let row = terminal_row(state, terminal, reason);
         prop_assert!(row.state.is_terminal(), "fixture precondition: state must be terminal");
 
-        let classes =
-            [is_intentional_stop(&row), is_workload_failure(&row), is_platform_reclamation(&row)];
+        let intentional_stop = intentional_stop_leg(&row);
+        let platform_reclaimed = is_platform_reclaimed(&row);
+        let workload_failure = row.state.is_terminal() && !intentional_stop && !platform_reclaimed;
+
+        let classes = [intentional_stop, workload_failure, platform_reclaimed];
         let true_count = classes.iter().filter(|c| **c).count();
         prop_assert_eq!(
             true_count, 1,
