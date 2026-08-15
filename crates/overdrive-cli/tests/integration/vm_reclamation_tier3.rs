@@ -8,6 +8,17 @@
 //! (`cargo xtask metal run --`), never Lima (no nested KVM on Apple
 //! Silicon).
 //!
+//! Every scenario here MUST stay registered in `.config/nextest.toml`'s
+//! `host-kernel-shared` test-group (matched by module, so a new `#[tokio::
+//! test]` added to this file joins automatically) — `#[serial(cgroup)]`
+//! alone enforces nothing under nextest's per-test-process execution
+//! model. Confirmed empirically while landing this file: an unserialized
+//! `--no-fail-fast` run produced real `EBUSY` XDP-slot collisions and
+//! `did not reach Running within 60s` timeouts from concurrent real-
+//! cgroupfs contention; the module-level `host-kernel-shared` assignment
+//! resolved all of it. See `vm_walking_skeleton.rs`'s own module doc for
+//! the original precedent this file follows.
+//!
 //! # Scenario map
 //!
 //! Per `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
