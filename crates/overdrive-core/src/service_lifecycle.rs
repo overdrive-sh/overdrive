@@ -971,6 +971,27 @@ fn startup_probe_failed_action(
     attempts: u32,
     now_unix: UnixInstant,
 ) -> Option<Action> {
+    // `AllocState` gate (brief.md §105a.9/§105a.10, S-VM-29). This branch
+    // previously read NO `AllocState` at all — it fired for ANY state
+    // reaching it, including `Terminated`. A platform-reclaimed row
+    // (`brief.md` §105a.5) is ALWAYS `Terminated` (never `Pending` /
+    // `Running` / `Failed`), so an already-reclaimed allocation whose
+    // startup probes had been failing raced a fabricated
+    // `ServiceFailed { StartupProbeFailed }` claim over an ending already
+    // authored elsewhere. Excluding `Terminated` specifically — rather
+    // than allow-listing `Running | Failed` — is deliberate: the existing
+    // branch-coverage suite (`tests/acceptance/service_lifecycle_reconcile_branches.rs::
+    // startup_probe_failed_fires_when_all_three_gates_met` et al.)
+    // deliberately drives this branch from `AllocState::Pending` (no
+    // Stable/EarlyExit gate applies yet, but the three attempts/deadline/
+    // no-pass gates below still must fire) — an allow-list would silently
+    // break that pinned, already-covered case. `Terminated` is the one
+    // state this branch is never entitled to act on: every reachable
+    // `Terminated` row already carries a different ending authored by
+    // another path (reclamation, an operator/reconciler stop, …).
+    if fact.state == AllocState::Terminated {
+        return None;
+    }
     let started = fact.started_at?;
     let elapsed_ms = elapsed_ms_from(now_unix, started);
     let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);

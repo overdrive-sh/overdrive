@@ -9,7 +9,9 @@ use crate::aggregate::{Exec, Job, Node, ProbeDescriptor, Vm, WorkloadDriver, Wor
 use crate::id::{AllocationId, CorrelationKey, NodeId, WorkloadId};
 use crate::traits::driver::{AllocationSpec, DriverPayload, ExecPayload, VmPayload};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
-use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use crate::transition_reason::{
+    StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
+};
 use crate::wall_clock::UnixInstant;
 
 use super::backend_discovery_bridge::BackendDiscoveryBridge;
@@ -677,7 +679,23 @@ impl WorkloadLifecycle {
                     // RestartAllocation past the ceiling. Pure check
                     // against `view.restart_counts`.
                     let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-                    if attempts >= RESTART_BACKOFF_CEILING {
+                    // `&& !is_platform_reclaimed(failed)` (brief.md
+                    // §105a.10, S-VM-27) — a platform-reclaimed row's
+                    // `terminal` is always `None` (§105a.5), so the
+                    // idempotency guard just below does NOT short-circuit
+                    // for it and this ceiling check is genuinely reached
+                    // on every reclaim-driven restart cycle. The
+                    // workload's intent still stands under DD-1 (the
+                    // platform, not the workload, ended this instance),
+                    // so a run of consecutive reclamations must never
+                    // exhaust the SAME restart budget a crash-loop
+                    // exhausts. Exempting the ceiling CHECK — not the
+                    // `attempts` bookkeeping below, which keeps
+                    // incrementing — means the restart-emission path is
+                    // reached unconditionally past its backoff window,
+                    // however high `attempts` has climbed from prior
+                    // reclamations.
+                    if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
                         // Idempotency guard: if the row already carries
                         // a BackoffExhausted terminal claim the
                         // reconciler has already finalised this alloc on
@@ -1160,7 +1178,19 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
     // site and `CrashFacts::advance` cannot drift. `is_restartable`'s
     // predicate above is deliberately NOT collapsed — it is a different,
     // wider set (`Terminated | Draining | Failed`).
-    row.state.is_terminal() && !is_intentionally_stopped(row)
+    //
+    // `&& !is_platform_reclaimed(row)` (brief.md §104/§105a.10, S-VM-26)
+    // — the ONLY predicate this design's binding-sites table changes.
+    // Without this clause a reclaimed Job-kind row (the workload's intent
+    // still stands; the platform owes a replacement, DD-1) matched this
+    // predicate and the Job finalise branch fabricated
+    // `TerminalCondition::Failed { exit_code: Some(0) }` on a workload
+    // that never exited. Excluding it here routes the row to the
+    // general `is_restartable` branch below instead, which DOES match a
+    // platform-reclaimed row (its `state == Terminated` and it is not
+    // `is_intentionally_stopped`), so the allocation is genuinely
+    // re-driven rather than finalised.
+    row.state.is_terminal() && !is_intentionally_stopped(row) && !is_platform_reclaimed(row)
 }
 
 /// Classify a natural-exit alloc row into the typed

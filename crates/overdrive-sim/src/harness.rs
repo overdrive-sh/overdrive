@@ -732,6 +732,30 @@ impl Harness {
             Invariant::SvidRunningSetHoldsValidSvid => {
                 crate::invariants::svid_running_set::evaluate_running_set_holds_valid_svid().await
             }
+            // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7,
+            // brief.md §105a.11, GH #42) — the four `VmReclamation` ESR
+            // invariants. Each evaluator drives the pure
+            // `plan_reclamation` reconciler directly against a REAL
+            // `SimVmHostState` for the host half of `VmReclamationState`;
+            // the supervision half is constructed in-fixture (no Sim-side
+            // `Driver` counterpart exists yet — see the module doc in
+            // `crate::invariants::vm_reclamation`). Single-node,
+            // in-memory — `hosts` / `cluster` unused, matching
+            // `SvidRunningSetHoldsValidSvid` immediately above.
+            Invariant::SupervisedVmSurvivesEveryTick => {
+                crate::invariants::vm_reclamation::evaluate_supervised_vm_survives_every_tick()
+                    .await
+            }
+            Invariant::VmReclamationIdempotentSteadyState => {
+                crate::invariants::vm_reclamation::evaluate_vm_reclamation_idempotent_steady_state()
+                    .await
+            }
+            Invariant::VmReclamationConverges => {
+                crate::invariants::vm_reclamation::evaluate_vm_reclamation_converges().await
+            }
+            Invariant::EndingInFlightIsNeverReclaimed => {
+                crate::invariants::vm_reclamation::evaluate_ending_in_flight_is_never_reclaimed()
+            }
         }
     }
 }

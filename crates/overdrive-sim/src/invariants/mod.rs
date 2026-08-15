@@ -138,6 +138,16 @@ pub mod backend_discovery_bridge;
 // `crates/overdrive-sim/tests/acceptance/identity_read_equivalence.rs`.
 pub mod svid_running_set;
 
+// microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+// §105a.11, GH #42). Four ESR invariants for the `VmReclamation`
+// reconciler: `SupervisedVmSurvivesEveryTick` (S-VM-24 / AC4),
+// `VmReclamationIdempotentSteadyState` (S-VM-87),
+// `VmReclamationConverges` (S-VM-88), `EndingInFlightIsNeverReclaimed`
+// (S-VM-89). All four drive `plan_reclamation` directly against a REAL
+// `SimVmHostState`; the evaluator bodies live in
+// `crate::invariants::vm_reclamation`.
+pub mod vm_reclamation;
+
 /// Catalogue of invariants the DST harness evaluates.
 ///
 /// Each variant name IS the canonical name printed in both green
@@ -583,6 +593,52 @@ pub enum Invariant {
     /// teeth are exercised in the acceptance test. The evaluator body lives in
     /// `crate::invariants::svid_running_set`.
     SvidRunningSetHoldsValidSvid,
+
+    /// microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    /// §105a.10 AC4 / §105a.11, GH #42) — always invariant (safety,
+    /// `assert_always!`). An allocation that is non-terminal AND a member
+    /// of the OBSERVED supervision set has its cgroup scope, run
+    /// directory and rootfs clone intact, and its row unmodified, on
+    /// EVERY reclamation tick. Without this, the reconciler passes its
+    /// whole suite by killing everything (S-VM-24, AC4). The evaluator
+    /// body lives in `crate::invariants::vm_reclamation`.
+    SupervisedVmSurvivesEveryTick,
+
+    /// microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    /// §105a.11, GH #42) — always invariant (stability, `assert_always!`).
+    /// A second `plan_reclamation` reconcile over an unchanged
+    /// `VmReclamationState` observation ALWAYS returns an empty
+    /// `Vec<Action>`. Mirrors `HydratorIdempotentSteadyState` (`:360`
+    /// above). The evaluator body lives in
+    /// `crate::invariants::vm_reclamation`. Closes S-VM-87.
+    VmReclamationIdempotentSteadyState,
+
+    /// microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    /// §105a.11, GH #42) — eventually invariant (liveness,
+    /// `assert_eventually!`). Seeding an arbitrary mix of live, terminal
+    /// and unknown VM allocations against `SimVmHostState`, with a
+    /// `SimClock` advancing the 30s sweep cadence, repeated reclamation
+    /// ticks EVENTUALLY leave no host state on any surface (scope, run
+    /// directory, clone) attributable to a terminal or unknown
+    /// allocation. The evaluator body lives in
+    /// `crate::invariants::vm_reclamation`. Closes S-VM-88.
+    VmReclamationConverges,
+
+    /// microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    /// §105a.11, GH #42) — always invariant (safety, `assert_always!`),
+    /// `@mandatory:mutation_target`. An allocation whose ending is IN
+    /// FLIGHT — its VMM has exited, or its stop has been issued, and its
+    /// terminal row is not yet written — is ALWAYS absent from
+    /// `plan_reclamation`'s `ReclaimAllocation` output. The fourth
+    /// invariant (iteration-2 review NEW-1): NOT foldable into
+    /// `SupervisedVmSurvivesEveryTick`, which is scoped to membership in
+    /// the OBSERVED supervision set — the exit window is precisely the
+    /// interval a process-death handle reading has just REMOVED the
+    /// allocation from that set, so the safety invariant above is
+    /// vacuously satisfied exactly where the release-point regression
+    /// this invariant exists to catch would live. The evaluator body
+    /// lives in `crate::invariants::vm_reclamation`. Closes S-VM-89.
+    EndingInFlightIsNeverReclaimed,
 }
 
 impl Invariant {
@@ -728,6 +784,14 @@ impl Invariant {
         // `crate::invariants::svid_running_set`. On the `cargo dst` critical
         // path — the whole subsystem exists to satisfy this relation.
         Self::SvidRunningSetHoldsValidSvid,
+        // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7,
+        // brief.md §105a.11, GH #42) — the four `VmReclamation` ESR
+        // invariants. Evaluator bodies live in
+        // `crate::invariants::vm_reclamation`.
+        Self::SupervisedVmSurvivesEveryTick,
+        Self::VmReclamationIdempotentSteadyState,
+        Self::VmReclamationConverges,
+        Self::EndingInFlightIsNeverReclaimed,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -794,6 +858,13 @@ impl Invariant {
             }
             // workload-identity-manager step 01-07 (Slice 01 CAPSTONE).
             Self::SvidRunningSetHoldsValidSvid => "svid-running-set-holds-valid-svid",
+            // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7).
+            Self::SupervisedVmSurvivesEveryTick => "supervised-vm-survives-every-tick",
+            Self::VmReclamationIdempotentSteadyState => {
+                "vm-reclamation-idempotent-steady-state"
+            }
+            Self::VmReclamationConverges => "vm-reclamation-converges",
+            Self::EndingInFlightIsNeverReclaimed => "ending-in-flight-is-never-reclaimed",
         }
     }
 }

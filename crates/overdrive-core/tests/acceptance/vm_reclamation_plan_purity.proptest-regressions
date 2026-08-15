@@ -1,0 +1,15 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 631d0597aa4f665c81cfa8fc24c26d13aebd134b3c29378ed4c79c5b3a15e0b1 # shrinks to alloc = AllocationId("vm-plan-11000000"), workload_id = WorkloadId("wl-0"), cycle = 1
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e27271f5eeecc930dbf94747da9f95505d43e98fdfa94caa51fe6b30973e2c73 # shrinks to alloc = AllocationId("vm-plan-10000000"), workload_id = WorkloadId("wl-0"), attempts = 0, elapsed_secs = 0
+cc 25e90a6c84625cd9ae1e13d059db2774332b38d2037dbd931fc730ccb5300398 # shrinks to alloc = AllocationId("vm-plan-12000000"), attempts = 29, elapsed_ms = 61000

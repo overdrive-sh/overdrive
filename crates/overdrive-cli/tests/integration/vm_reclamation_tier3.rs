@@ -41,6 +41,12 @@
 //!   rather than papers over (no production surface exposes `IdentityMgr`
 //!   state to a real-serve test; the four-evaluations claim IS fully
 //!   proven, executor-direct, at Tier-1 in `action_shim::reclamation::tests`).
+//! - S-VM-28 (step 02-04): [`reclaim_then_restart_populates_restart_count_and_last_terminated_together`]
+//!   — the SAME boot-epoch-reclaim fixture shape as S-VM-81, but the
+//!   workload is never `stop()`-ed: its intent still stands, so the SAME
+//!   live `serve` session's `WorkloadLifecycle` reconcile loop re-drives
+//!   it (S-VM-26/27's guards), and ONE scenario asserts BOTH
+//!   `restart_count` and `last_terminated` populate together.
 //!
 //! # Fixture construction — why not a plain fault-injection seam
 //!
@@ -323,6 +329,36 @@ async fn poll_until_terminal(cfg: &Path, workload_id: &str, max_wait: Duration) 
         assert!(
             tokio::time::Instant::now() < deadline,
             "workload {workload_id} did not reach a terminal state within {max_wait:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// Polls up to `max_wait` for the single row to be `Running` again with
+/// `restart_count >= 1` -- the reclaim-then-restart postcondition
+/// (S-VM-28). Distinct from `poll_until_running`: a restart REUSES the
+/// SAME `alloc_id` (`Action::RestartAllocation`, mirrors the Exec-driver
+/// shape in `crash_observability_two_cycles.rs`), so `state == Running`
+/// alone cannot distinguish "still the original boot" from "recovered
+/// via a reclaim-then-restart cycle" -- the restart count is what pins it.
+async fn poll_until_restarted(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out =
+            describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
+                .await
+                .expect("workload describe must succeed while polling");
+        if out
+            .snapshot
+            .rows
+            .first()
+            .is_some_and(|r| r.state == AllocStateWire::Running && r.restart_count >= 1)
+        {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "workload {workload_id} did not restart (Running with restart_count>=1) within {max_wait:?}"
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -1040,6 +1076,145 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed");
     assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed");
     assert!(!clone_path(&staging_dir, &alloc_id).exists(), "the clone must be reclaimed");
+
+    handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-28 (step 02-04) -- restart_count and last_terminated populate
+// TOGETHER, in one scenario, across a genuine reclaim-then-restart
+// cycle.
+// ---------------------------------------------------------------------
+
+/// `docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md`
+/// S-VM-28. SAME boot-epoch-reclaim fixture shape as S-VM-81 (an unclean
+/// `handle.shutdown()` leaves a real, surviving VMM and a non-terminal
+/// row; a second boot's brand-new `VmDriver` reads `Observed(∅)` and the
+/// boot-epoch drive reclaims it via a GENUINE `Action::ReclaimAllocation`,
+/// never `stop()`) -- but UNLIKE S-VM-81, the workload here is NEVER
+/// `stop()`-ed before the reclaim: its intent still stands (DD-1), so the
+/// SAME live `serve` session's `WorkloadLifecycle` reconcile loop
+/// re-drives it once the boot-epoch drive's terminal write lands (the
+/// `is_natural_exit` / ceiling guards S-VM-26/27 exist for exactly this
+/// branch). Deliberately ONE scenario asserting BOTH crash-observability
+/// fields together, per the DISTILL crafter notes: asserting only the
+/// budget (`restart_count`) passes an implementation that erased the
+/// occurrence; asserting only the occurrence (`last_terminated`) passes
+/// one that consumed the budget silently -- per ADR-0078, "a convergent
+/// record cannot answer 'did it happen'."
+#[tokio::test]
+#[serial(cgroup)]
+async fn reclaim_then_restart_populates_restart_count_and_last_terminated_together() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s28-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+
+    // Boot #1 -- deploy and confirm the pre-reclaim baseline: a first
+    // start has never restarted and has nothing to report yet.
+    let handle = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s28.toml",
+        &vm_job_toml("vm-s28", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    let baseline = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let baseline_row = baseline.snapshot.rows.first().expect("one row for the running alloc");
+    assert_eq!(baseline_row.restart_count, 0, "sanity: a first start is not a restart");
+    assert_eq!(baseline_row.last_terminated, None, "sanity: nothing survived yet");
+
+    // Unclean shutdown -- NEVER call stop(). The workload's intent still
+    // stands; the real cloud-hypervisor process survives
+    // (`Command::kill_on_drop` is deliberately `false` on the production
+    // spawn) and the row stays non-terminal (Running).
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 -- SAME data_dir. Its brand-new `VmDriver` has supervised
+    // nothing yet in THIS process (`Observed(∅)`), so the boot-epoch
+    // drive's `plan_reclamation` row 1 fires a GENUINE
+    // `Action::ReclaimAllocation` for the still-non-terminal row -- the
+    // reclaim half of S-VM-28's "reclaimed and then restarted" Given.
+    // The drive runs synchronously inside `run_server`, before this call
+    // returns.
+    let handle2 = spawn_vm_server(
+        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
+        &data_dir,
+        &config_dir,
+    )
+    .await;
+
+    let reclaimed = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("describe after the boot-epoch reclaim");
+    let reclaimed_row = reclaimed.snapshot.rows.first().expect("one row survives reclamation");
+    assert_eq!(
+        reclaimed_row.state,
+        AllocStateWire::Terminated,
+        "the boot-epoch drive must reclaim the surviving non-terminal allocation, got {reclaimed_row:?}"
+    );
+    assert!(
+        matches!(
+            reclaimed_row.reason,
+            Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+        ),
+        "Stopped {{ by: PlatformReclaimed }} is the reclamation disposition S-VM-28's Given \
+         requires; got {:?}",
+        reclaimed_row.reason
+    );
+
+    // The workload was NEVER stopped -- its intent still stands, so the
+    // SAME live `serve` session's `WorkloadLifecycle` reconcile loop
+    // re-drives it once the backoff window elapses. This is the restart
+    // half of the Given, and the ONE scenario's Then: both
+    // crash-observability fields populate TOGETHER as a direct result of
+    // the SAME cycle.
+    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
+    assert_eq!(
+        restarted_row.restart_count, 1,
+        "restart_count must have incremented by EXACTLY one across the reclaim-then-restart \
+         cycle; got {restarted_row:?}"
+    );
+    let last_terminated = restarted_row
+        .last_terminated
+        .as_ref()
+        .expect("last_terminated must be populated by the SAME restart that bumped restart_count");
+    assert!(
+        matches!(
+            last_terminated.reason,
+            Some(overdrive_core::TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+        ),
+        "last_terminated must describe the reclamation disposition (StoppedBy::PlatformReclaimed), \
+         not be silently erased or describe something else; got {:?}",
+        last_terminated.reason
+    );
+
+    // Reap the restarted (still-live) spin VM via the PRODUCTION stop
+    // path before shutdown: `Command::kill_on_drop` is deliberately
+    // `false` on the production spawn, so nothing kills a still-Running
+    // VM merely because this test process exits (same leak class
+    // `vm_walking_skeleton.rs`'s long-lived-spin scenarios guard
+    // against).
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the restarted spin workload before shutdown to avoid leaking the VMM process");
+    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");
 }

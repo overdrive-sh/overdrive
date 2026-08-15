@@ -172,6 +172,14 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `Invariant::ALL`; blessed here so both catalogues track `Invariant::ALL`
     // exactly. Mirrors `dst_clean_clone_green.rs`.
     "svid-running-set-holds-valid-svid",
+    // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7, brief.md
+    // §105a.11) — the four `VmReclamation` ESR invariants. Added to
+    // `Invariant::ALL`; blessed here so both catalogues track `Invariant::ALL`
+    // exactly. Mirrors `dst_clean_clone_green.rs`.
+    "supervised-vm-survives-every-tick",
+    "vm-reclamation-idempotent-steady-state",
+    "vm-reclamation-converges",
+    "ending-in-flight-is-never-reclaimed",
 ];
 
 // -----------------------------------------------------------------------------
