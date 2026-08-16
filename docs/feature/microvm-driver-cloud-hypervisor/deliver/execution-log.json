@@ -799,6 +799,27 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: no GREEN state exists to commit. No files were modified by this dispatch -- action_shim/mod.rs and transition_reason.rs are unchanged from HEAD, no test file was created, nothing to stage. Escalated to nw-solution-architect for a decision on threading VmmExit diagnostic data (stderr_tail/exit_code/signal), the rootfs master path, and a console-log read through DriverError::StartRejected.reason in vm_driver.rs (and possibly overdrive-host/src/vmm.rs) before this step can proceed.",
       "t": "2026-08-16T07:25:15Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: executable acceptance tests are absent at the three DES-owned paths; AT authorship must route to nw-acceptance-designer before crafter RED",
+      "t": "2026-08-16T14:54:55Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: executable acceptance tests are absent at the three DES-owned paths; PREPARE and semantic RED did not pass",
+      "t": "2026-08-16T14:55:44Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN was not executed because the required pre-authored acceptance tests are absent; no code exists to commit",
+      "t": "2026-08-16T14:55:44Z"
     }
   ]
 }
