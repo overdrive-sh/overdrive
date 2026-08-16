@@ -764,6 +764,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-15T17:16:23Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-15T17:47:49Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-15T17:48:02Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: classify_driver_failure's VM arm cannot satisfy S-VM-33/34/36/41 within this step's declared scope (action_shim/mod.rs + transition_reason.rs only; vm_driver.rs and overdrive-host/src/vmm.rs are out of scope). Traced the full call chain before authoring RED: (1) VmHostLayout.kernel is validated ONCE at overdrive serve boot in compose_vm_driver (lib.rs ~1720-1729); a boot-time kernel ENOENT or bad-format BOTH collapse unconditionally to VmComposeError::NotAvailable, so neither ever reaches a per-allocation Failed row -- the only way to reach Failed/VmKernelNotFound or Failed/VmKernelFormatUnsupported is a TOCTOU construction (valid kernel at boot, corrupted or deleted before this allocation's Vmm::create), mirroring S-VM-35's own TOCTOU framing. (2) That TOCTOU is only observable via VmDriver::start's async VmmExited race arm (vm_driver.rs ~613-622), which discards the resolved VmmExit entirely (the ended binding is underscore-prefixed and unused) and returns the hardcoded literal string 'VMM exited before the guest signalled ready' with zero interpolation of CH's own stderr, exit code, or signal -- so S-VM-33 (kernel not found), S-VM-37 (unclassified), and S-VM-41 (kernel format, CH's own misleading UefiTooBig text) are structurally indistinguishable given classify_driver_failure's text-only signature. (3) provision_vmm's rootfs pre-check (vm_driver.rs ~409-415) builds its reason text from a bare std::io::Error whose Display never carries the path, so VmRootfsNotFound.path cannot be populated from text alone. (4) BootRaceOutcome::Deadline's text (vm_driver.rs ~623-634) carries no console output at all, so VmBootDeadlineExceeded.console_tail cannot be derived from it (None is at least type-valid there). KernelImage::validate is a pure function requiring freshly-read header bytes that classify_driver_failure has no access to. Needs an architect decision on how vm_driver.rs (and possibly overdrive-host/src/vmm.rs) threads VmmExit.stderr_tail, the rootfs master path, and a console-log read into StartRejected.reason before RED/GREEN can proceed. See step report for full trace.",
+      "t": "2026-08-16T07:25:06Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot GREEN -- RED itself is blocked pending the vm_driver.rs / overdrive-host/src/vmm.rs scope decision described in the RED phase log. No test was authored, to avoid building a RED scaffold that cannot honestly reach GREEN without out-of-scope production changes and would tempt weakening the assertions to fit what the current code can produce.",
+      "t": "2026-08-16T07:25:12Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no GREEN state exists to commit. No files were modified by this dispatch -- action_shim/mod.rs and transition_reason.rs are unchanged from HEAD, no test file was created, nothing to stage. Escalated to nw-solution-architect for a decision on threading VmmExit diagnostic data (stderr_tail/exit_code/signal), the rootfs master path, and a console-log read through DriverError::StartRejected.reason in vm_driver.rs (and possibly overdrive-host/src/vmm.rs) before this step can proceed.",
+      "t": "2026-08-16T07:25:15Z"
     }
   ]
 }
