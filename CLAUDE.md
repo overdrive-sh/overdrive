@@ -25,10 +25,14 @@ This binds three roles:
 - **Crafters**: build only the API the design names. If you need a
   primitive the design doesn't specify, return a blocker — do not add a
   public method/type/variant on your own initiative.
-- **Orchestrators dispatching crafters**: for any design-sensitive
-  surface, pin the **exact signature** in the dispatch and explicitly
-  forbid inventing API. Granting latitude ("pick the cleanest shape,"
-  "add a variant if needed") *causes* divergence — do not.
+- **Orchestrators dispatching crafters**: point the crafter at the
+  authoritative design (the ADR / feature-delta / roadmap step) and
+  forbid inventing API. Do **not** pre-explore the codebase or restate
+  the signature yourself — the crafter reads the design and is bound by
+  the crafter rule above; duplicating that read is wasted work. The
+  orchestrator's job is to not *loosen* the contract: granting latitude
+  ("pick the cleanest shape," "add a variant if needed") *causes*
+  divergence — do not.
 - **Reviewers / orchestrators accepting work**: verify the output
   against the design's API shape, not just "tests pass." A green suite
   over a divergent API is a rejection, not an approval.
