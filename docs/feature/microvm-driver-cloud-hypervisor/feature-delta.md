@@ -4609,3 +4609,17 @@ version (v53.0).
 
 ---
 
+## Wave: DELIVER / [WHY] Upstream Issues
+
+**Resolved by DWD-24 (2026-08-16).** Old 03-01 exposed the upstream-contract
+contradiction: `StartRejected.reason: String` erased the driver-start cause,
+then `classify_driver_failure` reparsed that prose, although ADR-0032 §4 had
+already prescribed typed driver-start failures. DWD-24 and the amended
+ADR-0032, ADR-0082, and ADR-0083 resolve it with structured Exec/VM causes and
+a pure typed conversion to `TransitionReason`.
+
+The roadmap now executes 03-05 followed by 03-06; old 03-01 remains the
+blocked checkpoint audit row, not completed implementation. Every scenario
+S-VM-33…41 remains in scope; none is dropped, and this resolution introduces
+no issue or deferral.
+

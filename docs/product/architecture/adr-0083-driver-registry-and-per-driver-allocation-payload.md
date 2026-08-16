@@ -64,6 +64,14 @@ kinds}` (whose doc already reads *"iterated for the admission-rejection message"
 have existed since step 01-08. The dispatch-time fallback stays as multi-node-ready
 defense-in-depth. `brief.md` § 104 carries the same status note; see
 `distill/wave-decisions.md` DWD-23.
+**Amended 2026-08-16 (DWD-24, DELIVER Phase-03 upstream resolution).**
+§ D5 retires `classify_driver_failure(text, driver, command)` and pins the
+exact typed `DriverStartFailure` / `DriverStartClass` /
+`ExecStartFailure` / `VmStartFailure` API. Exec's existing operator-visible
+classes and verbatim detail are preserved; VM causes are constructed where
+their fields are known; every unknown uses the existing
+`DriverInternalError` fallback. Rows 13/14 remain exit-observer-only, and row
+15 is appended for the already-known post-READY `EXEC` delivery failure.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -550,42 +558,129 @@ deploys on the same node, so SD-5's boot probe (and, for the absence case, the
 registry) is a strictly better source. Slice 02's ACs are unaffected — the deploy
 still fails; the message improves.
 
-### D5 — `classify_driver_failure`'s `DriverType` parameter stops being unused
+### D5 — drivers author typed start causes; the shim converts, never classifies text
 
-`classify_driver_failure(text, _driver: DriverType, _command: &str)`
-(`action_shim/mod.rs:179-202`) documents both parameters as *"accepted for
-forward-compatibility … Phase 1's prefix table is `ExecDriver`-shaped only"*.
-That forward compatibility is now cashed: the function branches on `driver`
-first, and the exec prefix table is reached only under `DriverType::Exec`.
-**Zero exec test cases change** — Slice 02's stated learning hypothesis, and its
-falsifiable form.
-
-The VM arm maps `DriverError::StartRejected.reason` — which `VmDriver` builds
-from a **typed** `VmmError`, not from free text — onto these
-`TransitionReason` variants. **Cause-variant naming was re-assigned to me by
-Hera's DD-3** (she delivered the Disposition name and C-7's meaning, and handed
-the Cause variants over rather than dropping them):
-
-| # | Variant | Payload | Slice | Notes |
-|---|---|---|---|---|
-| 1 | `VmKernelNotFound` | `{ path: String }` | 02 | |
-| 2 | `VmRootfsNotFound` | `{ path: String }` | 02 | |
-| 3 | `VmHypervisorAbsent` | `{ searched: Vec<String> }` | 02 | Names the paths searched — D2's refinement |
-| 4 | `VmBootDeadlineExceeded` | `{ deadline_ms: u64, console_tail: Option<String> }` | 02 | The guest never beaconed |
-| 5 | `VmKernelFormatUnsupported` | `{ path: String, arch: String, detail: String }` | 02 | **C-7.** Says *format*, never "size cap". CH's verbatim `UefiTooBig` text goes in `AllocStatusRow.detail` |
-| 6 | `VmConfinementUnavailable` | `{ control: ConfinementControl, detail: String }` | 03 | The **fifth** variant US-VM-7 asks for — one variant, typed discriminant |
-| 7 | `VmGuestExitUnreported` | `{ vmm_exit_code: Option<i32>, vmm_signal: Option<u8> }` | 03 | The hypervisor ended with no agent report |
-| 8 | `VmVolumeSourceNotFound` | `{ path: String }` | 04 | |
-| 9 | `VmStorageDaemonAbsent` | `{ searched: Vec<String> }` | 04 | |
-| 10 | `VmGuestMountFailed` | `{ target: String, detail: String }` | 04 | The composite-lie case |
-| 11 | `VmStorageSocketTimeout` | `{ socket: String, waited_ms: u64 }` | 04 | |
-| 12 | `VmStorageSandboxUnavailable` | `{ requested: String, detail: String }` | 04 | |
-| 13 | `VmOutOfMemory` | `{ limit_bytes: u64, oom_kill_count: u64 }` | 01 | **Added 2026-08-11, D-3 fold-in.** Mid-run cgroup OOM, diagnosed from a post-mortem `memory.events` read (ADR-0082 § D8) — closes deferral D-3's *reduced* form for the VM path only. `StoppedBy` disposition is `Process`, same as any other crash; **not** `PlatformReclaimed` |
-| 14 | `VmStorageDaemonDied` | `{ socket: String, exit_code: Option<i32>, signal: Option<u8> }` | 04 | **Added 2026-08-11, gap-closure amendment.** Mid-run `virtiofsd` death (S-VM-65) — see the dedicated subsection below. `StoppedBy` disposition is `Process`, same as any other crash; **not** `PlatformReclaimed` |
+`classify_driver_failure(text, driver, command)` is retired. The action shim
+must not branch on `DriverType`, inspect `Display`, parse a path, or match an OS
+error sentence. The exact public boundary in `overdrive-core` is:
 
 ```rust
-pub enum ConfinementControl { Landlock, Seccomp, UidDrop, RlimitFsize, RlimitNofile, KvmAccess }
+pub enum DriverError {
+    StartRejected { failure: DriverStartFailure },
+    // NotFound / Io / NetnsEntry remain unchanged.
+}
+
+pub struct DriverStartFailure {
+    pub class: DriverStartClass,
+    /// Non-empty verbatim low-level diagnostic, preserved in
+    /// AllocStatusRow.detail. Never a classification input.
+    pub detail: String,
+}
+
+#[non_exhaustive]
+pub enum DriverStartClass {
+    Exec(ExecStartFailure),
+    Vm(VmStartFailure),
+    Unclassified { driver: DriverType },
+}
+
+#[non_exhaustive]
+pub enum ExecStartFailure {
+    BinaryNotFound { path: String },
+    PermissionDenied { path: String },
+    BinaryInvalid { path: String, kind: String },
+    CgroupSetupFailed { kind: String, source: String },
+}
+
+#[non_exhaustive]
+pub enum VmStartFailure {
+    KernelNotFound { path: String },
+    RootfsNotFound { path: String },
+    HypervisorAbsent { searched: Vec<String> },
+    BootDeadlineExceeded {
+        deadline_ms: u64,
+        console_tail: Option<String>,
+    },
+    KernelFormatUnsupported {
+        path: String,
+        arch: String,
+        detail: String,
+    },
+    ConfinementUnavailable {
+        control: ConfinementControl,
+        detail: String,
+    },
+    GuestExitUnreported {
+        vmm_exit_code: Option<i32>,
+        vmm_signal: Option<u8>,
+    },
+    VolumeSourceNotFound { path: String },
+    StorageDaemonAbsent { searched: Vec<String> },
+    GuestMountFailed { target: String, detail: String },
+    StorageSocketTimeout { socket: String, waited_ms: u64 },
+    StorageSandboxUnavailable { requested: String, detail: String },
+    GuestCommandDispatchFailed { detail: String },
+}
+
+pub enum ConfinementControl {
+    Landlock,
+    Seccomp,
+    UidDrop,
+    RlimitFsize,
+    RlimitNofile,
+    KvmAccess,
+}
+
+impl From<&DriverStartFailure> for TransitionReason;
 ```
+
+`DriverStartClass` is the family discriminator; there is deliberately no
+independent `driver` field on `StartRejected` that could contradict it. The
+`Unclassified` arm retains a `DriverType` only for a failure with no named
+class. Its conversion is always
+`DriverInternalError { detail: failure.detail.clone() }`.
+
+The conversion is total and one-to-one for known causes:
+
+| Typed Exec cause | Exact `TransitionReason` |
+|---|---|
+| `Exec(BinaryNotFound { path })` | `ExecBinaryNotFound { path }` |
+| `Exec(PermissionDenied { path })` | `ExecPermissionDenied { path }` |
+| `Exec(BinaryInvalid { path, kind })` | `ExecBinaryInvalid { path, kind }` |
+| `Exec(CgroupSetupFailed { kind, source })` | `CgroupSetupFailed { kind, source }` |
+
+The canonical Exec payload strings are preserved from the live operator
+surface: ENOEXEC uses `kind == "exec_format_error"`; cgroup setup uses only
+`"create_scope"` or `"place_pid"`. ENOENT, EACCES, and ENOEXEC are selected
+from structured OS error identity at `ExecDriver`, not from English `Display`
+text. Existing row `detail` remains the verbatim diagnostic. **Zero existing
+Exec operator-visible classifications change.**
+
+The VM mapping is:
+
+| # | `VmStartFailure` / mid-run source | Exact `TransitionReason` payload | Slice | Notes |
+|---|---|---|---|---|
+| 1 | `KernelNotFound { path }` | `VmKernelNotFound { path: String }` | 02 | Per-allocation path reopen; post-composition deletion is observable |
+| 2 | `RootfsNotFound { path }` | `VmRootfsNotFound { path: String }` | 02 | Exact configured master path |
+| 3 | `HypervisorAbsent { searched }` | `VmHypervisorAbsent { searched: Vec<String> }` | 02 | Spawn-time `NotFound` only; names every searched path |
+| 4 | `BootDeadlineExceeded { deadline_ms, console_tail }` | `VmBootDeadlineExceeded { deadline_ms: u64, console_tail: Option<String> }` | 02 | Tail comes from `VmmDiagnostics`, never timeout text |
+| 5 | `KernelFormatUnsupported { path, arch, detail }` | `VmKernelFormatUnsupported { path: String, arch: String, detail: String }` | 02 | **C-7.** Stable validator diagnosis; never "size cap" |
+| 6 | `ConfinementUnavailable { control, detail }` | `VmConfinementUnavailable { control: ConfinementControl, detail: String }` | 03 | One typed cause class, six controls |
+| 7 | `GuestExitUnreported { vmm_exit_code, vmm_signal }` | `VmGuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> }` | 03 | Boot-race `VmmExit`; stderr remains outer row `detail` |
+| 8 | `VolumeSourceNotFound { path }` | `VmVolumeSourceNotFound { path: String }` | 04 | `VmDriver`, outside `Vmm` |
+| 9 | `StorageDaemonAbsent { searched }` | `VmStorageDaemonAbsent { searched: Vec<String> }` | 04 | `VmDriver`, outside `Vmm` |
+| 10 | `GuestMountFailed { target, detail }` | `VmGuestMountFailed { target: String, detail: String }` | 04 | Guest-reported start-time mount failure |
+| 11 | `StorageSocketTimeout { socket, waited_ms }` | `VmStorageSocketTimeout { socket: String, waited_ms: u64 }` | 04 | `VmDriver`, outside `Vmm` |
+| 12 | `StorageSandboxUnavailable { requested, detail }` | `VmStorageSandboxUnavailable { requested: String, detail: String }` | 04 | `VmDriver`, outside `Vmm` |
+| 13 | mid-run `ExitEvent.oom` | `VmOutOfMemory { limit_bytes: u64, oom_kill_count: u64 }` | 01 | Exit observer only; never `DriverStartFailure` |
+| 14 | mid-run `ExitEvent.storage_daemon_died` | `VmStorageDaemonDied { socket: String, exit_code: Option<i32>, signal: Option<u8> }` | 04 | Exit observer only; checked ahead of `ExitKind` |
+| 15 | `GuestCommandDispatchFailed { detail }` | `VmGuestCommandDispatchFailed { detail: String }` | 02 | Appended: READY arrived but `EXEC` delivery failed before `Running` |
+
+Rows 1–12 and 15 are start-time causes and may cross
+`DriverError::StartRejected`. Rows 13 and 14 are mid-run facts and MUST NOT.
+Not every VM start cause originates in `VmmError`: kernel/rootfs preflight,
+the boot deadline, `VmmExit`, guest control, and storage-sidecar facts are
+owned by `VmDriver`; ADR-0082 D1.1 names the smaller typed `VmmError` subset.
 
 **Why #6 is one variant and not six**, against US-VM-2's *"no two distinct
 causes share a variant"*: the distinct causes there are all *"this host cannot
@@ -594,13 +689,13 @@ which is what Slice 03 asks for in as many words (*"a **fifth** variant minted
 in Slice 02's shape"*). A `String` discriminant would have been the stringly-
 typed version and is rejected.
 
-**Row 14 — why it is mid-run and not `classify_driver_failure`'s to
-construct, and why it must be checked ahead of `ExitKind`, not nested inside
-it.** *(2026-08-11, gap-closure amendment; closes the hedge S-VM-65 recorded:
+**Row 14 — why it is mid-run and not `DriverStartFailure`'s to construct,
+and why it must be checked ahead of `ExitKind`, not nested inside it.**
+*(2026-08-11, gap-closure amendment; closes the hedge S-VM-65 recorded:
 "`VmGuestMountFailed`'s sibling variant, or a distinct mid-run variant per
-ADR-0083 § D5".)* `classify_driver_failure`'s VM arm (opening text, above)
-maps `DriverError::StartRejected` — a **start-time** failure. A `virtiofsd`
-death mid-run is not a start failure; the allocation is already `Running`,
+ADR-0083 § D5".)* `DriverError::StartRejected` carries a **start-time**
+failure. A `virtiofsd` death mid-run is not a start failure; the allocation is
+already `Running`,
 and by the time the platform observes the death there is no `create()` call
 in flight to reject. The construction mechanism is instead the same shape
 ADR-0082 § D8 introduced for row 13: `ExitEvent` gains a second additive
@@ -667,17 +762,28 @@ AC 1/2's single discriminated classification (not three independent checks)
 actually hold across both the `Crashed` and `CleanExit` guest-reported
 outcomes, not only the `Crashed` one.
 
-**Fourteen distinct causes** (twelve from the original Slice 02–04 sweep,
-plus `VmOutOfMemory` — row 13, 2026-08-11 D-3 fold-in — and
-`VmStorageDaemonDied` — row 14, 2026-08-11 gap-closure amendment), against
-K3's "≥ 4 distinct". Per DD-3, the reclamation **disposition** is
-deliberately **not** in this table and must not be counted toward K3 —
-counting a disposition as a failure cause would let the feature satisfy K3
-without shipping a fourth diagnosis.
+**Fifteen distinct causes**: thirteen start-time classes (rows 1–12 and the
+append-only row 15) plus two mid-run classes (`VmOutOfMemory`, row 13, and
+`VmStorageDaemonDied`, row 14), against K3's "≥ 4 distinct". Per DD-3, the
+reclamation **disposition** is deliberately **not** in this table and must not
+be counted toward K3 — counting a disposition as a failure cause would let the
+feature satisfy K3 without shipping a fourth diagnosis.
 
 `TransitionReason` is `#[non_exhaustive]` (`transition_reason.rs:87`) and every
-addition is appended, preserving rkyv discriminants — the same discipline
-`StoppedBy` states verbatim at `:237-241`.
+addition is appended, preserving rkyv discriminants — row 15 therefore stays
+physically after rows 13/14 despite being a start-time cause. The same
+discipline is stated verbatim for `StoppedBy` at `:237-241`.
+
+**Enforcement.** Rust exhaustiveness is the first layer: the core-owned
+`From<&DriverStartFailure>` match names every current nested variant, so an
+additive class cannot compile until its transition mapping is explicit. The
+structural layer is the ADR-0032 `xtask::dst_lint` rule rejecting the retired
+`reason: String` field and `classify_driver_failure` function. The behavioral
+layer is (a) a table test over every Exec/VM class and payload, (b) unchanged
+Exec operator assertions including `kind == "exec_format_error"`, and (c) the
+S-VM acceptance scenarios reading `workload describe`, including the
+`DriverInternalError` unknown fallback. These layers answer different
+questions; no text convention is trusted as a contract.
 
 **Two documentation corrections land in the same commits**, because this
 vocabulary is the one being touched and § "Documentation" forbids leaving a
@@ -1664,3 +1770,26 @@ projection. The `discriminant_offset_from_end() == None` deferral
 exhaustive `match` with a `Vm` arm. Where the `Vm` behaviour needs step 01-08's
 `AllocationSpec.driver` / `DriverPayload` work, the arm is
 `todo!("RED scaffold: ... 01-08")` gated with `#[expect(clippy::todo)]`.
+
+---
+
+## Amendment 2026-08-16 — typed start-failure transport and Phase-03 recovery
+
+Checkpoint `3222f030` demonstrated that the old D5 shape was internally
+contradictory: it claimed VM classification came from typed `VmmError`, while
+requiring `VmDriver` to flatten that value into `StartRejected.reason: String`
+and the action shim to classify the string later. It also grouped the boot
+clock, `VmmExit`, VM-local storage, and mid-run exit facts under `VmmError`,
+although those facts belong to different owners.
+
+The revised D5 is the single current contract. It makes source ownership
+explicit, preserves the complete Exec surface, appends the known post-READY
+command-dispatch cause, and keeps rows 13/14 outside the start-error type. The
+roadmap recovery is recorded in feature DWD-24: completed step 03-01 remains a
+checkpoint, then a typed upstream vertical slice and the remaining named
+vocabulary discharge S-VM-33…41 without changing execution history.
+
+Rejected alternatives are the same three ruled in ADR-0032's 2026-08-16
+amendment: direct `TransitionReason` carriage (too broad), per-driver text
+parsers (lossy and presentation-coupled), and independent driver/cause fields
+(contradictory states representable). No compatibility parser remains.

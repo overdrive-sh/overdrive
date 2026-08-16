@@ -8,6 +8,15 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-16 (DELIVER Phase-03 upstream-contract resolution).**
+`VmmError` now has exact structured variants for the causes the adapter can
+know; `VmProcess` exposes a live `VmmDiagnostics` snapshot backed by the same
+bounded console/stderr capture as final `VmmExit.stderr_tail`; and
+`VmDriver::start` maps those facts into ADR-0083's typed
+`DriverStartFailure`. `Display` text is diagnostic only and is never reparsed.
+This closes checkpoint `3222f030` without changing `VmmProbeError` or the
+wire→probe→use composition invariant.
+
 **Amended 2026-08-11 (fold-in of prerequisites, same DESIGN pass, user
 ruling)** — § D8 is added: a new `CgroupAccounting` port gives the VM
 mid-run exit path a post-mortem read of the allocation scope's
@@ -269,6 +278,87 @@ implementation's `Virtualizer` carried beyond these (`configure`,
 | `SimVmm` | `overdrive-sim` | `adapter-sim` |
 | `VmDriver` (implements `Driver` over `Arc<dyn Vmm>`) | `overdrive-worker` | `adapter-host` |
 | `overdrive-init` (the in-guest PID 1) | `overdrive-init` (**new**) | `binary` |
+
+#### D1.1 — `VmmError` preserves the cause at source; `VmProcess` exposes live diagnostics
+
+The exact adapter-boundary error is:
+
+```rust
+pub enum VmmError {
+    HypervisorAbsent {
+        searched: Vec<String>,
+        source: std::io::Error,
+    },
+    RootfsNotFound {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    ConfinementUnavailable {
+        control: ConfinementControl,
+        detail: String,
+    },
+    Create {
+        detail: String,
+    },
+    Io {
+        operation: String,
+        path: Option<PathBuf>,
+        source: std::io::Error,
+    },
+}
+```
+
+`HypervisorAbsent` is used only for a spawn-time `NotFound` and carries every
+path the adapter searched. `RootfsNotFound` is used only when the configured
+master disappears before or during per-launch staging. A permission error,
+short read, clone failure, malformed response, or other I/O failure is not
+relabelled as absence; it remains `Io` or `Create` and reaches the explicit
+unclassified driver fallback. `ConfinementUnavailable` is the one typed
+adapter-local mapping to ADR-0083's confinement cause. Storage-daemon and
+guest-mount failures remain `VmDriver` concerns; volume information does not
+enter this port.
+
+`VmProcess` gains one required field and one new core value:
+
+```rust
+pub struct VmProcess {
+    pub control: VmControl,
+    pub exit: VmExitWatch,
+    pub diagnostics: VmmDiagnostics,
+}
+
+#[derive(Clone)]
+pub struct VmmDiagnostics { /* private shared bounded capture */ }
+
+impl VmmDiagnostics {
+    /// Pure snapshot of the guest-console / VMM-stderr tail captured so far.
+    pub fn console_tail(&self) -> Option<String>;
+}
+```
+
+`VmmDiagnostics::console_tail` is **pure-function / return-only**. Its closed
+universe is the adapter-owned bounded capture for this one `VmProcess`; it may
+read no file, socket, clock, process, or global. `VmmExit.stderr_tail` is the
+final snapshot of that same capture, never a separately assembled diagnostic.
+`CloudHypervisorVmm` and `SimVmm` must satisfy this live/final coherence in the
+existing VMM equivalence suite. This is compile-time-enforced at the port
+boundary because every successful `Vmm::create` must return the field.
+
+`VmDriver` owns the total structural mapping because it is the boundary from
+`Vmm::create -> Result<_, VmmError>` to `Driver::start -> Result<_,
+DriverError>`:
+
+| `VmmError` | `DriverStartClass` | Verbatim `DriverStartFailure.detail` |
+|---|---|---|
+| `HypervisorAbsent { searched, source }` | `Vm(HypervisorAbsent { searched })` | `source.to_string()` |
+| `RootfsNotFound { path, source }` | `Vm(RootfsNotFound { path: path.display().to_string() })` | `source.to_string()` |
+| `ConfinementUnavailable { control, detail }` | `Vm(ConfinementUnavailable { control, detail: detail.clone() })` | `detail` |
+| `Create { detail }` | `Unclassified { driver: DriverType::Vm }` | `detail` |
+| `Io { operation, path, source }` | `Unclassified { driver: DriverType::Vm }` | one verbatim diagnostic naming `operation`, `path` when present, and `source` |
+
+No `VmmError::Display` string selects a class. `VmmProbeError` remains a
+composition-time `health.startup.refused` cause and never converts into a
+per-allocation `DriverError` or `TransitionReason`.
 
 > **Amendment 2026-08-12 (gaps 1 & 2 — two `overdrive-core` residents pinned).**
 > "`VmConfig` + every value type below" resolves to concrete `overdrive-core`
@@ -684,11 +774,25 @@ impl KernelImage {
 }
 ```
 
-`KernelFormatError` carries the **format** problem and the arch — and
-`classify_driver_failure`'s VM arm maps it to
-`TransitionReason::VmKernelFormatUnsupported { path, arch, detail }`
-(ADR-0083 § D5). The operator never reads `UefiTooBig`; CH's verbatim text
-lives in `AllocStatusRow.detail`, never in the variant's meaning.
+`KernelFormatError` carries the **format** problem and the arch. Because the
+path can disappear or be replaced after `overdrive serve` constructed the
+original `KernelImage`, `VmDriver::start` reopens the configured path, reads the
+same bounded magic window, and calls this pure validator for every allocation
+immediately before `Vmm::create`. `NotFound` constructs
+`DriverStartClass::Vm(VmStartFailure::KernelNotFound { path })`; a format
+rejection constructs
+`DriverStartClass::Vm(VmStartFailure::KernelFormatUnsupported { path, arch,
+detail })`. Both convert structurally to the corresponding
+`TransitionReason`; neither invokes CH and neither parses an error string.
+This per-allocation check is what makes the post-composition delete/replace
+TOCTOU scenarios observable as allocation failures rather than process-startup
+refusals.
+
+In `VmKernelFormatUnsupported`, the payload `detail` is the validator's stable
+format diagnosis. `AllocStatusRow.detail` remains the separate verbatim
+low-level diagnostic channel. The operator never reads `UefiTooBig`; CH's text,
+if another race makes it available, may appear only in row `detail`, never in
+the variant's meaning.
 
 > **Amendment 2026-08-14 (gap 6 — two 01-06 first-implementor accessors blessed, 01-07 review, user ruling).** Matching gaps 1–5 of the 2026-08-12 amendment, this records two accessors step 01-06 (the `CloudHypervisorVmm` / `SimVmm` adapters) added that the design had not named, both sanctioned here as first-implementor surface (the 01-06 review ACCEPTED both on substance): **`KernelImage::path(&self) -> &Path`** (`crate::vm::config`, `config.rs:201`) — a plain validated-path read, the sibling of `RootfsPlan::master()` (§ D2) and `KernelCmdline::as_str()` (§ D2), which the adapter needs to hand the validated `--kernel` path to the spawn; and **`VmExitWatch::new(oneshot::Receiver<VmmExit>) -> Self`** (§ D3, `vmm.rs:202`) — the only constructor for that private-field return type, structurally forced (the adapter's watcher task must build the value it fills). Both are additive, non-lie-bearing accessors; neither reopens any § D2 substrate-lie decision. Documentation-trail entry only, not a design change.
 
@@ -733,7 +837,11 @@ blocker.
 ### D3 — `create` returns a process, an exit watch, and a control handle — because `start` races three outcomes
 
 ```rust
-pub struct VmProcess { pub control: VmControl, pub exit: VmExitWatch }
+pub struct VmProcess {
+    pub control: VmControl,
+    pub exit: VmExitWatch,
+    pub diagnostics: VmmDiagnostics,
+}
 pub struct VmControl { pub pid: u32, pub api_socket: PathBuf }
 
 /// Adapter-agnostic await on the hypervisor process's own ending. Wraps
@@ -769,15 +877,16 @@ The three-way race is `VmDriver::start`'s, and it is **pinned** (SD-3, and
 CLAUDE.md § "Implement to the design" — crafters must not improvise it):
 
 ```rust
-let VmProcess { control, mut exit } = vmm.create(&config).await?;
+let VmProcess { control, mut exit, diagnostics } =
+    vmm.create(&config).await.map_err(/* structural VmmError mapping, D1.1 */)?;
 let outcome = tokio::select! {
     biased;
-    ready = beacon.accept_ready()          => /* guest signalled READY  → Ok(handle) */,
-    ended = exit.recv()                    => /* VMM died with no beacon → Err(StartRejected) */,
-    ()    = clock.sleep(VM_BOOT_DEADLINE)  => /* deadline                → Err(StartRejected) */,
+    ready = beacon.accept_ready()          => /* guest signalled READY  → EXEC continuation */,
+    ended = exit.recv()                    => /* preserve VmmExit fields → typed StartRejected */,
+    ()    = clock.sleep(VM_BOOT_DEADLINE)  => /* snapshot diagnostics    → typed StartRejected */,
 };
-// On the Ok path `exit` is STILL LIVE and is moved, together with the
-// accepted beacon session, into the per-alloc exit watcher.
+// On the Ok path `exit` and `diagnostics` are STILL LIVE and move with the
+// accepted beacon session into the per-alloc exit watcher.
 ```
 
 - **`biased;` is load-bearing.** If the beacon and the VMM exit are both ready,
@@ -785,12 +894,16 @@ let outcome = tokio::select! {
   ending belongs to the exit watcher, not to `start`. **This is only meaningful
   because `VmExitWatch::recv` borrows rather than consumes** — the watch must
   outlive the race or the exit watcher receives nothing.
-- **The VMM-exit arm carries CH's stderr into the diagnosis** — that is where
-  the `[D5]` "name the real problem" text lives, and it is why the arm does
-  double duty regardless of how fast CH exits. Titan flagged CH's
-  failure-to-exit *latency* as **unmeasured**; DELIVER measures it, and if it
-  approaches the deadline, SD-3 option C (an asynchronous readiness seam) is
-  the named re-opening.
+- **The VMM-exit arm consumes the returned value; it never discards it.**
+  `Some(VmmExit { exit_code, signal, stderr_tail })` constructs
+  `VmStartFailure::GuestExitUnreported { vmm_exit_code: exit_code,
+  vmm_signal: signal }`, while `DriverStartFailure.detail` is the captured
+  `stderr_tail` or a stable channel-closed diagnostic when the watch yields
+  `None`. The operator-visible typed reason therefore carries code/signal and
+  the row retains CH's verbatim stderr. Titan flagged CH's failure-to-exit
+  *latency* as **unmeasured**; DELIVER measures it, and if it approaches the
+  deadline, SD-3 option C (an asynchronous readiness seam) is the named
+  re-opening.
 - **`VM_BOOT_DEADLINE = 30 s`**, and it is a *policy constant in the driver*,
   not a persisted field and not a magic number. Derivation: the slowest
   measured substrate is **8.7 s** (nested aarch64, module loads + nesting;
@@ -798,7 +911,10 @@ let outcome = tokio::select! {
   three `CONFIG_VSOCKETS=m` module loads — 30 s is ~3.4× the worst observation.
   There is no per-workload input to persist, so § "Persist inputs, not derived
   state" is satisfied trivially; when one appears, the deadline becomes a
-  function of it.
+  function of it. The deadline arm constructs
+  `VmStartFailure::BootDeadlineExceeded { deadline_ms: 30_000,
+  console_tail: diagnostics.console_tail() }`; the live diagnostic is never
+  reconstructed from timeout text.
 - **Every non-`Ok` arm cleans up before returning**: SIGKILL the VMM pid,
   `cgroup.kill` the scope, unlink the run directory and the per-launch clone.
   This is Slice 03's *"no leaked hypervisor processes or rootfs copies"* AC,
@@ -1168,9 +1284,12 @@ artifact may state or imply otherwise.
 > - VmDriver writes `EXEC <argv>` on the just-accepted session. **Write ok** →
 >   store the session in § D4's `LiveVm.beacon` (now `Some`), move the still-live
 >   `exit` watch into the exit watcher (§ D3), return `Ok(handle)` → **Running**.
->   **Write err** → treat as `StartRejected` exactly like the other non-Ok arms
->   (§ D3's "every non-`Ok` arm cleans up"): SIGKILL the VMM, `cgroup.kill`, unlink
->   dir + clone, release the supervision claim → **Failed**, no leak.
+>   **Write err** → construct `VmStartFailure::GuestCommandDispatchFailed {
+>   detail }`, with the same verbatim diagnostic in `DriverStartFailure.detail`,
+>   then treat it as `StartRejected` exactly like the other non-Ok arms (§ D3's
+>   "every non-`Ok` arm cleans up"): SIGKILL the VMM, `cgroup.kill`, unlink dir +
+>   clone, release the supervision claim → **Failed**, no leak. It is a known
+>   typed cause, not the unclassified fallback.
 > - The honest consequence: **Running ⟹ READY arrived AND `EXEC` was delivered** —
 >   Running now means "guest up and command dispatched," strictly ≥ the ready
 >   beacon, so S-VM-01's *"Running reached no earlier than the ready beacon"* holds

@@ -1981,6 +1981,162 @@ adds the roadmap step.**
 
 ---
 
+### DWD-24 — `StartRejected` becomes a typed failure envelope; Phase 03 resumes through an upstream-contract vertical slice (2026-08-16, DESIGN ruling — Morgan)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`)
+per explicit dispatch. No code, test, execution-log, or history file is edited
+by this ruling.**
+
+**The blocker, grounded.** Checkpoint `3222f030` stopped old roadmap step
+03-01 before RED and recorded that its two-file scope could not satisfy its own
+S-VM-33/34/35/36/41 criteria:
+
+1. `DriverError::StartRejected { driver, reason: String }` discarded the
+   structured cause before the action shim saw it.
+2. `VmDriver::start` discarded the resolved `VmmExit`, including exit code,
+   signal, and stderr tail.
+3. The rootfs pre-check exposed a bare I/O error with no exact configured path.
+4. The boot-deadline arm had no live console-tail value.
+5. Kernel validation at `serve` composition made S-VM-33 and S-VM-41's former
+   initial conditions unable to create an allocation-level `Failed` row.
+
+No production or test code landed in old 03-01. Treating that checkpoint as a
+completed delivery step would therefore be false; reopening its original scope
+would still be unbuildable.
+
+**Ruling — typed contract, exact public shape.** ADR-0032 §4 and ADR-0083 §D5
+now pin:
+
+```rust
+pub enum DriverError {
+    StartRejected { failure: DriverStartFailure },
+    // existing non-start variants unchanged
+}
+
+pub struct DriverStartFailure {
+    pub class: DriverStartClass,
+    pub detail: String,
+}
+
+pub enum DriverStartClass {
+    Exec(ExecStartFailure),
+    Vm(VmStartFailure),
+    Unclassified { driver: DriverType },
+}
+
+impl From<&DriverStartFailure> for TransitionReason;
+```
+
+The nested Exec and VM variants/fields are exactly those in ADR-0083 §D5.
+`failure.detail` is non-empty verbatim low-level text and remains
+`AllocStatusRow.detail`; no consumer may classify from its spelling. The
+conversion is pure and total. `Unclassified` maps to the existing
+`DriverInternalError { detail }` and is the only unknown fallback.
+
+**Exec preservation.** The three live binary classifications remain byte- and
+meaning-compatible: ENOENT → `ExecBinaryNotFound`, EACCES →
+`ExecPermissionDenied`, ENOEXEC → `ExecBinaryInvalid { kind:
+"exec_format_error" }`. Cgroup setup retains `kind == "create_scope" |
+"place_pid"`. The driver selects these from structured OS error identity; the
+action shim no longer owns an Exec prefix table. Existing verbatim detail is
+preserved.
+
+**VM/VMM field preservation.** ADR-0082 D1.1 pins structured `VmmError`
+variants and adds `VmProcess.diagnostics: VmmDiagnostics`. Its pure
+`console_tail()` snapshot and final `VmmExit.stderr_tail` read the same bounded
+capture. `VmDriver` owns the structural join from VMM, per-allocation artifact
+verification, boot clock, `VmmExit`, beacon/EXEC, and VM-local storage facts
+into `VmStartFailure`. `VmmProbeError` remains composition-time startup refusal
+and never becomes an allocation cause. The already-known post-READY EXEC write
+failure receives append-only row 15,
+`VmGuestCommandDispatchFailed { detail }`; mid-run rows 13/14 remain outside
+`DriverStartFailure`.
+
+**Reuse and effect-contract analysis.** No subsystem or service is added. The
+existing Driver/VMM/action-shim boundaries are extended; each new value exists
+only because no current type can carry the required contract without making an
+invalid state representable (`TransitionReason` is too broad for a start-error
+port; terminal-only `VmmExit` cannot supply a live deadline snapshot).
+
+| Component / boundary | Reuse or no-existing-alternative ruling | Contract shape | Aggregate-bounded universe | Declared delta | Restricted capabilities | Assertion mechanism |
+|---|---|---|---|---|---|---|
+| `DriverStartFailure` + `From<&DriverStartFailure>` | **New value; no existing alternative.** Reusing `TransitionReason` admits healthy/reconciler-only variants; reusing `String` loses fields. | pure-function / return-only | One `DriverStartFailure`; closed nested enum set in ADR-0083 §D5 | Return exactly one `TransitionReason`; mutate nothing | None | Rust exhaustive match + complete variant-table test |
+| `ExecDriver::start` classification edge | Reuse existing ExecDriver; replace only its string-flattening constructors | bounded-change | One allocation's cgroup scope, child process, supervision entry and emitted start result | Existing success delta unchanged; on rejection return one typed Exec class + verbatim detail; no additional surviving process/scope | Existing `CgroupFs`, `Clock`, and process-spawn boundary only | Existing Exec acceptance outputs unchanged; fault cases vary diagnostic wording while holding OS error identity fixed |
+| `VmDriver::start` | Reuse existing VmDriver and three-way race; extend fact preservation | bounded-change | One allocation's configured kernel/rootfs paths, run dir, beacon listener/session, cgroup scope, VMM process, diagnostics handle, live-allocation claim | Success delta unchanged; each failure returns one typed VM/unclassified cause and performs the already-required cleanup to no surviving VMM/scope/run-dir/clone | Required `Vmm`, `Clock`, `CgroupFs`, `CgroupAccounting`, and typed `VmHostLayout`; no global OS object is passed into core | S-VM-33…37/41 plus component fault matrix; cleanup assertions on every non-Ok arm |
+| Per-allocation kernel/rootfs verification inside `VmDriver::start` | Reuse `KernelImage::validate` and configured `RootfsPlan`; no second validator | bounded-change with empty mutation set | Exactly the configured kernel path's bounded magic window and configured rootfs-master metadata for one allocation | **∅** — reads only; neither path nor surrounding directory may change | The adapter-host filesystem read capability already owned by VmDriver; no write surface is exposed to the pure validator | Before/after metadata/content identity for the two fixture paths; TOCTOU S-VM-33/34/41 proves read timing |
+| `CloudHypervisorVmm::create` | Reuse existing adapter; widen `VmmError` and return value only | bounded-change | One per-launch rootfs clone, one CH process, one exit watch, one bounded diagnostics capture, and the configured run-dir/API-socket names | Success creates exactly one clone/process/watch/capture; failure leaves no process or clone and returns one typed `VmmError` | Typed `VmConfig`, host process spawn, filesystem clone, and bounded stderr capture; probe remains mandatory before use | Existing VMM equivalence + fault catalogue + real adapter probe; live/final tail coherence assertion |
+| `SimVmm::create` | Reuse existing simulation adapter; no production shape concession | bounded-change | One scripted VM process/watch/capture in simulator state | Mirror the host adapter's success/failure observations without real I/O | Injected script only | Same VMM equivalence sequence as host adapter |
+| `VmmDiagnostics::console_tail` | **New value; no existing alternative.** `VmmExit` is available only after termination and cannot satisfy the deadline arm. | pure-function / return-only | One process's private bounded capture | Return a snapshot; mutate nothing and perform no I/O | Private shared capture handle only | Repeated-read stability + final `VmmExit.stderr_tail` coherence |
+| `VmmError → DriverStartFailure` join in `VmDriver` | Reuse existing core error boundary; make its mapping structural | pure-function / return-only for the mapping itself | One `VmmError` plus the already-known driver context | Return one typed VM/unclassified failure; mutate nothing | None beyond typed inputs | Exhaustive mapping table; changing `Display` text cannot change class |
+| Action-shim start/restart rejection arm | Reuse ADR-0023 writer; delete classifier responsibility | bounded-change | One target allocation row and its one corresponding lifecycle broadcast event | Write `state: Failed`, the converted reason, and the exact verbatim detail once; no other allocation row changes | Existing `DriverRegistry` and observation/event writer interfaces only | Initial-start + restart-start acceptance equality; row/event reason byte equality |
+| `xtask::dst_lint` retired-shape guard | Reuse existing AST lint; no new enforcement tool | pure-function / return-only over loaded source text | Driver trait and action-shim source ASTs | Emit diagnostics only; source delta **∅** | Read-only source input | Gold tests reject `reason: String` and `classify_driver_failure`, accept the typed shape |
+
+Every bounded-change row declares its complete mutation universe and exact
+delta; everything outside that universe is preserved. The composition-root
+invariant remains **wire → probe → use** for both host and sim VMM adapters. The
+three enforcement layers are orthogonal: Rust types/exhaustiveness establish
+shape, the AST lint rejects regression to the retired API, and behavioral
+fault/acceptance tests establish real-environment semantics.
+
+**Scenario reconciliation — all S-VM-33…41 remain and no ID moves.**
+
+- **S-VM-33** keeps `VmKernelNotFound { path }`, but its Given is corrected to
+  valid-at-composition then delete-before-this-start.
+- **S-VM-34** remains the missing-rootfs vertical proof and becomes the first
+  end-to-end consumer of the typed transport.
+- **S-VM-35** retains its existing hypervisor-binary TOCTOU shape.
+- **S-VM-36** receives the real deadline milliseconds and live console tail;
+  it remains the KVM-required failure in the named-cause group.
+- **S-VM-37** uses `DriverStartClass::Unclassified { driver: Vm }` and the
+  existing `DriverInternalError` result; no new catch-all variant is minted.
+- **S-VM-41** keeps the format diagnosis, but its Given is corrected to
+  valid-at-composition then replace-before-this-start.
+- **S-VM-38** remains the pre-scheduling `[service]+[vm]` rejection and is
+  technically independent of the typed-error chain.
+- **S-VM-39** retains acceptance/scheduling and now closes Slice-02's existing
+  "accepted and run" clause by requiring the VM allocation to reach Running.
+- **S-VM-40** does the same when its first scheduled firing becomes due; it is
+  therefore reclassified `@requires-kvm`. The current count becomes 46 of 88.
+
+The two TOCTOU corrections change only reachability, never expected operator
+outcome. The S-VM-39/40 additions close an already-present Slice-vs-DISTILL gap;
+no scenario is removed, weakened, renumbered, or replaced.
+
+**DELIVER re-decomposition — execution history remains immutable.**
+
+| Step | Current disposition | Scope / scenarios | Dependency |
+|---|---|---|---|
+| `03-01` | Completed checkpoint only | Records the pre-RED blocker; owns no test or S-VM scenario | historical `01-08` |
+| `03-05` | New upstream-contract vertical slice | Exact typed API across core/Exec/Vm/VMM/shim plus the real S-VM-34 rootfs `serve + deploy` proof | `01-08` |
+| `03-06` | New remaining named-cause delivery | S-VM-33, 35, 36, 41 | `03-05` |
+| `03-02` | Revised, ID preserved | S-VM-37 typed unknown fallthrough | `03-06` |
+| `03-03` | Revised, ID preserved | S-VM-38; independent semantic rejection | `01-08` |
+| `03-04` | Revised, ID preserved | S-VM-39/40 accepted, scheduled, and run | `03-03` |
+
+03-05 owns an operator-visible S-VM-34 proof rather than landing a horizontal
+mechanism with only component tests. 03-06 then extends the same production
+path. Pending IDs 03-02…04 are not repurposed or renumbered. The phase gains
+two steps (32 → 34 total); `.develop-progress.json` keeps all 15 completed IDs,
+keeps old 03-01 completed, and inserts 03-05/03-06 ahead of the remaining
+phase-03 work. `execution-log.json` and every history artifact remain untouched.
+
+**Rejected alternatives.** (1) Directly carry `TransitionReason` in
+`StartRejected`: allows healthy and reconciler-only reasons at a driver-failure
+boundary. (2) Add a VM text parser beside the Exec parser: still cannot recover
+discarded fields and binds correctness to upstream prose. (3) Mutate completed
+03-01's execution record into a success: falsifies what checkpoint `3222f030`
+actually recorded. (4) Land a no-scenario typed-transport step: violates the
+production-entry vertical-slice rule; S-VM-34 is the thin live loop.
+
+**Files touched by this entry.** `docs/product/architecture/adr-0032-…md`,
+`adr-0082-…md`, `adr-0083-…md`; this `wave-decisions.md` entry and Changelog;
+`distill/test-scenarios.md`; `slices/slice-02-boot-failure-vocabulary.md`;
+`deliver/roadmap.json`; and `deliver/.develop-progress.json`. No `brief.md`,
+Rust source, test source, `CLAUDE.md`, execution log, history, or issue is
+touched or created.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -1998,3 +2154,4 @@ adds the roadmap step.**
 - 2026-08-14 — Guest vsock provisioning ruled (DWD-21), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch. Step 01-08's walking skeleton surfaced a spike→ship regression: the 01-03 `overdrive-init` + 01-04 fixture lost the spike's proven vsock module-load, so on the stock `CONFIG_VSOCKETS=m` kernel the fixture stages, the guest's `socket(AF_VSOCK)` fails `EAFNOSUPPORT` and never beacons — `#[ignore]`ing S-VM-01/02/05/74. Ruled (c) reconcile: `overdrive-init` `finit_module`-loads the three staged vsock `.ko` before `connect_beacon` (no-op on a vsock=y kernel) and the 01-04 fixture stages them from the same `uname -r` as the kernel (the spike's proven-12/12 mechanism / the `[D2]` fallback), WHILE the production appliance kernel builds vsock in (ADR-0068 §4). Lands as the 01-08 review-remediation touching `overdrive-init/src/main.rs` + `overdrive-testing/src/vm_fixture.rs` (both added to 01-08's `source_directories`). ADR-0068 gains §4; ADR-0082 §D4 gains a loader/staging amendment; ADR-0083 unaffected; `brief.md` consistent, untouched. `deliver/roadmap.json` step 01-08: one additive criterion + two source files + an `implementation_notes` remediation note. No scenario changed; no GitHub issue created.
 - 2026-08-14 — Alloc→driver index MISS disposition ruled (DWD-22), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-08 review's MAJOR finding D1. ADR-0083 §D2a(b) pinned a typed `ShimError::UnknownDriverForAlloc { alloc_id }` on an `alloc_drivers` index miss; the shipped `resolve_drivers_for_alloc` (`action_shim/mod.rs:668-678`) instead **broadcasts** the stop/terminal call to every composed driver, and the variant exists nowhere in the tree. Investigated the four consumer arms (`FinalizeFailed` `:1291`, `RestartAllocation` stop-half `:1604`, `StopAllocation` `:1858`/`:1922`) and the regression that forced the fallback (`stable_does_not_stop_probe_supervision.rs` calls `on_alloc_running` directly, leaving the per-boot index empty). Ruled **(a) bless the broadcast, retire the typed-error pin**: the ADR's rationale attacked a strawman (broadcast reaches the *owning* driver — including `VmDriver` — so no orphan is stranded, unlike the "route to `ExecDriver`" fallback it feared), and the typed error taken literally would route a legitimate per-boot miss to nobody and *create* the orphan SD-1 prevents; runtime confirmed safe (every `Driver::stop`/`on_alloc_*` is NotFound-tolerant/no-op). Options (b)/(c) rejected — they reintroduce the orphan on the stop arms. **No code change** — the shipped code and all four call-site comments already match the amended contract; the crafter only confirms the § D2a(b) citations resolve to the amended text, and MUST NOT implement `UnknownDriverForAlloc`. Amended ADR-0083 § D2a(b) + `brief.md` § 104; § D3 / § D2a(c) name no typed error and are untouched. `deliver/roadmap.json` not touched (no code change ⇒ no AC/scope edit). No `test-scenarios.md` or Rust file touched. No GitHub issue created.
 - 2026-08-14 — `[vm]` "at admission" capability rejection ruled (DWD-23), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-09 review's MEDIUM finding D2. Roadmap step 01-09 AC #1 promised "rejects `[vm]` at admission"; the shipped behavior admits the spec (`Inserted`) and rejects at DISPATCH (`action_shim` `drivers.get(kind) → None → StartRejected → Failed` naming the capability, S-VM-12) — SAFE, but not "at admission," and never in 01-09's `handlers.rs`-excluding scope. Ruled **(b)**: "at admission" stays required DESIGN intent (SD-5, ADR-0083 §§ D1/D2/D4, `brief.md` § 104); the dispatch-time fallback is ratified as a SAFE INTERIM and STAYS as multi-node-ready defense-in-depth; the admission gate (`handlers.rs::submit_workload` → `state.drivers.supports(..)` before `put_if_absent`, a cheap addition since `AppState.drivers` + `DriverRegistry::{supports,kinds}` exist since 01-08) is scoped to a **follow-up step, pending user build-vs-defer approval**. Option (a) (ratify dispatch-time, drop "at admission") rejected — discards deliberate design, contradicts § D4's "the deploy still fails." Reworded step 01-09 AC #1 to shipped behavior + `implementation_notes` scope note; added implementation-status notes to `brief.md` § 104 + ADR-0083 status header; SPECIFIED (not applied — docs-only) the `action_shim`/`error.rs`/`vm_walking_skeleton.rs` "step 01-09" comment corrections. **No GitHub issue created — follow-up surfaced for approval.**
+- 2026-08-16 — Phase-03 typed driver-failure upstream resolution ruled (DWD-24). `StartRejected.reason: String` and `classify_driver_failure` are retired in favor of exact `DriverStartFailure` / Exec / VM classes and a pure exhaustive conversion to `TransitionReason`; Exec's observable classes and verbatim detail stay unchanged; unknown VM/VMM failures reuse `DriverInternalError`. Checkpoint `3222f030` is retained honestly as completed old 03-01 with no scenario ownership. Roadmap adds 03-05 (typed contract + S-VM-34 vertical proof) and 03-06 (S-VM-33/35/36/41), then preserves 03-02/03/04 for S-VM-37/38/39/40 with corrected dependencies. S-VM-33/41 receive reachable post-composition TOCTOU Givens; S-VM-39/40 now prove the VM runs, making S-VM-40 the 46th `@requires-kvm` scenario. Total remains 88; no scenario removed or renumbered. No code, test source, execution log/history, issue, or commit.

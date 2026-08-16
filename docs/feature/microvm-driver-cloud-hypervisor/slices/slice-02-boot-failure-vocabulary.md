@@ -11,13 +11,16 @@ spec is rejected at deploy time naming exactly what is missing.
 
 ## Learning hypothesis
 
-`classify_driver_failure`'s already-present-but-unused `DriverType` parameter
-(`action_shim/mod.rs:200`, documented at `:193-196` as *"accepted for
-forward-compatibility"*) is the correct seam for a second driver's failure vocabulary —
-no new mechanism, no change to exec classification.
+A typed `DriverStartFailure` created where the cause is still known, followed by
+the pure core-owned `From<&DriverStartFailure> for TransitionReason` conversion,
+is the correct seam for a second driver's failure vocabulary. The action shim is
+a persistence boundary, not an error-text classifier; `classify_driver_failure`
+and `StartRejected.reason: String` are retired by DWD-24 / ADR-0032 §4 / ADR-0083
+§D5.
 
-**Predicted:** four distinct VM failure modes route to four distinct `TransitionReason`
-variants through the existing seam, and zero exec test cases change.
+**Predicted:** five distinct VM failure modes route to five distinct
+`TransitionReason` variants without parsing `Display` text, the verbatim diagnostic
+still reaches row `detail`, and zero existing Exec operator classifications change.
 
 > **`superseded-by-DESIGN` (2026-08-11, GH #42) — C-7.** The count is **five, not
 > four**. The spike's measured P1 failure is a kernel that **is** found and is
@@ -30,8 +33,9 @@ variants through the existing seam, and zero exec test cases change.
 > ADR-0083 § D5), fed by the **pure** pre-flight `KernelImage::validate(path,
 > arch, header)` that runs **before** CH ever sees the file (ADR-0082 § D2); CH's
 > verbatim text belongs in `detail`, never in the variant's meaning. The
-> **twelve** `TransitionReason::Vm*` cause variants named in ADR-0083 § D5 are the
-> governing list; this slice produces its share of them. US-VM-2 / K3's *"no two
+> **fifteen** `TransitionReason::Vm*` cause variants named in ADR-0083 § D5 are
+> the governing list (thirteen start-time, two mid-run); this slice produces its
+> share of them. US-VM-2 / K3's *"no two
 > share a variant"* is unaffected and is exceeded.
 >
 > One further correction: *"no `cloud-hypervisor` on the host"* is a **host**
@@ -41,9 +45,13 @@ variants through the existing seam, and zero exec test cases change.
 
 ## Thinnest `serve` + `deploy` loop
 
-`overdrive serve` + four deliberately-broken deploys (bad kernel path, bad rootfs path, no
-`cloud-hypervisor` on the host, guest init that hangs) + one `[vm]` + `[service]` deploy.
-Read `overdrive workload describe` / CLI output for each.
+`overdrive serve` with valid boot-time VM capability + five deliberately-broken
+deploy/start paths: delete the configured kernel after composition, use a missing
+rootfs master, remove `cloud-hypervisor` after composition, hang guest init, and
+replace the configured kernel with an arch-incompatible image after composition;
+plus one `[vm]` + `[service]` deploy. Read `overdrive workload describe` / CLI
+output for each. The post-composition mutations are required because a bad kernel
+at `serve` boot is a startup refusal, not an allocation-level `Failed` row.
 
 ## Behavior (DESIGN owns the API)
 
@@ -51,8 +59,10 @@ Read `overdrive workload describe` / CLI output for each.
   artifact not found**, **hypervisor binary absent**, **boot deadline exceeded**, and
   — **C-7, added by DESIGN** — **kernel present but not loadable by this hypervisor**
   (`VmKernelFormatUnsupported`, brief § 104 / ADR-0083 § D5). No two share a variant.
-- `classify_driver_failure` gains a VM arm routed by its `DriverType` parameter; the exec
-  prefix table is untouched.
+- `DriverError::StartRejected` carries `DriverStartFailure`; the core-owned typed
+  conversion produces `TransitionReason`, and the action shim only persists the result.
+  `classify_driver_failure` and every Exec/VM prefix parser are deleted. Exec's existing
+  rendered classifications and verbatim row detail remain unchanged.
 - Genuinely unclassified failures carry the **verbatim** hypervisor text and are labelled
   unclassified — never dressed up as a known cause
   (`.claude/rules/development.md` § "Distinct failure modes get distinct error variants").
@@ -68,8 +78,9 @@ Read `overdrive workload describe` / CLI output for each.
 
 - **Closes a real loop through production?** Yes — each failure is produced by a real
   `deploy` against a real `serve`, never by constructing a `DriverError` in a test.
-- **Thinnest?** Yes — no new subsystem; one match arm plus variants, and one validation
-  rejection.
+- **Thinnest?** Yes — no new subsystem: one typed start-failure value, one pure
+  exhaustive conversion, the existing driver/VMM boundary, and one validation rejection.
+  A string compatibility parser is deliberately not retained.
 - **Delivers operator-visible value alone?** Yes. This is Ana's stated frustration
   verbatim — *"a diagnosis that requires reading source instead of reading the CLI"* — and
   without it every VM failure is `DriverInternalError { detail: <raw string> }`.
@@ -85,8 +96,10 @@ Read `overdrive workload describe` / CLI output for each.
       image for the target arch reports a **format** error naming the real problem, produced
       by the pure pre-flight validation **before** CH is invoked. It must **not** surface as
       `UefiTooBig`, and CH's verbatim text (when present) appears only in `detail`.
-- [ ] VM failures route via the `DriverType` parameter; exec classification is unchanged
-      (existing exec tests green, untouched).
+- [ ] VM failures route through typed `DriverStartFailure` classes and the exhaustive
+      `From<&DriverStartFailure>` conversion; no classification reads `Display` text.
+      Exec classification and verbatim row detail are unchanged (existing Exec assertions
+      stay green without weakening).
 - [ ] Each message names the artifact or resource **and** the actionable next step —
       verified by reading `workload describe` output, not by asserting on an enum.
 - [ ] Unclassified failures carry verbatim cause text and are labelled unclassified.

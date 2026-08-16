@@ -25,7 +25,7 @@ scenario either drives the same CLI path with a different fixture, or
 enters at a narrower driving port (a reconciler tick, a pure function, a
 driven-port equivalence test) per this project's four-tier discipline.
 
-**45 scenarios carry `@requires-kvm`** — the capability class distinct from
+**46 scenarios carry `@requires-kvm`** — the capability class distinct from
 `@tier3`/`@real-io`. `spike/findings.md` § "The nested-virt stall — SETTLED
 2026-08-10" measured a real asymmetry: bare-metal x86_64 booted 12/12
 (median 0.744s), while nested-aarch64 (the standard macOS dev Lima VM)
@@ -1098,12 +1098,24 @@ Consumes: US-VM-2, US-VM-6, contradiction C-7 (kernel-format vocabulary), K3.
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@kpi:K3`
 
 ```gherkin
-Given Ana has deployed a VM workload whose [vm] kernel path does not exist
+Given "overdrive serve" booted while the configured VM kernel path contained a
+  valid image, so the Vm driver composed successfully
+And that exact kernel path is then DELETED after composition but before this
+  allocation's VmDriver::start performs its per-allocation verification
 When the platform attempts to start the allocation
 Then the allocation is Failed with TransitionReason::VmKernelNotFound
   naming the exact path
 And the reason is distinct from a missing rootfs
 ```
+
+**Crafter notes**: This is the kernel counterpart to S-VM-35's already-ratified
+TOCTOU shape. A path that is missing at `overdrive serve` boot cannot produce
+the allocation-level `Failed` row asserted here because the validated
+`KernelImage` / VM capability never composes. DWD-24 therefore preserves the
+scenario's ID and expected operator result while making its producer reachable:
+valid at composition, absent at this allocation's start. The per-allocation
+reopen is specified by ADR-0082 §D2.4; it constructs typed
+`VmStartFailure::KernelNotFound`, never a parsed string.
 
 #### S-VM-34: A missing rootfs artifact is named precisely
 
@@ -1183,7 +1195,10 @@ variant is `TransitionReason::DriverInternalError { detail }`**
 (`transition_reason.rs`) — the EXISTING generic "driver returned an
 uncategorised failure that did not fit any of the more specific cause
 variants; falls back on the verbatim driver `Display` text in `detail`"
-variant, not a new one this feature mints. No named variant needs to be
+variant, not a new one this feature mints. DWD-24 supplies it through
+`DriverStartClass::Unclassified { driver: DriverType::Vm }`; the conversion
+copies the already-captured verbatim `DriverStartFailure.detail` into
+`DriverInternalError { detail }`. No named variant or compatibility parser is
 invented for this scenario.
 
 #### S-VM-41: A kernel that exists but is the wrong format for this hypervisor is named precisely, not reported as a firmware size cap
@@ -1192,12 +1207,14 @@ invented for this scenario.
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-09` `@tier3` `@real-io` `@correction:C-7`
 
 ```gherkin
-Given Ana has deployed a VM workload on an aarch64 host whose [vm] kernel
-  path points at the host distro's own /boot/vmlinuz -- a UKI-wrapped
-  image, not the raw PE Image cloud-hypervisor requires on aarch64
+Given "overdrive serve" booted on an aarch64 host while the configured VM
+  kernel path contained a valid raw PE Image, so the Vm driver composed
+And that same path is then atomically REPLACED after composition but before
+  this allocation's VmDriver::start with the host distro's UKI-wrapped
+  /boot/vmlinuz bytes, which cloud-hypervisor cannot load as a raw PE Image
 When the platform attempts to start the allocation
 Then the allocation is Failed with TransitionReason::VmKernelFormatUnsupported
-  naming the exact path and arch "aarch64"
+  naming the exact configured path and arch "aarch64"
 And the reported cause reads as a format problem -- never a firmware size
   cap and never "UefiTooBig"
 And the reason is distinct from VmKernelNotFound (the path exists; only its
@@ -1209,10 +1226,12 @@ companion to S-VM-17's pure-function half — do not duplicate S-VM-17 here.
 S-VM-17 already proves `KernelImage::validate(path, arch, header)` is pure
 and rejects the bad magic bytes before any hypervisor process is spawned
 (ADR-0082 §D2.4), covering the identical aarch64 UKI-wrapper artifact at
-the function boundary. This scenario proves the join one layer up:
-`classify_driver_failure`'s VM arm maps the resulting `KernelFormatError`
-onto `TransitionReason::VmKernelFormatUnsupported { path, arch, detail }`
-(ADR-0083 §D5 row 5), and that the operator-visible cause the CLI renders
+the function boundary. This scenario proves the join one layer up: the per-allocation verifier
+constructs `VmStartFailure::KernelFormatUnsupported { path, arch, detail }`
+and the exhaustive `From<&DriverStartFailure>` conversion produces
+`TransitionReason::VmKernelFormatUnsupported { path, arch, detail }`
+(ADR-0083 §D5 row 5), without parsing validator or CH text; the
+operator-visible cause the CLI renders
 is honestly worded as a *format* problem — never CH's misleading
 `VmBoot(UefiLoad(UefiTooBig))` framing, which is exactly the lie this
 variant exists to prevent from reaching the operator (`slice-02.md`'s
@@ -1220,7 +1239,10 @@ correction block, `brief.md` §104). CH's own verbatim text, if it is ever
 present at all, belongs only in the row's free-form `detail`, never in the
 variant's meaning — assert on the rendered cause text, not on the enum
 discriminant alone, per this AC's own "verified by reading `workload
-describe` output, not by asserting on an enum" acceptance line.
+describe` output, not by asserting on an enum" acceptance line. The
+post-composition replacement is load-bearing: starting `serve` with the bad
+image would fail before an allocation exists, which cannot satisfy this
+scenario's `Failed`-row assertion (checkpoint `3222f030`, DWD-24).
 **Gap-closure note**: this scenario was absent from the original 87 — the
 row-5 Cause variant ADR-0083 §D5 pins for Slice 02
 (`VmKernelFormatUnsupported`) had no test-scenarios.md entry at all, a gap
@@ -1253,17 +1275,20 @@ And the error names guest networking, guest probes and guest-stack mTLS as
 Given Ana has written a spec declaring both [job] and [vm]
 When she runs "overdrive deploy render.toml"
 Then the workload is accepted and scheduled
+And its VM allocation reaches Running through the production VmDriver path
 ```
 
 #### S-VM-40: A scheduled VM job is accepted
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
-**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3` `@real-io`
+**Tags**: `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
 Given Ana has written a spec declaring [schedule] with a cron expression and [vm]
 When she runs "overdrive deploy nightly.toml"
 Then the workload is accepted and scheduled
+And when its first firing becomes due, its VM allocation reaches Running through
+  the production VmDriver path
 ```
 
 ---

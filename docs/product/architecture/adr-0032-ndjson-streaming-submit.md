@@ -9,6 +9,12 @@ ratification of [D1] / [D5] / [D7] (carried into DESIGN as constraints
 > **§8 amended 2026-05-02** — channel-closed mid-stream maps to
 > `TerminalReason::StreamInterrupted` (new payload-free variant), not
 > `DriverError`. See **Amendment 2026-05-02** section below.
+>
+> **§4 amended 2026-08-16** — `DriverError::StartRejected.reason: String`
+> and the action-shim prefix parser are retired. Drivers now return a typed
+> `DriverStartFailure`; the shim performs only the total typed conversion to
+> `TransitionReason` and preserves the failure's verbatim `detail`. See
+> **Amendment 2026-08-16** below.
 
 Tags: phase-1, cli-submit-vs-deploy-and-alloc-status, application-arch,
 http-shape.
@@ -305,37 +311,58 @@ pub struct AllocStatusRow {
 The action shim (per ADR-0023) is the single writer of this row. It
 constructs both fields at the point of writing.
 
-For driver-domain reasons the shim **classifies the
-`DriverError::StartRejected.reason` text into a cause-class variant**
-at write time — the verbatim text becomes `detail` (preserved for
-audit), AND the typed cause becomes the enum variant. The
-classification is a small string-prefix matcher run inside the
-shim against the verbatim driver text:
+For driver-domain reasons, the driver returns the typed failure at the
+point where the cause is still known. The exact boundary is:
 
-| Prefix substring (verbatim driver text) | `TransitionReason` variant |
-|---|---|
-| `"spawn ..."` containing `"No such file or directory"` (ENOENT) | `ExecBinaryNotFound { path }` |
-| `"spawn ..."` containing `"Permission denied"` (EACCES) | `ExecPermissionDenied { path }` |
-| `"spawn ..."` containing `"Exec format error"` (ENOEXEC) | `ExecBinaryInvalid { path, kind: "not_executable" }` |
-| `"create workload scope: ..."` | `CgroupSetupFailed { kind: "create_scope", source }` |
-| `"place pid in scope: ..."` | `CgroupSetupFailed { kind: "place_pid", source }` |
-| Any other `StartRejected.reason` | `DriverInternalError { detail }` |
+```rust
+pub enum DriverError {
+    StartRejected { failure: DriverStartFailure },
+    // existing non-start variants remain unchanged
+}
 
-The shim parses the path out of the `"spawn <path>: ..."` prefix the
-ExecDriver constructs (cf. `crates/overdrive-worker/src/exec_driver.rs`
-`start_rejected(format!("spawn {}: {err}", spec.command))`). On the
-happy path the variant is `Started` (no payload) and `detail` is
-`None`. For reconciler-domain reasons the reconciler emits the cause-
-class variant directly on the `Action::*` payload and the shim
-threads it through verbatim — `NoCapacity { requested, free }` and
-`RestartBudgetExhausted { attempts, last_cause_summary }` originate
-in the reconciler.
+pub struct DriverStartFailure {
+    pub class: DriverStartClass,
+    /// Non-empty verbatim low-level diagnostic. Classification MUST NOT
+    /// depend on this field's spelling.
+    pub detail: String,
+}
 
-**Future-proofing**: when Phase 2 ExecDriver gains structured error
-classes (rather than `String` reasons), the shim's classification
-table collapses to a `From<DriverError> for TransitionReason` impl
-and the prefix-matching logic deletes. The intermediate string-prefix
-shape is a Phase 1 cost the cause-class refactor pays once.
+pub enum DriverStartClass {
+    Exec(ExecStartFailure),
+    Vm(VmStartFailure),
+    Unclassified { driver: DriverType },
+}
+```
+
+ADR-0083 § D5 owns the exact `ExecStartFailure` and `VmStartFailure`
+variants and fields. `DriverStartClass` encodes the driver family, so an
+independent `driver: DriverType` field cannot contradict the failure class.
+The unknown arm retains `DriverType` only because no family-specific variant
+exists for it.
+
+The action shim performs no parsing, prefix matching, path extraction, or
+`DriverType` dispatch. It applies the total, core-owned pure conversion
+`impl From<&DriverStartFailure> for TransitionReason`, writes that value to
+`AllocStatusRow.reason`, and writes `Some(failure.detail)` to
+`AllocStatusRow.detail`. `DriverStartClass::Unclassified` converts to
+`DriverInternalError { detail: failure.detail.clone() }`; this is the total
+fallback for an unmapped driver or VMM failure. The same typed value is used
+by initial start and restart-start.
+
+This preserves the Exec operator contract exactly while deleting its text
+grammar: ENOENT remains `ExecBinaryNotFound { path }`, EACCES remains
+`ExecPermissionDenied { path }`, ENOEXEC remains
+`ExecBinaryInvalid { path, kind: "exec_format_error" }`, and cgroup setup
+uses `CgroupSetupFailed { kind: "create_scope" | "place_pid", source }`.
+The verbatim diagnostic remains byte-for-byte available in row `detail`.
+No consumer may select a cause from that diagnostic.
+
+On the happy path the variant is `Started` (no payload) and `detail` is
+`None`. For reconciler-domain reasons the reconciler emits the cause-class
+variant directly on the `Action::*` payload and the shim threads it through
+verbatim — `NoCapacity { requested, free }` and
+`RestartBudgetExhausted { attempts, last_cause_summary }` originate in the
+reconciler.
 
 The streaming endpoint reads `reason` + `detail` off the
 `LifecycleEvent` broadcast payload (which is constructed from the row
@@ -347,9 +374,9 @@ The `Action` enum gains `reason: TransitionReason` on
 `StartAllocation`, `RestartAllocation`, `StopAllocation` so the
 reconciler can declare its rationale at action emit time. Phase 1
 defaults: `Scheduling` for first start, `Scheduling` for restart
-(driver outcome refines to `Started` on success or to a cause-class
-variant on `DriverError::StartRejected` per the classification table
-above), `Stopped { by: Reconciler }` or `Stopped { by: Operator }`
+(driver outcome refines to `Started` on success or to the typed cause
+obtained from `DriverError::StartRejected.failure`),
+`Stopped { by: Reconciler }` or `Stopped { by: Operator }`
 on stop depending on whether the stop intent was operator-driven.
 Future reconcilers (right-sizing, cert-rotation) extend the variant
 set additively under `#[non_exhaustive]`.
@@ -866,12 +893,13 @@ amendment moves that data into typed payloads on cause-class variants.
   `Box<TransitionReason>` — rkyv `Archive` cannot resolve a
   recursive enum. Per-attempt structured cause history lives in
   reconciler private libSQL.
-- The action shim grows a small string-prefix matcher that
-  classifies `DriverError::StartRejected.reason` text into the
-  right cause-class variant at write time. The verbatim text is
-  preserved in `AllocStatusRow.detail` for audit. Phase 2
-  ExecDriver structured-error refactor collapses the matcher to a
-  `From<DriverError>` impl.
+- The Phase-1 action shim originally grew a small string-prefix matcher that
+  classified `DriverError::StartRejected.reason` text into the right
+  cause-class variant while preserving the text in `AllocStatusRow.detail`.
+  **Superseded 2026-08-16:** Phase 2 now carries `DriverStartFailure`
+  structurally and converts it through `From<&DriverStartFailure>`; the matcher
+  and the `reason: String` field are retired. This bullet remains only as the
+  historical account of the Phase-1 transition.
 - Phase 2 emit-deferred variants (`OutOfMemory`,
   `WorkloadCrashedImmediately`) ship in the enum now for forward
   wire-compatibility, mirroring the `exit_code: Option<i32>`
@@ -1021,6 +1049,45 @@ based on the persisted `WorkloadSpec.kind()` read from intent.
 
 See ADR-0047 for the full decomposition.
 
+## Amendment 2026-08-16 — typed driver-start failures retire text reparsing
+
+**Trigger.** DELIVER checkpoint `3222f030` stopped Phase-03 step 03-01 before
+RED: the action shim received only `StartRejected.reason: String`, while the
+facts required for VM classification were still typed or structured upstream
+(the exact rootfs path, `VmmExit` code/signal/stderr, and the live console tail).
+No parser at the shim could reconstruct facts that had already been discarded.
+
+**Decision.** §4's typed `DriverStartFailure` boundary is current and
+normative. `DriverError::StartRejected` carries that value; the action shim
+uses the exhaustive `From<&DriverStartFailure> for TransitionReason`
+conversion and preserves `failure.detail` separately. The conversion is a
+**pure-function / return-only** contract. Its universe is the closed set of
+`DriverStartClass`, `ExecStartFailure`, and `VmStartFailure` variants named by
+ADR-0083 § D5; its assertion mechanism is an exhaustive match plus a table test
+covering every variant. Adding a class without extending the conversion fails
+at compile time.
+
+The old matcher is retired, not retained as a compatibility path. The
+language-appropriate structural guard is an `xtask::dst_lint` clause rejecting
+(a) a `StartRejected` string field named `reason`, and (b) a function named
+`classify_driver_failure` in the action shim. Behavioral acceptance continues
+to assert the operator-rendered reason and the separately preserved verbatim
+detail. `Vmm::probe()` remains the adapter's Earned-Trust gate; ADR-0082 adds
+the typed post-probe/TOCTOU failure contract rather than weakening that probe.
+
+**Alternatives rejected.** (1) Carry `TransitionReason` directly in
+`StartRejected`: smallest spelling, but it makes healthy/reconciler-only values
+such as `Started`, `Stopped`, and `NoCapacity` representable as driver start
+failures. (2) Keep one parser per driver family: still couples correctness to
+`Display` text and cannot recover dropped fields. (3) Keep independent
+`driver: DriverType` and typed-cause fields: permits contradictory values such
+as `driver: Exec` with a VM cause. The chosen sum type makes that mismatch
+unrepresentable.
+
+`OutOfMemory` remains an un-emitted compatibility variant. VM mid-run OOM uses
+`VmOutOfMemory`; this amendment neither invents nor defers an Exec OOM
+classification.
+
 ## Changelog
 
 | Date | Change |
@@ -1029,3 +1096,4 @@ See ADR-0047 for the full decomposition.
 | 2026-04-30 | **Amendment** — `TransitionReason` refactored from state-class to cause-class. `TerminalReason` extended with structured payloads. Original variant set retired and captured under Alternative D as the rejected predecessor. See `Amendment 2026-04-30` section above. Slice 02 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues the consequent updates needed in DISCUSS / DISTILL / roadmap. |
 | 2026-05-02 | **Amendment** — §8 channel-closed row now maps to `TerminalReason::StreamInterrupted` (new payload-free variant), not `DriverError`. The original routing was unimplementable: `DriverError` requires a `cause: TransitionReason` the closed-bus call site cannot construct. Implementation had drifted to a `Timeout { after_seconds: 0 }` sentinel; the new variant is the dedicated payload-free wire shape for stream-transport failures with no observable cause. See `Amendment 2026-05-02` section above. |
 | 2026-05-10 | **Amendment** — `SubmitEvent` becomes a kind-discriminating outer envelope; `JobSubmitEvent` has no `ConvergedRunning` variant (structural bug fix). See `Amendment 2026-05-10` section above and ADR-0047. |
+| 2026-08-16 | **Amendment** — §4 retires `StartRejected.reason: String` and the action-shim prefix parser. `DriverStartFailure` carries a typed driver-family cause plus verbatim detail; `From<&DriverStartFailure>` is the only driver-start conversion to `TransitionReason`. Exec's observable variants and detail remain unchanged; unknowns use `DriverInternalError`. |

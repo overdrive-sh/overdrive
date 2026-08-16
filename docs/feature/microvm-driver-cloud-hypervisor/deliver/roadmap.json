@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "microvm-driver-cloud-hypervisor",
     "created_at": "2026-08-11T19:07:27Z",
-    "total_steps": 32
+    "total_steps": 34
   },
   "phases": [
     {
@@ -469,19 +469,83 @@
       "steps": [
         {
           "id": "03-01",
-          "name": "classify_driver_failure gains a VM arm — kernel/rootfs not found, hypervisor absent, boot deadline, kernel format",
-          "description": "Cash classify_driver_failure's documented-but-unused DriverType parameter with five Slice-02 Cause variants; zero exec test cases move.",
+          "name": "Checkpoint — original Slice-02 classifier scope blocked before RED",
+          "description": "Preserve checkpoint 3222f030 honestly: the original action-shim/TransitionReason-only scope could not carry the typed VM diagnostics required by its five acceptance scenarios, and no production or test code landed.",
           "criteria": [
-            "A deploy whose kernel path does not exist is Failed/VmKernelNotFound naming the exact path, distinct from a missing rootfs.",
-            "A deploy whose rootfs path does not exist is Failed/VmRootfsNotFound naming the exact path.",
-            "cloud-hypervisor removed after admission but before this allocation's start is Failed/VmHypervisorAbsent naming the paths searched (the TOCTOU window S-VM-12's boot-time gate does not close).",
-            "A guest that hangs during boot is Failed/VmBootDeadlineExceeded naming the deadline in ms and the captured console tail; the allocation never passes through Running.",
-            "A kernel that exists but is the wrong format for this hypervisor (e.g. a UKI-wrapped image where cloud-hypervisor requires a raw PE Image on aarch64) is Failed/VmKernelFormatUnsupported naming the exact path and arch, worded honestly as a format problem — never CH's misleading firmware-size-cap framing — and distinct from VmKernelNotFound (S-VM-41)."
+            "Checkpoint 3222f030 remains the immutable record that old 03-01 stopped before RED with no production or test implementation.",
+            "This checkpoint owns no S-VM scenario; DWD-24 moves its former S-VM-33/34/35/36/41 ownership to steps 03-05 and 03-06 without rewriting execution history."
+          ],
+          "test_file": "",
+          "scenario_name": "None — checkpoint only",
+          "implementation_scope": {
+            "source_directories": [],
+            "test_directories": []
+          },
+          "dependencies": [
+            "01-08"
+          ],
+          "effort_hours": 0,
+          "implementation_notes": "CHECKPOINT ONLY (3222f030; superseded for delivery by DWD-24 and steps 03-05/03-06): the original two-file scope could not carry the exact rootfs path, VmmExit code/signal/stderr, live deadline console tail, or post-composition kernel verification required by S-VM-33/34/35/36/41. No production or test code landed. Do not execute this step again; keep it completed and leave execution-log/history untouched."
+        },
+        {
+          "id": "03-05",
+          "name": "Typed driver-start failure contract + missing-rootfs vertical proof",
+          "description": "Land DWD-24's exact typed DriverStartFailure boundary across ExecDriver, VmDriver, Vmm, and the action shim, then drive the first real serve+deploy path through it with S-VM-34.",
+          "criteria": [
+            "Every driver start rejection produces one structured operator cause and one separately preserved verbatim diagnostic; changing diagnostic wording alone cannot change the selected cause.",
+            "Existing Exec start failures remain operator-identical: missing binary, permission denied, exec-format error with kind=exec_format_error, create/place cgroup setup failures, and their verbatim detail retain the same serialized values.",
+            "A start failure with no named class is rendered only as the existing DriverInternalError unclassified cause with its exact upstream diagnostic; it is never guessed into a known class.",
+            "An early VMM exit preserves its exit code, signal and stderr diagnosis, while a boot deadline preserves the deadline milliseconds and the live console tail; the final exit tail is coherent with the live diagnostic stream.",
+            "Initial start and restart-start persist the same typed-cause/detail pair to the allocation row and lifecycle event; no other allocation row is changed by that rejection.",
+            "S-VM-34: a real overdrive serve + deploy whose configured rootfs master is absent reaches Failed/VmRootfsNotFound naming the exact configured path and remains distinct from VmKernelNotFound.",
+            "Every rejected VM start leaves no surviving hypervisor process, workload scope, per-launch rootfs clone or run directory."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
-          "scenario_name": "S-VM-33, S-VM-34, S-VM-35, S-VM-36, S-VM-41",
+          "scenario_name": "S-VM-34 (first production vertical proof for the typed transport)",
           "implementation_scope": {
             "source_directories": [
+              "crates/overdrive-core/src/traits/driver.rs",
+              "crates/overdrive-core/src/traits/vmm.rs",
+              "crates/overdrive-core/src/transition_reason.rs",
+              "crates/overdrive-worker/src/driver.rs",
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-host/src/vmm.rs",
+              "crates/overdrive-sim/src/adapters/vmm.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "xtask/src/dst_lint.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/acceptance/driver_start_failure.rs",
+              "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
+              "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+              "crates/overdrive-cli/tests/integration.rs"
+            ]
+          },
+          "dependencies": [
+            "01-08"
+          ],
+          "effort_hours": 12,
+          "implementation_notes": "UPSTREAM RESOLUTION (DWD-24): implement the exact ADR API — DriverError::StartRejected { failure: DriverStartFailure }, DriverStartFailure { class: DriverStartClass, detail: String }, the closed ExecStartFailure/VmStartFailure variants in ADR-0083 D5, and From<&DriverStartFailure> for TransitionReason. Do not invent another method, field, enum or compatibility parser. This is a vertical slice, not a no-scenario mechanism step. RED begins with the typed contract/table/equivalence assertions and S-VM-34's real serve+deploy rootfs failure; GREEN ends only when that operator path reads the typed reason and preserved detail. Contract shape: the conversion is pure-function/return-only over the closed nested-enum universe; VmmDiagnostics::console_tail is return-only over one bounded process capture; Vmm::create remains bounded-change under ADR-0082. Exec regression assertions MUST pin the current kind string exec_format_error rather than ADR-0032's retired Phase-1 wording. The action shim owns persistence only and must contain no parser or DriverType branch. Add the dst-lint structural guard in the same step so the retired string API cannot return silently. S-VM-34 is real I/O but pre-spawn and is not itself @requires-kvm; the shared test file's broader gate is a file-layout fact, not evidence this scenario boots a guest."
+        },
+        {
+          "id": "03-06",
+          "name": "Remaining named VM boot-failure vocabulary from typed causes",
+          "description": "Extend the production path proven in 03-05 across the remaining four named Slice-02 causes, preserving every field at its source and every operator-visible distinction.",
+          "criteria": [
+            "S-VM-33: after serve composes against a valid kernel, deleting that exact path before this allocation's start produces Failed/VmKernelNotFound naming the path; no VMM process is spawned.",
+            "S-VM-35: removing cloud-hypervisor after composition but before spawn produces Failed/VmHypervisorAbsent with every searched path and preserved spawn diagnostic.",
+            "S-VM-36: a guest that never beacons produces Failed/VmBootDeadlineExceeded { deadline_ms: 30000, console_tail } from the live VmmDiagnostics capture and never passes through Running.",
+            "S-VM-41: after serve composes against a valid aarch64 raw PE Image, replacing the configured path with an incompatible image before this allocation's start produces Failed/VmKernelFormatUnsupported naming path, arch and stable format diagnosis — never UefiTooBig/firmware-size wording.",
+            "All four outcomes are rendered and asserted through workload describe; no test passes by matching only an enum discriminant, and no VM/Exec string parser exists."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-33, S-VM-35, S-VM-36, S-VM-41",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-host/src/vmm.rs",
+              "crates/overdrive-sim/src/adapters/vmm.rs",
               "crates/overdrive-control-plane/src/action_shim/mod.rs",
               "crates/overdrive-core/src/transition_reason.rs"
             ],
@@ -491,35 +555,38 @@
             ]
           },
           "dependencies": [
-            "01-08"
+            "03-05"
           ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (five deliberately-broken deploys). Author the RED scaffold fresh at this slice's own RED phase (DWD-06a) — file name is DELIVER's own call within the overdrive-cli/tests/integration/vm_*.rs family DWD-04 commits. classify_driver_failure branches on DriverType FIRST; the exec prefix table is reached only under Exec — zero exec test cases may change (learning hypothesis, slice-02.md). S-VM-41 (DWD-14, closing the ADR-0083 §D5 row-5 VmKernelFormatUnsupported gap a fable review surfaced against this exact step) is the classification-join half of C-7 — companion to S-VM-17's pure-function half (step 01-01, KernelImage::validate rejecting the bad magic before any hypervisor process spawns). This step's classify_driver_failure VM arm maps the resulting KernelFormatError onto TransitionReason::VmKernelFormatUnsupported{path, arch, detail} (ADR-0082 §D2.4, ADR-0083 §D5 row 5); assert on the rendered cause text via workload describe, never on the enum discriminant alone (DWD-14's own acceptance line). The emit-inventory table (ADR-0083 §D5, opening text) separately lacks two rows this step's own scope only touches tangentially — MtlsInterceptInstallFailed and WorkloadNetnsProvisionFailed are absent from the pre-existing 15-row table (17 variants exist); out of this step's scope to backfill (they predate this feature), noted here only so this step's classify_driver_failure work is not mistaken for closing that separate gap too. MICROVM-BOOT-TESTS GATE: vm_boot_failure_vocabulary.rs is a NEW file; every one of its five deliberately-broken deploys spawns a real cloud-hypervisor process (even the fast-failing ones, e.g. VmKernelNotFound), so the file compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests."
+          "effort_hours": 10,
+          "implementation_notes": "DELIVERY RESTORATION (DWD-24; supersedes old 03-01's delivery claim): discharge S-VM-33/35/36/41 through the typed contract from 03-05. S-VM-33 and S-VM-41 use post-composition TOCTOU fixtures because missing/bad at serve boot cannot yield the required allocation Failed row. Capability truth is mixed: only S-VM-36 requires a real guest boot; S-VM-33/35/41 reject before a guest-booting VMM process. Preserve every source field: exact configured path, full searched-path vector, deadline_ms, live console tail, arch and validator diagnosis."
         },
         {
           "id": "03-02",
-          "name": "Unclassified-failure fallthrough — verbatim cause, labelled unclassified",
-          "description": "A hypervisor failure with no named variant carries CH's verbatim text and is honestly labelled unclassified, using the existing DriverInternalError fallthrough — no new variant minted.",
+          "name": "Typed unclassified-failure fallthrough — verbatim cause, labelled unclassified",
+          "description": "Prove that a genuinely unmapped VM/VMM start failure crosses as DriverStartClass::Unclassified { driver: Vm }, preserves its verbatim detail, and converts only to the existing DriverInternalError fallback.",
           "criteria": [
-            "A VM start failure the platform has no named variant for reports the verbatim hypervisor error text in detail.",
-            "The reason is labelled unclassified rather than presented as a known cause.",
-            "The fallthrough reuses the EXISTING TransitionReason::DriverInternalError{detail} variant; no new variant is added for this case."
+            "A genuinely unmapped VM/VMM start failure reports its verbatim upstream diagnostic without truncation or rewording.",
+            "The operator-facing reason is the existing DriverInternalError unclassified cause and is never presented as any named VM cause.",
+            "Changing the unmapped failure's diagnostic wording changes only the preserved detail, never which cause class is selected.",
+            "The S-VM-41 kernel-format failure remains VmKernelFormatUnsupported and cannot fall through to this scenario."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
           "scenario_name": "S-VM-37",
           "implementation_scope": {
             "source_directories": [
-              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-host/src/vmm.rs",
+              "crates/overdrive-sim/src/adapters/vmm.rs"
             ],
             "test_directories": [
               "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
             ]
           },
           "dependencies": [
-            "03-01"
+            "03-06"
           ],
           "effort_hours": 4,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. Per development.md 'Distinct failure modes get distinct error variants' — this is the deliberate exception: an unclassified failure stays unclassified rather than inventing a variant. The kernel-format case (C-7) is explicitly NOT this scenario — it is caught pre-boot by KernelImage::validate (01-01) and, at the classification layer, by VmKernelFormatUnsupported (03-01, S-VM-41) — and never reaches this fallthrough. Continues in vm_boot_failure_vocabulary.rs and inherits the kvm-tests gate established at step 03-01 — the fallthrough still requires a real cloud-hypervisor invocation to produce CH's own verbatim error text."
+          "implementation_notes": "TEST PARADIGM: Tier 3 real-I/O acceptance through the existing VMM substitution/binary seam; the sentinel diagnostic must originate upstream and reach workload describe unchanged. This is the explicit total fallback, not an exception to the distinct-failure rule: a cause with no named class must remain unclassified rather than being guessed. DWD-24/ADR-0083 D5 own the conversion; this step proves the real boundary and must not reintroduce classification logic in action_shim."
         },
         {
           "id": "03-03",
@@ -541,18 +608,19 @@
             ]
           },
           "dependencies": [
-            "03-01"
+            "01-08"
           ],
           "effort_hours": 4,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example (in-process rejection, no VMM needed). Mirrors the existing ParseError::ProbesNotAllowedOnKind precedent (workload_spec.rs:827) — a semantic rejection with guidance, not a parse error. GH #257 and #222 are real, already-filed issues; do not invent a third. This scenario itself spawns no VMM ('no VMM needed', TEST PARADIGM above), but it rides in the same vm_boot_failure_vocabulary.rs file as 03-01/03-02, so it still compiles only under the kvm-tests gate — the gate applies at file granularity, not per-scenario."
+          "implementation_notes": "TEST PARADIGM: Tier 3 real-I/O, single-example, but the behavior is an in-process semantic rejection and spawns no VMM. This step is technically independent of 03-05/03-06/03-02 and therefore depends only on the completed DriverRegistry/spec-dispatch boundary 01-08; phase ordering must not masquerade as a code dependency. Mirrors the existing ParseError::ProbesNotAllowedOnKind precedent (workload_spec.rs:827) — semantic rejection with guidance, not a parse error. The shared vm_boot_failure_vocabulary.rs file may be kvm-tests-gated because sibling scenarios boot guests; that is harmless file-level over-gating and not a property of S-VM-38."
         },
         {
           "id": "03-04",
-          "name": "[vm] + [job] / [vm] + [schedule] accepted and run",
-          "description": "The complementary positive cases: VM job and scheduled-VM specs are accepted and scheduled with no new capability check blocking them.",
+          "name": "[vm] + [job] / [vm] + [schedule] accepted, scheduled, and run",
+          "description": "The complementary positive cases close Slice-02's full promise: VM job and scheduled-VM specs are admitted, scheduled, and reach Running through the production VmDriver path.",
           "criteria": [
-            "A spec declaring [job] + [vm] is accepted and scheduled.",
-            "A spec declaring [schedule] (cron) + [vm] is accepted and scheduled."
+            "S-VM-39: a spec declaring [job] + [vm] is accepted and scheduled, and its VM allocation reaches Running through the production VmDriver path.",
+            "S-VM-40: a spec declaring [schedule] (cron) + [vm] is accepted and scheduled, and when its first firing becomes due its VM allocation reaches Running through the production VmDriver path.",
+            "The S-VM-38 rejection remains scoped to [service] + [vm]; neither positive path is blocked by that semantic check."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
           "scenario_name": "S-VM-39, S-VM-40",
@@ -568,7 +636,7 @@
             "03-03"
           ],
           "effort_hours": 3,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. These are the regression guard that 03-03's rejection is scoped to [service] only — [job]/[schedule] combinations must not regress. Rides in vm_boot_failure_vocabulary.rs and inherits the kvm-tests gate established at step 03-01."
+          "implementation_notes": "TEST PARADIGM: Tier 3, integration-tests + kvm-tests, one immediate job example and one first-firing schedule example. These are both a regression guard that 03-03 is scoped to [service] and the production-entry proof required by Slice 02's existing 'accepted and run' acceptance line. S-VM-40 is now explicitly @requires-kvm because its Then reaches Running; DWD-24 updates the feature count from 45 to 46 without changing the 88-scenario total. The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient."
         }
       ]
     },
@@ -992,8 +1060,8 @@
     ]
   },
   "validation": {
-    "status": "pending",
+    "status": "approved",
     "reviewer": "nw-solution-architect-reviewer",
-    "approved_at": ""
+    "approved_at": "2026-08-16"
   }
 }
