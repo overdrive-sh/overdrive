@@ -440,14 +440,23 @@ impl ExecDriver {
     }
 }
 
-// `too_many_lines` allow: the lint measures the whole `#[async_trait]`-
-// expanded impl, and its length here is `#[cfg(target_os = "linux")]`
-// code that a macOS host check compiles out — so the crate is clean on
-// the host and flagged only under the Lima-routed (Linux) clippy this
-// repo gates on. `allow`, not `expect`, for exactly that asymmetry: an
-// `expect` would go unfulfilled on the host. Pre-existing shape,
-// untouched by the step that added this attribute.
-#[allow(clippy::too_many_lines)]
+// `too_many_lines`: the lint measures the whole `#[async_trait]`-expanded
+// impl — every method of `Driver for ExecDriver` as one body — not any
+// single fn an author wrote. Splitting the impl to satisfy a lint that
+// only fires on the macro's own concatenation would trade a real shape
+// for a synthetic one, so this is suppressed rather than refactored, and
+// the shape is pre-existing (untouched by this feature).
+//
+// `expect`, not `allow`: the canonical compile environment for this repo
+// is the Lima (Linux) VM — bare host `cargo clippy` is blocked at the
+// tool boundary (`.claude/hooks/block-bare-clippy.ts`), so the gating
+// clippy always sees the Linux-gated body and the expectation is always
+// fulfilled. `expect` self-removes the day the lint stops firing;
+// `allow` would sit here silently forever.
+#[expect(
+    clippy::too_many_lines,
+    reason = "lint measures the #[async_trait]-expanded impl as one body, not an authored fn"
+)]
 #[async_trait]
 impl Driver for ExecDriver {
     fn r#type(&self) -> DriverType {

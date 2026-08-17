@@ -175,6 +175,35 @@ fn assert_no_allocation_scoped_vm_residue(alloc: &AllocationId, rootfs_master: &
     );
 }
 
+/// The operator-visible half of AC-09, asserted the same way by all five
+/// scenarios: the NAMED cause must reach the rendered `overdrive workload
+/// describe` output in the ratified `TransitionReason::human_readable()`
+/// vocabulary — not merely the verbatim driver diagnostic, and not merely
+/// a path that happens to appear inside it.
+///
+/// The second assertion is what stops this from being a tautology. Every
+/// cause in this file carries a `detail` whose prose differs from the
+/// cause's own wording (`open kernel image {p}: ...` vs `VM kernel not
+/// found: {p}`; `stat rootfs master {p}: ...` vs `VM rootfs not found:
+/// {p}`), so a renderer that emitted ONLY the detail cannot satisfy the
+/// containment check. Pinning that divergence here means a future change
+/// that collapses the two — making the cause's wording a substring of the
+/// detail — fails loudly rather than silently hollowing out every
+/// scenario's operator-facing assertion.
+fn assert_named_cause_is_rendered(rendered: &str, reason: &TransitionReason, detail: &str) {
+    let named = reason.human_readable();
+    assert!(
+        !detail.contains(&named),
+        "test integrity: the verbatim driver detail must NOT already contain the named cause \
+         {named:?}, or the render assertion below proves nothing; detail was {detail:?}",
+    );
+    assert!(
+        rendered.contains(&named),
+        "the rendered operator view must name the typed cause in the ratified vocabulary \
+         ({named:?}) — the verbatim diagnostic alone is not the named cause:\n{rendered}",
+    );
+}
+
 fn vm_job_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\n\
@@ -384,6 +413,7 @@ async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources(
         rendered.contains(&configured),
         "the rendered operator view must name the exact configured rootfs path:\n{rendered}",
     );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // ---- Rejected starts leak nothing. ----
     assert_no_allocation_scoped_vm_residue(&alloc, &missing_rootfs);
@@ -514,6 +544,7 @@ async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hyper
         rendered.contains(&configured),
         "the rendered operator view must name the exact configured kernel path:\n{rendered}",
     );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // The preflight runs before anything is provisioned, so nothing was
     // spawned and nothing is left behind.
@@ -644,6 +675,7 @@ async fn hypervisor_removed_after_composition_names_every_searched_path() {
         rendered.contains(&searched_path),
         "the rendered operator view must name every searched path:\n{rendered}",
     );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // A spawn that never happened leaves nothing behind.
     assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
@@ -770,6 +802,7 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
         rendered.contains("30000"),
         "the rendered operator view must name the deadline in milliseconds:\n{rendered}",
     );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
     if let Some(tail) = console_tail.as_deref() {
         assert!(
             rendered.contains(tail),
@@ -873,6 +906,7 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
     let configured = kernel.display().to_string();
     let arch = host_arch().to_string();
     let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    let detail = row.error.clone().expect("the verbatim driver diagnostic must be preserved");
 
     let TransitionReason::VmKernelFormatUnsupported {
         path: reported_path,
@@ -923,6 +957,7 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
         rendered.contains(&configured) && rendered.contains(&arch),
         "the rendered operator view must name the exact configured path and the arch:\n{rendered}",
     );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // The preflight rejects before any hypervisor is spawned.
     assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
