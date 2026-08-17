@@ -27,13 +27,13 @@
 //! over-gates it, which is a layout fact rather than a property of that
 //! scenario.
 //!
-//! Steps 03-03 and 03-04 (S-VM-38, S-VM-39, S-VM-40) close the whole of AC-10
-//! and stay scaffolded RED at the bottom of this file, each with its own
-//! activation plan. Their capability truth is mixed once more: S-VM-39 and
-//! S-VM-40 genuinely boot a guest and reach Running, while S-VM-38 is an
-//! in-process semantic rejection that spawns no VMM at all and would run
-//! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
-//! over-gates it too.
+//! Steps 03-03 and 03-04 (S-VM-38, S-VM-39, S-VM-40) close the whole of AC-10.
+//! Step 03-03 (S-VM-38) is activated; 03-04's two scenarios stay scaffolded RED
+//! at the bottom of this file, each with its own activation plan. Their
+//! capability truth is mixed once more: S-VM-39 and S-VM-40 genuinely boot a
+//! guest and reach Running, while S-VM-38 is an in-process semantic rejection
+//! that spawns no VMM at all and would run anywhere — it rides here for
+//! scenario cohesion, so the `kvm-tests` gate over-gates it too.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::expect_used, clippy::missing_panics_doc)]
@@ -47,6 +47,7 @@ use std::time::Duration;
 use overdrive_cli::commands::deploy::{DeployArgs, deploy};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
+use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::VmBootArtifacts;
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
@@ -234,6 +235,23 @@ fn assert_named_cause_is_rendered(rendered: &str, reason: &TransitionReason, det
 fn vm_job_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\n\
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
+         memory_bytes = 134217728\n",
+        kernel.display(),
+        rootfs.display(),
+    )
+}
+
+/// [`vm_job_toml`]'s `[service]` twin: the SAME `[vm]` driver table and
+/// `[resources]` block, with the kind section swapped and a single valid
+/// `[[listener]]` added so the spec is well-formed in every respect
+/// EXCEPT the `[service]` + `[vm]` combination S-VM-38 rejects. A spec
+/// that were otherwise invalid could be refused for the wrong reason and
+/// the scenario would prove nothing.
+fn vm_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+    format!(
+        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 8080\n\
+         protocol = \"tcp\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\n\
          kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
          memory_bytes = 134217728\n",
         kernel.display(),
@@ -1299,22 +1317,13 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
 }
 
 // ---------------------------------------------------------------------------
-// Steps 03-03 / 03-04 — RED scaffolds (S-VM-38, S-VM-39, S-VM-40).
+// Step 03-03 (DWD-24 / US-VM-6) — the whole of AC-10's negative half.
 //
-// Shape per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
-// failing commits": `#[should_panic(expected = "RED scaffold")]` plus a panic
-// body naming the scenario. The bar stays green while every pending scenario
-// stays discoverable via `grep -rn 'should_panic.*RED scaffold' crates/`, and
-// deleting the `panic!` without writing the assertions trips the attribute
-// rather than passing silently.
-//
-// All three carry `#[test]` TODAY, deliberately: their bodies are a single
-// panic, so they await nothing and touch no cgroup. `#[tokio::test]` and
-// `#[serial(cgroup)]` are claims about what a body DOES, and neither body
-// makes them yet. Each rustdoc names the attributes its activated form must
-// carry, so the swap happens with the assertions and not before.
-//
-// The six activated scenarios above (S-VM-33/34/35/36/37/41) are untouched.
+// The one scenario in this file that asserts an outcome the platform reaches
+// WITHOUT a driver at all: the spec never becomes intent, so there is no
+// allocation, no VMM, and no `Failed` row. Every helper above that closes over
+// an `AllocationId` is therefore inapplicable here by construction rather than
+// by omission.
 // ---------------------------------------------------------------------------
 
 /// S-VM-38 / `@contract-shape:bounded-change` `@error_path` `@ac-10` `@tier3`
@@ -1345,51 +1354,124 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
 /// over-gating is a layout consequence, not a capability claim about this
 /// scenario (roadmap 03-03).
 ///
-/// # Activation plan (step 03-03)
+/// The three missing capabilities the rejection must name, asserted
+/// INDEPENDENTLY below: a single `contains` on one phrase would pass against
+/// a message that silently dropped the other two.
 ///
-/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`.
-/// The `await` is real — the "nothing was scheduled" half is asserted against a
-/// live `serve`, not inferred from the parser — and that composition boots the
-/// real cgroup-backed worker, so the serialisation is a claim the body makes
-/// even though this scenario creates no scope of its own.
-///
-/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (a VALID
-/// kernel/rootfs pair, so the rejection is provably about the `[service]` +
-/// `[vm]` combination and not about a broken artifact), `spawn_vm_server`,
-/// `config_path`, `write_toml`, `deploy`, `describe`.
-///
-/// **Still to build**: a `vm_service_toml` builder alongside `vm_job_toml`,
-/// emitting `[service]` + `[vm]` with the same `[resources]` block; and the
-/// rejection itself in `crates/overdrive-core/src/aggregate/workload_spec.rs`,
-/// mirroring `ProbesNotAllowedOnKind`'s shape — a `ParseError` variant whose
-/// `#[error(...)]` text is the operator-facing message and whose guidance is a
-/// `&'static str` constant rather than a string built at the call site.
-///
-/// **Assertions**:
-///
-/// * `deploy(..)` returns `Err`, and its rendered message names all three
-///   missing capabilities — guest networking, guest-reachable probes, and
-///   guest-stack mTLS interception. Assert the three independently; a single
-///   `contains` on one phrase would pass against a message that dropped the
-///   other two.
-/// * The same message cites `#257` and `#222` by number. Assert the digits, not
-///   a URL — the criterion is that the operator can find the tracking issue.
-/// * Nothing was scheduled: `describe` for the spec's declared id reports no
-///   allocation rows. This is the half a parser-level unit test cannot reach
-///   and the reason the scenario is Tier 3 at all.
-/// * `assert_no_allocation_scoped_vm_residue` does NOT apply and must not be
-///   forced: no `AllocationId` is ever minted, which is precisely what this
-///   scenario proves. Asserting on residue for an allocation that does not
-///   exist would be vacuous.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-38 / step 03-03 -- a spec declaring both \
-         [service] and [vm] must be rejected before any intent is committed, naming guest \
-         networking, guest probes and guest-stack mTLS and citing GH #257 and GH #222)"
+/// `assert_no_allocation_scoped_vm_residue` deliberately does NOT apply here
+/// and is not forced: no `AllocationId` is ever minted, which is precisely
+/// what this scenario proves. Asserting on residue for an allocation that does
+/// not exist would be vacuous.
+#[tokio::test]
+#[serial(cgroup)]
+async fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
+    const MISSING_CAPABILITIES: [&str; 3] =
+        ["guest networking", "guest-reachable probes", "guest-stack mtls interception"];
+    const TRACKING_ISSUES: [&str; 2] = ["#257", "#222"];
+    const WORKLOAD_ID: &str = "vm-service-rejected";
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    // Both artifacts are VALID and PRESENT throughout: the rejection is
+    // provably about the [service] + [vm] combination, never about a
+    // broken or absent artifact (which is what S-VM-33/34/41 cover).
+    assert!(
+        fixture.kernel_path.exists() && fixture.rootfs_path.exists(),
+        "S-VM-38 precondition: both configured artifacts must be present, so nothing but the \
+         kind/driver combination can explain the rejection",
     );
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: fixture.rootfs_path.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-service-rejected.toml",
+        &vm_service_toml(WORKLOAD_ID, &fixture.kernel_path, &fixture.rootfs_path),
+    );
+
+    // ---- The scoping control. The IDENTICAL [vm] driver table under
+    // [job] still parses, so a failure below is the [service] rejection
+    // firing and not this fixture's [vm] block being unacceptable
+    // anywhere. Steps 03-04's two scenarios prove the positive paths
+    // reach Running; this line only fixes the blame for THIS one. ----
+    overdrive_core::aggregate::WorkloadSpecInput::from_toml_str(&vm_job_toml(
+        WORKLOAD_ID,
+        &fixture.kernel_path,
+        &fixture.rootfs_path,
+    ))
+    .expect("the same [vm] driver table under [job] must still parse — the rejection is scoped");
+
+    // ---- The rejection, off the production deploy surface. ----
+    let rejection = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect_err("a spec declaring both [service] and [vm] must be rejected");
+    let message = rejection.to_string();
+    let lowered = message.to_lowercase();
+
+    for capability in MISSING_CAPABILITIES {
+        assert!(
+            lowered.contains(capability),
+            "the rejection must name {capability:?} as a missing capability:\n{message}",
+        );
+    }
+    for issue in TRACKING_ISSUES {
+        assert!(
+            message.contains(issue),
+            "the rejection must cite GH {issue} by number so the operator can find the tracking \
+             issue:\n{message}",
+        );
+    }
+
+    // ---- Nothing was scheduled. The half a parser-level unit test
+    // cannot reach, and the reason this scenario is Tier 3 at all: the
+    // describe surface reports the workload as unknown, so no intent was
+    // committed and no allocation row exists to describe. ----
+    let described =
+        describe(DescribeArgs { id: WORKLOAD_ID.to_owned(), config_path: cfg.clone() }).await;
+    match described {
+        Err(CliError::HttpStatus { status, body }) => {
+            assert_eq!(
+                status, 404,
+                "a rejected deploy must commit no intent, so the workload must be unknown",
+            );
+            assert_eq!(body.error, "not_found", "error class must be `not_found`");
+        }
+        Ok(out) => panic!(
+            "a rejected deploy must schedule nothing, but describe found the workload with {} \
+             allocation row(s)",
+            out.allocations_total,
+        ),
+        Err(other) => {
+            panic!("expected HTTP 404 for the never-committed workload, got {other:?}")
+        }
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
 }
+
+// ---------------------------------------------------------------------------
+// Step 03-04 — RED scaffolds (S-VM-39, S-VM-40): AC-10's positive half.
+//
+// Shape per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
+// failing commits": `#[should_panic(expected = "RED scaffold")]` plus a panic
+// body naming the scenario. The bar stays green while every pending scenario
+// stays discoverable via `grep -rn 'should_panic.*RED scaffold' crates/`, and
+// deleting the `panic!` without writing the assertions trips the attribute
+// rather than passing silently.
+//
+// Both carry `#[test]` TODAY, deliberately: their bodies are a single panic,
+// so they await nothing and touch no cgroup. `#[tokio::test]` and
+// `#[serial(cgroup)]` are claims about what a body DOES, and neither body
+// makes them yet. Each rustdoc names the attributes its activated form must
+// carry, so the swap happens with the assertions and not before.
+//
+// The seven activated scenarios above (S-VM-33/34/35/36/37/38/41) are
+// untouched.
+// ---------------------------------------------------------------------------
 
 /// S-VM-39 / `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3`
 /// `@real-io` `@requires-kvm` — a spec declaring both `[job]` and `[vm]` is

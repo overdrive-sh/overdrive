@@ -303,7 +303,58 @@ pub enum ParseError {
         /// Per-kind guidance text explaining the rejection.
         guidance: &'static str,
     },
+
+    // -----------------------------------------------------------------
+    // Slice 02 — microvm-driver-cloud-hypervisor US-VM-6 / AC-10.
+    // -----------------------------------------------------------------
+    /// `[vm]` was declared on a `[service]` workload. A VM workload
+    /// cannot yet be *served*: the platform has no tap in the guest's
+    /// netns, no probe that can reach inside the guest, and no
+    /// interception point for the guest's own TCP stack — so a spec the
+    /// platform accepted here would schedule, report `Running`, and
+    /// receive no traffic.
+    ///
+    /// The mirror image of [`Self::ProbesNotAllowedOnKind`]: there
+    /// Service is the kind being *required*, here it is the kind being
+    /// *refused*. Same shape by design — a semantic rejection carrying
+    /// `&'static str` guidance that explains *why* and names where each
+    /// missing capability is tracked, rather than a bare refusal.
+    ///
+    /// This variant is *removed*, not relaxed, when VM services become
+    /// supported.
+    #[error("[vm] is not allowed on a [service] workload — {guidance}")]
+    VmNotAllowedOnServiceKind {
+        /// Guidance text naming the missing capabilities and their
+        /// tracking issues — always [`SERVICE_VM_UNSUPPORTED_GUIDANCE`].
+        guidance: &'static str,
+    },
 }
+
+/// Guidance text surfaced on
+/// [`ParseError::VmNotAllowedOnServiceKind`] when an operator declares
+/// `[vm]` alongside `[service]` (Slice 02 / US-VM-6 / AC-10).
+///
+/// Names each capability a served VM workload would require and cites
+/// the issue tracking it, so the operator learns *what is missing* and
+/// *where to watch for it* rather than merely being refused. A per-kind
+/// constant (not a format string) so the operator-facing message is
+/// stable and greppable — same discipline as
+/// [`crate::aggregate::probe_descriptor::JOB_PROBES_GUIDANCE`].
+///
+/// The three named gaps and their real tracking issues:
+///
+/// * guest networking + guest-reachable probes —
+///   [GH #257](https://github.com/overdrive-sh/overdrive/issues/257)
+///   (tap-in-netns provisioning + guest-reachable probes)
+/// * guest-stack mTLS interception —
+///   [GH #222](https://github.com/overdrive-sh/overdrive/issues/222)
+///   (guest-stack mTLS intercept)
+const SERVICE_VM_UNSUPPORTED_GUIDANCE: &str = concat!(
+    "a VM workload cannot be served yet: guest networking (a tap in the workload's ",
+    "netns) and guest-reachable probes are missing, tracked by GH #257; guest-stack ",
+    "mTLS interception is missing, tracked by GH #222. Until then, run the [vm] block ",
+    "under [job] (optionally with [schedule]), or keep [service] on [exec].",
+);
 
 // ---------------------------------------------------------------------------
 // Discriminator
@@ -788,13 +839,11 @@ impl WorkloadSpecInput {
     /// `MissingResources`; missing `cron` in `[schedule]` →
     /// `MissingCron`; underlying TOML parse failures → `Toml(_)`.
     ///
-    /// `[vm]` is a job-family driver table only (`[job]` / `[schedule]`) —
-    /// `[service]` keeps its original `[exec]`-only requirement. Rejecting
-    /// `[vm]` + `[service]` with ADR-0083 §D4's dedicated guest-networking
-    /// message is a later slice's concern (AC-10); today it falls out of
-    /// the unchanged `[service]` branch requiring `[exec]` and surfaces as
-    /// `MissingDriverSection` — safe (no allocation created), not yet the
-    /// fully-named rejection.
+    /// `[vm]` is a job-family driver table only (`[job]` / `[schedule]`).
+    /// `[service]` keeps its original `[exec]`-only requirement and now
+    /// rejects `[vm]` explicitly with `VmNotAllowedOnServiceKind` — the
+    /// named AC-10 rejection (microvm-driver US-VM-6), replacing the
+    /// former incidental `MissingDriverSection` fall-out.
     pub fn from_toml_str(src: &str) -> Result<Self, ParseError> {
         // Parse to a generic TOML value so we can inspect section presence
         // before mapping to the variant. `toml` is a dev-dep on this
@@ -807,46 +856,8 @@ impl WorkloadSpecInput {
             .as_table()
             .ok_or_else(|| ParseError::Toml("top-level TOML must be a table".to_string()))?;
 
-        let has_service = table.contains_key("service");
-        let has_job = table.contains_key("job");
-        let has_schedule = table.contains_key("schedule");
-        let has_exec = table.contains_key("exec");
-        let has_vm = table.contains_key("vm");
-        let has_resources = table.contains_key("resources");
-
-        // Kind-discrimination matrix per ADR-0047 §1.
-        // Rejection ordering matches the operator-facing-clarity ordering
-        // in slice-01-parser-kind-discriminator.md.
-        if has_service && has_job {
-            return Err(ParseError::MixedServiceAndJob);
-        }
-        if has_schedule && has_service {
-            return Err(ParseError::ScheduleWithService);
-        }
-        if has_schedule && !has_job {
-            return Err(ParseError::ScheduleWithoutJob);
-        }
-        if !has_service && !has_job {
-            return Err(ParseError::MissingKindSection);
-        }
-        // Driver-table dispatch (ADR-0083 §D4, GH #42): exactly one of
-        // [exec] / [vm] is required on the job-family path. `[service]`
-        // is unchanged — still [exec]-only (see this fn's doc comment).
-        if has_service {
-            if !has_exec {
-                return Err(ParseError::MissingDriverSection);
-            }
-        } else {
-            if has_exec && has_vm {
-                return Err(ParseError::MultipleDriverSections);
-            }
-            if !has_exec && !has_vm {
-                return Err(ParseError::MissingDriverSection);
-            }
-        }
-        if !has_resources {
-            return Err(ParseError::MissingResources);
-        }
+        let SectionPresence { service: has_service, schedule: has_schedule, vm: has_vm } =
+            SectionPresence::validated(table)?;
 
         // Inner-section deserialisation. Each section is parsed into its
         // typed shape; failures map to ParseError::Field with the
@@ -967,6 +978,87 @@ impl WorkloadSpecInput {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Which top-level sections a spec declares, once the kind/driver
+/// combination has been proven legal.
+///
+/// Deciding *whether the combination is admissible at all* is a
+/// distinct responsibility from deserialising each section's body, so it
+/// lives here and [`WorkloadSpecInput::from_toml_str`] reads the verdict.
+/// Only the three flags that path still branches on afterwards are
+/// carried — the rest are consumed entirely by the validation.
+struct SectionPresence {
+    /// `[service]` is present (so this is the Service-kind path).
+    service: bool,
+    /// `[schedule]` is present (so the job-family path is a Schedule).
+    schedule: bool,
+    /// `[vm]` is the declared driver table rather than `[exec]`.
+    vm: bool,
+}
+
+impl SectionPresence {
+    /// Walk the top-level table and reject every inadmissible section
+    /// combination, in the operator-facing-clarity ordering pinned by
+    /// `slice-01-parser-kind-discriminator.md`.
+    ///
+    /// Kind-discrimination matrix per ADR-0047 §1; driver-table dispatch
+    /// per ADR-0083 §D4 (GH #42); the `[service]` + `[vm]` rejection per
+    /// microvm-driver US-VM-6 / AC-10.
+    fn validated(table: &toml::value::Table) -> Result<Self, ParseError> {
+        let has_service = table.contains_key("service");
+        let has_job = table.contains_key("job");
+        let has_schedule = table.contains_key("schedule");
+        let has_exec = table.contains_key("exec");
+        let has_vm = table.contains_key("vm");
+
+        if has_service && has_job {
+            return Err(ParseError::MixedServiceAndJob);
+        }
+        if has_schedule && has_service {
+            return Err(ParseError::ScheduleWithService);
+        }
+        if has_schedule && !has_job {
+            return Err(ParseError::ScheduleWithoutJob);
+        }
+        if !has_service && !has_job {
+            return Err(ParseError::MissingKindSection);
+        }
+
+        if has_service {
+            // Slice 02 / US-VM-6 (AC-10): `[service]` + `[vm]` is a
+            // semantic rejection, not a missing-driver one — the driver
+            // table IS present; it is the kind that cannot be served.
+            // Checked before the `[exec]` requirement so the operator
+            // reads what is actually missing (guest networking, guest-
+            // reachable probes, guest-stack mTLS interception) rather
+            // than being told to add an `[exec]` block they did not
+            // forget. Deliberately scoped to `[service]`: the job-family
+            // branch below is untouched, so `[job]` / `[job]+[schedule]`
+            // with `[vm]` stay accepted.
+            if has_vm {
+                return Err(ParseError::VmNotAllowedOnServiceKind {
+                    guidance: SERVICE_VM_UNSUPPORTED_GUIDANCE,
+                });
+            }
+            if !has_exec {
+                return Err(ParseError::MissingDriverSection);
+            }
+        } else {
+            if has_exec && has_vm {
+                return Err(ParseError::MultipleDriverSections);
+            }
+            if !has_exec && !has_vm {
+                return Err(ParseError::MissingDriverSection);
+            }
+        }
+
+        if !table.contains_key("resources") {
+            return Err(ParseError::MissingResources);
+        }
+
+        Ok(Self { service: has_service, schedule: has_schedule, vm: has_vm })
+    }
+}
 
 /// Deserialise a top-level TOML section into a typed shape, mapping
 /// failures to `ParseError::Field` with the section name.

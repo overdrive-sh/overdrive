@@ -225,11 +225,22 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         Ok(WorkloadSpecInput::Service(service_spec)) => {
             return deploy_service(args, service_spec).await;
         }
-        // Slice 07 / US-07 — surface the kind-rejection verbatim with
-        // its per-kind guidance. Without this explicit arm the error
-        // would be swallowed by the legacy `toml::from_str` fall-through
-        // below, hiding the teaching message from the operator.
-        Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
+        // Semantic kind rejections — surfaced verbatim with their
+        // guidance. Without an explicit arm each would be swallowed by
+        // the legacy `toml::from_str` fall-through below, which reports
+        // the unrelated "missing field `id`" and hides the teaching
+        // message from the operator.
+        //
+        // * `ProbesNotAllowedOnKind` — Slice 07 / US-07: probes on a
+        //   non-Service workload.
+        // * `VmNotAllowedOnServiceKind` — microvm-driver US-VM-6 /
+        //   AC-10: `[vm]` on a `[service]` workload. The rejection must
+        //   reach the operator BEFORE any HTTP call, so no intent is
+        //   committed and no allocation is created.
+        Err(
+            parse_err @ (ParseError::ProbesNotAllowedOnKind { .. }
+            | ParseError::VmNotAllowedOnServiceKind { .. }),
+        ) => {
             return Err(CliError::ParseError(parse_err));
         }
         // Schedule kind and other parse failures fall through to the
