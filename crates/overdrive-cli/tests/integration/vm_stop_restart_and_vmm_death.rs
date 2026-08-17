@@ -1,6 +1,8 @@
-//! Slice 03 / AC-11 — exit classification is guest-authoritative, never
-//! derived from the hypervisor's own exit status (GH #42, brief §105 /
-//! feature-delta `[D3]`).
+//! Slice 03 / AC-11 + AC-12 — exit classification is guest-authoritative,
+//! never derived from the hypervisor's own exit status (AC-11, GH #42,
+//! brief §105 / feature-delta `[D3]`), and the operator stop verb drives a
+//! bounded graceful-shutdown sequence over the guest's beacon before any
+//! hard kill (AC-12, ADR-0082 §D4).
 //!
 //! # What this file proves, and what it does NOT touch
 //!
@@ -37,7 +39,7 @@
 //! | VMM exited with **no** agent report | `Crashed`, cause names the un-reported death | S-VM-42 (panic), S-VM-43 (host kill) |
 //! | Operator stop | `intentional_stop`, no restart budget | S-VM-45 |
 //!
-//! # The four scenarios
+//! # The scenarios (AC-11: S-VM-42..45; AC-12: S-VM-46..47)
 //!
 //! * **S-VM-42** — a guest that exits the hypervisor cleanly (`0`) WITHOUT
 //!   ever beaconing READY lands `Failed / VmGuestExitUnreported`, never
@@ -93,6 +95,24 @@
 //! * **S-VM-45** — an operator stop lands `Terminated` attributed to the
 //!   operator/reconciler, NOT a crash, and consumes NO restart budget
 //!   (`restart_count == 0`, `restart_budget.used == 0`).
+//!
+//! * **S-VM-46** (AC-12) — stopping a running VM drives ADR-0082 §D4's
+//!   graceful-shutdown sequence (the `SHUTDOWN` write on the guest's
+//!   already-open beacon, then the `Vmm::terminate` escalation) to
+//!   `Terminated / Stopped { by: Operator }`, the SAME driver-agnostic
+//!   terminal a stopped process workload reaches. The **first real
+//!   evidence for the host→guest `SHUTDOWN` write** (the spike exercised
+//!   guest→host only, `findings.md:2787`) — a mechanism proof, not a
+//!   regression guard.
+//!
+//! * **S-VM-47** (AC-12, error path) — a guest that ignores the `SHUTDOWN`
+//!   request (the shipped `overdrive-init` blocked on its long-lived child,
+//!   never reaching its post-command `read_shutdown_or_eof`) is still
+//!   stopped within the bounded grace (`VM_SHUTDOWN_REQUEST_DEADLINE` 2s +
+//!   `VM_STOP_GRACE` 10s), escalated to `Vmm::terminate`'s SIGKILL, and
+//!   lands the operator-stop terminal — NEVER `WorkloadCrashedImmediately`,
+//!   even though the SIGKILL'd VMM is indistinguishable in isolation from
+//!   S-VM-43's host kill.
 //!
 //! # `#[serial(cgroup)]` + the `host-kernel-shared` nextest group
 //!
@@ -868,6 +888,248 @@ async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
     assert!(
         out.snapshot.restart_budget.as_ref().is_none_or(|b| b.used == 0),
         "an operator stop must leave the restart budget unused: {:?}",
+        out.snapshot.restart_budget,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// S-VM-46 — an operator stop drives the graceful-shutdown sequence to the
+// operator-stop terminal, the SAME terminal a process workload reaches.
+// ---------------------------------------------------------------------------
+
+/// S-VM-46 / `@ac-12` — stopping a running VM workload drives the ADR-0082
+/// §D4 graceful-shutdown sequence — `VmDriver::stop` writes `SHUTDOWN` on
+/// the guest's already-open beacon connection BEFORE escalating to
+/// `Vmm::terminate` (AC-1) — and the allocation lands
+/// `Terminated / Stopped { by: Operator }`, the SAME driver-agnostic
+/// terminal a stopped process (`ExecDriver`) workload reaches. The parity
+/// in the scenario title is structural: there is no VM-specific stop
+/// reason — `TransitionReason::Stopped { by: Operator }` is the one reason
+/// every driver's operator stop produces, so a VM reaching it IS parity.
+///
+/// **First real evidence for the host→guest `SHUTDOWN` write** (ADR-0082
+/// §D4, `findings.md:2787` — the spike exercised the vsock connection
+/// guest→host only). This is the first scenario to run the real `stop()`
+/// — which writes `SHUTDOWN\n` on a real, live beacon connection held to a
+/// real guest — end to end against a real Cloud Hypervisor VMM. It is a
+/// mechanism proof, not a regression guard.
+///
+/// With the shipped `overdrive-init`, a guest running a long-lived command
+/// is blocked in `exec_operator_command` and never reaches its
+/// post-command `read_shutdown_or_eof`, so the best-effort `SHUTDOWN` write
+/// is not consumed by the busy guest and the `Vmm::terminate` escalation is
+/// what stops the VM (concurrent-`SHUTDOWN`-during-execution is deferred —
+/// `overdrive-init` module doc). The observable is invariant across that
+/// detail: the allocation lands the operator-stop terminal, never a crash.
+///
+/// ```gherkin
+/// Given Ana has a running VM workload
+/// When she runs the operator stop verb
+/// Then the guest is asked to shut down gracefully over its open vsock
+///   connection
+/// And the allocation reaches Terminated as operator-stopped
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-stop46-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-stop46.toml",
+        &vm_job_toml("vm-stop46", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the long-lived VM workload");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+
+    // The operator stop verb drives VmDriver::stop's §D4 sequence: the
+    // SHUTDOWN write on the beacon, then VM_SHUTDOWN_REQUEST_DEADLINE, then
+    // Vmm::terminate. Same `commands::deploy::stop` handler an [exec]
+    // workload uses (crates/overdrive-cli CLAUDE.md).
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the running VM workload with the operator stop verb");
+
+    let out = poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    let row = out.snapshot.rows.first().expect("one terminated allocation row");
+
+    assert_eq!(
+        row.state,
+        AllocStateWire::Terminated,
+        "an operator stop must reach Terminated, got {:?} (reason={:?})",
+        row.state,
+        row.reason,
+    );
+    // The operator-stop terminal — the SAME reason a stopped process
+    // workload produces (there is no VM-specific stop reason). Reconciler
+    // is accepted alongside Operator for the reason S-VM-45 accepts it: the
+    // terminal is authored on the operator-stop intent, not a VM path.
+    assert!(
+        matches!(
+            row.reason,
+            Some(TransitionReason::Stopped {
+                by: StoppedBy::Operator | StoppedBy::Reconciler
+            }),
+        ),
+        "a VM operator stop must reach the operator-stop terminal, never a crash: {:?}",
+        row.reason,
+    );
+    assert!(
+        !matches!(row.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        "the graceful-then-escalate stop sequence is never a crash: {:?}",
+        row.reason,
+    );
+    // Converges like any other stopped workload: no restart, no budget
+    // consumed (the reconciler exempts the operator-stop intent from the
+    // restart branch), exactly as a stopped process workload shows.
+    assert_eq!(
+        row.restart_count, 0,
+        "an operator-stopped VM consumes no restart budget (restart_count), got {}",
+        row.restart_count,
+    );
+    assert!(
+        out.snapshot.restart_budget.as_ref().is_none_or(|b| b.used == 0),
+        "an operator-stopped VM leaves the restart budget unused: {:?}",
+        out.snapshot.restart_budget,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// S-VM-47 — an unresponsive guest is stopped within the bounded grace and
+// is never classified a crash.
+// ---------------------------------------------------------------------------
+
+/// S-VM-47 / `@ac-12` `@error_path` — a running VM whose guest ignores the
+/// `SHUTDOWN` request is still stopped within the bounded grace
+/// (`VM_SHUTDOWN_REQUEST_DEADLINE` 2s + `VM_STOP_GRACE` 10s), escalated to
+/// `Vmm::terminate`'s SIGKILL, and lands `Terminated / Stopped { by:
+/// Operator }` — NEVER `WorkloadCrashedImmediately`, even though the VMM
+/// dies to a SIGKILL that in isolation looks exactly like the host kill
+/// S-VM-43 classifies as a crash. The operator-stop intent is what refuses
+/// the crash classification.
+///
+/// The shipped `overdrive-init` IS the "guest ignores shutdown requests"
+/// Given: it is blocked in `exec_operator_command` running the long-lived
+/// `/sbin/spin` child and never reaches its post-command
+/// `read_shutdown_or_eof`, so the host's best-effort `SHUTDOWN` write is
+/// unconsumed and the `Vmm::terminate` escalation is the only thing that
+/// stops the VM. Without `VM_SHUTDOWN_REQUEST_DEADLINE` bounding step 1 and
+/// `VM_STOP_GRACE` bounding step 2, such a guest would let `stop` hang
+/// indefinitely — the bound is exactly what this scenario defends (ADR-0082
+/// §D4, "Without the step-1 deadline this ADR's own claim has no
+/// mechanism").
+///
+/// ```gherkin
+/// Given Ana has a running VM workload whose guest ignores shutdown requests
+/// When she runs the operator stop verb
+/// Then the allocation reaches Terminated as operator-stopped within the
+///   grace period
+/// And it is NOT classified as a crash
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-stop47-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-stop47.toml",
+        &vm_job_toml("vm-stop47", "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the long-lived VM workload whose guest ignores shutdown");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+
+    // VM_SHUTDOWN_REQUEST_DEADLINE (2s) + VM_STOP_GRACE (10s) = 12s is the
+    // driver-side escalation bound (both private consts in vm_driver.rs).
+    // The operator-observable terminal adds the reconciler observe -> emit
+    // StopAllocation -> action-shim -> author-terminal latency on top, so
+    // the end-to-end ceiling is padded to 30s (the window S-VM-45 already
+    // proves sufficient for this same spin-guest stop path). A hang — the
+    // failure mode the two constants exist to prevent — would blow past
+    // both this ceiling and the 60s poll window below.
+    let bounded_grace_ceiling = Duration::from_secs(30);
+
+    let started = tokio::time::Instant::now();
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the VM workload whose guest ignores the shutdown request");
+    let out = poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let elapsed = started.elapsed();
+    let row = out.snapshot.rows.first().expect("one terminated allocation row");
+
+    assert_eq!(
+        row.state,
+        AllocStateWire::Terminated,
+        "an unresponsive guest's operator stop must reach Terminated, got {:?} (reason={:?})",
+        row.state,
+        row.reason,
+    );
+    // Bounded grace: the escalation lands the terminal well within the
+    // constant-derived ceiling rather than hanging on the unresponsive
+    // guest — the property VM_SHUTDOWN_REQUEST_DEADLINE + VM_STOP_GRACE
+    // exist to guarantee.
+    assert!(
+        elapsed <= bounded_grace_ceiling,
+        "an unresponsive guest must reach Terminated within the bounded grace \
+         (2s deadline + 10s grace + reconciler slack, ceiling {bounded_grace_ceiling:?}); \
+         took {elapsed:?}",
+    );
+    // Still an operator stop, never a crash — even though the VMM died to a
+    // SIGKILL indistinguishable in isolation from S-VM-43's host kill. The
+    // operator-stop intent wins the classification.
+    assert!(
+        matches!(
+            row.reason,
+            Some(TransitionReason::Stopped {
+                by: StoppedBy::Operator | StoppedBy::Reconciler
+            }),
+        ),
+        "an unresponsive guest's stop is still an operator stop, never a crash: {:?}",
+        row.reason,
+    );
+    assert!(
+        !matches!(row.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        "the SIGKILL escalation of an operator stop must NOT be classified a crash: {:?}",
+        row.reason,
+    );
+    // No restart budget consumed — an operator stop is exempt from the
+    // restart branch regardless of how the VMM ultimately died.
+    assert_eq!(
+        row.restart_count, 0,
+        "an operator-stopped VM consumes no restart budget (restart_count), got {}",
+        row.restart_count,
+    );
+    assert!(
+        out.snapshot.restart_budget.as_ref().is_none_or(|b| b.used == 0),
+        "an operator-stopped VM leaves the restart budget unused: {:?}",
         out.snapshot.restart_budget,
     );
 
