@@ -103,9 +103,15 @@ fn start_rejected_unclassified(detail: impl Into<String>) -> DriverError {
 /// diagnosis. `@mandatory:mutation_target`.
 fn classify_vmm_error(err: &VmmError) -> DriverError {
     match err {
-        VmmError::HypervisorAbsent { searched, source } => start_rejected(
+        // The detail is the WHOLE `VmmError`, not its inner `source`: the
+        // adapter's own `Display` is the low-level diagnostic that names
+        // every path searched, and dropping to the bare `io::Error`
+        // ("No such file or directory") discards exactly the evidence an
+        // operator acts on. Still verbatim adapter text, never a
+        // classification input.
+        VmmError::HypervisorAbsent { searched, .. } => start_rejected(
             VmStartFailure::HypervisorAbsent { searched: searched.clone() },
-            source.to_string(),
+            err.to_string(),
         ),
         VmmError::RootfsNotFound { path, source } => start_rejected(
             VmStartFailure::RootfsNotFound { path: path.display().to_string() },
@@ -135,10 +141,14 @@ async fn preflight_kernel(kernel: &KernelImage, arch: HostArch) -> Result<(), Dr
     let path = kernel.path().to_path_buf();
     let header = match read_kernel_magic_window(&path).await {
         Ok(header) => header,
+        // The detail NAMES the configured path, mirroring the rootfs
+        // preflight's `stat rootfs master {configured}: {err}` shape. A
+        // bare `io::Error` ("No such file or directory") tells an operator
+        // nothing about WHICH artifact went missing.
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Err(start_rejected(
                 VmStartFailure::KernelNotFound { path: path.display().to_string() },
-                err.to_string(),
+                format!("open kernel image {}: {err}", path.display()),
             ));
         }
         Err(err) => {
@@ -623,6 +633,16 @@ struct ProvisionedVmm {
     memory: MemoryPlan,
 }
 
+// `too_many_lines` allow: the lint measures the whole `#[async_trait]`-
+// expanded impl, not one method, and `start`'s body IS the ADR-0082 §D3
+// boot sequence — provision, the three-way race, and one cleanup-and-
+// reject arm per outcome. Splitting the arms apart to satisfy a line
+// count would scatter the cleanup contract (`@mandatory:mutation_target`
+// on every non-Ok arm) across call sites, which is the property this
+// file is most at risk of leaking. `allow`, not `expect`: the flagged
+// length depends on `#[cfg(target_os = "linux")]` code that is absent on
+// a macOS host check, so an `expect` would itself go unfulfilled there.
+#[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Driver for VmDriver {
     fn r#type(&self) -> DriverType {

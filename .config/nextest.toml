@@ -478,6 +478,30 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_reclamation_tier3)'
 test-group = 'host-kernel-shared'
 
+# microvm-driver-cloud-hypervisor step 03-06 (AC-09 / DWD-24, GH #42) —
+# `overdrive-cli`'s vm_boot_failure_vocabulary.rs → `host-kernel-shared`,
+# by MODULE. Same shared-real-host-cgroupfs reason as the two modules
+# above, plus a THIRD mechanism this file measured directly: a sibling
+# `serve` boot's VM-reclamation pass (`vm_reclamation_boot::converge`)
+# discards every `/run/overdrive/vm/<alloc>` run-dir orphan that has no
+# row in ITS OWN store — and a concurrently-booting test's serve has an
+# empty store, so it reaps the LIVE VM another test is booting.
+#
+# Measured, not inferred. Unserialized, the boot-deadline scenario
+# (`guest_that_never_beacons_...`) failed in 0.82s with
+# `VmGuestExitUnreported { vmm_exit_code: None, vmm_signal: Some(9) }`
+# and "no stderr captured" — a sub-second SIGKILL, never the 30s
+# deadline it asserts on. The same test alone passes in 30.7s with
+# `VmBootDeadlineExceeded { deadline_ms: 30000, .. }`. The reap is
+# correct production behaviour (one `overdrive serve` per node); running
+# several serves against one host is the test-harness artefact, and this
+# group is the only level that can prevent it — `#[serial(cgroup)]` on
+# every test in the file synchronises within a process, and nextest
+# gives each test its own. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_boot_failure_vocabulary)'
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,

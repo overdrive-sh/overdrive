@@ -432,7 +432,7 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         let run_dir = VmRunDir::for_alloc(&run_dir_root, &alloc);
         assert!(!run_dir.path().exists(), "[{arm}] the run directory must be removed");
 
-        let master_bytes = std::fs::metadata(&rootfs_master).map(|m| m.len()).unwrap_or(0);
+        let master_bytes = std::fs::metadata(&rootfs_master).map_or(0, |m| m.len());
         let rootfs_plan = RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc);
         assert!(
             !rootfs_plan.clone_dest().exists(),

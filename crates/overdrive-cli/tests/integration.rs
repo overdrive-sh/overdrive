@@ -129,9 +129,15 @@ mod integration {
     // the start of their own RED phase, per `distill/wave-decisions.md`
     // DWD-06.
     mod vm_walking_skeleton;
-    // Step 03-05 / S-VM-34 (DWD-24) — real serve + deploy + workload
-    // describe proof for an absent configured rootfs, including exact cause
-    // vocabulary and zero leaked allocation-scoped VM resources.
+    // AC-09 named VM boot-failure vocabulary (DWD-24).
+    //   * Step 03-05 / S-VM-34 — real serve + deploy + workload describe
+    //     proof for an absent configured rootfs, including exact cause
+    //     vocabulary and zero leaked allocation-scoped VM resources.
+    //   * Step 03-06 / S-VM-33, S-VM-35, S-VM-36, S-VM-41 — the remaining
+    //     four named Slice-02 causes across that same production path:
+    //     a kernel deleted after composition, a hypervisor removed after
+    //     composition, a guest that never beacons, and a kernel replaced
+    //     with an image the host cannot load.
     mod vm_boot_failure_vocabulary;
 
     // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md

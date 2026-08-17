@@ -440,6 +440,14 @@ impl ExecDriver {
     }
 }
 
+// `too_many_lines` allow: the lint measures the whole `#[async_trait]`-
+// expanded impl, and its length here is `#[cfg(target_os = "linux")]`
+// code that a macOS host check compiles out — so the crate is clean on
+// the host and flagged only under the Lima-routed (Linux) clippy this
+// repo gates on. `allow`, not `expect`, for exactly that asymmetry: an
+// `expect` would go unfulfilled on the host. Pre-existing shape,
+// untouched by the step that added this attribute.
+#[allow(clippy::too_many_lines)]
 #[async_trait]
 impl Driver for ExecDriver {
     fn r#type(&self) -> DriverType {

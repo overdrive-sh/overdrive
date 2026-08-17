@@ -51,8 +51,13 @@ struct SimProcessEntry {
     /// Scripted process ending, if one was injected. `None` keeps this
     /// double's established default (an un-beaconed process settles as
     /// `Killed`, signal 9).
-    scripted_exit: Option<(Option<i32>, Option<u8>)>,
+    scripted_exit: Option<ScriptedEnding>,
 }
+
+/// One injected process ending: `(exit_code, signal)`, mirroring
+/// [`VmmExit`]'s own two fields. Named so the injection slot below reads
+/// as an ending rather than as an anonymous nest of options.
+type ScriptedEnding = (Option<i32>, Option<u8>);
 
 #[derive(Default)]
 struct State {
@@ -121,7 +126,7 @@ pub struct SimVmm {
     scripted_console: Arc<Mutex<Option<Vec<u8>>>>,
     /// The ending the NEXT created process reports. Consumed by that one
     /// `create`, mirroring `fail_next_create`'s one-shot style.
-    scripted_exit: Arc<Mutex<Option<(Option<i32>, Option<u8>)>>>,
+    scripted_exit: Arc<Mutex<Option<ScriptedEnding>>>,
 }
 
 impl Default for SimVmm {
@@ -249,7 +254,12 @@ impl Vmm for SimVmm {
         // writer stays adapter-side and is dropped once the scripted
         // output is captured — this double has no long-lived pipe to read.
         let (diagnostics, writer) = VmmDiagnostics::new();
-        if let Some(scripted) = self.scripted_console.lock().take() {
+        // The lock is released BEFORE the branch body runs: a guard held
+        // across the scrutinee would keep this double's console mutex
+        // locked for the whole `if let`, which is the deadlock shape
+        // `significant_drop_in_scrutinee` names.
+        let scripted_console = self.scripted_console.lock().take();
+        if let Some(scripted) = scripted_console {
             writer.append(&scripted);
         }
         let scripted_exit = self.scripted_exit.lock().take();
