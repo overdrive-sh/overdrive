@@ -235,13 +235,46 @@ async fn create_index_link(rootfs: &RootfsPlan) -> std::io::Result<()> {
 
 /// Remove the rootfs clone FIRST, then its index link (ADR-0083 §D3f) —
 /// the ordering that makes `no link ⇒ no clone` true across a crash
-/// between the two steps. Both removals are best-effort and
-/// NotFound-tolerant: a crash after the clone's removal leaves at most a
-/// dangling link the reclamation sweep disposes idempotently.
-/// `@mandatory:mutation_target` — swapping the two removals reopens the
-/// "clone without a link" window S-VM-85 exists to close.
+/// between the two steps. Best-effort and NotFound-tolerant, but the link
+/// is dropped ONLY once the clone is gone (removed now, or already
+/// absent). If the clone removal fails for any reason OTHER than
+/// `NotFound` — the operator's rootfs directory went read-only / `EROFS` /
+/// `EACCES` between the FICLONE and stop — the surviving clone MUST keep
+/// its index entry, or it becomes an orphan no reclamation sweep can ever
+/// enumerate (§D3h `no link ⇒ no clone`; the "clone exists, link absent"
+/// state §D3f's crash table marks *unreachable by construction*). The
+/// non-`NotFound` error is surfaced, not swallowed
+/// (`.claude/rules/development.md` § "Errors"), and the link is left for
+/// the sweep to retry — mirroring the sweep-side twin
+/// `RealVmHostState::discard_artifacts`, which likewise returns before
+/// touching the link on a non-`NotFound` clone-removal failure. Stop stays
+/// best-effort: a failed clone removal must not crash stop, but it must NOT
+/// actively create the invisible orphan by removing the link.
+/// `@mandatory:mutation_target` — swapping the two removals removes the
+/// link first and reopens the "clone without a link" window S-VM-85 exists
+/// to close (the `stop_keeps_the_index_link_when_the_clone_removal_fails`
+/// test drives exactly this).
 async fn remove_clone_then_index_link(rootfs: &RootfsPlan) {
-    let _ = tokio::fs::remove_file(rootfs.clone_dest()).await;
+    match tokio::fs::remove_file(rootfs.clone_dest()).await {
+        // Clone gone (removed now, or already absent) — safe to drop the link.
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        // Clone still on disk for a reason other than absence — removing the
+        // link now would strand it invisibly. Keep the link so the sweep
+        // retries; surface the cause rather than absorbing it into silence.
+        Err(err) => {
+            warn!(
+                clone = %rootfs.clone_dest().display(),
+                error = %err,
+                "per-launch rootfs clone removal failed (non-NotFound); keeping the clone-index \
+                 link so the reclamation sweep retries — removing it would orphan the clone \
+                 (ADR-0083 §§D3f/D3h)"
+            );
+            return;
+        }
+    }
+    // The clone is gone — now drop its index link. Best-effort and
+    // NotFound-tolerant (a concurrent double-stop may have removed it).
     let _ = tokio::fs::remove_file(rootfs.index_link()).await;
 }
 
@@ -529,6 +562,10 @@ impl VmDriver {
     /// itself purely to stay under the file's line-count budget; every
     /// cleanup call and its trigger point are unchanged from the
     /// pre-split body.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "linear VM boot sequence (steps 0..Vmm::create, ADR-0082 §D3); rustfmt 1.95.0 wrapping the cleanup_after_start_failure calls tips it past 100"
+    )]
     async fn provision_vmm(&self, spec: &AllocationSpec) -> Result<ProvisionedVmm, DriverError> {
         // ADR-0083 §D3a: the kernel and rootfs are THIS allocation's own,
         // read from the `[vm]` block the operator wrote. There is no
@@ -660,8 +697,14 @@ impl VmDriver {
         // swapping it reopens the invisible-orphan leak S-VM-85
         // mutation-tests. `@mandatory:mutation_target`.
         if let Err(err) = create_index_link(&rootfs).await {
-            self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, Some(&rootfs))
-                .await;
+            self.cleanup_after_start_failure(
+                &spec.alloc,
+                &run_dir,
+                Some(&scope),
+                None,
+                Some(&rootfs),
+            )
+            .await;
             return Err(start_rejected_unclassified(format!("create clone-index link: {err}")));
         }
 
@@ -673,8 +716,14 @@ impl VmDriver {
                 // but the index link created just above IS ours to remove
                 // (the §D3f "after link, before clone" residue), so pass
                 // the `RootfsPlan` through to strip the dangling link.
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, Some(&rootfs))
-                    .await;
+                self.cleanup_after_start_failure(
+                    &spec.alloc,
+                    &run_dir,
+                    Some(&scope),
+                    None,
+                    Some(&rootfs),
+                )
+                .await;
                 return Err(classify_vmm_error(&err, &rootfs));
             }
         };

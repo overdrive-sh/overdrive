@@ -542,7 +542,8 @@ fn remove_cgroup_child_blocker(blocker: &Path) {
 fn restrand_vm_exclusive_artifacts(alloc_id: &str, staging_dir: &Path, index_dir: &Path) {
     std::fs::create_dir_all(run_dir_path(alloc_id)).expect("recreate the stranded run dir");
     let clone = clone_path(staging_dir, alloc_id);
-    std::fs::write(&clone, b"stranded-clone-placeholder").expect("recreate the stranded clone file");
+    std::fs::write(&clone, b"stranded-clone-placeholder")
+        .expect("recreate the stranded clone file");
     // The clone-index link is what the sweep enumerates now (DWD-26). A
     // crash between teardown steps leaves the link pointing at the
     // surviving clone; `RealVmHostState::observe` read_links it and

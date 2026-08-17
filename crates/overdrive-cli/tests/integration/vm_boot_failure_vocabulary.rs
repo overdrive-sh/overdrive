@@ -38,8 +38,9 @@
 //! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
 //! over-gates it too.
 //!
-//! Step 03-08 (S-VM-82, DWD-25 / AC-21) is appended as a RED scaffold at the
-//! bottom of this file. It closes AC-21's error half: a node whose VM
+//! Step 03-08 (S-VM-82, DWD-25 / AC-21) is a live `#[tokio::test]` at the
+//! bottom of this file (activated in 03-08 from its original RED scaffold).
+//! It closes AC-21's error half: a node whose VM
 //! capability probe did not pass must tell the operator WHAT is absent and
 //! WHERE the specific reason was recorded, rather than presenting a node's own
 //! limit as an internal platform error. Like S-VM-37 and S-VM-38 it needs no
@@ -51,12 +52,13 @@
 //! after 03-07 the clone targets the operator-named rootfs directory that
 //! `Vmm::probe`'s boot-time reflink check no longer speaks for — was folded
 //! into that step inline with no scenario id. It now has one: **S-VM-83**,
-//! minted 2026-08-17 at the lowest free id (the 83–86 gap), scaffolded RED
-//! immediately after S-VM-82 below. It is deliberately NOT a clause of
-//! S-VM-82 — different premise (the node HAS a VM driver), different cause,
-//! different fixture — and equally not a duplicate of S-VM-94, which owns the
-//! adapter-layer fail-closed behaviour over in `overdrive-host`; S-VM-83 owns
-//! only the operator-facing message. Neither scaffold carries `#[ignore]`.
+//! minted 2026-08-17 at the lowest free id (the 83–86 gap), activated as a
+//! live `#[tokio::test]` immediately after S-VM-82 below. It is deliberately
+//! NOT a clause of S-VM-82 — different premise (the node HAS a VM driver),
+//! different cause, different fixture — and equally not a duplicate of
+//! S-VM-94, which owns the adapter-layer fail-closed behaviour over in
+//! `overdrive-host`; S-VM-83 owns only the operator-facing message. Both are
+//! activated `#[tokio::test]`s; neither carries `#[ignore]`.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::expect_used, clippy::missing_panics_doc)]

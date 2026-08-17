@@ -20,8 +20,29 @@
 //! instant a clone that exists has a link that exists — contrapositive
 //! *no link ⇒ no clone* — so enumerating links enumerates a SUPERSET of
 //! live clones and the reclamation sweep cannot miss one. A mutation that
-//! swaps either ordering reopens exactly the invisible-orphan leak S-VM-84
+//! swaps EITHER ordering reopens exactly the invisible-orphan leak S-VM-84
 //! closes, and MUST be killed here.
+//!
+//! Both halves of the ordering are guarded DIRECTLY, because neither is a
+//! `cargo-mutants` mutant: there is no statement-reorder operator, and the
+//! whole-body→`()` mutant is already killed by the quiescent end-state
+//! checks (Parts B/D). ADR-0083 § Consequences designates this test as the
+//! sole guard of the ordering precisely because a comment would not hold
+//! it, so each half is pinned by a deterministic witness:
+//!
+//! - **create-before** — Part A's `RecordsFsAtCreate` witness observes the
+//!   filesystem at the instant `Vmm::create` (the FICLONE) is entered and
+//!   asserts the link already exists while the clone does not. Creating the
+//!   clone first would find the link absent there.
+//! - **remove-after** — the dedicated
+//!   `stop_keeps_the_index_link_when_the_clone_removal_fails` test
+//!   interrupts the stop sequence at its first removal by making the clone
+//!   un-removable (a directory `unlink(2)` cannot delete), and asserts the
+//!   index link SURVIVES. Reversing the two removals drops the link first —
+//!   before the clone is gone — leaving the "clone without a link" orphan
+//!   §D3f marks *unreachable by construction*; that test goes RED on
+//!   exactly the reversal (Part D's both-gone end state cannot, being
+//!   order-independent).
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
@@ -315,10 +336,8 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
         "running: both present"
     );
 
-    let handle = overdrive_core::traits::driver::AllocationHandle {
-        alloc: alloc_stop.clone(),
-        pid: None,
-    };
+    let handle =
+        overdrive_core::traits::driver::AllocationHandle { alloc: alloc_stop.clone(), pid: None };
     // `stop` writes SHUTDOWN then awaits `clock.sleep(SHUTDOWN_DEADLINE)`
     // on the injected `SimClock`; drive it in a task and tick the clock so
     // the deadline elapses (mirrors `vm_driver_stop_totality.rs`).
@@ -332,4 +351,81 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     stop_task.await.expect("stop task did not panic").expect("stop returns Ok");
     assert!(!stop_plan.clone_dest().exists(), "stop removed the clone");
     assert!(!link_present(stop_plan.index_link()), "stop removed the index link");
+}
+
+// ---------------------------------------------------------------------
+// S-VM-85 (remove-after half) — the index link OUTLIVES a clone whose
+// removal fails. This is the guard Part D above cannot be: Part D's
+// both-gone end state is ORDER-INDEPENDENT, so reversing the two removals
+// still leaves both gone and Part D stays GREEN. Here the clone is made
+// un-removable, so the two orderings diverge at a quiescent end state:
+//   clone-first (correct):  clone removal fails -> link KEPT  (clone ⇒ link)
+//   link-first  (reversed): link removed first  -> clone with NO link (orphan)
+// The assertion is RED on exactly the reversed order — it is the sole
+// guard of the remove-after half of §D3f's ordering.
+// ---------------------------------------------------------------------
+
+/// S-VM-85 / `@ac-08` `@real-io` `@mandatory:mutation_target` — `stop` must
+/// remove the clone BEFORE its index link, so a clone that cannot be
+/// removed (operator rootfs dir gone read-only / `EROFS` / `EACCES` between
+/// the FICLONE and stop) keeps its index entry rather than becoming the
+/// invisible orphan the reclamation sweep can never enumerate.
+#[tokio::test]
+async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let index_dir = layout.clone_index_dir.clone();
+    let master = operator_rootfs_path(&tmp);
+    let master_bytes = std::fs::metadata(&master).expect("stat master").len();
+    let (driver, clock) = build_driver(Arc::new(SimVmm::new()), layout.clone());
+
+    let alloc = AllocationId::new("alloc-clone-index-stuck").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    start_with_beacon(&driver, &spec, &run_dir_root).await;
+    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
+    assert!(
+        plan.clone_dest().exists() && link_present(plan.index_link()),
+        "running: both the clone and its index link exist"
+    );
+
+    // Make the clone un-removable by `unlink(2)`: replace the clone FILE
+    // with a DIRECTORY at the same path, so `remove_file` returns `EISDIR`
+    // — a non-`NotFound` error. The index link keeps pointing at that path.
+    std::fs::remove_file(plan.clone_dest()).expect("remove the staged clone file");
+    std::fs::create_dir(plan.clone_dest())
+        .expect("stage a directory the clone removal cannot unlink");
+    assert!(
+        link_present(plan.index_link()),
+        "precondition: the index link is still present before stop"
+    );
+
+    // Drive `stop` to completion (mirrors Part D — SHUTDOWN then a clock
+    // tick past `VM_SHUTDOWN_REQUEST_DEADLINE`). `stop` stays best-effort:
+    // the un-removable clone must not make it return `Err` or panic.
+    let handle =
+        overdrive_core::traits::driver::AllocationHandle { alloc: alloc.clone(), pid: None };
+    let driver_for_stop = driver.clone();
+    let handle_owned = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_owned).await });
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(2));
+    stop_task
+        .await
+        .expect("stop task did not panic")
+        .expect("stop returns Ok despite the un-removable clone");
+
+    // The clone (now an un-unlinkable directory) is still on disk, so its
+    // index link MUST have outlived it — removing the link first (the
+    // reversed ordering) would strand the clone as the invisible orphan
+    // §D3f marks unreachable by construction.
+    assert!(
+        link_present(plan.index_link()),
+        "the index link MUST outlive a clone whose removal failed (non-NotFound): removing it \
+         first strands the clone as the invisible orphan §D3f forbids (§D3h 'no link ⇒ no clone')"
+    );
+    // Housekeeping: drop the stand-in directory so TempDir cleanup is clean.
+    let _ = std::fs::remove_dir_all(plan.clone_dest());
 }

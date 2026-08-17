@@ -203,7 +203,8 @@ async fn vm_host_state_equivalence_real() {
         .await
         .expect("enrol the VMM pid into the scope");
 
-    let host = RealVmHostState::new(PathBuf::from(CGROUP_ROOT), run_root.clone(), index_dir.clone());
+    let host =
+        RealVmHostState::new(PathBuf::from(CGROUP_ROOT), run_root.clone(), index_dir.clone());
 
     assert_observe_then_kill_then_discard(&host, &config.alloc).await;
 
