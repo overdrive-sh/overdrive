@@ -1396,3 +1396,140 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
 
     handle2.shutdown().await.expect("clean shutdown");
 }
+
+// ---------------------------------------------------------------------
+// S-VM-84 (step 03-09, DWD-26 / ADR-0083 §§D3f-D3h) — RED scaffolds:
+// a VM that ends WITHOUT `VmDriver::stop` leaves no rootfs clone behind,
+// on all three without-stop endings.
+//
+// Shape per `.claude/rules/testing.md` § "RED scaffolds and
+// intentionally-failing commits": `#[should_panic(expected = "RED
+// scaffold")]` plus a panic body naming the scenario, so the bar stays
+// green and the scaffold stays discoverable via
+// `grep -rn 'should_panic.*RED scaffold' crates/`. `#[test]` (sync)
+// TODAY because a body that is a single panic awaits nothing, boots no
+// server and touches no cgroup; the rustdoc names the `#[tokio::test]` +
+// `#[serial(cgroup)]` attributes the activated form must carry, so the
+// swap happens together with the assertions. The file-level
+// `integration-tests,kvm-tests` gate carries the `@requires-kvm` tag —
+// same gating as every activated scenario above, so these compile only
+// under `kvm-tests` and run only on the metal box, never Lima.
+//
+// The eight activated scenarios above are untouched.
+//
+// ## Shared shape (all three fns)
+//
+// `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier3`
+// `@real-io` `@requires-kvm`. THE leak scenario — the falsifiable form of
+// DWD-26 / ADR-0083 §§ D3f–D3h.
+//
+// ```gherkin
+// Given a [job] + [vm] spec whose rootfs master sits in an
+//   operator-chosen directory that is NOT any platform-owned directory
+// And the VM has reached Running under a real "overdrive serve"
+// When the allocation ends WITHOUT VmDriver::stop being called
+// Then the VmReclamation pass reclaims the per-launch rootfs clone
+// And no .overdrive-vm-rootfs-<alloc>.img file remains in the operator's
+//   rootfs directory
+// And the clone index holds no entry for that allocation
+// And the cgroup scope and run directory are reclaimed as they already were
+// ```
+//
+// ### Fixture placement is the load-bearing precondition
+//
+// Stage the `[vm] rootfs` master in a per-test OPERATOR-chosen directory
+// — a `tempdir_in(shared_staging_root())` (reflink-capable, so FICLONE
+// works) that is deliberately NEITHER `node_staging_dir()`
+// (`/run/overdrive/vm-rootfs-staging`) NOR the server's `data_dir`. That
+// is exactly where a real boot lands the clone: `RootfsPlan::for_alloc`
+// derives `clone_dest` from `parent([vm] rootfs)` (§ D3a/§ D3b). A
+// regression that re-points the sweep at a platform directory then fails
+// HERE rather than passing vacuously. The activated assertions read:
+//   * the operator clone is gone —
+//     `clone_path(<operator_rootfs_dir>, &alloc_id)` (the SAME
+//     `.overdrive-vm-rootfs-<alloc>.img` helper, pointed at the operator
+//     dir, NOT `node_staging_dir()`) no longer `exists()`;
+//   * the clone-index entry is gone — no
+//     `.overdrive-vm-rootfs-<alloc>.img` symlink under
+//     `clone_index_dir(<data_dir>)` = `<data_dir>/vm/clone-index/`
+//     (§ D3g — the one derivation both composition sites call);
+//   * the scope and run dir are reclaimed exactly as the activated
+//     scenarios above already assert (`scope_path`, `run_dir_path`).
+//
+// ### Why `stop` must NOT stand in for any of the three (CRITICAL)
+//
+// The `stop` path is already correct: it holds the allocation's own
+// in-memory `RootfsPlan` and removes the exact clone it minted, so the
+// operator directory is no obstacle. That is precisely why a fixture that
+// calls `stop` passes TODAY and proves nothing — `stop` is the ONE shape
+// that must never substitute for a without-stop ending. Each ending below
+// is therefore its own scenario, and none may reach for `stop` to reclaim
+// the clone under test.
+// ---------------------------------------------------------------------
+
+/// S-VM-84 ending (1) — the guest exits on its own. Reuse
+/// `build_exit0_binary` (the natural-exit shape S-VM-25(a) already
+/// stages): the guest execs, exits 0, and `run_exit_watcher` emits an
+/// `ExitEvent` — but per DWD-26 nothing in that path removes the
+/// per-launch clone, so it strands in the operator directory. Deploy
+/// through `spawn_vm_server` + `deploy`, poll to a terminal row via
+/// `poll_until_terminal`, then drive the reclamation pass (a `serve`
+/// restart's boot-epoch drive, or the steady-state sweep — either is
+/// legitimate for this ending; the restart arm is scenario (3)) and
+/// assert the operator clone AND the clone-index entry are both gone,
+/// with scope/run-dir reclaimed as before. MUST NOT call `stop`.
+/// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a VM whose guest exits on \
+         its own, without VmDriver::stop, leaves no per-launch rootfs clone in the operator's \
+         rootfs directory and no clone-index entry; scope and run dir reclaimed as before)"
+    );
+}
+
+/// S-VM-84 ending (2) — the hypervisor dies. Stage a long-lived guest
+/// (`build_spin_binary`), reach Running, then capture the real
+/// `cloud-hypervisor` pid with `find_cloud_hypervisor_pid` and kill it
+/// directly (SIGKILL) so the allocation ends via a dead VMM rather than
+/// `stop`. The row goes non-terminal-then-observed; the clone strands.
+/// Drive the reclamation pass and assert the operator clone AND the
+/// clone-index entry are both gone, scope/run-dir reclaimed. `pid_is_alive`
+/// confirms the VMM is genuinely gone first. MUST NOT call `stop`.
+/// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a VM whose hypervisor dies, \
+         without VmDriver::stop, leaves no per-launch rootfs clone in the operator's rootfs \
+         directory and no clone-index entry; scope and run dir reclaimed as before)"
+    );
+}
+
+/// S-VM-84 ending (3) — `serve` restarts and loses the in-memory
+/// `RootfsPlan`. This is the sharpest arm: it is the ONLY one that also
+/// proves the index survives the process. Boot #1 (`spawn_vm_server`)
+/// deploys a long-lived guest to Running, then `handle.shutdown()` — an
+/// unclean shutdown that drops the in-memory `RootfsPlan` (the same
+/// shape S-VM-30/23/81 use; `kill_on_drop(false)` leaves the real VMM
+/// surviving). Boot #2 against the SAME `data_dir` (via
+/// `wait_for_data_dir_release` then `spawn_vm_server`) runs the
+/// boot-epoch `VmReclamation` drive synchronously inside `run_server`,
+/// which reads the DURABLE clone index under `<data_dir>/vm/clone-index/`
+/// (§ D3g: `data_dir`, not `/run` — the index must survive the process)
+/// and reclaims the operator clone. Assert the operator clone AND the
+/// clone-index entry are both gone after boot #2, scope/run-dir
+/// reclaimed. MUST NOT call `stop`. Activate as `#[tokio::test]`
+/// `#[serial(cgroup)]`.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a serve restart that loses \
+         the in-memory RootfsPlan leaves no per-launch rootfs clone in the operator's rootfs \
+         directory and no clone-index entry; the durable clone index under data_dir is what the \
+         boot-epoch drive reads to reclaim it)"
+    );
+}

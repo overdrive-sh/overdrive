@@ -216,3 +216,85 @@ async fn vm_host_state_equivalence_real() {
     );
     empty_host.probe().await.expect("an absent run/staging root is Ok, never a refusal");
 }
+
+// ---------------------------------------------------------------------
+// S-VM-91 extension (step 03-09, DWD-26 / ADR-0083 §§D3f-D3h) — RED
+// scaffold: after the per-launch clone moves to the operator's directory
+// and `RealVmHostState` enumerates it through the platform-owned
+// clone-index symlinks, the two adapters must STILL observe the same
+// clone surface.
+//
+// Shape per `.claude/rules/testing.md` § "RED scaffolds and
+// intentionally-failing commits": `#[should_panic(expected = "RED
+// scaffold")]` plus a panic body naming the scenario, discoverable via
+// `grep -rn 'should_panic.*RED scaffold' crates/`. `#[test]` (sync) TODAY
+// because a body that is a single panic awaits nothing and boots no VMM;
+// the activated form carries whatever `assert_observe_then_kill_then_
+// discard` needs (`#[tokio::test]`, and `#[serial(vm_host_state_real_
+// cgroup)]` if it folds into the real-adapter half). The two activated
+// equivalence tests above are untouched — this is an ADDITION, not a
+// rewrite.
+// ---------------------------------------------------------------------
+
+/// S-VM-91 extension / `@example` (Mandate 9, layer 3+) — the clone
+/// surface stays adapter-equivalent after the DWD-26 relocation.
+///
+/// After ADR-0083 §§D3f-D3h the clone no longer sits in a single
+/// node-level staging directory the sweep watches: `RootfsPlan::for_alloc`
+/// reflinks it beside the OPERATOR's `[vm] rootfs` master (§D3a/§D3b), and
+/// `RealVmHostState` learns of it through a platform-owned symlink index —
+///
+/// ```text
+/// clone_index_dir(data_dir)/.overdrive-vm-rootfs-<alloc>.img  ->  <clone beside master>
+/// ```
+///
+/// Two `RealVmHostState` method bodies change (§D3h), NO trait signature
+/// does:
+///   * `observe_clones` walks `index_dir` and takes the mapped path from
+///     `read_link(entry.path())` instead of `entry.path()` — a dangling
+///     link still yields an entry (§D3f's crash table);
+///   * `discard_artifacts` stops re-deriving the clone path: it
+///     `read_link`s the index entry, removes the TARGET first, then the
+///     LINK, both `NotFound`-tolerant.
+///
+/// `RealVmHostState::new`'s third argument (today `config.rootfs.
+/// clone_dest().parent()`, the staging surface) becomes
+/// `clone_index_dir(&config.data_dir)`, renamed `index_dir`.
+///
+/// ## What the activated equivalence must assert
+///
+/// Drive the SAME shared sequence this file already owns —
+/// [`assert_observe_then_kill_then_discard`] — against a `RealVmHostState`
+/// constructed with a real `index_dir` that holds a symlink to a clone
+/// staged beside an operator-chosen master (two distinct real directories,
+/// NEITHER a platform staging dir NOR `/run`). Prove:
+///   * `observe()` reports the clone by RESOLVING the symlink, so the
+///     surface is populated even though no clone sits in `index_dir`
+///     itself;
+///   * `discard_artifacts` removes the clone via the link (target then
+///     link), leaving neither behind, idempotently;
+///   * `SimVmHostState` — whose `set_clone` already models the observable
+///     clone surface directly — observes the byte-identical
+///     observe/kill/discard shape, so the two adapters stay equivalent
+///     across the new indirection.
+///
+/// This does NOT restate the pre-index observe/kill/discard assertions the
+/// two activated tests above already make against a clone that lives in
+/// the enumerated directory itself — those stand unchanged. What is new is
+/// the ONE indirection DWD-26 introduces: the clone lives in the
+/// operator's directory and is reached through the index link.
+///
+/// The scaffold panics today because `clone_index_dir`, the symlink-based
+/// `observe_clones`, and the renamed `RealVmHostState::new(index_dir)` do
+/// not exist at HEAD; they are delivered by step 03-09.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn index_backed_clone_surface_stays_equivalent_across_adapters() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-91 extension / step 03-09 -- RealVmHostState \
+         and SimVmHostState must observe the SAME clone surface after the per-launch clone moves \
+         to the operator's directory and RealVmHostState enumerates it through the platform-owned \
+         clone-index symlinks under data_dir; observe resolves the clone by reading the link and \
+         discard_artifacts removes target-then-link)"
+    );
+}
