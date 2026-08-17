@@ -1147,6 +1147,13 @@ asserted in `vm_host_state_equivalence.rs` across both adapters.
 the VM run root; every per-launch clone in the image directory. Cross-reference
 against the allocation set.
 
+> **Corrected by the 2026-08-17 (second) amendment, § D7 correction item 1.**
+> There is no single "image directory" after § D3a — clones land beside the
+> operator's own `[vm] rootfs`. Read the third surface as: *every per-launch
+> clone reachable through the platform-owned clone index (§ D3f)*. The model is
+> still **three** surfaces; the index is the index *for* the third, not a
+> fourth.
+
 **The three surfaces are NOT equally attributable, and the diff must not treat
 them as if they were** *(a precision added at iteration 3; SD-1's prose leaves it
 implicit)*. The cgroup scope tree is **shared with exec allocations** —
@@ -1183,6 +1190,19 @@ unchanged.
 filename is the only remaining attribution. Slice 03's *"no leaked … rootfs
 copies after terminal states"* does not cover this case — there is no allocation
 left to key a terminal-state GC off.
+
+> **Corrected by the 2026-08-17 (second) amendment, § D7 correction item 2.**
+> This paragraph, and the clause above it naming the clone *"the only surface
+> that survives a host reboot"*, were true as authored and were falsified by
+> § D3a. Between § D3a and that amendment they were false in **both**
+> directions at once: the enumerated clone directory was `/run` (tmpfs — does
+> not survive a reboot, and per ADR-0082 § D2 gap 3 cannot hold a clone at all,
+> since staging into `/run` fails `EXDEV`), while the clones that genuinely do
+> survive a reboot sat unenumerated on the operator's persistent filesystem.
+> Both statements hold again under § D3f–D3h: the index is durable
+> (`data_dir`), and the index link's lifetime strictly contains the clone's.
+> The filename-carries-attribution rule this paragraph gives is unchanged and
+> is what the index still keys on.
 
 **Ordering is load-bearing.** The **boot-epoch drive**
 (`vm_reclamation_boot::converge`) runs in `run_server` **immediately before** the
@@ -2109,3 +2129,371 @@ to `overdrive serve` and ungating `vm_artifacts` was considered and rejected:
   `TransitionReason` variant are untouched.
 
 Recorded in feature DWD-25. Delivered by roadmap steps 03-07 and 03-08.
+
+## Amendment 2026-08-17 (second) — the per-launch rootfs clone becomes reclaimable; § D7's clone surface is corrected; `run_with_kek` is ratified
+
+**Scope: application architecture only. No operator surface is created. No
+`VmHostState` method signature changes, no `Action` variant is added, no
+reconciler changes. This amendment closes a durable resource leak the first
+2026-08-17 amendment opened, and corrects two § D7 statements that amendment
+falsified without noticing.**
+
+### The leak, traced rather than asserted
+
+§ D3a moved the per-launch rootfs clone from a node-wide staging area onto the
+parent directory of the operator's own `[vm] rootfs`. Its Consequences record
+one half of what followed — *"the per-launch rootfs clone is now written into
+an **operator-chosen** directory … That directory may be read-only, shared
+between workloads, or on a filesystem the platform does not control"* — and
+stop there. The half it does not record is the one that matters more: **nothing
+reclaims that clone.**
+
+Four facts, each read from the tree rather than inferred:
+
+1. **`VmDriver::stop` still reclaims correctly, and by a route the operator
+   directory cannot obstruct.** It extracts the per-allocation `RootfsPlan`
+   from its own in-memory `live: Arc<Mutex<BTreeMap<AllocationId,
+   VmSupervision>>>` and calls `tokio::fs::remove_file(rootfs.clone_dest())`
+   on the exact path it minted at `start`. `cleanup_after_start_failure` does
+   the same. Neither enumerates a directory, so neither cares where the clone
+   landed. *(The finding's premise, verified: it holds.)*
+2. **No other path in the driver removes it.** `run_exit_watcher` classifies
+   the exit, transitions `Live → EndingInFlight` and emits an `ExitEvent`; its
+   own doc comment states teardown "happens later, in `stop` or
+   `cleanup_after_start_failure`, both driven by a SEPARATE caller." So an
+   allocation that ends **without** `stop` — a natural exit, a guest crash, or
+   a control-plane restart that loses the in-memory plan — leaves
+   `<operator_rootfs_dir>/.overdrive-vm-rootfs-<alloc>.img` behind.
+3. **The surface that exists to catch exactly that is pointed somewhere
+   else.** `VmHostObservation.clones: BTreeMap<AllocationId, PathBuf>` is
+   already the right shape, and `plan_reclamation` already unions `clones`
+   into its host-id set and already treats a clone as a VM-exclusive trigger.
+   But `RealVmHostState` enumerates clones from **one** directory, its
+   `staging_dir`, and § D3a's composition hardcodes that to
+   `/run/overdrive/vm-rootfs-staging`. `discard_artifacts` re-derives the same
+   path independently. Neither is where `RootfsPlan::for_alloc` puts anything.
+4. **And that directory is `tmpfs`, which makes the mismatch worse than a
+   mismatch.** ADR-0082 § D2 gap 3's own pinned doc comment says the clone
+   destination must be "derived on the **master's own filesystem** (FICLONE is
+   intra-filesystem; **staging into `/run` fails `EXDEV`**)". So the one
+   directory the platform watches for clones is a directory in which a clone
+   *cannot be created*. The two statements are flatly contradictory and sit in
+   the same tree.
+
+**The sharper framing, and it is correct.** The clone surface only ever agreed
+with the driver because the deleted `VmBootArtifacts` seam fed *both* sides
+from the same node-level artifact path — `staging_dir` was derived from the
+node's configured rootfs artifact's parent directory, which is precisely where
+`RootfsPlan::for_alloc` staged. § D3a deleted the derivation on one side and
+hardcoded a literal on the other. In production the divergence was invisible
+because, as DWD-25 measured, **no VM had ever booted at all** (`K4` NOT MET,
+`new_hypervisors=0`): all three of § D7's surfaces were vacuously empty, and
+the clone surface specifically has never been exercised against a real
+operator-chosen directory. § D7's three-surface reclamation model has been
+**partly notional in production for its entire life.**
+
+This is a durable, unbounded leak on a shared host — one reflink clone per
+crashed launch, each growing toward the full rootfs size as the guest diverges
+from its master, on a filesystem the operator relies on. It is exactly the
+class SD-1 and § D7 exist to prevent.
+
+### D3f — The clone location is authored once and *recorded*, never re-derived
+
+**The root cause is not "the wrong directory constant." It is that the clone's
+location is authored in `overdrive-core` (`RootfsPlan::for_alloc`) and
+independently re-derived in `overdrive-host` (`RealVmHostState`), with nothing
+binding the two.** The *filename* half of that agreement survived § D3a by
+luck — both sides spell `.overdrive-vm-rootfs-<alloc>.img`, and the filename is
+what carries attribution. The *directory* half diverged silently the moment one
+author moved. Any fix that leaves two independent derivations in place merely
+re-synchronises the bug class; per CLAUDE.md § "Type-driven design" and this
+methodology's *make the bug class non-representable* rule, the derivation must
+be eliminated, not re-aligned.
+
+It is also **not recomputable**, which is the fact that selects the design.
+`clone_dest` is a function of `parent([vm] rootfs)` and `AllocationId`, and the
+first of those is **mutable and deletable by the operator**: editing a spec's
+`rootfs` path, or deleting the workload, destroys the only input from which the
+old clone's directory could be re-derived — while the clone itself remains on
+disk. `development.md` § "A convergent record cannot answer 'did it happen'"
+governs: *"some things are not recomputable, because convergence already
+destroyed the input. Before deciding a value can be re-derived on read, check
+that the state it would be derived from still exists."* Here it does not. The
+location must therefore be **recorded at the moment the platform chooses it**.
+
+**The record is a symlink, in a platform-owned index directory:**
+
+```
+<index_dir>/.overdrive-vm-rootfs-<alloc>.img  ->  <clone_dest>
+```
+
+- The **clone itself does not move.** It stays beside the master, so FICLONE
+  stays intra-filesystem and § D3b is untouched.
+- The **filename is the existing one**, so `RealVmHostState`'s `CLONE_PREFIX` /
+  `CLONE_SUFFIX` parsing and its `AllocationId::from_str` recovery are
+  unchanged. Attribution still rides on the filename, exactly as ADR-0082 § D2
+  gap 3 designed.
+- The link is a **symlink and not a recorded path string** because `read_link`
+  hands `observe_clones` the `PathBuf` its map already wants, needs no encoding
+  decision, mints no serialisable type, and therefore touches neither the rkyv
+  envelope discipline nor the CBOR `View` discipline.
+
+**The ordering is the contract, and it is the reason this is complete:**
+
+> **The link is created before the clone, and removed after the clone.**
+> Therefore at every instant, a clone that exists has a link that exists.
+
+Contrapositive: *no link ⇒ no clone*. Enumerating links enumerates a **superset**
+of live clones, so the sweep cannot miss one. The two crash windows both
+converge rather than leak:
+
+| Crash point | Residue | Resolution |
+|---|---|---|
+| after link, before clone | dangling link, no clone | `observe_clones` reports it; `plan_reclamation` sees a VM-exclusive surface entry; `DiscardStrandedArtifacts` removes the (absent) target and the link — both `NotFound`-tolerant |
+| after clone removal, before link removal (in `stop`) | dangling link, no clone | same sweep, same disposal |
+| after clone, before link | **unreachable by construction** | this is the ordering the rule forbids |
+
+This is the same *record-the-effect-before-attempting-it* discipline the
+reconciler runtime already uses at STEP 7 → STEP 8 (fsync the `View`, *then*
+dispatch the actions). It is explicitly **not** the marker anti-pattern
+`.claude/rules/reconcilers.md` condemns: that marker was consulted **as the
+diff**, standing in for observing the resource. This link *is* the observation
+path — the sweep still reaches the real file through it, disposal is idempotent
+whether or not the target exists, and no convergence decision is derived from
+the link's mere presence.
+
+### D3g — One derivation, two composition sites
+
+`index_dir` is a **pure path derivation over the node's durable data
+directory**, and it is named once:
+
+```rust
+// crates/overdrive-core/src/vm/config.rs, beside RootfsPlan
+/// The platform-owned directory holding the per-launch rootfs clone index.
+/// The SINGLE derivation both composition sites call — never re-derived
+/// independently. (D3f: independent re-derivation is the defect this closes.)
+#[must_use]
+pub fn clone_index_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("vm").join("clone-index")
+}
+```
+
+The in-tree precedent for exactly this shape is `RedbViewStore::resolve_path
+(data_dir) -> data_dir.join("reconcilers").join("memory.redb")`, which is
+likewise the sole derivation consumed by both its open site and its error
+site. The two call sites here are in different functions and cannot share a
+`let`, which is precisely why the derivation is a function rather than a local:
+
+- `compose_vm_driver` gains a `clone_index_dir: PathBuf` parameter, stored on
+  `VmHostLayout` as a **sixth field**, `clone_index_dir: PathBuf`. It is
+  genuinely node-invariant — the same property that let `cgroup_root`,
+  `run_dir_root`, `arch`, `vcpus` and `confinement` survive § D3a.
+- `RealVmHostState::new`'s third argument stops being the `/run` literal and
+  becomes the same `clone_index_dir(&config.data_dir)` value. The parameter is
+  renamed `index_dir` to stop naming a staging area it never was.
+
+**`data_dir`, not `/run`.** The index must survive a host reboot or it cannot
+serve the reboot-orphan case § D7 designs it for; `/run` is tmpfs.
+`ServerConfig.data_dir` is the node's durable root (XDG
+`~/.local/share/overdrive` by default), already the home of `intent.redb`,
+`workflow-journal.redb` and `reconcilers/memory.redb`. Nothing else about
+`ServerConfig` changes.
+
+### D3h — What `RealVmHostState` does instead, and what stays exactly as it is
+
+Two method bodies change. **No trait signature changes**, so § D7 item 3's
+"`VmHostState::observe()` is the hydration seam — one call returning a plain
+`VmHostObservation`" survives verbatim, and #197's future generalisation is
+still a refactor of an existing seam.
+
+- **`observe_clones`** walks `index_dir` exactly as it walks `staging_dir`
+  today, parses the same filename, and takes the mapped path from
+  `read_link(entry.path())` instead of `entry.path()`. A dangling link still
+  yields an entry — that is required, per D3f's crash table. An entry that is
+  not a symlink is skipped and logged; this is a greenfield single cut, so no
+  migration reads pre-existing regular files there.
+- **`discard_artifacts`** stops re-deriving the clone path. It `read_link`s the
+  index entry, removes the **target** first, then the **link** — mirroring
+  `stop`'s ordering so that an interrupted disposal always leaves the
+  self-healing residue rather than the invisible one. Both removals stay
+  `NotFound`-tolerant. The run-directory removal above it is unchanged.
+
+**`discard_artifacts` keeps its `(&self, alloc: &AllocationId)` signature and
+does *not* take the observed path as a parameter** — and § D7 already supplies
+the reason, so this is not a new rule: *"an observation carried from the diff
+into the plan goes stale between emit and execute."* DD-5 pins these `Action`s
+to `alloc_id` and nothing else; the executor re-observes. Re-reading one
+symlink is the cheapest possible instance of that rule.
+
+**`VmReclamation` covers this completely, and gains nothing.** Verified against
+the shipped reconciler rather than assumed: `plan_reclamation` already unions
+`actual.host.clones.keys()` into its host-id set, already treats
+`clones.contains_key(&alloc_id)` as a VM-exclusive trigger for the
+`desired == None` arm, and already routes the `terminal` arm unconditionally.
+`VmReclamationState`, `VmReclamationView`, `Action::ReclaimAllocation`,
+`Action::DiscardStrandedArtifacts`, both executors, the boot-epoch drive and
+the sweep interval are **all unchanged**. The reconciler was never the problem;
+it was being fed an empty surface.
+
+### Rejected alternatives
+
+- **Enumerate operator-named directories derived from intent.** Rejected on
+  three counts, the second decisive. (a) It inverts the port's layering:
+  `observe()` is the "what is" hydration seam and takes no arguments; feeding
+  it desired state makes a driven observation port consume intent. (b) **It is
+  incomplete in a routine case.** An operator who edits `[vm] rootfs` to a new
+  path — or deletes the workload — removes the old directory from intent while
+  the old clone is still on disk. Those are exactly the `desired == None` rows
+  `plan_reclamation`'s disposal arm exists for, so the arm would be
+  structurally unreachable for the very inputs it was written to handle.
+  (c) It walks operator directories of unbounded size on the sweep cadence.
+- **Persist the clone *path* as durable per-allocation state (a row, a `View`
+  field, an rkyv envelope).** Rejected. It is a heavier mechanism than a
+  symlink for the same information; it mints a serialisable type and therefore
+  a schema-evolution obligation; and per `development.md` § "Persist inputs,
+  not derived state" a persisted path is a cache of `RootfsPlan::for_alloc`'s
+  naming rule that goes stale the moment that rule changes. D3f's record
+  deliberately carries **no** path *string* — the symlink is a pointer into the
+  real resource, resolved at read time, not a remembered derivation.
+- **Constrain clone placement to a single platform-owned directory.**
+  Rejected as **impossible**, not merely undesirable, and it is worth stating
+  why so it is not re-proposed: FICLONE is intra-filesystem, the master's
+  filesystem is operator-chosen per § D3a, so no single directory can serve
+  every master. ADR-0082 § D2 gap 3 already says as much ("staging into `/run`
+  fails `EXDEV`"). The only viable variants — a platform-owned subdirectory at
+  each master's directory, or at each master's filesystem root — still yield
+  *N* directories and therefore still require an enumeration mechanism, which
+  is the actual problem. The filesystem-root variant additionally needs
+  mount-point resolution on **both** sides (the driver's, and the sweep's),
+  reintroducing precisely the two-independent-derivations defect D3f exists to
+  eliminate.
+- **Accept the leak with a documented bound.** Rejected: there is no bound.
+  One clone per crashed or restart-orphaned launch, unbounded over the node's
+  lifetime, each growing toward full rootfs size, on a filesystem the operator
+  depends on. SD-1's own triage names "SD-2's unbounded-over-lifetime clone
+  leak" as a founding motivation for the reconciler.
+
+### § D7 correction — two statements the first 2026-08-17 amendment falsified
+
+§ D7 was **correct as authored**: it was written against a single node-level
+artifact directory, where the observed clone directory and the staged clone
+directory were the same place. § D3a invalidated that premise and did not carry
+the correction through. Two statements are corrected here rather than left to
+mislead:
+
+1. **"every per-launch clone in the image directory"** (§ D7, *Observe three
+   surfaces*). There is no "the image directory" after § D3a. Read instead:
+   *every per-launch clone reachable through the platform-owned clone index
+   (§ D3f), whose filename carries the allocation id.*
+2. **"a reboot-orphaned VM is caught by its clone, which is the only surface
+   that survives a host reboot"** (§ D7) and **"The same pass sweeps
+   reboot-orphaned clones"** (§ D7). Between § D3a and this amendment these
+   were false in *both* directions simultaneously — the enumerated directory
+   was `/run` (tmpfs, does not survive a reboot, and by ADR-0082 § D2 gap 3
+   cannot hold a clone at all), while the clones that genuinely do survive a
+   reboot sat unenumerated on the operator's persistent filesystem. Both
+   statements become true again under § D3f–D3h, because the index is durable
+   (`data_dir`) and the link's lifetime contains the clone's.
+
+**The three-surface model itself stands and is not widened.** The clone index
+is the *index for* surface three, not a fourth surface: it carries no state a
+sweep must reconcile independently, and it is disposed of by the same
+`discard_artifacts` call as the clone it points to. § D7's attributability
+ruling is likewise unchanged — the cgroup scope stays shared with exec
+allocations and unattributable-therefore-left-alone; the run directory and the
+clone stay VM-exclusive.
+
+### D3i — `run_with_kek` is ratified, ungated, and `run` collapses onto it
+
+With its artifact parameter deleted, `overdrive-cli`'s
+`run_with_dataplane_and_vm_artifacts` / `run_with_vm_artifacts` pair collapsed
+to a single wrapper the crafter named **`run_with_kek`**, under the naming
+authority DISTILL's activation plan gave step 03-07. § D3a deleted the two
+entrypoints but did not name the survivor. It is ratified here:
+
+```rust
+// crates/overdrive-cli/src/commands/serve.rs — NOT #[cfg]-gated
+pub async fn run_with_kek(
+    args: ServeArgs,
+    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
+) -> Result<ServeHandle, CliError>
+```
+
+**It is not redundant with `run`, and the reason is load-bearing.** `run(args)`
+constructs the production KEK provider inline
+(`Arc::new(overdrive_host::ca::SystemdCredsKeyring::new())`) and is the sole
+production entrypoint, called from `main.rs`. `run_with_kek` takes the KEK as a
+parameter. That is the `Clock` / `Transport` / `Entropy` discipline
+`development.md` § "Port-trait dependencies" mandates — *"Required, not
+defaulted, at the call site"* — applied at the binary boundary, where the
+production wiring legitimately lives in `run` and the injection sibling
+legitimately lives beside it. Its two callers pass `SimKek` to dodge the
+production provider's cold-boot refusal, which is the same hazard recorded in
+project memory as the cause of a prior missed cold-boot regression.
+
+**Their bodies, however, are redundant, and that is what gets collapsed.**
+Both delegate byte-identically to `run_inner(args, None, kek, |c| c)`. `run`
+therefore becomes:
+
+```rust
+pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
+    run_with_kek(args, Arc::new(overdrive_host::ca::SystemdCredsKeyring::new())).await
+}
+```
+
+One body, not two. The near-duplicate cannot drift because it no longer exists.
+
+**Gating: ungated, deliberately.** It matches the sibling `run_with_dataplane`,
+which is likewise ungated with zero production callers. The `#[cfg]` it lost
+was never about the entrypoint — it existed only because the deleted
+`VmBootArtifacts` *type* in its signature was gated. And unlike
+`ServerConfig.vm_artifacts`, a caller-supplied KEK is **not** a state only a
+test seam can produce: `Kek` is a real port with a real production binding, and
+`run` is that binding's composition site. CLAUDE.md § "Ground the premise" is
+therefore satisfied rather than dodged. `run_with_dataplane_and_vmm_override`
+**stays** `#[cfg(feature = "integration-tests")]` — § D8's adapter-substitution
+fault seam has no production analogue and is untouched.
+
+**Naming asymmetry, observed and accepted so it is not "fixed" later.**
+`run_with_dataplane(args, dataplane, kek)` also takes a KEK without naming it,
+so the family's implicit rule is "name what you inject *beyond* the mandatory
+KEK" — under which this wrapper injects nothing extra. `run_with_kek` is kept
+regardless: it names exactly what it takes, it is the minimum-delta name, it
+has landed with two callers, and a rename buys nothing but churn.
+
+### Consequences
+
+- **Positive.** § D7's clone surface becomes operative in production for the
+  first time. An allocation that ends without `stop` — natural exit, guest
+  crash, or a control-plane restart that loses the in-memory `RootfsPlan` — has
+  its clone reclaimed by the reconciler that was already designed to do it.
+- **Positive.** The two-independent-derivations defect is removed, not
+  re-synchronised: `clone_index_dir` is the one derivation, and the clone's own
+  location is recorded rather than recomputed. A future move of `clone_dest`
+  cannot silently blind the sweep again.
+- **Positive.** The index moves from tmpfs to `data_dir`, so the reboot-orphan
+  case § D7 designs is reachable rather than notional.
+- **Positive.** `VmDriver::stop`'s in-memory fast path is unchanged and stays
+  the common case; the sweep is the backstop it was always meant to be.
+- **Negative, and stated.** A symlink is a second filesystem artifact per live
+  VM. It is bounded (one per launch, a path-sized inode), self-cleaning through
+  the same `discard_artifacts` call, and any residue is a dangling link the
+  next sweep disposes — but it is not nothing, and the create-before /
+  remove-after ordering is a discipline a future edit to `VmDriver` can break.
+  A test owns that ordering directly (S-VM-85) precisely because a comment
+  would not hold it.
+- **Negative.** The clone still lands in the operator's directory, which may
+  still be read-only or shared. § D3a's Consequence on that point stands
+  unchanged and is **not** claimed as fixed here; § D3b's narrowing of
+  `Vmm::probe`'s reflink proof likewise stands, and S-VM-94 / step 03-08's
+  sixth criterion continue to own the fail-closed behaviour.
+- **Negative.** `VmHostLayout` gains a field one step after § D3a removed two,
+  and `compose_vm_driver` gains a parameter. The justification is the same test
+  § D3a applied: `clone_index_dir` is node-invariant, so it belongs on the
+  node-invariant struct.
+- **Neutral.** No `VmHostState` signature, no `Action` variant, no
+  `TransitionReason` variant, no `VmmError` variant, no `Vmm` method, no
+  reconciler `State` / `View`, no rkyv envelope and no operator surface
+  changes. `plan_reclamation` is untouched.
+
+Recorded in feature DWD-26. Delivered by roadmap step 03-09.

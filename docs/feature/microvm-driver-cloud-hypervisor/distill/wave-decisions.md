@@ -2333,6 +2333,232 @@ Issues*); `deliver/roadmap.json` (steps 03-07, 03-08; phase-03 name). No
 `brief.md`, Rust source, test source, `CLAUDE.md`, execution log, progress
 file, or issue is touched or created. No commit made by this pass.
 
+### DWD-26 — The per-launch rootfs clone becomes reclaimable: a platform-owned clone index; § D7's clone surface corrected; `run_with_kek` ratified (2026-08-17, DESIGN ruling — Morgan, GH #42)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`)
+per explicit dispatch. Docs and roadmap only — no Rust source, test source,
+execution log, history file, or GitHub issue is touched or created.**
+
+**Two findings surfaced by step 03-07 (`6b6ffb12`, `cf0c6b1e`). Both verified
+in source before being designed against; one premise was found imprecise and is
+corrected below rather than inherited.**
+
+---
+
+**FINDING 1 — orphaned per-launch rootfs clones. The leak is real.**
+
+DWD-25 / § D3a moved the per-launch clone onto the parent directory of the
+operator's own `[vm] rootfs`. Four facts, each read from the tree:
+
+1. **`VmDriver::stop` still reclaims correctly** — it extracts the per-alloc
+   `RootfsPlan` from `VmDriver.live: Arc<Mutex<BTreeMap<AllocationId,
+   VmSupervision>>>` and calls `remove_file(rootfs.clone_dest())` on the exact
+   path it minted at `start`; `cleanup_after_start_failure` does the same.
+   Neither enumerates a directory, so the operator directory is no obstacle.
+   *The dispatch's premise, verified: it holds.*
+2. **Nothing else in the driver removes it.** `run_exit_watcher` classifies the
+   exit, transitions `Live → EndingInFlight` and emits an `ExitEvent`; its own
+   doc comment says teardown "happens later, in `stop` or
+   `cleanup_after_start_failure`, both driven by a SEPARATE caller." An
+   allocation ending **without** `stop` — natural exit, crash, or a
+   control-plane restart losing the in-memory plan — strands the clone.
+3. **The surface built to catch that is pointed elsewhere.**
+   `VmHostObservation.clones: BTreeMap<AllocationId, PathBuf>` is already the
+   right shape and `plan_reclamation` already unions it into its host-id set
+   and already treats it as a VM-exclusive trigger — but `RealVmHostState`
+   enumerates clones from one `staging_dir`, hardcoded by § D3a's composition
+   to `/run/overdrive/vm-rootfs-staging`, and `discard_artifacts` re-derives
+   the same path independently.
+4. **That directory is tmpfs, which makes it worse than a mismatch.** ADR-0082
+   § D2 gap 3's own pinned doc comment says the clone destination must be
+   derived on the master's own filesystem because *"staging into `/run` fails
+   `EXDEV`"*. The one directory the platform watches for clones is a directory
+   in which a clone cannot be created. Two flatly contradictory statements in
+   one tree.
+
+**One premise corrected.** The dispatch stated `RealVmHostState` "observes only
+a single platform-owned `node_staging_dir`". It in fact observes **three** roots
+(`cgroup_root`, `run_root`, `staging_dir`) — the claim is right in substance but
+only about the **clone** surface, which is indeed a single platform-owned
+directory. Stated precisely so no later reader concludes the scope or run-dir
+surfaces are affected: they are not.
+
+**The sharper framing is correct.** The clone surface only ever agreed with the
+driver because the deleted `VmBootArtifacts` seam fed both sides from the same
+node-level artifact path. § D3a deleted the derivation on one side and
+hardcoded a literal on the other. In production the divergence was invisible
+because — as DWD-25 measured — no VM had ever booted (`K4` NOT MET,
+`new_hypervisors=0`), so all three of § D7's surfaces were vacuously empty.
+**§ D7's three-surface model has been partly notional in production for its
+entire life**, and the clone surface has never been exercised against a real
+operator-chosen directory.
+
+**Ruling — record the location, do not re-derive it.** Pinned in full as
+ADR-0083's 2026-08-17 (second) amendment §§ D3f–D3h, with the `RootfsPlan`
+consequence in ADR-0082's 2026-08-17 (second) amendment. The root cause is
+**not** a wrong directory constant: the clone's location is authored in
+`overdrive-core` (`RootfsPlan::for_alloc`) and independently re-derived in
+`overdrive-host` (`RealVmHostState`), with nothing binding them. The filename
+half survived § D3a by luck; the directory half diverged silently. And the
+location is **not recomputable** — `parent([vm] rootfs)` is mutable and
+deletable by the operator, so a spec edit or a workload deletion destroys the
+only input the old clone's directory could be re-derived from while the clone
+remains on disk. `development.md` § "A convergent record cannot answer 'did it
+happen'" governs: check the state you would derive from still exists. It does
+not. So:
+
+- The clone **does not move** (FICLONE stays intra-filesystem; § D3b untouched).
+- A **symlink** at `<index_dir>/.overdrive-vm-rootfs-<alloc>.img → <clone_dest>`
+  records it, carrying the *existing* filename so `CLONE_PREFIX`/`CLONE_SUFFIX`
+  parsing and `AllocationId` recovery are unchanged.
+- **The ordering is the contract**: the link is created **before** the clone and
+  removed **after** it, so a clone that exists always has a link that exists.
+  *No link ⇒ no clone*, so enumerating links enumerates a superset — complete by
+  construction, and both crash windows leave a dangling link the next sweep
+  disposes idempotently. Same discipline as the reconciler runtime's
+  fsync-then-dispatch (STEP 7 → STEP 8). **Not** the marker anti-pattern
+  `reconcilers.md` condemns: that marker was consulted *as the diff*; this link
+  *is* the observation path, and no convergence decision derives from its mere
+  presence.
+- `index_dir` is one derivation, `vm::config::clone_index_dir(data_dir) ->
+  data_dir.join("vm").join("clone-index")`, called by both composition sites —
+  the shape `RedbViewStore::resolve_path` already sets. `data_dir`, **not**
+  `/run`: the index must survive a reboot or it cannot serve the reboot-orphan
+  case § D7 designs it for.
+- `VmHostLayout` gains a sixth field `clone_index_dir`; `compose_vm_driver`
+  gains the parameter; `RealVmHostState::new`'s third argument is renamed
+  `index_dir` and fed the same value. `observe_clones` takes the path from
+  `read_link` instead of `entry.path()`; `discard_artifacts` `read_link`s,
+  removes target then link, and **stops re-deriving the clone path**.
+
+**`VmReclamation` covers this completely and gains nothing** — verified against
+the shipped reconciler, not assumed. `plan_reclamation` already unions
+`clones.keys()`, already treats `clones.contains_key` as the VM-exclusive
+trigger for the `desired == None` arm, and already routes the terminal arm
+unconditionally. `VmReclamationState`, `VmReclamationView`,
+`Action::ReclaimAllocation`, `Action::DiscardStrandedArtifacts`, both
+executors, the boot-epoch drive and the sweep interval are **all unchanged**.
+**No new port method, no new Action, no new reconciler.** The reconciler was
+never the problem; it was being fed an empty surface.
+
+**Rejected alternatives**, with reasons, all recorded in the ADR: *intent-derived
+directory enumeration* (inverts the port's layering — `observe()` is the "what
+is" seam and takes no arguments; and decisively, it is **incomplete in a routine
+case** — an operator editing `[vm] rootfs` or deleting a workload removes the
+directory from intent while the clone survives, making `plan_reclamation`'s
+`desired == None` disposal arm structurally unreachable for the very inputs it
+was written for); *persisting the clone path as durable per-allocation state*
+(heavier for the same information, mints a serialisable type and a
+schema-evolution obligation, and is a cache of `for_alloc`'s naming rule per
+§ "Persist inputs, not derived state" — the symlink deliberately stores no path
+*string*); *a single platform-owned clone directory* (**impossible**, not merely
+undesirable — FICLONE is intra-filesystem and the master's filesystem is
+operator-chosen, and the viable per-directory / per-mount variants still yield
+*N* directories, with the mount-root variant additionally needing resolution on
+**both** sides, reintroducing the two-independent-derivations defect); *accepting
+the leak with a documented bound* (**there is no bound** — one clone per crashed
+or restart-orphaned launch, unbounded over node lifetime, each growing toward
+full rootfs size, on a filesystem the operator depends on; SD-1's own triage
+names "SD-2's unbounded-over-lifetime clone leak" as a founding motivation).
+
+**§ D7 corrected in two places, and marked in place, not only in the amendment.**
+§ D7 was **correct as authored** — written against a single node-level artifact
+directory where observed and staged were the same place; § D3a invalidated the
+premise and did not carry the correction through. (1) *"every per-launch clone in
+the image directory"* — there is no such directory; read *"reachable through the
+platform-owned clone index"*. (2) *"the only surface that survives a host
+reboot"* / *"the same pass sweeps reboot-orphaned clones"* — between § D3a and
+this ruling these were false in **both** directions at once: the enumerated
+directory was tmpfs (and per ADR-0082 § D2 gap 3 cannot hold a clone at all),
+while the clones that do survive a reboot sat unenumerated. Both hold again
+under §§ D3f–D3h. **The three-surface model itself stands and is not widened** —
+the index is the index *for* surface three, disposed of by the same
+`discard_artifacts` call, not a fourth surface. § D7's attributability ruling is
+untouched.
+
+**Not claimed as fixed.** § D3a's Consequence that the clone lands in an
+operator-chosen directory which may be read-only or shared **stands unchanged**,
+as does § D3b's narrowing of `Vmm::probe`'s reflink proof. S-VM-94 and step
+03-08's sixth criterion continue to own the fail-closed behaviour; nothing is
+moved off them and no `VmStartFailure` variant is minted here.
+
+---
+
+**FINDING 2 — `run_with_kek` ratified, ungated, and `run` collapsed onto it.**
+
+Pinned as ADR-0083 § D3i. § D3a deleted `run_with_dataplane_and_vm_artifacts` /
+`run_with_vm_artifacts` but did not name the survivor; step 03-07 named it
+`run_with_kek` under DISTILL's activation-plan authority and un-gated it (the
+`#[cfg]` existed only because the deleted `VmBootArtifacts` *type* in the
+signature was gated).
+
+**Not redundant with `run`.** Verified: `run(args)` constructs the production
+KEK provider inline (`SystemdCredsKeyring::new()`) and is the sole production
+entrypoint (`main.rs:201`); `run_with_kek(args, kek)` takes it as a parameter,
+and its two callers (`vm_reclamation_tier3.rs:244`,
+`vm_walking_skeleton.rs:433`) pass `SimKek` to dodge the production provider's
+cold-boot refusal — the same hazard behind a prior missed cold-boot regression.
+That is `development.md` § "Port-trait dependencies" — *"Required, not
+defaulted, at the call site"* — applied at the binary boundary, where the
+production wiring belongs in `run` and the injection sibling beside it.
+
+**Their bodies *are* redundant, and that is what collapses.** Both delegate
+byte-identically to `run_inner(args, None, kek, |c| c)`. `run` becomes
+`run_with_kek(args, Arc::new(SystemdCredsKeyring::new())).await` — one body,
+not two, so the near-duplicate cannot drift.
+
+**Gating: ungated**, matching the sibling `run_with_dataplane` (also ungated,
+also zero production callers). Unlike `ServerConfig.vm_artifacts`, a
+caller-supplied KEK is **not** a state only a test seam can produce — `Kek` is a
+real port with a real production binding and `run` is that binding's composition
+site, so CLAUDE.md § "Ground the premise" is satisfied rather than dodged.
+`run_with_dataplane_and_vmm_override` **stays** `integration-tests`-gated as
+§ D8's genuine fault seam. Naming asymmetry noted and accepted so it is not
+"fixed" later: `run_with_dataplane` also takes a KEK without naming it; the
+rename buys nothing but churn.
+
+---
+
+**Scenarios.** Two added at the two lowest genuinely-unused IDs, per this
+file's established gap-reuse practice (the rule DWD-14 and DWD-25 both applied)
+— the unused IDs are 84, 85, 86, so: **S-VM-84** (an allocation that ends
+without `stop` leaves no clone — the leak, closed, through real `serve`) and
+**S-VM-85** (the index-link ordering invariant: the link's lifetime contains
+the clone's, so no interleaving yields an unindexed clone). Count 91 → 93. No
+scenario removed, renumbered, or re-tagged. **A pre-existing stale count was
+surfaced by the mechanical recount and corrected**: the top-of-file
+`@requires-kvm` figure read **46** and was already understated by one before
+this pass (DWD-25's S-VM-54 carries the tag and was added to the body without
+updating that line — the identical omission the Error/Edge block already
+records for the 88 → 90 total). True pre-DWD-26 count 47; it now reads **48**
+with S-VM-84. Every figure in this pass was verified by
+`grep -c '^#### S-VM-'` / `grep -c '^\*\*Tags\*\*:'` (both **93**) and per-tag
+`grep '^\*\*Tags\*\*:' | grep -c '<tag>'`, never incremented by hand.
+
+**Roadmap.** One step appended to phase 03 as **03-09**, depending on 03-07
+(the step whose change created the divergence) and 03-08 (file overlap on
+`vm_driver.rs`, and 03-08's sixth criterion is the adjacent clone concern).
+**One step, not two** — splitting the core type, the driver's link lifecycle,
+the adapter's enumeration and the composition wiring would leave a mechanism no
+production path reaches, which is the horizontal-layer shape CLAUDE.md
+§ "Build vertical slices through production entry points" forbids. Following
+DWD-25's own precedent for the same reason it set it, the leading steps of the
+unexecuted phases — **04-01, 05-01, 06-01** — each gain a dependency on 03-09,
+since 03-09 restructures `vm_driver.rs` exactly as 03-07 did. No existing
+dependency edge is removed and no step is reordered.
+
+**Files touched by this entry.** `docs/product/architecture/adr-0082-…md`
+(2026-08-17 (second) amendment + a pointer at the § D2 gap-3 block);
+`adr-0083-…md` (2026-08-17 (second) amendment §§ D3f–D3i, plus two in-place
+correction notes inside § D7); this `wave-decisions.md` entry and Changelog;
+`distill/test-scenarios.md` (S-VM-84, S-VM-85 and the mechanical recount);
+`feature-delta.md` (§ *Wave: DELIVER / [WHY] Upstream Issues*, extended — no
+second section created); `deliver/roadmap.json` (step 03-09; `total_steps`;
+three dependency edges). No `brief.md`, Rust source, test source, `CLAUDE.md`,
+`verification/`, execution log, progress file, or GitHub issue is touched or
+created. #42 / #259 / #166 / #267 are cited by number only; no number is
+invented. No commit made by this pass.
+
 ---
 
 ## Changelog
@@ -2354,3 +2580,4 @@ file, or issue is touched or created. No commit made by this pass.
 - 2026-08-14 — `[vm]` "at admission" capability rejection ruled (DWD-23), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-09 review's MEDIUM finding D2. Roadmap step 01-09 AC #1 promised "rejects `[vm]` at admission"; the shipped behavior admits the spec (`Inserted`) and rejects at DISPATCH (`action_shim` `drivers.get(kind) → None → StartRejected → Failed` naming the capability, S-VM-12) — SAFE, but not "at admission," and never in 01-09's `handlers.rs`-excluding scope. Ruled **(b)**: "at admission" stays required DESIGN intent (SD-5, ADR-0083 §§ D1/D2/D4, `brief.md` § 104); the dispatch-time fallback is ratified as a SAFE INTERIM and STAYS as multi-node-ready defense-in-depth; the admission gate (`handlers.rs::submit_workload` → `state.drivers.supports(..)` before `put_if_absent`, a cheap addition since `AppState.drivers` + `DriverRegistry::{supports,kinds}` exist since 01-08) is scoped to a **follow-up step, pending user build-vs-defer approval**. Option (a) (ratify dispatch-time, drop "at admission") rejected — discards deliberate design, contradicts § D4's "the deploy still fails." Reworded step 01-09 AC #1 to shipped behavior + `implementation_notes` scope note; added implementation-status notes to `brief.md` § 104 + ADR-0083 status header; SPECIFIED (not applied — docs-only) the `action_shim`/`error.rs`/`vm_walking_skeleton.rs` "step 01-09" comment corrections. **No GitHub issue created — follow-up surfaced for approval.**
 - 2026-08-16 — Phase-03 typed driver-failure upstream resolution ruled (DWD-24). `StartRejected.reason: String` and `classify_driver_failure` are retired in favor of exact `DriverStartFailure` / Exec / VM classes and a pure exhaustive conversion to `TransitionReason`; Exec's observable classes and verbatim detail stay unchanged; unknown VM/VMM failures reuse `DriverInternalError`. Checkpoint `3222f030` is retained honestly as completed old 03-01 with no scenario ownership. Roadmap adds 03-05 (typed contract + S-VM-34 vertical proof) and 03-06 (S-VM-33/35/36/41), then preserves 03-02/03/04 for S-VM-37/38/39/40 with corrected dependencies. S-VM-33/41 receive reachable post-composition TOCTOU Givens; S-VM-39/40 now prove the VM runs, making S-VM-40 the 46th `@requires-kvm` scenario. Total remains 88; no scenario removed or renumbered. No code, test source, execution log/history, issue, or commit.
 - 2026-08-17 — Production artifact supply ruled (DWD-25), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the K4 gap that verification expectation E06 measured as NOT MET on a real x86_64 + KVM host (SHA `655ac964`: `deploy` accepted, allocation `Failed` with `no vm driver composed on this node`, `new_hypervisors=0`). Root cause is **not** a missing config surface: ADR-0083 § D3's `VmPayload.kernel`/`.rootfs` are already ratified, already `[vm]`-parsed, already `V2`-persisted and already carried intact to `driver.start(&spec)` — `VmDriver::provision_vmm` simply reads `self.layout.*` instead and never matches `spec.driver`'s `Vm` arm. Ruled **per-allocation**: the driver binds `let DriverPayload::Vm(payload) = &spec.driver else { … }` (no new accessor — the fields are already `pub`); `VmHostLayout` sheds `kernel`/`rootfs_master`; `VmBootArtifacts`, `ServerConfig.vm_artifacts`, `run_with_dataplane_and_vm_artifacts` and `run_with_vm_artifacts` are **deleted, not ungated** (with artifacts per-allocation there is no node-level artifact to configure, so the test seam has no production counterpart to promote — CLAUDE.md § "Ground the premise"); `vmm_override` stays gated as ADR-0083 § D8's genuine fault seam; `compose_vm_driver` and its call site go unconditional, gated only by `Vmm::probe`. Node-level `--vm-kernel`/`--vm-rootfs` flags rejected on four counts (contradicts § D3 and would silently ignore the operator's spec; strictly larger; does not survive GH #259's per-workload images; would require rewriting E06's runner to match the implementation). Earned Trust preserved by scope: the hypervisor *capability* stays proven once at boot by `Vmm::probe`, the *artifact* is proven per start by the already-per-allocation `preflight_kernel` → `KernelImage::validate`. Capability absence reuses the DWD-24 typed contract with an actionable `detail` and **mints no `TransitionReason` variant** (the registry miss is driver-kind-generic; `HypervisorAbsent` would force a per-driver branch into the shim; the typed answer is the admission-time gate DWD-23 already scoped). Amended ADR-0082 (2026-08-17) and ADR-0083 (2026-08-17, §§ D3a–D3e, incl. the #259 supersession statement). Scenarios S-VM-54 and S-VM-82 added at the two lowest unused IDs per this file's gap-reuse practice (88 → 90); none removed or renumbered. Roadmap gains steps 03-07/03-08 appended to phase 03 — every phase-03 step has already executed, so nothing is reordered and no execution history is rewritten. Step 03-06's S-VM-33/S-VM-41 fixtures must re-point at the spec-named path; 03-07 owns that, and neither scenario changes in substance. No Rust source, test source, execution log/history, GitHub issue, or commit.
+- 2026-08-17 — Clone reclamation and the surviving `serve` entrypoint ruled (DWD-26), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing two findings surfaced by step 03-07 (`6b6ffb12`, `cf0c6b1e`). **Finding 1 — a durable, unbounded clone leak.** § D3a moved the per-launch rootfs clone onto the operator's own `[vm] rootfs` directory; `VmDriver::stop` still reclaims it correctly (in-memory `RootfsPlan`, verified), but nothing reclaims a clone whose allocation ends **without** `stop` — natural exit, crash, or a control-plane restart losing the plan. `RealVmHostState` enumerates clones from one hardcoded `/run/overdrive/vm-rootfs-staging`, which is both the wrong directory AND tmpfs — a directory in which, per ADR-0082 § D2 gap 3's own "staging into `/run` fails `EXDEV`", a clone cannot exist at all. The dispatch's premise was verified and one wording corrected (`RealVmHostState` observes **three** roots, not one; the single-directory claim is true only of the *clone* surface). Root cause: the clone's location is authored in `overdrive-core` and independently re-derived in `overdrive-host`, and § D3a moved one side only; the location is also **not recomputable**, since an operator spec-edit or workload deletion destroys `parent([vm] rootfs)` while the clone survives (`development.md` § "A convergent record cannot answer 'did it happen'"). Ruled: **record the location, never re-derive it** — the clone stays beside the master (FICLONE intra-filesystem, § D3b untouched) and a **symlink** at `<index_dir>/.overdrive-vm-rootfs-<alloc>.img` records it, carrying the existing filename so `CLONE_PREFIX`/`CLONE_SUFFIX` parsing is unchanged; **the link is created before the clone and removed after it**, so a clone that exists always has a link, *no link ⇒ no clone*, and both crash windows leave a dangling link the next sweep disposes idempotently (the runtime's own fsync-then-dispatch discipline; explicitly not the marker anti-pattern `reconcilers.md` condemns, which was consulted *as the diff*). `index_dir` is one derivation, `vm::config::clone_index_dir(data_dir)`, called by both composition sites (the `RedbViewStore::resolve_path` shape), rooted at durable `data_dir` rather than tmpfs so the reboot-orphan case is reachable. **`VmReclamation` covers it completely and gains nothing** — `plan_reclamation` already unions `clones.keys()` and already treats them as the VM-exclusive trigger; no new port method, no new `Action`, no new reconciler, no `State`/`View` change. Four alternatives rejected with reasons (intent-derived enumeration — inverts the port's layering and is incomplete for exactly the `desired == None` inputs the disposal arm exists for; persisting the path — heavier, mints a schema-evolution obligation, caches a derivation; a single platform-owned directory — **impossible** under intra-filesystem FICLONE with operator-chosen masters; accepting the leak — there is no bound). **§ D7 corrected in two places and marked in place**: "the image directory" no longer exists, and the "only surface that survives a host reboot" clause was false in *both* directions between § D3a and this ruling. § D7 was correct as authored; § D3a falsified it. The three-surface model stands and is **not** widened — the index is the index *for* surface three. § D3a's operator-directory Consequence and § D3b's reflink narrowing are **not** claimed as fixed; S-VM-94 and 03-08's sixth criterion keep them. **Finding 2 — `run_with_kek` ratified** (§ D3i): not redundant with `run` (which hardcodes the production `SystemdCredsKeyring` and is the sole production entrypoint), because a caller-supplied `Kek` is real port injection at the binary boundary, not a test-only state — but their bodies *are* byte-identical, so `run` collapses onto `run_with_kek` and the near-duplicate ceases to exist. Stays **ungated**, matching the sibling `run_with_dataplane`; `run_with_dataplane_and_vmm_override` stays gated as § D8's genuine fault seam. Amended ADR-0082 and ADR-0083 (both 2026-08-17, second). Scenarios S-VM-84 and S-VM-85 added at the two lowest unused IDs per this file's gap-reuse practice (91 → 93); none removed or renumbered. Roadmap gains step 03-09 (one vertical step, not two — splitting would leave a mechanism no production path reaches); 04-01, 05-01 and 06-01 each gain a dependency on it, per DWD-25's own precedent for the same `vm_driver.rs` reason. No Rust source, test source, `brief.md`, `verification/`, execution log/history, GitHub issue, or commit; #42/#259/#166/#267 cited by number only, none invented.

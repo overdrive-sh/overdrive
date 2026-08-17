@@ -25,7 +25,7 @@ scenario either drives the same CLI path with a different fixture, or
 enters at a narrower driving port (a reconciler tick, a pure function, a
 driven-port equivalence test) per this project's four-tier discipline.
 
-**46 scenarios carry `@requires-kvm`** — the capability class distinct from
+**48 scenarios carry `@requires-kvm`** — the capability class distinct from
 `@tier3`/`@real-io`. `spike/findings.md` § "The nested-virt stall — SETTLED
 2026-08-10" measured a real asymmetry: bare-metal x86_64 booted 12/12
 (median 0.744s), while nested-aarch64 (the standard macOS dev Lima VM)
@@ -72,7 +72,7 @@ roadmap's file-level gate.
 |---|---|---|---|
 | `overdrive deploy <spec.toml>` — direct CLI handler call (`overdrive_cli::commands::deploy::deploy`) against a REAL in-process `overdrive serve`, run under `cargo xtask lima run --` as root | Driving (user-facing) | `crates/overdrive-cli`, per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess" (firm rule — no `Command::new(CARGO_BIN_EXE_overdrive)` anywhere in this feature) | S-VM-01…05, S-VM-09, S-VM-11…15, S-VM-19, S-VM-33…66, S-VM-68, S-VM-74, S-VM-75, S-VM-81 (Tier-3 cases; **excludes S-VM-67**, moved to the pure-function row below — DWD-13; **explicitly names S-VM-09/S-VM-19** — DWD-16 closes the sub-range-gap omission DWD-15 flagged). The REAL OS-level subprocess in every one of these is `cloud-hypervisor` itself, spawned by `VmDriver`/`CloudHypervisorVmm` inside the real `overdrive serve` process — that is what makes them Tier-3/`@real-io`, not how the CLI layer is invoked |
 | `overdrive workload describe <id>` / `overdrive job stop <id>` | Driving (user-facing) | `crates/overdrive-cli` | Read-side assertions on every Tier-3 scenario; S-VM-46/47 (stop verb) |
-| `VmDriver::start` / `VmDriver::stop` — **component-scope acceptance case against `SimVmm`, injected at the `Vmm` port boundary** | Driving (internal, component scope — the enforcement vehicle ADR-0082 §D4 names by name: *"`VmDriver::stop`'s edge cases … are therefore asserted by a `VmDriver`-level acceptance case against `SimVmm`, named here so the move does not quietly shed the enforcement it was partly justified on"*) | `crates/overdrive-worker` | S-VM-76. Carved out of the "always reached through the CLI/serve pair" default because `vmm_equivalence.rs` drives the `Vmm` port only and structurally cannot reach `VmDriver::stop`'s relocated guest half (ADR-0082 §D4) — this is `SimVmm` injected at a port boundary per system constraint 1, not a bypass of it |
+| `VmDriver::start` / `VmDriver::stop` — **component-scope acceptance case against `SimVmm`, injected at the `Vmm` port boundary** | Driving (internal, component scope — the enforcement vehicle ADR-0082 §D4 names by name: *"`VmDriver::stop`'s edge cases … are therefore asserted by a `VmDriver`-level acceptance case against `SimVmm`, named here so the move does not quietly shed the enforcement it was partly justified on"*) | `crates/overdrive-worker` | S-VM-76, S-VM-85. Carved out of the "always reached through the CLI/serve pair" default because `vmm_equivalence.rs` drives the `Vmm` port only and structurally cannot reach `VmDriver::stop`'s relocated guest half (ADR-0082 §D4) — this is `SimVmm` injected at a port boundary per system constraint 1, not a bypass of it. S-VM-85 (DWD-26) sits here for the same reason and one more: the clone-index ordering invariant is only observable by interrupting the start/stop filesystem sequence, which no CLI-level driving port can reach — its end-to-end consequence is S-VM-84, driven through the real `serve`/`deploy` pair |
 | `Vmm` port (`CloudHypervisorVmm` / `SimVmm`) | Driven (adapter-under-test for equivalence only) | `crates/overdrive-host`, `crates/overdrive-sim` | `vmm_equivalence.rs` (S-VM-90); `vmm_ficlone_per_launch.rs` (S-VM-94, real non-reflink substrate) |
 | `VmHostState` port (`RealVmHostState` / `SimVmHostState`) | Driven (adapter-under-test) | `crates/overdrive-host`, `crates/overdrive-sim` | `vm_host_state_equivalence.rs` (S-VM-91) |
 | `CgroupAccounting` port (`RealCgroupAccounting` / `SimCgroupAccounting`) | Driven (adapter-under-test) | `crates/overdrive-host`, `crates/overdrive-sim` | `cgroup_accounting_equivalence.rs` (S-VM-93) |
@@ -863,6 +863,75 @@ Then it belongs to EXACTLY ONE of the three classes -- never zero, never two
 **Crafter notes**: Named `P1` in the design (brief §105a.10) — a proptest,
 not a compile-time guarantee (`EndingClass` enum was rejected as
 disproportionate; brief §104 "The Ending Class surface").
+
+#### S-VM-84: A VM that ends without `stop` leaves no rootfs clone behind
+
+**Driving port**: `overdrive serve` + `overdrive deploy` (Tier-3, real VM boot, real reclamation sweep)
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-08` `@tier3` `@real-io` `@requires-kvm`
+
+```gherkin
+Given a [job] + [vm] spec whose rootfs master sits in an operator-chosen
+  directory that is NOT any platform-owned directory
+And the VM has reached Running under a real "overdrive serve"
+When the allocation ends WITHOUT VmDriver::stop being called -- the guest
+  exits on its own, or the hypervisor dies, or serve restarts and loses the
+  in-memory RootfsPlan
+Then the VmReclamation pass reclaims the per-launch rootfs clone
+And no .overdrive-vm-rootfs-<alloc>.img file remains in the operator's
+  rootfs directory
+And the clone index holds no entry for that allocation
+And the cgroup scope and run directory are reclaimed as they already were
+```
+
+**Crafter notes**: THE leak scenario — the falsifiable form of DWD-26 /
+ADR-0083 §§ D3f–D3h. It must exercise **all three** ending shapes, since the
+`stop` path (already correct via the in-memory `RootfsPlan`) is precisely the
+one that would mask the defect: a fixture that stops the VM passes today and
+proves nothing. The `serve`-restart arm is the sharpest, because it is the
+only one that also proves the index survives the process. Assert on the
+**operator's** directory being clean, never on the platform index alone —
+the whole defect was that the two had diverged. Deliberately places the
+rootfs master somewhere that is not `/run/overdrive/vm-rootfs-staging` and
+not `data_dir`, so a regression that re-points the sweep at a platform
+directory fails here rather than passing vacuously. Placement:
+`crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs`, alongside
+S-VM-21…30, gated `integration-tests,kvm-tests`.
+
+#### S-VM-85: The clone index link outlives the clone it points at, on every interleaving
+
+**Driving port**: `VmDriver` start/stop lifecycle over a real filesystem with `SimVmm` (component scope, no guest boot)
+**Tags**: `@contract-shape:unbounded-preservation` `@ac-08` `@tier3` `@real-io` `@property` `@mandatory:mutation_target`
+
+```gherkin
+Given a VmDriver whose clone index directory and rootfs master directory are
+  distinct real directories
+When the start and stop paths are interrupted at each filesystem step in
+  turn -- after the index link, after the clone, after the clone's removal,
+  after the link's removal
+Then at no interruption point does a rootfs clone exist without an index
+  link pointing at it
+And every residue left by an interruption is either nothing, or a dangling
+  index link that a subsequent VmHostState observe reports and
+  discard_artifacts removes idempotently
+And discard_artifacts never derives the clone's path -- it resolves it by
+  reading the link
+```
+
+**Crafter notes**: The structural invariant D3f names: *the link is created
+before the clone and removed after it*, so `no link ⇒ no clone` and the sweep
+enumerates a superset. This is the mandatory mutation target — a mutation
+that swaps either ordering (link-after-clone on create, or link-before-clone
+on remove) reopens exactly the invisible-orphan leak S-VM-84 closes, and
+**must** be killed here; S-VM-84 alone cannot catch it, because the residue
+is only visible on the interrupted interleavings. `@contract-shape:
+unbounded-preservation` — the claim quantifies over interruption points, not
+over an enumerable delta. `SimVmm` and a real `tempfile::TempDir` pair: no
+guest boot, so **not** `@requires-kvm`. The last clause is a structural
+assertion, not a behavioural one — it is what stops the re-derivation defect
+from being reintroduced. Placement:
+`crates/overdrive-worker/tests/acceptance/vm_driver_clone_index.rs` (NEW
+file), the same component-scope carve-out ADR-0082 §D4 already justifies for
+S-VM-76.
 
 ### AC-19: The claim's lifecycle and the write-time guard are structural (iteration-2 review NEW-1 pins)
 
@@ -2222,8 +2291,8 @@ non-reflink fixture, gated `integration-tests`.
 | `Vmm` (`CloudHypervisorVmm`) | YES | S-VM-01, S-VM-02, S-VM-14, S-VM-15, S-VM-94 (per-launch `FICLONE`), plus `vmm_equivalence.rs` (S-VM-90) |
 | `Vmm` (`SimVmm`) | YES (fault injection, port boundary — `ServerConfig.vmm_override`, ADR-0083 §D8; capability-flag classes only, see S-VM-13's crafter note) | S-VM-13, S-VM-51 |
 | `Vmm`, non-reflink substrate | YES (real substrate, no injection) | S-VM-75 |
-| `VmDriver::stop` (component-scope, `SimVmm`) | YES | S-VM-76 |
-| `VmHostState` (`RealVmHostState`) | YES | S-VM-21…30 Tier-3 shapes, plus `vm_host_state_equivalence.rs` (S-VM-91) |
+| `VmDriver::stop` (component-scope, `SimVmm`) | YES | S-VM-76, S-VM-85 (clone-index ordering, real filesystem + `SimVmm`, no guest boot) |
+| `VmHostState` (`RealVmHostState`) | YES | S-VM-21…30 Tier-3 shapes, S-VM-84 (the clone surface enumerated from the platform-owned index against a real operator-chosen rootfs directory), plus `vm_host_state_equivalence.rs` (S-VM-91) |
 | `CgroupAccounting` (real cgroupfs `memory.events` read) | YES | S-VM-19, plus `cgroup_accounting_equivalence.rs` (S-VM-93) |
 | `overdrive-init` (guest PID 1, real vsock beacon + real exec/exit framing) | YES | S-VM-01, S-VM-02, S-VM-14, S-VM-15, S-VM-60 |
 | `DriverRegistry` composition (discover → probe → insert) | YES | S-VM-11, S-VM-12, S-VM-13, S-VM-35, S-VM-75 |
@@ -2231,7 +2300,7 @@ non-reflink fixture, gated `integration-tests`.
 | Spec parser — `[vm]` / `[[vm.volume]]` driver-table dispatch | YES (in-process; real deserializer, no subprocess needed for rejection-only cases) | S-VM-06, S-VM-07, S-VM-62 |
 | `JobEnvelope` V1→V2 (rkyv, real serialize/deserialize) | YES | S-VM-10 |
 | virtiofsd storage daemon (real supervised host process) | YES | S-VM-55, S-VM-56, S-VM-59, S-VM-64, S-VM-65, S-VM-66, S-VM-68 (excludes S-VM-67 — moved to `@tier1`/`@in-memory` pure launch-argument construction, DWD-13; the running-daemon half of `[D8d]` stays a Tier-3 property of Slice 04, undischarged by any scenario in this catalogue — see S-VM-67's own crafter note) |
-| `VmReclamation` reconciler, real `overdrive serve` convergence loop | YES | S-VM-21 (Tier-3 companion), S-VM-22 (Tier-3 companion), S-VM-23, S-VM-28, S-VM-30, S-VM-81 (`svid_lifecycle` evaluation) |
+| `VmReclamation` reconciler, real `overdrive serve` convergence loop | YES | S-VM-21 (Tier-3 companion), S-VM-22 (Tier-3 companion), S-VM-23, S-VM-28, S-VM-30, S-VM-81 (`svid_lifecycle` evaluation), S-VM-84 (the without-`stop` ending shapes, incl. the `serve`-restart arm) |
 | DST harness, `VmReclamation` ESR invariants | YES (Tier 1, `SimVmHostState` + `SimClock`) | S-VM-24, S-VM-87, S-VM-88, S-VM-89 |
 
 Zero "NO — MISSING" rows.
@@ -2285,7 +2354,7 @@ All 10 KPIs traced. K6 is the only "secondary" KPI (a companion assertion on an 
 | US-VM-7 | AC-13 | S-VM-49…53 | 4 UAT scenarios + Landlock-directory-grant correction; S-VM-49's ruleset enumeration corrected to match S-VM-53 |
 | US-VM-8 | AC-14, AC-15 | S-VM-55…63 | 7 UAT scenarios + engineering-constraint scenario |
 | US-VM-9 | AC-16 | S-VM-64…68 | 5/5 UAT scenarios; S-VM-65's hedged `TransitionReason` variant RESOLVED by the concurrent DESIGN pass (ADR-0083 §D5 row 14, `VmStorageDaemonDied`); S-VM-67 RESOLVED by explicit user ruling (DWD-13) — rewritten to the pure launch-argument-construction layer, `@tier1`/`@in-memory`, no storage-daemon supervision port minted; the deploy-level fail-closed claim stays an undischarged Tier-3 property of Slice 04, not covered by any scenario in this catalogue |
-| SD-1 (Bar 2 reconciler) | AC-08, AC-19, AC-20 | S-VM-21…32, S-VM-77…81, S-VM-87…89 | 5 ACs (105a.10) + 2 property tests (P1 totality, `plan_reclamation` purity) + DD-1 trap scenarios (a)/(b)/(d) + the five NEW-1 pins (abandonment boundary, hydration read order, write-time terminality guard, P2-over-`VmReclamation`, the fourth `svid_lifecycle` evaluation) + all four §105a.11 ESR invariants |
+| SD-1 (Bar 2 reconciler) | AC-08, AC-19, AC-20 | S-VM-21…32, S-VM-77…81, S-VM-84, S-VM-85, S-VM-87…89 | 5 ACs (105a.10) + 2 property tests (P1 totality, `plan_reclamation` purity) + DD-1 trap scenarios (a)/(b)/(d) + the five NEW-1 pins (abandonment boundary, hydration read order, write-time terminality guard, P2-over-`VmReclamation`, the fourth `svid_lifecycle` evaluation) + all four §105a.11 ESR invariants + the DWD-26 clone-reclamation pair (the without-`stop` leak closed end-to-end; the index-link ordering invariant that makes the clone surface complete) |
 | Port contract enforcement (cross-cutting, no single owning story) | — | S-VM-90…94 | `Vmm`, `VmHostState`, `CgroupAccounting` adapter equivalence; `SupervisionSet::reclamation_authorised` purity; per-launch `FICLONE` self-application |
 
 All 9 stories + the cross-cutting reconciler + the cross-cutting port-contract
@@ -2315,15 +2384,34 @@ stale**: DWD-25 added its two scenarios to the body without recounting
 this section, so the whole block understated by two from 2026-08-17 until
 this pass. Corrected mechanically here rather than incrementally, by the
 same two greps the next paragraph names.
+Then **91 → 93** (DWD-26, S-VM-84 + S-VM-85, the clone-reclamation pair
+closing the leak ADR-0083 §§ D3f–D3h rule on), taken at the two lowest
+genuinely-unused IDs per this file's gap-reuse practice — 84, 85 and 86
+were the only unused ids below 94, and 86 remains unused.
 Re-verified by `grep -c '^\*\*Tags\*\*:'` and cross-checked against
-`grep -c '^#### S-VM-'` (both **91**) after every edit in this pass — for
-S-VM-83, `@error_path` moves **42 → 43** and
-`@contract-shape:bounded-change` moves **68 → 69** (S-VM-83 carries both,
-mirroring S-VM-33…37's and S-VM-82's shape); `@property` stays **21**
+`grep -c '^#### S-VM-'` (both **93**) after every edit in this pass — for
+S-VM-83, `@error_path` moved **42 → 43** and
+`@contract-shape:bounded-change` moved **68 → 69** (S-VM-83 carries both,
+mirroring S-VM-33…37's and S-VM-82's shape); `@property` was **21**
 (S-VM-83 is Tier-3/example-shaped, not a property scenario, same as its
 AC-09/AC-21 siblings), and `@happy_path` stays **19** (S-VM-54 took it
-18 → 19 under DWD-25). Contract-shape splits sum: 12 `pure-function` +
-69 `bounded-change` + 10 `unbounded-preservation` = 91. An earlier
+18 → 19 under DWD-25). The DWD-26 pair then moves `@error_path`
+**43 → 44** (S-VM-84 only), `@property` **21 → 22** (S-VM-85 only),
+`@requires-kvm` **47 → 48** (S-VM-84 only — S-VM-85 drives `SimVmm` over a
+real filesystem and boots no guest), `@contract-shape:bounded-change`
+**69 → 70** (S-VM-84) and `@contract-shape:unbounded-preservation`
+**10 → 11** (S-VM-85, whose claim quantifies over interruption points
+rather than an enumerable delta); `@happy_path` and `@edge_case` are
+unchanged, and S-VM-85 joins the no-happy/error/edge bucket
+(**17 → 18**). **A second stale count was surfaced and corrected by the same
+mechanical sweep**: the top-of-file `@requires-kvm` figure read **46** and was
+already understated by one before this pass — the true pre-DWD-26 count was
+47 (DWD-25's S-VM-54 carries the tag and was added to the body without
+updating that line, the identical omission this block records for the 88 →
+90 total). It now reads **48**, verified by
+`grep '^\*\*Tags\*\*:' | grep -c '@requires-kvm'`.
+Contract-shape splits sum: 12 `pure-function` +
+70 `bounded-change` + 11 `unbounded-preservation` = 93. An earlier
 mechanical recount surfaced a pre-existing off-by-one in the Self-Review
 Checklist's `@contract-shape:pure-function` /
 `@contract-shape:bounded-change` split (claimed 11/66, both were already
@@ -2332,14 +2420,14 @@ Checklist's `@contract-shape:pure-function` /
 | Category | Count |
 |---|---|
 | `@happy_path` | 19 |
-| `@error_path` | 43 |
+| `@error_path` | 44 |
 | `@edge_case` | 12 |
-| No happy/error/edge tag (pure `@property`/`@example` scenarios: S-VM-08, 10, 16, 18, 20, 31, 32, 63, 73, 80, 87, 88, 89, 90, 91, 92, 93) | 17 |
-| `@property` | 21 |
+| No happy/error/edge tag (pure `@property`/`@example` scenarios: S-VM-08, 10, 16, 18, 20, 31, 32, 63, 73, 80, 85, 87, 88, 89, 90, 91, 92, 93) | 18 |
+| `@property` | 22 |
 | `@example` (fixed call sequences at layer 3, per Mandate 9 — S-VM-76, 90, 91, 93) | 4 |
-| **Total distinct scenarios** | **91** |
+| **Total distinct scenarios** | **93** |
 
-Error + edge coverage: **55 of 91 ≈ 60%** — well above the 40% target,
+Error + edge coverage: **56 of 93 ≈ 60%** — well above the 40% target,
 consistent with this feature being fundamentally about honest failure
 classification (K1/K2/K3/K7/K9 are ALL guardrail/diagnosis KPIs), and the
 remediation pass's additions skewed further toward `@error_path` (the
@@ -2351,6 +2439,9 @@ scenario. Unchanged by S-VM-67's rewrite (DWD-13) — it keeps its
 → `@tier1 @in-memory`). The AC-21 additions leave it at ≈60% as well:
 DWD-25's pair split one `@happy_path` (S-VM-54) against one `@error_path`
 (S-VM-82), and S-VM-83 adds one more `@error_path` over one more total.
+DWD-26's pair leaves it at ≈60% too — S-VM-84 is `@error_path`, S-VM-85 is
+a pure `@property` invariant carrying no happy/error/edge tag, so the ratio
+moves 55/91 → 56/93.
 
 ---
 
@@ -2364,7 +2455,7 @@ DWD-25's pair split one `@happy_path` (S-VM-54) against one `@error_path`
 - [x] 6. Mandate 7 scaffolding — see `distill/wave-decisions.md` DWD-06 for the scoped scaffold decision (this feature genuinely introduces new crates/modules, unlike the brownfield precedent that deferred scaffolding entirely). Corrected in this remediation pass: the accounting was internally inconsistent (claimed 15 scaffolds "for every scenario in Slice 01" when only 12 of 20 are scaffolded) and the deferred-scaffold list omitted S-VM-11/S-VM-12 — both fixed in `wave-decisions.md`. No new scaffolds were authored by this remediation pass; every new/modified scenario joins the existing deferred-to-DELIVER set with its crate/file destination recorded in DWD-04
 - [x] 7. Driving Adapter coverage — `overdrive deploy` / `overdrive workload describe` / `overdrive job stop` / `overdrive serve` boot, all exercised via direct CLI handler call against a real in-process `overdrive serve` (never a subprocess, per `crates/overdrive-cli/CLAUDE.md`); see § Driving Adapter Coverage. One documented, justified carve-out: S-VM-76 (`VmDriver::stop` totality) is a component-scope acceptance case against `SimVmm`, named as its own enforcement vehicle by ADR-0082 §D4 because `vmm_equivalence.rs` cannot reach the relocated guest half of `stop`
 - [x] 8. Error path coverage ≥ 40% — 60% (see § Error / Edge Path Coverage)
-- [x] 13. **Contract Shape Classification (mandate 14, 2026-05-15)** — every one of the **91** scenarios carries a `@contract-shape:<pure-function|bounded-change|unbounded-preservation>` tag, mechanically recounted while adding S-VM-83 via `grep '^\*\*Tags\*\*:' | grep -c '@contract-shape:<kind>'`: **12 `pure-function` + 10 `unbounded-preservation` + 69 `bounded-change` = 91, zero untagged.** The per-kind narrative below is the 2026-08-11 remediation-pass reckoning, preserved verbatim for its off-by-one correction; the three AC-21 additions (S-VM-54, S-VM-82, S-VM-83) are all `bounded-change`, taking that class 66 → 69 and the total 88 → 91. Original text: 12 `pure-function` (the `VmConfig`/`plan_reclamation`/`SupervisionSet` pure-function scenarios + the `JobEnvelope` V1 roundtrip — unchanged; **corrects a pre-existing off-by-one in this line, which read 11** — the true count was already 12 before this pass, confirmed by direct listing), 10 `unbounded-preservation` (S-VM-14, 24, 52, 57, 61, 68 — unchanged from the original set — plus S-VM-74, 78, 87, 88, added by the remediation pass: "no intercept state exists," "the freshest-read supervision set is never stale toward a booting VM," and the two ESR invariants whose statements are themselves open-ended non-enumerable claims), 66 `bounded-change` (a specific, nameable resource/row/field transition with a closed complement — S-VM-41 joins this class, DWD-14; 65 before this pass, not 66 as the prior text implied — the prior 11/66 split summed correctly to 87 by coincidence, masking the same off-by-one). 12 + 10 + 66 = 88. Zero untagged.
+- [x] 13. **Contract Shape Classification (mandate 14, 2026-05-15)** — every one of the **93** scenarios carries a `@contract-shape:<pure-function|bounded-change|unbounded-preservation>` tag, mechanically recounted while adding S-VM-84/85 via `grep '^\*\*Tags\*\*:' | grep -c '@contract-shape:<kind>'`: **12 `pure-function` + 11 `unbounded-preservation` + 70 `bounded-change` = 93, zero untagged.** The per-kind narrative below is the 2026-08-11 remediation-pass reckoning, preserved verbatim for its off-by-one correction; the three AC-21 additions (S-VM-54, S-VM-82, S-VM-83) are all `bounded-change`, taking that class 66 → 69 and the total 88 → 91. The DWD-26 pair then splits across two classes: S-VM-84 is `bounded-change` (a named clone file and index entry, closed complement) taking that class 69 → 70, and S-VM-85 is `unbounded-preservation` (the claim quantifies over interruption points, not over an enumerable delta) taking that class 10 → 11; total 91 → 93. Original text: 12 `pure-function` (the `VmConfig`/`plan_reclamation`/`SupervisionSet` pure-function scenarios + the `JobEnvelope` V1 roundtrip — unchanged; **corrects a pre-existing off-by-one in this line, which read 11** — the true count was already 12 before this pass, confirmed by direct listing), 10 `unbounded-preservation` (S-VM-14, 24, 52, 57, 61, 68 — unchanged from the original set — plus S-VM-74, 78, 87, 88, added by the remediation pass: "no intercept state exists," "the freshest-read supervision set is never stale toward a booting VM," and the two ESR invariants whose statements are themselves open-ended non-enumerable claims), 66 `bounded-change` (a specific, nameable resource/row/field transition with a closed complement — S-VM-41 joins this class, DWD-14; 65 before this pass, not 66 as the prior text implied — the prior 11/66 split summed correctly to 87 by coincidence, masking the same off-by-one). 12 + 10 + 66 = 88. Zero untagged.
 - [x] 9. Wave-decision reconciliation — 0 contradictions (see `distill/wave-decisions.md`)
 - [x] 10. AC-to-scenario traceability complete — all 9 stories + the cross-cutting reconciler + the cross-cutting port-contract scenarios covered
 - [x] 11. KPI traceability documented — all 10 KPIs (K1–K10) traced

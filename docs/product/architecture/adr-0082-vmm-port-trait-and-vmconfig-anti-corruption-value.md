@@ -8,6 +8,53 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-17 (second — the per-launch clone becomes reclaimable;
+`RootfsPlan` gains an index link. See ADR-0083's 2026-08-17 (second)
+amendment §§ D3f–D3h for the governing decision).** The amendment below moved
+the per-launch clone onto an operator-chosen directory, and nothing reclaims a
+clone whose allocation ends without `VmDriver::stop`. § D2 gap 3's own pinned
+doc comment already says the clone destination "is derived on the **master's
+own filesystem** … so a reboot-orphaned clone is attributable (SD-1 / SD-2;
+the reap keys off it — ADR-0083 § D7)" — the *attribution* half was true, the
+*reap* half stopped being reachable. `RootfsPlan` therefore gains **one field
+and one accessor**, and `for_alloc` gains **one parameter**:
+
+```rust
+pub struct RootfsPlan {
+    master: PathBuf,
+    master_bytes: u64,
+    clone_dest: PathBuf,   // UNCHANGED — parent(master), FICLONE is intra-filesystem
+    index_link: PathBuf,   // NEW — <index_dir>/<same filename as clone_dest>
+}
+
+impl RootfsPlan {
+    pub fn for_alloc(
+        master: PathBuf,
+        master_bytes: u64,
+        alloc: &AllocationId,
+        index_dir: &Path,      // NEW — VmHostLayout::clone_index_dir, itself
+    ) -> Self;                 //       `vm::config::clone_index_dir(data_dir)`
+
+    pub fn index_link(&self) -> &Path;   // NEW
+    // master() / master_bytes() / clone_dest() unchanged
+}
+```
+
+`clone_dest` keeps its existing derivation and its existing filename — the
+`.overdrive-vm-rootfs-<alloc>.img` convention `RealVmHostState` already parses
+is untouched, and the FICLONE intra-filesystem constraint this ADR pinned is
+untouched. `index_link` is a **symlink** at the platform-owned index directory
+carrying the *same filename*, pointing at `clone_dest`. The lifecycle rule is
+an ordering, and it is the whole point: **the link is created before the clone
+and removed after the clone**, so at every instant a clone that exists has a
+link that exists, and "a clone no sweep can see" is not a reachable state. `VmDriver::stop` and
+`cleanup_after_start_failure` remove `clone_dest` first and `index_link`
+second; a crash between the two leaves a dangling link that the next
+`VmReclamation` sweep disposes idempotently. **No `Vmm` trait method changes,
+no `VmConfig` field changes, and `VmConfig.rootfs` still carries the same
+`RootfsPlan`** — `Vmm::create` continues to clone `master` → `clone_dest` and
+knows nothing about the index. Recorded in feature DWD-26.
+
 **Amended 2026-08-17 (production artifact supply — `VmHostLayout` sheds the
 artifact fields; see ADR-0083's 2026-08-17 amendment for the governing
 decision).** `VmConfig.kernel` and `VmConfig.rootfs` are now built from the
@@ -618,6 +665,13 @@ impl RootfsPlan {
 The exact clone **filename** format is the crafter's (it must sit in `master`'s
 own directory and contain `alloc`); the *shape* above is fixed. `master_bytes()`
 is what keeps `VmConfig::rlimit_fsize()` pure (see the method block below).
+
+> **Extended by the 2026-08-17 (second) amendment in § Status** — the block
+> above is additive-extended, not replaced. `for_alloc` takes a fourth
+> parameter (`index_dir: &Path`), the struct gains an `index_link: PathBuf`
+> field, and `index_link()` joins the three accessors. `master`,
+> `master_bytes`, `clone_dest` and their accessors are unchanged, as is the
+> intra-filesystem derivation of `clone_dest` and its filename convention.
 
 **`cmdline: KernelCmdline` — pinned shape (gap 4), in `crate::vm::config`.**
 

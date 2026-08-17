@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "microvm-driver-cloud-hypervisor",
     "created_at": "2026-08-11T19:07:27Z",
-    "total_steps": 36
+    "total_steps": 37
   },
   "phases": [
     {
@@ -465,7 +465,7 @@
     },
     {
       "id": "03",
-      "name": "Boot-failure vocabulary and production artifact supply (Slice 02)",
+      "name": "Boot-failure vocabulary, artifact supply, clone reclamation (Slice 02)",
       "steps": [
         {
           "id": "03-01",
@@ -704,6 +704,41 @@
           ],
           "effort_hours": 6,
           "implementation_notes": "GOVERNING DESIGN: DWD-25 and ADR-0083's 2026-08-17 amendment section D3d. This is a message-actionability step and nothing more. Per DWD-24 the detail field is free-form verbatim diagnostic text and is NEVER a classification input, so changing it alters no contract and no conversion; per ADR-0083 D3d no TransitionReason variant is minted, because the registry miss is driver-kind-generic (a Vm-prefixed variant would be the wrong shape), because reusing VmStartFailure::HypervisorAbsent would force the shim to synthesise searched-path knowledge it does not have, and because an admission-time rejection is not this step's job. NOTE (2026-08-17 user ruling): DWD-23's capability-based admission gate is SUPERSEDED IN PREMISE — cloud-hypervisor ships with the appliance OS, so \"this node has no VM driver\" is not a state production meaningfully reaches, and gating admission on it would defend a test-only state (CLAUDE.md § \"Ground the premise\"). The admission rejection worth making is role-based (this node does not have worker/scheduling enabled), which needs per-node component enablement — GH #267. Do NOT build any admission-time mechanism here. This step depends on 03-07 because only after it is the message accurate: with the artifact precondition gone, a missing Vm registry entry has exactly one cause, a Vmm::probe that did not pass. Assert on the operator-visible rendering through workload describe, never on an enum discriminant. Not @requires-kvm — the scenario's premise is a host that cannot boot a guest. REFLINK RESIDUAL (folded in 2026-08-17, ADR-0083 Consequences + § D3b): 03-07 moves the per-launch clone target from the node's image_dir to the operator-named rootfs directory. FICLONE is intra-filesystem, so Vmm::probe's boot-time reflink check no longer proves the clone will succeed, and the directory may also be read-only or shared. This step makes that failure name the directory and the requirement. It does NOT mint a VmStartFailure variant — S-VM-94 owns the fail-closed behaviour and the typing belongs with it. E06 cannot catch this (it stages under /srv/vm, the probed filesystem), so the test must point the spec at a directory on a filesystem without reflink support."
+        },
+        {
+          "id": "03-09",
+          "name": "Per-launch rootfs clones become reclaimable",
+          "description": "Step 03-07 moved the per-launch rootfs clone onto the operator's own rootfs directory, but the reclamation sweep still enumerates one hardcoded platform directory, so a VM that ends without VmDriver::stop strands its clone forever. Record the clone's location in a platform-owned durable index at the moment the platform chooses it, and enumerate the clone surface through that index.",
+          "criteria": [
+            "S-VM-84: a VM whose allocation ends WITHOUT VmDriver::stop -- guest exits on its own, hypervisor dies, or serve restarts and loses the in-memory RootfsPlan -- has its per-launch rootfs clone reclaimed, leaving no .overdrive-vm-rootfs file in the operator's rootfs directory and no index entry.",
+            "S-VM-85: the index link is created before the clone and removed after it, so no interruption of the start or stop sequence leaves a clone without an index link; any residue is a dangling link the next sweep disposes idempotently.",
+            "The clone destination is unchanged -- still derived on the master's own filesystem, still carrying the allocation id in its filename -- so FICLONE stays intra-filesystem and ADR-0082 D2 gap 3 is satisfied.",
+            "The index directory is derived by one function over the node's durable data_dir and called by both composition sites; no site derives it independently, and the directory is not under /run.",
+            "discard_artifacts resolves the clone by reading the index link and never re-derives its path; VmHostState keeps all five method signatures, no Action variant is added, and plan_reclamation is unchanged.",
+            "VmDriver::stop's existing in-memory reclamation still runs and still removes the clone directly; the sweep is the backstop for the paths stop does not cover, not a replacement for it."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
+          "scenario_name": "S-VM-84, S-VM-85",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/vm/config.rs",
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-host/src/vm_host_state.rs",
+              "crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
+              "crates/overdrive-worker/tests/acceptance/vm_driver_clone_index.rs",
+              "crates/overdrive-worker/tests/acceptance.rs",
+              "crates/overdrive-host/tests/integration/vm_host_state_equivalence.rs"
+            ]
+          },
+          "dependencies": [
+            "03-07",
+            "03-08"
+          ],
+          "effort_hours": 10,
+          "implementation_notes": "GOVERNING DESIGN: DWD-26 and the 2026-08-17 (second) amendments to ADR-0083 (sections D3f, D3g, D3h) and ADR-0082. Implement exactly that API and invent nothing else. THE DEFECT: the clone's location is authored in overdrive-core (RootfsPlan::for_alloc) and independently re-derived in overdrive-host (RealVmHostState), and 03-07 moved one side only; it is also NOT recomputable, because an operator spec-edit or workload deletion destroys parent([vm] rootfs) while the clone survives. So the location is RECORDED, not re-derived. EXACT SHAPES: overdrive-core gains one free function beside RootfsPlan -- `pub fn clone_index_dir(data_dir: &Path) -> PathBuf` returning data_dir.join(\"vm\").join(\"clone-index\"), modelled on the existing RedbViewStore::resolve_path. RootfsPlan gains ONE field `index_link: PathBuf` and ONE accessor `index_link(&self) -> &Path`; for_alloc gains a FOURTH parameter `index_dir: &Path`. master, master_bytes, clone_dest and their accessors are unchanged, as is clone_dest's derivation and filename. VmHostLayout gains a SIXTH field `clone_index_dir: PathBuf` and compose_vm_driver gains the matching parameter. RealVmHostState::new's third argument is renamed index_dir and fed clone_index_dir(&config.data_dir) -- the SAME expression compose_vm_driver is fed, which is the whole point of the shared function. THE ORDERING IS THE CONTRACT AND IS NOT NEGOTIABLE: create the index symlink BEFORE the FICLONE, and in stop / cleanup_after_start_failure remove the clone FIRST and the link SECOND. That is what makes `no link implies no clone` true, and it is what S-VM-85 mutation-tests; swapping either ordering reopens the invisible-orphan leak. observe_clones keeps its existing CLONE_PREFIX/CLONE_SUFFIX parsing and AllocationId::from_str recovery -- only the mapped value changes, from entry.path() to read_link(entry.path()). A dangling link MUST still yield an entry; that is required by the crash table, not an oversight. A non-symlink entry is skipped and logged; this is a greenfield single cut, so do NOT write a migration for pre-existing regular files. discard_artifacts read_links, removes target then link, both NotFound-tolerant, and MUST NOT reconstruct the clone path from a directory join -- that re-derivation is the defect. Do NOT add a path parameter to discard_artifacts: ADR-0083 D7 already rules that an observation carried from the diff into the plan goes stale between emit and execute, and DD-5 pins these Actions to alloc_id alone. DO NOT TOUCH: plan_reclamation, VmReclamationState, VmReclamationView, Action::ReclaimAllocation, Action::DiscardStrandedArtifacts, either executor, the boot-epoch drive, the sweep interval, or any VmHostState signature -- the reconciler already unions clones.keys() and already treats them as the VM-exclusive trigger; it was being fed an empty surface, and that is all this step fixes. NOT IN SCOPE, explicitly: the clone still lands in the operator's directory, which may be read-only or shared (ADR-0083 D3a Consequence, unchanged), and Vmm::probe's reflink proof still does not cover it (D3b, unchanged) -- S-VM-94 and step 03-08's sixth criterion own that fail-closed behaviour and no VmStartFailure variant is minted here. S-VM-84 must exercise all three without-stop endings; a fixture that calls stop passes today and proves nothing, so the stop path is the one shape that must NOT stand in for the others. Extend vm_host_state_equivalence.rs (S-VM-91) so RealVmHostState and SimVmHostState still observe the same clone surface after the change."
         }
       ]
     },
@@ -736,7 +771,8 @@
           "dependencies": [
             "01-07",
             "03-01",
-            "03-07"
+            "03-07",
+            "03-09"
           ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-42 is a mandatory mutation target (K1 north star) — a mutation collapsing the unreported-death arm into CleanExit must be killed. No code path may derive ExitKind from cloud-hypervisor's own exit status (already enforced structurally by 01-07; this step is its operator-facing Tier-3 proof). MICROVM-BOOT-TESTS GATE: vm_stop_restart_and_vmm_death.rs is a NEW file; it compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests — exit classification needs a real guest and a real (or host-OOM-killed) hypervisor process."
@@ -876,6 +912,7 @@
             "01-08",
             "03-01",
             "03-07",
+            "03-09",
             "04-01"
           ],
           "effort_hours": 6,
@@ -1045,7 +1082,8 @@
           "dependencies": [
             "01-01",
             "01-08",
-            "03-07"
+            "03-07",
+            "03-09"
           ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: S-VM-73 is Tier 1 default-lane proptest, mandatory mutation target — author fresh (name pinned by DELIVER's own DESIGN reading, per US-VM-5 Technical Notes; the derivation rule itself is DESIGN's). S-VM-69/70 are Tier 3, gated integration-tests, single-example, real guest CPU count read, which needs a real DriverRegistry-composed serve (step 01-08). MICROVM-BOOT-TESTS GATE: the Tier-3 half, in crates/overdrive-cli/tests/integration/vm_resources_sizing.rs, compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests; the Tier-1 half in vm_resources_derivation.rs is unaffected."

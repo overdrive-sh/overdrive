@@ -4671,3 +4671,63 @@ replaces them with an image reference, and the internal `VmPayload` plumbing
 survives as what the factory resolves into. This resolution introduces no
 issue and no deferral.
 
+**Resolved by DWD-26 (2026-08-17) — the leak DWD-25's own fix opened, and
+closed.** Step 03-07 (`6b6ffb12`, `cf0c6b1e`) landed the ruling above and, in
+doing so, moved the per-launch rootfs clone onto the parent directory of the
+operator's own `[vm] rootfs`. `VmDriver::stop` still reclaims it correctly — it
+holds the per-allocation `RootfsPlan` in memory and removes the exact path it
+minted, so the operator directory is no obstacle. But **nothing reclaims a
+clone whose allocation ends without `stop`**: a guest that exits on its own, a
+hypervisor that dies, or a `serve` restart that loses the in-memory plan each
+strand `<operator_rootfs_dir>/.overdrive-vm-rootfs-<alloc>.img` permanently.
+`run_exit_watcher` classifies the exit and emits an `ExitEvent`; its own doc
+comment states teardown happens later, in `stop` or
+`cleanup_after_start_failure`, "both driven by a SEPARATE caller."
+
+The surface built to catch exactly that was pointed elsewhere. `RealVmHostState`
+enumerates clones from a single directory, hardcoded by the DWD-25 composition
+to `/run/overdrive/vm-rootfs-staging`, and `discard_artifacts` re-derives the
+same path independently — while `RootfsPlan::for_alloc` stages beside the
+master. Worse, that directory is `tmpfs`, and ADR-0082 § D2 gap 3's own pinned
+doc comment says the clone must sit on the master's filesystem because
+*"staging into `/run` fails `EXDEV`"*: the one directory the platform watched
+for clones is a directory in which a clone cannot exist. The two sides only
+ever agreed because the deleted `VmBootArtifacts` seam fed both from one
+node-level artifact path; and because **no VM had ever booted in production**
+(the `K4` refutation above, `new_hypervisors=0`), all three of ADR-0083 § D7's
+reclamation surfaces were vacuously empty — the clone surface has never been
+exercised against a real operator-chosen directory. This is an unbounded,
+durable leak on a shared host: one reflink clone per crashed launch, each
+growing toward full rootfs size.
+
+DWD-26 rules that the clone's location is **recorded at the moment the platform
+chooses it, never re-derived**. The root cause is that the location is authored
+in `overdrive-core` and independently re-derived in `overdrive-host`, and 03-07
+moved one side only; it is also genuinely non-recomputable, since an operator
+spec-edit or workload deletion destroys `parent([vm] rootfs)` while the clone
+survives. The clone does **not** move (FICLONE stays intra-filesystem); a
+symlink in a platform-owned index directory under the node's durable `data_dir`
+records it, carrying the existing `.overdrive-vm-rootfs-<alloc>.img` filename so
+attribution is unchanged. **The link is created before the clone and removed
+after it**, so a clone that exists always has a link — *no link implies no
+clone* — and both crash windows leave a dangling link the next sweep disposes
+idempotently. **`VmReclamation` covers it completely and gains nothing**: no new
+port method, no new `Action`, no new reconciler, `plan_reclamation` untouched.
+The reconciler was never the problem; it was being fed an empty surface.
+
+Two ADR-0083 § D7 statements are corrected in place: there is no longer "the
+image directory," and the clause naming the clone *"the only surface that
+survives a host reboot"* was, between 03-07 and this ruling, false in **both**
+directions at once. § D7 was correct as authored; § D3a falsified it without
+carrying the correction through. The three-surface model itself stands and is
+not widened. Amended ADR-0082 and ADR-0083 (both 2026-08-17, second); delivered
+by roadmap step **03-09**, which the leading steps of phases 04, 05 and 06 each
+depend on for the same `vm_driver.rs` reason DWD-25 gave for 03-07. Scenarios
+S-VM-84 and S-VM-85 are added; none is dropped or renumbered (91 → 93). The
+same entry ratifies `run_with_kek` as the surviving ungated `serve` entrypoint
+and collapses `run` onto it, so the two byte-identical bodies cannot drift.
+**Not claimed as fixed and still owned by S-VM-94 / step 03-08:** the clone
+still lands in an operator-chosen directory that may be read-only or shared,
+and `Vmm::probe`'s reflink proof still does not cover it. This resolution
+introduces no issue and no deferral.
+
