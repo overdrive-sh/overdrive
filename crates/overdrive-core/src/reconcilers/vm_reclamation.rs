@@ -144,10 +144,7 @@ pub struct VmReclamationView {}
 /// | no entry, VM-exclusive surface | `false` | nothing |
 /// | no entry, cgroup-scope-only | not reached | nothing |
 #[must_use]
-pub fn plan_reclamation(
-    desired: &VmReclamationState,
-    actual: &VmReclamationState,
-) -> Vec<Action> {
+pub fn plan_reclamation(desired: &VmReclamationState, actual: &VmReclamationState) -> Vec<Action> {
     let mut host_ids: BTreeSet<AllocationId> = BTreeSet::new();
     host_ids.extend(actual.host.scopes.keys().cloned());
     host_ids.extend(actual.host.run_dirs.iter().cloned());

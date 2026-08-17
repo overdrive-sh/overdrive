@@ -35,9 +35,13 @@ use overdrive_control_plane::reconciler_runtime::{
 };
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
-use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::{AnyReconciler, AnyState, TargetResource, vm_reclamation::VmReclamation};
+use overdrive_core::reconcilers::{
+    AnyReconciler, AnyState, TargetResource, vm_reclamation::VmReclamation,
+};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
@@ -78,7 +82,11 @@ struct ClaimTrackingDriver {
 
 impl ClaimTrackingDriver {
     fn new(inner: Arc<SimDriver>) -> Self {
-        Self { inner, held: Arc::new(Mutex::new(BTreeSet::new())), released: Arc::new(Mutex::new(Vec::new())) }
+        Self {
+            inner,
+            held: Arc::new(Mutex::new(BTreeSet::new())),
+            released: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
     fn claim(&self, alloc: &AllocationId) {
@@ -124,7 +132,11 @@ impl Driver for ClaimTrackingDriver {
         self.inner.status(handle).await
     }
 
-    async fn resize(&self, handle: &AllocationHandle, resources: Resources) -> Result<(), DriverError> {
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
         self.inner.resize(handle, resources).await
     }
 
@@ -262,8 +274,9 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocationId {
         .await
         .expect("tick");
         let rows = h.state.obs.alloc_status_rows().await.expect("read rows");
-        if let Some(row) =
-            rows.iter().find(|r| r.state == overdrive_core::traits::observation_store::AllocState::Running)
+        if let Some(row) = rows
+            .iter()
+            .find(|r| r.state == overdrive_core::traits::observation_store::AllocState::Running)
         {
             return row.alloc_id.clone();
         }
@@ -396,7 +409,10 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
                 args: vec![],
             },
         ),
-        resources: overdrive_core::traits::driver::Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        resources: overdrive_core::traits::driver::Resources {
+            cpu_milli: 100,
+            memory_bytes: 32 * 1024 * 1024,
+        },
         probe_descriptors: Vec::new(),
         netns: None,
         host_veth: None,

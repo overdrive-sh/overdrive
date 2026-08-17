@@ -56,7 +56,10 @@ fn validated_kernel(fixture: &VmFixture) -> KernelImage {
 }
 
 const fn sample_confinement() -> VmConfinement {
-    VmConfinement::confined(VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] }, 1024)
+    VmConfinement::confined(
+        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+        1024,
+    )
 }
 
 /// Build a real, fully-resolved `VmConfig` sharing `fixture`'s staged
@@ -84,10 +87,7 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path) -> VmConfig {
 /// three surfaces) -> `kill_scope` (settles -- the scope is gone
 /// afterward, on BOTH adapters) -> `discard_artifacts` (the run dir and
 /// clone are both gone afterward).
-async fn assert_observe_then_kill_then_discard(
-    host: &dyn VmHostState,
-    alloc: &AllocationId,
-) {
+async fn assert_observe_then_kill_then_discard(host: &dyn VmHostState, alloc: &AllocationId) {
     host.probe().await.expect("probe succeeds");
     host.probe().await.expect("probe is idempotent -- second call also succeeds");
 
@@ -134,7 +134,10 @@ async fn vm_host_state_equivalence_sim() {
 
     sim.set_scope(alloc.clone(), BTreeSet::from([4242]));
     sim.set_run_dir(alloc.clone());
-    sim.set_clone(alloc.clone(), PathBuf::from("/sim/staging/.overdrive-vm-rootfs-vmhosteq-sim-a.img"));
+    sim.set_clone(
+        alloc.clone(),
+        PathBuf::from("/sim/staging/.overdrive-vm-rootfs-vmhosteq-sim-a.img"),
+    );
 
     assert_observe_then_kill_then_discard(&sim, &alloc).await;
 

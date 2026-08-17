@@ -93,8 +93,8 @@ fn fail(name: &str, cause: String) -> InvariantResult {
 /// are jointly responsible for.
 async fn apply_actions(sim: &SimVmHostState, actions: &[Action]) {
     for action in actions {
-        let (Action::ReclaimAllocation { alloc_id } | Action::DiscardStrandedArtifacts { alloc_id }) =
-            action
+        let (Action::ReclaimAllocation { alloc_id }
+        | Action::DiscardStrandedArtifacts { alloc_id }) = action
         else {
             continue;
         };
@@ -131,8 +131,11 @@ pub async fn evaluate_supervised_vm_survives_every_tick() -> InvariantResult {
             Ok(h) => h,
             Err(e) => return fail(NAME, format!("tick {tick_n}: observe failed: {e}")),
         };
-        let actual =
-            VmReclamationState { allocations: BTreeMap::new(), host, supervision: supervision.clone() };
+        let actual = VmReclamationState {
+            allocations: BTreeMap::new(),
+            host,
+            supervision: supervision.clone(),
+        };
         let actions = plan_reclamation(&desired, &actual);
         if !actions.is_empty() {
             return fail(
@@ -181,8 +184,11 @@ pub async fn evaluate_vm_reclamation_idempotent_steady_state() -> InvariantResul
         Ok(h) => h,
         Err(e) => return fail(NAME, format!("first observe: {e}")),
     };
-    let actual =
-        VmReclamationState { allocations: BTreeMap::new(), host: host_first, supervision: supervision.clone() };
+    let actual = VmReclamationState {
+        allocations: BTreeMap::new(),
+        host: host_first,
+        supervision: supervision.clone(),
+    };
     let first = plan_reclamation(&desired, &actual);
     if !first.is_empty() {
         return fail(
@@ -281,8 +287,11 @@ pub async fn evaluate_vm_reclamation_converges() -> InvariantResult {
             Ok(h) => h,
             Err(e) => return fail(NAME, format!("observe failed: {e}")),
         };
-        let actual =
-            VmReclamationState { allocations: BTreeMap::new(), host, supervision: supervision.clone() };
+        let actual = VmReclamationState {
+            allocations: BTreeMap::new(),
+            host,
+            supervision: supervision.clone(),
+        };
         let actions = plan_reclamation(&desired, &actual);
         if actions.is_empty() {
             converged = true;
@@ -303,7 +312,9 @@ pub async fn evaluate_vm_reclamation_converges() -> InvariantResult {
         if sim.has_scope(alloc) || !sim.artifacts_absent(alloc) {
             return fail(
                 NAME,
-                format!("{label} allocation {alloc} is still attributable on a host surface after convergence"),
+                format!(
+                    "{label} allocation {alloc} is still attributable on a host surface after convergence"
+                ),
             );
         }
     }
@@ -365,7 +376,11 @@ fn ending_in_flight_case(
 
 /// `true` iff `plan_reclamation(desired, actual)` emits `ReclaimAllocation`
 /// for `alloc` — the ONE observable shape this invariant refuses.
-fn reclaims(desired: &VmReclamationState, actual: &VmReclamationState, alloc: &AllocationId) -> bool {
+fn reclaims(
+    desired: &VmReclamationState,
+    actual: &VmReclamationState,
+    alloc: &AllocationId,
+) -> bool {
     plan_reclamation(desired, actual)
         .iter()
         .any(|a| matches!(a, Action::ReclaimAllocation { alloc_id } if alloc_id == alloc))

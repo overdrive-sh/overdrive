@@ -510,7 +510,9 @@ impl overdrive_core::traits::vm_host_state::VmHostState for NoopVmHostState {
         "overdrive_control_plane::NoopVmHostState"
     }
 
-    async fn probe(&self) -> std::result::Result<(), overdrive_core::traits::vm_host_state::VmHostStateProbeError> {
+    async fn probe(
+        &self,
+    ) -> std::result::Result<(), overdrive_core::traits::vm_host_state::VmHostStateProbeError> {
         Ok(())
     }
 
@@ -524,7 +526,10 @@ impl overdrive_core::traits::vm_host_state::VmHostState for NoopVmHostState {
         Ok(())
     }
 
-    async fn discard_artifacts(&self, _alloc: &overdrive_core::AllocationId) -> std::io::Result<()> {
+    async fn discard_artifacts(
+        &self,
+        _alloc: &overdrive_core::AllocationId,
+    ) -> std::io::Result<()> {
         Ok(())
     }
 }
@@ -1724,9 +1729,10 @@ async fn compose_vm_driver(
         })
     })?;
     let window = &header[..header.len().min(KERNEL_MAGIC_WINDOW)];
-    let kernel = KernelImage::validate(artifacts.kernel_path.clone(), arch, window).map_err(
-        |source| VmComposeError::NotAvailable(error::VmmBootError::KernelFormat { source }),
-    )?;
+    let kernel =
+        KernelImage::validate(artifacts.kernel_path.clone(), arch, window).map_err(|source| {
+            VmComposeError::NotAvailable(error::VmmBootError::KernelFormat { source })
+        })?;
 
     let layout = VmHostLayout {
         cgroup_root,
@@ -2934,12 +2940,10 @@ fn spawn_convergence_loop(
 
             if now >= next_vm_reclamation_sweep_at {
                 next_vm_reclamation_sweep_at = now + VM_RECLAMATION_SWEEP_INTERVAL;
-                if let Ok(target) =
-                    overdrive_core::reconcilers::TargetResource::new(&format!(
-                        "node/{}",
-                        state.node_id
-                    ))
-                {
+                if let Ok(target) = overdrive_core::reconcilers::TargetResource::new(&format!(
+                    "node/{}",
+                    state.node_id
+                )) {
                     #[allow(clippy::expect_used)]
                     let reconciler = overdrive_core::reconcilers::ReconcilerName::new(
                         <overdrive_core::reconcilers::vm_reclamation::VmReclamation as overdrive_core::reconcilers::Reconciler>::NAME,
@@ -3375,9 +3379,7 @@ mod tests {
                 matches!(
                     err,
                     Some(VmComposeError::Refused(VmmBootError::Probe {
-                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent {
-                            ..
-                        }
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent { .. }
                     }))
                 ),
                 "expected Refused(VmmBootError::Probe{{LandlockLsmAbsent}}), got {err:?}"
@@ -3412,9 +3414,7 @@ mod tests {
                 matches!(
                     VmComposeError::NotAvailable(cause),
                     VmComposeError::NotAvailable(VmmBootError::Probe {
-                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent {
-                            ..
-                        }
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent { .. }
                     })
                 ),
                 "VmComposeError::NotAvailable must carry the typed VmmBootError variant unchanged"

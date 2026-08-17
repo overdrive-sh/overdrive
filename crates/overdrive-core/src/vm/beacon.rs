@@ -76,11 +76,8 @@ pub const GUEST_VSOCK_MODULE_DIR: &str = "/modules";
 /// load order exactly. A vsock=y appliance kernel (ADR-0068 §4) stages
 /// none of these — the loader's read of each path is a tolerated
 /// no-op skip, never an error (the `[D2]` fallback contract).
-pub const GUEST_VSOCK_MODULE_FILES: [&str; 3] = [
-    "vsock.ko",
-    "vmw_vsock_virtio_transport_common.ko",
-    "vmw_vsock_virtio_transport.ko",
-];
+pub const GUEST_VSOCK_MODULE_FILES: [&str; 3] =
+    ["vsock.ko", "vmw_vsock_virtio_transport_common.ko", "vmw_vsock_virtio_transport.ko"];
 
 /// A beacon line that failed to parse. Carries the raw line and the
 /// specific field that rejected it so a caller can log the exact wire
@@ -114,7 +111,9 @@ pub enum BeaconParseError {
         raw: String,
     },
     /// A `key=value` field was missing its `key=` prefix.
-    #[error("{kind} field {field} must be formatted as {field}=<value>, found {found:?} in line {raw:?}")]
+    #[error(
+        "{kind} field {field} must be formatted as {field}=<value>, found {found:?} in line {raw:?}"
+    )]
     MissingKey {
         /// The message kind (`"READY"` / `"EXIT"` / `"SHUTDOWN"`).
         kind: &'static str,
@@ -250,9 +249,10 @@ impl FromStr for BeaconMessage {
             "READY" => parse_ready(line, &rest),
             "EXIT" => parse_exit(line, &rest),
             "SHUTDOWN" => parse_shutdown(line, &rest),
-            other => {
-                Err(BeaconParseError::UnknownKind { kind: other.to_string(), raw: line.to_string() })
-            }
+            other => Err(BeaconParseError::UnknownKind {
+                kind: other.to_string(),
+                raw: line.to_string(),
+            }),
         }
     }
 }
@@ -294,9 +294,12 @@ fn parse_u32_field(
     raw: &str,
 ) -> Result<u32, BeaconParseError> {
     let value = strip_key(kind, field, token, raw)?;
-    value
-        .parse::<u32>()
-        .map_err(|source| BeaconParseError::InvalidInt { kind, field, raw: raw.to_string(), source })
+    value.parse::<u32>().map_err(|source| BeaconParseError::InvalidInt {
+        kind,
+        field,
+        raw: raw.to_string(),
+        source,
+    })
 }
 
 fn parse_ready(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {

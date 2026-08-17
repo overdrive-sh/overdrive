@@ -364,11 +364,14 @@ fn exec_operator_command(argv: &[String]) -> Result<i32, InitError> {
     // has already rejected an empty argv as `BeaconParseError::EmptyArgv`
     // (`.claude/rules/development.md` § "Logically unreachable None/Err").
     let command = argv.first().unwrap_or_else(|| {
-        unreachable!("recv_exec only returns argv already validated non-empty by BeaconMessage::from_str")
+        unreachable!(
+            "recv_exec only returns argv already validated non-empty by BeaconMessage::from_str"
+        )
     });
-    let status = Command::new(command).args(&argv[1..]).status().map_err(|source| {
-        InitError::Spawn { command: command.clone(), source }
-    })?;
+    let status = Command::new(command)
+        .args(&argv[1..])
+        .status()
+        .map_err(|source| InitError::Spawn { command: command.clone(), source })?;
     Ok(exit_status_to_wire(status))
 }
 

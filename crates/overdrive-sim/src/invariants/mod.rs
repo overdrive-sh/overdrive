@@ -860,9 +860,7 @@ impl Invariant {
             Self::SvidRunningSetHoldsValidSvid => "svid-running-set-holds-valid-svid",
             // microvm-driver-cloud-hypervisor step 02-04 (ADR-0083 §D7).
             Self::SupervisedVmSurvivesEveryTick => "supervised-vm-survives-every-tick",
-            Self::VmReclamationIdempotentSteadyState => {
-                "vm-reclamation-idempotent-steady-state"
-            }
+            Self::VmReclamationIdempotentSteadyState => "vm-reclamation-idempotent-steady-state",
             Self::VmReclamationConverges => "vm-reclamation-converges",
             Self::EndingInFlightIsNeverReclaimed => "ending-in-flight-is-never-reclaimed",
         }

@@ -386,13 +386,15 @@ impl ReconcilerRuntime {
                               self-removes when the View gains a field. See \
                               AnyViewMap::VmReclamation."
                 )]
-                let loaded: BTreeMap<TargetResource, overdrive_core::reconcilers::VmReclamationView> =
-                    self.view_store.bulk_load(static_name).await.map_err(|e| {
-                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
-                            reconciler: name.clone(),
-                            source: e,
-                        })
-                    })?;
+                let loaded: BTreeMap<
+                    TargetResource,
+                    overdrive_core::reconcilers::VmReclamationView,
+                > = self.view_store.bulk_load(static_name).await.map_err(|e| {
+                    ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                        reconciler: name.clone(),
+                        source: e,
+                    })
+                })?;
                 AnyViewMap::VmReclamation(loaded)
             }
         };
@@ -3012,15 +3014,20 @@ async fn hydrate_vm_reclamation_actual(state: &AppState) -> Result<AnyState, Con
     // world (the platform provably holds no VM supervision handle), not
     // a missing observation. This is what lets a node that uninstalled
     // cloud-hypervisor still reclaim its survivors (S-VM-30).
-    let supervision = state.drivers.get(overdrive_core::traits::driver::DriverType::Vm).map_or_else(
-        || overdrive_core::reconcilers::SupervisionSet::Observed(BTreeSet::new()),
-        |driver| {
-            driver.live_allocations().map_or(
-                overdrive_core::reconcilers::SupervisionSet::Unavailable,
-                |ids| overdrive_core::reconcilers::SupervisionSet::Observed(ids.into_iter().collect()),
-            )
-        },
-    );
+    let supervision =
+        state.drivers.get(overdrive_core::traits::driver::DriverType::Vm).map_or_else(
+            || overdrive_core::reconcilers::SupervisionSet::Observed(BTreeSet::new()),
+            |driver| {
+                driver.live_allocations().map_or(
+                    overdrive_core::reconcilers::SupervisionSet::Unavailable,
+                    |ids| {
+                        overdrive_core::reconcilers::SupervisionSet::Observed(
+                            ids.into_iter().collect(),
+                        )
+                    },
+                )
+            },
+        );
     Ok(AnyState::VmReclamation(overdrive_core::reconcilers::VmReclamationState {
         allocations: BTreeMap::new(),
         host,

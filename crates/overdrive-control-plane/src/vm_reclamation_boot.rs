@@ -43,8 +43,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use overdrive_core::reconcilers::{Action, VmReclamationState, plan_reclamation};
 use overdrive_core::reconcilers::vm_reclamation::SupervisionSet;
+use overdrive_core::reconcilers::{Action, VmReclamationState, plan_reclamation};
 use overdrive_core::traits::driver::DriverType;
 
 use crate::AppState;
@@ -90,11 +90,9 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     let supervision = state.drivers.get(DriverType::Vm).map_or_else(
         || SupervisionSet::Observed(BTreeSet::new()),
         |driver| {
-            driver
-                .live_allocations()
-                .map_or(SupervisionSet::Unavailable, |ids| {
-                    SupervisionSet::Observed(ids.into_iter().collect())
-                })
+            driver.live_allocations().map_or(SupervisionSet::Unavailable, |ids| {
+                SupervisionSet::Observed(ids.into_iter().collect())
+            })
         },
     );
 
@@ -258,7 +256,9 @@ mod tests {
     #[tokio::test]
     async fn converge_reclaims_a_non_terminal_unsupervised_vm_driven_allocation() {
         use overdrive_core::TransitionReason;
-        use overdrive_core::aggregate::{IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind};
+        use overdrive_core::aggregate::{
+            IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,
+        };
         use overdrive_core::id::{AllocationId, WorkloadId};
         use overdrive_core::traits::driver::Resources;
         use overdrive_core::traits::observation_store::{
@@ -326,7 +326,10 @@ mod tests {
             .expect("row exists after converge");
         assert_eq!(after.state, AllocState::Terminated);
         assert!(
-            matches!(after.reason, Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })),
+            matches!(
+                after.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
             "a non-terminal, unsupervised, Vm-driven allocation reached via the desired-side \
              join must be reclaimed via Action::ReclaimAllocation, got {:?}",
             after.reason

@@ -123,7 +123,9 @@ impl RealVmHostState {
             // failing the whole observation.
             let pids = tokio::fs::read_to_string(&procs_path).await.map_or_else(
                 |_| BTreeSet::new(),
-                |content| content.lines().filter_map(|line| line.trim().parse::<u32>().ok()).collect(),
+                |content| {
+                    content.lines().filter_map(|line| line.trim().parse::<u32>().ok()).collect()
+                },
             );
             scopes.insert(alloc_id, ScopeFacts { pids });
         }
@@ -151,7 +153,8 @@ impl RealVmHostState {
         for entry in Self::list_dir_tolerant(&self.staging_dir).await? {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
-            let Some(middle) = name.strip_prefix(CLONE_PREFIX).and_then(|s| s.strip_suffix(CLONE_SUFFIX))
+            let Some(middle) =
+                name.strip_prefix(CLONE_PREFIX).and_then(|s| s.strip_suffix(CLONE_SUFFIX))
             else {
                 continue;
             };
@@ -170,8 +173,7 @@ impl VmHostState for RealVmHostState {
     }
 
     async fn probe(&self) -> Result<(), VmHostStateProbeError> {
-        for root in [self.workloads_slice_root(), self.run_root.clone(), self.staging_dir.clone()]
-        {
+        for root in [self.workloads_slice_root(), self.run_root.clone(), self.staging_dir.clone()] {
             match tokio::fs::read_dir(&root).await {
                 Ok(_) => {}
                 // An absent root is Ok -- a node that has never run a VM

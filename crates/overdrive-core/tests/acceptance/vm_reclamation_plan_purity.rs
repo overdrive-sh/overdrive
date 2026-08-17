@@ -40,7 +40,6 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use overdrive_core::{AllocationId, SpiffeId, UnixInstant};
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::observation::ProbeStatus;
@@ -58,6 +57,7 @@ use overdrive_core::traits::vm_host_state::ScopeFacts;
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
+use overdrive_core::{AllocationId, SpiffeId, UnixInstant};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -123,12 +123,16 @@ fn build_case(
 
     let expected = match row {
         Row::NonTerminalAuthorised => {
-            desired.allocations.insert(alloc.clone(), VmAllocFacts { workload_id, terminal: false });
+            desired
+                .allocations
+                .insert(alloc.clone(), VmAllocFacts { workload_id, terminal: false });
             actual.host.scopes.insert(alloc.clone(), ScopeFacts::default());
             vec![Action::ReclaimAllocation { alloc_id: alloc }]
         }
         Row::NonTerminalHeld => {
-            desired.allocations.insert(alloc.clone(), VmAllocFacts { workload_id, terminal: false });
+            desired
+                .allocations
+                .insert(alloc.clone(), VmAllocFacts { workload_id, terminal: false });
             actual.host.scopes.insert(alloc.clone(), ScopeFacts::default());
             held.insert(alloc);
             Vec::new()
@@ -356,7 +360,11 @@ proptest! {
 /// `state: Terminated`, `reason: Stopped { by: PlatformReclaimed }`,
 /// `terminal: None` -- the executor stamps only `reason`, never a
 /// reconciler terminal claim.
-fn vm_reclaimed_row(alloc_id: AllocationId, workload_id: WorkloadId, node_id: &NodeId) -> AllocStatusRow {
+fn vm_reclaimed_row(
+    alloc_id: AllocationId,
+    workload_id: WorkloadId,
+    node_id: &NodeId,
+) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id,
         workload_id,
@@ -458,7 +466,10 @@ fn svc_restart_spec(alloc_id: AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc_id,
         identity: svc_spiffe(),
-        driver: DriverPayload::Exec(ExecPayload { command: "/bin/svc".to_string(), args: Vec::new() }),
+        driver: DriverPayload::Exec(ExecPayload {
+            command: "/bin/svc".to_string(),
+            args: Vec::new(),
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,

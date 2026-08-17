@@ -853,7 +853,9 @@ fn stage_vsock_modules(stage_dir: &Path, kernel_release: &str) -> Result<(), VmF
             .arg("-o")
             .arg(&dest)
             .status()
-            .map_err(|source| VmFixtureError::spawn(format!("zstd -d {}", src.display()), source))?;
+            .map_err(|source| {
+                VmFixtureError::spawn(format!("zstd -d {}", src.display()), source)
+            })?;
         if !status.success() {
             return Err(VmFixtureError::rootfs_staging_failed(
                 format!(

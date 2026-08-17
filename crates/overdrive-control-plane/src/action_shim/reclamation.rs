@@ -27,11 +27,11 @@
 //! `action_shim::dispatch_single`.
 
 use overdrive_core::AllocationId;
+use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::TransitionReason;
 use overdrive_core::traits::observation_store::{
     AllocState, LogicalTimestamp, ObservationRow, ObservationStore, ObservationStoreError,
 };
@@ -179,11 +179,8 @@ pub async fn execute_reclaim_allocation(
     // than a hardcoded `0` so the floor is non-trivial even before `prior`
     // is consulted.
     let tick_floor = clock.unix_now().as_secs();
-    let updated_at = LogicalTimestamp::dominating(
-        tick_floor,
-        writer_node.clone(),
-        Some(&prior_row.updated_at),
-    );
+    let updated_at =
+        LogicalTimestamp::dominating(tick_floor, writer_node.clone(), Some(&prior_row.updated_at));
     let row = build_alloc_status_row(
         alloc_id.clone(),
         prior_row.workload_id.clone(),
@@ -222,10 +219,7 @@ pub async fn execute_reclaim_allocation(
             reconciler: evaluation_targets::service_lifecycle(),
             target: target.clone(),
         });
-        guard.submit(Evaluation {
-            reconciler: evaluation_targets::svid_lifecycle(),
-            target,
-        });
+        guard.submit(Evaluation { reconciler: evaluation_targets::svid_lifecycle(), target });
     }
 
     Ok(())
@@ -364,7 +358,11 @@ mod tests {
     /// `StoppedBy::Operator` disposition so a refusal is unambiguously
     /// distinguishable from a `PlatformReclaimed` write in the
     /// byte-unchanged assertion.
-    fn terminated_row(alloc: &AllocationId, workload: &WorkloadId, node: &NodeId) -> AllocStatusRow {
+    fn terminated_row(
+        alloc: &AllocationId,
+        workload: &WorkloadId,
+        node: &NodeId,
+    ) -> AllocStatusRow {
         AllocStatusRow {
             alloc_id: alloc.clone(),
             workload_id: workload.clone(),
@@ -457,7 +455,10 @@ mod tests {
             row.workload_id, prior.workload_id,
             "workload_id must be carried forward from the prior row"
         );
-        assert_eq!(row.node_id, prior.node_id, "node_id must be carried forward from the prior row");
+        assert_eq!(
+            row.node_id, prior.node_id,
+            "node_id must be carried forward from the prior row"
+        );
         assert_eq!(row.kind, prior.kind, "kind must be carried forward from the prior row");
         assert_eq!(
             row.started_at, prior.started_at,
@@ -610,9 +611,16 @@ mod tests {
             .expect("seed Running row");
         let clock = SimClock::new();
         let running_broker = parking_lot::Mutex::new(EvaluationBroker::new());
-        execute_reclaim_allocation(&running_alloc, &running_host, &running_obs, &clock, &n, &running_broker)
-            .await
-            .expect("ok");
+        execute_reclaim_allocation(
+            &running_alloc,
+            &running_host,
+            &running_obs,
+            &clock,
+            &n,
+            &running_broker,
+        )
+        .await
+        .expect("ok");
         assert_eq!(
             running_broker.lock().drain_pending().len(),
             4,

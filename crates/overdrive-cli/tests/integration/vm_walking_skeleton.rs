@@ -878,8 +878,7 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
 /// `--seccomp true` installs).
 fn thread_seccomp_mode(vmm_pid: u32, tid: &str) -> u32 {
     let path = format!("/proc/{vmm_pid}/task/{tid}/status");
-    let status =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+    let status = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path}: {e}"));
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix("Seccomp:") {
             return rest
@@ -974,10 +973,7 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
         if out.snapshot.rows.first().is_some_and(|r| r.state == AllocStateWire::Running) {
             break;
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "allocation must reach Running within 60s"
-        );
+        assert!(tokio::time::Instant::now() < deadline, "allocation must reach Running within 60s");
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
@@ -997,10 +993,10 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
          {names:?}"
     );
 
-    let vmm_tid = names.iter().find(|(_, name)| name.as_str() == "vmm").map_or_else(
-        || panic!("no thread named 'vmm' among {names:?}"),
-        |(tid, _)| tid.clone(),
-    );
+    let vmm_tid = names
+        .iter()
+        .find(|(_, name)| name.as_str() == "vmm")
+        .map_or_else(|| panic!("no thread named 'vmm' among {names:?}"), |(tid, _)| tid.clone());
     let http_server_tid = names.iter().find(|(_, name)| name.contains("http")).map_or_else(
         || panic!("no thread with 'http' in its name among {names:?}"),
         |(tid, _)| tid.clone(),

@@ -215,11 +215,16 @@ fn stage_rootfs_with_extra_binary(
 /// Real serve, `[vm]` driver composed, non-mTLS (`SimDataplane`
 /// injected) — the cheapest boot for scenarios that do not need mTLS /
 /// SVID machinery.
-async fn spawn_vm_server(vm_artifacts: VmBootArtifacts, data_dir: &Path, config_dir: &Path) -> ServeHandle {
+async fn spawn_vm_server(
+    vm_artifacts: VmBootArtifacts,
+    data_dir: &Path,
+    config_dir: &Path,
+) -> ServeHandle {
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
     overdrive_cli::commands::serve::run_with_dataplane_and_vm_artifacts(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -241,7 +246,8 @@ async fn spawn_vm_server_mtls_composed(
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
     overdrive_cli::commands::serve::run_with_vm_artifacts(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
@@ -257,7 +263,8 @@ async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeH
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
     overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -304,7 +311,11 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-async fn poll_until_running(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+async fn poll_until_running(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let out =
@@ -322,7 +333,11 @@ async fn poll_until_running(cfg: &Path, workload_id: &str, max_wait: Duration) -
     }
 }
 
-async fn poll_until_terminal(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+async fn poll_until_terminal(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let out =
@@ -349,7 +364,11 @@ async fn poll_until_terminal(cfg: &Path, workload_id: &str, max_wait: Duration) 
 /// shape in `crash_observability_two_cycles.rs`), so `state == Running`
 /// alone cannot distinguish "still the original boot" from "recovered
 /// via a reclaim-then-restart cycle" -- the restart count is what pins it.
-async fn poll_until_restarted(cfg: &Path, workload_id: &str, max_wait: Duration) -> WorkloadDescribeOutput {
+async fn poll_until_restarted(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let out =
@@ -373,7 +392,8 @@ async fn poll_until_restarted(cfg: &Path, workload_id: &str, max_wait: Duration)
 }
 
 fn scope_path(alloc_id: &str) -> PathBuf {
-    PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice").join(format!("{alloc_id}.scope"))
+    PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice")
+        .join(format!("{alloc_id}.scope"))
 }
 
 fn run_dir_path(alloc_id: &str) -> PathBuf {
@@ -420,7 +440,8 @@ fn remove_cgroup_child_blocker(blocker: &Path) {
     // A child cgroup directory can only be rmdir'd once its own
     // `cgroup.procs` is empty -- true here since nothing was ever added
     // to it -- and once its own subtree_control has nothing enabled.
-    std::fs::remove_dir(blocker).expect("rmdir the child cgroup blocker (clearing the induced fault)");
+    std::fs::remove_dir(blocker)
+        .expect("rmdir the child cgroup blocker (clearing the induced fault)");
 }
 
 /// `VmDriver::stop`'s own teardown (`crates/overdrive-worker/src/vm_driver.rs:696-701`)
@@ -811,7 +832,11 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     let seeded_row: AllocStatusRowBody =
         out.snapshot.rows.first().expect("one row for the exited alloc").clone();
-    assert_eq!(seeded_row.state, AllocStateWire::Terminated, "a clean guest exit reaches Terminated");
+    assert_eq!(
+        seeded_row.state,
+        AllocStateWire::Terminated,
+        "a clean guest exit reaches Terminated"
+    );
     handle.shutdown().await.expect("shutdown boot #1 (no further action against this row)");
     wait_for_data_dir_release().await;
 
@@ -827,10 +852,7 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 
     assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed at boot");
     assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
-    assert!(
-        !clone_path(&staging_dir, &alloc_id).exists(),
-        "the clone must be reclaimed at boot"
-    );
+    assert!(!clone_path(&staging_dir, &alloc_id).exists(), "the clone must be reclaimed at boot");
 
     let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg })
         .await
@@ -995,14 +1017,14 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// as a synchronous checkpoint would have been -- ADR-0078's crash-facts
 /// snapshot preserves the terminal disposition the row passed through,
 /// observed without racing the restart. `Action::RestartAllocation`
-/// reuses the SAME `alloc_id`, so there is no "old alloc_id" distinct
+/// reuses the SAME `alloc_id`, so there is no "old `alloc_id`" distinct
 /// from the current one whose artifacts this test could check post-
 /// restart either. This is what keeps S-VM-81 a genuine end-to-end
 /// witness that a reclaimed **SVID-holder** specifically is handled
 /// correctly through a real restart -- distinct from S-VM-28, which
 /// drives the SAME boot-epoch-reclaim-then-restart cycle without the
-/// SVID precondition, asserting the identical restart_count /
-/// last_terminated pair.
+/// SVID precondition, asserting the identical `restart_count` /
+/// `last_terminated` pair.
 ///
 /// **Residual gap, surfaced rather than papered over.** Observing that
 /// the `svid_lifecycle` evaluation is subsequently DEQUEUED by a live
@@ -1149,9 +1171,9 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     // VM merely because this test process exits (same leak class
     // `vm_walking_skeleton.rs`'s long-lived-spin scenarios guard
     // against; mirrors S-VM-28's own closing sequence).
-    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop the restarted spin workload before shutdown to avoid leaking the VMM process");
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() }).await.expect(
+        "stop the restarted spin workload before shutdown to avoid leaking the VMM process",
+    );
     poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");
@@ -1236,9 +1258,10 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
     )
     .await;
 
-    let reclaimed = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("describe after the boot-epoch reclaim");
+    let reclaimed =
+        describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("describe after the boot-epoch reclaim");
     let reclaimed_row = reclaimed.snapshot.rows.first().expect("one row survives reclamation");
     assert_eq!(
         reclaimed_row.state,
@@ -1288,9 +1311,9 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
     // VM merely because this test process exits (same leak class
     // `vm_walking_skeleton.rs`'s long-lived-spin scenarios guard
     // against).
-    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
-        .await
-        .expect("stop the restarted spin workload before shutdown to avoid leaking the VMM process");
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() }).await.expect(
+        "stop the restarted spin workload before shutdown to avoid leaking the VMM process",
+    );
     poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");

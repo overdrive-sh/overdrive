@@ -152,13 +152,19 @@ fn from_str_rejects_ready_with_wrong_field_count() {
 #[test]
 fn from_str_rejects_ready_with_missing_key_prefix() {
     let err = "READY 1 port=2".parse::<BeaconMessage>().unwrap_err();
-    assert!(matches!(err, BeaconParseError::MissingKey { kind: "READY", field: "pid", .. }), "{err:?}");
+    assert!(
+        matches!(err, BeaconParseError::MissingKey { kind: "READY", field: "pid", .. }),
+        "{err:?}"
+    );
 }
 
 #[test]
 fn from_str_rejects_ready_with_non_integer_pid() {
     let err = "READY pid=abc port=2".parse::<BeaconMessage>().unwrap_err();
-    assert!(matches!(err, BeaconParseError::InvalidInt { kind: "READY", field: "pid", .. }), "{err:?}");
+    assert!(
+        matches!(err, BeaconParseError::InvalidInt { kind: "READY", field: "pid", .. }),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -173,14 +179,20 @@ fn from_str_rejects_exit_with_wrong_field_count() {
 #[test]
 fn from_str_rejects_exit_with_non_integer_status() {
     let err = "EXIT not-a-number".parse::<BeaconMessage>().unwrap_err();
-    assert!(matches!(err, BeaconParseError::InvalidInt { kind: "EXIT", field: "status", .. }), "{err:?}");
+    assert!(
+        matches!(err, BeaconParseError::InvalidInt { kind: "EXIT", field: "status", .. }),
+        "{err:?}"
+    );
 }
 
 #[test]
 fn from_str_rejects_shutdown_with_a_payload() {
     let err = "SHUTDOWN now".parse::<BeaconMessage>().unwrap_err();
     assert!(
-        matches!(err, BeaconParseError::FieldCount { kind: "SHUTDOWN", expected: 0, actual: 1, .. }),
+        matches!(
+            err,
+            BeaconParseError::FieldCount { kind: "SHUTDOWN", expected: 0, actual: 1, .. }
+        ),
         "{err:?}"
     );
 }
