@@ -1360,7 +1360,24 @@ async fn dispatch_single(
                     None => Err(DriverError::StartRejected {
                         failure: DriverStartFailure {
                             class: DriverStartClass::Unclassified { driver: driver_kind },
-                            detail: format!("no {driver_kind} driver composed on this node"),
+                            // ADR-0083 §D3d / DWD-25: name the absent
+                            // capability and point at the executed boot
+                            // reason, rather than reading as an internal
+                            // defect. Driver-kind-generic (the same shape
+                            // serves a future `wasm` miss), so no per-driver
+                            // branch or parser is introduced; free-form
+                            // verbatim `detail` per DWD-24, never a
+                            // classification input, so no contract or
+                            // conversion moves. The `driver.{kind}.not_composed`
+                            // pointer names the startup-log event the driver's
+                            // own composition emits (§D3c) where the specific
+                            // probe reason was recorded.
+                            detail: format!(
+                                "no {driver_kind} driver composed on this node: the node's \
+                                 {driver_kind} capability probe did not pass; see the startup \
+                                 log's `driver.{driver_kind}.not_composed` reason for the \
+                                 specific cause"
+                            ),
                         },
                     }),
                 };
@@ -1616,7 +1633,24 @@ async fn dispatch_single(
                     None => Err(DriverError::StartRejected {
                         failure: DriverStartFailure {
                             class: DriverStartClass::Unclassified { driver: driver_kind },
-                            detail: format!("no {driver_kind} driver composed on this node"),
+                            // ADR-0083 §D3d / DWD-25: name the absent
+                            // capability and point at the executed boot
+                            // reason, rather than reading as an internal
+                            // defect. Driver-kind-generic (the same shape
+                            // serves a future `wasm` miss), so no per-driver
+                            // branch or parser is introduced; free-form
+                            // verbatim `detail` per DWD-24, never a
+                            // classification input, so no contract or
+                            // conversion moves. The `driver.{kind}.not_composed`
+                            // pointer names the startup-log event the driver's
+                            // own composition emits (§D3c) where the specific
+                            // probe reason was recorded.
+                            detail: format!(
+                                "no {driver_kind} driver composed on this node: the node's \
+                                 {driver_kind} capability probe did not pass; see the startup \
+                                 log's `driver.{driver_kind}.not_composed` reason for the \
+                                 specific cause"
+                            ),
                         },
                     }),
                 };

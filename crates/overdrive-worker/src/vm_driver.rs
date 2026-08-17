@@ -101,8 +101,10 @@ fn start_rejected_unclassified(detail: impl Into<String>) -> DriverError {
 /// The STRUCTURAL `VmmError -> DriverStartClass` join (ADR-0082 §D1.1).
 /// Selection is by VARIANT only — no `VmmError::Display` string selects a
 /// class, so changing an adapter's prose cannot change the operator's
-/// diagnosis. `@mandatory:mutation_target`.
-fn classify_vmm_error(err: &VmmError) -> DriverError {
+/// diagnosis. `rootfs` is consumed ONLY to enrich the unclassified `Io`
+/// arm's free-form detail with the operator's rootfs directory (ADR-0083
+/// §D3b); it never participates in class selection. `@mandatory:mutation_target`.
+fn classify_vmm_error(err: &VmmError, rootfs: &RootfsPlan) -> DriverError {
     match err {
         // The detail is the WHOLE `VmmError`, not its inner `source`: the
         // adapter's own `Display` is the low-level diagnostic that names
@@ -122,11 +124,29 @@ fn classify_vmm_error(err: &VmmError) -> DriverError {
             VmStartFailure::ConfinementUnavailable { control: *control, detail: detail.clone() },
             detail.clone(),
         ),
-        // A staging/spawn failure the adapter does not further distinguish,
-        // and a bare I/O failure, both reach the explicit unknown fallback
-        // rather than being guessed into an absence class.
+        // A staging/spawn failure the adapter does not further distinguish
+        // reaches the explicit unknown fallback rather than being guessed
+        // into an absence class.
         VmmError::Create { detail } => start_rejected_unclassified(detail.clone()),
-        VmmError::Io { .. } => start_rejected_unclassified(err.to_string()),
+        // `create`'s ONLY `Io` source is `ficlone_rootfs` — the per-launch
+        // rootfs clone (host adapter: "Every other staging failure stays
+        // Io / Create", whose sole `Io` producer there is the clone). After
+        // ADR-0083 §D3a the clone targets the operator's OWN rootfs directory
+        // (the parent of `[vm] rootfs`), which `Vmm::probe`'s boot-time
+        // reflink self-test no longer speaks for (§D3b: `FICLONE` is
+        // intra-filesystem). Name that directory and the filesystem capability
+        // the clone requires, rather than leaving the operator a bare
+        // internal-shaped I/O error. Class selection stays by variant
+        // (`Io` -> unclassified) — `rootfs` enriches only the detail — and no
+        // `VmStartFailure` variant is minted here: S-VM-94 owns that typing.
+        VmmError::Io { .. } => {
+            let clone_dir = rootfs.master().parent().unwrap_or_else(|| std::path::Path::new(""));
+            start_rejected_unclassified(format!(
+                "per-launch rootfs clone into {} failed: {err}; this directory's filesystem \
+                 must support reflink (FICLONE) and be writable",
+                clone_dir.display(),
+            ))
+        }
     }
 }
 
@@ -585,7 +605,7 @@ impl VmDriver {
                 // process is left running and no clone is left on disk
                 // — nothing extra to remove here.
                 self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
-                return Err(classify_vmm_error(&err));
+                return Err(classify_vmm_error(&err, &rootfs));
             }
         };
 

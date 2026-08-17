@@ -2036,15 +2036,152 @@ fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
 /// test-integrity guard — that the phrases being searched for are not
 /// substrings of the label itself, or the containment checks would pass for
 /// free and prove nothing.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_error() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-82 / step 03-08 -- a [job] + [vm] deploy to a \
-         node whose VM capability probe did not pass must reach Failed with a cause naming the \
-         absent VM capability AND where the specific probe reason was recorded, read off the \
-         rendered workload describe output, never a bare internal platform error)"
+/// Every directory in `PATH` EXCEPT the one containing `cloud-hypervisor`
+/// — a file-local copy of `vm_walking_skeleton.rs`'s helper of the same
+/// name (sibling test modules cannot see each other's private items, the
+/// same reason [`spawn_vm_server`], [`build_spin_binary`] and
+/// [`build_empty_rootfs`] are already file-local copies). Hiding the
+/// binary is a REAL `exec`-resolution fact — `cloud-hypervisor` genuinely
+/// cannot be run by this process for the duration — so discovery finds no
+/// hypervisor, `compose_vm_driver` takes the `VmComposeError::NotAvailable`
+/// soft-skip arm, and the node boots with no `Vm` registry entry (S-VM-82's
+/// premise).
+fn path_without_cloud_hypervisor() -> String {
+    let ch_dir = Command::new("which")
+        .arg("cloud-hypervisor")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .and_then(|resolved| Path::new(&resolved).parent().map(Path::to_path_buf))
+        .expect(
+            "cloud-hypervisor must be resolvable via `which` on this host before we can hide it",
+        );
+
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|dir| Path::new(dir) != ch_dir.as_path())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// The absent-capability half of S-VM-82's rendered cause: the phrase that
+/// names WHAT is missing, and the phrase that points at WHERE the specific
+/// probe reason was recorded (the `driver.vm.not_composed` startup-log
+/// event `compose_vm_driver` emits, ADR-0083 §D3c). Named so the
+/// test-integrity guard below can state — once — that neither is already a
+/// substring of [`UNCLASSIFIED_LABEL`], which is what stops the rendered
+/// containment checks from passing for free against the label
+/// `assert_named_cause_is_rendered` independently requires.
+const ABSENT_CAPABILITY_PHRASE: &str = "vm capability probe did not pass";
+const RECORDED_REASON_POINTER: &str = "driver.vm.not_composed";
+
+/// S-VM-82 — activated. Message-actionability only: a `[job]` + `[vm]`
+/// deploy to a booted node whose VM capability probe did not pass reaches
+/// `Failed` with a cause that NAMES the absent VM capability and WHERE the
+/// specific probe reason was recorded, instead of a bare internal-shaped
+/// error. The class stays `DriverInternalError` (no variant minted); only
+/// the registry-miss `detail` text gains the capability naming and the
+/// boot-log pointer (ADR-0083 §D3d, DWD-25).
+#[tokio::test]
+#[serial(cgroup, env)]
+async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_error() {
+    // Test integrity, asserted before anything else runs (S-VM-37-shaped):
+    // if either phrase were already a substring of the unclassified LABEL,
+    // the two rendered-containment checks below would pass for free against
+    // the label `assert_named_cause_is_rendered` requires, proving nothing.
+    assert!(
+        !UNCLASSIFIED_LABEL.contains(ABSENT_CAPABILITY_PHRASE),
+        "test integrity: {ABSENT_CAPABILITY_PHRASE:?} must not be a substring of \
+         {UNCLASSIFIED_LABEL:?}",
     );
+    assert!(
+        !UNCLASSIFIED_LABEL.contains(RECORDED_REASON_POINTER),
+        "test integrity: {RECORDED_REASON_POINTER:?} must not be a substring of \
+         {UNCLASSIFIED_LABEL:?}",
+    );
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+
+    // Produce a booted node with NO `Vm` entry by hiding `cloud-hypervisor`
+    // from `PATH` across the composition root's synchronous discover/probe.
+    let original_path = std::env::var_os("PATH");
+    let broken_path = path_without_cloud_hypervisor();
+    // SAFETY: `#[serial(env)]` guarantees exclusive access to `PATH` for the
+    // duration of this test.
+    unsafe {
+        std::env::set_var("PATH", &broken_path);
+    }
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+
+    // SAFETY: restoring the pre-test PATH; still inside the `#[serial(env)]`
+    // window. Safe NOW — the composition root's discover/probe already ran
+    // SYNCHRONOUSLY inside the `spawn_vm_server(...).await` above, and the
+    // `deploy()` below never reads `PATH`.
+    unsafe {
+        match &original_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    let cfg = config_path(server_tmp.path());
+    // The fixture's real kernel and rootfs paths are provably inert here: with
+    // no `Vm` entry the action shim's `drivers.get(..) -> None` arm fires at
+    // dispatch, before any driver runs, so neither artifact is ever opened. An
+    // artifact-shaped cause appearing here would mean the registry miss did not
+    // fire.
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-no-capability.toml",
+        &vm_job_toml("vm-no-capability", &fixture.kernel_path, &fixture.rootfs_path),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy of a [vm] spec must be ACCEPTED even when no Vm driver is composed");
+    let out = poll_until_failed(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+
+    let row = out.snapshot.rows.first().expect("one failed allocation row for the deployed VM job");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
+    let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    let detail = row.error.clone().expect("the registry-miss detail must be preserved");
+
+    // No variant is minted: the registry miss stays the EXISTING unclassified
+    // cause carrying its enriched detail (DWD-25, ADR-0083 §D3d).
+    assert_eq!(
+        reason,
+        TransitionReason::DriverInternalError { detail: detail.clone() },
+        "S-VM-82: a registry miss must reach the operator as the EXISTING unclassified cause, \
+         no TransitionReason variant minted",
+    );
+
+    // All three operator-facing claims are asserted on the rendered output,
+    // per this scenario's own crafter note.
+    let rendered = overdrive_cli::render::workload_describe(&out);
+    assert!(
+        rendered.contains(ABSENT_CAPABILITY_PHRASE),
+        "S-VM-82: the rendered cause must NAME the absent VM capability, not read as an internal \
+         platform error:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(RECORDED_REASON_POINTER),
+        "S-VM-82: the rendered cause must point at WHERE the specific probe reason was recorded \
+         ({RECORDED_REASON_POINTER:?}):\n{rendered}",
+    );
+    // ...and the whole `driver internal error: {detail}` label reaches the
+    // operator, so they provably read that this is UNCLASSIFIED and not an
+    // unexplained string.
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
+
+    // A dispatch-time registry miss runs no driver, so it leaks nothing — and
+    // this forecloses the reading that "Failed" here meant a start was
+    // attempted and aborted.
+    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
+
+    handle.shutdown().await.expect("clean shutdown");
 }
 
 /// S-VM-83 / `@contract-shape:bounded-change` `@error_path` `@ac-21` `@tier3`
@@ -2181,14 +2318,136 @@ fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_error() {
 /// the requirement are both named. Pair it with the S-VM-37-shaped integrity
 /// guard that the phrases being searched for are not already substrings of the
 /// cause's own label, or the containment checks pass for free.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn unservable_rootfs_directory_names_the_directory_and_the_clone_requirement() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-83 / step 03-08 -- a [job] + [vm] deploy whose \
-         spec names a rootfs directory on a filesystem that cannot serve the per-launch clone \
-         must reach Failed with a cause naming THAT directory and the filesystem requirement, \
-         read off the rendered workload describe output, never an internal-shaped error and \
-         never the absent-VM-capability cause)"
+/// The filesystem-capability half of S-VM-83's rendered cause: the phrase
+/// naming what the per-launch clone requires of the operator's rootfs
+/// directory's filesystem. Named so the test-integrity guard can state it
+/// is not already a substring of [`UNCLASSIFIED_LABEL`].
+const CLONE_REQUIREMENT_PHRASE: &str = "reflink (FICLONE)";
+
+/// S-VM-83 — activated. A per-launch clone the operator's own rootfs
+/// directory cannot serve (its filesystem cannot reflink) reaches the
+/// operator as a cause naming THAT directory and the filesystem capability
+/// the clone requires — never an internal-shaped error, and never the
+/// absent-VM-capability cause. Message-actionability only: it mints no
+/// `VmStartFailure` variant (S-VM-94 owns the adapter-layer typing); the
+/// clone failure stays the EXISTING unclassified `DriverInternalError`
+/// whose `detail` now names the directory and the requirement (ADR-0083
+/// §D3b, Consequences).
+#[tokio::test]
+#[serial(cgroup)]
+async fn unservable_rootfs_directory_names_the_directory_and_the_clone_requirement() {
+    // Test integrity (S-VM-37-shaped): the requirement phrase must not be a
+    // substring of the unclassified LABEL, or the rendered-containment check
+    // below passes for free against the label `assert_named_cause_is_rendered`
+    // requires.
+    assert!(
+        !UNCLASSIFIED_LABEL.contains(CLONE_REQUIREMENT_PHRASE),
+        "test integrity: {CLONE_REQUIREMENT_PHRASE:?} must not be a substring of \
+         {UNCLASSIFIED_LABEL:?}",
     );
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+
+    // Stage the rootfs MASTER on tmpfs (`/dev/shm`) — a REAL non-reflink
+    // filesystem. This is legitimate HERE and NOWHERE ELSE in this file:
+    // every other Tier-3 VM scenario stages on the XFS-backed reflink-capable
+    // root because cloud-hypervisor disk I/O needs `O_DIRECT`, which tmpfs
+    // cannot serve. That constraint never binds here — the per-launch clone
+    // fails BEFORE any hypervisor opens the image. Do NOT "fix" this fixture
+    // back onto XFS: pointing it at a reflink-capable directory makes the
+    // deploy simply succeed and the scenario vacuous.
+    let shm_dir = tempfile::Builder::new()
+        .prefix("vm-reflink-")
+        .tempdir_in("/dev/shm")
+        .expect("tmpfs tempdir under /dev/shm (guaranteed non-reflink on Linux)");
+    let rootfs_master = shm_dir.path().join("rootfs.img");
+    std::fs::copy(&fixture.rootfs_path, &rootfs_master).expect(
+        "copy the shared fixture rootfs onto tmpfs so the master EXISTS but its directory \
+         cannot serve the per-launch clone",
+    );
+
+    // Real `serve` with the production `CloudHypervisorVmm` composed (no
+    // `vmm_override`). On this KVM-capable host `Vmm::probe` reads `/dev/kvm`
+    // and self-tests reflink against the node's own `image_dir` (`/srv/vm`,
+    // reflink-capable) — so the probe PASSES and a `Vm` entry exists. The gap
+    // this scenario proves is exactly that a passing boot probe no longer
+    // speaks for the operator-named rootfs directory (§D3b): `FICLONE` is
+    // intra-filesystem.
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-unservable-rootfs.toml",
+        &vm_job_toml("vm-unservable-rootfs", &fixture.kernel_path, &rootfs_master),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload whose per-launch clone the tmpfs rootfs dir cannot serve");
+    let out = poll_until_failed(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+
+    // Anti-vacuity guard (b): the master EXISTS and is readable, so the outcome
+    // is a clone failure, NOT `VmRootfsNotFound` — "present but unservable"
+    // proven rather than assumed.
+    assert!(
+        rootfs_master.exists(),
+        "S-VM-83 precondition: the rootfs master must be present at assertion time; only its \
+         DIRECTORY may be unable to serve the clone",
+    );
+
+    let row = out.snapshot.rows.first().expect("one failed allocation row for the deployed VM job");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
+    let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    let detail = row.error.clone().expect("the clone-failure detail must be preserved");
+
+    // No variant is minted here (S-VM-94 owns the typed variant): the clone
+    // failure stays the EXISTING unclassified cause carrying the enriched
+    // detail (ADR-0083 §D3b).
+    assert_eq!(
+        reason,
+        TransitionReason::DriverInternalError { detail: detail.clone() },
+        "S-VM-83: an unservable-clone failure must stay the EXISTING unclassified cause, no \
+         VmStartFailure variant minted here",
+    );
+
+    let rendered = overdrive_cli::render::workload_describe(&out);
+    let dir = shm_dir.path().display().to_string();
+    // The reported cause names the rootfs DIRECTORY — a property of the
+    // filesystem that directory sits on, not merely the master image FILE. A
+    // message naming only the image sends the operator to fix the wrong thing.
+    assert!(
+        !UNCLASSIFIED_LABEL.contains(dir.as_str()),
+        "test integrity: the staged directory {dir:?} must not be a substring of \
+         {UNCLASSIFIED_LABEL:?}",
+    );
+    assert!(
+        rendered.contains(dir.as_str()),
+        "S-VM-83: the rendered cause must NAME the rootfs directory {dir}, not merely the master \
+         image file:\n{rendered}",
+    );
+    assert!(
+        rendered.contains(CLONE_REQUIREMENT_PHRASE),
+        "S-VM-83: the rendered cause must name the filesystem capability the per-launch clone \
+         requires ({CLONE_REQUIREMENT_PHRASE:?}):\n{rendered}",
+    );
+
+    // Anti-vacuity guard (a): the cause is NOT the absent-VM-capability one. On
+    // a host where the probe did NOT pass, the deploy would take S-VM-82's
+    // registry-miss path and never reach the clone — the test would go green
+    // having proven nothing.
+    assert!(
+        !rendered.contains(ABSENT_CAPABILITY_PHRASE),
+        "S-VM-83: the node HAS a VM driver, so this must be a per-launch clone failure, not the \
+         registry-miss cause S-VM-82 owns:\n{rendered}",
+    );
+
+    // The whole `driver internal error: {detail}` label reaches the operator.
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
+
+    // The clone fails before the hypervisor is spawned, so all four residue
+    // facts must hold — which also distinguishes "the clone was refused" from
+    // "a hypervisor started and then died".
+    assert_no_allocation_scoped_vm_residue(&alloc, &rootfs_master);
+
+    handle.shutdown().await.expect("clean shutdown");
 }

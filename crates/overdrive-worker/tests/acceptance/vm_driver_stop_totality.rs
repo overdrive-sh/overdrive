@@ -64,11 +64,6 @@ async fn yield_for_task_poll() {
     }
 }
 
-/// Build a per-test [`VmHostLayout`] rooted at `tmp`: a real (tiny)
-/// master rootfs file `SimVmm::create` FICLONE-copies, a
-/// pre-validated synthetic-ELF [`KernelImage`], and a dedicated
-/// `run`/`cgroup` subtree so parallel tests never collide.
-
 /// The kernel image this fixture stages, and the path the `[vm]` spec
 /// built by [`build_spec`] names. ADR-0083 §D3a: artifacts are
 /// per-allocation, so the driver reads THIS path out of the spec's own
@@ -97,6 +92,10 @@ fn stage_fixture_artifacts(tmp: &TempDir) {
     std::fs::write(fixture_kernel_path(tmp), &header).expect("stage the synthetic kernel image");
 }
 
+/// Build a per-test [`VmHostLayout`] rooted at `tmp`: a real (tiny)
+/// master rootfs file `SimVmm::create` FICLONE-copies, a
+/// pre-validated synthetic-ELF [`KernelImage`], and a dedicated
+/// `run`/`cgroup` subtree so parallel tests never collide.
 fn build_layout(tmp: &TempDir) -> VmHostLayout {
     stage_fixture_artifacts(tmp);
     VmHostLayout {

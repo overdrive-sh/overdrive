@@ -395,7 +395,7 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     // Delete the configured rootfs so BOTH attempts fail identically.
-    std::fs::remove_file(&fixture_rootfs_path(&tmp)).expect("remove the configured rootfs master");
+    std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove the configured rootfs master");
     let configured = fixture_rootfs_path(&tmp).display().to_string();
     let (driver, _clock, _fs) = build_driver(Arc::new(SimVmm::new()), layout);
     let alloc = AllocationId::new("alloc-restart-parity").expect("valid alloc id");
@@ -428,7 +428,7 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         let sim = SimVmm::new();
         let vmm: Arc<dyn Vmm> = match arm {
             "preflight" => {
-                std::fs::remove_file(&fixture_rootfs_path(&tmp)).expect("remove configured rootfs");
+                std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove configured rootfs");
                 Arc::new(sim.clone())
             }
             "create" => {
