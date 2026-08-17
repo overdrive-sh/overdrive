@@ -146,4 +146,16 @@ mod integration {
     // See the file's own module doc for the scenario map and the
     // cgroup-child-blocker fixture-construction rationale.
     mod vm_reclamation_tier3;
+
+    // microvm-driver-cloud-hypervisor step 04-01 (AC-11, brief.md §105 /
+    // feature-delta [D3], GH #42) — the operator-facing Tier-3 proof that
+    // VM exit classification is guest-authoritative, never derived from the
+    // hypervisor's own exit status: S-VM-42 (un-reported VMM death is a
+    // crash, @mandatory:mutation_target / K1), S-VM-43 (host-killed
+    // hypervisor restarts like a crash / K5), S-VM-44 (agent EXIT 0 is the
+    // completed terminal), S-VM-45 (operator stop consumes no restart
+    // budget). The classification chain (classify_vm_exit /
+    // exit_observer::classify / WorkloadLifecycle restart-backoff) is REUSED
+    // UNCHANGED; this file drives it end-to-end.
+    mod vm_stop_restart_and_vmm_death;
 }

@@ -502,6 +502,22 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_boot_failure_vocabulary)'
 test-group = 'host-kernel-shared'
 
+# microvm-driver-cloud-hypervisor step 04-01 (AC-11 / [D3], GH #42) —
+# `overdrive-cli`'s vm_stop_restart_and_vmm_death.rs → `host-kernel-shared`,
+# by MODULE. Same shared-real-host-cgroupfs + sibling-serve-reclamation
+# reasons as the three vm_* modules above — and this file is doubly
+# sensitive to the reap race the block above measured: its S-VM-42 asserts
+# `VmGuestExitUnreported { vmm_signal: None }` from a CLEAN guest power-off
+# (VMM exits 0), which a concurrent sibling serve's reclamation SIGKILL
+# would corrupt into `vmm_signal: Some(9)` (the exact 0.82s artefact the
+# vm_boot_failure_vocabulary note above records), and its S-VM-43 SIGKILLs
+# its OWN allocation's hypervisor and scans `/proc` for it — a scan a
+# concurrent sibling's live `cloud-hypervisor` would contaminate. Matched
+# BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_stop_restart_and_vmm_death)'
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,
