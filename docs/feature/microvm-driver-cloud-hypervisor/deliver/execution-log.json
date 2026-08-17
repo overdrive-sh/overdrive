@@ -953,6 +953,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-17T09:06:59Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T09:36:59Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: S-VM-39 is GREEN and fully gated (real guest boot to Running on metal; litmus-proven by widening the 03-03 rejection to the job family and observing RED; no production change needed; fmt+clippy clean; 9/9 in-file and 31/31 across all Tier-3 VM modules). S-VM-40 cannot reach Running: no production Schedule execution path exists. commands::deploy::deploy has no Schedule arm (falls through to the flat JobSpecInput parser); deploy_streaming rejects WorkloadSpecInput::Schedule with 'schedule submission is not yet implemented (ADR-0051 OQ-5)'; control-plane handlers.rs rejects SubmitSpecInput::Schedule identically; ScheduleV2::from_submit and ScheduleV2::to_describe are both todo!() RED scaffolds; and nothing evaluates a CronExpr at runtime (no schedule reconciler, no per-firing allocation action). Satisfying it requires the whole Schedule execution subsystem deferred by ADR-0051 OQ-5 / ADR-0064 OQ-5 (GH #166), whose primitives the approved design does not name - CLAUDE.md 'Implement to the design' requires a blocker, not invented API. Needs a scope ruling: descope S-VM-40 to a follow-up step, or expand scope with a design that names the primitives.",
+      "t": "2026-08-17T09:37:16Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: Checkpoint commit 4243e849 landed the verified S-VM-39 half (1 file, Step-Id + Task-Id trailers, clean tree, fmt+clippy clean, 9/9 in-file and 31/31 across all Tier-3 VM modules on metal, no orphaned hypervisor processes). The step's COMMIT gate is NOT met and this is deliberately not logged PASS: one '#[should_panic(expected = \"RED scaffold\")]' remains (S-VM-40), so 'zero RED scaffold markers' and 'both scenarios reach Running' are unsatisfied. Blocker is the same as GREEN's - S-VM-40 needs the Schedule execution subsystem deferred by ADR-0051 OQ-5 / ADR-0064 OQ-5 (GH #166). Awaiting a scope ruling; no GitHub issue created (CLAUDE.md forbids unilateral issue creation). Re-dispatch cleanly once scope is ruled.",
+      "t": "2026-08-17T09:37:58Z"
     }
   ]
 }
