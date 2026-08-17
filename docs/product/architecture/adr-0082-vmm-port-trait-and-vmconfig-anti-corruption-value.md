@@ -8,6 +8,138 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-18 (fourth — the confined-artifact-access mechanism, resolving
+the DELIVER 04-04 security regression B1; SUPERSEDES § (c) consequence 2's
+run-dir-only sketch, and sharpens § (e) M2 + § (d) M1. See DELIVER step 04-04.)**
+04-04 built the confinement wrapper but filled the un-pinned "how does the
+uid-dropped hypervisor reach its artifacts" gap by **mutating operator-owned
+file permissions**: `prepare_confined_paths` (`overdrive-host/src/vmm.rs`) added
+`o+r` to the operator's kernel FILE, `o+x` to the operator's kernel and image
+DIRECTORIES, and never reverted any of it. That is a real DAC regression — a
+world-readable operator kernel; world-traversable operator dirs that reach
+adjacent rootfs masters and secrets by name; the widening leaks across
+allocations and survives teardown; and Landlock confines only the VM, never the
+other host processes the bits now expose. This amendment pins the correct
+mechanism. It reverses no § D2 substrate-lie decision and mints no confinement
+field beyond one platform-owned staging root.
+
+**Governing invariant (the rule the mechanism enforces): the confined identity's
+DAC access path to each artifact contains ONLY platform-owned or
+OS-default-traversable directories — never an operator-owned path. No operator
+artifact's mode or bytes is ever changed, so there is nothing to revert and
+nothing to leak.** The two artifacts carry different constraints and therefore
+get different placements.
+
+**(c-fix.1) Kernel — COPY into the per-alloc run dir; never touch the operator's
+kernel.** The kernel is small (~MB) with no filesystem-locality constraint.
+Before spawn — as root, pre-uid-drop — the platform copies the operator's kernel
+master byte-for-byte into the per-allocation run dir at `VmRunDir::kernel_copy()`
+(a new accessor, `<dir>/kernel`, sibling of `console_log()`/`vsock_socket()`
+per § D2.2's "`VmRunDir` owns every path inside it") and `chown`s the COPY to the
+confined `uid:gid`. `create` renders `--kernel` against `run_dir.kernel_copy()`,
+not `config.kernel.path()`; Cloud Hypervisor loads the copy and auto-derives its
+(read-only) `--kernel` Landlock grant against it. The operator's kernel master is
+only ever OPENED READ-ONLY by root to source the copy — its mode and bytes are
+untouched. § D2.4's pure validator still runs in `VmDriver::start` against the
+master; because the copy is a byte-identical duplicate taken immediately after,
+the loaded artifact carries the validated magic and the lie-3 / C-7 guarantee
+holds against the artifact CH actually loads. The run dir is tmpfs (SD-2) and is
+already chown'd to the confined identity per § (c) consequence 2; the copy is
+reclaimed with the run dir at teardown, and it is THIS allocation's own artifact
+inside its OWN Landlock boundary (SD-2's "holds nothing else" refines to
+"sockets, console log, and this allocation's own kernel copy" — nothing
+cross-allocation is exposed). The `add_other_mode_bits(kernel, 0o004)` and
+`add_other_mode_bits(kernel.parent(), 0o001)` calls in `prepare_confined_paths`
+are DELETED.
+
+**(c-fix.2) Rootfs clone — FICLONE into a PLATFORM-owned staging root on the
+master's filesystem; never traverse the operator's directory.** FICLONE is
+intra-filesystem (C-1 — no full-copy fallback), so the clone must share the
+master's filesystem; but it must NOT live in the operator's directory, because
+reaching a clone under `/home/ana/images/…` would require `o+x` traverse on that
+operator dir — the regression. The platform stages the clone in a **platform-owned
+VM clone-staging root**: a new `overdrive_core::vm::config::clone_staging_dir(data_dir)`
+(sibling of the existing `clone_index_dir(data_dir)`), threaded through
+`VmHostLayout` as a new field `clone_staging_dir: PathBuf`. `RootfsPlan::clone_dest`
+relocates its PARENT from `parent(master)` to this staging root while KEEPING its
+existing `.overdrive-vm-rootfs-<alloc>.img` filename (so ADR-0083 §§ D3f–D3h
+`index_link` reclamation and `RealVmHostState`'s alloc-from-filename attribution
+are unchanged — the index symlink still points at `clone_dest` wherever it lives).
+`RootfsPlan::for_alloc` gains the staging root:
+`for_alloc(master, master_bytes, alloc, staging_dir, index_dir)`. The platform
+`chown`s the CLONE (which it created) to the confined identity; the staging root
+and its ancestors are platform-owned and are granted confined-identity traverse
+(not read, not world) ONCE at node setup — e.g. `0710 root:<confined-gid>`, a
+set-once posture on the platform's OWN directories, never per-alloc, never
+reverted. CH auto-derives the `--disk` Landlock grant against the clone path, and
+**Landlock — not DAC — isolates one VM's disk from a sibling's** (P5: a sibling
+disk is `DENIED errno=13`), exactly as § (e) already establishes for the shared
+uid; so a flat staging root holding alloc-named clone files is sufficient (the
+`0710` traverse-not-read posture additionally prevents the confined identity from
+LISTING the staging root to discover other allocs' clone names). The
+`chown(clone_dest, …)` on the platform-created clone is RETAINED; the
+`add_other_mode_bits(clone_dest.parent(), 0o001)` on the operator's image dir is
+DELETED.
+
+**Operator-facing consequence (named in brief.md SD-2): the VM ROOTFS master must
+reside on the platform VM data filesystem** — the same filesystem as
+`clone_staging_dir(data_dir)`. On the appliance this is the one durable data
+partition where BYO artifacts land, so it holds by construction; the constraint
+only excludes a master an operator placed on a separate mount. A rootfs master on
+a different filesystem cannot be FICLONE'd into the platform staging root:
+`Vmm::create` observes this as the FICLONE `EXDEV` (cross-device) result and FAILS
+CLOSED with `VmmError::ConfinementUnavailable { control: UidDrop, detail }` — never
+a silent operator-dir widening, never a C-1-defeating full-copy fallback. The
+KERNEL master carries NO such constraint (it is copied, not cloned) and may live
+on any host path. ADR-0083 § D3's `VmPayload.rootfs` TYPE is unchanged — this is a
+create-time confinement precondition, not a type change — but its § D3a "clones
+land beside the operator's `[vm] rootfs`, anywhere" prose is now stale; the
+ADR-0083 owner should carry the "rootfs master on the data filesystem" wording
+into § D3a as a companion follow-up (**surfaced here for user ratification, not
+made in this amendment**).
+
+**(e-fix) M2 — the confined identity must be a DEDICATED reserved numeric pair;
+`nobody`/`nogroup` (65534) is REJECTED.** § (e) already required "a fixed,
+unprivileged, non-root NUMERIC pair the platform reserves." The 04-04 impl used
+65534 (`nobody`/`nogroup`), which does NOT satisfy that: 65534 is the kernel's
+overflow/anonymous id (`/proc/sys/kernel/overflowuid`; NFS id-squash; unmapped
+user-namespace principals) — a SHARED system identity the platform has NOT
+reserved. A hypervisor running as 65534 shares a uid with every overflow-mapped
+principal on the host and is therefore not ptrace/signal/`/proc`-isolated from
+them (DAC does not isolate same-uid processes). The confined identity MUST be a
+dedicated numeric uid AND a dedicated numeric primary gid — both unprivileged,
+non-root, and NOT 65534/`nobody`/`nogroup` nor any other shared system identity.
+This is resolvable WITHOUT an appliance-image change (**no blocker**), exactly as
+§ (e) states: `setpriv --reuid=<N> --regid=<N>` operates on raw numeric ids with
+no `/etc/passwd`/`/etc/group` entry. The crafter selects a value from a range the
+appliance leaves unassigned, verifies against the appliance's `/etc/passwd` +
+`/etc/group` that it is unassigned and that no base-OS daemon runs as it, and
+documents it as the named const at the compose site (`compose_vm_driver` →
+`VmHostLayout.confinement`) that § (e) already calls for. The `kvm`
+supplementary-group discovery in § (e) is unchanged. (Per-VM uid remains a #258 /
+future hardening — the shared-but-dedicated identity is US-VM-7's posture; the
+change here is dedicated-vs-overflow, not shared-vs-per-VM.)
+
+**(d-fix) M1 — a confinement-APPLICATION failure classifies as
+`VmConfinementUnavailable { control: UidDrop }`, NOT `Unclassified`.** CONFIRMED
+and TIGHTENED. § (d)'s table maps the confinement-TOOL failures
+(`setpriv`/`prlimit`/`--landlock`/`/dev/kvm`/`--seccomp`); it did NOT cover the
+artifact-PREPARATION failures. Add the row: **applying the confined identity to
+the per-alloc artifact paths fails — `chown`/copy of the rootfs clone or the
+kernel copy, `chown` of the run dir, the staging-root posture, or the
+same-filesystem precondition (`EXDEV`) — → `ConfinementControl::UidDrop`.** The
+04-04 impl routes `prepare_confined_paths` failure through `VmmError::create(...)`,
+which § D1.1 maps to `Unclassified { driver: Vm }` — an undiagnosable internal
+error for what is precisely a confinement-application failure. The crafter changes
+that mapping to `VmmError::ConfinementUnavailable { control: UidDrop, detail }`
+(→ `Vm(ConfinementUnavailable { control: UidDrop, .. })` →
+`TransitionReason::VmConfinementUnavailable { control: UidDrop }`), consistent with
+`.claude/rules/development.md` § "Distinct failure modes get distinct error
+variants" and § "Never flatten a typed error … to `Internal`". Turning any of
+these fail-closed arms into warn-and-continue remains a mutation target.
+
+Recorded in feature DWD (04-04 gap-5 B1 closure).
+
 **Amended 2026-08-17 (third — gap 5 CLOSED: US-VM-7 confinement is built and
 applied. `LandlockRule` gains a shape; uid-drop + `setrlimit` + Landlock get an
 application mechanism that keeps `overdrive-host` `#![forbid(unsafe_code)]`; and
@@ -860,9 +992,9 @@ impl RootfsPlan {
 }
 ```
 
-The exact clone **filename** format is the crafter's (it must sit in `master`'s
-own directory and contain `alloc`); the *shape* above is fixed. `master_bytes()`
-is what keeps `VmConfig::rlimit_fsize()` pure (see the method block below).
+The exact clone **filename** format is the crafter's (it must contain `alloc`);
+the *shape* above is fixed. `master_bytes()` is what keeps
+`VmConfig::rlimit_fsize()` pure (see the method block below).
 
 > **Extended by the 2026-08-17 (second) amendment in § Status** — the block
 > above is additive-extended, not replaced. `for_alloc` takes a fourth
@@ -870,6 +1002,18 @@ is what keeps `VmConfig::rlimit_fsize()` pure (see the method block below).
 > field, and `index_link()` joins the three accessors. `master`,
 > `master_bytes`, `clone_dest` and their accessors are unchanged, as is the
 > intra-filesystem derivation of `clone_dest` and its filename convention.
+
+> **Relocated by the 2026-08-18 (fourth) amendment in § Status (confinement
+> B1 fix)** — `clone_dest`'s PARENT moves from `parent(master)` to the
+> platform-owned `clone_staging_dir(data_dir)` so the confined identity reaches
+> the clone via platform-owned traverse, never an operator dir. `for_alloc`
+> takes `staging_dir: &Path` (→ `for_alloc(master, master_bytes, alloc,
+> staging_dir, index_dir)`); the `.overdrive-vm-rootfs-<alloc>.img` FILENAME is
+> unchanged (so `index_link` / `RealVmHostState` attribution is intact), and the
+> intra-filesystem FICLONE constraint is preserved as a create-time precondition
+> — a master not on the staging filesystem FAILS CLOSED with
+> `ConfinementUnavailable { control: UidDrop }` on the FICLONE `EXDEV`. The top
+> amendment governs.
 
 **`cmdline: KernelCmdline` — pinned shape (gap 4), in `crate::vm::config`.**
 
@@ -992,6 +1136,7 @@ impl VmRunDir {
     pub fn beacon_socket(&self, port: VsockPort) -> PathBuf; // <dir>/vsock_<port> — the DRIVER binds
     pub fn api_socket(&self) -> PathBuf;               // <dir>/api
     pub fn console_log(&self) -> PathBuf;              // <dir>/console.log
+    pub fn kernel_copy(&self) -> PathBuf;             // <dir>/kernel — 2026-08-18 (fourth) amendment (B1)
     // landlock_grant() -> LandlockRule — DEFERRED to Slice 03 (gap 5); see note
 }
 ```

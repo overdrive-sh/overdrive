@@ -411,8 +411,8 @@ example of exactly the hydration problem it exists to solve.
 
 | State | Location | Lifetime property |
 |---|---|---|
-| vsock UDS (CH-bound) · beacon UDS (driver-bound) · CH API socket | `/run/overdrive/vm/<alloc-id>/` — **tmpfs**, one directory per allocation, holding **nothing else** | Survives a `serve` restart; **self-clears on host reboot** |
-| Per-launch rootfs clone | **Same filesystem as the operator's rootfs master** | Survives both; **requires explicit GC** |
+| vsock UDS (CH-bound) · beacon UDS (driver-bound) · CH API socket · **this allocation's own kernel copy** (US-VM-7 / ADR-0082 fourth amendment) | `/run/overdrive/vm/<alloc-id>/` — **tmpfs**, one directory per allocation, holding **nothing else** (the kernel copy is this allocation's own artifact, inside its own Landlock boundary) | Survives a `serve` restart; **self-clears on host reboot** |
+| Per-launch rootfs clone | **Platform-owned clone-staging root on the VM data filesystem** (`clone_staging_dir(data_dir)`), which the operator's rootfs master must share (US-VM-7 / ADR-0082 fourth amendment) | Survives both; **requires explicit GC** |
 
 **Why the run directory must be tmpfs, and why that is not incidental.** Its
 survival semantics are exactly the discriminator the reap needs: a surviving
@@ -442,6 +442,24 @@ intra-filesystem. Spike P4 measured `--reflink` at **0.015 s / +0 MiB** versus
 and the increment-f run that staged images into `/run` failed
 `Invalid cross-device link`. Sockets and logs on tmpfs; **disk images on the
 master's filesystem.**
+
+**Confinement corollary (US-VM-7 / ADR-0082 fourth amendment): the confined
+hypervisor reaches its artifacts WITHOUT any operator-owned path being
+permission-mutated.** DAC (orthogonal to Landlock) requires the uid-dropped
+hypervisor to read the kernel and rootfs clone and to traverse every directory
+on the path to them. The design keeps that path entirely on platform-owned
+directories: the **kernel** is copied (root, read-only source) into the
+per-alloc run dir and the copy chown'd to the confined identity; the **rootfs
+clone** is FICLONE'd into the platform-owned `clone_staging_dir(data_dir)` and
+chown'd to the confined identity, with the staging root granted confined-identity
+traverse once at node setup. Consequently the **rootfs master must reside on the
+VM data filesystem** (so FICLONE, an intra-filesystem ioctl, can stage the clone
+there) — on the appliance's single durable data partition this holds by
+construction; a master on a foreign filesystem FAILS CLOSED
+(`ConfinementUnavailable`, from the FICLONE `EXDEV`), never a silent operator-dir
+widening and never a full copy. The **kernel** master carries no such filesystem
+constraint (it is copied, not cloned) and may live on any host path. No operator
+artifact's mode or bytes is ever changed.
 
 **Consequence, and it is assigned rather than merely noted.** Rootfs clones do
 *not* self-clear on host reboot. The leak is bounded by guest *writes*, not
