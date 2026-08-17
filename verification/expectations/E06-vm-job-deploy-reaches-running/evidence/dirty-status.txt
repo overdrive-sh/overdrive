@@ -1,1 +1,3 @@
-?? verification/expectations/E06-vm-job-deploy-reaches-running/
+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+ M docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt

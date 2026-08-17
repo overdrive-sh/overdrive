@@ -1,5 +1,7 @@
 # Allocation-scoped VM resources that appeared during this run.
-# Captured after the 90s ceiling elapsed without Running.
-new_hypervisors=0
-new_run_dirs=0
-new_scopes=0
+# Non-zero on all three is the black-box form of the in-tree
+# assertion that the production VmDriver path RAN (rather than the
+# parser merely accepting the spec).
+new_hypervisors=1
+new_run_dirs=1
+new_scopes=1

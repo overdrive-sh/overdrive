@@ -1,4 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
      Running `target/debug/xtask metal run -- bash -c 'set -uo pipefail
 EVID="verification/expectations/E06-vm-job-deploy-reaches-running/evidence"
 mkdir -p "$EVID"
@@ -427,8 +427,8 @@ xtask: running metal sync (bootstrap.sh --sync-only)
 
 ########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
 
-sent 118,988 bytes  received 6,232 bytes  50,088.00 bytes/sec
-total size is 53,540,578  speedup is 427.57
+sent 114,866 bytes  received 7,412 bytes  48,911.20 bytes/sec
+total size is 54,192,797  speedup is 443.19
 
 ########## [bootstrap] sync-only; skipping provisioning
 xtask: running ssh <metal> <cmd>
@@ -437,6 +437,6 @@ sudo: preserving the entire environment is not supported, '-E' is ignored
 # phase A: serve with no KEK delivered (expect a fail-closed refusal)
 # phase A: serve refused to start, as designed (see serve_no_kek.log)
 # phase B: starting ephemeral production serve: bind=127.0.0.1:7643
-# serve ready (pid 330293)
+# serve ready (pid 393995)
 # deploy exit: 0
-INNER_DONE serve_status=ready deploy_rc=0 final_state=never-Running(last=Failed)
+INNER_DONE serve_status=ready deploy_rc=0 final_state=Running

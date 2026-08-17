@@ -2,27 +2,52 @@
 
 **Surface:** E (end-to-end) · **KPI:** K4 · **Status:** `pending`
 
-<!-- Status rationale (2026-08-17, SHA 655ac964, SEED=1, executed on the
-bare-metal KVM box — NOT Lima — runner_exit_code: 1).
+<!-- Status rationale — CURRENT CAPTURE (2026-08-17, SHA 6b6ffb12, SEED=1,
+executed on the bare-metal KVM box — NOT Lima — runner_exit_code: 0).
 
-`pending` means "evidence captured, verdict not yet rendered". It is NOT a
-`satisfied` claim and NOT an absence of evidence: sub-claims 0 and 1 are
-captured and pass, sub-claims 2 and 3 are captured and REFUTED, and the cause
-is quoted verbatim from the operator surface below.
+`pending` still means "evidence captured, verdict not yet rendered", and the
+word is unchanged FOR PROCESS REASONS ONLY — the evidence underneath it has
+reversed. Every sub-claim now passes:
 
-Two reasons the status word is `pending` rather than something stronger:
+  [PASS] sub-claim 0: the box is KVM-capable with cloud-hypervisor and staged artifacts
+  [PASS] sub-claim 1a: deploy exited 0
+  [PASS] sub-claim 2: the VM allocation reached Running within the 90s ceiling
+  [PASS] sub-claim 3: new_hypervisors=1 / new_run_dirs=1 / new_scopes=1
+  [PASS] no-leak: leaked_hypervisors=0 / leaked_scopes=0 / leaked_run_dirs=0 / leaked_xdp=0
+  INNER_DONE serve_status=ready deploy_rc=0 final_state=Running
+
+Sub-claims 2 and 3 were REFUTED at the prior capture (SHA 655ac964,
+runner_exit_code: 1, `final_state=Failed`, `no vm driver composed on this
+node`, `new_hypervisors=0`). Step 03-07 (DWD-25 / ADR-0083 §§D3a-D3c) closed
+that: artifacts now arrive per-allocation from the spec's own `[vm]` block and
+VM composition is unconditional, gated on `Vmm::probe` alone.
+
+`runner.sh` was NOT modified between the two captures — that is load-bearing.
+It already wrote `kernel = ` / `rootfs = ` into `[vm]`, so it re-ran verbatim
+against the new implementation. Had the runner needed an edit to pass, the
+implementation would have diverged from the spec surface the expectation
+measures, and the pass would have been self-assessment rather than evidence.
+The binary is built with DEFAULT features (`cargo build -p overdrive-cli
+--bin overdrive`, no `--features`), so no test-only wiring participates.
+
+The status word stays `pending` for the two reasons it always did, both of
+which are about WHO may render a verdict, not about what the evidence shows:
 
 1. `.claude/rules/verification.md` § Enforcement forbids the agent that wrote
-   the runner from stamping its own expectation `satisfied`; that verdict
-   belongs to a different-fox adversarial audit of the captured evidence. The
-   same logic applies to a negative verdict — an authoring agent's own
-   "refuted" is still self-assessment.
-2. `partial` and `broken` both require a linked issue per the status legend,
-   and creating a GitHub issue requires explicit user approval (CLAUDE.md §
-   "Deferrals require GitHub issues"). No issue number is invented here.
+   the implementation from stamping its own expectation `satisfied`; that
+   verdict belongs to a different-fox adversarial audit of the captured
+   evidence. Step 03-07's crafter explicitly declines to stamp it.
+2. Any status requiring a linked issue would require explicit user approval
+   per CLAUDE.md § "Deferrals require GitHub issues". No issue number is
+   invented here.
 
-Nothing is softened by the status word: the refutation, its cause and its
-citations are recorded in full below. -->
+`working_tree_dirty: true` in the manifest: the DELIVER execution log carries
+03-07's own COMMIT phase entry, which is by construction written after the
+commit it records. The captured SHA 6b6ffb12 IS step 03-07's commit; the
+`dirty-diff.patch` beside the manifest shows the delta is the log entry alone.
+
+The prior REFUTED capture's rationale, cause and citations are preserved
+verbatim below under "Prior capture (SHA 655ac964) — REFUTED". -->
 
 ## Expectation
 
@@ -45,12 +70,24 @@ roadmap step `03-04` in commit `4243e849`. The in-tree Tier-3 witness is
 (`crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`), which
 pins the Running row to `TransitionReason::Started` — a marker written only on
 the beacon-win arm of `VmDriver::start`'s three-way boot race, so it asserts a
-real guest booted. That test drives production `run_server` wiring through the
-in-process composition helper `run_with_dataplane_and_vm_artifacts`. **This
-expectation asks the strictly harder question that helper cannot ask: can an
-operator reach the same place through the shipped binary's own argv, with no
-test-only wiring?** That question is KPI **K4**, and the feature-delta assigns
-its measurement to this catalogue by name.
+real guest booted. That test drives production `run_server` wiring through an
+in-process composition helper. **This expectation asks the strictly harder
+question no in-process helper can ask: can an operator reach the same place
+through the shipped binary's own argv, with no test-only wiring?** That
+question is KPI **K4**, and the feature-delta assigns its measurement to this
+catalogue by name.
+
+Step 03-07 (DWD-25 / ADR-0083 §§D3a–D3c) narrowed the gap between the two
+considerably. The helper that used to carry node-level boot artifacts
+(`run_with_dataplane_and_vm_artifacts`) is **deleted**: every in-tree VM test
+now supplies its kernel and rootfs the way an operator does, through the
+deployed spec's own `[vm]` block. The remaining difference between the Tier-3
+witness and this expectation is the process boundary and the feature set — not
+the artifact-supply path. The in-tree companion for the per-allocation claim
+itself is **S-VM-54**
+(`two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named`,
+`crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs`), which proves
+two workloads on ONE `serve` each boot the image their own spec named.
 
 - Anchor: S-VM-39 (`docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md:1269` — *"A VM job spec is accepted … Then the workload is accepted and scheduled / And its VM allocation reaches Running through the production VmDriver path"*)
 - Anchor: roadmap 03-04 (`docs/feature/microvm-driver-cloud-hypervisor/deliver/roadmap.json:621` — criteria[0]: *"S-VM-39: a spec declaring [job] + [vm] is accepted and scheduled, and its VM allocation reaches Running through the production VmDriver path"*; `implementation_notes`: *"The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient"*)
@@ -206,6 +243,40 @@ not asserted here, since no evidence in this capture pins the mechanism.
 ## Evidence
 
 Captured under `evidence/` by `harness/run-expectation.sh E06` — SHA
+`6b6ffb12` (step 03-07's commit), `SEED=1`, `runner_exit_code: 0`, executed on
+the metal KVM box (see `evidence/execution_substrate.txt`). `runner.sh` was
+NOT modified between this capture and the prior one.
+
+The evidence files below are the CURRENT capture; the table's descriptions are
+unchanged because the runner is unchanged — only the outcomes moved.
+
+### Per-sub-claim verdict — CURRENT capture (SHA `6b6ffb12`)
+
+| # | Sub-claim | Verdict | Reason |
+|---|---|---|---|
+| 0 | the box can boot a guest | pass | `probe_before_capability.txt`: `x86_64`, `/dev/kvm present`, `cloud-hypervisor`, `cgroup2fs`, kernel + rootfs staged. |
+| 1 | deploy exits `0` and prints `Accepted.` | pass | `deploy_vm_job.meta`: `# exit: 0`; `deploy_vm_job.out` line 1 is literally `Accepted.` |
+| 2 | the allocation reaches `Running` | **pass** | `INNER_DONE serve_status=ready deploy_rc=0 final_state=Running` — reached within the 90s ceiling. Previously refuted. |
+| 3 | the production `VmDriver` path ran | **pass** | `resource_delta.txt`: `new_hypervisors=1`, `new_run_dirs=1`, `new_scopes=1` — a real Cloud Hypervisor guest was spawned. Previously `0/0/0`. |
+| — | no leak | pass | `leaked_hypervisors=0`, `leaked_scopes=0`, `leaked_run_dirs=0`, `leaked_xdp=0`. |
+
+The binary under test is built with DEFAULT features (`binary_under_test.txt`
+/ `build.log`: `cargo build -p overdrive-cli --bin overdrive`, no
+`--features`), so no `integration-tests` or `kvm-tests` wiring participates.
+
+The verdict word in the header stays `pending` deliberately: per
+`.claude/rules/verification.md` § Enforcement, the agent that implemented
+03-07 may not stamp its own expectation `satisfied`. That is a different-fox
+audit's call, and this capture is the input to it.
+
+---
+
+## Prior capture (SHA `655ac964`) — REFUTED
+
+Preserved verbatim. This is the capture that measured K4 as NOT MET and
+motivated DWD-25 / step 03-07.
+
+Captured under `evidence/` by `harness/run-expectation.sh E06` — SHA
 `655ac964`, `SEED=1`, `runner_exit_code: 1`, executed on the metal KVM box
 (see `evidence/execution_substrate.txt`; `working_tree_dirty: true` records
 this expectation's own untracked files, listed in `dirty-status.txt`).
@@ -228,7 +299,7 @@ this expectation's own untracked files, listed in `dirty-status.txt`).
 | `stop_vm_job.out` / `describe_after_stop.out` | the production stop verb driving the workload down |
 | `teardown_sweep.txt` / `leak_verdict.txt` / `probe_post_teardown_*.txt` | what the sweep reaped, and the four-counter no-leak proof |
 
-### Per-sub-claim verdict
+### Per-sub-claim verdict — PRIOR capture (SHA `655ac964`)
 
 | # | Sub-claim | Verdict | Reason |
 |---|---|---|---|

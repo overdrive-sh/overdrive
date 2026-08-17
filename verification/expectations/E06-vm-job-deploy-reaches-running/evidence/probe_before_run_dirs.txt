@@ -1,1 +1,2 @@
 # VM run dirs BEFORE
+alloc-vm-exit0-0

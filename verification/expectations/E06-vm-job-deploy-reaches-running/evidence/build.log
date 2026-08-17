@@ -1,1 +1,4 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.18s
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.39s

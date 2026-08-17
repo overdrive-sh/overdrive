@@ -1,0 +1,62 @@
+diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+index 9ee7ebd7..e2f76018 100644
+--- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
++++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
+@@ -1,7 +1,7 @@
+ {
+   "project_id": "",
+-  "total_steps": 34,
+-  "completed_steps": 20,
++  "total_steps": 36,
++  "completed_steps": 21,
+   "completed_step_ids": [
+     "01-01",
+     "01-02",
+@@ -22,9 +22,11 @@
+     "03-06",
+     "03-02",
+     "03-03",
+-    "03-04"
++    "03-04",
++    "03-07"
+   ],
+   "pending_step_ids": [
++    "03-08",
+     "04-01",
+     "04-02",
+     "04-03",
+diff --git a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+index 621c791e..d6c67a84 100644
+--- a/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
++++ b/docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
+@@ -995,6 +995,20 @@
+       "s": "SKIPPED",
+       "d": "BLOCKED_BY_DEPENDENCY: GREEN gate not met - 5 vm_reclamation_tier3 scenarios fail on clone_gone=false. ADR-0083 D3a puts the per-launch rootfs clone in the operator-named rootfs dir while D7 requires RealVmHostState to enumerate it from the platform-owned node staging dir; no ruling reconciles them. Cannot commit a red bar.",
+       "t": "2026-08-17T12:37:20Z"
++    },
++    {
++      "sid": "03-07",
++      "p": "GREEN",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-08-17T13:02:28Z"
++    },
++    {
++      "sid": "03-07",
++      "p": "COMMIT",
++      "s": "EXECUTED",
++      "d": "PASS",
++      "t": "2026-08-17T13:02:29Z"
+     }
+   ]
+ }
+\ No newline at end of file
+diff --git a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+index ceceabf7..72c72022 100644
+--- a/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
++++ b/verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt
+@@ -1 +1,3 @@
+-?? verification/expectations/E06-vm-job-deploy-reaches-running/
++ M docs/feature/microvm-driver-cloud-hypervisor/deliver/.develop-progress.json
++ M docs/feature/microvm-driver-cloud-hypervisor/deliver/execution-log.json
++ M verification/expectations/E06-vm-job-deploy-reaches-running/evidence/dirty-status.txt

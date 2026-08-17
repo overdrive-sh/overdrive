@@ -1,1 +1,1 @@
-(no cloud-hypervisor process)
+pid 394132: cloud-hypervisor --cpus boot=1 --memory size=134217728 --kernel /srv/vm/overdrive-testing/kernel --cmdline console=ttyS0 panic=1 root=/dev/vda rw --disk path=/srv/vm/overdrive-testing/e06-NDY9IL/.overdrive-vm-rootfs-alloc-e06-vm-job-0.img,image_type=raw --serial file=/run/overdrive/vm/alloc-e06-vm-job-0/console.log --console off --vsock cid=3,socket=/run/overdrive/vm/alloc-e06-vm-job-0/vsock --api-socket /run/overdrive/vm/alloc-e06-vm-job-0/api --seccomp true 

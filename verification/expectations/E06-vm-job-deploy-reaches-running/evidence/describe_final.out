@@ -1,10 +1,12 @@
---- 2026-08-17T10:15:39Z ---
+--- 2026-08-17T13:05:23Z ---
 Job 'e06-vm-job' (kind: Job)
-Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
-Verdict: Failed (backoff exhausted)
+Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
+Verdict: In progress (no terminal yet)
 
 Attempt  State        Exit   Started              Duration  
-1        Failed       —      (c=6,w=local)        —         
-
-    reason: driver internal error: no vm driver composed on this node
-    error: no vm driver composed on this node
+1        Running      —      (c=5,w=local)        —         
+Issued certificates:
+  serial:        69bd1710ae7863d14b981a9c319e74b6
+    spiffe_id:     spiffe://overdrive.local/workload/e06-vm-job/alloc/alloc-e06-vm-job-0
+    issuer_serial: 3d132eb8cc4db956c90b714b87731ff6
+    not_after:     1786975462.505112484

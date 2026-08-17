@@ -1,9 +1,8 @@
 Job 'e06-vm-job' (kind: Job)
-Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Spec digest: 627093405e468f55bad819b182ecfaed7680b335ef5ddf85bba1803c41fdbf4c
 Verdict: Failed (backoff exhausted)
 
 Attempt  State        Exit   Started              Duration  
-1        Failed       —      (c=6,w=local)        —         
+1        Terminated   —      (c=78,w=local)       —         
 
-    reason: driver internal error: no vm driver composed on this node
-    error: no vm driver composed on this node
+    reason: stopped
