@@ -72,7 +72,6 @@ use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_cli::http_client::CliError;
-use overdrive_control_plane::VmBootArtifacts;
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
@@ -92,7 +91,7 @@ fn shared_staging_root() -> PathBuf {
 /// The same real in-process `serve` composition used by the existing microVM
 /// walking skeleton: production server wiring with only the dataplane and KEK
 /// external ports replaced by their established simulation adapters.
-async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir) {
+async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
@@ -100,14 +99,13 @@ async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
     let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vm_artifacts(
+    let handle = overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
     )
     .await
-    .expect("serve::run_with_dataplane_and_vm_artifacts");
+    .expect("serve::run_with_dataplane");
     (handle, tmp)
 }
 
@@ -118,10 +116,7 @@ async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir
 /// removing that binary removes only THIS allocation's hypervisor and
 /// never mutates the host-shared `cloud-hypervisor` sibling Tier-3
 /// scenarios (`vmm_equivalence`) spawn in parallel nextest processes.
-async fn spawn_vm_server_with_vmm(
-    vm_artifacts: VmBootArtifacts,
-    vmm: Arc<dyn Vmm>,
-) -> (ServeHandle, TempDir) {
+async fn spawn_vm_server_with_vmm(vmm: Arc<dyn Vmm>) -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
@@ -133,7 +128,6 @@ async fn spawn_vm_server_with_vmm(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
         vmm,
     )
     .await
@@ -551,11 +545,7 @@ async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources(
         "S-VM-34 precondition: configured rootfs path must be absent"
     );
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: missing_rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -674,11 +664,7 @@ async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hyper
 
     // Composition must SUCCEED against the valid copy — an absent kernel
     // at serve boot refuses the driver outright and creates no allocation.
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: kernel.clone(),
-        rootfs_path: fixture.rootfs_path.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -798,14 +784,7 @@ async fn hypervisor_removed_after_composition_names_every_searched_path() {
             .with_binary(hypervisor.clone())
             .with_image_dir(shared_staging_root()),
     );
-    let (handle, server_tmp) = spawn_vm_server_with_vmm(
-        VmBootArtifacts {
-            kernel_path: fixture.kernel_path.clone(),
-            rootfs_path: fixture.rootfs_path.clone(),
-        },
-        vmm,
-    )
-    .await;
+    let (handle, server_tmp) = spawn_vm_server_with_vmm(vmm).await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -913,11 +892,7 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
     // kernel's no-`init=` fallback search finds no init at all.
     let silent_rootfs = build_empty_rootfs(artifact_tmp.path(), "never-beacons-rootfs.ext4");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: silent_rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -1062,11 +1037,7 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
     // Composition must SUCCEED against the valid image — booting `serve`
     // against the bad one fails before any allocation exists, which
     // cannot produce the Failed row this scenario asserts on.
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: kernel.clone(),
-        rootfs_path: fixture.rootfs_path.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -1211,11 +1182,7 @@ async fn deploy_against_unclassifiable_vmm(
 ) -> (WorkloadDescribeOutput, ServeHandle, TempDir) {
     let vmm = SimVmm::new();
     vmm.inject_persistent_create_failure(diagnostic);
-    let (handle, server_tmp) = spawn_vm_server_with_vmm(
-        VmBootArtifacts { kernel_path: kernel.to_path_buf(), rootfs_path: rootfs.to_path_buf() },
-        Arc::new(vmm),
-    )
-    .await;
+    let (handle, server_tmp) = spawn_vm_server_with_vmm(Arc::new(vmm)).await;
     let cfg = config_path(server_tmp.path());
     let spec_path =
         write_toml(server_tmp.path(), &format!("{id}.toml"), &vm_job_toml(id, kernel, rootfs));
@@ -1527,11 +1494,7 @@ async fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
          kind/driver combination can explain the rejection",
     );
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: fixture.rootfs_path.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
@@ -1708,11 +1671,7 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
     let spin = build_spin_binary(artifact_tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(artifact_tmp.path(), &fixture, &spin, "spinjobvm");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),

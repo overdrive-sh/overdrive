@@ -730,22 +730,6 @@ impl AppState {
     }
 }
 
-/// Pre-staged, format-validated VM boot artifacts (ADR-0082/ADR-0083,
-/// GH #42, step 01-08). See [`ServerConfig::vm_artifacts`]'s doc comment.
-#[cfg(feature = "integration-tests")]
-#[derive(Debug, Clone)]
-pub struct VmBootArtifacts {
-    /// Path to a kernel image whose boot-format magic
-    /// [`overdrive_core::vm::config::KernelImage::validate`] has already
-    /// accepted for the host's [`overdrive_core::vm::config::HostArch`]
-    /// (the composition root re-validates before use — Earned Trust, not
-    /// a bypass).
-    pub kernel_path: std::path::PathBuf,
-    /// Path to an ext4 rootfs image with `overdrive-init` baked in at its
-    /// well-known path.
-    pub rootfs_path: std::path::PathBuf,
-}
-
 /// Configuration for the Phase 1 control-plane server. Populated at
 /// startup from CLI flags and environment.
 #[derive(Clone)]
@@ -937,25 +921,6 @@ pub struct ServerConfig {
     #[cfg(feature = "integration-tests")]
     pub dataplane_probe_fault: Option<String>,
 
-    /// Test-only VM boot-artifact seam (ADR-0082/ADR-0083, GH #42, step
-    /// 01-08). `Slice 01 ships a single fixed template per node — no
-    /// per-allocation BYO kernel/rootfs surface exists yet`
-    /// (`VmHostLayout`'s own doc comment) and no ADR pins how the
-    /// PRODUCTION composition root's kernel/rootfs paths are supplied —
-    /// that is DEVOPS's `infra/metal/provision.sh` territory, out of this
-    /// step's scope. `Some((kernel_path, rootfs_path))` points the
-    /// composition root at a pre-staged, format-validated kernel and
-    /// ext4 rootfs (with `overdrive-init` baked in) — the
-    /// `overdrive-testing::vm_fixture` 01-04 fixture is the only current
-    /// producer. `None` (production default): the composition root never
-    /// attempts to compose a `Vm` driver at all — the identical
-    /// capability-absence posture as a host with no `cloud-hypervisor`
-    /// installed. Gated behind `#[cfg(feature = "integration-tests")]`
-    /// on both this field and its one use site, mirroring
-    /// `dataplane_probe_fault` above.
-    #[cfg(feature = "integration-tests")]
-    pub vm_artifacts: Option<VmBootArtifacts>,
-
     /// Test-only fault-injection seam for the transparent-mTLS proxy
     /// Earned-Trust probe (transparent-mtls-host-socket, step 06-03,
     /// criteria[0]). When `Some(msg)`, the boot path forces
@@ -1061,8 +1026,6 @@ impl std::fmt::Debug for ServerConfig {
         #[cfg(feature = "integration-tests")]
         dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
         #[cfg(feature = "integration-tests")]
-        dbg.field("vm_artifacts", &self.vm_artifacts);
-        #[cfg(feature = "integration-tests")]
         dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
         #[cfg(feature = "integration-tests")]
         dbg.field("dns_probe_fault", &self.dns_probe_fault);
@@ -1147,12 +1110,6 @@ impl ServerConfig {
             // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
             #[cfg(feature = "integration-tests")]
             dataplane_probe_fault: None,
-            // ADR-0082/ADR-0083 step 01-08: `None` (production default) —
-            // the composition root never attempts to compose a `Vm`
-            // driver. The walking-skeleton test sets `Some(..)` from the
-            // 01-04 `vm_fixture` staged artifacts.
-            #[cfg(feature = "integration-tests")]
-            vm_artifacts: None,
             // transparent-mtls-host-socket step 06-03: default no
             // mTLS-probe fault; the e2e criteria[0] test sets
             // `Some(..)` to exercise the `MtlsBootError::Probe`
@@ -1576,32 +1533,39 @@ pub async fn run_server(
     let mut registry = DriverRegistry::new();
     registry.insert(driver);
 
-    // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09): discover -> probe ->
-    // insert `cloud-hypervisor`, mirroring `compose_mtls`'s
-    // composition-gated shape. Capability ABSENCE (no `[vm]` boot
-    // artifacts configured, or the real, non-injected discover/probe
-    // sequence failing — SD-5's "no genuinely lying host exists in the
-    // real test envelope for these classes" case) is NOT a fault: the
-    // node simply has no `Vm` entry and `[vm]` deploys are rejected at
-    // admission (`VmComposeError::NotAvailable`). A GENUINE substrate lie
-    // caught on an adapter the composition root already knows is PRESENT
-    // — the real adapter discovered successfully-but-then-failed-probe is
-    // not reachable in this codebase's test envelope, so in practice this
-    // is exclusively the injected `ServerConfig.vmm_override` path (ADR-
-    // 0083 §D8) declaring presence — hard-refuses the whole boot with
+    // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09, §D3c): discover ->
+    // probe -> insert `cloud-hypervisor`. UNCONDITIONAL — no `#[cfg]`, no
+    // artifact precondition. Artifacts are per-allocation (§D3a), so the
+    // ONLY thing that decides whether this node can run microVMs is
+    // whether `Vmm::probe` passes, and "the registry IS the VM capability
+    // gate" is finally true in production.
+    //
+    // Capability ABSENCE (the real, non-injected discover/probe sequence
+    // failing — a host with no `cloud-hypervisor`, or SD-5's "no
+    // genuinely lying host exists in the real test envelope for these
+    // classes" case) is NOT a fault: the node boots with no `Vm` entry
+    // and `[vm]` deploys fail at dispatch naming the absent capability
+    // (`VmComposeError::NotAvailable`). A GENUINE substrate lie caught on
+    // an adapter the composition root already knows is PRESENT — the real
+    // adapter discovered successfully-but-then-failed-probe is not
+    // reachable in this codebase's test envelope, so in practice this is
+    // exclusively the injected `ServerConfig.vmm_override` path (ADR-0083
+    // §D8) declaring presence — hard-refuses the whole boot with
     // `health.startup.refused` (`VmComposeError::Refused`).
-    #[cfg(feature = "integration-tests")]
-    if let Some(artifacts) = config.vm_artifacts.clone() {
+    {
         let cgroup_accounting: Arc<
             dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
         > = Arc::new(overdrive_host::RealCgroupAccounting::new());
+        #[cfg(feature = "integration-tests")]
+        let vmm_override = config.vmm_override.clone();
+        #[cfg(not(feature = "integration-tests"))]
+        let vmm_override = None;
         match compose_vm_driver(
-            &artifacts,
             cgroup_root_path,
             Arc::clone(&clock),
             fs,
             cgroup_accounting,
-            config.vmm_override.clone(),
+            vmm_override,
         )
         .await
         {
@@ -1635,11 +1599,10 @@ pub async fn run_server(
 /// composition root (or an injected `ServerConfig.vmm_override` test
 /// seam) already knows is present (hard: refuses the whole boot).
 /// ADR-0083 §D8.
-#[cfg(feature = "integration-tests")]
 #[derive(Debug)]
 enum VmComposeError {
-    /// No override was injected, and the real discover/probe/kernel-
-    /// validation sequence failed. Capability absence is not a fault
+    /// No override was injected, and the real discover/probe
+    /// sequence failed. Capability absence is not a fault
     /// (SD-5) — the caller logs `driver.vm.not_composed` and continues
     /// booting with no `Vm` entry. Carries the typed
     /// [`error::VmmBootError`] cause (not a pre-flattened `String`) per
@@ -1661,18 +1624,22 @@ enum VmComposeError {
 
 /// Compose the production `VmDriver` — resolve `Vmm` (the injected
 /// `vmm_override`, when present, or a freshly discovered
-/// `CloudHypervisorVmm`), run its Earned-Trust `.probe()` (and
+/// `CloudHypervisorVmm`) and run its Earned-Trust `.probe()` (and
 /// `CgroupAccounting`'s, gated alongside it per ADR-0082 §D8's
-/// "Composition" section), and validate the configured kernel image's
-/// boot-format magic against the host architecture. ADR-0082/ADR-0083
-/// (GH #42, steps 01-08/01-09).
+/// "Composition" section). ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09,
+/// §§D3a/D3c).
+///
+/// Takes NO artifact argument and carries NO `#[cfg]`: the kernel and
+/// rootfs are per-allocation (§D3a), so there is nothing node-level left
+/// to configure, and the probe is the whole gate. What is proven here is
+/// the HOST's microVM capability, once; what each allocation's own
+/// artifacts are is proven per start by `VmDriver`'s `preflight_kernel`
+/// and rootfs preflight (§D3b's table).
 ///
 /// See [`VmComposeError`] for the two-way error split; see
 /// `run_server`'s call site doc comment for the ABSENCE-vs-REFUSAL
 /// framing.
-#[cfg(feature = "integration-tests")]
 async fn compose_vm_driver(
-    artifacts: &VmBootArtifacts,
     cgroup_root: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
@@ -1680,9 +1647,7 @@ async fn compose_vm_driver(
     vmm_override: Option<Arc<dyn overdrive_core::traits::vmm::Vmm>>,
 ) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
     use overdrive_core::traits::vmm::Vmm;
-    use overdrive_core::vm::config::{
-        HostArch, KERNEL_MAGIC_WINDOW, KernelImage, VmConfinement, VmmIdentity,
-    };
+    use overdrive_core::vm::config::{HostArch, VmConfinement, VmmIdentity};
     use overdrive_worker::vm_driver::VmHostLayout;
 
     // §D8's resolution: the override, when present, replaces discovery
@@ -1722,23 +1687,9 @@ async fn compose_vm_driver(
     // just validated).
     let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
 
-    let header = tokio::fs::read(&artifacts.kernel_path).await.map_err(|source| {
-        VmComposeError::NotAvailable(error::VmmBootError::KernelHeaderRead {
-            path: artifacts.kernel_path.clone(),
-            source,
-        })
-    })?;
-    let window = &header[..header.len().min(KERNEL_MAGIC_WINDOW)];
-    let kernel =
-        KernelImage::validate(artifacts.kernel_path.clone(), arch, window).map_err(|source| {
-            VmComposeError::NotAvailable(error::VmmBootError::KernelFormat { source })
-        })?;
-
     let layout = VmHostLayout {
         cgroup_root,
         run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
-        rootfs_master: artifacts.rootfs_path.clone(),
-        kernel,
         arch,
         vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
         // Confined identity per ADR-0082 §D2.5. NO production system
@@ -2484,30 +2435,25 @@ pub async fn run_server_with_obs_and_drivers(
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.2, GH #42): `VmHostState` is composed UNCONDITIONALLY — never
-    // gated on the `Vm` registry entry / `integration-tests` feature /
-    // `config.vm_artifacts` presence — so a node that uninstalled
-    // `cloud-hypervisor` still observes and still reclaims (S-VM-30).
+    // gated on the `Vm` registry entry or the `integration-tests` feature
+    // — so a node that uninstalled `cloud-hypervisor` still observes and
+    // still reclaims (S-VM-30).
     // `run_dir_root` mirrors `compose_vm_driver`'s own hardcoded
     // `/run/overdrive/vm` literal (the two composition sites must agree
-    // on the same VM run root); `staging_dir` derives from the
-    // configured rootfs artifact's parent directory when one is
-    // configured (matching `RootfsPlan::for_alloc`'s real clone
-    // destination), falling back to a fixed default when no VM boot
-    // artifacts are configured at all (a node with no VM config has no
-    // clones to enumerate there regardless of the path — `RealVmHostState`'s
-    // own contract treats an absent root as `Ok`, not an error).
-    // `ServerConfig.vm_artifacts` is itself `#[cfg(feature =
-    // "integration-tests")]` (mirrors `VmBootArtifacts`'s own gate) —
-    // `vm_host_state` composition must still be unconditional (see above),
-    // so the staging-dir derivation is split by feature the same way the
-    // `dns_probe_fault` seam above is.
-    #[cfg(feature = "integration-tests")]
-    let vm_staging_dir: std::path::PathBuf = config
-        .vm_artifacts
-        .as_ref()
-        .and_then(|a| a.rootfs_path.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_else(|| std::path::PathBuf::from("/run/overdrive/vm-rootfs-staging"));
-    #[cfg(not(feature = "integration-tests"))]
+    // on the same VM run root).
+    //
+    // `staging_dir` is the platform's own VM staging root, a fixed
+    // node-level path. It used to be DERIVED from the node's configured
+    // rootfs artifact's parent directory; ADR-0083 §D3a deleted that
+    // configuration, because artifacts are per-allocation. The honest
+    // consequence, recorded in that amendment's Consequences ("the
+    // per-launch rootfs clone is now written into an operator-chosen
+    // directory ... rather than a platform-owned one"): a clone made
+    // beside an operator-named rootfs OUTSIDE this root is not
+    // enumerated by the steady-state sweep. `RealVmHostState`'s own
+    // contract treats an absent root as `Ok`, not an error, so a node
+    // that never stages here simply observes nothing here; the scope and
+    // run-directory surfaces are unaffected and remain node-owned.
     let vm_staging_dir: std::path::PathBuf =
         std::path::PathBuf::from("/run/overdrive/vm-rootfs-staging");
     let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
@@ -3341,18 +3287,7 @@ mod tests {
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
 
         use crate::error::VmmBootError;
-        use crate::{VmBootArtifacts, VmComposeError, compose_vm_driver};
-
-        /// Never read on the three probe-failure paths these tests
-        /// exercise — `vmm.probe()` and `cgroup_accounting.probe()` both
-        /// return before `compose_vm_driver` ever touches
-        /// `kernel_path`/`rootfs_path`.
-        fn unread_artifacts() -> VmBootArtifacts {
-            VmBootArtifacts {
-                kernel_path: PathBuf::from("/unread/kernel"),
-                rootfs_path: PathBuf::from("/unread/rootfs"),
-            }
-        }
+        use crate::{VmComposeError, compose_vm_driver};
 
         #[tokio::test]
         async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
@@ -3365,7 +3300,6 @@ mod tests {
             // formatting the whole `Result` on assertion failure would
             // not compile. Neither of these tests reaches `Ok`.
             let err = compose_vm_driver(
-                &unread_artifacts(),
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
@@ -3433,7 +3367,6 @@ mod tests {
                 .inject_probe_substrate_error(std::io::ErrorKind::PermissionDenied);
 
             let err = compose_vm_driver(
-                &unread_artifacts(),
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),

@@ -229,15 +229,16 @@
 //! [`vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader`]'s
 //! own doc comment).
 //!
-//! **Step 03-07** appends a 10th scenario, S-VM-54 (DWD-25 / AC-21), as a
-//! RED scaffold at the bottom of this file — the one test here that is not
-//! GREEN. It carries `#[should_panic(expected = "RED scaffold")]`, never
-//! `#[ignore]`, so the bar stays green and it stays discoverable via
-//! `grep -rn 'should_panic.*RED scaffold' crates/`. It cannot be written
-//! before 03-07 lands because every server helper above composes through
-//! `VmBootArtifacts` — the node-level artifact seam DWD-25 deletes — and
-//! S-VM-54's whole claim is that no such seam exists. See its own doc
-//! comment for the activation plan.
+//! **Step 03-07** adds a 10th scenario, S-VM-54 (DWD-25 / AC-21), and
+//! deletes the node-level artifact seam every server helper here used to
+//! compose through. No helper below takes an artifact argument any more:
+//! each scenario's kernel and rootfs reach the driver through the `[vm]`
+//! block of the spec it deploys — which is what a real operator writes,
+//! so these tests became MORE production-faithful, not less. S-VM-54 is
+//! the scenario whose whole claim is that no node-level seam exists: two
+//! specs naming rootfs images in two DIFFERENT parent directories, both
+//! reaching Running on ONE `serve`, each booting the image its own spec
+//! named.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -252,7 +253,6 @@ use std::time::Duration;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
-use overdrive_control_plane::VmBootArtifacts;
 use overdrive_control_plane::api::{AllocStateWire, IdempotencyOutcome};
 use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
@@ -392,7 +392,12 @@ fn build_empty_rootfs(tmp: &Path) -> PathBuf {
 /// correctness scenarios — S-VM-01/02/03/04 do not need the real
 /// `EbpfDataplane` / mTLS composition; that is what
 /// [`spawn_vm_server_mtls_composed`] is for).
-async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir) {
+/// Spawns a real in-process `overdrive serve` through the UNGATED
+/// [`overdrive_cli::commands::serve::run_with_dataplane`] entrypoint — no
+/// node-level artifact argument anywhere. Every VM allocation booted
+/// against this handle must source its kernel and rootfs from its own
+/// `[vm]` spec.
+async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
@@ -400,14 +405,13 @@ async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
     let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vm_artifacts(
+    let handle = overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
     )
     .await
-    .expect("serve::run_with_dataplane_and_vm_artifacts");
+    .expect("serve::run_with_dataplane");
     (handle, tmp)
 }
 
@@ -418,7 +422,7 @@ async fn spawn_vm_server(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir
 /// (GH #248 / ADR-0074 trap: this is the deliberate re-proof that a
 /// mesh-composed serve correctly SKIPS the `MtlsInterceptWorker` gate
 /// for a `DriverType::Vm` allocation rather than crashing on it).
-async fn spawn_vm_server_mtls_composed(vm_artifacts: VmBootArtifacts) -> (ServeHandle, TempDir) {
+async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
@@ -426,13 +430,12 @@ async fn spawn_vm_server_mtls_composed(vm_artifacts: VmBootArtifacts) -> (ServeH
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
     let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_vm_artifacts(
+    let handle = overdrive_cli::commands::serve::run_with_kek(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
     )
     .await
-    .expect("serve::run_with_vm_artifacts (mTLS-composed)");
+    .expect("serve::run_with_kek (mTLS-composed)");
     (handle, tmp)
 }
 
@@ -476,25 +479,95 @@ async fn poll_until_terminal(
     workload_id: &str,
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
+    poll_until_state(
+        cfg,
+        workload_id,
+        |state| matches!(state, AllocStateWire::Terminated | AllocStateWire::Failed),
+        "a terminal state",
+        max_wait,
+    )
+    .await
+}
+
+/// [`poll_until_state`] specialised to `Running`. S-VM-54 needs it for two
+/// allocations, and S-VM-05/S-VM-09/S-VM-74 each hand-rolled the same loop
+/// before it existed — five hand-written loops free to drift on their
+/// row-selection rule and timeout message.
+async fn poll_until_running(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    poll_until_state(
+        cfg,
+        workload_id,
+        |state| state == AllocStateWire::Running,
+        "Running",
+        max_wait,
+    )
+    .await
+}
+
+/// The ONE row-selection rule and the ONE timeout message every poller in
+/// this file shares (the shape `vm_boot_failure_vocabulary.rs` settled on).
+async fn poll_until_state(
+    cfg: &Path,
+    workload_id: &str,
+    wanted: impl Fn(AllocStateWire) -> bool,
+    wanted_label: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let out =
             describe(DescribeArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
                 .await
                 .expect("workload describe must succeed while polling");
-        if let Some(row) = out.snapshot.rows.first()
-            && matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
-        {
+        if out.snapshot.rows.first().is_some_and(|row| wanted(row.state)) {
             return out;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not reach a terminal state within {max_wait:?}; \
+            "workload {workload_id} did not reach {wanted_label} within {max_wait:?}; \
              last observed row: {:?}",
             out.snapshot.rows.first(),
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
+}
+
+/// The full NUL-joined argv of the live `cloud-hypervisor` process serving
+/// THIS allocation, located by the allocation's own [`VmRunDir`] path.
+///
+/// [`find_cloud_hypervisor_pid`] cannot be used where more than one VM is
+/// booted concurrently — its own contract pins "exactly one VM is booted at
+/// the time of the call", and it would return whichever allocation's
+/// `/proc` entry was yielded first. This is the allocation-scoped shape
+/// `vm_boot_failure_vocabulary.rs` already proved out (a file-local copy —
+/// sibling test modules cannot see each other's private items).
+///
+/// Matches on `argv[0]`, never the `TASK_COMM_LEN`-truncated
+/// `/proc/<pid>/comm` (15 chars, shorter than the 16-char binary name).
+fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
+    let needle = run_dir.path().to_string_lossy().into_owned();
+    for entry in std::fs::read_dir("/proc").expect("read /proc") {
+        let Ok(entry) = entry else { continue };
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else { continue };
+        let argv0 = cmdline.split(|&byte| byte == 0).next().unwrap_or(&[]);
+        let argv0 = String::from_utf8_lossy(argv0);
+        if Path::new(argv0.as_ref()).file_name() != Some(std::ffi::OsStr::new("cloud-hypervisor")) {
+            continue;
+        }
+        let argv = String::from_utf8_lossy(&cmdline).replace('\0', " ");
+        if argv.contains(&needle) {
+            return argv;
+        }
+    }
+    panic!("no live cloud-hypervisor process found whose argv references {needle}")
 }
 
 // ---------------------------------------------------------------------
@@ -515,11 +588,7 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -565,11 +634,7 @@ async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
     let exit7 = build_exit_code_binary(tmp.path(), 7);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit7, "exit7");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -625,11 +690,7 @@ async fn vm_guest_that_never_starts_is_never_reported_running() {
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
     let broken_rootfs = build_empty_rootfs(tmp.path());
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: broken_rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -689,11 +750,7 @@ async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
     let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -796,11 +853,7 @@ async fn vm_platform_contains_the_hypervisor_it_started() {
     assert!(rustc_status.success(), "rustc must build the long-lived spin binary");
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spin");
 
-    let (handle, server_tmp) = spawn_vm_server_mtls_composed(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -957,11 +1010,7 @@ async fn vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader() {
     let spin_bin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinseccomp");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -1192,11 +1241,7 @@ async fn vm_alloc_on_mtls_composed_serve_boots_cleanly_without_mtls_install() {
     let spin_bin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin_bin, "spinmtls");
 
-    let (handle, server_tmp) = spawn_vm_server_mtls_composed(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
 
     // D2 baseline, taken BEFORE deploy: the ambient shared mTLS nft
@@ -1352,11 +1397,7 @@ async fn vm_deadline_arm_leaks_nothing() {
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
     let broken_rootfs = build_empty_rootfs(tmp.path());
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: broken_rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -1458,11 +1499,7 @@ async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
     let exit7 = build_exit_code_binary(tmp.path(), 7);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit7, "exitreport");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -1529,11 +1566,7 @@ async fn vm_registry_reports_vm_supported_when_cloud_hypervisor_present_and_heal
     let exit0 = build_exit_code_binary(tmp.path(), 0);
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0vm11");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -1632,11 +1665,7 @@ async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capa
         std::env::set_var("PATH", &broken_path);
     }
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
 
     // SAFETY: restoring the pre-test PATH; still inside the
     // `#[serial(env)]` window. Safe to restore NOW — the composition
@@ -1705,7 +1734,6 @@ async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capa
 /// need no mesh composition. Returns `Result` (not `.expect()`-unwrapped)
 /// since both callers assert on the `Err` arm.
 async fn spawn_vm_server_with_vmm_override(
-    vm_artifacts: VmBootArtifacts,
     vmm_override: std::sync::Arc<dyn overdrive_core::traits::vmm::Vmm>,
 ) -> Result<(ServeHandle, TempDir), overdrive_cli::http_client::CliError> {
     let tmp = TempDir::new().expect("tempdir");
@@ -1719,7 +1747,6 @@ async fn spawn_vm_server_with_vmm_override(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
         vmm_override,
     )
     .await;
@@ -1739,20 +1766,10 @@ async fn spawn_vm_server_with_vmm_override(
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-
     let sim_vmm = SimVmm::new();
     sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
 
-    let result = spawn_vm_server_with_vmm_override(
-        VmBootArtifacts {
-            kernel_path: fixture.kernel_path.clone(),
-            rootfs_path: fixture.rootfs_path.clone(),
-        },
-        std::sync::Arc::new(sim_vmm),
-    )
-    .await;
+    let result = spawn_vm_server_with_vmm_override(std::sync::Arc::new(sim_vmm)).await;
 
     let err = result.expect_err(
         "a boot against an INJECTED vmm carrying a capability-flag probe fault must be REFUSED \
@@ -1796,9 +1813,6 @@ async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_non_reflink_staging_directory_refuses_boot_via_executed_ficlone() {
-    let fixture =
-        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-
     let non_reflink_dir = tempfile::Builder::new()
         .prefix("overdrive-vm-ws-s-vm-75-")
         .tempdir_in("/dev/shm")
@@ -1806,14 +1820,7 @@ async fn vm_non_reflink_staging_directory_refuses_boot_via_executed_ficlone() {
     let real_vmm_non_reflink =
         CloudHypervisorVmm::new().with_image_dir(non_reflink_dir.path().to_path_buf());
 
-    let result = spawn_vm_server_with_vmm_override(
-        VmBootArtifacts {
-            kernel_path: fixture.kernel_path.clone(),
-            rootfs_path: fixture.rootfs_path.clone(),
-        },
-        std::sync::Arc::new(real_vmm_non_reflink),
-    )
-    .await;
+    let result = spawn_vm_server_with_vmm_override(std::sync::Arc::new(real_vmm_non_reflink)).await;
 
     let err = result.expect_err(
         "a boot whose REAL CloudHypervisorVmm probes a genuinely non-reflink tmpfs directory \
@@ -1946,11 +1953,7 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
     let memhog = build_memory_hog_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &memhog, "memhog");
 
-    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
-        kernel_path: fixture.kernel_path.clone(),
-        rootfs_path: rootfs.clone(),
-    })
-    .await;
+    let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
 
     let spec_path = write_toml(
@@ -2096,137 +2099,210 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
 /// and is K4's instrument. Keep the two consistent: if this passes and E06
 /// does not, the difference is the in-process seam and is itself the finding.
 ///
-/// # Why this cannot be written before 03-07
+/// # The two discriminators, and why each is load-bearing
 ///
-/// Every server helper in this file — [`spawn_vm_server`],
-/// [`spawn_vm_server_mtls_composed`], [`spawn_vm_server_with_vmm_override`] —
-/// takes a `VmBootArtifacts`, the node-level artifact seam DWD-25 **deletes**
-/// (along with `ServerConfig.vm_artifacts`,
-/// `run_with_dataplane_and_vm_artifacts` and `run_with_vm_artifacts`). This
-/// scenario's premise is that no such seam exists, so it has no honest
-/// composition to drive today: composing through the seam would prove the
-/// opposite of what it claims. The scaffold therefore stops at the panic
-/// rather than reaching for the API 03-07 is going to remove — or inventing
-/// the one it will leave behind.
+/// **Host-side.** The two rootfs masters are staged in two DIFFERENT parent
+/// directories. `RootfsPlan::for_alloc` derives the per-launch clone
+/// destination as `<master_dir>/.overdrive-vm-rootfs-<alloc>.img` and does
+/// NOT encode the master's own filename, so two masters sharing one parent
+/// would produce two clone paths differing only by allocation id — which is
+/// exactly what a re-introduced node-level default would also produce. Two
+/// parents make the two clone paths differ in their DIRECTORY component,
+/// which no single-master node default can imitate.
 ///
-/// # Activation plan (step 03-07)
+/// **In-guest.** Each image carries a different injected guest binary
+/// (`/sbin/spinone`, `/sbin/spintwo`) and each spec names only its own. Every
+/// per-test rootfs is a copy of the shared fixture image, which carries only
+/// `overdrive-init` — so neither image contains the other's binary. Were a
+/// node-level default to force both allocations onto one image, the
+/// mismatched guest would beacon READY, fail its exec, power down, and be
+/// unable to STAY Running. That is the Gherkin's "each guest identifiably
+/// reporting which image it booted", independent of the host-side check.
 ///
-/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`.
-/// This scenario boots a real `serve` against the real host cgroupfs and
-/// creates TWO allocation-scoped cgroup scopes, so the serialisation is
-/// load-bearing rather than conventional. No `.config/nextest.toml` change is
-/// needed: that file already routes this whole module into the
-/// `host-kernel-shared` single-writer group by MODULE filter
-/// (`test(vm_walking_skeleton)`), and `tests/integration.rs` already declares
-/// the module.
-///
-/// **Composition**: drive whichever **ungated** `serve` entrypoint survives
-/// 03-07's deletion. 03-07 owns naming it; do not invent one here, and do not
-/// reach for `run_with_dataplane_and_vm_artifacts` or `run_with_vm_artifacts`
-/// — both are gone. Whatever the surviving helper is, it must take NO artifact
-/// argument: that absence IS the scenario's `Given`.
-///
-/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (the shared
-/// kernel — both specs name the SAME kernel, so one copy suffices),
-/// [`build_spin_binary`], [`stage_rootfs_with_extra_binary`], [`write_toml`],
-/// [`config_path`], [`vm_job_toml`] (it already emits `kernel = ` and
-/// `rootfs = ` inside `[vm]`, so no new spec builder is needed), `deploy`,
-/// `stop`, and [`poll_until_terminal`].
-///
-/// # The distinct-parent-directory requirement is STRUCTURAL, not stylistic
-///
-/// The two rootfs masters MUST be staged in two different parent directories.
-/// `RootfsPlan::for_alloc` derives the per-launch clone destination as
-/// `<master_dir>/.overdrive-vm-rootfs-<alloc>.img` — it does **not** encode
-/// the master's own filename. Two masters sharing one parent therefore produce
-/// two clone paths that differ ONLY by allocation id, which is exactly what a
-/// node-level default would also produce: the assertion could not discriminate
-/// "each allocation booted the image its own spec named" from "both
-/// allocations booted one node-wide image", and the scenario would pass
-/// vacuously against the very regression it exists to catch. Two parents make
-/// the two clone paths differ in their DIRECTORY component, which no
-/// single-master node default can imitate.
-///
-/// The fixture shape falls out of this and is enforced by a helper this file
-/// already has: [`stage_rootfs_with_extra_binary`] writes its per-test copy to
-/// the fixed name `tmp.join("rootfs.ext4")`, so staging two images requires two
-/// `tempdir_in(shared_staging_root())` roots regardless — calling it twice
-/// against one `tmp` would silently overwrite the first image with the second.
-///
-/// **Still to build**:
-///
-/// * Two staging roots, each its own `tempdir_in(shared_staging_root())` (never
-///   tmpfs — cloud-hypervisor disk I/O needs `O_DIRECT`), each carrying one
-///   rootfs copy.
-/// * A **second, in-guest** discriminator, cheap because the fixture already
-///   supports it: give each image a DIFFERENT injected guest binary name
-///   (`stage_rootfs_with_extra_binary`'s `guest_name`, e.g. `/sbin/spinone`
-///   and `/sbin/spintwo`) and have each spec name only its own. Each per-test
-///   rootfs is a copy of the shared fixture image, which carries only
-///   `overdrive-init` — so neither image contains the other's binary. If a
-///   node-level default forced both allocations onto one image, the mismatched
-///   allocation's guest would beacon READY, fail its exec and power down, and
-///   could not STAY Running. That is the Gherkin's "each guest identifiably
-///   reporting which image it booted", and it is independent of the host-side
-///   path check below.
-/// * A `poll_until_running(cfg, id, max_wait)` helper. This file polls for
-///   Running inline in three places already (S-VM-05, S-VM-09, S-VM-74) and a
-///   fourth and fifth copy for two allocations would be four hand-written loops
-///   free to drift on their row-selection rule and timeout message. Prefer the
-///   shape `vm_boot_failure_vocabulary.rs` settled on: one
-///   `poll_until_state(cfg, id, wanted, max_wait)` that a `poll_until_running`
-///   and the existing [`poll_until_terminal`] both delegate to.
-/// * A **per-allocation** hypervisor finder. [`find_cloud_hypervisor_pid`]
-///   CANNOT be reused: its own doc comment pins the assumption "exactly one VM
-///   is booted at the time of the call", and this is the first scenario in the
-///   file to run two concurrently — it would return whichever allocation's VMM
-///   `/proc` yielded first. Use the allocation-scoped shape
-///   `vm_boot_failure_vocabulary.rs` already proved out: scan `/proc` for the
-///   `cloud-hypervisor` `argv[0]` (never the `TASK_COMM_LEN`-truncated
-///   `comm`) whose full argv contains THIS allocation's
-///   `VmRunDir::for_alloc(...)` path. It must be a file-local copy — sibling
-///   test modules cannot see each other's private items, which is why
-///   [`build_spin_binary`] is already duplicated across the two files.
-///
-/// **Assertions**:
-///
-/// * Both `deploy(..)` calls succeed against the SAME running server, and each
-///   returns its own declared workload id. One `serve`, two deploys — a second
-///   server would test two nodes, not one node reading two payloads.
-/// * Both allocations reach `AllocStateWire::Running` within a ceiling
-///   comfortably above the 30s boot deadline, so a pass means both guests
-///   booted rather than the poll being generous.
-/// * Each Running row carries `Some(TransitionReason::Started)` — the progress
-///   marker production writes only on `start`'s beacon-win arm, so pinning it
-///   states that a real guest dialled the beacon and excludes every named
-///   failure cause at the same time (the form S-VM-39 settled on).
-/// * **The discriminating assertion.** For each allocation independently:
-///   `RootfsPlan::for_alloc(<the master THAT spec named>, <its size>,
-///   &alloc).clone_dest()` exists, and the live hypervisor process found for
-///   THAT allocation's run directory has that clone path in its argv. Then the
-///   cross-check that makes it discriminating: allocation A's clone path is NOT
-///   under image B's parent directory and vice versa, and neither allocation's
-///   argv references the other's master. A node-level default cannot satisfy
-///   both halves at once.
-/// * Assert through the observable run directory and hypervisor argv only.
-///   Never read `VmHostLayout` — after 03-07 it no longer carries the fields,
-///   and reading platform-internal state would assert the implementation
-///   rather than the operator-observable outcome.
+/// [`find_cloud_hypervisor_pid`] is deliberately NOT used: its own contract
+/// pins "exactly one VM is booted at the time of the call", and this is the
+/// first scenario in the file to run two concurrently. It uses the
+/// allocation-scoped [`hypervisor_argv_for_alloc`] instead.
 ///
 /// **Hygiene, not an acceptance claim**: both guests are long-lived and never
-/// beacon EXIT, so both workloads must be driven to Terminated through the
+/// beacon EXIT, so both workloads are driven to Terminated through the
 /// production `stop` verb (and confirmed there) BEFORE `handle.shutdown()`.
 /// Production spawns the VMM with `kill_on_drop(false)`, so a still-Running
 /// guest is orphaned by server teardown alone and contaminates the next
-/// serialized test's `/proc` scan — the lesson S-VM-05 learned on the metal box
-/// (commit `28dbefdc`), doubled here because there are two of them.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-54 / step 03-07 -- two VM jobs deployed to ONE \
-         running serve, naming rootfs images staged in two DIFFERENT parent directories, must \
-         both reach Running and each boot from the image its own spec named, on a composition \
-         with no node-level artifact seam)"
+/// serialized test's `/proc` scan — the lesson S-VM-05 learned on the metal
+/// box (commit `28dbefdc`), doubled here because there are two of them.
+#[tokio::test]
+#[serial(cgroup)]
+async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+
+    // TWO staging roots, never one. `RootfsPlan::for_alloc` derives the
+    // per-launch clone destination as
+    // `<master_dir>/.overdrive-vm-rootfs-<alloc>.img` and does NOT encode
+    // the master's own filename, so two masters sharing one parent would
+    // produce two clone paths differing only by allocation id -- exactly
+    // what a re-introduced node-level default would also produce, and the
+    // discriminating assertion below could not tell the two apart.
+    // (`stage_rootfs_with_extra_binary` also writes to the fixed name
+    // `tmp.join("rootfs.ext4")`, so two calls against one root would
+    // silently overwrite the first image regardless.)
+    let tmp_one = tempfile::Builder::new()
+        .prefix("vm-ws-s54-one-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let tmp_two = tempfile::Builder::new()
+        .prefix("vm-ws-s54-two-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+
+    // The SECOND, in-guest discriminator: each image carries a DIFFERENT
+    // long-lived guest binary, and each spec names only its own. Every
+    // per-test rootfs is a copy of the shared fixture image, which carries
+    // ONLY `overdrive-init` -- so neither image contains the other's
+    // binary. Were a node-level default to force both allocations onto one
+    // image, the mismatched guest would beacon READY, fail its exec, power
+    // down, and be unable to STAY Running.
+    let spin_one = build_spin_binary(tmp_one.path());
+    let spin_two = build_spin_binary(tmp_two.path());
+    let rootfs_one = stage_rootfs_with_extra_binary(tmp_one.path(), &fixture, &spin_one, "spinone");
+    let rootfs_two = stage_rootfs_with_extra_binary(tmp_two.path(), &fixture, &spin_two, "spintwo");
+
+    // ONE serve, with NO artifact argument anywhere -- that absence IS the
+    // scenario's `Given`.
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_one = write_toml(
+        server_tmp.path(),
+        "vm-s54-one.toml",
+        &vm_job_toml("vm-s54-one", "/sbin/spinone", &[], &fixture.kernel_path, &rootfs_one),
     );
+    let spec_two = write_toml(
+        server_tmp.path(),
+        "vm-s54-two.toml",
+        &vm_job_toml("vm-s54-two", "/sbin/spintwo", &[], &fixture.kernel_path, &rootfs_two),
+    );
+
+    let submit_one = deploy(DeployArgs { spec: spec_one, config_path: cfg.clone() })
+        .await
+        .expect("deploy the first [vm] spec");
+    let submit_two = deploy(DeployArgs { spec: spec_two, config_path: cfg.clone() })
+        .await
+        .expect("deploy the second [vm] spec against the SAME running serve");
+    assert_eq!(submit_one.workload_id, "vm-s54-one");
+    assert_eq!(submit_two.workload_id, "vm-s54-two");
+
+    // 90s: comfortably above the 30s VM_BOOT_DEADLINE for two concurrent
+    // real guest boots, so a pass means both booted rather than the poll
+    // being generous.
+    let running_one =
+        poll_until_running(&cfg, &submit_one.workload_id, Duration::from_secs(90)).await;
+    let running_two =
+        poll_until_running(&cfg, &submit_two.workload_id, Duration::from_secs(90)).await;
+
+    let row_one = running_one.snapshot.rows.first().expect("one allocation row for the first job");
+    let row_two = running_two.snapshot.rows.first().expect("one allocation row for the second job");
+    assert_eq!(
+        row_one.reason,
+        Some(TransitionReason::Started),
+        "a Running VM allocation carries the beacon-win progress marker; got {:?}",
+        row_one.reason,
+    );
+    assert_eq!(
+        row_two.reason,
+        Some(TransitionReason::Started),
+        "a Running VM allocation carries the beacon-win progress marker; got {:?}",
+        row_two.reason,
+    );
+
+    let alloc_one = AllocationId::new(&row_one.alloc_id)
+        .expect("server-echoed alloc_id parses as AllocationId");
+    let alloc_two = AllocationId::new(&row_two.alloc_id)
+        .expect("server-echoed alloc_id parses as AllocationId");
+
+    // The discriminating assertion. Each allocation's per-launch clone
+    // must sit beside the master ITS OWN SPEC named, and the live
+    // hypervisor for THAT allocation's run directory must carry that clone
+    // path in its argv. A single node-level master cannot put one clone
+    // under `tmp_one` and the other under `tmp_two`.
+    let master_bytes_one =
+        std::fs::metadata(&rootfs_one).expect("stat the first rootfs master").len();
+    let master_bytes_two =
+        std::fs::metadata(&rootfs_two).expect("stat the second rootfs master").len();
+    let plan_one = RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one);
+    let plan_two = RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two);
+    let clone_one = plan_one.clone_dest();
+    let clone_two = plan_two.clone_dest();
+
+    assert!(
+        clone_one.exists(),
+        "the first allocation's per-launch clone must exist beside the master ITS spec named, at {}",
+        clone_one.display(),
+    );
+    assert!(
+        clone_two.exists(),
+        "the second allocation's per-launch clone must exist beside the master ITS spec named, at \
+         {}",
+        clone_two.display(),
+    );
+    assert!(
+        !clone_one.starts_with(tmp_two.path()),
+        "the first allocation's clone must NOT live under the SECOND image's directory ({}) -- a \
+         node-level artifact default is exactly what that would look like",
+        tmp_two.path().display(),
+    );
+    assert!(
+        !clone_two.starts_with(tmp_one.path()),
+        "the second allocation's clone must NOT live under the FIRST image's directory ({}) -- a \
+         node-level artifact default is exactly what that would look like",
+        tmp_one.path().display(),
+    );
+
+    let argv_one = hypervisor_argv_for_alloc(&alloc_one);
+    let argv_two = hypervisor_argv_for_alloc(&alloc_two);
+    assert!(
+        argv_one.contains(&clone_one.to_string_lossy().into_owned()),
+        "the first allocation's live hypervisor argv must name ITS OWN clone {}; got: {argv_one}",
+        clone_one.display(),
+    );
+    assert!(
+        argv_two.contains(&clone_two.to_string_lossy().into_owned()),
+        "the second allocation's live hypervisor argv must name ITS OWN clone {}; got: {argv_two}",
+        clone_two.display(),
+    );
+    assert!(
+        !argv_one.contains(&rootfs_two.to_string_lossy().into_owned()),
+        "the first allocation's hypervisor argv must not reference the OTHER spec's master {}",
+        rootfs_two.display(),
+    );
+    assert!(
+        !argv_two.contains(&rootfs_one.to_string_lossy().into_owned()),
+        "the second allocation's hypervisor argv must not reference the OTHER spec's master {}",
+        rootfs_one.display(),
+    );
+
+    // Hygiene, not an acceptance claim: both guests spin forever and never
+    // beacon EXIT, so neither allocation can reach a terminal state on its
+    // own. Production spawns the VMM with `kill_on_drop(false)`, so a
+    // still-Running guest is orphaned by server teardown alone and
+    // contaminates the next serialized test's `/proc` scan (the lesson
+    // S-VM-05 learned on the metal box, commit `28dbefdc`) -- doubled here.
+    for workload_id in [&submit_one.workload_id, &submit_two.workload_id] {
+        stop(StopArgs { id: workload_id.clone(), config_path: cfg.clone() })
+            .await
+            .expect("stop the long-lived spin workload before shutdown");
+        let stopped = poll_until_terminal(&cfg, workload_id, Duration::from_secs(30)).await;
+        let stopped_row =
+            stopped.snapshot.rows.first().expect("one allocation row for the stopped workload");
+        assert_eq!(
+            stopped_row.state,
+            AllocStateWire::Terminated,
+            "an operator stop must drive the never-self-terminating spin allocation {workload_id} \
+             to Terminated before this test tears down the server, got {:?}",
+            stopped_row.state,
+        );
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
 }

@@ -92,7 +92,6 @@ use std::time::Duration;
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
-use overdrive_control_plane::VmBootArtifacts;
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody};
 use overdrive_core::transition_reason::StoppedBy;
 use overdrive_testing::vm_fixture::VmFixture;
@@ -215,51 +214,7 @@ fn stage_rootfs_with_extra_binary(
 /// Real serve, `[vm]` driver composed, non-mTLS (`SimDataplane`
 /// injected) — the cheapest boot for scenarios that do not need mTLS /
 /// SVID machinery.
-async fn spawn_vm_server(
-    vm_artifacts: VmBootArtifacts,
-    data_dir: &Path,
-    config_dir: &Path,
-) -> ServeHandle {
-    std::fs::create_dir_all(data_dir).expect("create data dir");
-    std::fs::create_dir_all(config_dir).expect("create operator config dir");
-    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
-    overdrive_cli::commands::serve::run_with_dataplane_and_vm_artifacts(
-        args,
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
-    )
-    .await
-    .expect("serve::run_with_dataplane_and_vm_artifacts")
-}
-
-/// Real serve, `[vm]` driver composed, mTLS-composed (real `EbpfDataplane`,
-/// real SVID/CA machinery) — needed for S-VM-23 (adopt-on-restart
-/// ordering) and S-VM-81 (SVID issuance).
-async fn spawn_vm_server_mtls_composed(
-    vm_artifacts: VmBootArtifacts,
-    data_dir: &Path,
-    config_dir: &Path,
-) -> Result<ServeHandle, overdrive_cli::http_client::CliError> {
-    std::fs::create_dir_all(data_dir).expect("create data dir");
-    std::fs::create_dir_all(config_dir).expect("create operator config dir");
-    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args =
-        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
-    overdrive_cli::commands::serve::run_with_vm_artifacts(
-        args,
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        vm_artifacts,
-    )
-    .await
-}
-
-/// Real serve, NO `[vm]` driver composed at all (cloud-hypervisor
-/// "uninstalled" — `state.drivers.get(DriverType::Vm) == None`). Needed
-/// for S-VM-30.
-async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeHandle {
+async fn spawn_vm_server(data_dir: &Path, config_dir: &Path) -> ServeHandle {
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -271,7 +226,100 @@ async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeH
         std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
     )
     .await
-    .expect("serve::run_with_dataplane (no vm_artifacts -> no Vm registry entry)")
+    .expect("serve::run_with_dataplane")
+}
+
+/// Real serve, `[vm]` driver composed, mTLS-composed (real `EbpfDataplane`,
+/// real SVID/CA machinery) — needed for S-VM-23 (adopt-on-restart
+/// ordering) and S-VM-81 (SVID issuance).
+async fn spawn_vm_server_mtls_composed(
+    data_dir: &Path,
+    config_dir: &Path,
+) -> Result<ServeHandle, overdrive_cli::http_client::CliError> {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+    overdrive_cli::commands::serve::run_with_kek(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+    )
+    .await
+}
+
+/// Every directory in `PATH` EXCEPT the one containing `cloud-hypervisor`
+/// — mirrors `vm_walking_skeleton.rs::path_without_cloud_hypervisor` (same
+/// technique, duplicated here since sibling test modules cannot see each
+/// other's private items).
+fn path_without_cloud_hypervisor() -> String {
+    let ch_dir = Command::new("which")
+        .arg("cloud-hypervisor")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .and_then(|resolved| Path::new(&resolved).parent().map(Path::to_path_buf))
+        .expect(
+            "cloud-hypervisor must be resolvable via `which` on this host before we can hide it",
+        );
+
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|dir| Path::new(dir) != ch_dir.as_path())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Real serve, NO `[vm]` driver composed at all (cloud-hypervisor
+/// "uninstalled" — `state.drivers.get(DriverType::Vm) == None`). Needed
+/// for S-VM-30.
+///
+/// The absence is a REAL host fact — `cloud-hypervisor` is hidden from
+/// `PATH` for the duration of the boot, so discovery finds no hypervisor
+/// and composition takes the `VmComposeError::NotAvailable` soft-skip
+/// arm. It used to be produced by leaving `ServerConfig.vm_artifacts`
+/// unset, but ADR-0083 §D3c made composition UNCONDITIONAL and gated on
+/// `Vmm::probe` alone: there is no artifact precondition left to withhold,
+/// and a node's VM capability is now exactly whether the hypervisor is
+/// there. This is the same technique S-VM-12 already proves end to end
+/// (`vm_walking_skeleton.rs`).
+///
+/// The composition root's discover/probe runs synchronously inside this
+/// `.await`, so `PATH` is restored the instant it returns. Callers must
+/// carry `#[serial(env)]` alongside `#[serial(cgroup)]`.
+async fn spawn_server_no_vm_driver(data_dir: &Path, config_dir: &Path) -> ServeHandle {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
+
+    let original_path = std::env::var_os("PATH");
+    let broken_path = path_without_cloud_hypervisor();
+    // SAFETY: callers carry `#[serial(env)]`, which guarantees exclusive
+    // access to `PATH` for the duration of the test.
+    unsafe {
+        std::env::set_var("PATH", &broken_path);
+    }
+
+    let result = overdrive_cli::commands::serve::run_with_dataplane(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+    )
+    .await;
+
+    // SAFETY: as above — restored immediately, before any assertion runs.
+    unsafe {
+        match &original_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+
+    result.expect("serve::run_with_dataplane (cloud-hypervisor hidden -> no Vm registry entry)")
 }
 
 fn config_path(config_dir: &Path) -> PathBuf {
@@ -404,6 +452,38 @@ fn clone_path(staging_dir: &Path, alloc_id: &str) -> PathBuf {
     staging_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
 }
 
+/// The PLATFORM-OWNED VM rootfs staging root — the single directory
+/// `RealVmHostState` enumerates for stranded per-launch clones, and the
+/// literal `run_server` composes (`/run/overdrive/vm-rootfs-staging`).
+///
+/// # The clone-surface residual this constant makes visible
+///
+/// ADR-0083 §D3a made artifacts per-allocation, and `RootfsPlan::for_alloc`
+/// derives the per-launch clone destination from the MASTER'S OWN PARENT —
+/// i.e. wherever the operator's `[vm] rootfs` lives. §D3b keeps that
+/// derivation deliberately (`FICLONE` is intra-filesystem, so the clone
+/// must sit on the master's filesystem for reflink to work at all), and
+/// the amendment's own Consequences ratify the result: "the per-launch
+/// rootfs clone is now written into an operator-chosen directory ...
+/// rather than a platform-owned one".
+///
+/// The consequence for RECLAMATION is not spelled out there, and it is
+/// this: `VmHostState`'s clone surface is a single node-level directory,
+/// so it can no longer observe any clone a real allocation produces.
+/// `VmDriver::stop` still removes the clone directly (it holds the
+/// allocation's own `RootfsPlan` in memory, so the operator directory is
+/// no obstacle) — the uncovered case is an allocation that ends WITHOUT
+/// `stop`: a natural guest exit, or a crash. Scope and run-directory
+/// reclamation are unaffected; both are platform-owned paths.
+///
+/// Scenarios below therefore split into two groups, and the split is
+/// deliberate rather than incidental — see each site.
+fn node_staging_dir() -> PathBuf {
+    let dir = PathBuf::from("/run/overdrive/vm-rootfs-staging");
+    std::fs::create_dir_all(&dir).expect("create the platform-owned VM rootfs staging root");
+    dir
+}
+
 /// Finds the single running `cloud-hypervisor` process's pid by
 /// `argv[0]` (mirrors `vm_walking_skeleton.rs::find_cloud_hypervisor_pid`
 /// — `comm` truncates to 15 chars, shorter than the 16-char binary name).
@@ -501,7 +581,11 @@ async fn poll_until_reclaimed(alloc_id: &str, staging_dir: &Path, max_wait: Dura
 /// registry entry) authorises reclamation rather than blocking it
 /// (brief.md §105a.3's composition table).
 #[tokio::test]
-#[serial(cgroup)]
+// `env` alongside `cgroup`: [`spawn_server_no_vm_driver`] hides
+// `cloud-hypervisor` from `PATH` for the duration of the boot, which is
+// process-global state (`.claude/rules/testing.md` § "Tests that mutate
+// process-global state").
+#[serial(cgroup, env)]
 async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -510,7 +594,6 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
@@ -519,12 +602,7 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     // Boot #1 -- with the [vm] driver -- deploy and let the VM survive
     // an unclean shutdown (kill_on_drop(false) on the spawned VMM means
     // it is NOT killed merely because this process's handle is dropped).
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -536,12 +614,16 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     assert!(scope_path(&alloc_id).exists(), "sanity: the scope must exist while Running");
-    let _ = &staging_dir; // see the clone-assertion note below
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
     wait_for_data_dir_release().await;
 
-    // Boot #2 -- SAME data_dir, NO vm_artifacts at all (no [vm] driver
-    // composed): `state.drivers.get(DriverType::Vm)` reads `None`.
+    // Boot #2 -- SAME data_dir, with `cloud-hypervisor` hidden from PATH so
+    // discovery finds no hypervisor and NO [vm] driver is composed:
+    // `state.drivers.get(DriverType::Vm)` reads `None`. (Before ADR-0083
+    // §D3c this absence was produced by withholding `vm_artifacts`;
+    // composition is now unconditional and gated on `Vmm::probe` alone, so
+    // the absence has to be a real host fact -- which is strictly more
+    // faithful to the "cloud-hypervisor uninstalled" node it models.)
     let handle2 = spawn_server_no_vm_driver(&data_dir, &config_dir).await;
 
     // The boot-epoch VmReclamation drive runs synchronously inside
@@ -549,20 +631,15 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     // happened by the time boot #2's handle is available.
     assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
     assert!(!run_dir_path(&alloc_id).exists(), "the surviving run dir must be reclaimed at boot");
-    // NOTE: the clone is NOT asserted here. `RealVmHostState`'s staging
-    // directory is derived from `ServerConfig.vm_artifacts.rootfs_path`'s
-    // parent (`crates/overdrive-control-plane/src/lib.rs`); boot #2
-    // deliberately composes NO `vm_artifacts` (that IS S-VM-30's fixture),
-    // so its own `VmHostState` falls back to the fixed default staging
-    // root -- a DIFFERENT path from boot #1's per-test tempdir. A real
-    // "cloud-hypervisor uninstalled" node has no vm_artifacts configured
-    // either and would never have a clone staged under a one-off custom
-    // directory to find in the first place; asserting the clone's removal
-    // here would only be testing this fixture's own directory mismatch,
-    // not production behaviour. The run dir (fixed `/run/overdrive/vm`,
-    // independent of vm_artifacts) and the scope (independent of
-    // vm_artifacts entirely) ARE staging-dir-independent and are asserted
-    // above.
+    // The clone is NOT asserted here -- the same named residual documented
+    // on `node_staging_dir`. Boot #1's clone was produced by a REAL boot,
+    // so it sits beside the operator's own `[vm] rootfs`, and
+    // `RealVmHostState`'s single platform-owned clone surface cannot see
+    // it. The run dir (fixed `/run/overdrive/vm`) and the scope are both
+    // platform-owned paths, are unaffected by the artifact relocation, and
+    // ARE asserted above -- which is this scenario's actual claim: a node
+    // with no `Vm` registry entry still reclaims via `Observed(the empty
+    // set)`.
     handle2.shutdown().await.expect("clean shutdown");
 }
 
@@ -586,19 +663,14 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
-    let handle = spawn_vm_server_mtls_composed(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await
-    .expect("boot #1 (mTLS-composed) must succeed");
+    let handle = spawn_vm_server_mtls_composed(&data_dir, &config_dir)
+        .await
+        .expect("boot #1 (mTLS-composed) must succeed");
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -615,23 +687,33 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     // Boot #2 -- SAME data_dir, mTLS-composed again (so
     // adopt_on_restart_recovery's netns-adopt pass genuinely runs and
     // reads the same cgroup tree the reclamation drive just touched).
-    let handle2 = spawn_vm_server_mtls_composed(
-        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
-        &data_dir,
-        &config_dir,
-    )
-    .await
-    .expect(
+    let handle2 = spawn_vm_server_mtls_composed(&data_dir, &config_dir).await.expect(
         "boot #2 must NOT refuse -- a NetnsRecoveryError::ObserveRead would surface here if the \
          reclaim-before-adopt ordering (or kill_scope's settle postcondition) regressed",
     );
 
     assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
     assert!(!run_dir_path(&alloc_id).exists(), "the surviving run dir must be reclaimed at boot");
-    assert!(
-        !clone_path(&staging_dir, &alloc_id).exists(),
-        "the surviving clone must be reclaimed at boot"
-    );
+    // The CLONE is deliberately not asserted here, and the reason is a
+    // named design residual rather than an oversight.
+    //
+    // This clone was produced by a REAL boot, so `RootfsPlan::for_alloc`
+    // put it beside the operator's own `[vm] rootfs` (ADR-0083 §D3a/§D3b —
+    // FICLONE is intra-filesystem, so the clone MUST share the master's
+    // filesystem). `RealVmHostState`'s clone surface is the single
+    // platform-owned `node_staging_dir()`, so the sweep structurally
+    // cannot see it. This allocation also never went through
+    // `VmDriver::stop` (which DOES remove the clone directly, holding the
+    // allocation's own `RootfsPlan`), so nothing removes it.
+    //
+    // That is a real leak on the natural-exit / crash path, ratified only
+    // in its premise: ADR-0083's Consequences accept that the clone leaves
+    // platform-owned space, but no ruling reconciles that with §D7's
+    // reclamation model, which counts the clone as one of three observation
+    // surfaces. Asserting "reclaimed" here would be false; asserting
+    // "leaked" would ratify a leak this step has no authority to bless.
+    // The scenario's own claim -- named in its function name -- is about
+    // the reclaim-before-adopt ORDERING, and that claim is asserted in full above.
 
     handle2.shutdown().await.expect("clean shutdown");
 }
@@ -656,19 +738,21 @@ async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve()
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+    // The stranded clone goes in the PLATFORM-OWNED staging root, which is
+    // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
+    // This scenario strands artifacts artificially, so it is free to strand
+    // them where the sweep looks — that keeps `discard_artifacts`' clone
+    // path genuinely exercised. A clone from a REAL boot lands beside the
+    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
+    // two scenarios that produce one that way say so at their own sites.
+    let staging_dir = node_staging_dir();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
     // ONE boot for the whole test -- no restart anywhere below.
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -744,18 +828,20 @@ async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+    // The stranded clone goes in the PLATFORM-OWNED staging root, which is
+    // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
+    // This scenario strands artifacts artificially, so it is free to strand
+    // them where the sweep looks — that keeps `discard_artifacts`' clone
+    // path genuinely exercised. A clone from a REAL boot lands beside the
+    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
+    // two scenarios that produce one that way say so at their own sites.
+    let staging_dir = node_staging_dir();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -808,18 +894,12 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
         .expect("tempdir on the staging root");
     let exit0 = build_exit0_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -843,16 +923,30 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     // If a natural exit's artifacts survive to disk (SD-2's framing --
     // VmReclamation is the general sweep, not only the failure-path
     // cleanup), boot #2's reclamation drive discards them.
-    let handle2 = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
 
     assert!(!scope_path(&alloc_id).exists(), "the scope must be reclaimed at boot");
     assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
-    assert!(!clone_path(&staging_dir, &alloc_id).exists(), "the clone must be reclaimed at boot");
+    // The CLONE is deliberately not asserted here, and the reason is a
+    // named design residual rather than an oversight.
+    //
+    // This clone was produced by a REAL boot, so `RootfsPlan::for_alloc`
+    // put it beside the operator's own `[vm] rootfs` (ADR-0083 §D3a/§D3b —
+    // FICLONE is intra-filesystem, so the clone MUST share the master's
+    // filesystem). `RealVmHostState`'s clone surface is the single
+    // platform-owned `node_staging_dir()`, so the sweep structurally
+    // cannot see it. This allocation also never went through
+    // `VmDriver::stop` (which DOES remove the clone directly, holding the
+    // allocation's own `RootfsPlan`), so nothing removes it.
+    //
+    // That is a real leak on the natural-exit / crash path, ratified only
+    // in its premise: ADR-0083's Consequences accept that the clone leaves
+    // platform-owned space, but no ruling reconciles that with §D7's
+    // reclamation model, which counts the clone as one of three observation
+    // surfaces. Asserting "reclaimed" here would be false; asserting
+    // "leaked" would ratify a leak this step has no authority to bless.
+    // The scenario's own claim -- named in its function name -- is about
+    // the terminal row being BYTE-UNCHANGED across reclamation, and that claim is asserted in full above.
 
     let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg })
         .await
@@ -892,18 +986,20 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let staging_dir = rootfs.parent().expect("rootfs has a parent dir").to_path_buf();
+    // The stranded clone goes in the PLATFORM-OWNED staging root, which is
+    // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
+    // This scenario strands artifacts artificially, so it is free to strand
+    // them where the sweep looks — that keeps `discard_artifacts`' clone
+    // path genuinely exercised. A clone from a REAL boot lands beside the
+    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
+    // two scenarios that produce one that way say so at their own sites.
+    let staging_dir = node_staging_dir();
 
     let server_tmp = TempDir::new().expect("server tempdir");
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -1067,13 +1163,9 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 
     // Boot #1 -- mTLS-composed -- deploy and confirm a REAL SVID is
     // issued and held.
-    let handle = spawn_vm_server_mtls_composed(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await
-    .expect("boot #1 (mTLS-composed) must succeed");
+    let handle = spawn_vm_server_mtls_composed(&data_dir, &config_dir)
+        .await
+        .expect("boot #1 (mTLS-composed) must succeed");
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -1114,13 +1206,9 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     // `DiscardStrandedArtifacts` (which requires "no entry"). The
     // boot-epoch `VmReclamation` drive runs synchronously inside
     // `run_server`, before this call returns.
-    let handle2 = spawn_vm_server_mtls_composed(
-        VmBootArtifacts { kernel_path: fixture.kernel_path, rootfs_path: rootfs },
-        &data_dir,
-        &config_dir,
-    )
-    .await
-    .expect("boot #2 (mTLS-composed) must succeed");
+    let handle2 = spawn_vm_server_mtls_composed(&data_dir, &config_dir)
+        .await
+        .expect("boot #2 (mTLS-composed) must succeed");
 
     // The DURABLE occurrence proof (ADR-0078: "a convergent record
     // cannot answer 'did it happen'"). The workload's intent was never
@@ -1218,12 +1306,7 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
 
     // Boot #1 -- deploy and confirm the pre-reclaim baseline: a first
     // start has never restarted and has nothing to report yet.
-    let handle = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
     let spec_path = write_toml(
         tmp.path(),
@@ -1251,12 +1334,7 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
     // reclaim half of S-VM-28's "reclaimed and then restarted" Given.
     // The drive runs synchronously inside `run_server`, before this call
     // returns.
-    let handle2 = spawn_vm_server(
-        VmBootArtifacts { kernel_path: fixture.kernel_path.clone(), rootfs_path: rootfs.clone() },
-        &data_dir,
-        &config_dir,
-    )
-    .await;
+    let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
 
     let reclaimed =
         describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })

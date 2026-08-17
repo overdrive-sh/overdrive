@@ -36,8 +36,7 @@ use overdrive_core::traits::vmm::{
 };
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, RootfsPlan, VmConfig, VmConfinement, VmRunDir,
-    VmmIdentity,
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
@@ -69,29 +68,40 @@ async fn yield_for_task_poll() {
 /// master rootfs file `SimVmm::create` FICLONE-copies, a
 /// pre-validated synthetic-ELF [`KernelImage`], and a dedicated
 /// `run`/`cgroup` subtree so parallel tests never collide.
-fn build_layout(tmp: &TempDir) -> VmHostLayout {
-    let rootfs_master = tmp.path().join("master.img");
-    std::fs::write(&rootfs_master, b"deterministic-fixture-rootfs-bytes")
-        .expect("write synthetic master rootfs");
 
-    let kernel_path = tmp.path().join("vmlinuz");
+/// The kernel image this fixture stages, and the path the `[vm]` spec
+/// built by [`build_spec`] names. ADR-0083 §D3a: artifacts are
+/// per-allocation, so the driver reads THIS path out of the spec's own
+/// `VmPayload` — there is no node-level artifact anywhere to fall back to.
+fn fixture_kernel_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("vmlinuz")
+}
+
+/// The master rootfs image this fixture stages, and the path the `[vm]`
+/// spec built by [`build_spec`] names.
+fn fixture_rootfs_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("master.img")
+}
+
+/// Stage both artifacts on disk. The bytes must REALLY be there:
+/// `VmDriver::start` opens the path the spec names and re-validates the
+/// kernel header for every allocation (ADR-0082 §D2.4 / ADR-0083 §D3b),
+/// which is what makes a deleted or replaced artifact observable as an
+/// allocation failure. Called by [`build_layout`], which every test
+/// invokes before [`build_spec`].
+fn stage_fixture_artifacts(tmp: &TempDir) {
+    std::fs::write(fixture_rootfs_path(tmp), b"deterministic-fixture-rootfs-bytes")
+        .expect("write synthetic master rootfs");
     let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
     header[..4].copy_from_slice(b"\x7fELF");
-    // The bytes must really be on disk: `VmDriver::start` reopens the
-    // CONFIGURED kernel path and re-validates it for every allocation
-    // (ADR-0082 §D2.4), which is what makes a post-composition
-    // delete/replace observable as an allocation failure. A fixture that
-    // validated a path it never staged modelled a host whose kernel does
-    // not exist — previously unobservable, now correctly rejected.
-    std::fs::write(&kernel_path, &header).expect("stage the synthetic kernel image");
-    let kernel = KernelImage::validate(kernel_path, HostArch::X86_64, &header)
-        .expect("synthetic ELF header validates");
+    std::fs::write(fixture_kernel_path(tmp), &header).expect("stage the synthetic kernel image");
+}
 
+fn build_layout(tmp: &TempDir) -> VmHostLayout {
+    stage_fixture_artifacts(tmp);
     VmHostLayout {
         cgroup_root: tmp.path().join("cgroup"),
         run_dir_root: tmp.path().join("run"),
-        rootfs_master,
-        kernel,
         arch: HostArch::X86_64,
         vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
@@ -101,15 +111,18 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
     }
 }
 
-fn build_spec(alloc: &AllocationId) -> AllocationSpec {
+fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-driver-test/alloc/x")
             .expect("valid spiffe id"),
-        driver: overdrive_core::traits::driver::DriverPayload::Exec(
-            overdrive_core::traits::driver::ExecPayload {
+        driver: overdrive_core::traits::driver::DriverPayload::Vm(
+            overdrive_core::traits::driver::VmPayload {
                 command: "/sbin/init".to_owned(),
                 args: vec![],
+                kernel: fixture_kernel_path(tmp),
+                rootfs: fixture_rootfs_path(tmp),
+                volumes: vec![],
             },
         ),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -246,14 +259,14 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let rootfs_master = layout.rootfs_master.clone();
+    let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     sim.inject_create_failure();
     let (driver, _clock, cgroup_fs) = build_driver_with_cgroup_fs(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let err = driver.start(&spec).await.expect_err("Vmm::create failure rejects start");
     assert!(matches!(err, overdrive_core::traits::driver::DriverError::StartRejected { .. }));
@@ -311,7 +324,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let rootfs_master = layout.rootfs_master.clone();
+    let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
@@ -319,7 +332,7 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
         build_driver_with_cgroup_fs(std::sync::Arc::new(dies_before_beacon), layout);
 
     let alloc = AllocationId::new("alloc-exit-before-beacon").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let err = driver.start(&spec).await.expect_err("VMM exit before beacon rejects start");
     assert!(matches!(err, overdrive_core::traits::driver::DriverError::StartRejected { .. }));
@@ -380,14 +393,14 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let rootfs_master = layout.rootfs_master.clone();
+    let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new();
     let (driver, clock, cgroup_fs) =
         build_driver_with_cgroup_fs(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-deadline").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let driver_for_task = driver.clone();
     let spec_owned = spec.clone();
@@ -484,7 +497,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     let (driver, _clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-exit-report").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let mut exit_rx = driver.take_exit_receiver().expect("exit receiver available exactly once");
 
@@ -533,7 +546,7 @@ async fn start_writes_exec_message_with_spec_command_and_args_before_returning_o
     let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-exec-write").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let (_handle, stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
@@ -638,7 +651,7 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let (driver, _clock) = build_driver(std::sync::Arc::new(vmm), layout);
 
     let alloc = AllocationId::new("alloc-stop-a").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     // Nothing ever dials the beacon or ticks the clock — start() stays
     // parked in the three-way race for the whole test, landing on
@@ -698,7 +711,7 @@ async fn stop_sequence_b_unresponsive_guest_escalates_after_deadline() {
     let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-stop-b").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let (handle, _unresponsive_stream) =
         start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
@@ -736,7 +749,7 @@ async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-stop-c").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
@@ -788,7 +801,7 @@ async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let (driver, clock) = build_driver(std::sync::Arc::new(sim.clone()), layout);
 
     let alloc = AllocationId::new("alloc-stop-d").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
@@ -888,7 +901,7 @@ async fn stop_ok_then_status_reports_not_found() {
     let (driver, clock) = build_driver(std::sync::Arc::new(never_signals_exit), layout);
 
     let alloc = AllocationId::new("alloc-stop-then-status").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
@@ -925,7 +938,7 @@ async fn live_allocations_reports_membership_and_release_supervision_is_idempote
     let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
 
     let alloc = AllocationId::new("alloc-live-report").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     assert_eq!(driver.live_allocations(), Some(Vec::new()), "nothing live before start");
 

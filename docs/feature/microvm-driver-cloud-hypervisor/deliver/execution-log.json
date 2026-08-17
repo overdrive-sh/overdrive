@@ -974,6 +974,27 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: Checkpoint commit 4243e849 landed the verified S-VM-39 half (1 file, Step-Id + Task-Id trailers, clean tree, fmt+clippy clean, 9/9 in-file and 31/31 across all Tier-3 VM modules on metal, no orphaned hypervisor processes). The step's COMMIT gate is NOT met and this is deliberately not logged PASS: one '#[should_panic(expected = \"RED scaffold\")]' remains (S-VM-40), so 'zero RED scaffold markers' and 'both scenarios reach Running' are unsatisfied. Blocker is the same as GREEN's - S-VM-40 needs the Schedule execution subsystem deferred by ADR-0051 OQ-5 / ADR-0064 OQ-5 (GH #166). Awaiting a scope ruling; no GitHub issue created (CLAUDE.md forbids unilateral issue creation). Re-dispatch cleanly once scope is ruled.",
       "t": "2026-08-17T09:37:58Z"
+    },
+    {
+      "sid": "03-07",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T12:07:20Z"
+    },
+    {
+      "sid": "03-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-08-17T12:37:15Z"
+    },
+    {
+      "sid": "03-07",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN gate not met - 5 vm_reclamation_tier3 scenarios fail on clone_gone=false. ADR-0083 D3a puts the per-launch rootfs clone in the operator-named rootfs dir while D7 requires RealVmHostState to enumerate it from the platform-owned node staging dir; no ruling reconciles them. Cannot commit a red bar.",
+      "t": "2026-08-17T12:37:20Z"
     }
   ]
 }

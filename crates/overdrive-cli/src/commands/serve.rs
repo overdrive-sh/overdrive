@@ -150,56 +150,32 @@ pub async fn run_with_dataplane(
     run_inner(args, Some(dataplane), kek, |c| c).await
 }
 
-/// Test-only sibling of [`run_with_dataplane`] that ALSO points the
-/// composition root at real, pre-staged VM boot artifacts.
+/// Test-only sibling of [`run`] (NOT of [`run_with_dataplane`]) that
+/// injects only the KEK, leaving `dataplane_override` **unset**.
 ///
-/// ADR-0082 / ADR-0083, GH #42, step 01-08 — the 01-04 `vm_fixture`'s
-/// staged kernel + ext4 rootfs. `overdrive serve` then attempts the real
-/// discover→probe→insert sequence for the `Vm` driver (production
-/// `run_server`'s own composition, unchanged from every other caller):
-/// a `[vm]` deploy against the resulting handle drives a REAL Cloud
-/// Hypervisor VM. Gated behind `integration-tests` — mirrors
-/// `ServerConfig.vm_artifacts`'s own gate. The `VmBootArtifacts` type is
-/// itself gated the same way, so it is threaded in via a closure over
-/// `ServerConfig` — that keeps `run_inner`'s own signature free of the
-/// gated type, since `run_inner` is also called from the two ungated
-/// siblings above.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_dataplane_and_vm_artifacts(
-    args: ServeArgs,
-    dataplane: Arc<dyn Dataplane>,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
-        vm_artifacts: Some(vm_artifacts),
-        ..c
-    })
-    .await
-}
-
-/// Test-only sibling of [`run`] (NOT of [`run_with_dataplane`]) used only
-/// to prove the mTLS-composition invariant against a REAL `[vm]` boot.
+/// Production `run_server` therefore composes the real `EbpfDataplane`
+/// and `compose_mtls = dataplane_override.is_none()` evaluates `true`,
+/// exactly as it does on the production `run` path — which is the whole
+/// point: S-VM-05 / S-VM-74 exist to re-prove the GH #248 / ADR-0074
+/// trap closed against a mesh-composed boot. The KEK is still injected
+/// (a hermetic `SimKek`) because the production `SystemdCredsKeyring`
+/// refuses to boot in a cold environment, and KEK choice is orthogonal
+/// to the mTLS-composition gate this sibling exercises.
 ///
-/// S-VM-05 / S-VM-74, GH #248 / ADR-0074 trap. Unlike
-/// [`run_with_dataplane_and_vm_artifacts`], this sibling leaves
-/// `dataplane_override` **unset** — production `run_server` therefore
-/// composes the real `EbpfDataplane` and `compose_mtls =
-/// dataplane_override.is_none()` evaluates `true`, exactly as it does on
-/// the production `run` path. The KEK is still injected (a hermetic
-/// `SimKek`) since KEK choice is orthogonal to the mTLS-composition gate
-/// this sibling exists to exercise faithfully.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_vm_artifacts(
+/// Takes no VM artifacts and carries no `#[cfg]`. It is the survivor of
+/// the deleted `run_with_vm_artifacts` (ADR-0083 §D3a): with artifacts
+/// per-allocation there is nothing node-level left to pass, and the gate
+/// that used to exist only because the artifact TYPE was gated has no
+/// remaining reason to. A `[vm]` deploy against the resulting handle
+/// drives a REAL Cloud Hypervisor VM off the paths its own spec names.
+pub async fn run_with_kek(
     args: ServeArgs,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
 ) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, move |c| ServerConfig { vm_artifacts: Some(vm_artifacts), ..c })
-        .await
+    run_inner(args, None, kek, |c| c).await
 }
 
-/// Test-only sibling of [`run_with_dataplane_and_vm_artifacts`] that ALSO
+/// Test-only sibling of [`run_with_dataplane`] that ALSO
 /// injects a `ServerConfig.vmm_override` (ADR-0083 §D8, GH #42, step 01-09).
 ///
 /// A real in-process `overdrive serve` runs the SAME discover → probe →
@@ -215,11 +191,9 @@ pub async fn run_with_dataplane_and_vmm_override(
     args: ServeArgs,
     dataplane: Arc<dyn Dataplane>,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vm_artifacts: overdrive_control_plane::VmBootArtifacts,
     vmm_override: Arc<dyn overdrive_core::traits::vmm::Vmm>,
 ) -> Result<ServeHandle, CliError> {
     run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
-        vm_artifacts: Some(vm_artifacts),
         vmm_override: Some(vmm_override),
         ..c
     })

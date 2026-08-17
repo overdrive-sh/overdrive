@@ -14,6 +14,7 @@
 
 use std::num::NonZeroU8;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,16 +23,15 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverError, DriverPayload, DriverStartClass, DriverType, ExecPayload,
-    Resources, VmStartFailure,
+    AllocationSpec, Driver, DriverError, DriverPayload, DriverStartClass, DriverType, Resources,
+    VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelImage, RootfsPlan, VmConfig, VmConfinement, VmRunDir,
-    VmmIdentity,
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
@@ -43,25 +43,39 @@ use tempfile::TempDir;
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
 // ---------------------------------------------------------------------
 
-fn build_layout(tmp: &TempDir) -> VmHostLayout {
-    let rootfs_master = tmp.path().join("master.img");
-    std::fs::write(&rootfs_master, b"deterministic-fixture-rootfs-bytes")
-        .expect("write synthetic master rootfs");
+/// The kernel image this fixture stages, and the path the `[vm]` spec
+/// built by [`build_spec`] names. ADR-0083 §D3a: artifacts are
+/// per-allocation, so the driver reads THIS path out of the spec's own
+/// `VmPayload` — there is no node-level artifact anywhere to fall back to.
+fn fixture_kernel_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("vmlinuz")
+}
 
-    let kernel_path = tmp.path().join("vmlinuz");
+/// The master rootfs image this fixture stages, and the path the `[vm]`
+/// spec built by [`build_spec`] names.
+fn fixture_rootfs_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("master.img")
+}
+
+/// Stage both artifacts on disk. The bytes must REALLY be there:
+/// `VmDriver::start` opens the path the spec names and re-validates the
+/// kernel header for every allocation (ADR-0082 §D2.4 / ADR-0083 §D3b),
+/// which is what makes a deleted or replaced artifact observable as an
+/// allocation failure. Called by [`build_layout`], which every test
+/// invokes before [`build_spec`].
+fn stage_fixture_artifacts(tmp: &TempDir) {
+    std::fs::write(fixture_rootfs_path(tmp), b"deterministic-fixture-rootfs-bytes")
+        .expect("write synthetic master rootfs");
     let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
     header[..4].copy_from_slice(b"\x7fELF");
-    // The driver re-reads this path per allocation, so the bytes must
-    // really be on disk — not merely validated in memory.
-    std::fs::write(&kernel_path, &header).expect("write synthetic kernel image");
-    let kernel = KernelImage::validate(kernel_path, HostArch::X86_64, &header)
-        .expect("synthetic ELF header validates");
+    std::fs::write(fixture_kernel_path(tmp), &header).expect("stage the synthetic kernel image");
+}
 
+fn build_layout(tmp: &TempDir) -> VmHostLayout {
+    stage_fixture_artifacts(tmp);
     VmHostLayout {
         cgroup_root: tmp.path().join("cgroup"),
         run_dir_root: tmp.path().join("run"),
-        rootfs_master,
-        kernel,
         arch: HostArch::X86_64,
         vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
@@ -71,12 +85,18 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
     }
 }
 
-fn build_spec(alloc: &AllocationId) -> AllocationSpec {
+fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-fail/alloc/x")
             .expect("valid spiffe id"),
-        driver: DriverPayload::Exec(ExecPayload { command: "/sbin/init".to_owned(), args: vec![] }),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/sbin/init".to_owned(),
+            args: vec![],
+            kernel: fixture_kernel_path(tmp),
+            rootfs: fixture_rootfs_path(tmp),
+            volumes: vec![],
+        }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         netns: None,
@@ -227,7 +247,8 @@ async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
         let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
         let alloc = AllocationId::new("alloc-wording").expect("valid alloc id");
 
-        let err = driver.start(&build_spec(&alloc)).await.expect_err("create failure rejects");
+        let err =
+            driver.start(&build_spec(&alloc, &tmp)).await.expect_err("create failure rejects");
         let (class, detail) = expect_vm_class(err);
         observed.push((class, detail));
     }
@@ -264,7 +285,7 @@ async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
     let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
     let alloc = AllocationId::new("alloc-verbatim").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc)).await.expect_err("create failure rejects");
+    let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("create failure rejects");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -294,7 +315,8 @@ async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail(
     let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
     let alloc = AllocationId::new("alloc-early-exit").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc)).await.expect_err("early VMM exit rejects start");
+    let err =
+        driver.start(&build_spec(&alloc, &tmp)).await.expect_err("early VMM exit rejects start");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -320,7 +342,7 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
         SilentButNoisy { console: "[    0.78] Run /sbin/init as init process\npanic: no init" };
     let (driver, clock, _fs) = build_driver(Arc::new(vmm), layout);
     let alloc = AllocationId::new("alloc-deadline-tail").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let driver_task = driver.clone();
     let spec_owned = spec.clone();
@@ -373,11 +395,11 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     // Delete the configured rootfs so BOTH attempts fail identically.
-    std::fs::remove_file(&layout.rootfs_master).expect("remove the configured rootfs master");
-    let configured = layout.rootfs_master.display().to_string();
+    std::fs::remove_file(&fixture_rootfs_path(&tmp)).expect("remove the configured rootfs master");
+    let configured = fixture_rootfs_path(&tmp).display().to_string();
     let (driver, _clock, _fs) = build_driver(Arc::new(SimVmm::new()), layout);
     let alloc = AllocationId::new("alloc-restart-parity").expect("valid alloc id");
-    let spec = build_spec(&alloc);
+    let spec = build_spec(&alloc, &tmp);
 
     let first = expect_vm_class(driver.start(&spec).await.expect_err("initial start rejects"));
     let second = expect_vm_class(driver.start(&spec).await.expect_err("restart start rejects"));
@@ -401,12 +423,12 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let rootfs_master = layout.rootfs_master.clone();
+        let rootfs_master = fixture_rootfs_path(&tmp);
 
         let sim = SimVmm::new();
         let vmm: Arc<dyn Vmm> = match arm {
             "preflight" => {
-                std::fs::remove_file(&layout.rootfs_master).expect("remove configured rootfs");
+                std::fs::remove_file(&fixture_rootfs_path(&tmp)).expect("remove configured rootfs");
                 Arc::new(sim.clone())
             }
             "create" => {
@@ -420,7 +442,7 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
 
         let (driver, _clock, cgroup_fs) = build_driver(vmm, layout);
         let alloc = AllocationId::new("alloc-cleanup").expect("valid alloc id");
-        let err = driver.start(&build_spec(&alloc)).await.expect_err("start rejects");
+        let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("start rejects");
         assert!(matches!(err, DriverError::StartRejected { .. }), "[{arm}] must reject");
 
         assert_eq!(
@@ -470,7 +492,7 @@ async fn a_permission_error_is_never_reported_as_a_missing_artifact() {
     let (driver, _clock, _fs) = build_driver(Arc::new(vmm), layout);
     let alloc = AllocationId::new("alloc-eacces").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc)).await.expect_err("io failure rejects start");
+    let err = driver.start(&build_spec(&alloc, &tmp)).await.expect_err("io failure rejects start");
     let failure = expect_rejection(err);
 
     assert!(

@@ -29,8 +29,9 @@ use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources, VmStartFailure,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
+    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
+    VmStartFailure,
 };
 use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
@@ -129,16 +130,23 @@ fn classify_vmm_error(err: &VmmError) -> DriverError {
     }
 }
 
-/// Per-allocation kernel preflight (ADR-0082 §D2.4): reopen the CONFIGURED
-/// path, read the same bounded magic window, and re-run the pure validator
-/// immediately before `Vmm::create`.
+/// Per-allocation kernel preflight (ADR-0082 §D2.4, ADR-0083 §D3b): open
+/// the path THIS allocation's `[vm]` spec names, read a bounded magic
+/// window, and run the pure validator immediately before `Vmm::create`.
 ///
-/// This is what makes a post-composition delete/replace observable as an
-/// allocation failure instead of a process-startup refusal — the kernel was
-/// validated once at `serve` boot, and this proves it is still loadable for
-/// THIS start. Reads only; it never writes the path or its directory.
-async fn preflight_kernel(kernel: &KernelImage, arch: HostArch) -> Result<(), DriverError> {
-    let path = kernel.path().to_path_buf();
+/// This is the ONLY site where a guest kernel is validated. Artifacts are
+/// per-allocation (§D3a), so there is no node-wide kernel to have proven
+/// once at boot — the proof is scoped to the allocation that names the
+/// path, which is the only honest scope for a per-workload input.
+/// `KernelImage::validate` stays the sole constructor of [`KernelImage`];
+/// this returns the value it built rather than discarding it, so
+/// [`VmConfig`] can consume it. Reads only; it never writes the path or
+/// its directory.
+async fn preflight_kernel(
+    path: &std::path::Path,
+    arch: HostArch,
+) -> Result<KernelImage, DriverError> {
+    let path = path.to_path_buf();
     let header = match read_kernel_magic_window(&path).await {
         Ok(header) => header,
         // The detail NAMES the configured path, mirroring the rootfs
@@ -161,7 +169,7 @@ async fn preflight_kernel(kernel: &KernelImage, arch: HostArch) -> Result<(), Dr
 
     // The validator's own diagnosis is the payload — never the
     // hypervisor's misleading firmware-size-cap wording (C-7).
-    KernelImage::validate(path.clone(), arch, &header).map(|_| ()).map_err(|format_err| {
+    KernelImage::validate(path.clone(), arch, &header).map_err(|format_err| {
         start_rejected(
             VmStartFailure::KernelFormatUnsupported {
                 path: path.display().to_string(),
@@ -173,7 +181,7 @@ async fn preflight_kernel(kernel: &KernelImage, arch: HostArch) -> Result<(), Dr
     })
 }
 
-/// Read at most [`KERNEL_MAGIC_WINDOW`] bytes off the configured kernel.
+/// Read at most [`KERNEL_MAGIC_WINDOW`] bytes off the named kernel.
 /// A short file is not an error here — the pure validator decides whether
 /// the bytes it got constitute a loadable image.
 async fn read_kernel_magic_window(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
@@ -189,21 +197,21 @@ async fn read_kernel_magic_window(path: &std::path::Path) -> std::io::Result<Vec
 // VmHostLayout — the per-node, fixed VM-boot template this slice needs
 // ---------------------------------------------------------------------
 
-/// The node-level, per-launch-invariant inputs `VmDriver::start` needs
-/// to build a [`VmConfig`] that `AllocationSpec` (generic across every
-/// driver type) does not carry.
+/// The genuinely node-invariant inputs `VmDriver::start` needs to build a
+/// [`VmConfig`] that `AllocationSpec` (generic across every driver type)
+/// does not carry.
 ///
-/// Slice 01 ships a single fixed template per node — no per-allocation
-/// BYO kernel/rootfs surface exists yet (that is Slice 04 / a future
-/// operator-facing spec); the production composition root (the
-/// `DriverRegistry` step) is what reads real files and validates the
-/// real kernel header into this value ONCE at boot, mirroring
-/// `Vmm::probe`'s "prove it once, use it many times" shape.
+/// **Artifacts are NOT here** (ADR-0083 §D3a): the guest kernel and rootfs
+/// are per-allocation, read from that allocation's own `VmPayload`
+/// (`[vm] kernel` / `[vm] rootfs`), never from node state. There is no
+/// node-level artifact configuration anywhere in the process — that is
+/// what makes two workloads on one node able to boot two different
+/// images, and what lets GH #259's image factory fill the same
+/// `VmPayload` fields without `VmDriver` changing at all. Every field
+/// that remains is a property of the HOST, not of a workload.
 ///
 /// Every field is `pub` and there is no validating constructor beyond
-/// what the field types themselves already enforce (`KernelImage` is
-/// pre-validated by [`KernelImage::validate`]; the paths are free-form
-/// until the imperative shell touches the filesystem) — this is
+/// what the field types themselves already enforce — this is
 /// `VmDriver`-internal plumbing, not a port or a cross-crate contract.
 #[derive(Debug, Clone)]
 pub struct VmHostLayout {
@@ -214,13 +222,9 @@ pub struct VmHostLayout {
     /// Root directory under which per-allocation [`VmRunDir`]s are
     /// created (SD-2 — tmpfs in production).
     pub run_dir_root: PathBuf,
-    /// The operator's read-only master rootfs image, FICLONE'd
-    /// per-launch by [`overdrive_core::traits::vmm::Vmm::create`].
-    pub rootfs_master: PathBuf,
-    /// The pre-validated guest kernel image.
-    pub kernel: KernelImage,
     /// Host CPU architecture — selects the guest cmdline's console
-    /// token via [`KernelCmdline::platform_default`].
+    /// token via [`KernelCmdline::platform_default`], and the
+    /// architecture each allocation's kernel is validated against.
     pub arch: HostArch,
     /// Fixed vcpu count for this slice's single VM template.
     pub vcpus: NonZeroU8,
@@ -459,6 +463,26 @@ impl VmDriver {
     /// cleanup call and its trigger point are unchanged from the
     /// pre-split body.
     async fn provision_vmm(&self, spec: &AllocationSpec) -> Result<ProvisionedVmm, DriverError> {
+        // ADR-0083 §D3a: the kernel and rootfs are THIS allocation's own,
+        // read from the `[vm]` block the operator wrote. There is no
+        // node-level artifact anywhere to fall back to, which is exactly
+        // why the platform can no longer silently ignore what the spec
+        // named. `VmPayload`'s fields are already `pub`, so the refutable
+        // binding reaches them and states the routing precondition in the
+        // same breath — no accessor is added to `DriverPayload`.
+        //
+        // A non-`Vm` payload reaching `VmDriver` is a registry-ROUTING
+        // defect, not a VM-start failure, so it takes the existing
+        // `DriverStartClass::Unclassified` fallback rather than minting a
+        // class of its own. It runs before step 0 below: nothing has been
+        // claimed or provisioned yet, so there is nothing to release.
+        let DriverPayload::Vm(payload) = &spec.driver else {
+            return Err(start_rejected_unclassified(format!(
+                "VmDriver received a {} payload",
+                spec.driver.driver_type()
+            )));
+        };
+
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
         // load-bearing — see ADR-0082 §D4 / brief §103's "the claim is
@@ -474,10 +498,13 @@ impl VmDriver {
         // Per-allocation artifact preflight (ADR-0082 §D2.4). Runs before
         // anything else is provisioned so a deleted/replaced kernel costs
         // no scope, no clone, and no hypervisor spawn.
-        if let Err(rejection) = preflight_kernel(&self.layout.kernel, self.layout.arch).await {
-            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
-            return Err(rejection);
-        }
+        let kernel = match preflight_kernel(&payload.kernel, self.layout.arch).await {
+            Ok(kernel) => kernel,
+            Err(rejection) => {
+                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
+                return Err(rejection);
+            }
+        };
 
         // The listener must exist before the guest can dial (SD-1
         // handoff item 6's pinned start-path ordering).
@@ -523,11 +550,11 @@ impl VmDriver {
         // is NOT relabelled as absence — it reaches the unknown fallback,
         // so the operator never gets "file missing" remediation for a
         // permissions problem (`.claude/rules/development.md` § Errors).
-        let master_bytes = match tokio::fs::metadata(&self.layout.rootfs_master).await {
+        let master_bytes = match tokio::fs::metadata(&payload.rootfs).await {
             Ok(meta) => meta.len(),
             Err(err) => {
                 self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
-                let configured = self.layout.rootfs_master.display().to_string();
+                let configured = payload.rootfs.display().to_string();
                 let detail = format!("stat rootfs master {configured}: {err}");
                 return Err(if err.kind() == std::io::ErrorKind::NotFound {
                     start_rejected(VmStartFailure::RootfsNotFound { path: configured }, detail)
@@ -536,12 +563,11 @@ impl VmDriver {
                 });
             }
         };
-        let rootfs =
-            RootfsPlan::for_alloc(self.layout.rootfs_master.clone(), master_bytes, &spec.alloc);
+        let rootfs = RootfsPlan::for_alloc(payload.rootfs.clone(), master_bytes, &spec.alloc);
         let cmdline = KernelCmdline::platform_default(self.layout.arch);
         let config = VmConfig {
             alloc: spec.alloc.clone(),
-            kernel: self.layout.kernel.clone(),
+            kernel,
             rootfs: rootfs.clone(),
             cmdline,
             memory,
