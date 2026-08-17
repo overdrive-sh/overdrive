@@ -615,15 +615,14 @@
         },
         {
           "id": "03-04",
-          "name": "[vm] + [job] / [vm] + [schedule] accepted, scheduled, and run",
-          "description": "The complementary positive cases close Slice-02's full promise: VM job and scheduled-VM specs are admitted, scheduled, and reach Running through the production VmDriver path.",
+          "name": "[vm] + [job] accepted, scheduled, and run",
+          "description": "The complementary positive case: a VM job spec is admitted, scheduled, and reaches Running through the production VmDriver path. The [schedule] + [vm] half (S-VM-40) is descoped — schedule execution does not exist (deploy_streaming rejects the kind: \"schedule submission is not yet implemented (ADR-0051 OQ-5)\"), and is tracked on GH #166.",
           "criteria": [
             "S-VM-39: a spec declaring [job] + [vm] is accepted and scheduled, and its VM allocation reaches Running through the production VmDriver path.",
-            "S-VM-40: a spec declaring [schedule] (cron) + [vm] is accepted and scheduled, and when its first firing becomes due its VM allocation reaches Running through the production VmDriver path.",
             "The S-VM-38 rejection remains scoped to [service] + [vm]; neither positive path is blocked by that semantic check."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
-          "scenario_name": "S-VM-39, S-VM-40",
+          "scenario_name": "S-VM-39",
           "implementation_scope": {
             "source_directories": [
               "crates/overdrive-core/src/aggregate/workload_spec.rs"
@@ -635,8 +634,8 @@
           "dependencies": [
             "03-03"
           ],
-          "effort_hours": 3,
-          "implementation_notes": "TEST PARADIGM: Tier 3, integration-tests + kvm-tests, one immediate job example and one first-firing schedule example. These are both a regression guard that 03-03 is scoped to [service] and the production-entry proof required by Slice 02's existing 'accepted and run' acceptance line. S-VM-40 is now explicitly @requires-kvm because its Then reaches Running; DWD-24 updates the feature count from 45 to 46 without changing the 88-scenario total. The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient."
+          "effort_hours": 2,
+          "implementation_notes": "TEST PARADIGM: Tier 3, integration-tests + kvm-tests, one immediate job example. This is both a regression guard that 03-03 is scoped to [service] and the production-entry proof required by Slice 02's 'accepted and run' acceptance line. The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient. DESCOPED (2026-08-17): S-VM-40 ([schedule] + [vm]) is removed from this step. Schedule execution has no producer — `deploy_streaming` rejects WorkloadSpecInput::Schedule outright (ADR-0051 OQ-5), and there is no cron evaluation and no ScheduleLifecycle reconciler, so \"when its first firing becomes due\" cannot be driven. Building it is the scope of GH #166 (Scheduled job execution semantics), which now carries a comment naming the VM dimension: a scheduled firing must allocate onto DriverType::Vm, ConcurrencyPolicy must reclaim a running microVM, and boot failures must classify through the typed DriverStartFailure contract. The RED scaffold `scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due` stays in vm_boot_failure_vocabulary.rs as the waiting test for #166 — do not delete it."
         }
       ]
     },
