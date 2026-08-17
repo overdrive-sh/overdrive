@@ -2138,6 +2138,203 @@ touched or created.
 
 ---
 
+### DWD-25 — The `[vm]` spec's own `kernel`/`rootfs` become the artifact contract; the node-level `vm_artifacts` seam is deleted and VM composition goes unconditional (2026-08-17, DESIGN ruling — Morgan, GH #42)
+
+**Recorded into the DISTILL log by the DESIGN wave (`nw-solution-architect`)
+per explicit dispatch. Docs and roadmap only — no Rust source, test source,
+execution log, history file, or GitHub issue is touched or created.**
+
+**The finding, executed rather than asserted.** Verification expectation
+`E06-vm-job-deploy-reaches-running` drove a **default-features** `overdrive`
+binary on a real x86_64 + KVM host (SHA `655ac964`, `SEED=1`). Sub-claim 0
+(the box can boot a guest) and sub-claim 1 (`deploy` exits 0, prints
+`Accepted.`) pass. Sub-claims 2 and 3 are **refuted**: the allocation sits
+`Failed` for all 45 polls and `resource_delta.txt` reads
+`new_hypervisors=0 new_run_dirs=0 new_scopes=0`. The operator surface names
+the cause itself:
+
+```
+    reason: driver internal error: no vm driver composed on this node
+```
+
+KPI **K4** — "the production composition path can reach the VM driver via
+`overdrive serve` + `overdrive deploy`… with **no** test-only wiring", the
+feature's own binary pass/fail bar (`feature-delta.md:2398`, instrumented by
+this catalogue at `:2427`) — therefore reads **NOT MET**. This is the
+precedent the feature's risk register named in advance at
+`feature-delta.md:2445`: *"the mechanism composes but no production path
+reaches it."*
+
+**Investigation (from the source, not assumed).** Five facts, each verified:
+
+1. `ServerConfig.vm_artifacts: Option<VmBootArtifacts>` is
+   `#[cfg(feature = "integration-tests")]`, as are `VmBootArtifacts` itself,
+   `compose_vm_driver`, the composition block guarded by `if let
+   Some(artifacts) = config.vm_artifacts.clone()`, and the two `serve`
+   entrypoints that set it (`run_with_dataplane_and_vm_artifacts`,
+   `run_with_vm_artifacts`). `main.rs` calls the production
+   `serve::run(args)`, which leaves the field unset. So
+   `vm_artifacts = Some(_)` is **a state only a test seam can produce**.
+2. `ServeArgs` carries `bind`, `data_dir`, `config_dir` and nothing else; the
+   clap `Serve` variant exposes `--bind` and `--data-dir`. The only config
+   file in the CLI is the ADR-0019 trust triple at
+   `<config_dir>/.overdrive/config`, whose schema is
+   `{current-context, contexts[].{name,endpoint,ca,crt,key}}` — a TLS identity
+   artifact with no `ServerConfig` relationship whatsoever.
+3. **The per-allocation artifact surface already exists and is already
+   ratified.** ADR-0083 § D3 declares `VmPayload.kernel: PathBuf` and
+   `.rootfs: PathBuf`, both annotated `// operator surface, BYO artifact`;
+   § D4's `[vm]` block carries both keys; the 2026-08-12 amendment persists
+   them in the `V2` envelope.
+4. **Those values are carried faithfully all the way to the driver and then
+   ignored.** `[vm]` TOML → `VmInput` (`deny_unknown_fields`) → wire DTO →
+   `JobV2::from_submit` → rkyv `Vm { command, args, kernel, rootfs }` →
+   `WorkloadLifecycle` (both the `StartAllocation` and `RestartAllocation`
+   arms) → `DriverPayload::Vm(VmPayload { kernel: PathBuf::from(kernel),
+   rootfs: PathBuf::from(rootfs), .. })` → action shim passes `spec` through
+   unmodified → `driver.start(&spec)`. But `VmDriver::provision_vmm` reads
+   `self.layout.kernel` and `self.layout.rootfs_master`, and `spec.driver` is
+   touched exactly twice in the whole file — at the `.command()` / `.args()`
+   accessors — and is **never** pattern-matched into its `Vm` arm.
+5. E06's runner already deploys a spec whose `[vm]` block names `kernel` and
+   `rootfs`. It was authored against the per-allocation shape.
+
+So the platform has two candidate artifact contracts: one ratified by ADR-0083
+and fully plumbed but unread, and one implemented but reachable only from a
+test seam. **The gap is not a missing config surface. It is a consumer reading
+the wrong source.**
+
+**Ruling — per-allocation. No new operator surface is created; four items are
+deleted.** Pinned in full as ADR-0083's 2026-08-17 amendment (§§ D3a–D3e) with
+the `VmHostLayout` / `KernelImage::validate` consequences in ADR-0082's
+2026-08-17 amendment. In short:
+
+- `VmDriver::provision_vmm` binds `let DriverPayload::Vm(payload) =
+  &spec.driver else { … }` and uses `payload.kernel` / `payload.rootfs`. No
+  accessor is added to `DriverPayload` — `VmPayload`'s fields are already
+  `pub`. A non-`Vm` payload takes the existing
+  `DriverStartClass::Unclassified { driver: DriverType::Vm }` fallback.
+- `VmHostLayout` sheds exactly two fields (`kernel`, `rootfs_master`); its own
+  "single fixed template per node" doc comment becomes false and is corrected
+  in the same commit.
+- `VmBootArtifacts`, `ServerConfig.vm_artifacts`,
+  `run_with_dataplane_and_vm_artifacts` and `run_with_vm_artifacts` are
+  **deleted, not ungated** — with artifacts arriving per allocation there is
+  no node-level artifact to configure, so the seam has no production
+  counterpart to promote. Test callers move the paths into the `[vm]` spec
+  they deploy, which is what an operator does.
+- `vmm_override` and `run_with_dataplane_and_vmm_override` **stay gated**:
+  ADR-0083 § D8's adapter-substitution fault seam is a genuine test-only
+  capability with no production analogue, and is untouched.
+- `compose_vm_driver` and its call site lose the `#[cfg]` and the `if let`;
+  composition is discover → probe → insert, gated only by `Vmm::probe`.
+
+**Why not node-level `serve` flags.** Considered and rejected on four counts,
+recorded in the ADR: it contradicts ADR-0083 § D3 and would make the platform
+silently ignore what the operator wrote in the spec; it is strictly *larger*
+(a clap surface + `ServeArgs` field + `main.rs` plumbing + validation, while
+*keeping* all four deleted items); it does not survive GH #259, which resolves
+per-workload images that a node-wide template cannot express; and it would
+require rewriting E06's runner to match the implementation — self-assessment
+of the kind `.claude/rules/verification.md` § Enforcement rejects. Under the
+ruling, E06 re-runs **unchanged**.
+
+**Earned Trust is preserved, not traded away.** The *hypervisor capability* is
+still proven once at boot by `Vmm::probe` (reflink, binary, `/dev/kvm`, run
+dir) — that is what "prove it once, use it many times" was always about. The
+*artifact* is proven per allocation by `preflight_kernel`, which already
+re-reads the path and re-runs `KernelImage::validate` immediately before
+`Vmm::create` and already calls itself a "Per-allocation kernel preflight".
+Only the redundant boot-time validation of a node-wide path disappears, with
+the path itself. `VmStartFailure::{KernelNotFound, RootfsNotFound,
+KernelFormatUnsupported}` keep naming the exact path — now the one the
+operator actually wrote.
+
+**Capability absence — reuse the typed contract, mint nothing.** A node whose
+`Vmm::probe` fails still boots with no `Vm` entry (absence stays a first-class
+answer). The dispatch-time registry-miss keeps
+`DriverStartClass::Unclassified { driver }` — the action shim "owns
+persistence only" and must carry no per-driver branch — and its `detail`
+becomes operator-actionable, naming the capability and pointing at the boot
+log's `driver.vm.not_composed` reason. Per DWD-24, `detail` is free-form
+verbatim text and **never** a classification input, so no contract changes.
+**No new `TransitionReason` variant** because: the registry miss is
+driver-kind-generic (a `Vm`-prefixed variant would be the wrong shape, a
+generic one duplicates `DriverInternalError`); reusing
+`VmStartFailure::HypervisorAbsent { searched }` would force the shim to
+synthesise driver-specific knowledge it does not have; and the properly typed
+answer is the **admission-time** rejection ADR-0083 § D2 already designs,
+which DWD-23 is the record of. **This entry does not build the admission-time
+gate and promises nothing about when it is built** — it is out of scope, and
+no forward pointer is written in its place. DWD-23 recorded "no GitHub issue
+created — follow-up surfaced for approval"; that remains true, no number is
+invented, and none is implied (CLAUDE.md § "Deferrals require GitHub issues").
+
+**Supersession, stated plainly.** `[vm] kernel` / `[vm] rootfs` are a slicing
+mechanism, not a product commitment (user ruling 2026-08-11,
+`feature-delta.md:4229`). GH
+[#259](https://github.com/overdrive-sh/overdrive/issues/259) deletes both keys
+and replaces them with an image reference; the factory then resolves that
+reference into host paths and fills the same `VmPayload` fields, leaving
+`VmDriver` unchanged. One cut at one boundary — available only because
+artifacts are per-allocation.
+
+**Adjacent-doc and call-site fallout, named rather than left to rot.** Steps
+03-05 and 03-06 landed S-VM-33/34/35/36/41 against "the path `serve` composed
+against". All five are unchanged in substance and no ID moves; their fixtures
+must now mutate the path the *spec* names, and the shared
+`VmBootArtifacts`-taking `spawn_vm_server` helper disappears. Deleting
+`VmBootArtifacts` breaks **every** call site that names it — roughly thirty
+across `vm_walking_skeleton.rs`, `vm_boot_failure_vocabulary.rs` and
+`vm_reclamation_tier3.rs`, **plus one outside the VM test files entirely**,
+`overdrive-control-plane/tests/integration/workload_lifecycle/
+convergence_loop_spawned_in_production_boot.rs` (`vm_artifacts: None`), which
+would otherwise be an unscoped compile break. Step 03-07 owns all of it
+(CLAUDE.md § "Behavior change must mark stale adjacent docs").
+
+**Two residuals recorded honestly, neither solved here.** (1) `Vmm::probe`'s
+reflink check runs against the adapter's own `image_dir` (`/srv/vm`), while
+the per-launch `FICLONE` now targets the *operator's* rootfs directory —
+`FICLONE` is intra-filesystem, so the boot probe no longer proves the clone
+will succeed, and today that failure renders as an *unclassified*
+internal-shaped error. S-VM-94 already owns the fail-closed behaviour and its
+target becomes the operator-named path; **no `VmStartFailure` variant is
+minted here** (new `core` API surface, and the right moment to type it is when
+S-VM-94 is implemented). **E06 cannot catch this** — it stages under
+`/srv/vm/overdrive-testing`, beneath the probe's own default. (2) The
+per-launch clone is now written into an operator-chosen directory, which may
+be read-only or shared; no operator surface exists to redirect it. Both are in
+ADR-0083's Consequences.
+
+**Ordering is encoded in the graph, not asserted in prose.** Phases 04/05/06
+have **not** executed and both 04-01 and 05-02 edit `vm_driver.rs`, the file
+03-07 restructures. The leading step of each — 04-01, 05-01, 06-01 — therefore
+takes an explicit dependency on 03-07, so an orchestrator reading
+`roadmap.json` cannot start them first.
+
+**Scenarios.** Two added, taking the two lowest genuinely-unused IDs per this
+file's established gap-reuse practice (the same rule DWD-14 applied when it
+filled gap 41): **S-VM-54** (a configured-by-spec VM job runs end to end
+through the shipped binary — the in-tree companion to E06) and **S-VM-82** (a
+node without the hypervisor capability reports what is absent, actionably).
+Count 88 → 90. No scenario removed, renumbered, or re-tagged.
+
+**Roadmap.** Two steps appended to phase 03 as **03-07** and **03-08** — every
+phase-03 step has already executed, so nothing is reordered and no execution
+history is rewritten. Both must precede phases 04/05/06, whose behaviour is
+otherwise unverifiable through production. Phase 03's display name widens to
+name the second concern; no dependency references a phase name.
+
+**Files touched by this entry.** `docs/product/architecture/adr-0082-…md`
+(2026-08-17 amendment), `adr-0083-…md` (2026-08-17 amendment §§ D3a–D3e); this
+`wave-decisions.md` entry and Changelog; `distill/test-scenarios.md`
+(S-VM-54, S-VM-82); `feature-delta.md` (§ *Wave: DELIVER / [WHY] Upstream
+Issues*); `deliver/roadmap.json` (steps 03-07, 03-08; phase-03 name). No
+`brief.md`, Rust source, test source, `CLAUDE.md`, execution log, progress
+file, or issue is touched or created. No commit made by this pass.
+
+---
+
 ## Changelog
 
 - 2026-08-11 — Initial DISTILL wave decisions captured. 0 contradictions in reconciliation (both the orchestrator's pre-verified summary and this session's independent full read agree). 74 scenarios across 9 user stories + 1 cross-cutting reconciler + 3 port-contract-enforcement scenarios, tagged and traced to all 10 KPIs. Walking skeleton: S-VM-01, one scenario, Slice 01. Adapter strategy: this project's four-tier model (Tier 1 in-memory default lane / Tier 3 real-Lima `integration-tests` lane), with `Sim*` fault injection at the port boundary for substrate-lie scenarios. Mandate 7 scaffolding: scoped to Slice 01 + three cross-cutting pure-function scenarios (15 scaffolds, verified compiling and RED by execution — `cargo check`, `cargo clippy -D warnings`, `cargo nextest run`, all clean); the remaining 59 scenarios' scaffolds are deferred to DELIVER's per-slice RED phase with exact file placement already committed in DWD-04. Two drafting corrections made and recorded (DWD-07): the no-subprocess CLI convention, and three dangling scenario references closed.
@@ -2156,3 +2353,4 @@ touched or created.
 - 2026-08-14 — Alloc→driver index MISS disposition ruled (DWD-22), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-08 review's MAJOR finding D1. ADR-0083 §D2a(b) pinned a typed `ShimError::UnknownDriverForAlloc { alloc_id }` on an `alloc_drivers` index miss; the shipped `resolve_drivers_for_alloc` (`action_shim/mod.rs:668-678`) instead **broadcasts** the stop/terminal call to every composed driver, and the variant exists nowhere in the tree. Investigated the four consumer arms (`FinalizeFailed` `:1291`, `RestartAllocation` stop-half `:1604`, `StopAllocation` `:1858`/`:1922`) and the regression that forced the fallback (`stable_does_not_stop_probe_supervision.rs` calls `on_alloc_running` directly, leaving the per-boot index empty). Ruled **(a) bless the broadcast, retire the typed-error pin**: the ADR's rationale attacked a strawman (broadcast reaches the *owning* driver — including `VmDriver` — so no orphan is stranded, unlike the "route to `ExecDriver`" fallback it feared), and the typed error taken literally would route a legitimate per-boot miss to nobody and *create* the orphan SD-1 prevents; runtime confirmed safe (every `Driver::stop`/`on_alloc_*` is NotFound-tolerant/no-op). Options (b)/(c) rejected — they reintroduce the orphan on the stop arms. **No code change** — the shipped code and all four call-site comments already match the amended contract; the crafter only confirms the § D2a(b) citations resolve to the amended text, and MUST NOT implement `UnknownDriverForAlloc`. Amended ADR-0083 § D2a(b) + `brief.md` § 104; § D3 / § D2a(c) name no typed error and are untouched. `deliver/roadmap.json` not touched (no code change ⇒ no AC/scope edit). No `test-scenarios.md` or Rust file touched. No GitHub issue created.
 - 2026-08-14 — `[vm]` "at admission" capability rejection ruled (DWD-23), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the 01-09 review's MEDIUM finding D2. Roadmap step 01-09 AC #1 promised "rejects `[vm]` at admission"; the shipped behavior admits the spec (`Inserted`) and rejects at DISPATCH (`action_shim` `drivers.get(kind) → None → StartRejected → Failed` naming the capability, S-VM-12) — SAFE, but not "at admission," and never in 01-09's `handlers.rs`-excluding scope. Ruled **(b)**: "at admission" stays required DESIGN intent (SD-5, ADR-0083 §§ D1/D2/D4, `brief.md` § 104); the dispatch-time fallback is ratified as a SAFE INTERIM and STAYS as multi-node-ready defense-in-depth; the admission gate (`handlers.rs::submit_workload` → `state.drivers.supports(..)` before `put_if_absent`, a cheap addition since `AppState.drivers` + `DriverRegistry::{supports,kinds}` exist since 01-08) is scoped to a **follow-up step, pending user build-vs-defer approval**. Option (a) (ratify dispatch-time, drop "at admission") rejected — discards deliberate design, contradicts § D4's "the deploy still fails." Reworded step 01-09 AC #1 to shipped behavior + `implementation_notes` scope note; added implementation-status notes to `brief.md` § 104 + ADR-0083 status header; SPECIFIED (not applied — docs-only) the `action_shim`/`error.rs`/`vm_walking_skeleton.rs` "step 01-09" comment corrections. **No GitHub issue created — follow-up surfaced for approval.**
 - 2026-08-16 — Phase-03 typed driver-failure upstream resolution ruled (DWD-24). `StartRejected.reason: String` and `classify_driver_failure` are retired in favor of exact `DriverStartFailure` / Exec / VM classes and a pure exhaustive conversion to `TransitionReason`; Exec's observable classes and verbatim detail stay unchanged; unknown VM/VMM failures reuse `DriverInternalError`. Checkpoint `3222f030` is retained honestly as completed old 03-01 with no scenario ownership. Roadmap adds 03-05 (typed contract + S-VM-34 vertical proof) and 03-06 (S-VM-33/35/36/41), then preserves 03-02/03/04 for S-VM-37/38/39/40 with corrected dependencies. S-VM-33/41 receive reachable post-composition TOCTOU Givens; S-VM-39/40 now prove the VM runs, making S-VM-40 the 46th `@requires-kvm` scenario. Total remains 88; no scenario removed or renumbered. No code, test source, execution log/history, issue, or commit.
+- 2026-08-17 — Production artifact supply ruled (DWD-25), a DESIGN-wave ruling (Morgan, `nw-solution-architect`) recorded into the DISTILL log per dispatch, closing the K4 gap that verification expectation E06 measured as NOT MET on a real x86_64 + KVM host (SHA `655ac964`: `deploy` accepted, allocation `Failed` with `no vm driver composed on this node`, `new_hypervisors=0`). Root cause is **not** a missing config surface: ADR-0083 § D3's `VmPayload.kernel`/`.rootfs` are already ratified, already `[vm]`-parsed, already `V2`-persisted and already carried intact to `driver.start(&spec)` — `VmDriver::provision_vmm` simply reads `self.layout.*` instead and never matches `spec.driver`'s `Vm` arm. Ruled **per-allocation**: the driver binds `let DriverPayload::Vm(payload) = &spec.driver else { … }` (no new accessor — the fields are already `pub`); `VmHostLayout` sheds `kernel`/`rootfs_master`; `VmBootArtifacts`, `ServerConfig.vm_artifacts`, `run_with_dataplane_and_vm_artifacts` and `run_with_vm_artifacts` are **deleted, not ungated** (with artifacts per-allocation there is no node-level artifact to configure, so the test seam has no production counterpart to promote — CLAUDE.md § "Ground the premise"); `vmm_override` stays gated as ADR-0083 § D8's genuine fault seam; `compose_vm_driver` and its call site go unconditional, gated only by `Vmm::probe`. Node-level `--vm-kernel`/`--vm-rootfs` flags rejected on four counts (contradicts § D3 and would silently ignore the operator's spec; strictly larger; does not survive GH #259's per-workload images; would require rewriting E06's runner to match the implementation). Earned Trust preserved by scope: the hypervisor *capability* stays proven once at boot by `Vmm::probe`, the *artifact* is proven per start by the already-per-allocation `preflight_kernel` → `KernelImage::validate`. Capability absence reuses the DWD-24 typed contract with an actionable `detail` and **mints no `TransitionReason` variant** (the registry miss is driver-kind-generic; `HypervisorAbsent` would force a per-driver branch into the shim; the typed answer is the admission-time gate DWD-23 already scoped). Amended ADR-0082 (2026-08-17) and ADR-0083 (2026-08-17, §§ D3a–D3e, incl. the #259 supersession statement). Scenarios S-VM-54 and S-VM-82 added at the two lowest unused IDs per this file's gap-reuse practice (88 → 90); none removed or renumbered. Roadmap gains steps 03-07/03-08 appended to phase 03 — every phase-03 step has already executed, so nothing is reordered and no execution history is rewritten. Step 03-06's S-VM-33/S-VM-41 fixtures must re-point at the spec-named path; 03-07 owns that, and neither scenario changes in substance. No Rust source, test source, execution log/history, GitHub issue, or commit.

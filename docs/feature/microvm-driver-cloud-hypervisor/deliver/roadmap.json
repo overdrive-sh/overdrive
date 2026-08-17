@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "microvm-driver-cloud-hypervisor",
     "created_at": "2026-08-11T19:07:27Z",
-    "total_steps": 34
+    "total_steps": 36
   },
   "phases": [
     {
@@ -465,7 +465,7 @@
     },
     {
       "id": "03",
-      "name": "Boot-failure vocabulary (Slice 02)",
+      "name": "Boot-failure vocabulary and production artifact supply (Slice 02)",
       "steps": [
         {
           "id": "03-01",
@@ -636,6 +636,72 @@
           ],
           "effort_hours": 2,
           "implementation_notes": "TEST PARADIGM: Tier 3, integration-tests + kvm-tests, one immediate job example. This is both a regression guard that 03-03 is scoped to [service] and the production-entry proof required by Slice 02's 'accepted and run' acceptance line. The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient. DESCOPED (2026-08-17): S-VM-40 ([schedule] + [vm]) is removed from this step. Schedule execution has no producer — `deploy_streaming` rejects WorkloadSpecInput::Schedule outright (ADR-0051 OQ-5), and there is no cron evaluation and no ScheduleLifecycle reconciler, so \"when its first firing becomes due\" cannot be driven. Building it is the scope of GH #166 (Scheduled job execution semantics), which now carries a comment naming the VM dimension: a scheduled firing must allocate onto DriverType::Vm, ConcurrencyPolicy must reclaim a running microVM, and boot failures must classify through the typed DriverStartFailure contract. The RED scaffold `scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due` stays in vm_boot_failure_vocabulary.rs as the waiting test for #166 — do not delete it."
+        },
+        {
+          "id": "03-07",
+          "name": "Per-allocation VM artifacts + unconditional VM composition",
+          "description": "Make ADR-0083 D3's already-ratified VmPayload.kernel/.rootfs load-bearing: VmDriver reads the allocation's own payload, VmHostLayout sheds its two artifact fields, the integration-tests-only vm_artifacts seam is deleted, and VM composition becomes unconditional and gated only by Vmm::probe. This is what makes the feature reachable through overdrive serve + overdrive deploy.",
+          "criteria": [
+            "A VM allocation boots from the kernel and rootfs paths named in its own [vm] spec block; no node-level kernel or rootfs configuration exists in any argument, environment variable or configuration file.",
+            "S-VM-54: two VM jobs deployed to one running serve, naming different rootfs images, both reach Running and each boots from the image its own spec named.",
+            "VmBootArtifacts, ServerConfig.vm_artifacts, run_with_dataplane_and_vm_artifacts and run_with_vm_artifacts no longer exist anywhere in the tree; no replacement node-level artifact field, flag, environment variable or configuration key is introduced.",
+            "The VM composition block and compose_vm_driver carry no cfg attribute and no artifact precondition; a probe pass inserts the Vm driver, a probe failure with no override injected leaves the node booted with no Vm entry, and a probe failure with a vmm_override injected still refuses startup.",
+            "ServerConfig.vmm_override and run_with_dataplane_and_vmm_override remain integration-tests-gated and behaviourally unchanged.",
+            "A missing kernel, a missing rootfs and a wrong-format kernel still produce their existing named causes, each naming the exact path the deployed spec declared; every scenario landed by 03-05 and 03-06 (S-VM-33, S-VM-34, S-VM-35, S-VM-36, S-VM-41) continues to pass with its fixtures re-pointed at the spec-named path, and no S-VM identifier moves.",
+            "Verification expectation E06-vm-job-deploy-reaches-running becomes satisfiable: its runner is re-run unmodified against a default-features binary and its sub-claims 2 and 3 pass, and the expectation README records the new capture rather than the prior refutation.",
+            "Every rejected or completed VM start still leaves no surviving hypervisor process, workload scope, per-launch rootfs clone or run directory."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+          "scenario_name": "S-VM-54",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-worker/src/vm_driver.rs",
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-cli/src/commands/serve.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_walking_skeleton.rs",
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+              "crates/overdrive-cli/tests/integration/vm_reclamation_tier3.rs",
+              "crates/overdrive-worker/tests/acceptance/vm_driver_start_failure_contract.rs",
+              "crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs",
+              "crates/overdrive-control-plane/tests/integration/workload_lifecycle/convergence_loop_spawned_in_production_boot.rs",
+              "verification/expectations/E06-vm-job-deploy-reaches-running/"
+            ]
+          },
+          "dependencies": [
+            "03-04",
+            "03-06"
+          ],
+          "effort_hours": 12,
+          "implementation_notes": "GOVERNING DESIGN: DWD-25 and the 2026-08-17 amendments to ADR-0083 (sections D3a-D3e) and ADR-0082. Implement exactly that API and invent nothing else. The binding is `let DriverPayload::Vm(payload) = &spec.driver else { return Err(start_rejected_unclassified(...)) }` inside provision_vmm; do NOT add kernel()/rootfs() accessors to DriverPayload — VmPayload's fields are already pub — and do NOT mint a DriverStartClass or VmStartFailure variant for the wrong-payload case, which takes the existing Unclassified fallback. VmHostLayout loses exactly two fields, kernel and rootfs_master, and keeps cgroup_root, run_dir_root, arch, vcpus and confinement; correct its 'single fixed template per node' doc comment and the quotation of it that ServerConfig.vm_artifacts leaves behind, in the same commit. DELETE, do not ungate: with artifacts arriving per allocation the seam has no production counterpart to promote (CLAUDE.md 'Ground the premise'). Test callers that construct VmBootArtifacts today move those paths into the [vm] spec they deploy and switch to the ungated serve entrypoints; that makes them more production-faithful, not less. preflight_kernel keeps its per-allocation shape and its KernelImage::validate call — only its argument source changes — so ADR-0082 D2.4 lie-3/C-7 is unchanged. ADJACENT-DOC FALLOUT THIS STEP OWNS: step 03-06 landed S-VM-33 and S-VM-41 against 'the path serve composed against'; re-point those fixtures at the spec-named path. Neither scenario changes in substance and neither ID moves. The hardcoded vcpus=1 and the VmConfinement uid/gid are explicitly OUT of scope and stay as they are. Re-run the E06 harness via verification/harness/run-expectation.sh against a DEFAULT-features binary on the metal KVM box; do not modify runner.sh, and per .claude/rules/verification.md do not stamp the expectation satisfied from this step — record the capture and leave the verdict to a different-fox audit."
+        },
+        {
+          "id": "03-08",
+          "name": "Capability-absence names the capability, not an internal error",
+          "description": "A node whose VM capability probe did not pass still boots and still rejects [vm] deploys, but reports a cause that names the absent capability and where the specific probe reason was recorded, instead of presenting a node capability limit as an internal platform error.",
+          "criteria": [
+            "S-VM-82: deploying a [job] + [vm] spec to a node whose VM capability probe did not pass reaches Failed with a cause naming the absent VM capability and where the specific probe reason was recorded.",
+            "The reported cause does not present the node's own capability limit as an internal platform error.",
+            "The failure still crosses as DriverStartClass::Unclassified { driver } and still converts to the existing DriverInternalError cause; no TransitionReason variant is added and no DriverStartFailure class is added.",
+            "The action shim gains no per-driver branch, no parser and no driver-specific knowledge; only the detail text of the registry-miss arm changes.",
+            "S-VM-12's existing assertions are unchanged and not duplicated: the node still boots and the deploy still does not run a VM."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs",
+          "scenario_name": "S-VM-82",
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/action_shim/mod.rs"
+            ],
+            "test_directories": [
+              "crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs"
+            ]
+          },
+          "dependencies": [
+            "03-07"
+          ],
+          "effort_hours": 4,
+          "implementation_notes": "GOVERNING DESIGN: DWD-25 and ADR-0083's 2026-08-17 amendment section D3d. This is a message-actionability step and nothing more. Per DWD-24 the detail field is free-form verbatim diagnostic text and is NEVER a classification input, so changing it alters no contract and no conversion; per ADR-0083 D3d no TransitionReason variant is minted, because the registry miss is driver-kind-generic (a Vm-prefixed variant would be the wrong shape), because reusing VmStartFailure::HypervisorAbsent would force the shim to synthesise searched-path knowledge it does not have, and because the properly typed answer is the admission-time rejection ADR-0083 D2 designs and DWD-23 already scoped to a follow-up. Do NOT build a second, parallel admission-time mechanism here. This step depends on 03-07 because only after it is the message accurate: with the artifact precondition gone, a missing Vm registry entry has exactly one cause, a Vmm::probe that did not pass. Assert on the operator-visible rendering through workload describe, never on an enum discriminant. Not @requires-kvm — the scenario's premise is a host that cannot boot a guest."
         }
       ]
     },
@@ -667,7 +733,8 @@
           },
           "dependencies": [
             "01-07",
-            "03-01"
+            "03-01",
+            "03-07"
           ],
           "effort_hours": 8,
           "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-42 is a mandatory mutation target (K1 north star) — a mutation collapsing the unreported-death arm into CleanExit must be killed. No code path may derive ExitKind from cloud-hypervisor's own exit status (already enforced structurally by 01-07; this step is its operator-facing Tier-3 proof). MICROVM-BOOT-TESTS GATE: vm_stop_restart_and_vmm_death.rs is a NEW file; it compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests — exit classification needs a real guest and a real (or host-OOM-killed) hypervisor process."
@@ -806,6 +873,7 @@
           "dependencies": [
             "01-08",
             "03-01",
+            "03-07",
             "04-01"
           ],
           "effort_hours": 6,
@@ -974,7 +1042,8 @@
           },
           "dependencies": [
             "01-01",
-            "01-08"
+            "01-08",
+            "03-07"
           ],
           "effort_hours": 6,
           "implementation_notes": "TEST PARADIGM: S-VM-73 is Tier 1 default-lane proptest, mandatory mutation target — author fresh (name pinned by DELIVER's own DESIGN reading, per US-VM-5 Technical Notes; the derivation rule itself is DESIGN's). S-VM-69/70 are Tier 3, gated integration-tests, single-example, real guest CPU count read, which needs a real DriverRegistry-composed serve (step 01-08). MICROVM-BOOT-TESTS GATE: the Tier-3 half, in crates/overdrive-cli/tests/integration/vm_resources_sizing.rs, compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests; the Tier-1 half in vm_resources_derivation.rs is unaffected."

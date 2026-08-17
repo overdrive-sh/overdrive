@@ -4623,3 +4623,51 @@ blocked checkpoint audit row, not completed implementation. Every scenario
 S-VM-33…41 remains in scope; none is dropped, and this resolution introduces
 no issue or deferral.
 
+**Resolved by DWD-25 (2026-08-17) — K4 measured NOT MET, and closed.**
+Verification expectation `E06-vm-job-deploy-reaches-running` drove a
+**default-features** `overdrive` binary on a real x86_64 + KVM host (SHA
+`655ac964`, `SEED=1`) and refuted the KPI this feature is graded on. `deploy`
+was accepted, then the allocation sat `Failed` for all 45 polls with
+`new_hypervisors=0 new_run_dirs=0 new_scopes=0`, the operator surface naming
+the cause itself: `driver internal error: no vm driver composed on this node`.
+K4 (`:2398` above — "can reach the VM driver via `overdrive serve` +
+`overdrive deploy`… with **no** test-only wiring", *Leading (the feature's
+pass/fail bar)*, measured by this catalogue per `:2427`) therefore read **NOT
+MET**. This is exactly the risk register's own precedent warning #1 at `:2445`
+— *"the mechanism composes but no production path reaches it"* — landing on
+this feature.
+
+The cause was **not** a missing configuration surface. ADR-0083 § D3's
+`VmPayload.kernel` / `.rootfs` were already ratified as operator surface,
+already parsed from `[vm]`, already persisted in the `V2` envelope, and
+already carried intact through `WorkloadLifecycle` and the action shim into
+`driver.start(&spec)` — `VmDriver::provision_vmm` simply read the node-wide
+`self.layout.*` instead and never matched `spec.driver`'s `Vm` arm. The
+node-level `ServerConfig.vm_artifacts` seam that fed that layout was
+`#[cfg(feature = "integration-tests")]`, so `Some(_)` was a state only a test
+seam could produce.
+
+DWD-25 rules the artifact contract **per-allocation** and deletes the seam
+rather than promoting it: `VmDriver` reads the allocation's own `VmPayload`,
+`VmHostLayout` sheds `kernel`/`rootfs_master`, and `VmBootArtifacts`,
+`ServerConfig.vm_artifacts`, `run_with_dataplane_and_vm_artifacts` and
+`run_with_vm_artifacts` are removed; `vmm_override` stays gated as ADR-0083
+§ D8's genuine fault seam. VM composition becomes unconditional, gated only by
+`Vmm::probe`, so capability absence remains a first-class answer. **No new
+operator surface is created and no `TransitionReason` variant is minted.**
+Amended ADR-0082 and ADR-0083 (both 2026-08-17); delivered by roadmap steps
+**03-07** and **03-08**, appended to phase 03 ahead of phases 04/05/06, whose
+behaviour is otherwise unverifiable through production.
+
+E06 is the instrument that measured this and is the instrument that closes it:
+its runner already deploys a spec whose `[vm]` block names `kernel` and
+`rootfs`, so it **re-runs unchanged** and sub-claims 2 and 3 become live. "E06
+becomes satisfiable" is an explicit acceptance criterion on step 03-07.
+Scenarios S-VM-54 and S-VM-82 are added; none is dropped or renumbered
+(88 → 90). The `[vm] kernel`/`rootfs` keys remain a slicing mechanism, not a
+product commitment — GH
+[#259](https://github.com/overdrive-sh/overdrive/issues/259) deletes both and
+replaces them with an image reference, and the internal `VmPayload` plumbing
+survives as what the factory resolves into. This resolution introduces no
+issue and no deferral.
+

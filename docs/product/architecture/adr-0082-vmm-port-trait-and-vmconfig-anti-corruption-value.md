@@ -8,6 +8,27 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-17 (production artifact supply — `VmHostLayout` sheds the
+artifact fields; see ADR-0083's 2026-08-17 amendment for the governing
+decision).** `VmConfig.kernel` and `VmConfig.rootfs` are now built from the
+allocation's own `VmPayload` (ADR-0083 § D3a), not from a node-wide template.
+`VmHostLayout` therefore loses exactly two fields — `kernel: KernelImage` and
+`rootfs_master: PathBuf` — and keeps only what is genuinely node-invariant
+(`cgroup_root`, `run_dir_root`, `arch`, `vcpus`, `confinement`). Its own doc
+comment ("Slice 01 ships a single fixed template per node — no per-allocation
+BYO kernel/rootfs surface exists yet") is false on this change and is corrected
+in the same commit. **`KernelImage::validate` is unchanged and is not
+weakened:** its remaining call site is `preflight_kernel`, which already
+re-reads the path and re-runs the pure validator *per allocation* immediately
+before `Vmm::create`; only the redundant boot-time validation of a node-wide
+path disappears with the path itself. The § D2.4 lie-3 / C-7 guarantee — an
+unloadable kernel is named as a format error before Cloud Hypervisor sees the
+file — holds unchanged, now against the path the operator actually wrote in
+`[vm]`. `Vmm::probe` and the wire→probe→use composition invariant are
+untouched: the *hypervisor capability* is still proven once at boot, which is
+the scope "prove it once, use it many times" was always about. Recorded in
+feature DWD-25.
+
 **Amended 2026-08-16 (DELIVER Phase-03 upstream-contract resolution).**
 `VmmError` now has exact structured variants for the causes the adapter can
 know; `VmProcess` exposes a live `VmmDiagnostics` snapshot backed by the same

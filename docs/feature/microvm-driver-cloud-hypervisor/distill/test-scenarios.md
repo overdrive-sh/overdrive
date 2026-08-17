@@ -1291,6 +1291,82 @@ And when its first firing becomes due, its VM allocation reaches Running through
   the production VmDriver path
 ```
 
+### AC-21: The shipped binary reaches the VM driver, and a node that cannot says so
+
+Added by DWD-25 (2026-08-17), which ruled the artifact contract
+per-allocation and deleted the `ServerConfig.vm_artifacts` node-level seam.
+Both scenarios below assert against a composition that has **no** artifact
+seam to inject through — that absence is the point, and is what separates
+them from S-VM-39 (which drives `run_with_dataplane_and_vm_artifacts`) and
+from S-VM-12 (which asserts node-boots-and-rejects, not message quality).
+
+#### S-VM-54: A VM job boots from the artifacts its own spec names, with no node-level artifact configuration
+
+**Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve` composed WITHOUT any VM artifact seam)
+**Tags**: `@contract-shape:bounded-change` `@walking_skeleton` `@happy_path` `@ac-21` `@tier3` `@real-io` `@requires-kvm` `@kpi:K4`
+
+```gherkin
+Given a kernel and two distinct ext4 rootfs images are staged on the host in
+  separate directories, each guest identifiably reporting which image it booted
+And "overdrive serve" is running with no kernel or rootfs configured anywhere
+  in its arguments, environment or configuration files
+And Ana has written two specs, each declaring [job] and [vm], naming the same
+  kernel and a different one of the two rootfs images
+When she runs "overdrive deploy" for each of them
+Then both workloads are accepted and both VM allocations reach Running through
+  the production VmDriver path
+And each allocation booted from the rootfs image its own spec named
+```
+
+**Crafter notes**: The **structural** proof of DWD-25 is that reaching Running
+at all is impossible unless the spec's paths were read — after 03-07 there is
+no other source of a kernel path in the process. The two-spec clause is the
+**regression** proof: it is the assertion a re-introduced node-level default
+would fail, and a single-artifact test would pass vacuously. Compose `serve`
+through the ungated production entrypoint; do NOT reach for
+`run_with_dataplane_and_vm_artifacts` or `run_with_vm_artifacts` — 03-07
+deletes both. **The two images MUST live in separate parent directories, or be
+distinguishable from inside the guest.** `RootfsPlan::for_alloc` derives the
+clone destination as `<master_dir>/.overdrive-vm-rootfs-<alloc>.img`, which
+does **not** encode the master's filename — two masters in one directory
+produce hypervisor argv that differs only by allocation id, so the assertion
+would not discriminate which *image* was booted and the scenario would pass
+vacuously against a node-level default. Assert through the observable run
+directory / hypervisor argv, never by reading `VmHostLayout`. This scenario is
+the in-tree companion to verification expectation
+`E06-vm-job-deploy-reaches-running`, which asks the strictly harder question
+(the shipped binary's own argv, out of process, default features) and is K4's
+instrument; keep the two consistent — if this passes and E06 does not, the
+difference is the in-process seam and is itself the finding.
+
+#### S-VM-82: A node whose hypervisor capability is absent tells the operator what is absent
+
+**Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
+**Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-21` `@tier3` `@real-io`
+
+```gherkin
+Given "overdrive serve" started on a host where the VM capability probe does
+  not pass, and its startup log recorded the specific reason
+And Ana has written a spec declaring [job] and [vm]
+When she runs "overdrive deploy render.toml" and then "overdrive workload describe"
+Then the allocation is Failed and the reported cause names the absent VM
+  capability and where the specific probe reason was recorded
+And the cause does not present the node's own capability limit as an internal
+  platform error
+```
+
+**Crafter notes**: This is a **message-actionability** scenario and nothing
+else. It does not restate S-VM-12's assertions (the node boots; the deploy
+does not run a VM) — those stand unchanged and must not be duplicated here.
+Per DWD-25 the class stays `DriverStartClass::Unclassified { driver }` and the
+conversion still lands on `DriverInternalError`; only `detail` changes, which
+DWD-24 pins as free-form verbatim text that is never a classification input.
+**Mint no `TransitionReason` variant and add no per-driver branch to the
+action shim.** Assert on the operator-visible rendering, not on the enum
+discriminant. The typed admission-time rejection remains DWD-23's scoped
+follow-up and is explicitly out of scope here. Not `@requires-kvm`: the whole
+point is a host that cannot boot a guest.
+
 ---
 
 ## Slice 03 — `stop-restart-and-vmm-death`

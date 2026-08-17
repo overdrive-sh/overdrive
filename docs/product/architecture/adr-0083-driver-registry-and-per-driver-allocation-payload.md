@@ -1793,3 +1793,319 @@ Rejected alternatives are the same three ruled in ADR-0032's 2026-08-16
 amendment: direct `TransitionReason` carriage (too broad), per-driver text
 parsers (lossy and presentation-coupled), and independent driver/cause fields
 (contradictory states representable). No compatibility parser remains.
+
+---
+
+## Amendment 2026-08-17 — § D3's `VmPayload.kernel` / `.rootfs` become load-bearing; the node-level artifact seam is deleted; VM composition is unconditional
+
+**Scope: application architecture only. No § D3 field is added, removed or
+retyped; no new operator surface is created. This amendment makes the ADR's
+already-accepted per-allocation artifact fields actually reach the driver, and
+deletes the test-only node-level seam that stood in for them.**
+
+### The gap this closes, grounded rather than asserted
+
+§ D3 has always declared `VmPayload.kernel: PathBuf` and
+`VmPayload.rootfs: PathBuf` — both annotated `// operator surface, BYO
+artifact` — and § D4's `[vm]` block has always carried `kernel` and `rootfs`
+keys. The 2026-08-12 amendment above persisted both into the `V2` envelope.
+Every hop of that path is live today and was verified end to end:
+
+- `[vm]` TOML → `workload_spec.rs` `VmInput { command, args, kernel, rootfs }`
+  (`#[serde(deny_unknown_fields)]`);
+- → wire DTO `aggregate::VmInput` → `JobV2::from_submit` →
+  persisted `aggregate::Vm { command, args, kernel, rootfs }` in the rkyv `V2`
+  envelope;
+- → `WorkloadLifecycle` projects both arms
+  (`StartAllocation` and `RestartAllocation`) into
+  `DriverPayload::Vm(VmPayload { kernel: PathBuf::from(kernel),
+  rootfs: PathBuf::from(rootfs), .. })`;
+- → the action shim passes `spec` through unmodified and calls
+  `driver.start(&spec)`.
+
+**The values then die at the consumer.** `VmDriver::provision_vmm` reads
+`self.layout.kernel` and `self.layout.rootfs_master` — a node-wide
+`VmHostLayout` built once at boot — and never pattern-matches `spec.driver`
+into its `Vm` arm at all (`spec.driver` is touched only via the
+kind-agnostic `.command()` / `.args()` accessors). Two workloads on one node
+therefore boot the same image regardless of what either spec says. The
+operator surface this ADR ratified is, today, decorative.
+
+That node-wide layout is fed by `ServerConfig.vm_artifacts:
+Option<VmBootArtifacts>`, which is `#[cfg(feature = "integration-tests")]`,
+as are the composition block that consumes it and the two `serve` entrypoints
+that set it. So `vm_artifacts = Some(_)` is **a state only a test seam can
+produce** — precisely the shape CLAUDE.md § "Ground the premise" forbids
+building on. In a shipped binary no `Vm` driver is ever composed, and every
+`[vm]` deploy lands `Failed` with `no vm driver composed on this node`
+(executed evidence: `verification/expectations/E06-vm-job-deploy-reaches-running/`,
+SHA `655ac964`, on a real x86_64 + KVM host).
+
+### D3a — The artifact contract is per-allocation. There is no node-level artifact configuration.
+
+`VmDriver::start` resolves the kernel and rootfs for an allocation **from that
+allocation's own `VmPayload`**, never from node state:
+
+```rust
+// in VmDriver::provision_vmm, before any provisioning
+let DriverPayload::Vm(payload) = &spec.driver else {
+    return Err(start_rejected_unclassified(format!(
+        "VmDriver received a {} payload", spec.driver.driver_type()
+    )));
+};
+// payload.kernel : &Path   — the [vm] spec's kernel
+// payload.rootfs : &Path   — the [vm] spec's rootfs
+```
+
+No accessor is added to `DriverPayload`. `VmPayload`'s fields are already
+`pub`; the `let …else` refutable binding reaches them and states the routing
+precondition in the same breath. A non-`Vm` payload reaching `VmDriver` is a
+registry-routing defect, so it takes the existing
+`DriverStartClass::Unclassified { driver: DriverType::Vm }` fallback — no new
+class, no new variant.
+
+**One private signature changes, and it is pinned here so it is not
+improvised.** `VmConfig.kernel` is a `KernelImage`, whose only constructor is
+`KernelImage::validate(path, arch, header)` over a private field, while the
+payload supplies a bare `PathBuf`. `preflight_kernel` therefore becomes:
+
+```rust
+async fn preflight_kernel(path: &Path, arch: HostArch)
+    -> Result<KernelImage, DriverError>
+```
+
+— it stops discarding the validated value (`.map(|_| ())` today) and returns
+it for `VmConfig` to consume. **No new `KernelImage` constructor is added**:
+no `from_path`, no `new_unchecked`, no relaxation of the private field.
+`KernelImage::validate` stays the sole constructor and is itself unchanged.
+Its three failure arms (`KernelNotFound`, the unclassified read error,
+`KernelFormatUnsupported`) are unchanged. This is the one place a crafter
+would otherwise be tempted to invent surface on a `core` type — CLAUDE.md
+§ "Implement to the design — never invent API surface" governs, and the
+signature above is the whole permitted change.
+
+Consequently `VmHostLayout` sheds **exactly two fields**, `kernel:
+KernelImage` and `rootfs_master: PathBuf`. What remains — `cgroup_root`,
+`run_dir_root`, `arch`, `vcpus`, `confinement` — is genuinely node-invariant
+and stays. `VmHostLayout`'s own doc comment ("Slice 01 ships a single fixed
+template per node — no per-allocation BYO kernel/rootfs surface exists yet")
+becomes false on this change and is corrected in the same commit.
+
+`VmBootArtifacts`, `ServerConfig.vm_artifacts`, and the `serve` entrypoints
+`run_with_dataplane_and_vm_artifacts` / `run_with_vm_artifacts` are
+**deleted**, not ungated. Nothing replaces them: with artifacts arriving per
+allocation there is no node-level artifact to configure, so the seam has no
+production counterpart to be promoted into. Their test callers move the
+artifact paths into the `[vm]` spec they deploy — which is what a real
+operator does, so those tests become *more* production-faithful, not less.
+`vmm_override` and `run_with_dataplane_and_vmm_override` **stay** gated: § D8's
+adapter-substitution fault-injection seam is a genuine test-only capability
+with no production analogue, and is untouched here.
+
+### D3b — Where the kernel is validated, and why that is still Earned Trust
+
+`KernelImage::validate` is a pure validator over a bounded magic window; the
+imperative shell does the read. Under D3a its only call site is
+`preflight_kernel`, which already runs **per allocation, immediately before
+`Vmm::create`**, and already re-reads the path from disk. Its own doc comment
+already describes itself as "Per-allocation kernel preflight". So validation
+is not weakened, relocated or deferred — the *redundant boot-time copy over a
+node-wide path* is what disappears, along with the node-wide path itself.
+
+The Earned-Trust posture is preserved by putting each proof where its subject
+lives:
+
+| Subject | Proven | Where |
+|---|---|---|
+| The **host can run microVMs** (`cloud-hypervisor` binary, `/dev/kvm`, run dir, reflink on the node's own `image_dir`) | once, at boot | `Vmm::probe` — unchanged |
+| **This allocation's kernel** is present and loadable for this arch | at every start | `preflight_kernel` → `KernelImage::validate` |
+| **This allocation's rootfs** is present and stat-able | at every start | the existing rootfs preflight |
+| **This allocation's rootfs directory supports `FICLONE`** | at every start, by the clone itself | `Vmm::create` → `ficlone_rootfs` |
+
+"Prove it once, use it many times" was always a statement about the
+*hypervisor capability*, which is node-scoped. A per-workload artifact has no
+"many times" to amortise over — it is proven for the allocation that names it,
+which is the only honest scope. `preflight_kernel` keeps returning
+`VmStartFailure::KernelNotFound` / `KernelFormatUnsupported`, and the rootfs
+preflight keeps returning `RootfsNotFound`, all naming the path the operator
+actually wrote.
+
+**The reflink probe's scope narrows, and that is stated rather than glossed.**
+`Vmm::probe` runs `probe_reflink` against the adapter's own `image_dir`
+(`/srv/vm` by default), but `RootfsPlan::for_alloc` derives the clone
+destination from the *master's own parent directory* — which, under D3a, is
+wherever the operator's `[vm] rootfs` lives. `FICLONE` is intra-filesystem, so
+a boot probe on `/srv/vm` **no longer proves** the per-launch clone will
+succeed for a rootfs staged on a different filesystem, or on one without
+reflink support at all. The boot probe keeps its value (it is still the
+node's own staging area, and still catches the node-level misconfiguration it
+was written for); it simply stops being a proof about operator-chosen paths.
+This is the honest residual of making artifacts per-allocation, and it is a
+real narrowing of what boot-time Earned Trust buys.
+
+Two consequences follow, and neither is deferred silently:
+
+- **The fail-closed behaviour is already scenario-owned.** S-VM-94 ("the
+  per-launch `FICLONE` clone fails closed on a non-reflink target — self
+  application of the boot probe's own rule") is the existing ratified
+  scenario for exactly this. Under D3a its target becomes the
+  **operator-named** rootfs directory rather than the node default; the
+  scenario is unchanged in substance and does not move.
+- **Today that failure is unclassified.** `ficlone_rootfs` surfaces an ioctl
+  failure as `VmmError::Io`, which `VmDriver` maps to
+  `DriverStartClass::Unclassified` — i.e. it renders as an internal-shaped
+  error, the very shape D3d exists to remove. This amendment does **not**
+  mint a `VmStartFailure` variant for it: doing so would be new API surface
+  on a `core` type, S-VM-94 already owns the behaviour, and the correct
+  moment to type it is when that scenario is implemented. **It is recorded
+  here as a known, named residual, not as a solved problem** — see
+  Consequences below.
+
+Note for whoever implements S-VM-94: **E06 cannot catch this.** E06 stages its
+artifacts under `/srv/vm/overdrive-testing`, i.e. beneath the probe's own
+default, so a passing E06 says nothing about a cross-filesystem rootfs. The
+instrument that measures K4 is not an instrument for this residual.
+
+### D3c — VM composition is unconditional and gated only by `Vmm::probe`
+
+§ D2's "the registry **is** the VM capability gate" is unchanged in intent and
+finally true in production. `compose_vm_driver` loses its `&VmBootArtifacts`
+parameter and its `#[cfg]`; `run_server`'s call site loses both the `#[cfg]`
+and the `if let Some(artifacts) = config.vm_artifacts` guard. The composition
+sequence becomes exactly discover → probe → insert, with the same three
+outcomes as today:
+
+- probe passes → `registry.insert(VmDriver)`;
+- probe fails with no override injected → `VmComposeError::NotAvailable` →
+  `tracing::info!(name: "driver.vm.not_composed", reason = %cause, …)`, the
+  node boots, no `Vm` entry. **Capability absence remains a first-class
+  answer, not a fault** — a node without `cloud-hypervisor` still starts;
+- probe fails with a § D8 `vmm_override` injected → `VmComposeError::Refused`
+  → `health.startup.refused` + `ControlPlaneError::VmmBoot`, boot refused.
+
+The hardcoded `vcpus: 1` and the `VmConfinement` uid/gid remain exactly as they
+are; § D3a changes artifact supply only, and re-pointing those at real
+production values is Phase 04/06 scope, not this amendment's.
+
+### D3d — Capability absence must name a capability, not an internal error
+
+With D3c live, a node has no `Vm` registry entry for exactly one reason:
+`Vmm::probe` did not pass. The dispatch-time registry-miss fallback keeps its
+`DriverStartClass::Unclassified { driver }` class — the action shim cannot and
+must not classify per-driver causes (it "owns persistence only") — but its
+`detail` must name the capability and point at the executed boot reason rather
+than reading as an internal defect. Per DWD-24, `detail` is free-form verbatim
+diagnostic text and is **never** a classification input, so this changes no
+contract and no conversion.
+
+**No new `TransitionReason` variant is minted, and none is needed.** Three
+reasons, stated so the next reader does not re-litigate it:
+
+1. The registry miss is **driver-kind-generic** — it fires identically for a
+   future `Wasm` deploy on a node without `wasmtime` — so a `Vm`-prefixed
+   variant would be the wrong shape, and a generic one duplicates
+   `DriverInternalError`'s slot.
+2. Reusing `VmStartFailure::HypervisorAbsent { searched }` would require the
+   action shim to synthesise driver-specific knowledge (the searched paths) it
+   does not have — the exact per-driver branching § D5's delivery notes forbid
+   there.
+3. The **properly typed** answer is the admission-time rejection § D2 already
+   designs ("`[vm]` deploys are rejected at admission naming the absent
+   capability"). Feature DWD-23 ratified the dispatch-time fallback as a safe
+   interim and is the record of that decision. **This amendment does not
+   build the admission-time gate and makes no promise about when it is
+   built** — it is simply not in scope here, and no forward pointer is
+   written in its place. (DWD-23 recorded "no GitHub issue created — follow-up
+   surfaced for approval"; that remains true and unchanged. Per CLAUDE.md
+   § "Deferrals require GitHub issues", no number is invented here and none
+   is implied.)
+
+### D3e — Supersession: this operator surface is deleted by the image factory
+
+`[vm] kernel` / `[vm] rootfs` are a **slicing mechanism, not a product
+commitment** (feature-delta.md changelog, user ruling 2026-08-11). They exist
+so the driver ships without blocking on the image factory, GH
+[#259](https://github.com/overdrive-sh/overdrive/issues/259) (OCI / Dockerfile
+→ bootable rootfs image factory), whose acceptance requires `overdrive deploy`
+to accept an OCI reference with no operator-side rootfs preparation.
+
+When #259 lands it **deletes the two TOML keys** and replaces them with an
+image reference. What survives is everything below the spec: the factory
+resolves the reference into host paths and fills the same
+`VmPayload.kernel` / `.rootfs` fields, and `VmDriver` is unchanged. That is a
+single cut at one boundary, and it is only available because artifacts are
+per-allocation — a node-level template could not survive #259 at all, since
+two workloads on one node resolve to two different images.
+
+### Rejected alternative — node-level artifact configuration on `serve`
+
+Adding `--vm-kernel` / `--vm-rootfs` flags (or config-file keys, or env vars)
+to `overdrive serve` and ungating `vm_artifacts` was considered and rejected:
+
+- **It contradicts this ADR.** § D3 already ratifies per-allocation
+  `kernel`/`rootfs`. A node-level flag would leave those fields decorative and
+  make the platform silently ignore what the operator wrote in the spec — an
+  operator writing `kernel = "/a"` would get `/b`, with no diagnostic.
+- **It is larger, not smaller.** It adds a clap surface, a `ServeArgs` field,
+  main.rs plumbing and a validation path, and *keeps* `VmBootArtifacts`,
+  `ServerConfig.vm_artifacts` and the two gated entrypoints alive. D3a adds no
+  operator surface and deletes four items.
+- **It does not survive #259.** #259 resolves per-workload images; a node-wide
+  template would have to be deleted wholesale and the per-allocation path
+  built anyway — two cuts instead of one.
+- **It cannot be measured by the instrument that exists.** E06's runner already
+  deploys a spec whose `[vm]` block names `kernel` and `rootfs`. Under D3a it
+  re-runs unchanged. Under the flag design the expectation's own runner would
+  have to be rewritten to match the implementation — self-assessment of the
+  kind `.claude/rules/verification.md` § Enforcement rejects.
+
+### Consequences
+
+- **Positive.** The feature becomes production-drivable through `overdrive
+  serve` + `overdrive deploy` with no test-only wiring, which is KPI **K4**'s
+  binary bar. Per-workload images become possible, which every later slice and
+  #259 require. Four test-only items leave the production type surface. The
+  spec fields this ADR ratified stop being decorative.
+- **Negative.** A malformed or absent artifact is now discovered at allocation
+  start rather than at `serve` boot, so a node can start healthy and still
+  reject an individual `[vm]` deploy. That is the correct scope for a
+  per-workload input, and the failure vocabulary for it (`VmKernelNotFound`,
+  `VmRootfsNotFound`, `VmKernelFormatUnsupported`) already exists and already
+  names the exact path.
+- **Negative.** Deleting `VmBootArtifacts` breaks **every call site that names
+  it**, not an enumerated subset. That is roughly thirty construction sites
+  across `vm_walking_skeleton.rs`, `vm_boot_failure_vocabulary.rs` and
+  `vm_reclamation_tier3.rs`, the `spawn_vm_server`-shaped helpers they share,
+  **and** one struct-literal outside the VM test files entirely —
+  `overdrive-control-plane/tests/integration/workload_lifecycle/
+  convergence_loop_spawned_in_production_boot.rs`, which carries
+  `vm_artifacts: None`. All of them are compile breaks, all are in scope for
+  the step that lands D3a, and the scope list must be read as "every call
+  site" rather than a scenario enumeration.
+- **Negative.** Steps 03-05 and 03-06 landed S-VM-33/34/35/36/41 against "the
+  path `serve` composed against". Those scenarios are unchanged in substance —
+  a missing kernel, a missing rootfs or a wrong-format kernel is still named
+  precisely — but their fixtures must now mutate the path the *spec* names,
+  and the shared `VmBootArtifacts`-taking helper they call disappears. The
+  step that lands D3a owns that update; it is a fixture relocation, not a
+  scenario change, and **no S-VM ID moves**.
+- **Negative, and genuinely unresolved.** Per D3b, `Vmm::probe`'s reflink
+  proof no longer covers the operator's rootfs directory, and a `FICLONE`
+  failure there currently renders as an *unclassified* internal-shaped error.
+  S-VM-94 owns the fail-closed behaviour and this amendment types nothing for
+  it. Recorded as a known residual, not solved.
+- **Negative.** The per-launch rootfs clone is now written into an
+  **operator-chosen** directory (the parent of `[vm] rootfs`) rather than a
+  platform-owned one. That directory may be read-only, shared between
+  workloads, or on a filesystem the platform does not control. No new
+  operator surface exists to redirect it; this is a direct consequence of
+  deriving the clone destination from the master's own parent.
+- **Negative.** Phases 04, 05 and 06 have not executed and both edit
+  `vm_driver.rs`, which D3a restructures. Their leading steps must take a
+  dependency on the step that lands D3a so the ordering is encoded in the
+  graph rather than asserted in prose.
+- **Neutral.** The `[vm]` grammar, the `V2` envelope, `DriverPayload`,
+  `AllocationSpec`, the typed `DriverStartFailure` contract and every
+  `TransitionReason` variant are untouched.
+
+Recorded in feature DWD-25. Delivered by roadmap steps 03-07 and 03-08.
