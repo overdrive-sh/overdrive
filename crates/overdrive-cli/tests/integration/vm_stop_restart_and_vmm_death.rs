@@ -167,8 +167,11 @@ use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, de
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::driver::ConfinementControl;
+use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::vm::config::VmRunDir;
+use overdrive_sim::SimVmm;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -211,8 +214,48 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     (handle, tmp)
 }
 
+/// The same real in-process `serve` composition as [`spawn_vm_server`], with
+/// the `Vmm` port additionally bound to a caller-supplied adapter
+/// (`ServerConfig.vmm_override`, ADR-0083 §D8, step 01-09). S-VM-51 binds a
+/// [`SimVmm`] armed to fail `create` CLOSED with `VmmError::ConfinementUnavailable`
+/// — `.probe()` still runs unconditionally against it (a clean sim probe), so
+/// the node boots and registers the VM driver exactly as in production; only
+/// the port binding differs. Mirrors `vm_boot_failure_vocabulary.rs`'s helper
+/// of the same name (a file-local copy — sibling test modules cannot share
+/// private items).
+async fn spawn_vm_server_with_vmm(vmm: std::sync::Arc<dyn Vmm>) -> (ServeHandle, TempDir) {
+    let tmp = TempDir::new().expect("tempdir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir };
+    let handle = overdrive_cli::commands::serve::run_with_dataplane_and_vmm_override(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        vmm,
+    )
+    .await
+    .expect("serve::run_with_dataplane_and_vmm_override");
+    (handle, tmp)
+}
+
 fn config_path(tmp: &Path) -> PathBuf {
     tmp.join("conf").join(".overdrive").join("config")
+}
+
+/// A plain per-test COPY of the shared fixture's rootfs — no loopback mount,
+/// no injected guest binary. S-VM-51's `SimVmm` never boots the guest (it
+/// fails `create` closed on confinement), so the rootfs only has to exist as a
+/// real file for the deploy's `RootfsPlan` staging + `SimVmm`'s `std::fs::copy`
+/// clone. The shared fixture artifact is never mutated (AC5).
+fn stage_plain_rootfs_copy(tmp: &Path, fixture: &VmFixture) -> PathBuf {
+    let dest = tmp.join("rootfs.ext4");
+    std::fs::copy(&fixture.rootfs_path, &dest)
+        .expect("copy the shared fixture rootfs into a per-test working copy");
+    dest
 }
 
 /// A `[job]`+`[vm]`+`[resources]` TOML — the shape a real operator writes,
@@ -1771,4 +1814,254 @@ async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
     );
 
     stop_and_shutdown(handle, &cfg, "vm-vsock-grant").await;
+}
+
+// ---------------------------------------------------------------------------
+// AC-13 (US-VM-7) fail-closed — a host that cannot confine REFUSES the
+// workload rather than starting it degraded, and confinement adds nothing to
+// the operator's deploy surface. S-VM-51 (SimVmm-driven fail-closed) +
+// S-VM-52 (real-boot no-new-operator-surface).
+// ---------------------------------------------------------------------------
+
+/// S-VM-51 / `@mandatory:mutation_target` — a host that cannot supply a
+/// required `ConfinementControl` (here: `--landlock` below the version floor)
+/// makes the allocation `Failed / VmConfinementUnavailable` NAMING that
+/// control, and the hypervisor is NEVER started unconfined.
+///
+/// # Injected at the `Vmm` port, not organic (system constraint 1)
+///
+/// The whole Lima/metal test envelope runs ONE kernel, so no genuinely
+/// Landlock-less host exists in it — a confinement capability is a
+/// fixed-kernel-shape property, not something a fixture can toggle. So the
+/// unavailable-control condition is injected at the `Vmm` port boundary via the
+/// SAME `ServerConfig.vmm_override` seam step 01-09 wired (ADR-0083 §D8): a
+/// [`SimVmm`] whose `create` fails CLOSED with
+/// `VmmError::ConfinementUnavailable { control: Landlock, .. }`. `.probe()`
+/// still runs unconditionally against it (a clean sim probe), so a REAL
+/// in-process `overdrive serve` boots, registers the VM driver, and drives the
+/// already-wired fail-closed producer path end to end —
+/// `VmDriver::start` → `classify_vmm_error`'s `ConfinementUnavailable` arm →
+/// `TransitionReason::VmConfinementUnavailable` → allocation `Failed`. No real
+/// KVM boot is needed (the `SimVmm` never launches a hypervisor), so this
+/// scenario runs under Lima; it inherits the file's `kvm-tests` gate only at
+/// file granularity.
+///
+/// # Why the assertion kills the warn-and-continue mutation
+///
+/// The `@mandatory:mutation_target` is that fail-closed must never degrade to
+/// warn-and-continue (start the hypervisor unconfined and proceed). This test
+/// fails on BOTH failure shapes of that mutation:
+///
+/// * **It started at all.** A `SimVmm` create that returned `Ok(VmProcess)`
+///   instead of the typed refusal — the shape a warn-and-continue mutation
+///   produces — would drive the allocation to `Running`. The recorded-states
+///   assertion (`never Running`) reddens on exactly that.
+/// * **It reached the wrong terminal / wrong cause.** The allocation must land
+///   `Failed` with `VmConfinementUnavailable` naming the *specific* control; a
+///   mutation collapsing the `ConfinementUnavailable` classification arm into
+///   the unclassified path (`DriverInternalError`) reddens on the reason
+///   equality.
+///
+/// ```gherkin
+/// Given Ana has deployed a VM workload on a host that cannot supply the
+///   required confinement (e.g. no --landlock support below the version floor)
+/// When the platform attempts to start the allocation
+/// Then the allocation is Failed with TransitionReason::VmConfinementUnavailable
+///   naming the unavailable ConfinementControl
+/// And the hypervisor is NEVER started unconfined
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfined() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-confine-unavail-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    // SimVmm never boots the guest, so a plain rootfs copy (no injected guest
+    // binary, no loopback mount) is all the deploy's staging + the sim clone need.
+    let rootfs = stage_plain_rootfs_copy(tmp.path(), &fixture);
+
+    // The Vmm port, bound to a SimVmm that fails create CLOSED because the host
+    // cannot supply the Landlock control (the "no --landlock below the version
+    // floor" case). `.probe()` stays clean, so the node boots normally.
+    let vmm = SimVmm::new();
+    vmm.inject_persistent_confinement_unavailable(
+        ConfinementControl::Landlock,
+        "sim-injected: cloud-hypervisor below the --landlock version floor",
+    );
+    let (handle, server_tmp) = spawn_vm_server_with_vmm(std::sync::Arc::new(vmm)).await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-confine-unavail.toml",
+        // The command never runs: create is refused before any guest launches.
+        &vm_job_toml("vm-confine-unavail", "/sbin/never", &fixture.kernel_path, &rootfs),
+    );
+
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload the confinement-less host will refuse");
+
+    let (out, observed) =
+        poll_until_failed_recording_states(&cfg, &submit.workload_id, Duration::from_secs(30))
+            .await;
+    let row = out.snapshot.rows.first().expect("one failed allocation row");
+
+    // The hypervisor was NEVER started unconfined: fail-closed, not
+    // warn-and-continue. A warn-and-continue mutation (create returns
+    // Ok(VmProcess)) would drive the allocation THROUGH Running — this reddens.
+    assert!(
+        !observed.contains(&AllocStateWire::Running),
+        "a host that cannot confine must NEVER start the hypervisor (fail-closed, not \
+         warn-and-continue); the allocation passed through Running: {observed:?}",
+    );
+
+    // Failed, not degraded.
+    assert_eq!(
+        row.state,
+        AllocStateWire::Failed,
+        "an unconfinable host must Fail the allocation, never start it degraded; observed \
+         {observed:?}, reason={:?}",
+        row.reason,
+    );
+
+    // The cause NAMES the unavailable control — not the unclassified fallback.
+    let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    assert!(
+        matches!(
+            reason,
+            TransitionReason::VmConfinementUnavailable {
+                control: ConfinementControl::Landlock,
+                ..
+            }
+        ),
+        "the refusal must be VmConfinementUnavailable naming the unavailable control (Landlock), \
+         never a generic/unclassified cause: {reason:?}",
+    );
+    // Explicit complement: never swallowed as the unclassified driver-internal
+    // cause a collapse of the ConfinementUnavailable classification arm produces.
+    assert!(
+        !matches!(reason, TransitionReason::DriverInternalError { .. }),
+        "an unavailable confinement control must be named, never demoted to the unclassified \
+         driver-internal cause: {reason:?}",
+    );
+
+    // The complement terminal is never reached: an unconfinable host does not
+    // produce a completed/terminated outcome.
+    assert_ne!(
+        row.state,
+        AllocStateWire::Terminated,
+        "an unconfinable host must never reach a Terminated/completed terminal",
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+/// S-VM-52 / `@contract-shape:unbounded-preservation` — deploying a VM on a
+/// host that DOES support confinement requires no new flag, table or verb, and
+/// the terminal state + exit code the operator reads are UNCHANGED from
+/// Slice 01. Confinement (always active since step 04-04) is invisible to the
+/// operator surface.
+///
+/// This is the preservation half of US-VM-7: S-VM-51 proves the fail-closed
+/// refusal; this proves the success path grew no operator-facing surface. It
+/// runs a REAL confined boot on metal (`@requires-kvm`).
+///
+/// # What "no new surface" is proved by
+///
+/// * **No new flag / verb.** The deploy is the SAME `DeployArgs { spec,
+///   config_path }` an `[exec]` workload uses (there is no confinement
+///   parameter to pass — a compile-time fact), and the `[job]`+`[vm]` spec
+///   carries NO confinement stanza (`vm_job_toml` emits none).
+/// * **Terminal + exit code unchanged.** A guest that exits 0 and reports it
+///   reaches `Terminated` / `Stopped { by: Process }` → `Completed { exit_code:
+///   0 }` — byte-identical to the Slice-01 exit-classification terminal
+///   (S-VM-44), despite the hypervisor now running fully confined.
+/// * **No new table / render field.** The rendered `workload describe` the
+///   operator reads carries no confinement-specific field (no landlock /
+///   seccomp / confinement / uid-drop vocabulary leaked into the operator view).
+///
+/// ```gherkin
+/// Given Ana already deploys VM jobs with "overdrive deploy <spec>"
+/// When she deploys a workload on a host that supports the required confinement
+/// Then no new flag, table or verb is required
+/// And the terminal state and exit code she reads are unchanged
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn confinement_adds_no_new_operator_surface() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-nosurface-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let exit0 = build_exit_code_binary(tmp.path(), 0);
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
+
+    // The SAME real confined boot every other Slice-03 VM scenario uses — no
+    // confinement-specific composition, no operator-facing knob.
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-nosurface.toml",
+        // No confinement stanza — vm_job_toml emits only [job]/[vm]/[resources].
+        &vm_job_toml("vm-nosurface", "/sbin/exit0", &fixture.kernel_path, &rootfs),
+    );
+
+    // The SAME DeployArgs an [exec] workload uses — there is no confinement
+    // parameter to pass (a compile-time fact: no new flag/verb).
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the confined VM workload with the unchanged operator verb");
+    let out = poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let row = out.snapshot.rows.first().expect("one terminated allocation row");
+
+    // Terminal + exit code UNCHANGED from Slice 01: a guest exit 0, reported,
+    // reaches the SAME completed terminal despite the hypervisor now running
+    // fully confined.
+    assert_eq!(
+        row.state,
+        AllocStateWire::Terminated,
+        "a confined guest's clean exit must reach the SAME Terminated the unconfined Slice-01 \
+         path did, got {:?} (reason={:?})",
+        row.state,
+        row.reason,
+    );
+    // The exit-0 terminal the operator reads is carried by
+    // `Stopped { by: Process }` — the guest-authoritative clean-exit
+    // classification `classify_natural_exit_terminal` maps to
+    // `Completed { exit_code: 0 }`. This is the SAME terminal + exit
+    // classification S-VM-44 pins for the Slice-01 path, unchanged now that the
+    // hypervisor runs fully confined (04-04). Asserting exactly the two fields
+    // S-VM-44 does keeps this a faithful preservation proof rather than
+    // over-reaching into the separate exit-code-rendering concern.
+    assert_eq!(
+        row.reason,
+        Some(TransitionReason::Stopped { by: StoppedBy::Process }),
+        "the completed exit-0 terminal (Stopped by Process) the operator reads must be unchanged \
+         by confinement",
+    );
+    // Never a crash: confinement did not turn a clean exit into a failure.
+    assert!(
+        !matches!(row.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        "a confined clean guest exit must not be read as a crash: {:?}",
+        row.reason,
+    );
+
+    // No new table / render field: the operator's rendered view carries no
+    // confinement vocabulary — confinement did not grow the surface she reads.
+    let rendered = overdrive_cli::render::workload_describe(&out).to_lowercase();
+    for leaked in ["landlock", "seccomp", "confinement", "uid-drop", "uid_drop"] {
+        assert!(
+            !rendered.contains(leaked),
+            "confinement must add no new operator-facing field; the rendered workload describe \
+             leaked {leaked:?}:\n{rendered}",
+        );
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
 }

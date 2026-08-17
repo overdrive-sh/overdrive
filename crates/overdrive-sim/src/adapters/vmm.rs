@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics, VmmError,
     VmmExit, VmmProbeError,
@@ -73,6 +74,16 @@ type ScriptedEnding = (Option<i32>, Option<u8>);
 struct CreateFault {
     detail: String,
     persistent: bool,
+    /// When `Some`, the refusal is the TYPED
+    /// [`VmmError::ConfinementUnavailable`] naming this control — the
+    /// fail-closed producer S-VM-51 drives via the `ServerConfig.vmm_override`
+    /// seam (ADR-0083 §D8): a host that cannot supply a required confinement
+    /// control refuses the workload rather than starting it unconfined. When
+    /// `None`, the refusal stays the existing unclassified [`VmmError::Create`]
+    /// (S-VM-37's shape). No new injection mechanism — the SAME `create_fault`
+    /// slot, carrying an already-existing typed error rather than a bare
+    /// string.
+    confinement: Option<ConfinementControl>,
 }
 
 /// The diagnostic [`SimVmm::inject_create_failure`] refuses with. Held as
@@ -202,6 +213,43 @@ impl SimVmm {
         *self.create_fault.lock() = Some(CreateFault {
             detail: DEFAULT_CREATE_FAILURE_DETAIL.to_owned(),
             persistent: false,
+            confinement: None,
+        });
+    }
+
+    /// Arm a PERSISTENT [`Vmm::create`] refusal that fails CLOSED because the
+    /// host cannot supply the required confinement `control` — the typed
+    /// [`VmmError::ConfinementUnavailable`] carrying `detail` verbatim.
+    ///
+    /// This is the injection S-VM-51 drives through the
+    /// `ServerConfig.vmm_override` seam (ADR-0083 §D8, US-VM-7 fail-closed):
+    /// the Lima/metal test envelope runs one kernel, so no genuinely
+    /// Landlock-less host exists in it (system constraint 1). Injecting the
+    /// unavailable-control condition at the `Vmm` port boundary lets a REAL
+    /// in-process `overdrive serve` drive the already-wired fail-closed path
+    /// (`VmDriver::start` → `classify_vmm_error`'s `ConfinementUnavailable`
+    /// arm → `TransitionReason::VmConfinementUnavailable` → allocation
+    /// `Failed`) end to end, and NEVER starts the hypervisor unconfined.
+    ///
+    /// Persistent for the SAME reason [`Self::inject_persistent_create_failure`]
+    /// is: an unavailable confinement control does not heal between attempts,
+    /// so a one-shot arming would let a retry succeed into a different ending.
+    ///
+    /// No new mechanism and no new type: the existing `create_fault` slot
+    /// carries the already-existing typed [`VmmError::ConfinementUnavailable`]
+    /// (ADR-0082 confinement + [`ConfinementControl`]) rather than a bare
+    /// string. `detail` is never a classification input downstream — class and
+    /// diagnostic travel on independent channels, per the
+    /// [`overdrive_core::traits::driver::DriverStartFailure`] contract.
+    pub fn inject_persistent_confinement_unavailable(
+        &self,
+        control: ConfinementControl,
+        detail: impl Into<String>,
+    ) {
+        *self.create_fault.lock() = Some(CreateFault {
+            detail: detail.into(),
+            persistent: true,
+            confinement: Some(control),
         });
     }
 
@@ -229,22 +277,26 @@ impl SimVmm {
     /// [`overdrive_core::traits::driver::DriverStartFailure`] contract is
     /// that class and diagnostic travel on independent channels.
     pub fn inject_persistent_create_failure(&self, detail: impl Into<String>) {
-        *self.create_fault.lock() = Some(CreateFault { detail: detail.into(), persistent: true });
+        *self.create_fault.lock() =
+            Some(CreateFault { detail: detail.into(), persistent: true, confinement: None });
     }
 
-    /// Consume the armed `create` fault for ONE call. A one-shot arming
-    /// disarms itself here; a persistent one stays armed. The lock is
-    /// scoped to this function so no guard is ever held across the
-    /// caller's `await` points.
-    fn take_armed_create_fault(&self) -> Option<String> {
+    /// Consume the armed `create` fault for ONE call, returning its verbatim
+    /// `detail` and its optional confinement control (`Some` → fail closed with
+    /// the typed [`VmmError::ConfinementUnavailable`]; `None` → the unclassified
+    /// [`VmmError::Create`]). A one-shot arming disarms itself here; a
+    /// persistent one stays armed. The lock is scoped to this function so no
+    /// guard is ever held across the caller's `await` points.
+    fn take_armed_create_fault(&self) -> Option<(String, Option<ConfinementControl>)> {
         let mut armed = self.create_fault.lock();
         let fault = armed.as_ref()?;
-        let (detail, persistent) = (fault.detail.clone(), fault.persistent);
+        let (detail, persistent, confinement) =
+            (fault.detail.clone(), fault.persistent, fault.confinement);
         if !persistent {
             *armed = None;
         }
         drop(armed);
-        Some(detail)
+        Some((detail, confinement))
     }
 
     /// Arm a one-shot [`SimVmmProbeFault`] for the NEXT [`Vmm::probe`]
@@ -308,11 +360,17 @@ impl Vmm for SimVmm {
         }
         std::fs::copy(&master, &clone_dest).map_err(VmmError::Io)?;
 
-        if let Some(detail) = self.take_armed_create_fault() {
-            // §D6: the spawn "fails" after the clone succeeded — remove
-            // it. No partial artifact escapes a failed `create`.
+        if let Some((detail, confinement)) = self.take_armed_create_fault() {
+            // §D6: the "spawn" fails after the clone succeeded — remove it. No
+            // partial artifact escapes a failed `create`. Fail CLOSED with the
+            // typed confinement refusal when a control was named (S-VM-51), else
+            // the unclassified create refusal (S-VM-37) — the SAME slot, the
+            // real typed error, never an unconfined `Ok(VmProcess)`.
             let _ = std::fs::remove_file(&clone_dest);
-            return Err(VmmError::create(detail));
+            return Err(match confinement {
+                Some(control) => VmmError::ConfinementUnavailable { control, detail },
+                None => VmmError::create(detail),
+            });
         }
 
         let pid = self.next_pid.fetch_add(1, Ordering::SeqCst);
