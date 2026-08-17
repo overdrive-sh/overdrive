@@ -20,6 +20,20 @@
 //! than a capability claim: only S-VM-36 requires a real guest boot; S-VM-33,
 //! S-VM-35 and S-VM-41 are all rejected before a guest-booting hypervisor
 //! process exists.
+//!
+//! Step 03-02 (S-VM-37) closes the other half of AC-09 — the unclassified
+//! fallthrough. It substitutes the `Vmm` port at the same `vmm_override` seam
+//! S-VM-35 established, so it needs no guest and no KVM; the file-level gate
+//! over-gates it, which is a layout fact rather than a property of that
+//! scenario.
+//!
+//! Steps 03-03 and 03-04 (S-VM-38, S-VM-39, S-VM-40) close the whole of AC-10
+//! and stay scaffolded RED at the bottom of this file, each with its own
+//! activation plan. Their capability truth is mixed once more: S-VM-39 and
+//! S-VM-40 genuinely boot a guest and reach Running, while S-VM-38 is an
+//! in-process semantic rejection that spawns no VMM at all and would run
+//! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
+//! over-gates it too.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::expect_used, clippy::missing_panics_doc)]
@@ -41,6 +55,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::config::{HostArch, RootfsPlan, VmRunDir};
 use overdrive_host::CloudHypervisorVmm;
+use overdrive_sim::SimVmm;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -145,9 +160,12 @@ fn build_empty_rootfs(tmp: &Path, name: &str) -> PathBuf {
 }
 
 /// Every allocation-scoped VM resource a rejected or aborted start must
-/// leave behind: none. Named once so all five scenarios in this file
+/// leave behind: none. Named once so all six scenarios in this file
 /// assert the SAME four facts (hypervisor process, per-launch rootfs
 /// clone, run directory, cgroup scope) rather than drifting apart.
+/// S-VM-37 (step 03-02) is the sixth caller, and it calls this once per
+/// unclassified run: an unclassified rejection leaks no more than a
+/// named one.
 fn assert_no_allocation_scoped_vm_residue(alloc: &AllocationId, rootfs_master: &Path) {
     let rootfs_plan = RootfsPlan::for_alloc(rootfs_master.to_path_buf(), 0, alloc);
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
@@ -175,21 +193,30 @@ fn assert_no_allocation_scoped_vm_residue(alloc: &AllocationId, rootfs_master: &
     );
 }
 
-/// The operator-visible half of AC-09, asserted the same way by all five
-/// scenarios: the NAMED cause must reach the rendered `overdrive workload
+/// The operator-visible half of AC-09, asserted the same way by all six
+/// scenarios: the cause must reach the rendered `overdrive workload
 /// describe` output in the ratified `TransitionReason::human_readable()`
 /// vocabulary — not merely the verbatim driver diagnostic, and not merely
 /// a path that happens to appear inside it.
 ///
 /// The second assertion is what stops this from being a tautology. Every
-/// cause in this file carries a `detail` whose prose differs from the
-/// cause's own wording (`open kernel image {p}: ...` vs `VM kernel not
+/// NAMED cause in this file carries a `detail` whose prose differs from
+/// the cause's own wording (`open kernel image {p}: ...` vs `VM kernel not
 /// found: {p}`; `stat rootfs master {p}: ...` vs `VM rootfs not found:
 /// {p}`), so a renderer that emitted ONLY the detail cannot satisfy the
 /// containment check. Pinning that divergence here means a future change
 /// that collapses the two — making the cause's wording a substring of the
 /// detail — fails loudly rather than silently hollowing out every
 /// scenario's operator-facing assertion.
+///
+/// S-VM-37's UNCLASSIFIED cause is the one caller for which that guard is
+/// satisfied structurally rather than by evidence: `DriverInternalError`'s
+/// `human_readable()` EMBEDS the detail, so a detail can never contain it
+/// and the check passes for free. The containment check below is still
+/// worth everything there — it demands the whole `driver internal error:
+/// {detail}` string, so the operator provably read the LABEL and not just
+/// the diagnostic — but the divergence the guard is meant to prove is
+/// asserted directly at that scenario's own call site instead.
 fn assert_named_cause_is_rendered(rendered: &str, reason: &TransitionReason, detail: &str) {
     let named = reason.human_readable();
     assert!(
@@ -963,4 +990,530 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
     assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
 
     handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// Step 03-02 (DWD-24) — AC-09's unclassified fallthrough.
+//
+// The inverse duty of the five named scenarios above: where they prove a
+// cause is named PRECISELY, this one proves a cause with no named class stays
+// honestly unclassified rather than being guessed into its nearest named
+// neighbour. It is the deliberate exception to `.claude/rules/development.md`
+// § Errors' distinct-failure-modes rule — an unclassified failure IS its own
+// distinct mode, and mislabelling it would send an operator to check the
+// wrong thing entirely.
+// ---------------------------------------------------------------------------
+
+/// The unclassified cause's own operator-facing label —
+/// `TransitionReason::DriverInternalError`'s `human_readable()` prefix. Named
+/// so the test-integrity guard below can state the property it protects
+/// rather than restating a literal at three call sites.
+const UNCLASSIFIED_LABEL: &str = "driver internal error";
+
+/// Two upstream diagnostics that map to NO named `VmStartFailure` class,
+/// differing ONLY in wording. Deliberately shaped like real hypervisor prose
+/// (and deliberately NOT like any named cause's payload: no configured path,
+/// no searched-path vector, no deadline, no format finding) so that anything
+/// which classified them into a named cause would have to have guessed.
+const UNMAPPED_DIAGNOSTIC_A: &str =
+    "cloud-hypervisor: vmm control plane rejected the launch payload (response tag 0x5c)";
+const UNMAPPED_DIAGNOSTIC_B: &str =
+    "cloud-hypervisor: microvm refused to arm -- unexpected device-model state 0x91";
+
+/// One S-VM-37 run: compose the real in-process `serve` with its `Vmm` port
+/// bound to a [`SimVmm`] that refuses EVERY `create` with `diagnostic`
+/// verbatim, deploy a `[job]` + `[vm]` workload, and poll to `Failed`.
+///
+/// `after_compose` runs between composition and deploy — the same
+/// post-composition TOCTOU window S-VM-33/35/41 rely on, so the
+/// anti-fallthrough sub-case can replace the configured kernel without a
+/// second composition entry point.
+///
+/// The refusal is PERSISTENT rather than one-shot on purpose: an unmappable
+/// substrate failure does not heal between restart attempts, and a one-shot
+/// arming would let a restart succeed into a boot-deadline ending instead —
+/// making which row the poller observes a race rather than a property of the
+/// failure under test.
+///
+/// Returns the describe output plus the handles the caller must keep alive:
+/// the `ServeHandle` to shut down after asserting, and the server `TempDir`
+/// whose lifetime the config path rides on.
+async fn deploy_against_unclassifiable_vmm(
+    id: &str,
+    kernel: &Path,
+    rootfs: &Path,
+    diagnostic: &str,
+    after_compose: impl FnOnce(),
+) -> (WorkloadDescribeOutput, ServeHandle, TempDir) {
+    let vmm = SimVmm::new();
+    vmm.inject_persistent_create_failure(diagnostic);
+    let (handle, server_tmp) = spawn_vm_server_with_vmm(
+        VmBootArtifacts { kernel_path: kernel.to_path_buf(), rootfs_path: rootfs.to_path_buf() },
+        Arc::new(vmm),
+    )
+    .await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path =
+        write_toml(server_tmp.path(), &format!("{id}.toml"), &vm_job_toml(id, kernel, rootfs));
+
+    after_compose();
+
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload whose start the VMM will refuse");
+    let out = poll_until_failed(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+    (out, handle, server_tmp)
+}
+
+/// Everything S-VM-37 asserts about ONE unclassified run, named once so the
+/// verbatim-preservation and wording-independence sub-cases cannot drift
+/// apart. Returns the allocation id so the caller can close on residue.
+fn assert_reads_as_unclassified_carrying(
+    out: &WorkloadDescribeOutput,
+    diagnostic: &str,
+) -> AllocationId {
+    let row =
+        out.snapshot.rows.first().expect("one failed allocation row for the deployed VM workload");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
+    let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    let detail = row.error.clone().expect("the verbatim driver diagnostic must be preserved");
+
+    // The EXISTING unclassified cause, carrying the upstream diagnostic. This
+    // feature mints no variant here: `DriverStartClass::Unclassified` maps
+    // onto the pre-existing `DriverInternalError` (ADR-0083 §D5, DWD-24).
+    assert_eq!(
+        reason,
+        TransitionReason::DriverInternalError { detail: diagnostic.to_owned() },
+        "S-VM-37: an unmapped VM start failure must reach the operator as the EXISTING \
+         unclassified cause carrying its verbatim diagnostic",
+    );
+
+    // The anti-tautology guard, inverted from the named scenarios': being
+    // "unclassified" only means something against the named vocabulary, so
+    // the outcome must be NONE of the five named VM causes.
+    //
+    // Stated honestly: against the equality above this is defence in depth,
+    // not an independent arrow — the two cannot fail apart, because a named
+    // cause already contradicts the equality (verified: a litmus that routed
+    // this failure to `VmHypervisorAbsent` reddened on the equality first).
+    // It is kept, and kept separate, because the equality is the assertion
+    // most likely to be relaxed later — a future weakening to "matches the
+    // DriverInternalError variant" would silently drop the named-vocabulary
+    // exclusion, and this line is what would still catch that.
+    assert!(
+        !matches!(
+            reason,
+            TransitionReason::VmKernelNotFound { .. }
+                | TransitionReason::VmRootfsNotFound { .. }
+                | TransitionReason::VmHypervisorAbsent { .. }
+                | TransitionReason::VmBootDeadlineExceeded { .. }
+                | TransitionReason::VmKernelFormatUnsupported { .. }
+        ),
+        "an unmapped failure must never be dressed up as a named VM cause: {reason:?}",
+    );
+
+    // Byte-for-byte on its own channel: neither truncated nor reworded.
+    assert_eq!(
+        detail, diagnostic,
+        "the verbatim upstream diagnostic must survive untruncated and unreworded",
+    );
+
+    // ...and both halves reach the operator's actual rendered output: the
+    // diagnostic verbatim, and — via the shared integrity check — the whole
+    // `driver internal error: {detail}` label, so the operator provably reads
+    // that this is UNCLASSIFIED and not merely an unexplained string.
+    let rendered = overdrive_cli::render::workload_describe(out);
+    assert!(
+        rendered.contains(diagnostic),
+        "the rendered operator view must carry the verbatim upstream diagnostic:\n{rendered}",
+    );
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
+
+    alloc
+}
+
+/// S-VM-37 / `@contract-shape:bounded-change` — a VM start failure the
+/// platform has no named variant for reaches the operator carrying its
+/// verbatim upstream diagnostic under the EXISTING unclassified cause, and is
+/// never dressed up as one of the named VM causes.
+///
+/// ```gherkin
+/// Given a VM start fails for a reason the platform has no named variant for
+/// When Ana reads workload describe
+/// Then the reason carries the verbatim hypervisor error text
+/// And it is labelled as unclassified rather than presented as a known cause
+/// ```
+///
+/// This is the explicit TOTAL fallback of DWD-24's conversion, not an
+/// exception to the distinct-failure-modes rule: a cause with no named class
+/// must stay unclassified rather than be guessed into the nearest named
+/// neighbour. The operator-facing variant is the pre-existing
+/// `TransitionReason::DriverInternalError` — this feature mints nothing here —
+/// reached through `DriverStartClass::Unclassified` for `DriverType::Vm`,
+/// whose conversion copies the already-captured verbatim
+/// `DriverStartFailure.detail` across unchanged (ADR-0083 §D5). No
+/// compatibility parser and no classification logic exists in the action
+/// shim, and none may reappear.
+///
+/// Three sub-cases, all example-based (Tier 3 — sad paths are enumerated,
+/// never generated):
+///
+/// 1. *Verbatim preservation.* One run against diagnostic A.
+/// 2. *Wording independence.* A second run varying ONLY the wording. This is
+///    the criterion that a single run structurally cannot prove: it takes two
+///    runs to show that changing the diagnostic changes only the preserved
+///    detail and never which cause class is selected.
+/// 3. *Anti-fallthrough.* S-VM-41's artifact — the configured kernel replaced
+///    with an image the host cannot load — driven through this SAME
+///    unclassified-capable override, asserting the outcome stays
+///    `VmKernelFormatUnsupported`. The fallthrough must not be able to claim
+///    a failure a named cause already covers.
+#[tokio::test]
+#[serial(cgroup)]
+async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim_cause() {
+    // Test integrity, asserted before anything else runs. The shared
+    // `assert_named_cause_is_rendered` guard is satisfied structurally for
+    // this cause (its `human_readable()` embeds the detail, so a detail can
+    // never contain it), so the property that guard exists to protect is
+    // asserted here directly: a diagnostic that already spelt the
+    // unclassified label would make the render assertion prove nothing.
+    for diagnostic in [UNMAPPED_DIAGNOSTIC_A, UNMAPPED_DIAGNOSTIC_B] {
+        assert!(
+            !diagnostic.contains(UNCLASSIFIED_LABEL),
+            "test integrity: a diagnostic that already spells {UNCLASSIFIED_LABEL:?} would make \
+             the render assertion prove nothing; diagnostic was {diagnostic:?}",
+        );
+    }
+    assert_ne!(
+        UNMAPPED_DIAGNOSTIC_A, UNMAPPED_DIAGNOSTIC_B,
+        "wording independence is only provable against two DIFFERENT diagnostics",
+    );
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let artifact_tmp = tempfile::Builder::new()
+        .prefix("vm-unclassified-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the shared reflink-capable staging root");
+
+    // ---- (1) Verbatim preservation. ----
+    let (out_a, handle_a, _server_a) = deploy_against_unclassifiable_vmm(
+        "vm-unclassified-a",
+        &fixture.kernel_path,
+        &fixture.rootfs_path,
+        UNMAPPED_DIAGNOSTIC_A,
+        || {},
+    )
+    .await;
+    let alloc_a = assert_reads_as_unclassified_carrying(&out_a, UNMAPPED_DIAGNOSTIC_A);
+    assert_no_allocation_scoped_vm_residue(&alloc_a, &fixture.rootfs_path);
+    handle_a.shutdown().await.expect("clean shutdown");
+
+    // ---- (2) Wording independence: same class, different detail only. ----
+    let (out_b, handle_b, _server_b) = deploy_against_unclassifiable_vmm(
+        "vm-unclassified-b",
+        &fixture.kernel_path,
+        &fixture.rootfs_path,
+        UNMAPPED_DIAGNOSTIC_B,
+        || {},
+    )
+    .await;
+    let alloc_b = assert_reads_as_unclassified_carrying(&out_b, UNMAPPED_DIAGNOSTIC_B);
+    assert_no_allocation_scoped_vm_residue(&alloc_b, &fixture.rootfs_path);
+    handle_b.shutdown().await.expect("clean shutdown");
+
+    // The wording-independence claim, stated once as a fact rather than left
+    // as a deduction the reader has to make across the two blocks above: the
+    // two runs selected the SAME cause constructor, and still differ — which,
+    // given each run already pinned its whole cause, can only be in the
+    // preserved detail. This is the criterion one run structurally cannot
+    // prove.
+    let cause_of = |out: &WorkloadDescribeOutput| {
+        out.snapshot
+            .rows
+            .first()
+            .and_then(|row| row.reason.clone())
+            .expect("a failed VM allocation must carry a structured reason")
+    };
+    let (reason_a, reason_b) = (cause_of(&out_a), cause_of(&out_b));
+    assert_eq!(
+        std::mem::discriminant(&reason_a),
+        std::mem::discriminant(&reason_b),
+        "varying ONLY the diagnostic wording must not change which cause class is selected",
+    );
+    assert_ne!(
+        reason_a, reason_b,
+        "...and the two runs must still differ, in the preserved detail — the only thing that \
+         changed between them",
+    );
+
+    // ---- (3) Anti-fallthrough: a named cause is never surrendered to the
+    // unclassified arm. The per-allocation verifier rejects this start before
+    // the VMM is reached, so the armed diagnostic cannot claim it. ----
+    let kernel = copy_kernel_for_this_test(artifact_tmp.path(), &fixture, "kernel-to-replace");
+    let replacement = artifact_tmp.path().join("incompatible-image.staged");
+    let (out_c, handle_c, _server_c) = deploy_against_unclassifiable_vmm(
+        "vm-unclassified-not-format",
+        &kernel,
+        &fixture.rootfs_path,
+        UNMAPPED_DIAGNOSTIC_A,
+        || {
+            std::fs::write(&replacement, b"NOT-A-KERNEL\n".repeat(512))
+                .expect("stage an image cloud-hypervisor cannot load as a boot image");
+            std::fs::rename(&replacement, &kernel)
+                .expect("atomically replace the configured kernel after composition");
+        },
+    )
+    .await;
+    let row_c = out_c
+        .snapshot
+        .rows
+        .first()
+        .expect("one failed allocation row for the deployed VM workload");
+    let alloc_c = AllocationId::new(&row_c.alloc_id).expect("server allocation id is valid");
+    let reason_c =
+        row_c.reason.clone().expect("a failed VM allocation must carry a structured reason");
+
+    // The outcome, not the ordering — and deliberately NOT a restatement of
+    // S-VM-41's own naming assertions, which that scenario already owns.
+    assert!(
+        matches!(reason_c, TransitionReason::VmKernelFormatUnsupported { .. }),
+        "an unloadable kernel image must stay VmKernelFormatUnsupported even when the VMM behind \
+         it would have produced an unclassified failure: {reason_c:?}",
+    );
+    assert!(
+        !matches!(reason_c, TransitionReason::DriverInternalError { .. }),
+        "the unclassified fallthrough must never claim a failure a named cause already covers",
+    );
+
+    // The armed diagnostic is distinctive, so its ABSENCE is direct evidence
+    // the VMM was never reached rather than merely out-ranked.
+    let rendered_c = overdrive_cli::render::workload_describe(&out_c);
+    assert!(
+        !rendered_c.contains(UNMAPPED_DIAGNOSTIC_A),
+        "the VMM's own diagnostic must not reach an operator whose start never got that far:\n\
+         {rendered_c}",
+    );
+    assert_no_allocation_scoped_vm_residue(&alloc_c, &fixture.rootfs_path);
+    handle_c.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// Steps 03-03 / 03-04 — RED scaffolds (S-VM-38, S-VM-39, S-VM-40).
+//
+// Shape per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
+// failing commits": `#[should_panic(expected = "RED scaffold")]` plus a panic
+// body naming the scenario. The bar stays green while every pending scenario
+// stays discoverable via `grep -rn 'should_panic.*RED scaffold' crates/`, and
+// deleting the `panic!` without writing the assertions trips the attribute
+// rather than passing silently.
+//
+// All three carry `#[test]` TODAY, deliberately: their bodies are a single
+// panic, so they await nothing and touch no cgroup. `#[tokio::test]` and
+// `#[serial(cgroup)]` are claims about what a body DOES, and neither body
+// makes them yet. Each rustdoc names the attributes its activated form must
+// carry, so the swap happens with the assertions and not before.
+//
+// The six activated scenarios above (S-VM-33/34/35/36/37/41) are untouched.
+// ---------------------------------------------------------------------------
+
+/// S-VM-38 / `@contract-shape:bounded-change` `@error_path` `@ac-10` `@tier3`
+/// `@real-io` — a spec declaring both `[service]` and `[vm]` is rejected before
+/// anything is scheduled, and the rejection tells the operator which
+/// capabilities are missing and where they are tracked.
+///
+/// ```gherkin
+/// Given Ana has written a spec declaring both [service] and [vm]
+/// When she runs "overdrive deploy web.toml"
+/// Then the deploy is rejected before anything is scheduled
+/// And the error names guest networking, guest probes and guest-stack mTLS as
+///   missing, citing GH #257 and GH #222
+/// ```
+///
+/// A semantic rejection with guidance, not a parse error — the established
+/// precedent is `ParseError::ProbesNotAllowedOnKind`
+/// (`crates/overdrive-core/src/aggregate/workload_spec.rs`), which rejects
+/// `[[health_check.*]]` on a non-Service workload and carries per-kind
+/// `guidance` text so the operator learns *why* rather than merely being
+/// refused. This scenario is the mirror image of that shape: Service is the
+/// kind being refused rather than the kind being required.
+///
+/// Unlike every other scenario in this file, nothing here needs a hypervisor,
+/// a guest, or KVM: the rejection happens in-process before an intent is
+/// committed. It lives here for cohesion with the rest of AC-09/AC-10 and
+/// therefore inherits the file-level `integration-tests,kvm-tests` gate. That
+/// over-gating is a layout consequence, not a capability claim about this
+/// scenario (roadmap 03-03).
+///
+/// # Activation plan (step 03-03)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`.
+/// The `await` is real — the "nothing was scheduled" half is asserted against a
+/// live `serve`, not inferred from the parser — and that composition boots the
+/// real cgroup-backed worker, so the serialisation is a claim the body makes
+/// even though this scenario creates no scope of its own.
+///
+/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (a VALID
+/// kernel/rootfs pair, so the rejection is provably about the `[service]` +
+/// `[vm]` combination and not about a broken artifact), `spawn_vm_server`,
+/// `config_path`, `write_toml`, `deploy`, `describe`.
+///
+/// **Still to build**: a `vm_service_toml` builder alongside `vm_job_toml`,
+/// emitting `[service]` + `[vm]` with the same `[resources]` block; and the
+/// rejection itself in `crates/overdrive-core/src/aggregate/workload_spec.rs`,
+/// mirroring `ProbesNotAllowedOnKind`'s shape — a `ParseError` variant whose
+/// `#[error(...)]` text is the operator-facing message and whose guidance is a
+/// `&'static str` constant rather than a string built at the call site.
+///
+/// **Assertions**:
+///
+/// * `deploy(..)` returns `Err`, and its rendered message names all three
+///   missing capabilities — guest networking, guest-reachable probes, and
+///   guest-stack mTLS interception. Assert the three independently; a single
+///   `contains` on one phrase would pass against a message that dropped the
+///   other two.
+/// * The same message cites `#257` and `#222` by number. Assert the digits, not
+///   a URL — the criterion is that the operator can find the tracking issue.
+/// * Nothing was scheduled: `describe` for the spec's declared id reports no
+///   allocation rows. This is the half a parser-level unit test cannot reach
+///   and the reason the scenario is Tier 3 at all.
+/// * `assert_no_allocation_scoped_vm_residue` does NOT apply and must not be
+///   forced: no `AllocationId` is ever minted, which is precisely what this
+///   scenario proves. Asserting on residue for an allocation that does not
+///   exist would be vacuous.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-38 / step 03-03 -- a spec declaring both \
+         [service] and [vm] must be rejected before any intent is committed, naming guest \
+         networking, guest probes and guest-stack mTLS and citing GH #257 and GH #222)"
+    );
+}
+
+/// S-VM-39 / `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3`
+/// `@real-io` `@requires-kvm` — a spec declaring both `[job]` and `[vm]` is
+/// accepted, scheduled, and its VM allocation reaches Running through the
+/// production `VmDriver` path.
+///
+/// ```gherkin
+/// Given Ana has written a spec declaring both [job] and [vm]
+/// When she runs "overdrive deploy render.toml"
+/// Then the workload is accepted and scheduled
+/// And its VM allocation reaches Running through the production VmDriver path
+/// ```
+///
+/// One of the two regression guards proving S-VM-38's rejection stayed scoped
+/// to `[service]`. That guard only holds if this allocation genuinely RUNS: a
+/// spec that merely parses proves the rejection did not fire, but says nothing
+/// about whether the positive path still reaches a guest. DWD-24 made this
+/// explicit — "the test must drive real serve composition and the production
+/// `VmDriver` path; a parser-only acceptance assertion is insufficient" — which
+/// is why `@requires-kvm` here is a real capability claim rather than the
+/// file-level layout gate.
+///
+/// # Activation plan (step 03-04)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`.
+/// This one really does create an allocation-scoped cgroup scope, so the
+/// serialisation is load-bearing rather than merely conventional.
+///
+/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (the shared
+/// kernel/rootfs pair that actually boots — do NOT reach for
+/// `build_empty_rootfs`, whose whole purpose is a guest that never beacons),
+/// `spawn_vm_server`, `config_path`, `write_toml`, `deploy`, and `vm_job_toml`
+/// unchanged: it already emits `[job]` + `[vm]`, so this scenario's spec needs
+/// no new builder at all.
+///
+/// **Still to build**: a `poll_until_running` sibling of `poll_until_failed`.
+/// Prefer extracting a shared `poll_until_state(cfg, id, wanted, max_wait)`
+/// that both delegate to, so the two pollers cannot drift in their timeout
+/// message or their row-selection rule — the same reason
+/// `assert_no_allocation_scoped_vm_residue` is named once for every scenario
+/// here rather than inlined five times.
+///
+/// **Assertions**:
+///
+/// * `deploy(..)` succeeds — the workload is admitted, not rejected.
+/// * The allocation reaches `AllocStateWire::Running` within a ceiling
+///   comfortably above the boot deadline, so a pass means the guest booted
+///   rather than the poll being generous.
+/// * The row carries no failure reason while Running. A Running row with a
+///   populated reason would mean the state and the cause disagree.
+/// * The allocation-scoped VM resources DO exist while Running — the run
+///   directory and cgroup scope `assert_no_allocation_scoped_vm_residue`
+///   asserts the ABSENCE of on every rejected start. Asserting their presence
+///   here is what distinguishes "the production `VmDriver` path ran" from "the
+///   parser accepted the spec", and it is the assertion that makes this a
+///   genuine regression guard for 03-03.
+/// * Close with `handle.shutdown()`; the Running guest is this scenario's own
+///   and must not outlive it.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-39 / step 03-04 -- a spec declaring both \
+         [job] and [vm] must be accepted, scheduled, and reach Running through the production \
+         VmDriver path)"
+    );
+}
+
+/// S-VM-40 / `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3`
+/// `@real-io` `@requires-kvm` — a spec declaring a cron `[schedule]` and `[vm]`
+/// is accepted and scheduled, and when its first firing becomes due its VM
+/// allocation reaches Running through the production `VmDriver` path.
+///
+/// ```gherkin
+/// Given Ana has written a spec declaring [schedule] with a cron expression and [vm]
+/// When she runs "overdrive deploy nightly.toml"
+/// Then the workload is accepted and scheduled
+/// And when its first firing becomes due, its VM allocation reaches Running through
+///   the production VmDriver path
+/// ```
+///
+/// The second regression guard for S-VM-38's scoping, and the one that closes
+/// Slice 02's "accepted and run" promise for the Schedule kind. DWD-24 promoted
+/// this scenario's Then from "accepted" to "reaches Running", which is what
+/// makes it the 46th `@requires-kvm` scenario — the guest boot is the point,
+/// not an incidental cost.
+///
+/// # Activation plan (step 03-04)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`,
+/// for the same reason as S-VM-39 — a real fired allocation, a real scope.
+///
+/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision`,
+/// `spawn_vm_server`, `config_path`, `write_toml`, `deploy`, and the
+/// `poll_until_running` helper S-VM-39 introduces.
+///
+/// **Still to build**: a `vm_schedule_toml` builder emitting `[schedule]` with
+/// a cron expression plus `[job]` + `[vm]` — the Schedule kind composes a job
+/// inner spec, so this is `vm_job_toml` with a `[schedule]` table added rather
+/// than a separate shape. Confirm the exact table layout against the Schedule
+/// deploy surface already exercised by `tests/integration/deploy_schedule.rs`
+/// before writing it; do not infer the cron field name from this note.
+///
+/// **Assertions**:
+///
+/// * `deploy(..)` succeeds and the workload is recorded as scheduled.
+/// * When the first firing becomes due, the fired allocation reaches
+///   `AllocStateWire::Running`.
+/// * The poll ceiling must comfortably exceed the cron granularity, the same
+///   way S-VM-36's 120s ceiling comfortably exceeds its 30s boot deadline. A
+///   ceiling near the firing interval turns a real pass into a coin flip and,
+///   worse, turns a real regression into an intermittent one. Pick the cron
+///   expression and the ceiling together so that a timeout means the firing
+///   did not happen, never that the test was impatient.
+/// * As in S-VM-39, assert the allocation-scoped run directory and cgroup scope
+///   EXIST while Running — reaching Running through the production `VmDriver`
+///   path is the claim, and a state field alone does not evidence it.
+/// * Close with `handle.shutdown()`.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-40 / step 03-04 -- a spec declaring a cron \
+         [schedule] and [vm] must be accepted and scheduled, and its first firing must reach \
+         Running through the production VmDriver path)"
+    );
 }

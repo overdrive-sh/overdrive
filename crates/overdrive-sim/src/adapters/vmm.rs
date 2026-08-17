@@ -59,6 +59,27 @@ struct SimProcessEntry {
 /// as an ending rather than as an anonymous nest of options.
 type ScriptedEnding = (Option<i32>, Option<u8>);
 
+/// The armed [`Vmm::create`] fault: the verbatim diagnostic the refusal
+/// carries, plus whether the arming survives the call that consumed it.
+///
+/// Both fields exist because the two consumers need opposite lifetimes.
+/// §D6's "spawn fails after the clone succeeded" edge case wants a
+/// one-shot arming, so the sequence under test observes exactly one
+/// refusal. A scenario about an allocation that is *restarted* wants a
+/// persistent one: an unmappable substrate failure does not heal between
+/// attempts, and a one-shot arming would let attempt 2 succeed into a
+/// different ending entirely — a race between the restart and the
+/// observer, not a property of the failure being modelled.
+struct CreateFault {
+    detail: String,
+    persistent: bool,
+}
+
+/// The diagnostic [`SimVmm::inject_create_failure`] refuses with. Held as
+/// a named constant because the equivalence and driver-contract suites
+/// assert on this exact text.
+const DEFAULT_CREATE_FAILURE_DETAIL: &str = "SimVmm: injected create failure";
+
 #[derive(Default)]
 struct State {
     processes: BTreeMap<u32, SimProcessEntry>,
@@ -110,13 +131,14 @@ pub enum SimVmmProbeFault {
 pub struct SimVmm {
     state: Arc<Mutex<State>>,
     next_pid: Arc<AtomicU32>,
-    /// Consumed by the NEXT `create` call only (mirrors
-    /// `SimCgroupFs::inject_error`'s one-shot-per-call injection style,
-    /// simplified to a single flag since `Vmm` has exactly one
-    /// spawn-shaped operation). §D6's "spawn fails after the clone
-    /// succeeded" edge case needs this to be exercisable on `SimVmm`
-    /// too, per S-VM-90's driving sequence.
-    fail_next_create: Arc<std::sync::atomic::AtomicBool>,
+    /// The armed [`Vmm::create`] refusal, if any — see [`CreateFault`]
+    /// for why the arming carries its own lifetime. Mirrors
+    /// `SimCgroupFs::inject_error`'s injection style, collapsed to a
+    /// single slot since `Vmm` has exactly one spawn-shaped operation.
+    /// §D6's "spawn fails after the clone succeeded" edge case needs
+    /// this to be exercisable on `SimVmm` too, per S-VM-90's driving
+    /// sequence.
+    create_fault: Arc<Mutex<Option<CreateFault>>>,
     /// Consumed by the NEXT `probe` call only — ADR-0083 §D8's
     /// `ServerConfig.vmm_override` fault-injection seam (S-VM-13).
     probe_fault: Arc<Mutex<Option<SimVmmProbeFault>>>,
@@ -125,7 +147,8 @@ pub struct SimVmm {
     /// hypervisor writing to its stderr pipe.
     scripted_console: Arc<Mutex<Option<Vec<u8>>>>,
     /// The ending the NEXT created process reports. Consumed by that one
-    /// `create`, mirroring `fail_next_create`'s one-shot style.
+    /// `create`, mirroring [`Self::inject_create_failure`]'s one-shot
+    /// style.
     scripted_exit: Arc<Mutex<Option<ScriptedEnding>>>,
 }
 
@@ -144,7 +167,7 @@ impl SimVmm {
         Self {
             state: Arc::new(Mutex::new(State::default())),
             next_pid: Arc::new(AtomicU32::new(1_000_000)),
-            fail_next_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            create_fault: Arc::new(Mutex::new(None)),
             probe_fault: Arc::new(Mutex::new(None)),
             scripted_console: Arc::new(Mutex::new(None)),
             scripted_exit: Arc::new(Mutex::new(None)),
@@ -176,7 +199,52 @@ impl SimVmm {
     /// made. Exercises §D6's "create removes its clone if the spawn
     /// fails" edge case against this adapter.
     pub fn inject_create_failure(&self) {
-        self.fail_next_create.store(true, Ordering::SeqCst);
+        *self.create_fault.lock() = Some(CreateFault {
+            detail: DEFAULT_CREATE_FAILURE_DETAIL.to_owned(),
+            persistent: false,
+        });
+    }
+
+    /// Arm a PERSISTENT [`Vmm::create`] refusal carrying `detail`
+    /// verbatim — every `create` on this adapter fails identically until
+    /// the fault is re-armed or replaced.
+    ///
+    /// Two properties distinguish this from
+    /// [`Self::inject_create_failure`], and both are load-bearing for
+    /// S-VM-37 (an unmapped VM start failure reaching the operator as the
+    /// unclassified cause, GH #42 / ADR-0083 §D5):
+    ///
+    /// * **Caller-supplied diagnostic.** `detail` reaches
+    ///   [`VmmError::Create`] byte-for-byte, so a scenario can pin a
+    ///   sentinel that matches NO named `VmStartFailure` class and then
+    ///   prove the platform preserved it rather than reworded it. A
+    ///   fixed adapter-authored string cannot express that, and cannot
+    ///   express the second half either — that varying ONLY the wording
+    ///   leaves the selected cause class unchanged.
+    /// * **Persistent arming.** The refusal must not heal between
+    ///   restart attempts; see [`CreateFault`].
+    ///
+    /// `detail` is never interpreted here, and must never become a
+    /// classification input downstream — the whole point of the typed
+    /// [`overdrive_core::traits::driver::DriverStartFailure`] contract is
+    /// that class and diagnostic travel on independent channels.
+    pub fn inject_persistent_create_failure(&self, detail: impl Into<String>) {
+        *self.create_fault.lock() = Some(CreateFault { detail: detail.into(), persistent: true });
+    }
+
+    /// Consume the armed `create` fault for ONE call. A one-shot arming
+    /// disarms itself here; a persistent one stays armed. The lock is
+    /// scoped to this function so no guard is ever held across the
+    /// caller's `await` points.
+    fn take_armed_create_fault(&self) -> Option<String> {
+        let mut armed = self.create_fault.lock();
+        let fault = armed.as_ref()?;
+        let (detail, persistent) = (fault.detail.clone(), fault.persistent);
+        if !persistent {
+            *armed = None;
+        }
+        drop(armed);
+        Some(detail)
     }
 
     /// Arm a one-shot [`SimVmmProbeFault`] for the NEXT [`Vmm::probe`]
@@ -240,11 +308,11 @@ impl Vmm for SimVmm {
         }
         std::fs::copy(&master, &clone_dest).map_err(VmmError::Io)?;
 
-        if self.fail_next_create.swap(false, Ordering::SeqCst) {
+        if let Some(detail) = self.take_armed_create_fault() {
             // §D6: the spawn "fails" after the clone succeeded — remove
             // it. No partial artifact escapes a failed `create`.
             let _ = std::fs::remove_file(&clone_dest);
-            return Err(VmmError::create("SimVmm: injected create failure".to_string()));
+            return Err(VmmError::create(detail));
         }
 
         let pid = self.next_pid.fetch_add(1, Ordering::SeqCst);
