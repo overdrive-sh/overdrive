@@ -228,6 +228,16 @@
 //! verification — the C-5 correction, see
 //! [`vm_seccomp_is_verified_per_thread_not_on_the_thread_group_leader`]'s
 //! own doc comment).
+//!
+//! **Step 03-07** appends a 10th scenario, S-VM-54 (DWD-25 / AC-21), as a
+//! RED scaffold at the bottom of this file — the one test here that is not
+//! GREEN. It carries `#[should_panic(expected = "RED scaffold")]`, never
+//! `#[ignore]`, so the bar stays green and it stays discoverable via
+//! `grep -rn 'should_panic.*RED scaffold' crates/`. It cannot be written
+//! before 03-07 lands because every server helper above composes through
+//! `VmBootArtifacts` — the node-level artifact seam DWD-25 deletes — and
+//! S-VM-54's whole claim is that no such seam exists. See its own doc
+//! comment for the activation plan.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
@@ -2028,4 +2038,195 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
     }
 
     handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------
+// Step 03-07 — RED scaffold (S-VM-54): the artifacts are the allocation's
+// own, and there is no node-level artifact seam left to supply them.
+//
+// Shape per `.claude/rules/testing.md` § "RED scaffolds and
+// intentionally-failing commits": `#[should_panic(expected = "RED
+// scaffold")]` plus a panic body naming the scenario. The bar stays green
+// while the pending scenario stays discoverable via `grep -rn
+// 'should_panic.*RED scaffold' crates/`, and deleting the `panic!` without
+// writing the assertions trips the attribute rather than passing silently.
+//
+// It carries `#[test]` TODAY, deliberately: the body is a single panic, so
+// it awaits nothing, boots no server and touches no cgroup.
+// `#[tokio::test]` and `#[serial(cgroup)]` are claims about what a body
+// DOES, and this body makes neither yet. The rustdoc below names the
+// attributes the activated form must carry, so the swap happens with the
+// assertions and not before.
+//
+// The nine activated scenarios above are untouched.
+// ---------------------------------------------------------------------
+
+/// S-VM-54 / `@contract-shape:bounded-change` `@walking_skeleton`
+/// `@happy_path` `@ac-21` `@tier3` `@real-io` `@requires-kvm` `@kpi:K4` —
+/// two VM jobs deployed to ONE running `overdrive serve`, naming DIFFERENT
+/// rootfs images, both reach Running, and each boots from the image its own
+/// spec named.
+///
+/// ```gherkin
+/// Given a kernel and two distinct ext4 rootfs images are staged on the host in
+///   separate directories, each guest identifiably reporting which image it booted
+/// And "overdrive serve" is running with no kernel or rootfs configured anywhere
+///   in its arguments, environment or configuration files
+/// And Ana has written two specs, each declaring [job] and [vm], naming the same
+///   kernel and a different one of the two rootfs images
+/// When she runs "overdrive deploy" for each of them
+/// Then both workloads are accepted and both VM allocations reach Running through
+///   the production VmDriver path
+/// And each allocation booted from the rootfs image its own spec named
+/// ```
+///
+/// Two claims, and the second is the reason there are two specs. The
+/// **structural** claim is that reaching Running at all is impossible unless
+/// the spec's own paths were read: after 03-07 there is no other source of a
+/// kernel or rootfs path anywhere in the process. The **regression** claim is
+/// the one a single-spec test would pass vacuously against — a re-introduced
+/// node-level default would still boot ONE allocation from ONE image and look
+/// entirely correct; only two allocations demanding two different images can
+/// tell "the driver read this allocation's payload" apart from "the node had a
+/// template that happened to match".
+///
+/// This is the in-tree companion to verification expectation
+/// `E06-vm-job-deploy-reaches-running`, which asks the strictly harder
+/// question (the shipped binary's own argv, out of process, default features)
+/// and is K4's instrument. Keep the two consistent: if this passes and E06
+/// does not, the difference is the in-process seam and is itself the finding.
+///
+/// # Why this cannot be written before 03-07
+///
+/// Every server helper in this file — [`spawn_vm_server`],
+/// [`spawn_vm_server_mtls_composed`], [`spawn_vm_server_with_vmm_override`] —
+/// takes a `VmBootArtifacts`, the node-level artifact seam DWD-25 **deletes**
+/// (along with `ServerConfig.vm_artifacts`,
+/// `run_with_dataplane_and_vm_artifacts` and `run_with_vm_artifacts`). This
+/// scenario's premise is that no such seam exists, so it has no honest
+/// composition to drive today: composing through the seam would prove the
+/// opposite of what it claims. The scaffold therefore stops at the panic
+/// rather than reaching for the API 03-07 is going to remove — or inventing
+/// the one it will leave behind.
+///
+/// # Activation plan (step 03-07)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]`.
+/// This scenario boots a real `serve` against the real host cgroupfs and
+/// creates TWO allocation-scoped cgroup scopes, so the serialisation is
+/// load-bearing rather than conventional. No `.config/nextest.toml` change is
+/// needed: that file already routes this whole module into the
+/// `host-kernel-shared` single-writer group by MODULE filter
+/// (`test(vm_walking_skeleton)`), and `tests/integration.rs` already declares
+/// the module.
+///
+/// **Composition**: drive whichever **ungated** `serve` entrypoint survives
+/// 03-07's deletion. 03-07 owns naming it; do not invent one here, and do not
+/// reach for `run_with_dataplane_and_vm_artifacts` or `run_with_vm_artifacts`
+/// — both are gone. Whatever the surviving helper is, it must take NO artifact
+/// argument: that absence IS the scenario's `Given`.
+///
+/// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (the shared
+/// kernel — both specs name the SAME kernel, so one copy suffices),
+/// [`build_spin_binary`], [`stage_rootfs_with_extra_binary`], [`write_toml`],
+/// [`config_path`], [`vm_job_toml`] (it already emits `kernel = ` and
+/// `rootfs = ` inside `[vm]`, so no new spec builder is needed), `deploy`,
+/// `stop`, and [`poll_until_terminal`].
+///
+/// # The distinct-parent-directory requirement is STRUCTURAL, not stylistic
+///
+/// The two rootfs masters MUST be staged in two different parent directories.
+/// `RootfsPlan::for_alloc` derives the per-launch clone destination as
+/// `<master_dir>/.overdrive-vm-rootfs-<alloc>.img` — it does **not** encode
+/// the master's own filename. Two masters sharing one parent therefore produce
+/// two clone paths that differ ONLY by allocation id, which is exactly what a
+/// node-level default would also produce: the assertion could not discriminate
+/// "each allocation booted the image its own spec named" from "both
+/// allocations booted one node-wide image", and the scenario would pass
+/// vacuously against the very regression it exists to catch. Two parents make
+/// the two clone paths differ in their DIRECTORY component, which no
+/// single-master node default can imitate.
+///
+/// The fixture shape falls out of this and is enforced by a helper this file
+/// already has: [`stage_rootfs_with_extra_binary`] writes its per-test copy to
+/// the fixed name `tmp.join("rootfs.ext4")`, so staging two images requires two
+/// `tempdir_in(shared_staging_root())` roots regardless — calling it twice
+/// against one `tmp` would silently overwrite the first image with the second.
+///
+/// **Still to build**:
+///
+/// * Two staging roots, each its own `tempdir_in(shared_staging_root())` (never
+///   tmpfs — cloud-hypervisor disk I/O needs `O_DIRECT`), each carrying one
+///   rootfs copy.
+/// * A **second, in-guest** discriminator, cheap because the fixture already
+///   supports it: give each image a DIFFERENT injected guest binary name
+///   (`stage_rootfs_with_extra_binary`'s `guest_name`, e.g. `/sbin/spinone`
+///   and `/sbin/spintwo`) and have each spec name only its own. Each per-test
+///   rootfs is a copy of the shared fixture image, which carries only
+///   `overdrive-init` — so neither image contains the other's binary. If a
+///   node-level default forced both allocations onto one image, the mismatched
+///   allocation's guest would beacon READY, fail its exec and power down, and
+///   could not STAY Running. That is the Gherkin's "each guest identifiably
+///   reporting which image it booted", and it is independent of the host-side
+///   path check below.
+/// * A `poll_until_running(cfg, id, max_wait)` helper. This file polls for
+///   Running inline in three places already (S-VM-05, S-VM-09, S-VM-74) and a
+///   fourth and fifth copy for two allocations would be four hand-written loops
+///   free to drift on their row-selection rule and timeout message. Prefer the
+///   shape `vm_boot_failure_vocabulary.rs` settled on: one
+///   `poll_until_state(cfg, id, wanted, max_wait)` that a `poll_until_running`
+///   and the existing [`poll_until_terminal`] both delegate to.
+/// * A **per-allocation** hypervisor finder. [`find_cloud_hypervisor_pid`]
+///   CANNOT be reused: its own doc comment pins the assumption "exactly one VM
+///   is booted at the time of the call", and this is the first scenario in the
+///   file to run two concurrently — it would return whichever allocation's VMM
+///   `/proc` yielded first. Use the allocation-scoped shape
+///   `vm_boot_failure_vocabulary.rs` already proved out: scan `/proc` for the
+///   `cloud-hypervisor` `argv[0]` (never the `TASK_COMM_LEN`-truncated
+///   `comm`) whose full argv contains THIS allocation's
+///   `VmRunDir::for_alloc(...)` path. It must be a file-local copy — sibling
+///   test modules cannot see each other's private items, which is why
+///   [`build_spin_binary`] is already duplicated across the two files.
+///
+/// **Assertions**:
+///
+/// * Both `deploy(..)` calls succeed against the SAME running server, and each
+///   returns its own declared workload id. One `serve`, two deploys — a second
+///   server would test two nodes, not one node reading two payloads.
+/// * Both allocations reach `AllocStateWire::Running` within a ceiling
+///   comfortably above the 30s boot deadline, so a pass means both guests
+///   booted rather than the poll being generous.
+/// * Each Running row carries `Some(TransitionReason::Started)` — the progress
+///   marker production writes only on `start`'s beacon-win arm, so pinning it
+///   states that a real guest dialled the beacon and excludes every named
+///   failure cause at the same time (the form S-VM-39 settled on).
+/// * **The discriminating assertion.** For each allocation independently:
+///   `RootfsPlan::for_alloc(<the master THAT spec named>, <its size>,
+///   &alloc).clone_dest()` exists, and the live hypervisor process found for
+///   THAT allocation's run directory has that clone path in its argv. Then the
+///   cross-check that makes it discriminating: allocation A's clone path is NOT
+///   under image B's parent directory and vice versa, and neither allocation's
+///   argv references the other's master. A node-level default cannot satisfy
+///   both halves at once.
+/// * Assert through the observable run directory and hypervisor argv only.
+///   Never read `VmHostLayout` — after 03-07 it no longer carries the fields,
+///   and reading platform-internal state would assert the implementation
+///   rather than the operator-observable outcome.
+///
+/// **Hygiene, not an acceptance claim**: both guests are long-lived and never
+/// beacon EXIT, so both workloads must be driven to Terminated through the
+/// production `stop` verb (and confirmed there) BEFORE `handle.shutdown()`.
+/// Production spawns the VMM with `kill_on_drop(false)`, so a still-Running
+/// guest is orphaned by server teardown alone and contaminates the next
+/// serialized test's `/proc` scan — the lesson S-VM-05 learned on the metal box
+/// (commit `28dbefdc`), doubled here because there are two of them.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-54 / step 03-07 -- two VM jobs deployed to ONE \
+         running serve, naming rootfs images staged in two DIFFERENT parent directories, must \
+         both reach Running and each boot from the image its own spec named, on a composition \
+         with no node-level artifact seam)"
+    );
 }

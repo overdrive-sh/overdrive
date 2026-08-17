@@ -37,6 +37,26 @@
 //! in-process semantic rejection that spawns no VMM at all and would run
 //! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
 //! over-gates it too.
+//!
+//! Step 03-08 (S-VM-82, DWD-25 / AC-21) is appended as a RED scaffold at the
+//! bottom of this file. It closes AC-21's error half: a node whose VM
+//! capability probe did not pass must tell the operator WHAT is absent and
+//! WHERE the specific reason was recorded, rather than presenting a node's own
+//! limit as an internal platform error. Like S-VM-37 and S-VM-38 it needs no
+//! guest and no KVM — its whole premise is a host that cannot boot one — so
+//! the file-level `kvm-tests` gate over-gates it for the third time, a layout
+//! fact rather than a capability claim.
+//!
+//! Step 03-08's SECOND obligation — the per-launch FICLONE residual, where
+//! after 03-07 the clone targets the operator-named rootfs directory that
+//! `Vmm::probe`'s boot-time reflink check no longer speaks for — was folded
+//! into that step inline with no scenario id. It now has one: **S-VM-83**,
+//! minted 2026-08-17 at the lowest free id (the 83–86 gap), scaffolded RED
+//! immediately after S-VM-82 below. It is deliberately NOT a clause of
+//! S-VM-82 — different premise (the node HAS a VM driver), different cause,
+//! different fixture — and equally not a duplicate of S-VM-94, which owns the
+//! adapter-layer fail-closed behaviour over in `overdrive-host`; S-VM-83 owns
+//! only the operator-facing message. Neither scaffold carries `#[ignore]`.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::expect_used, clippy::missing_panics_doc)]
@@ -1880,5 +1900,336 @@ fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
         "Not yet implemented -- RED scaffold (S-VM-40 / step 03-04 -- a spec declaring a cron \
          [schedule] and [vm] must be accepted and scheduled, and its first firing must reach \
          Running through the production VmDriver path)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 03-08 — RED scaffold (S-VM-82): capability absence names what is
+// absent, not an internal platform error.
+//
+// Same shape and same reasoning as the 03-04 block above: `#[should_panic(
+// expected = "RED scaffold")]` plus a panic body naming the scenario, and
+// `#[test]` TODAY because a body that is a single panic awaits nothing, boots
+// no server and touches no cgroup. The rustdoc names the attributes the
+// activated form must carry, so the swap happens with the assertions.
+//
+// The eight activated scenarios above are untouched — in particular S-VM-37,
+// whose `DriverInternalError` assertions this scenario shares a cause class
+// with and must not disturb.
+// ---------------------------------------------------------------------------
+
+/// S-VM-82 / `@contract-shape:bounded-change` `@error_path` `@ac-21` `@tier3`
+/// `@real-io` — deploying a `[job]` + `[vm]` spec to a node whose VM
+/// capability probe did not pass reaches Failed with a cause that names the
+/// absent VM capability and where the specific probe reason was recorded.
+///
+/// ```gherkin
+/// Given "overdrive serve" started on a host where the VM capability probe does
+///   not pass, and its startup log recorded the specific reason
+/// And Ana has written a spec declaring [job] and [vm]
+/// When she runs "overdrive deploy render.toml" and then "overdrive workload describe"
+/// Then the allocation is Failed and the reported cause names the absent VM
+///   capability and where the specific probe reason was recorded
+/// And the cause does not present the node's own capability limit as an internal
+///   platform error
+/// ```
+///
+/// A **message-actionability** scenario and nothing else. It does not restate
+/// S-VM-12's assertions — the node still boots, the deploy is still admitted,
+/// the allocation still reaches Failed and no VM runs — which stand unchanged
+/// in `vm_walking_skeleton.rs` and must NOT be duplicated here. What is new is
+/// only what the operator READS.
+///
+/// Per DWD-25 the class stays `DriverStartClass::Unclassified { driver }` and
+/// the conversion still lands on the pre-existing
+/// `TransitionReason::DriverInternalError`; **no `TransitionReason` variant is
+/// minted and no per-driver branch is added to the action shim**. Only the
+/// `detail` text of the registry-miss arm changes, which DWD-24 pins as
+/// free-form verbatim text that is never a classification input — so no
+/// contract and no conversion moves. Not `@requires-kvm`: the whole premise is
+/// a host that cannot boot a guest.
+///
+/// # Why this cannot be written before 03-07
+///
+/// 03-08 depends on 03-07 for message accuracy, not merely for ordering. Today
+/// a missing `Vm` registry entry has two possible causes — a probe that did not
+/// pass, or the artifact precondition on the composition block. Once 03-07
+/// removes that precondition there is exactly one, which is what lets the
+/// detail name it without lying. A scaffold activated earlier would assert a
+/// message that is only sometimes true.
+///
+/// # Producing a node whose `Vmm::probe` does not pass, without a deleted seam
+///
+/// This is the load-bearing fixture question, and it has exactly one honest
+/// answer available today.
+///
+/// **NOT `vmm_override`.** It survives 03-07 (ADR-0083 §D8's genuine
+/// fault-injection seam is untouched), but it produces the wrong state: 03-07's
+/// own criterion is that "a probe failure with a `vmm_override` injected still
+/// REFUSES startup". That is S-VM-13's / S-VM-75's boot-refusal path — the
+/// server never comes up, so there is no admitted deploy and no `Failed`
+/// allocation row to describe. This scenario needs the other arm: a node that
+/// BOOTED, with no `Vm` entry.
+///
+/// **NOT `VmBootArtifacts`** or either artifact entrypoint — 03-07 deletes all
+/// four, and none of them gated the probe anyway.
+///
+/// **The mechanism is a real host fact: hide `cloud-hypervisor` from `PATH`.**
+/// Discovery then finds no hypervisor, composition takes the
+/// `VmComposeError::NotAvailable` soft-skip arm, and the node boots with no
+/// `Vm` entry. `vm_walking_skeleton.rs`'s S-VM-12 already proves this exact
+/// technique works end to end (`path_without_cloud_hypervisor`, plus
+/// `#[serial(cgroup, env)]` and an `unsafe` set/restore of `PATH` around the
+/// `spawn_*` call — the composition root's discover/probe runs synchronously
+/// inside that `.await`, so `PATH` can be restored the instant it returns and
+/// the later `deploy` never reads it). It is a genuine `exec`-resolution fact
+/// about the host, not a test seam: `cloud-hypervisor` really cannot be run by
+/// this process for the duration.
+///
+/// **State the residual honestly rather than paper over it.** That mechanism
+/// exercises capability ABSENCE (`NotAvailable`), not a probe that ran and
+/// FAILED (`Refused`). DWD-25 treats the two as one operator-facing outcome —
+/// "a node whose `Vmm::probe` fails still boots with no `Vm` entry (absence
+/// stays a first-class answer)" — and the registry-miss arm this scenario
+/// asserts on cannot distinguish them, because by then the only fact left is
+/// that the entry is missing. There is no producer of a booted, `Vm`-less node
+/// via the `Refused` arm anywhere in the Lima/metal envelope today: a real
+/// capability-lacking host is not available, and every injected probe fault
+/// refuses the boot by design. Minting a seam for it is outside this step's
+/// scope; the crafter should record the residual rather than invent one.
+///
+/// # Activation plan (step 03-08)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup,
+/// env)]`. The `env` group is not optional here and is the one attribute that
+/// differs from every other scenario in this file: `PATH` is process-global,
+/// and an unsynchronised mutation of it would break any concurrently-running
+/// test that resolves a binary. `cgroup` is still required for the real
+/// `serve` boot. `tests/integration.rs` and `.config/nextest.toml` need no
+/// change — the module is already declared and already routed into the
+/// `host-kernel-shared` single-writer group by MODULE filter
+/// (`test(vm_boot_failure_vocabulary)`).
+///
+/// **Reuse as-is**: [`shared_staging_root`], `VmFixture::provision`,
+/// [`spawn_vm_server`] (whatever shape 03-07 leaves it in — this scenario needs
+/// no artifact argument and does not care), [`config_path`], [`write_toml`],
+/// [`vm_job_toml`], `deploy`, [`poll_until_failed`],
+/// [`assert_named_cause_is_rendered`], `overdrive_cli::render::workload_describe`,
+/// [`UNCLASSIFIED_LABEL`], and [`assert_no_allocation_scoped_vm_residue`].
+///
+/// The fixture's real kernel and rootfs paths are fine to name in the spec and
+/// are provably inert: with no `Vm` entry the action shim's `drivers.get(..) ->
+/// None` arm fires at dispatch, before any driver runs, so neither artifact is
+/// ever opened. Say so in a comment — an artifact-shaped cause appearing here
+/// would mean the registry miss did not fire.
+///
+/// **Still to build**: a file-local copy of `path_without_cloud_hypervisor()`.
+/// The walking skeleton's is private to that module and sibling test modules
+/// cannot see each other's private items — the same reason
+/// [`build_spin_binary`], [`build_empty_rootfs`] and [`spawn_vm_server`] are
+/// already file-local copies here.
+///
+/// **Assertions**, all on the operator-visible rendering:
+///
+/// * The allocation reaches `AllocStateWire::Failed` (via `poll_until_failed`,
+///   which IS the assertion — a further assert on the returned row's state
+///   would be tautological).
+/// * `render::workload_describe(&out)` names the absent VM capability.
+/// * `render::workload_describe(&out)` names WHERE the specific probe reason
+///   was recorded. DWD-25 pins that pointer as the boot log's
+///   `driver.vm.not_composed` reason — **confirm the exact detail text against
+///   what 03-08 actually writes rather than treating this note as the spec.**
+///   This is the sub-claim that makes the scenario non-vacuous: today's shipped
+///   detail is the bare `no vm driver composed on this node` (the string
+///   DWD-25's E06 capture recorded and S-VM-12 asserts on), which names no
+///   recorded reason at all — so this assertion is genuinely RED before 03-08
+///   and genuinely GREEN only once the detail gains the pointer.
+/// * `assert_named_cause_is_rendered(&rendered, &reason, &detail)` — the whole
+///   `driver internal error: {detail}` label reaches the operator, so they
+///   provably read that this is UNCLASSIFIED and not merely an unexplained
+///   string. As S-VM-37's doc comment records, this cause satisfies that
+///   helper's anti-tautology guard structurally (its `human_readable()` embeds
+///   the detail), so the containment check is what carries the weight.
+/// * The "no new variant" claim, in the form S-VM-37 already uses: equality
+///   against `TransitionReason::DriverInternalError { detail }` on the EXISTING
+///   constructor. This is a value equality on a pre-existing variant, not a
+///   discriminant check standing in for the operator-facing claims above — all
+///   three of those are asserted on the rendered string, per this scenario's
+///   own crafter note ("assert on the operator-visible rendering, not on the
+///   enum discriminant").
+/// * [`assert_no_allocation_scoped_vm_residue`] — a dispatch-time registry miss
+///   runs no driver, so it leaks nothing. Cheap, and it forecloses the reading
+///   that "Failed" here might mean a start was attempted and aborted.
+///
+/// # The anti-assertion, and the trap in stating it naively
+///
+/// "The cause does not present the node's own capability limit as an internal
+/// platform error" CANNOT be asserted by excluding the string
+/// [`UNCLASSIFIED_LABEL`] from the rendered output. The class deliberately
+/// STAYS `DriverInternalError`, whose `human_readable()` prefix is exactly that
+/// label, and `assert_named_cause_is_rendered` above positively REQUIRES it —
+/// an exclusion assertion would contradict the criterion that no variant is
+/// minted, and the two assertions could never both pass.
+///
+/// The provable form is positive and additive: the operator must not be left
+/// with the label ALONE. Assert that the rendered detail carries the absent
+/// capability and the recorded-reason pointer, and add the S-VM-37-shaped
+/// test-integrity guard — that the phrases being searched for are not
+/// substrings of the label itself, or the containment checks would pass for
+/// free and prove nothing.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_error() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-82 / step 03-08 -- a [job] + [vm] deploy to a \
+         node whose VM capability probe did not pass must reach Failed with a cause naming the \
+         absent VM capability AND where the specific probe reason was recorded, read off the \
+         rendered workload describe output, never a bare internal platform error)"
+    );
+}
+
+/// S-VM-83 / `@contract-shape:bounded-change` `@error_path` `@ac-21` `@tier3`
+/// `@real-io` — a per-launch clone the operator's own rootfs directory cannot
+/// serve reaches the operator as a cause naming THAT directory and the
+/// filesystem capability the clone requires, never an internal-shaped error.
+///
+/// ```gherkin
+/// Given "overdrive serve" is running and its VM capability probe passed, so the
+///   node does have a VM driver
+/// And Ana has written a spec declaring [job] and [vm] whose rootfs image sits in a
+///   directory whose filesystem cannot serve the per-launch clone
+/// When she runs "overdrive deploy render.toml" and then "overdrive workload describe"
+/// Then the allocation is Failed and the reported cause names that rootfs directory
+///   and the filesystem capability the per-launch clone requires
+/// And the cause does not present the operator's own directory choice as an internal
+///   platform error
+/// And the cause is distinct from the absent-VM-capability cause a node with no VM
+///   driver reports, and distinct from a missing rootfs
+/// And no hypervisor process, run directory, rootfs clone or cgroup scope survives
+/// ```
+///
+/// # The boundary with S-VM-94 — stated so a future reader does not merge them
+///
+/// S-VM-94 owns the **adapter-layer fail-closed behaviour**:
+/// `CloudHypervisorVmm::create()` called directly in `overdrive-host`,
+/// asserting the typed `FICLONE` errno surfaces and that no full-copy fallback
+/// silently substitutes for a reflink. It is the mutation target, and per the
+/// roadmap note **the typing belongs with it**.
+///
+/// THIS scenario owns the **operator-facing message** one layer up: the
+/// rendered `overdrive workload describe` cause, reached through the full
+/// `deploy` → dispatch → `VmDriver::start` path. Neither subsumes the other. A
+/// correctly fail-closed adapter — S-VM-94 fully green — can still reach the
+/// operator as an opaque internal error, and that is precisely the gap this
+/// scenario closes. **It mints no `VmStartFailure` variant.** Message
+/// actionability only.
+///
+/// # Why this failure exists at all, and only now
+///
+/// Before DWD-25 the per-launch clone targeted the node's own `image_dir` —
+/// the very directory `Vmm::probe` proves reflink-capable at boot. After 03-07
+/// the clone targets the **operator-named** rootfs directory, which the boot
+/// probe never saw. `FICLONE` is intra-filesystem, so the boot probe no longer
+/// speaks for the clone at all, and the operator's directory may equally be
+/// read-only or shared. The capability gap is new, created by the ruling, and
+/// it needs a message of its own.
+///
+/// # Activation plan (step 03-08)
+///
+/// **Attributes**: swap `#[test]` for `#[tokio::test]` + `#[serial(cgroup)]` —
+/// a real `serve` boot against the real host cgroupfs. Unlike its sibling
+/// S-VM-82 this one does NOT need the `env` group: it mutates no
+/// process-global state, because the node here is supposed to have a working
+/// VM driver. `tests/integration.rs` and `.config/nextest.toml` need no change
+/// — the module is already declared and already routed into the
+/// `host-kernel-shared` single-writer group by MODULE filter.
+///
+/// **Reuse as-is**: [`shared_staging_root`], `VmFixture::provision`,
+/// [`spawn_vm_server`] (in whatever shape 03-07 leaves it), [`config_path`],
+/// [`write_toml`], [`vm_job_toml`], `deploy`, [`poll_until_failed`],
+/// [`assert_named_cause_is_rendered`],
+/// `overdrive_cli::render::workload_describe`, and
+/// [`assert_no_allocation_scoped_vm_residue`].
+///
+/// **Still to build**: a fixture that stages the rootfs master in a directory
+/// whose filesystem genuinely cannot serve the clone. `/dev/shm` is the
+/// already-proven in-repo choice — guaranteed tmpfs on Linux, used for exactly
+/// this purpose by the walking skeleton's S-VM-75 boot probe. Copy the shared
+/// fixture rootfs there and point the spec at that copy.
+///
+/// Note the register shift that makes tmpfs legitimate HERE and nowhere else
+/// in this file: every other Tier-3 VM scenario deliberately stages on the
+/// XFS-backed reflink-capable root because cloud-hypervisor disk I/O needs
+/// `O_DIRECT`, which tmpfs cannot serve. That constraint never binds here —
+/// the clone fails BEFORE any hypervisor opens the image. Say so in a comment,
+/// or the next reader will "fix" the fixture back onto XFS and silently make
+/// the scenario vacuous.
+///
+/// # E06 cannot catch this — the fixture is the whole test
+///
+/// Verification expectation `E06-vm-job-deploy-reaches-running` stages under
+/// `/srv/vm`, which **is** the probed filesystem, so its clone always
+/// succeeds. E06 is therefore structurally blind to this failure and cannot
+/// stand in for this scenario. If the fixture is pointed at any
+/// reflink-capable directory, the deploy simply succeeds and the test proves
+/// nothing at all.
+///
+/// **Assertions**, all on the operator-visible rendering:
+///
+/// * The allocation reaches `AllocStateWire::Failed` (via `poll_until_failed`,
+///   which IS the assertion — a further assert on the returned row's state
+///   would be tautological).
+/// * `render::workload_describe(&out)` names the rootfs **directory** — not
+///   merely the master image file. The requirement being reported is a
+///   property of the filesystem that directory sits on, so a message naming
+///   only the image sends the operator to fix the wrong thing. Assert the
+///   directory component explicitly.
+/// * `render::workload_describe(&out)` names the filesystem capability the
+///   clone requires, in whatever wording 03-08 settles on. **Confirm the exact
+///   text against what 03-08 writes rather than treating this note as the
+///   spec** — the roadmap fixes the obligation ("names that directory and the
+///   filesystem requirement"), not the prose.
+/// * [`assert_named_cause_is_rendered`] for the label-reaches-the-operator
+///   half, exactly as the five named causes above use it.
+/// * [`assert_no_allocation_scoped_vm_residue`] — the clone fails before the
+///   hypervisor is spawned, so the four facts must all hold. This is also what
+///   distinguishes "the clone was refused" from "a hypervisor started and then
+///   died".
+///
+/// # Three anti-vacuity guards, all load-bearing
+///
+/// **(a) The node's VM capability probe must PASS.** On a host where it does
+/// not, the deploy takes S-VM-82's registry-miss path instead and never
+/// reaches the clone at all — the test would go green having proven nothing.
+/// Assert directly that the cause is NOT the absent-capability one. This is
+/// also why the scenario is not tagged `@requires-kvm` yet still depends on a
+/// KVM-capable host: no guest is ever booted, but `Vmm::probe` reads
+/// `/dev/kvm`, so the premise silently evaporates on a host without it. The
+/// file-level `kvm-tests` gate happens to keep it on the metal box, which is
+/// convenient rather than load-bearing — state the precondition as an
+/// assertion, not as a gate.
+///
+/// **(b) The rootfs master must EXIST and be readable**, so the outcome is not
+/// `VmRootfsNotFound` (S-VM-34's cause). Only the clone may fail. Assert the
+/// master is present at assertion time, the way S-VM-41 asserts its replaced
+/// kernel is still present — "present but unservable" proven rather than
+/// assumed.
+///
+/// **(c) The cause must be distinct from an internal-shaped error.** As with
+/// S-VM-82, do not state this as an exclusion of the `driver internal error`
+/// label if 03-08 routes this through the unclassified arm — check what the
+/// step actually emits first. The provable form is positive: the directory and
+/// the requirement are both named. Pair it with the S-VM-37-shaped integrity
+/// guard that the phrases being searched for are not already substrings of the
+/// cause's own label, or the containment checks pass for free.
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn unservable_rootfs_directory_names_the_directory_and_the_clone_requirement() {
+    panic!(
+        "Not yet implemented -- RED scaffold (S-VM-83 / step 03-08 -- a [job] + [vm] deploy whose \
+         spec names a rootfs directory on a filesystem that cannot serve the per-launch clone \
+         must reach Failed with a cause naming THAT directory and the filesystem requirement, \
+         read off the rendered workload describe output, never an internal-shaped error and \
+         never the absent-VM-capability cause)"
     );
 }
