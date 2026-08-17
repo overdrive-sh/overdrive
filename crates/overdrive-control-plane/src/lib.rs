@@ -1562,6 +1562,7 @@ pub async fn run_server(
         let vmm_override = None;
         match compose_vm_driver(
             cgroup_root_path,
+            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
             Arc::clone(&clock),
             fs,
             cgroup_accounting,
@@ -1641,6 +1642,7 @@ enum VmComposeError {
 /// framing.
 async fn compose_vm_driver(
     cgroup_root: std::path::PathBuf,
+    clone_index_dir: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
@@ -1690,6 +1692,11 @@ async fn compose_vm_driver(
     let layout = VmHostLayout {
         cgroup_root,
         run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
+        // ADR-0083 §§D3f-D3h: where `start` records each launch's clone as
+        // a durable symlink BEFORE the FICLONE. The SAME expression
+        // `RealVmHostState`'s `index_dir` is fed — `clone_index_dir` is the
+        // one derivation both composition sites call (S-VM-84 criterion 4).
+        clone_index_dir,
         arch,
         vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
         // Confined identity per ADR-0082 §D2.5. NO production system
@@ -2442,25 +2449,25 @@ pub async fn run_server_with_obs_and_drivers(
     // `/run/overdrive/vm` literal (the two composition sites must agree
     // on the same VM run root).
     //
-    // `staging_dir` is the platform's own VM staging root, a fixed
-    // node-level path. It used to be DERIVED from the node's configured
-    // rootfs artifact's parent directory; ADR-0083 §D3a deleted that
-    // configuration, because artifacts are per-allocation. The honest
-    // consequence, recorded in that amendment's Consequences ("the
-    // per-launch rootfs clone is now written into an operator-chosen
-    // directory ... rather than a platform-owned one"): a clone made
-    // beside an operator-named rootfs OUTSIDE this root is not
-    // enumerated by the steady-state sweep. `RealVmHostState`'s own
-    // contract treats an absent root as `Ok`, not an error, so a node
-    // that never stages here simply observes nothing here; the scope and
-    // run-directory surfaces are unaffected and remain node-owned.
-    let vm_staging_dir: std::path::PathBuf =
-        std::path::PathBuf::from("/run/overdrive/vm-rootfs-staging");
+    // `index_dir` is the platform-owned clone-index directory
+    // (`clone_index_dir(&config.data_dir)` = `<data_dir>/vm/clone-index/`),
+    // fed the SAME expression `compose_vm_driver` feeds
+    // `VmHostLayout.clone_index_dir` — the one derivation both composition
+    // sites call (ADR-0083 §§D3f-D3h, DWD-26; S-VM-84 criterion 4). It
+    // supersedes the prior fixed `/run/overdrive/vm-rootfs-staging`: after
+    // ADR-0083 §D3a made artifacts per-allocation, a clone lands beside the
+    // operator's OWN rootfs master (§D3b — FICLONE is intra-filesystem), so
+    // the sweep can no longer enumerate a single node-level staging root.
+    // It now enumerates the durable index of symlinks `start` records, each
+    // resolving (via `read_link`) to a clone wherever the operator's master
+    // lives — and because the index is under `data_dir` (never `/run`) it
+    // survives a restart that loses the in-memory `RootfsPlan` (S-VM-84
+    // ending 3).
     let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
         Arc::new(overdrive_host::RealVmHostState::new(
             std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT),
             std::path::PathBuf::from("/run/overdrive/vm"),
-            vm_staging_dir,
+            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
         ));
 
     let state: AppState = AppState::new_with_workflow_engine(
@@ -3301,6 +3308,7 @@ mod tests {
             // not compile. Neither of these tests reaches `Ok`.
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
@@ -3368,6 +3376,7 @@ mod tests {
 
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),

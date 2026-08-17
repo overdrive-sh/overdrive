@@ -452,35 +452,32 @@ fn clone_path(staging_dir: &Path, alloc_id: &str) -> PathBuf {
     staging_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
 }
 
-/// The PLATFORM-OWNED VM rootfs staging root — the single directory
-/// `RealVmHostState` enumerates for stranded per-launch clones, and the
-/// literal `run_server` composes (`/run/overdrive/vm-rootfs-staging`).
+/// The clone-index symlink the reclamation sweep now enumerates
+/// (ADR-0083 §§D3f-D3h, DWD-26): `<index_dir>/.overdrive-vm-rootfs-<alloc>.img`,
+/// resolving (via `read_link`) to the clone wherever it lives.
+fn clone_link_path(index_dir: &Path, alloc_id: &str) -> PathBuf {
+    index_dir.join(format!(".overdrive-vm-rootfs-{alloc_id}.img"))
+}
+
+/// A real, reflink-capable directory the artificial-strand scenarios use
+/// to hold a stranded clone FILE. Under DWD-26 (ADR-0083 §§D3f-D3h) the
+/// reclamation sweep no longer enumerates any single node-level staging
+/// root: it enumerates the platform-owned clone-INDEX
+/// (`clone_index_dir(&data_dir)`), whose per-launch symlinks resolve (via
+/// `read_link`) to clones wherever the operator's rootfs master lives. So
+/// a stranded clone is reclaimable ONLY when an index link points at it —
+/// which is why [`restrand_vm_exclusive_artifacts`] now creates BOTH the
+/// clone file (here) and the index link (in `clone_index_dir(&data_dir)`).
 ///
-/// # The clone-surface residual this constant makes visible
-///
-/// ADR-0083 §D3a made artifacts per-allocation, and `RootfsPlan::for_alloc`
-/// derives the per-launch clone destination from the MASTER'S OWN PARENT —
-/// i.e. wherever the operator's `[vm] rootfs` lives. §D3b keeps that
-/// derivation deliberately (`FICLONE` is intra-filesystem, so the clone
-/// must sit on the master's filesystem for reflink to work at all), and
-/// the amendment's own Consequences ratify the result: "the per-launch
-/// rootfs clone is now written into an operator-chosen directory ...
-/// rather than a platform-owned one".
-///
-/// The consequence for RECLAMATION is not spelled out there, and it is
-/// this: `VmHostState`'s clone surface is a single node-level directory,
-/// so it can no longer observe any clone a real allocation produces.
-/// `VmDriver::stop` still removes the clone directly (it holds the
-/// allocation's own `RootfsPlan` in memory, so the operator directory is
-/// no obstacle) — the uncovered case is an allocation that ends WITHOUT
-/// `stop`: a natural guest exit, or a crash. Scope and run-directory
-/// reclamation are unaffected; both are platform-owned paths.
-///
-/// Scenarios below therefore split into two groups, and the split is
-/// deliberate rather than incidental — see each site.
+/// A clone from a REAL boot lands beside the operator's own `[vm] rootfs`
+/// (per-test tempdir), and its index link is created by the real
+/// `VmDriver::start`; those scenarios (S-VM-30/23/25a/81/28) still do not
+/// assert the clone directly — S-VM-84 owns the without-stop clone-leak
+/// claim — but the clone IS now reclaimed via the durable index (the prior
+/// "the sweep structurally cannot see it" residual is CLOSED by step 03-09).
 fn node_staging_dir() -> PathBuf {
     let dir = PathBuf::from("/run/overdrive/vm-rootfs-staging");
-    std::fs::create_dir_all(&dir).expect("create the platform-owned VM rootfs staging root");
+    std::fs::create_dir_all(&dir).expect("create the reflink-capable strand-clone directory");
     dir
 }
 
@@ -542,29 +539,50 @@ fn remove_cgroup_child_blocker(blocker: &Path) {
 /// GIVEN state) -- elevated here to real paths so the real production
 /// `execute_discard_stranded_artifacts` genuinely discovers and removes
 /// them via `VmHostState::observe()` / `discard_artifacts`.
-fn restrand_vm_exclusive_artifacts(alloc_id: &str, staging_dir: &Path) {
+fn restrand_vm_exclusive_artifacts(alloc_id: &str, staging_dir: &Path, index_dir: &Path) {
     std::fs::create_dir_all(run_dir_path(alloc_id)).expect("recreate the stranded run dir");
-    std::fs::write(clone_path(staging_dir, alloc_id), b"stranded-clone-placeholder")
-        .expect("recreate the stranded clone file");
+    let clone = clone_path(staging_dir, alloc_id);
+    std::fs::write(&clone, b"stranded-clone-placeholder").expect("recreate the stranded clone file");
+    // The clone-index link is what the sweep enumerates now (DWD-26). A
+    // crash between teardown steps leaves the link pointing at the
+    // surviving clone; `RealVmHostState::observe` read_links it and
+    // `discard_artifacts` removes target-then-link. Without the link the
+    // sweep cannot see the clone at all — so recreating BOTH is what makes
+    // this fixture the faithful "leaked by a crash between teardown steps"
+    // shape under the index model.
+    std::fs::create_dir_all(index_dir).expect("create the clone-index dir");
+    let link = clone_link_path(index_dir, alloc_id);
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&clone, &link).expect("record the stranded clone in the index");
 }
 
 /// Polls up to `max_wait` for `scope_path`/`run_dir_path`/`clone_path`
 /// to ALL be absent -- the steady-state sweep's reclaim postcondition.
 /// `VM_RECLAMATION_SWEEP_INTERVAL` is 30s; the ceiling gives headroom
 /// for scheduling jitter plus the sweep's own real filesystem I/O.
-async fn poll_until_reclaimed(alloc_id: &str, staging_dir: &Path, max_wait: Duration) {
+async fn poll_until_reclaimed(
+    alloc_id: &str,
+    staging_dir: &Path,
+    index_dir: &Path,
+    max_wait: Duration,
+) {
     let deadline = tokio::time::Instant::now() + max_wait;
     loop {
         let scope_gone = !scope_path(alloc_id).exists();
         let run_dir_gone = !run_dir_path(alloc_id).exists();
         let clone_gone = !clone_path(staging_dir, alloc_id).exists();
-        if scope_gone && run_dir_gone && clone_gone {
+        // The index link is removed AFTER the clone (§D3f), so it is the
+        // last thing to go — asserting it gone proves the whole
+        // target-then-link disposal ran.
+        let link_gone = !clone_link_path(index_dir, alloc_id).exists();
+        if scope_gone && run_dir_gone && clone_gone && link_gone {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
             "reclamation did not complete within {max_wait:?} for {alloc_id}: \
-             scope_gone={scope_gone} run_dir_gone={run_dir_gone} clone_gone={clone_gone}"
+             scope_gone={scope_gone} run_dir_gone={run_dir_gone} clone_gone={clone_gone} \
+             link_gone={link_gone}"
         );
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -786,14 +804,15 @@ async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve()
     // unrelated to the cgroup blocker) -- restrand them so the leftover
     // is VM-exclusive, not scope-only (see the helper's own doc comment
     // for why a scope-only leftover is unreclaimable by design).
-    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir, &index_dir);
 
     // Clear the induced fault -- "the transient condition has cleared".
     remove_cgroup_child_blocker(&blocker);
 
     // WITHOUT restarting serve: wait for the natural periodic sweep,
     // NO manual evaluation submission.
-    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+    poll_until_reclaimed(&alloc_id, &staging_dir, &index_dir, Duration::from_secs(50)).await;
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -861,10 +880,11 @@ async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
         .await
         .expect("stop must succeed even though its own scope-removal step failed");
     poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
-    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir, &index_dir);
     remove_cgroup_child_blocker(&blocker);
 
-    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+    poll_until_reclaimed(&alloc_id, &staging_dir, &index_dir, Duration::from_secs(50)).await;
     assert!(
         !pid_is_alive(vmm_pid),
         "the real cloud-hypervisor process must be gone after the sweep"
@@ -1028,9 +1048,10 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     );
     assert!(scope_path(&alloc_id).exists(), "sanity: the scope survived the failed removal");
 
-    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir);
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    restrand_vm_exclusive_artifacts(&alloc_id, &staging_dir, &index_dir);
     remove_cgroup_child_blocker(&blocker);
-    poll_until_reclaimed(&alloc_id, &staging_dir, Duration::from_secs(50)).await;
+    poll_until_reclaimed(&alloc_id, &staging_dir, &index_dir, Duration::from_secs(50)).await;
 
     let after = describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg })
         .await
@@ -1479,14 +1500,69 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
 /// assert the operator clone AND the clone-index entry are both gone,
 /// with scope/run-dir reclaimed as before. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a VM whose guest exits on \
-         its own, without VmDriver::stop, leaves no per-launch rootfs clone in the operator's \
-         rootfs directory and no clone-index entry; scope and run dir reclaimed as before)"
+#[tokio::test]
+#[serial(cgroup)]
+async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s84a-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let exit0 = build_exit0_binary(tmp.path());
+    // The rootfs master sits in the OPERATOR's own directory (`tmp`) — NOT
+    // `node_staging_dir()` and NOT the server `data_dir`. That is where a
+    // real boot lands the clone (`RootfsPlan::for_alloc` derives it from
+    // `parent([vm] rootfs)`), so a regression re-pointing the sweep at a
+    // platform dir fails HERE rather than passing vacuously.
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
+    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+
+    // Boot #1 — deploy an exit-0 guest and let it reach Terminated via the
+    // natural-exit path (`run_exit_watcher`), never `VmDriver::stop`.
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s84a.toml",
+        &vm_job_toml("vm-s84a", "/sbin/exit0", &fixture.kernel_path, &rootfs),
     );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+    // The clone and its durable index link both survive the guest exit —
+    // no `stop` ran to remove them.
+    assert!(
+        clone_path(&operator_dir, &alloc_id).exists(),
+        "sanity: the operator-dir clone must survive a guest exit that never called stop"
+    );
+    assert!(
+        clone_link_path(&index_dir, &alloc_id).exists(),
+        "sanity: the durable clone-index link must survive the guest exit"
+    );
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 — the boot-epoch VmReclamation drive runs synchronously
+    // inside run_server, reading the durable index under data_dir and
+    // reclaiming the operator clone.
+    let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
+    assert!(
+        !clone_path(&operator_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the operator's own directory"
+    );
+    assert!(
+        !clone_link_path(&index_dir, &alloc_id).exists(),
+        "the clone-index link must hold no entry for the reclaimed allocation"
+    );
+    assert!(!scope_path(&alloc_id).exists(), "the cgroup scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
+    handle2.shutdown().await.expect("clean shutdown");
 }
 
 /// S-VM-84 ending (2) — the hypervisor dies. Stage a long-lived guest
@@ -1498,14 +1574,64 @@ fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
 /// clone-index entry are both gone, scope/run-dir reclaimed. `pid_is_alive`
 /// confirms the VMM is genuinely gone first. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a VM whose hypervisor dies, \
-         without VmDriver::stop, leaves no per-launch rootfs clone in the operator's rootfs \
-         directory and no clone-index entry; scope and run dir reclaimed as before)"
+#[tokio::test]
+#[serial(cgroup)]
+async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s84b-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s84b.toml",
+        &vm_job_toml("vm-s84b", "/sbin/spin", &fixture.kernel_path, &rootfs),
     );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+
+    // The hypervisor dies out from under the platform — SIGKILL the real
+    // cloud-hypervisor process directly, so the allocation ends via a dead
+    // VMM rather than `VmDriver::stop`.
+    let vmm_pid = find_cloud_hypervisor_pid().expect("a real cloud-hypervisor process is running");
+    let _ = Command::new("kill").arg("-9").arg(vmm_pid.to_string()).status();
+    // Shut down boot #1 promptly so nothing removes the stranded clone or
+    // its index link (no stop; the survivor is reclaimed at the next boot).
+    handle.shutdown().await.expect("shutdown boot #1 after the hypervisor died");
+    wait_for_data_dir_release().await;
+    assert!(!pid_is_alive(vmm_pid), "the hypervisor process is genuinely gone");
+    assert!(
+        clone_link_path(&index_dir, &alloc_id).exists(),
+        "sanity: the durable clone-index link survives a hypervisor death with no stop"
+    );
+
+    // Boot #2 — the boot-epoch drive reads the durable index and reclaims
+    // the operator clone the dead hypervisor left behind.
+    let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
+    assert!(
+        !clone_path(&operator_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the operator's own directory"
+    );
+    assert!(
+        !clone_link_path(&index_dir, &alloc_id).exists(),
+        "the clone-index link must hold no entry for the reclaimed allocation"
+    );
+    assert!(!scope_path(&alloc_id).exists(), "the cgroup scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
+    handle2.shutdown().await.expect("clean shutdown");
 }
 
 /// S-VM-84 ending (3) — `serve` restarts and loses the in-memory
@@ -1523,13 +1649,63 @@ fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
 /// clone-index entry are both gone after boot #2, scope/run-dir
 /// reclaimed. MUST NOT call `stop`. Activate as `#[tokio::test]`
 /// `#[serial(cgroup)]`.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-84 / step 03-09 -- a serve restart that loses \
-         the in-memory RootfsPlan leaves no per-launch rootfs clone in the operator's rootfs \
-         directory and no clone-index entry; the durable clone index under data_dir is what the \
-         boot-epoch drive reads to reclaim it)"
+#[tokio::test]
+#[serial(cgroup)]
+async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
+    let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-reclaim-s84c-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+
+    // Boot #1 — deploy a long-lived guest to Running, then shut down
+    // UNCLEANLY (no stop): `kill_on_drop(false)` leaves the real VMM
+    // surviving and DROPS the in-memory `RootfsPlan`. The ONLY surviving
+    // record of the clone's location is the durable index link under
+    // data_dir.
+    let handle = spawn_vm_server(&data_dir, &config_dir).await;
+    let cfg = config_path(&config_dir);
+    let spec_path = write_toml(
+        tmp.path(),
+        "vm-s84c.toml",
+        &vm_job_toml("vm-s84c", "/sbin/spin", &fixture.kernel_path, &rootfs),
     );
+    let submit =
+        deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() }).await.expect("deploy");
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
+    let alloc_id = format!("alloc-{}-0", submit.workload_id);
+    assert!(
+        clone_path(&operator_dir, &alloc_id).exists()
+            && clone_link_path(&index_dir, &alloc_id).exists(),
+        "sanity: both the operator clone and its durable index link exist while Running"
+    );
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 — the brand-new `VmDriver` has NO in-memory `RootfsPlan` for
+    // this allocation. The boot-epoch drive reclaims the operator clone
+    // SOLELY by reading the durable clone index under
+    // `<data_dir>/vm/clone-index/` (§D3g: not /run — the index must
+    // survive the process).
+    let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
+    assert!(
+        !clone_path(&operator_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the operator's own directory via the \
+         durable index, even though the in-memory RootfsPlan was lost across the restart"
+    );
+    assert!(
+        !clone_link_path(&index_dir, &alloc_id).exists(),
+        "the clone-index link must hold no entry for the reclaimed allocation"
+    );
+    assert!(!scope_path(&alloc_id).exists(), "the cgroup scope must be reclaimed at boot");
+    assert!(!run_dir_path(&alloc_id).exists(), "the run dir must be reclaimed at boot");
+    handle2.shutdown().await.expect("clean shutdown");
 }

@@ -280,7 +280,12 @@ fn stage_rootfs_with_extra_binary(
 /// unclassified run: an unclassified rejection leaks no more than a
 /// named one.
 fn assert_no_allocation_scoped_vm_residue(alloc: &AllocationId, rootfs_master: &Path) {
-    let rootfs_plan = RootfsPlan::for_alloc(rootfs_master.to_path_buf(), 0, alloc);
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs_master.to_path_buf(),
+        0,
+        alloc,
+        std::path::Path::new("/run/overdrive/vm/clone-index"),
+    );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
     let scope_dir = CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup"));
 
@@ -1716,7 +1721,12 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
     // the exact inverse of `assert_no_allocation_scoped_vm_residue`'s four
     // facts, so "ran" and "left nothing behind" are stated against the same
     // resource set and cannot drift apart. ----
-    let rootfs_plan = RootfsPlan::for_alloc(rootfs.clone(), 0, &alloc);
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs.clone(),
+        0,
+        &alloc,
+        std::path::Path::new("/run/overdrive/vm/clone-index"),
+    );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup"));
 

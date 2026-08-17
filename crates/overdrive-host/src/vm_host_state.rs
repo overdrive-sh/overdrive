@@ -1,6 +1,9 @@
 //! Host [`VmHostState`] binding — real cgroupfs + real filesystem
 //! directory walks over `overdrive.slice/workloads.slice/`, the VM run
-//! root, and the rootfs-clone staging directory.
+//! root, and the platform-owned clone-index directory.
+//!
+//! The clone-index symlinks resolve to clones sitting beside the
+//! operator's own rootfs master (ADR-0083 §§D3f-D3h, DWD-26).
 //!
 //! Production binding of the [`VmHostState`] port trait (ADR-0083 §D7,
 //! `brief.md` §105a.2). See
@@ -29,8 +32,10 @@ use overdrive_core::traits::vm_host_state::{
 const WORKLOADS_SLICE: &str = "overdrive.slice/workloads.slice";
 
 /// Filename prefix/suffix `RootfsPlan::for_alloc` mints for a per-launch
-/// rootfs clone (`overdrive_core::vm::config::RootfsPlan`, ADR-0082 §D2
-/// gap 3): `.overdrive-vm-rootfs-<alloc>.img`.
+/// rootfs clone AND for its clone-index symlink (both carry the SAME
+/// name so this parsing recovers the alloc id from the link —
+/// `overdrive_core::vm::config::RootfsPlan`, ADR-0082 §D2 gap 3 /
+/// ADR-0083 §§D3f-D3h): `.overdrive-vm-rootfs-<alloc>.img`.
 const CLONE_PREFIX: &str = ".overdrive-vm-rootfs-";
 const CLONE_SUFFIX: &str = ".img";
 
@@ -62,24 +67,30 @@ pub struct RealVmHostState {
     /// — each child directory is one allocation's run directory, named
     /// verbatim as the allocation id.
     run_root: PathBuf,
-    /// Rootfs-clone staging directory — where per-launch clones are
-    /// enumerated. Production composition (a later step) decides which
-    /// concrete path this is; `RootfsPlan::for_alloc` derives the clone
-    /// destination from the operator's own rootfs artifact's parent
-    /// directory, so a non-default artifact location's clone is outside
-    /// this adapter's enumeration by construction — a stated limitation,
-    /// not a bug this port closes.
-    staging_dir: PathBuf,
+    /// The platform-owned clone-index directory
+    /// ([`overdrive_core::vm::config::clone_index_dir`] over the node's
+    /// durable `data_dir`) — one symlink per live per-launch clone,
+    /// `.overdrive-vm-rootfs-<alloc>.img -> <clone beside the operator
+    /// master>`. `observe_clones` enumerates the LINKS and resolves each
+    /// via `read_link`, so a clone written beside an operator-chosen
+    /// rootfs (ADR-0083 §D3a/§D3b — FICLONE is intra-filesystem) is
+    /// reclaimable even though it lives outside any platform directory.
+    /// The clone's location is RECORDED here at launch, never re-derived
+    /// (§§D3f-D3h, DWD-26).
+    index_dir: PathBuf,
 }
 
 impl RealVmHostState {
     /// Construct a `RealVmHostState` against the three observation
     /// roots. Per `.claude/rules/development.md` § "Port-trait
     /// dependencies", all three are mandatory constructor parameters —
-    /// no builder override, no in-constructor default.
+    /// no builder override, no in-constructor default. `index_dir` is the
+    /// platform-owned clone-index directory
+    /// ([`overdrive_core::vm::config::clone_index_dir`]) — the SAME
+    /// expression `compose_vm_driver` feeds `VmHostLayout.clone_index_dir`.
     #[must_use]
-    pub const fn new(cgroup_root: PathBuf, run_root: PathBuf, staging_dir: PathBuf) -> Self {
-        Self { cgroup_root, run_root, staging_dir }
+    pub const fn new(cgroup_root: PathBuf, run_root: PathBuf, index_dir: PathBuf) -> Self {
+        Self { cgroup_root, run_root, index_dir }
     }
 
     fn workloads_slice_root(&self) -> PathBuf {
@@ -150,7 +161,7 @@ impl RealVmHostState {
 
     async fn observe_clones(&self) -> std::io::Result<BTreeMap<AllocationId, PathBuf>> {
         let mut clones = BTreeMap::new();
-        for entry in Self::list_dir_tolerant(&self.staging_dir).await? {
+        for entry in Self::list_dir_tolerant(&self.index_dir).await? {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
             let Some(middle) =
@@ -158,8 +169,31 @@ impl RealVmHostState {
             else {
                 continue;
             };
-            if let Ok(alloc_id) = AllocationId::from_str(middle) {
-                clones.insert(alloc_id, entry.path());
+            let Ok(alloc_id) = AllocationId::from_str(middle) else { continue };
+            // The mapped value is the clone the index link RESOLVES to
+            // (ADR-0083 §D3h) — `read_link`, never `entry.path()`. A
+            // DANGLING link (its target already gone) still `read_link`s
+            // successfully and MUST still yield an entry (§D3f's crash
+            // table: `after clone removal, before link removal` leaves a
+            // dangling link the sweep is required to report and dispose).
+            match tokio::fs::read_link(entry.path()).await {
+                Ok(target) => {
+                    clones.insert(alloc_id, target);
+                }
+                // Vanished between listing and resolution — benign.
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                // A non-symlink entry (`readlink` → `EINVAL`) is skipped
+                // and logged. This is a greenfield single cut: no migration
+                // is written for pre-existing regular files.
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+                    let entry_path = entry.path();
+                    tracing::warn!(
+                        name: "vm.clone_index.non_symlink_entry",
+                        entry = %entry_path.display(),
+                        "clone-index entry is not a symlink; skipping (no migration for pre-existing regular files)"
+                    );
+                }
+                Err(err) => return Err(err),
             }
         }
         Ok(clones)
@@ -173,7 +207,7 @@ impl VmHostState for RealVmHostState {
     }
 
     async fn probe(&self) -> Result<(), VmHostStateProbeError> {
-        for root in [self.workloads_slice_root(), self.run_root.clone(), self.staging_dir.clone()] {
+        for root in [self.workloads_slice_root(), self.run_root.clone(), self.index_dir.clone()] {
             match tokio::fs::read_dir(&root).await {
                 Ok(_) => {}
                 // An absent root is Ok -- a node that has never run a VM
@@ -230,8 +264,35 @@ impl VmHostState for RealVmHostState {
             Err(e) => return Err(e),
         }
 
-        let clone_path = self.staging_dir.join(format!("{CLONE_PREFIX}{alloc}{CLONE_SUFFIX}"));
-        match tokio::fs::remove_file(&clone_path).await {
+        // Resolve the clone by READING THE INDEX LINK (ADR-0083 §D3h) —
+        // never by re-deriving the clone path from a directory join. That
+        // re-derivation IS the defect this step fixes: an operator
+        // spec-edit or workload deletion can destroy `parent([vm] rootfs)`
+        // while the clone survives, so its location is RECORDED in the
+        // durable link, not recomputed. The link path itself is the
+        // platform-owned `<index_dir>/<clone-name>` — the index directory
+        // is ours, so deriving the LINK's location is not the forbidden
+        // re-derivation (the CLONE's location is what must come from
+        // `read_link`). Remove the TARGET first, then the LINK — the same
+        // clone-before-link ordering `VmDriver::stop` uses — both
+        // NotFound-tolerant, so `no link ⇒ no clone` survives an
+        // interruption here too.
+        let link_path = self.index_dir.join(format!("{CLONE_PREFIX}{alloc}{CLONE_SUFFIX}"));
+        let clone_target = match tokio::fs::read_link(&link_path).await {
+            Ok(target) => target,
+            // No link (already removed, or never existed) — nothing to do.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            // A non-symlink at the link path (`readlink` → `EINVAL`) —
+            // skip; greenfield single cut, no pre-existing-file migration.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        match tokio::fs::remove_file(&clone_target).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        match tokio::fs::remove_file(&link_path).await {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),

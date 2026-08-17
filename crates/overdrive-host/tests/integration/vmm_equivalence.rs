@@ -69,7 +69,14 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, alloc_suffix: &str) ->
     VmConfig {
         alloc: alloc.clone(),
         kernel: validated_kernel(fixture),
-        rootfs: RootfsPlan::for_alloc(fixture.rootfs_path.clone(), master_bytes, &alloc),
+        rootfs: RootfsPlan::for_alloc(
+            fixture.rootfs_path.clone(),
+            master_bytes,
+            &alloc,
+            // Vmm-level test: only `clone_dest` is exercised (the FICLONE);
+            // the index link is `VmDriver`'s concern, so this dir is inert.
+            std::path::Path::new("/run/overdrive/vm/clone-index"),
+        ),
         cmdline: KernelCmdline::platform_default(HostArch::X86_64),
         memory: MemoryPlan::derive(GUEST_BYTES),
         vcpus: NonZeroU8::new(1).expect("1 is nonzero"),

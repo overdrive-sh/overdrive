@@ -422,12 +422,15 @@ impl VmConfinement {
 
 /// The rootfs staging plan: the operator's read-only master image, its
 /// size (captured at construction so [`VmConfig::rlimit_fsize`] stays
-/// pure), and the per-launch clone destination (ADR-0082 §D2, gap 3).
+/// pure), the per-launch clone destination, and the platform-owned
+/// clone-index link that points at that clone (ADR-0082 §D2 gap 3;
+/// ADR-0083 §§D3f-D3h).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootfsPlan {
     master: PathBuf,
     master_bytes: u64,
     clone_dest: PathBuf,
+    index_link: PathBuf,
 }
 
 impl RootfsPlan {
@@ -440,13 +443,29 @@ impl RootfsPlan {
     /// The clone destination is derived on the **master's own
     /// filesystem** (FICLONE is intra-filesystem; staging into `/run`
     /// fails `EXDEV`), with a filename **carrying `alloc`** so a
-    /// reboot-orphaned clone is attributable (SD-1 / SD-2; the reap
-    /// keys off it — ADR-0083 §D7).
+    /// reboot-orphaned clone is attributable (SD-1 / SD-2).
+    ///
+    /// The **index link** sits in `index_dir` (the platform-owned
+    /// [`clone_index_dir`], derived over the node's durable `data_dir`)
+    /// and carries the SAME filename as the clone, so `VmHostState`'s
+    /// `CLONE_PREFIX`/`CLONE_SUFFIX` parsing recovers the same allocation
+    /// id from the link. The clone's location is **recorded** in this
+    /// durable index at the moment the platform chooses it — never
+    /// re-derived — because an operator spec-edit or workload deletion can
+    /// destroy `parent(master)` while the clone survives (ADR-0083 §§D3f-D3h,
+    /// DWD-26).
     #[must_use]
-    pub fn for_alloc(master: PathBuf, master_bytes: u64, alloc: &AllocationId) -> Self {
+    pub fn for_alloc(
+        master: PathBuf,
+        master_bytes: u64,
+        alloc: &AllocationId,
+        index_dir: &Path,
+    ) -> Self {
+        let file_name = format!(".overdrive-vm-rootfs-{alloc}.img");
         let dir = master.parent().unwrap_or_else(|| Path::new(""));
-        let clone_dest = dir.join(format!(".overdrive-vm-rootfs-{alloc}.img"));
-        Self { master, master_bytes, clone_dest }
+        let clone_dest = dir.join(&file_name);
+        let index_link = index_dir.join(&file_name);
+        Self { master, master_bytes, clone_dest, index_link }
     }
 
     /// The FICLONE source — the operator's read-only master image.
@@ -467,6 +486,31 @@ impl RootfsPlan {
     pub fn clone_dest(&self) -> &Path {
         &self.clone_dest
     }
+
+    /// The platform-owned clone-index symlink for this launch, under
+    /// [`clone_index_dir`]. `VmDriver` creates it BEFORE the FICLONE and
+    /// removes it AFTER the clone, so `no link ⇒ no clone` and the
+    /// reclamation sweep enumerates a superset of live clones by walking
+    /// the index (ADR-0083 §§D3f-D3h).
+    #[must_use]
+    pub fn index_link(&self) -> &Path {
+        &self.index_link
+    }
+}
+
+/// The platform-owned clone-index directory under the node's durable
+/// `data_dir`: `<data_dir>/vm/clone-index/` (ADR-0083 §D3g). ONE
+/// derivation, called by BOTH composition sites (`compose_vm_driver`'s
+/// `VmHostLayout.clone_index_dir` and `RealVmHostState::new`'s
+/// `index_dir`), so neither derives it independently. Modelled on
+/// `RedbViewStore::resolve_path` — a pure join over `data_dir`, and
+/// deliberately **not under `/run`**, so the index survives a process
+/// restart and a `VmDriver` that lost its in-memory [`RootfsPlan`] can
+/// still have its clone reclaimed by reading the durable link (S-VM-84
+/// ending 3).
+#[must_use]
+pub fn clone_index_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("vm").join("clone-index")
 }
 
 // -----------------------------------------------------------------------
@@ -680,12 +724,14 @@ mod tests {
         fn rootfs_plan_clone_dest_sits_beside_master_and_carries_alloc(
             dir_name in "[a-z0-9]{1,8}",
             file_name in "[a-z0-9]{1,8}",
+            data_name in "[a-z0-9]{1,8}",
             alloc_suffix in ALLOC_SUFFIX_STRATEGY,
             master_bytes in any::<u64>(),
         ) {
             let alloc = AllocationId::new(&alloc_suffix).unwrap();
             let master = PathBuf::from(format!("/var/lib/overdrive/{dir_name}/{file_name}.img"));
-            let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc);
+            let index_dir = clone_index_dir(&PathBuf::from(format!("/srv/{data_name}")));
+            let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
 
             prop_assert_eq!(plan.master(), master.as_path());
             prop_assert_eq!(plan.master_bytes(), master_bytes);
@@ -701,7 +747,29 @@ mod tests {
                 "clone dest filename {clone_name:?} must carry the alloc id {alloc}",
             );
             prop_assert_ne!(plan.clone_dest(), master.as_path());
+
+            // The index link sits in `index_dir` and shares the clone's
+            // filename, so `VmHostState`'s prefix/suffix parsing recovers
+            // the SAME alloc id from the link (ADR-0083 §§D3f-D3h).
+            prop_assert_eq!(plan.index_link().parent(), Some(index_dir.as_path()));
+            prop_assert_eq!(
+                plan.index_link().file_name(),
+                plan.clone_dest().file_name(),
+                "index link and clone must share a filename so the sweep parses the alloc from the link",
+            );
+            // The index link is NOT the clone itself — the clone lives
+            // beside the master, the link under the durable index dir.
+            prop_assert_ne!(plan.index_link(), plan.clone_dest());
         }
+    }
+
+    #[test]
+    fn clone_index_dir_is_data_dir_joined_vm_clone_index() {
+        let dir = clone_index_dir(&PathBuf::from("/srv/overdrive/data"));
+        assert_eq!(dir, PathBuf::from("/srv/overdrive/data/vm/clone-index"));
+        // Deliberately NOT under /run — the index must survive a restart
+        // (ADR-0083 §D3g).
+        assert!(!dir.starts_with("/run"), "the clone index must live under the durable data_dir");
     }
 
     // -------------------------------------------------------------------
@@ -826,6 +894,7 @@ mod tests {
                 PathBuf::from("/var/lib/overdrive/images/base.img"),
                 master_bytes,
                 &alloc,
+                &clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
             ),
             cmdline: KernelCmdline::platform_default(HostArch::X86_64),
             memory: MemoryPlan::derive(guest_bytes),

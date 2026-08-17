@@ -6,112 +6,330 @@
 //!
 //! Component scope, the same carve-out ADR-0082 §D4 already justifies for
 //! S-VM-76 (`vm_driver_stop_totality.rs`): `SimVmm` is injected at the
-//! `Vmm` port boundary and a real `tempfile::TempDir` pair supplies the
+//! `Vmm` port boundary and real `tempfile::TempDir`s supply the
 //! clone-index directory and the operator rootfs-master directory as two
-//! distinct real directories. There is NO guest boot — nothing dials the
-//! beacon, nothing spawns cloud-hypervisor — so this is deliberately NOT
-//! `@requires-kvm` and runs under Lima in the default lane, exactly like
-//! `vm_driver_stop_totality.rs`. It is registered in
+//! distinct real directories. There is NO guest boot — nothing spawns
+//! cloud-hypervisor — so this runs under Lima in the default lane, exactly
+//! like `vm_driver_stop_totality.rs`. It is registered in
 //! `crates/overdrive-worker/tests/acceptance.rs`.
 //!
-//! RED scaffold pending step 03-09. The production clone-index surface it
-//! pins — the platform-owned index directory
-//! (`clone_index_dir(data_dir)` = `<data_dir>/vm/clone-index/`, ADR-0083
-//! §D3g), the create-before / remove-after symlink ordering (§D3f), and
-//! the `discard_artifacts` read-the-link resolution (§D3h) — does not
-//! exist at current HEAD. The scaffold therefore panics BEFORE touching
-//! any of it, per `.claude/rules/testing.md` § "RED scaffolds and
-//! intentionally-failing commits", and stays discoverable via
-//! `grep -rn 'should_panic.*RED scaffold' crates/`. DELIVER (step 03-09)
-//! replaces the `panic!` body with the real assertions and swaps `#[test]`
-//! for whichever runner the enumeration wants.
+//! ## The invariant, and why it is the mutation target
+//!
+//! ADR-0083 §D3f: the link is created BEFORE the clone (on the start path)
+//! and removed AFTER the clone (on stop / cleanup). Therefore at every
+//! instant a clone that exists has a link that exists — contrapositive
+//! *no link ⇒ no clone* — so enumerating links enumerates a SUPERSET of
+//! live clones and the reclamation sweep cannot miss one. A mutation that
+//! swaps either ordering reopens exactly the invisible-orphan leak S-VM-84
+//! closes, and MUST be killed here.
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
-/// S-VM-85 / `@contract-shape:unbounded-preservation` `@ac-08` `@tier3`
-/// `@real-io` `@property` `@mandatory:mutation_target` — the clone-index
-/// link's lifetime CONTAINS the clone's, so a clone that exists always has
-/// a link pointing at it, at every interruption point.
-///
-/// ```gherkin
-/// Given a VmDriver whose clone index directory and rootfs master
-///   directory are distinct real directories
-/// When the start and stop paths are interrupted at each filesystem step
-///   in turn -- after the index link, after the clone, after the clone's
-///   removal, after the link's removal
-/// Then at no interruption point does a rootfs clone exist without an
-///   index link pointing at it
-/// And every residue left by an interruption is either nothing, or a
-///   dangling index link that a subsequent VmHostState observe reports and
-///   discard_artifacts removes idempotently
-/// And discard_artifacts never derives the clone's path -- it resolves it
-///   by reading the link
-/// ```
-///
-/// ## The invariant, and why it is the mutation target
-///
-/// ADR-0083 §D3f names the contract: **the link is created before the
-/// clone, and removed after the clone.** Therefore at every instant a
-/// clone that exists has a link that exists — contrapositive *no link ⇒
-/// no clone* — so enumerating links enumerates a SUPERSET of live clones
-/// and the reclamation sweep cannot miss one. The two crash windows both
-/// converge rather than leak (§D3f's table):
-///
-/// | Crash point | Residue |
-/// |---|---|
-/// | after link, before clone | dangling link, no clone |
-/// | after clone removal, before link removal (in `stop`) | dangling link, no clone |
-/// | after clone, before link | **unreachable by construction** |
-///
-/// This is THE mandatory mutation target. A mutation that swaps either
-/// ordering — create-clone-before-link on the start path, or
-/// remove-link-before-clone on the stop path — reopens exactly the
-/// invisible-orphan leak S-VM-84 closes, and MUST be killed here.
-/// S-VM-84 alone cannot catch it, because the offending residue (a clone
-/// with no link) is only observable on the interrupted interleavings this
-/// scenario drives — never at the quiescent end states S-VM-84 asserts on.
-///
-/// ## Activation plan (step 03-09)
-///
-/// * Mirror `vm_driver_stop_totality.rs`'s component-scope fixtures:
-///   `build_layout` / `build_spec` / `build_driver` over `SimVmm` and a
-///   real `TempDir`. Give the driver a clone-index directory and an
-///   operator rootfs-master directory that are DISTINCT real directories
-///   (the master beside which `RootfsPlan::for_alloc` reflinks the clone,
-///   and the platform-owned `clone_index_dir` that holds the symlink).
-/// * Interrupt the start and stop filesystem sequences at each of the four
-///   named steps in turn (after the index link, after the clone, after the
-///   clone's removal, after the link's removal). `@property`
-///   (`unbounded-preservation`) quantifies over interruption points, not
-///   over an enumerable delta — the four points ARE the mutation-killing
-///   set; the crafter picks property-vs-parametrize per the paradigm-match
-///   rule, but every point must be exercised.
-/// * At EACH interruption point assert the invariant directly: there is no
-///   clone without a link. Any residue is either nothing or a dangling
-///   link.
-/// * Then drive a `VmHostState` observe + `discard_artifacts` over the
-///   residue and assert it converges idempotently: the dangling link is
-///   reported by `observe`, `discard_artifacts` removes the (absent)
-///   target and the link, both `NotFound`-tolerant, and a second
-///   `discard_artifacts` is a no-op.
-/// * The LAST clause is a STRUCTURAL assertion, not a behavioural one, and
-///   it is what stops the re-derivation defect (§D3f's root cause) from
-///   being reintroduced: `discard_artifacts` must resolve the clone's path
-///   by `read_link` on the index entry, NEVER by re-deriving it from
-///   `parent([vm] rootfs)` + `AllocationId` (which an operator spec-edit
-///   or workload deletion can destroy while the clone survives).
-///
-/// The scaffold panics today because none of that production surface
-/// exists at HEAD; it is delivered by step 03-09.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-85 / step 03-09 -- the clone-index link is \
-         created before the per-launch rootfs clone and removed after it, so at no interruption \
-         point does a clone exist without a link; any residue is a dangling link that a \
-         VmHostState observe reports and discard_artifacts removes idempotently by reading the \
-         link, never by re-deriving the clone path)"
+use std::num::NonZeroU8;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use overdrive_core::SpiffeId;
+use overdrive_core::id::AllocationId;
+use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverPayload, Resources, VmPayload};
+use overdrive_core::traits::vm_host_state::VmHostState;
+use overdrive_core::traits::vmm::{
+    Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+};
+use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
+use overdrive_core::vm::config::{
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+};
+use overdrive_host::RealVmHostState;
+use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
+use overdrive_worker::VmDriver;
+use overdrive_worker::vm_driver::VmHostLayout;
+use tempfile::TempDir;
+use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
+
+// ---------------------------------------------------------------------
+// Fixtures — a per-test operator rootfs-master dir + a distinct
+// platform-owned clone-index dir, both real directories on disk.
+// ---------------------------------------------------------------------
+
+const CGROUP_ROOT: &str = "/does-not-need-to-exist-for-the-clone-surface";
+
+fn operator_rootfs_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("operator-rootfs").join("master.img")
+}
+
+fn kernel_path(tmp: &TempDir) -> PathBuf {
+    tmp.path().join("vmlinuz")
+}
+
+fn clone_index_dir(tmp: &TempDir) -> PathBuf {
+    // Under a stand-in durable data_dir — deliberately NOT `/run` and NOT
+    // the operator dir where the clone lands.
+    tmp.path().join("node-data").join("vm").join("clone-index")
+}
+
+fn stage_artifacts(tmp: &TempDir) {
+    let master = operator_rootfs_path(tmp);
+    std::fs::create_dir_all(master.parent().unwrap()).expect("create operator rootfs dir");
+    std::fs::write(&master, b"deterministic-fixture-rootfs-bytes").expect("write master rootfs");
+    let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
+    header[..4].copy_from_slice(b"\x7fELF");
+    std::fs::write(kernel_path(tmp), &header).expect("stage the synthetic kernel");
+}
+
+fn build_layout(tmp: &TempDir) -> VmHostLayout {
+    stage_artifacts(tmp);
+    VmHostLayout {
+        cgroup_root: tmp.path().join("cgroup"),
+        run_dir_root: tmp.path().join("run"),
+        clone_index_dir: clone_index_dir(tmp),
+        arch: HostArch::X86_64,
+        vcpus: NonZeroU8::new(1).expect("1 != 0"),
+        confinement: VmConfinement::confined(
+            VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+            1024,
+        ),
+    }
+}
+
+fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
+    AllocationSpec {
+        alloc: alloc.clone(),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test/alloc/x")
+            .expect("valid spiffe id"),
+        driver: DriverPayload::Vm(VmPayload {
+            command: "/sbin/init".to_owned(),
+            args: vec![],
+            kernel: kernel_path(tmp),
+            rootfs: operator_rootfs_path(tmp),
+            volumes: vec![],
+        }),
+        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        probe_descriptors: Vec::new(),
+        netns: None,
+        host_veth: None,
+        service_ports: Vec::new(),
+        workload_addr: None,
+    }
+}
+
+fn build_driver(vmm: Arc<dyn Vmm>, layout: VmHostLayout) -> (VmDriver, SimClock) {
+    let clock = SimClock::new();
+    let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(SimCgroupFs::new());
+    let cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
+        Arc::new(SimCgroupAccounting::new());
+    let driver = VmDriver::new(vmm, Arc::new(clock.clone()), fs, cgroup_accounting, layout);
+    (driver, clock)
+}
+
+fn beacon_socket_path(run_dir_root: &Path, alloc: &AllocationId) -> PathBuf {
+    VmRunDir::for_alloc(run_dir_root, alloc).beacon_socket(BEACON_VSOCK_PORT)
+}
+
+async fn connect_with_retry(path: &Path) -> UnixStream {
+    for _ in 0..2000 {
+        match UnixStream::connect(path).await {
+            Ok(stream) => return stream,
+            Err(_) => tokio::task::yield_now().await,
+        }
+    }
+    panic!("beacon listener never became connectable at {}", path.display());
+}
+
+/// Spawn `start`, dial the beacon, write `READY`, await `start` to `Ok`.
+async fn start_with_beacon(driver: &VmDriver, spec: &AllocationSpec, run_dir_root: &Path) {
+    let beacon_path = beacon_socket_path(run_dir_root, &spec.alloc);
+    let driver = driver.clone();
+    let spec_owned = spec.clone();
+    let start_task = tokio::spawn(async move { driver.start(&spec_owned).await });
+
+    let mut stream = connect_with_retry(&beacon_path).await;
+    stream.write_all(b"READY pid=1 port=1234\n").await.expect("write READY");
+
+    start_task.await.expect("start task did not panic").expect("start resolves Ok on beacon-win");
+}
+
+/// A `Vmm` decorator that captures, at the instant `Vmm::create` (the
+/// FICLONE) is ENTERED, whether the clone-index link already exists and
+/// whether the clone does NOT yet — the deterministic witness of the
+/// link-before-clone creation ordering (ADR-0083 §D3f). Correct code
+/// creates the link BEFORE `vmm.create`, so at entry the link exists and
+/// the clone does not; a mutation that creates the clone first would find
+/// the link absent here.
+#[derive(Clone)]
+struct RecordsFsAtCreate {
+    inner: SimVmm,
+    at_create: Arc<Mutex<Option<(bool, bool)>>>,
+}
+
+#[async_trait]
+impl Vmm for RecordsFsAtCreate {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> VmmResult<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig) -> VmmResult<VmProcess> {
+        let link_exists = std::fs::symlink_metadata(config.rootfs.index_link()).is_ok();
+        let clone_exists = config.rootfs.clone_dest().exists();
+        *self.at_create.lock().expect("recorder mutex not poisoned") =
+            Some((link_exists, clone_exists));
+        self.inner.create(config).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await
+    }
+}
+
+fn real_host(layout: &VmHostLayout) -> RealVmHostState {
+    RealVmHostState::new(
+        PathBuf::from(CGROUP_ROOT),
+        layout.run_dir_root.clone(),
+        layout.clone_index_dir.clone(),
+    )
+}
+
+/// `true` iff a symlink exists at `p`, whether or not its target does.
+/// `Path::exists()` FOLLOWS the link, so a DANGLING link (target not yet
+/// created, or already removed) reads as absent — the index link is
+/// deliberately dangling at two of the invariant's interruption points
+/// (link-before-clone, and clone-removed-before-link), so the link's
+/// presence must be checked with `symlink_metadata`, which stats the link
+/// itself.
+fn link_present(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok()
+}
+
+// ---------------------------------------------------------------------
+// S-VM-85 — `no link ⇒ no clone` at every interruption point.
+// ---------------------------------------------------------------------
+
+/// S-VM-85 / `@ac-08` `@real-io` `@mandatory:mutation_target` — the
+/// clone-index link's lifetime CONTAINS the clone's.
+#[tokio::test]
+async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let index_dir = layout.clone_index_dir.clone();
+    let master = operator_rootfs_path(&tmp);
+    let master_bytes = std::fs::metadata(&master).expect("stat master").len();
+
+    // === Part A — CREATION ordering: link strictly precedes the clone. ===
+    let recorder: Arc<Mutex<Option<(bool, bool)>>> = Arc::new(Mutex::new(None));
+    let vmm = RecordsFsAtCreate { inner: SimVmm::new(), at_create: recorder.clone() };
+    let (driver, clock) = build_driver(Arc::new(vmm), layout.clone());
+
+    let alloc = AllocationId::new("alloc-clone-index-a").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    start_with_beacon(&driver, &spec, &run_dir_root).await;
+
+    let (link_at_create, clone_at_create) =
+        recorder.lock().expect("recorder mutex").take().expect("Vmm::create was entered");
+    assert!(
+        link_at_create,
+        "the clone-index link MUST exist at the instant the FICLONE (Vmm::create) is entered — the \
+         link is created BEFORE the clone (§D3f)"
     );
+    assert!(
+        !clone_at_create,
+        "the clone MUST NOT exist yet at FICLONE entry — the link strictly precedes the clone"
+    );
+
+    // The running state: both the clone and its index link exist, and the
+    // link RESOLVES to the clone beside the operator master — NOT into the
+    // index dir (so a re-derivation would target the wrong path).
+    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
+    assert!(plan.clone_dest().exists(), "the per-launch clone exists while running");
+    assert!(link_present(plan.index_link()), "the clone-index link exists while running");
+    assert_eq!(
+        std::fs::read_link(plan.index_link()).expect("read the index link"),
+        plan.clone_dest(),
+        "the index link resolves to the clone beside the operator master"
+    );
+    assert_ne!(
+        plan.clone_dest().parent(),
+        Some(index_dir.as_path()),
+        "the clone lives beside the operator master, NOT in the platform index dir"
+    );
+
+    // === Part B — reclamation over the running residue: observe resolves
+    // the link; discard removes the clone (via read_link, in the operator
+    // dir) then the link, idempotently. ===
+    let host = real_host(&layout);
+    let obs = host.observe().await.expect("observe");
+    assert_eq!(
+        obs.clones.get(&alloc),
+        Some(&plan.clone_dest().to_path_buf()),
+        "observe reports the clone the link RESOLVES to, not the link path"
+    );
+    host.discard_artifacts(&alloc).await.expect("discard");
+    assert!(
+        !plan.clone_dest().exists(),
+        "discard removed the clone the link resolved to (operator dir) — it read the link, it did \
+         not re-derive a platform path"
+    );
+    assert!(!link_present(plan.index_link()), "discard removed the index link too");
+    host.discard_artifacts(&alloc).await.expect("discard is idempotent");
+
+    // === Part C — the dangling-link residue (crash after clone removal,
+    // before link removal): observe still yields an entry; discard
+    // disposes it idempotently, never leaving a clone without a link. ===
+    let dangling = AllocationId::new("alloc-clone-index-dangling").expect("valid alloc id");
+    let dangling_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &dangling, &index_dir);
+    std::fs::create_dir_all(&index_dir).expect("index dir");
+    std::fs::write(dangling_plan.clone_dest(), b"x").expect("stage a clone");
+    std::os::unix::fs::symlink(dangling_plan.clone_dest(), dangling_plan.index_link())
+        .expect("link -> clone");
+    std::fs::remove_file(dangling_plan.clone_dest()).expect("simulate 'clone removed, link not'");
+    // Invariant at this residue: a clone does NOT exist without a link —
+    // here the clone is gone and only the (dangling) link remains.
+    assert!(!dangling_plan.clone_dest().exists(), "residue: the clone is gone");
+    assert!(link_present(dangling_plan.index_link()), "residue: a dangling link remains");
+    let obs_dangling = host.observe().await.expect("observe over the dangling residue");
+    assert!(
+        obs_dangling.clones.contains_key(&dangling),
+        "a dangling index link MUST still yield an observe entry (§D3f crash table)"
+    );
+    host.discard_artifacts(&dangling).await.expect("discard the dangling residue");
+    assert!(!link_present(dangling_plan.index_link()), "discard disposes the dangling link");
+    host.discard_artifacts(&dangling).await.expect("discard is idempotent over an absent residue");
+
+    // === Part D — the stop path removes the clone AND its link; the
+    // post-stop residue is nothing (§D3f point 4). ===
+    let alloc_stop = AllocationId::new("alloc-clone-index-stop").expect("valid alloc id");
+    let spec_stop = build_spec(&alloc_stop, &tmp);
+    start_with_beacon(&driver, &spec_stop, &run_dir_root).await;
+    let stop_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc_stop, &index_dir);
+    assert!(
+        stop_plan.clone_dest().exists() && link_present(stop_plan.index_link()),
+        "running: both present"
+    );
+
+    let handle = overdrive_core::traits::driver::AllocationHandle {
+        alloc: alloc_stop.clone(),
+        pid: None,
+    };
+    // `stop` writes SHUTDOWN then awaits `clock.sleep(SHUTDOWN_DEADLINE)`
+    // on the injected `SimClock`; drive it in a task and tick the clock so
+    // the deadline elapses (mirrors `vm_driver_stop_totality.rs`).
+    let driver_for_stop = driver.clone();
+    let handle_owned = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_stop.stop(&handle_owned).await });
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(2));
+    stop_task.await.expect("stop task did not panic").expect("stop returns Ok");
+    assert!(!stop_plan.clone_dest().exists(), "stop removed the clone");
+    assert!(!link_present(stop_plan.index_link()), "stop removed the index link");
 }

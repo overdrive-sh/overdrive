@@ -213,6 +213,38 @@ async fn read_kernel_magic_window(path: &std::path::Path) -> std::io::Result<Vec
     Ok(header)
 }
 
+/// Record this launch's rootfs clone location in the platform-owned
+/// durable index by creating a symlink `index_link -> clone_dest`
+/// (ADR-0083 §§D3f-D3h). Called BEFORE the FICLONE so the link's lifetime
+/// contains the clone's. Idempotent against a stale link left by a prior
+/// crashed launch of the SAME allocation id: the pre-existing link is
+/// removed (NotFound-tolerant) before the fresh one is created, since
+/// `symlink(2)` fails `EEXIST` otherwise.
+async fn create_index_link(rootfs: &RootfsPlan) -> std::io::Result<()> {
+    let link = rootfs.index_link();
+    if let Some(parent) = link.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    match tokio::fs::remove_file(link).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+    tokio::fs::symlink(rootfs.clone_dest(), link).await
+}
+
+/// Remove the rootfs clone FIRST, then its index link (ADR-0083 §D3f) —
+/// the ordering that makes `no link ⇒ no clone` true across a crash
+/// between the two steps. Both removals are best-effort and
+/// NotFound-tolerant: a crash after the clone's removal leaves at most a
+/// dangling link the reclamation sweep disposes idempotently.
+/// `@mandatory:mutation_target` — swapping the two removals reopens the
+/// "clone without a link" window S-VM-85 exists to close.
+async fn remove_clone_then_index_link(rootfs: &RootfsPlan) {
+    let _ = tokio::fs::remove_file(rootfs.clone_dest()).await;
+    let _ = tokio::fs::remove_file(rootfs.index_link()).await;
+}
+
 // ---------------------------------------------------------------------
 // VmHostLayout — the per-node, fixed VM-boot template this slice needs
 // ---------------------------------------------------------------------
@@ -242,6 +274,13 @@ pub struct VmHostLayout {
     /// Root directory under which per-allocation [`VmRunDir`]s are
     /// created (SD-2 — tmpfs in production).
     pub run_dir_root: PathBuf,
+    /// The platform-owned clone-index directory
+    /// ([`overdrive_core::vm::config::clone_index_dir`] over the node's
+    /// durable `data_dir`) where `start` records each launch's rootfs
+    /// clone location as a symlink BEFORE the FICLONE (ADR-0083 §§D3f-D3h).
+    /// The SAME expression `RealVmHostState`'s `index_dir` is fed, so the
+    /// sweep enumerates exactly the links `start` writes.
+    pub clone_index_dir: PathBuf,
     /// Host CPU architecture — selects the guest cmdline's console
     /// token via [`KernelCmdline::platform_default`], and the
     /// architecture each allocation's kernel is validated against.
@@ -449,22 +488,30 @@ impl VmDriver {
     }
 
     /// Cleanup shared by every non-`Ok` arm of `start`'s boot sequence:
-    /// SIGKILL the VMM (if one was ever spawned), remove the rootfs
-    /// clone, `cgroup.kill` + remove the workload scope, remove the run
-    /// directory (which also removes the beacon socket file), and
-    /// release the claim taken at step 0. Every step is best-effort —
-    /// this function is ALREADY the failure path; a secondary failure
-    /// here must not mask the original error nor panic.
+    /// SIGKILL the VMM (if one was ever spawned), remove the rootfs clone
+    /// then its index link, `cgroup.kill` + remove the workload scope,
+    /// remove the run directory (which also removes the beacon socket
+    /// file), and release the claim taken at step 0. Every step is
+    /// best-effort — this function is ALREADY the failure path; a
+    /// secondary failure here must not mask the original error nor panic.
+    ///
+    /// `control` and `rootfs` are separate `Option`s, not one bundled
+    /// tuple: the index link is created BEFORE `Vmm::create` (ADR-0083
+    /// §D3f), so the `Vmm::create`-failure arm has a `RootfsPlan` (whose
+    /// link must be removed) but no `VmControl`.
     async fn cleanup_after_start_failure(
         &self,
         alloc: &AllocationId,
         run_dir: &VmRunDir,
         scope: Option<&CgroupPath>,
-        process: Option<(&VmControl, &RootfsPlan)>,
+        control: Option<&VmControl>,
+        rootfs: Option<&RootfsPlan>,
     ) {
-        if let Some((control, rootfs)) = process {
+        if let Some(control) = control {
             let _ = self.vmm.terminate(control, Duration::ZERO).await;
-            let _ = tokio::fs::remove_file(rootfs.clone_dest()).await;
+        }
+        if let Some(rootfs) = rootfs {
+            remove_clone_then_index_link(rootfs).await;
         }
         if let Some(scope) = scope {
             let _ = self.cgroup_manager.cgroup_kill(scope).await;
@@ -521,7 +568,7 @@ impl VmDriver {
         let kernel = match preflight_kernel(&payload.kernel, self.layout.arch).await {
             Ok(kernel) => kernel,
             Err(rejection) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
+                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
                 return Err(rejection);
             }
         };
@@ -531,7 +578,7 @@ impl VmDriver {
         let listener = match UnixListener::bind(run_dir.beacon_socket(BEACON_VSOCK_PORT)) {
             Ok(listener) => listener,
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
+                self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
                 return Err(start_rejected_unclassified(format!("bind beacon listener: {err}")));
             }
         };
@@ -539,7 +586,7 @@ impl VmDriver {
         let scope = CgroupPath::for_alloc(&spec.alloc);
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             drop(listener);
-            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
+            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None, None).await;
             return Err(start_rejected_unclassified(format!("create workload scope: {err}")));
         }
 
@@ -573,7 +620,8 @@ impl VmDriver {
         let master_bytes = match tokio::fs::metadata(&payload.rootfs).await {
             Ok(meta) => meta.len(),
             Err(err) => {
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
+                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, None)
+                    .await;
                 let configured = payload.rootfs.display().to_string();
                 let detail = format!("stat rootfs master {configured}: {err}");
                 return Err(if err.kind() == std::io::ErrorKind::NotFound {
@@ -583,7 +631,12 @@ impl VmDriver {
                 });
             }
         };
-        let rootfs = RootfsPlan::for_alloc(payload.rootfs.clone(), master_bytes, &spec.alloc);
+        let rootfs = RootfsPlan::for_alloc(
+            payload.rootfs.clone(),
+            master_bytes,
+            &spec.alloc,
+            &self.layout.clone_index_dir,
+        );
         let cmdline = KernelCmdline::platform_default(self.layout.arch);
         let config = VmConfig {
             alloc: spec.alloc.clone(),
@@ -598,13 +651,30 @@ impl VmDriver {
             cgroup_scope: scope.clone(),
         };
 
+        // ADR-0083 §D3f: record the clone's location in the platform-owned
+        // durable index BEFORE the FICLONE runs (inside `Vmm::create`). The
+        // link's lifetime CONTAINS the clone's, so at no instant does a
+        // clone exist without a link — enumerating the index enumerates a
+        // superset of live clones and the reclamation sweep cannot miss
+        // one. The ORDERING is the correctness contract, not sequencing;
+        // swapping it reopens the invisible-orphan leak S-VM-85
+        // mutation-tests. `@mandatory:mutation_target`.
+        if let Err(err) = create_index_link(&rootfs).await {
+            self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, Some(&rootfs))
+                .await;
+            return Err(start_rejected_unclassified(format!("create clone-index link: {err}")));
+        }
+
         let (control, exit, diagnostics) = match self.vmm.create(&config).await {
             Ok(process) => (process.control, process.exit, process.diagnostics),
             Err(err) => {
                 // §D6: `Vmm::create`'s own Err contract guarantees no
-                // process is left running and no clone is left on disk
-                // — nothing extra to remove here.
-                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
+                // process is left running and no clone is left on disk —
+                // but the index link created just above IS ours to remove
+                // (the §D3f "after link, before clone" residue), so pass
+                // the `RootfsPlan` through to strip the dangling link.
+                self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None, Some(&rootfs))
+                    .await;
                 return Err(classify_vmm_error(&err, &rootfs));
             }
         };
@@ -727,7 +797,8 @@ impl Driver for VmDriver {
                 &spec.alloc,
                 &run_dir,
                 Some(&scope),
-                Some((&control, &rootfs)),
+                Some(&control),
+                Some(&rootfs),
             )
             .await;
             return Err(start_rejected_unclassified(format!("place VMM pid in scope: {err}")));
@@ -770,7 +841,8 @@ impl Driver for VmDriver {
                         &spec.alloc,
                         &run_dir,
                         Some(&scope),
-                        Some((&control, &rootfs)),
+                        Some(&control),
+                        Some(&rootfs),
                     )
                     .await;
                     let detail = format!("EXEC write failed: {err}");
@@ -804,7 +876,8 @@ impl Driver for VmDriver {
                     &spec.alloc,
                     &run_dir,
                     Some(&scope),
-                    Some((&control, &rootfs)),
+                    Some(&control),
+                    Some(&rootfs),
                 )
                 .await;
                 Err(start_rejected_unclassified(format!("beacon accept failed: {err}")))
@@ -817,7 +890,8 @@ impl Driver for VmDriver {
                     &spec.alloc,
                     &run_dir,
                     Some(&scope),
-                    Some((&control, &rootfs)),
+                    Some(&control),
+                    Some(&rootfs),
                 )
                 .await;
                 let (vmm_exit_code, vmm_signal, detail) = match ended {
@@ -849,7 +923,8 @@ impl Driver for VmDriver {
                     &spec.alloc,
                     &run_dir,
                     Some(&scope),
-                    Some((&control, &rootfs)),
+                    Some(&control),
+                    Some(&rootfs),
                 )
                 .await;
                 let deadline_ms = u64::try_from(VM_BOOT_DEADLINE.as_millis()).unwrap_or(u64::MAX);
@@ -928,10 +1003,17 @@ impl Driver for VmDriver {
 
         // Step 3: tear down the host footprint. Best-effort — benign if
         // already gone (a concurrent double-stop, S-VM-76 sequence (d)).
+        // The clone is removed FIRST and its index link SECOND (ADR-0083
+        // §D3f), so `no link ⇒ no clone` holds at every interruption point
+        // of the stop sequence — a crash after the clone's removal leaves
+        // at most a dangling link the next sweep disposes idempotently.
+        // `VmDriver::stop` still removes the clone DIRECTLY (it holds this
+        // allocation's own `RootfsPlan`); the sweep is the backstop for the
+        // without-stop endings, not a replacement for this.
         let _ = self.cgroup_manager.cgroup_kill(&scope).await;
         let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
         let _ = tokio::fs::remove_dir_all(run_dir.path()).await;
-        let _ = tokio::fs::remove_file(rootfs.clone_dest()).await;
+        remove_clone_then_index_link(&rootfs).await;
 
         Ok(())
     }

@@ -27,7 +27,7 @@ use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
-    VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+    VmConfig, VmConfinement, VmRunDir, VmmIdentity, clone_index_dir,
 };
 use overdrive_host::{CloudHypervisorVmm, RealVmHostState};
 use overdrive_sim::SimVmHostState;
@@ -65,13 +65,13 @@ const fn sample_confinement() -> VmConfinement {
 /// Build a real, fully-resolved `VmConfig` sharing `fixture`'s staged
 /// kernel/rootfs, for allocation `vmhosteq-a` — mirrors
 /// `vmm_equivalence.rs::sample_vm_config`.
-fn sample_vm_config(fixture: &VmFixture, run_root: &Path) -> VmConfig {
+fn sample_vm_config(fixture: &VmFixture, run_root: &Path, index_dir: &Path) -> VmConfig {
     let alloc = AllocationId::new("vmhosteq-a").expect("valid alloc id");
     let master_bytes = std::fs::metadata(&fixture.rootfs_path).expect("stat staged rootfs").len();
     VmConfig {
         alloc: alloc.clone(),
         kernel: validated_kernel(fixture),
-        rootfs: RootfsPlan::for_alloc(fixture.rootfs_path.clone(), master_bytes, &alloc),
+        rootfs: RootfsPlan::for_alloc(fixture.rootfs_path.clone(), master_bytes, &alloc, index_dir),
         cmdline: KernelCmdline::platform_default(HostArch::X86_64),
         memory: MemoryPlan::derive(GUEST_BYTES),
         vcpus: NonZeroU8::new(1).expect("1 is nonzero"),
@@ -164,7 +164,12 @@ async fn vm_host_state_equivalence_real() {
     let run_root = staging_root.join("vm-host-state-eq-run-root");
     std::fs::create_dir_all(&run_root).expect("create run root");
 
-    let config = sample_vm_config(&fixture, &run_root);
+    // The clone-index dir is a real, platform-owned directory distinct
+    // from the operator's rootfs-master dir (where the clone lands) —
+    // `RealVmHostState` enumerates the LINKS here and resolves each to its
+    // clone via `read_link` (ADR-0083 §§D3f-D3h).
+    let index_dir = run_root.join("clone-index");
+    let config = sample_vm_config(&fixture, &run_root, &index_dir);
     std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
 
     // Boot a real Cloud Hypervisor VMM -- the process whose PID this test
@@ -174,6 +179,16 @@ async fn vm_host_state_equivalence_real() {
     let vmm = CloudHypervisorVmm::default();
     vmm.probe().await.expect("Vmm::probe succeeds on this host");
     let proc = vmm.create(&config).await.expect("Vmm::create boots a real VMM");
+
+    // The clone-index link is `VmDriver`'s to create at launch; this test
+    // drives the `Vmm` port directly (no `VmDriver` in `overdrive-host`),
+    // so it stands in for that one step — record the just-cloned rootfs in
+    // the durable index exactly as `VmDriver::start` does BEFORE the
+    // FICLONE (ADR-0083 §D3f). `observe` then reports the clone by
+    // RESOLVING this link, and `discard_artifacts` removes target-then-link.
+    std::fs::create_dir_all(&index_dir).expect("create the clone-index dir");
+    std::os::unix::fs::symlink(config.rootfs.clone_dest(), config.rootfs.index_link())
+        .expect("record the per-launch clone in the platform-owned index");
 
     // Cgroup enrolment is the DRIVER's job, not `create`'s (per
     // `brief.md` §108's effect-isolation table) -- this test plays that
@@ -188,11 +203,7 @@ async fn vm_host_state_equivalence_real() {
         .await
         .expect("enrol the VMM pid into the scope");
 
-    let host = RealVmHostState::new(
-        PathBuf::from(CGROUP_ROOT),
-        run_root.clone(),
-        config.rootfs.clone_dest().parent().expect("clone_dest has a parent").to_path_buf(),
-    );
+    let host = RealVmHostState::new(PathBuf::from(CGROUP_ROOT), run_root.clone(), index_dir.clone());
 
     assert_observe_then_kill_then_discard(&host, &config.alloc).await;
 
@@ -212,9 +223,9 @@ async fn vm_host_state_equivalence_real() {
     let empty_host = RealVmHostState::new(
         PathBuf::from(CGROUP_ROOT),
         staging_root.join("vm-host-state-eq-never-created-run-root"),
-        staging_root.join("vm-host-state-eq-never-created-staging-root"),
+        staging_root.join("vm-host-state-eq-never-created-index-dir"),
     );
-    empty_host.probe().await.expect("an absent run/staging root is Ok, never a refusal");
+    empty_host.probe().await.expect("an absent run/index root is Ok, never a refusal");
 }
 
 // ---------------------------------------------------------------------
@@ -284,17 +295,78 @@ async fn vm_host_state_equivalence_real() {
 /// the ONE indirection DWD-26 introduces: the clone lives in the
 /// operator's directory and is reached through the index link.
 ///
-/// The scaffold panics today because `clone_index_dir`, the symlink-based
-/// `observe_clones`, and the renamed `RealVmHostState::new(index_dir)` do
-/// not exist at HEAD; they are delivered by step 03-09.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn index_backed_clone_surface_stays_equivalent_across_adapters() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-91 extension / step 03-09 -- RealVmHostState \
-         and SimVmHostState must observe the SAME clone surface after the per-launch clone moves \
-         to the operator's directory and RealVmHostState enumerates it through the platform-owned \
-         clone-index symlinks under data_dir; observe resolves the clone by reading the link and \
-         discard_artifacts removes target-then-link)"
+/// After the DWD-26 relocation the two adapters must STILL observe the
+/// same clone surface — `RealVmHostState` through a platform-owned index
+/// symlink resolving to a clone beside an operator-chosen master;
+/// `SimVmHostState` through its in-memory clone map. Needs no guest boot
+/// and no cgroup: it exercises only the clone indirection, over real
+/// tempdirs and a real symlink.
+#[tokio::test]
+async fn index_backed_clone_surface_stays_equivalent_across_adapters() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let alloc = AllocationId::new("vmhosteq-index-a").expect("valid alloc id");
+
+    // Two DISTINCT real directories: the operator's rootfs-master dir
+    // (where the clone lands beside the master) and the platform-owned
+    // clone-index dir under a stand-in data_dir. NEITHER is a platform
+    // staging dir NOR `/run`.
+    let operator_dir = tmp.path().join("operator-rootfs");
+    let data_dir = tmp.path().join("node-data");
+    let index_dir = clone_index_dir(&data_dir);
+    std::fs::create_dir_all(&operator_dir).expect("create operator rootfs dir");
+    std::fs::create_dir_all(&index_dir).expect("create clone-index dir");
+
+    // A real clone beside the operator master and a real index symlink
+    // resolving to it — the on-disk shape `VmDriver::start` records
+    // (link -> clone; ADR-0083 §D3f).
+    let plan = RootfsPlan::for_alloc(operator_dir.join("master.img"), 0, &alloc, &index_dir);
+    std::fs::write(plan.clone_dest(), b"clone-bytes").expect("stage the clone beside the master");
+    std::os::unix::fs::symlink(plan.clone_dest(), plan.index_link())
+        .expect("record the clone in the index");
+    // Structural: the clone is NOT inside the index dir — a re-derivation
+    // `index_dir.join(name)` would target the LINK, and the real clone
+    // would leak. Reading the link is the only correct resolution.
+    assert_ne!(plan.clone_dest().parent(), Some(index_dir.as_path()));
+
+    // --- Real adapter: observe RESOLVES the link; discard removes
+    // target-then-link, idempotently. ---
+    let run_root = tmp.path().join("run");
+    std::fs::create_dir_all(&run_root).expect("create run root");
+    let real = RealVmHostState::new(PathBuf::from(CGROUP_ROOT), run_root, index_dir.clone());
+
+    let obs = real.observe().await.expect("real observe");
+    assert_eq!(
+        obs.clones.get(&alloc),
+        Some(&plan.clone_dest().to_path_buf()),
+        "observe must report the clone the index link RESOLVES to (beside the operator master), \
+         never the link's own path"
     );
+
+    real.discard_artifacts(&alloc).await.expect("real discard");
+    assert!(
+        !plan.clone_dest().exists(),
+        "discard must remove the clone the link resolves to (in the operator dir) — proof it read \
+         the link rather than re-deriving a platform path"
+    );
+    assert!(!plan.index_link().exists(), "discard must remove the index link too");
+    real.discard_artifacts(&alloc).await.expect("real discard is idempotent");
+    assert!(
+        !real.observe().await.expect("real observe").clones.contains_key(&alloc),
+        "the real clone surface is empty after discard"
+    );
+
+    // --- Sim adapter: its in-memory clone map models the observable
+    // surface directly; the observe/discard shape is byte-identical. ---
+    let sim = SimVmHostState::new();
+    sim.set_clone(alloc.clone(), plan.clone_dest().to_path_buf());
+    assert!(
+        sim.observe().await.expect("sim observe").clones.contains_key(&alloc),
+        "sim observe reports the seeded clone"
+    );
+    sim.discard_artifacts(&alloc).await.expect("sim discard");
+    assert!(
+        !sim.observe().await.expect("sim observe").clones.contains_key(&alloc),
+        "sim discard removes the clone — equivalent to the real adapter across the new indirection"
+    );
+    sim.discard_artifacts(&alloc).await.expect("sim discard is idempotent");
 }

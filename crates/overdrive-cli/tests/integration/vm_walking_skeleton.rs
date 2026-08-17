@@ -1428,7 +1428,12 @@ async fn vm_deadline_arm_leaks_nothing() {
     );
 
     let master_bytes = std::fs::metadata(&broken_rootfs).expect("stat the broken rootfs").len();
-    let rootfs_plan = RootfsPlan::for_alloc(broken_rootfs.clone(), master_bytes, &alloc);
+    let rootfs_plan = RootfsPlan::for_alloc(
+        broken_rootfs.clone(),
+        master_bytes,
+        &alloc,
+        std::path::Path::new("/run/overdrive/vm/clone-index"),
+    );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "the deadline arm's cleanup must remove the per-launch rootfs clone at {}",
@@ -2230,8 +2235,10 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
         std::fs::metadata(&rootfs_one).expect("stat the first rootfs master").len();
     let master_bytes_two =
         std::fs::metadata(&rootfs_two).expect("stat the second rootfs master").len();
-    let plan_one = RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one);
-    let plan_two = RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two);
+    let plan_one =
+        RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one, tmp_one.path());
+    let plan_two =
+        RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two, tmp_two.path());
     let clone_one = plan_one.clone_dest();
     let clone_two = plan_two.clone_dest();
 

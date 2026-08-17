@@ -76,7 +76,7 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     let master_bytes = std::fs::metadata(&master).expect("stat staged master").len();
 
     let alloc = AllocationId::new("ficlone-neg").expect("valid alloc id");
-    let rootfs = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc);
+    let rootfs = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &non_reflink_dir);
     let clone_dest = rootfs.clone_dest().to_path_buf();
     assert_eq!(
         clone_dest.parent(),
