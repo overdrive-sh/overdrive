@@ -1541,6 +1541,30 @@ And the restart/backoff behaviour matches a crashed process workload
   (same reconciler, same ceiling, same backoff curve)
 ```
 
+**Crafter notes**: The second Then's "same ceiling, same backoff curve"
+names the Service restart-budget branch and must NOT be read as requiring a
+restart-under-backoff — the design forbids one here. A microVM is
+`WorkloadKind::Job` only (`[vm] + [service]` is rejected — S-VM-38), and a
+crashed Job (VM or process alike) is finalised RUN-ONCE with `restart_count`
+0 by the Job-kind natural-exit handler
+(`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:606-643`) —
+there is no ceiling and no backoff curve for a VM to match. The binding,
+port-observable assertion is crash-PARITY: a host-OOM/SIGKILL'd VMM is
+classified and finalised through the SAME `exit_observer::classify` +
+`WorkloadLifecycle` a crashed process Job uses → `Failed`,
+`WorkloadCrashedImmediately`, `restart_count == 0`, no restart budget
+consumed — via no VM-specific exit path. This mirrors S-VM-44's
+workspace-negative note: the sub-clause that no fixture can observe is
+reinterpreted here rather than asserted literally, so the wording is not
+mistaken for a restart the design forbids.
+
+Back-propagation: this clarification was driven by DELIVER phase 04 (step
+04-01, commit `e8656cd7`), whose Tier-3 proof
+(`host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process`,
+`vm_stop_restart_and_vmm_death.rs`) asserts exactly the crash-parity above
+and carries the same design-vs-Gherkin NOTE surfaced back to this catalogue.
+Tags unchanged — still `@kpi:K5`.
+
 #### S-VM-44: Only an agent-reported exit produces a completed terminal state
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`)
@@ -1609,16 +1633,44 @@ And it is NOT classified as a crash
 
 #### S-VM-48: A restarted VM boots from a clean, unmodified rootfs copy
 
-**Driving port**: `overdrive deploy` (direct CLI handler call, real in-process `overdrive serve`) + crash-induced restart
+**Driving port**: `overdrive deploy` (direct CLI handler call, real in-process `overdrive serve`) + platform-reclamation restart (boot-epoch reclaim-then-restart, per S-VM-28)
 **Tags**: `@contract-shape:bounded-change` `@edge_case` `@ac-12` `@tier3` `@real-io` `@requires-kvm`
 
 ```gherkin
-Given a VM workload crashed after modifying its rootfs
-When the platform restarts the allocation under backoff
+Given a VM workload modified its rootfs, then its allocation was
+  platform-reclaimed while its intent still stood
+When the platform restarts the allocation
 Then the new allocation boots from an unmodified copy of the operator's
   original artifact
 And the operator's artifact file on the host is byte-unchanged
 ```
+
+**Crafter notes**: The original trigger — "a VM workload CRASHED … the
+platform RESTARTS the allocation under backoff" — is UN-PRODUCIBLE for a
+microVM, so it was reframed to the ONLY restart path the design can
+actually reach for this workload. A microVM is `WorkloadKind::Job` only
+(`[vm] + [service]` is rejected — S-VM-38), and a Job crash finalises
+RUN-ONCE with no restart-under-backoff branch: the Job-kind natural-exit
+handler (`crates/overdrive-core/src/reconcilers/workload_lifecycle.rs:606-643`)
+emits `Action::FinalizeFailed` and returns with `restart_count` at 0; the
+restart-budget/backoff branch below it is Service-kind only ("the
+workload's contract is 'run once, until it exits'"). The design-real
+re-launch is **platform-reclamation restart** — a platform-reclaimed Job
+whose intent still stands is re-driven by `WorkloadLifecycle` via
+`Action::RestartAllocation` (DD-1), re-invoking `CloudHypervisorVmm::create`,
+whose per-launch `ficlone_rootfs` re-clones the read-only master afresh and
+never mutates it — the boot-epoch reclaim-then-restart cycle S-VM-28
+(`vm_reclamation_tier3.rs`) already drives. Only the TRIGGER moved; the
+observable invariant is unchanged (the restart boots a fresh clone with the
+prior modification absent, and the operator's master is byte-unchanged).
+
+Back-propagation: this reword was driven by DELIVER phase 04 (step 04-03,
+commit `b9a6dfc8`), which implemented the identical observable invariant
+through the platform-reclamation restart and proved it GREEN on real KVM
+hardware (`restarted_vm_boots_from_a_clean_unmodified_rootfs_copy`,
+`vm_stop_restart_and_vmm_death.rs`); the run-once-no-restart Job semantics
+it rests on were proven at Tier-3 in step 04-01 (commit `e8656cd7`) and are
+pinned at `workload_lifecycle.rs:606-643`. Tags unchanged — still `@ac-12`.
 
 ### AC-13: The hypervisor process is confined, or the workload does not run
 
