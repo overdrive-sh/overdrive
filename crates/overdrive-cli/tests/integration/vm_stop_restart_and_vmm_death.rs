@@ -39,7 +39,7 @@
 //! | VMM exited with **no** agent report | `Crashed`, cause names the un-reported death | S-VM-42 (panic), S-VM-43 (host kill) |
 //! | Operator stop | `intentional_stop`, no restart budget | S-VM-45 |
 //!
-//! # The scenarios (AC-11: S-VM-42..45; AC-12: S-VM-46..47)
+//! # The scenarios (AC-11: S-VM-42..45; AC-12: S-VM-46..48)
 //!
 //! * **S-VM-42** — a guest that exits the hypervisor cleanly (`0`) WITHOUT
 //!   ever beaconing READY lands `Failed / VmGuestExitUnreported`, never
@@ -113,6 +113,24 @@
 //!   lands the operator-stop terminal — NEVER `WorkloadCrashedImmediately`,
 //!   even though the SIGKILL'd VMM is indistinguishable in isolation from
 //!   S-VM-43's host kill.
+//!
+//! * **S-VM-48** (AC-12, edge case) — a VM whose guest MODIFIED its rootfs
+//!   clone and was then RESTARTED boots from a fresh `FICLONE` copy of the
+//!   operator's read-only master (the prior modification is absent), and the
+//!   master file on the host is byte-unchanged. **Restart trigger reframed
+//!   (surfaced to acceptance-designer):** the DISTILL Gherkin's "crash →
+//!   restart under backoff" is NOT producible for a Job-only microVM (S-VM-38
+//!   rejects `[vm]+[service]`; a Job crash finalises RUN-ONCE with no
+//!   restart-under-backoff path — the SAME fact S-VM-43 documents). This
+//!   scenario proves the SAME observable invariant through the phase-02
+//!   **platform-reclamation restart** — the boot-epoch reclaim-then-restart
+//!   cycle `vm_reclamation_tier3.rs`'s S-VM-28 drives: a platform-reclaimed
+//!   Job whose intent still stands is re-driven by `WorkloadLifecycle` via
+//!   `Action::RestartAllocation` (DD-1), re-invoking
+//!   `CloudHypervisorVmm::create`, whose per-launch `ficlone_rootfs` clones
+//!   the read-only master afresh and never mutates it. A PROOF of that
+//!   already-wired mechanism end to end, not a build (no production file is
+//!   modified by this scenario either).
 //!
 //! # `#[serial(cgroup)]` + the `host-kernel-shared` nextest group
 //!
@@ -501,6 +519,158 @@ fn cloud_hypervisor_pid_for_alloc(alloc: &AllocationId) -> u32 {
 fn alloc_id_of(out: &WorkloadDescribeOutput) -> AllocationId {
     let row = out.snapshot.rows.first().expect("one allocation row for the deployed workload");
     AllocationId::new(&row.alloc_id).expect("server allocation id is valid")
+}
+
+// ---------------------------------------------------------------------------
+// S-VM-48 helpers — the reclaim-then-restart cycle needs two boots against
+// the SAME data_dir (unlike `spawn_vm_server`, which makes its own tempdir
+// per call), plus the marker guest, the restart poller, and the operator-
+// artifact fingerprint. These mirror `vm_reclamation_tier3.rs`'s shapes;
+// sibling test modules cannot see each other's private items.
+// ---------------------------------------------------------------------------
+
+/// A real in-process `overdrive serve` bound to CALLER-CHOSEN `data_dir` /
+/// `config_dir`, so two boots can run against the SAME `data_dir` — the
+/// reclaim-then-restart cycle (S-VM-28) needs boot #2 to read boot #1's
+/// durable state. Same composition as [`spawn_vm_server`] (`SimDataplane` +
+/// `SimKek`), only the directories differ.
+async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
+    std::fs::create_dir_all(data_dir).expect("create data dir");
+    std::fs::create_dir_all(config_dir).expect("create operator config dir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs {
+        bind,
+        data_dir: data_dir.to_path_buf(),
+        config_dir: config_dir.to_path_buf(),
+    };
+    overdrive_cli::commands::serve::run_with_dataplane(
+        args,
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+    )
+    .await
+    .expect("serve::run_with_dataplane")
+}
+
+/// Bridges the narrow race between `ServeHandle::shutdown` returning and the
+/// `redb` file descriptors actually closing, so a reboot against the SAME
+/// `data_dir` does not observe `"Database already open"`. Mirrors
+/// `vm_reclamation_tier3.rs::wait_for_data_dir_release`.
+async fn wait_for_data_dir_release() {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
+/// Polls until the single row is `Running` again with `restart_count >= 1`
+/// — the reclaim-then-restart postcondition (S-VM-28). A restart REUSES the
+/// same `alloc_id` (`Action::RestartAllocation`), so `Running` alone cannot
+/// distinguish the original boot from a recovered restart; the restart count
+/// pins it. Mirrors `vm_reclamation_tier3.rs::poll_until_restarted`.
+async fn poll_until_restarted(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        let out = describe_once(cfg, workload_id).await;
+        if out
+            .snapshot
+            .rows
+            .first()
+            .is_some_and(|row| row.state == AllocStateWire::Running && row.restart_count >= 1)
+        {
+            return out;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "workload {workload_id} did not restart (Running with restart_count>=1) within \
+             {max_wait:?}; last row: {:?}",
+            out.snapshot.rows.first(),
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+/// A compact `(length, content-hash)` fingerprint of the operator's rootfs
+/// artifact, STREAMED through a hasher so a 64 MiB ext4 image never lands two
+/// full copies in memory. Dependency-free (`DefaultHasher`) — a real mutation
+/// to the image changes the fingerprint; a byte-identical file preserves it.
+/// This is the direct host-side proof of S-VM-48's second Then (the master is
+/// byte-unchanged); FICLONE only ever READS the master, and the guest's
+/// writes land on its own copy-on-write clone.
+fn rootfs_fingerprint(path: &Path) -> (u64, u64) {
+    use std::hash::Hasher;
+    use std::io::Read;
+    let mut file =
+        std::fs::File::open(path).expect("open the operator rootfs artifact to fingerprint");
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut buf = [0u8; 8192];
+    let mut len: u64 = 0;
+    loop {
+        let read =
+            file.read(&mut buf).expect("read the operator rootfs artifact while fingerprinting");
+        if read == 0 {
+            break;
+        }
+        len = len.saturating_add(read as u64);
+        hasher.write(&buf[..read]);
+    }
+    (len, hasher.finish())
+}
+
+/// Cross-builds a static-musl guest command that MODIFIES its rootfs on a
+/// fresh clone and then spins — the S-VM-48 guest. On boot it checks for a
+/// marker file at the rootfs root:
+///
+/// * marker PRESENT — a prior life's write survived, i.e. this boot adopted a
+///   MUTATED clone. The clean-copy invariant is violated; exit `66` so the
+///   allocation lands a crash terminal `poll_until_restarted` never reaches.
+///   This branch must NEVER fire on a fresh clone.
+/// * marker ABSENT — a fresh clone. WRITE the marker (the "modified its
+///   rootfs" Given), then RE-READ it to confirm the write actually landed on
+///   the mounted block device — a silent drop exits `77`/`78` loudly, so
+///   boot #1 never reaches `Running` and the test fails at its baseline
+///   rather than passing vacuously. Then spin forever so the allocation stays
+///   `Running` (reclaimable + restartable + observable — the long-lived shape
+///   S-VM-28's cycle needs).
+///
+/// The guest runs as PID-1's child (root) with the rootfs mounted `rw`
+/// (`root=/dev/vda rw`, `KernelCmdline::platform_default`), so the write to
+/// `/` genuinely mutates the clone's ext4. Same static-musl cross-build every
+/// guest helper in this file uses.
+fn build_marker_or_spin_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("marker_or_spin.rs");
+    std::fs::write(
+        &src,
+        r#"fn main() {
+    let marker = std::path::Path::new("/overdrive-rootfs-clean-marker");
+    if marker.exists() {
+        // Booted from a MUTATED clone: a prior life's write survived. The
+        // clean-copy invariant is violated -- crash so the restart poller
+        // (Running + restart_count>=1) never reaches this allocation.
+        std::process::exit(66);
+    }
+    // Fresh clone: MODIFY the rootfs, then confirm the modification really
+    // landed on the mounted block device. A rootfs that silently drops the
+    // write would void the premise, so make that failure loud -- boot #1
+    // would then never reach Running and the test fails at its baseline.
+    if std::fs::write(marker, b"modified-by-a-prior-life").is_err() {
+        std::process::exit(77);
+    }
+    if !marker.exists() {
+        std::process::exit(78);
+    }
+    // Stay alive so the allocation stays Running (reclaimable + restartable).
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+    }
+}
+"#,
+    )
+    .expect("write the marker-or-spin guest source");
+    let out = tmp.join("marker_or_spin");
+    rustc_static_musl(&src, &out);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,4 +1304,155 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
     );
 
     handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// S-VM-48 — a restarted VM boots from a clean, unmodified rootfs copy.
+// ---------------------------------------------------------------------------
+
+/// S-VM-48 / `@ac-12` `@edge_case` — a VM workload that MODIFIED its rootfs
+/// clone and was then RESTARTED boots from a fresh `FICLONE` copy of the
+/// operator's original artifact (the prior modification is absent), and the
+/// operator's artifact file on the host is byte-unchanged across the whole
+/// restart cycle.
+///
+/// # Design-real restart trigger (reframed from the DISTILL Gherkin)
+///
+/// The DISTILL Gherkin's trigger — "a VM workload CRASHED … the platform
+/// RESTARTS the allocation under backoff" — is NOT producible for a microVM:
+/// a microVM is Job-only (`[service] + [vm]` is rejected, S-VM-38) and a Job
+/// crash finalises RUN-ONCE with no restart-under-backoff path
+/// (`workload_lifecycle.rs`'s Job-kind natural-exit handler; the SAME fact
+/// S-VM-43 documents from the other direction). This scenario proves the SAME
+/// observable invariant through a restart path that DOES exist for a Job-kind
+/// VM: the phase-02 **platform-reclamation restart** (a platform-reclaimed
+/// Job whose intent still stands is re-driven by `WorkloadLifecycle` via
+/// `Action::RestartAllocation`, DD-1) — the exact boot-epoch
+/// reclaim-then-restart cycle `vm_reclamation_tier3.rs`'s S-VM-28 drives. That
+/// restart re-invokes `CloudHypervisorVmm::create`, whose per-launch
+/// `ficlone_rootfs` clones the read-only master afresh (removing any prior
+/// clone first) and never mutates the master. This is a PROOF of that
+/// already-wired mechanism end to end through the operator surface, not a
+/// build — no production file is modified.
+///
+/// # Why the assertions are non-vacuous
+///
+/// The guest MODIFIES its rootfs on a fresh clone (writes a marker, then
+/// re-reads it to confirm the write actually landed on the mounted block
+/// device — a silent drop exits loudly, so boot #1 reaching `Running` PROVES
+/// the modification is real), then spins. On the RESTART boot the guest sees
+/// NO marker (fresh clone) and spins again → `Running` with
+/// `restart_count == 1`. Had the restart booted the MUTATED clone, the guest
+/// would find the marker and exit `66` → a crash terminal, and
+/// `poll_until_restarted` would time out. So the restart reaching `Running`
+/// with a bumped restart count IS the proof the boot was from a clean copy.
+///
+/// ```gherkin
+/// Given a VM workload modified its rootfs, then its allocation was
+///   platform-reclaimed while its intent still stood
+/// When the platform restarts the allocation
+/// Then the new allocation boots from an unmodified copy of the operator's
+///   original artifact (the prior modification is absent)
+/// And the operator's artifact file on the host is byte-unchanged
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-clean-rootfs-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let marker = build_marker_or_spin_binary(tmp.path());
+    // The operator's rootfs artifact = a per-test COPY of the fixture rootfs
+    // with the marker guest injected at /sbin/marker. This staged file IS the
+    // FICLONE master; the clone lands beside it (RootfsPlan::for_alloc).
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &marker, "marker");
+
+    // The operator's artifact, fingerprinted BEFORE any launch.
+    let fingerprint_before = rootfs_fingerprint(&rootfs);
+
+    let server_tmp = TempDir::new().expect("server tempdir");
+    let data_dir = server_tmp.path().join("data");
+    let config_dir = server_tmp.path().join("conf");
+    let cfg = config_path(server_tmp.path());
+
+    // Boot #1 -- deploy the marker guest; it modifies its rootfs clone and
+    // reaches Running. Reaching Running PROVES the modification landed (a
+    // failed/dropped write exits 66/77/78 -> the alloc never reaches Running).
+    let handle = spawn_vm_server_at(&data_dir, &config_dir).await;
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-clean-rootfs.toml",
+        &vm_job_toml("vm-clean-rootfs", "/sbin/marker", &fixture.kernel_path, &rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload whose guest modifies its rootfs then spins");
+    let baseline = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    assert_eq!(
+        baseline.snapshot.rows.first().expect("one running row").restart_count,
+        0,
+        "sanity: a first start is not a restart",
+    );
+
+    // Unclean shutdown -- NEVER stop(). The workload's intent still stands
+    // (DD-1); the real cloud-hypervisor process survives (kill_on_drop(false))
+    // and the row stays non-terminal, so boot #2's boot-epoch VmReclamation
+    // reclaims it and the SAME live serve session's WorkloadLifecycle
+    // re-drives it (S-VM-28's reclaim-then-restart cycle).
+    handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
+    wait_for_data_dir_release().await;
+
+    // Boot #2 -- SAME data_dir. The boot-epoch reclaim discards the mutated
+    // clone; the intent-still-stands re-drive restarts the allocation,
+    // re-invoking create() -> a FRESH FICLONE of the read-only master.
+    let handle2 = spawn_vm_server_at(&data_dir, &config_dir).await;
+
+    // The restarted guest booted from a fresh clone: it found NO marker and
+    // spun again -> Running with restart_count == 1. Had it booted the mutated
+    // clone, it would exit 66 (crash) and this poll would time out.
+    let restarted =
+        poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(120)).await;
+    let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
+    assert_eq!(
+        restarted_row.restart_count, 1,
+        "the reclaim-then-restart cycle must bump restart_count to exactly 1; got {restarted_row:?}",
+    );
+    // Explicit complement: the restarted allocation is Running (it booted the
+    // clean copy), NEVER a crash terminal (which a stale-marker boot produces).
+    assert_eq!(
+        restarted_row.state,
+        AllocStateWire::Running,
+        "the restart must boot the clean copy and reach Running, never a crash; reason={:?}",
+        restarted_row.reason,
+    );
+    assert!(
+        !matches!(restarted_row.reason, Some(TransitionReason::WorkloadCrashedImmediately { .. })),
+        "a restart booting a clean rootfs is never a crash (a stale-marker boot would be): {:?}",
+        restarted_row.reason,
+    );
+
+    // S-VM-48's second Then, host-direct: the operator's original artifact is
+    // byte-unchanged across the whole modify-then-restart cycle. FICLONE only
+    // ever READS the master (copy-on-write); the guest's writes land on its
+    // clone, never the master.
+    let fingerprint_after = rootfs_fingerprint(&rootfs);
+    assert_eq!(
+        fingerprint_after, fingerprint_before,
+        "the operator's rootfs artifact must be byte-unchanged (len,hash) before and after the \
+         restart cycle; before={fingerprint_before:?} after={fingerprint_after:?}",
+    );
+
+    // Reap the restarted (still-live) spin VM via the production stop path
+    // before shutdown: kill_on_drop(false) means nothing kills a still-Running
+    // VM merely because this process exits (same leak class the sibling
+    // long-lived-spin scenarios guard against).
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the restarted marker workload before shutdown to avoid leaking the VMM");
+    poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
+
+    handle2.shutdown().await.expect("clean shutdown");
 }
