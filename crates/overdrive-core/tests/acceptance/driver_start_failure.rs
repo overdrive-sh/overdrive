@@ -168,12 +168,12 @@ proptest! {
 
 /// Assert one Exec class converts to exactly `expected` and preserves its
 /// diagnostic verbatim.
-fn assert_exec_parity(class: ExecStartFailure, detail: &str, expected: TransitionReason) {
+fn assert_exec_parity(class: ExecStartFailure, detail: &str, expected: &TransitionReason) {
     let (reason, preserved) = convert(DriverStartFailure {
         class: DriverStartClass::Exec(class),
         detail: detail.to_owned(),
     });
-    assert_eq!(reason, expected, "Exec operator classification must not change");
+    assert_eq!(&reason, expected, "Exec operator classification must not change");
     assert_eq!(preserved, detail, "the verbatim Exec diagnostic must be preserved");
 }
 
@@ -182,7 +182,7 @@ fn exec_binary_not_found_preserves_existing_operator_cause_and_detail() {
     assert_exec_parity(
         ExecStartFailure::BinaryNotFound { path: "/no/such".to_owned() },
         "spawn /no/such: No such file or directory (os error 2)",
-        TransitionReason::ExecBinaryNotFound { path: "/no/such".to_owned() },
+        &TransitionReason::ExecBinaryNotFound { path: "/no/such".to_owned() },
     );
 }
 
@@ -191,7 +191,7 @@ fn exec_permission_denied_preserves_existing_operator_cause_and_detail() {
     assert_exec_parity(
         ExecStartFailure::PermissionDenied { path: "/usr/local/bin/payments".to_owned() },
         "spawn /usr/local/bin/payments: Permission denied (os error 13)",
-        TransitionReason::ExecPermissionDenied { path: "/usr/local/bin/payments".to_owned() },
+        &TransitionReason::ExecPermissionDenied { path: "/usr/local/bin/payments".to_owned() },
     );
 }
 
@@ -206,7 +206,7 @@ fn exec_format_error_preserves_exec_format_error_kind_and_detail() {
             kind: "exec_format_error".to_owned(),
         },
         "spawn /tmp/garbage: Exec format error (os error 8)",
-        TransitionReason::ExecBinaryInvalid {
+        &TransitionReason::ExecBinaryInvalid {
             path: "/tmp/garbage".to_owned(),
             kind: "exec_format_error".to_owned(),
         },
@@ -239,7 +239,7 @@ fn exec_cgroup_create_scope_failure_preserves_existing_kind_and_detail() {
             source: "mkdir /sys/fs/cgroup/...: Permission denied".to_owned(),
         },
         "create workload scope: mkdir /sys/fs/cgroup/...: Permission denied",
-        TransitionReason::CgroupSetupFailed {
+        &TransitionReason::CgroupSetupFailed {
             kind: "create_scope".to_owned(),
             source: "mkdir /sys/fs/cgroup/...: Permission denied".to_owned(),
         },
@@ -254,7 +254,7 @@ fn exec_cgroup_place_pid_failure_preserves_existing_kind_and_detail() {
             source: "write cgroup.procs: Permission denied".to_owned(),
         },
         "place pid in scope: write cgroup.procs: Permission denied",
-        TransitionReason::CgroupSetupFailed {
+        &TransitionReason::CgroupSetupFailed {
             kind: "place_pid".to_owned(),
             source: "write cgroup.procs: Permission denied".to_owned(),
         },

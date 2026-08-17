@@ -5728,7 +5728,7 @@ mod tests {
     /// A `classify_driver_failure` function is rejected wherever it lives.
     #[test]
     fn retired_classify_driver_failure_fn_is_flagged() {
-        let source = r#"
+        let source = r"
             pub(crate) fn classify_driver_failure(
                 text: &str,
                 _driver: DriverType,
@@ -5736,7 +5736,7 @@ mod tests {
             ) -> TransitionReason {
                 TransitionReason::DriverInternalError { detail: text.to_owned() }
             }
-        "#;
+        ";
         let violations =
             scan_source_retired_driver_start_grammar(source, Path::new("action_shim/mod.rs"))
                 .expect("parses");
