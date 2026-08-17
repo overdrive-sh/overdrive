@@ -40,9 +40,11 @@ workspace = true
 # slow-test budget; CI exercises the gate in a dedicated
 # `integration` job. Per `.claude/rules/testing.md`. Forwards to
 # `overdrive-control-plane/integration-tests` (step 01-08, GH #42) —
-# `commands::serve::run_with_dataplane_and_vm_artifacts` and the
-# `ServerConfig.vm_artifacts` / `VmBootArtifacts` surface it needs are
-# themselves gated there, and a `-p overdrive-cli --features
+# `commands::serve::run_with_dataplane_and_vmm_override` and the
+# `ServerConfig.vmm_override` fault seam it needs are themselves gated
+# there (step 03-07 deleted the artifact seam this comment used to name;
+# artifacts now arrive per allocation, ADR-0083 §D3a), and a
+# `-p overdrive-cli --features
 # integration-tests` invocation does not otherwise unify the
 # same-named feature across the dependency graph (unlike a
 # `--workspace --features integration-tests` invocation, which enables

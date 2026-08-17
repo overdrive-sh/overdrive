@@ -995,6 +995,20 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: GREEN gate not met - 5 vm_reclamation_tier3 scenarios fail on clone_gone=false. ADR-0083 D3a puts the per-launch rootfs clone in the operator-named rootfs dir while D7 requires RealVmHostState to enumerate it from the platform-owned node staging dir; no ruling reconciles them. Cannot commit a red bar.",
       "t": "2026-08-17T12:37:20Z"
+    },
+    {
+      "sid": "03-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T13:02:28Z"
+    },
+    {
+      "sid": "03-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T13:02:29Z"
     }
   ]
 }

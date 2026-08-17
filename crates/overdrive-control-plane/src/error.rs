@@ -703,10 +703,15 @@ pub enum ControlPlaneError {
     /// probe()` against an adapter it already knows is present, and that
     /// probe caught a genuine substrate lie (ADR-0082 §D5's catalogued
     /// capability-flag / non-reflink classes). Distinct from capability
-    /// ABSENCE (no cloud-hypervisor binary at all, or `vm_artifacts`
-    /// unset) — that path is NOT a fault (SD-5) and does not construct
-    /// this variant; it soft-skips composing the `Vm` driver entry and
-    /// boots the node with `[vm]` rejected at admission instead. Same
+    /// ABSENCE (no cloud-hypervisor binary at all) — that path is NOT a
+    /// fault (SD-5) and does not construct this variant; it soft-skips
+    /// composing the `Vm` driver entry and boots the node, a later `[vm]`
+    /// deploy being rejected at DISPATCH naming the absent capability
+    /// (DWD-23's safe interim — the admission-time gate was never built,
+    /// and its capability-based premise is superseded: the rejection worth
+    /// making at admission is role-based, GH #267). Since ADR-0083 §D3a
+    /// artifacts arrive per allocation, there is no node-level artifact
+    /// whose absence could reach here. Same
     /// boot-path shape as `MtlsBoot` / `DnsResponderBoot`: happens BEFORE
     /// the listener binds, so the `to_response` arm is
     /// exhaustiveness-only.
@@ -771,8 +776,9 @@ pub enum VmmBootError {
         source: CgroupAccountingProbeError,
     },
 
-    /// The configured kernel image's leading bytes could not be read off
-    /// disk (`tokio::fs::read` on `VmBootArtifacts::kernel_path`).
+    /// The kernel image's leading bytes could not be read off disk — a
+    /// `tokio::fs::read` of the path the allocation's own `[vm]` spec
+    /// named (`VmPayload::kernel`, ADR-0083 §D3a).
     #[error("VM driver kernel header read failed for {path}: {source}")]
     KernelHeaderRead {
         /// The kernel image path the failing read targeted.
