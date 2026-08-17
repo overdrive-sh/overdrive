@@ -1,4 +1,4 @@
-//! S-VM-34 — production port-to-port RED scaffold for the first consumer of
+//! S-VM-34 — production port-to-port proof for the first consumer of
 //! DWD-24's typed driver-start failure transport.
 //!
 //! Driving path: real in-process `overdrive serve` composition -> direct
