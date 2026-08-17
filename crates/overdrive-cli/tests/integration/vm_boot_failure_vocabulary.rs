@@ -28,23 +28,27 @@
 //! scenario.
 //!
 //! Steps 03-03 and 03-04 (S-VM-38, S-VM-39, S-VM-40) close the whole of AC-10.
-//! Step 03-03 (S-VM-38) is activated; 03-04's two scenarios stay scaffolded RED
-//! at the bottom of this file, each with its own activation plan. Their
-//! capability truth is mixed once more: S-VM-39 and S-VM-40 genuinely boot a
-//! guest and reach Running, while S-VM-38 is an in-process semantic rejection
-//! that spawns no VMM at all and would run anywhere — it rides here for
-//! scenario cohesion, so the `kvm-tests` gate over-gates it too.
+//! Step 03-03 (S-VM-38) and step 03-04's S-VM-39 are activated; S-VM-40 alone
+//! stays scaffolded RED at the bottom of this file — not for want of work, but
+//! because no production Schedule execution path exists to drive (see its own
+//! doc comment for the five refusing stages and the ADR-0051 OQ-5 / ADR-0064
+//! OQ-5 deferral behind them). Their capability truth is mixed once more:
+//! S-VM-39 genuinely boots a guest and reaches Running, while S-VM-38 is an
+//! in-process semantic rejection that spawns no VMM at all and would run
+//! anywhere — it rides here for scenario cohesion, so the `kvm-tests` gate
+//! over-gates it too.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::expect_used, clippy::missing_panics_doc)]
 
 use std::net::SocketAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_cli::commands::deploy::{DeployArgs, deploy};
+use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_cli::http_client::CliError;
@@ -160,6 +164,100 @@ fn build_empty_rootfs(tmp: &Path, name: &str) -> PathBuf {
     path
 }
 
+/// Cross-builds a tiny static-musl binary that loops forever until it is
+/// killed — the "guest that reaches Running and stays there" shape S-VM-39
+/// needs. A guest command that exits promptly makes `Running` a transient
+/// window the poller can legitimately miss, which would turn a real
+/// regression into an intermittent one.
+///
+/// Deliberately a file-local copy of `vm_walking_skeleton.rs`'s helper of
+/// the same name rather than a cross-module reference: sibling test modules
+/// cannot see each other's private items, and this file is already
+/// self-contained by convention (`shared_staging_root`, `spawn_vm_server`,
+/// `config_path`, `write_toml` and `build_empty_rootfs` are all file-local
+/// copies of the same shapes). Widening the walking skeleton's surface to
+/// share ~50 lines of `losetup` plumbing would couple two Tier-3 files that
+/// are deliberately independent.
+fn build_spin_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("spin.rs");
+    std::fs::write(
+        &src,
+        "fn main() { loop { std::thread::sleep(std::time::Duration::from_secs(3600)); } }",
+    )
+    .expect("write the long-lived spin source");
+    let out = tmp.join("spin");
+    let status = Command::new("rustc")
+        .args(["--edition", "2021", "-C", "opt-level=0", "-C", "target-feature=+crt-static"])
+        .args(["--target", "x86_64-unknown-linux-musl"])
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for the long-lived spin binary");
+    assert!(status.success(), "rustc must build the long-lived spin binary");
+    out
+}
+
+/// Stages a PER-TEST COPY of the shared fixture's rootfs image with an
+/// additional static binary injected at `/sbin/<guest_name>`, via a
+/// loopback mount on the HOST before the guest ever boots. The shared
+/// fixture artifact is never mutated, so the concurrent Tier-3 VM files
+/// reusing the same staging root (the fixture's AC5 contract) are
+/// unaffected.
+///
+/// Load-bearing for S-VM-39: the shared fixture rootfs carries ONLY
+/// `overdrive-init` (at `/sbin/init` and `/init`) plus empty mountpoints
+/// and two device nodes — there is no `/sbin/true`, no shell, no
+/// coreutils. Re-invoking `/sbin/init` as the operator command is
+/// explicitly NOT a valid substitute: it would dial the beacon vsock a
+/// second time, which the host never accepts, hanging the guest.
+///
+/// Runs as root (this suite runs under `cargo xtask metal run --`), so
+/// `losetup` / `mount` / `umount` need no further escalation.
+fn stage_rootfs_with_extra_binary(
+    tmp: &Path,
+    fixture: &VmFixture,
+    host_bin: &Path,
+    guest_name: &str,
+) -> PathBuf {
+    let rootfs_copy = tmp.join("rootfs.ext4");
+    std::fs::copy(&fixture.rootfs_path, &rootfs_copy)
+        .expect("copy the shared fixture rootfs into a per-test working copy");
+
+    let mnt = tmp.join("rootfs-mnt");
+    std::fs::create_dir_all(&mnt).expect("create loopback mount point");
+
+    let losetup_out = Command::new("losetup")
+        .args(["--find", "--show"])
+        .arg(&rootfs_copy)
+        .output()
+        .expect("spawn losetup --find --show");
+    assert!(
+        losetup_out.status.success(),
+        "losetup --find --show failed: {}",
+        String::from_utf8_lossy(&losetup_out.stderr),
+    );
+    let loop_dev = String::from_utf8_lossy(&losetup_out.stdout).trim().to_owned();
+
+    let mount_status =
+        Command::new("mount").arg(&loop_dev).arg(&mnt).status().expect("spawn mount");
+    assert!(mount_status.success(), "mount {loop_dev} {} failed", mnt.display());
+
+    let dest = mnt.join("sbin").join(guest_name);
+    std::fs::copy(host_bin, &dest).expect("copy the extra binary into the mounted rootfs");
+    let mut perms = std::fs::metadata(&dest).expect("stat the copied guest binary").permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&dest, perms).expect("chmod the copied guest binary executable");
+
+    let umount_status = Command::new("umount").arg(&mnt).status().expect("spawn umount");
+    assert!(umount_status.success(), "umount {} failed", mnt.display());
+    // Best-effort detach — a leaked loop device affects host hygiene, not
+    // the correctness of any assertion below.
+    let _ = Command::new("losetup").arg("-d").arg(&loop_dev).status();
+
+    rootfs_copy
+}
+
 /// Every allocation-scoped VM resource a rejected or aborted start must
 /// leave behind: none. Named once so all six scenarios in this file
 /// assert the SAME four facts (hypervisor process, per-launch rootfs
@@ -232,14 +330,25 @@ fn assert_named_cause_is_rendered(rendered: &str, reason: &TransitionReason, det
     );
 }
 
-fn vm_job_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+/// A `[job]` + `[vm]` spec whose guest command is caller-chosen.
+///
+/// Every rejection scenario in this file is refused before the guest ever
+/// execs anything, so the command they pass is inert — [`vm_job_toml`] fixes
+/// it once for all of them. S-VM-39 is the one scenario that must actually
+/// REACH the exec, so it needs a command that exists in its own staged
+/// rootfs and does not return.
+fn vm_job_toml_with_command(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
-        "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\n\
+        "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\n\
          kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
          memory_bytes = 134217728\n",
         kernel.display(),
         rootfs.display(),
     )
+}
+
+fn vm_job_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+    vm_job_toml_with_command(id, "/sbin/true", kernel, rootfs)
 }
 
 /// [`vm_job_toml`]'s `[service]` twin: the SAME `[vm]` driver table and
@@ -265,9 +374,18 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
-async fn poll_until_failed(
+/// Polls `workload describe` until the workload's first allocation row
+/// reaches `wanted`, returning the snapshot that observed it.
+///
+/// The single row-selection rule and the single timeout message every
+/// poller in this file shares — the same reason
+/// `assert_no_allocation_scoped_vm_residue` is named once rather than
+/// inlined per scenario. A second hand-written loop would be free to drift
+/// on which row it reads or how it reports a timeout.
+async fn poll_until_state(
     cfg: &Path,
     workload_id: &str,
+    wanted: AllocStateWire,
     max_wait: Duration,
 ) -> WorkloadDescribeOutput {
     let deadline = tokio::time::Instant::now() + max_wait;
@@ -277,17 +395,25 @@ async fn poll_until_failed(
                 .await
                 .expect("workload describe must succeed while polling");
         if let Some(row) = out.snapshot.rows.first()
-            && row.state == AllocStateWire::Failed
+            && row.state == wanted
         {
             return out;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "workload {workload_id} did not reach Failed within {max_wait:?}; last row: {:?}",
+            "workload {workload_id} did not reach {wanted:?} within {max_wait:?}; last row: {:?}",
             out.snapshot.rows.first(),
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+}
+
+async fn poll_until_failed(
+    cfg: &Path,
+    workload_id: &str,
+    max_wait: Duration,
+) -> WorkloadDescribeOutput {
+    poll_until_state(cfg, workload_id, AllocStateWire::Failed, max_wait).await
 }
 
 /// [`poll_until_failed`] that additionally records EVERY allocation state
@@ -1530,14 +1656,130 @@ async fn service_plus_vm_spec_is_rejected_before_anything_is_scheduled() {
 ///   genuine regression guard for 03-03.
 /// * Close with `handle.shutdown()`; the Running guest is this scenario's own
 ///   and must not outlive it.
-#[test]
-#[should_panic(expected = "RED scaffold")]
-fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
-    panic!(
-        "Not yet implemented -- RED scaffold (S-VM-39 / step 03-04 -- a spec declaring both \
-         [job] and [vm] must be accepted, scheduled, and reach Running through the production \
-         VmDriver path)"
+///
+/// # Two departures from that plan, both deliberate
+///
+/// **The guest command is not `vm_job_toml`'s inert `/sbin/true`.** That path
+/// does not exist in the shared fixture rootfs (which carries only
+/// `overdrive-init`, empty mountpoints and two device nodes), so the guest
+/// would beacon `READY`, fail its exec, and power down — making `Running` a
+/// window the poller can miss and this scenario intermittent. It stages its
+/// own rootfs copy carrying a binary that never returns, so `Running` is a
+/// state the assertions can actually stand in.
+///
+/// **It stops the workload through the production `stop` verb before shutting
+/// the server down.** A guest that never exits on its own is never reaped by
+/// `handle.shutdown()` alone — production spawns the VMM with
+/// `kill_on_drop(false)` — and the orphan then contaminates the next
+/// serialized test's `/proc` scan. This is the lesson S-VM-05 learned on the
+/// metal box (walking skeleton, fourth pass), applied here up front. Test
+/// hygiene, not an additional acceptance claim.
+#[tokio::test]
+#[serial(cgroup)]
+async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
+    const WORKLOAD_ID: &str = "vm-job-accepted";
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let artifact_tmp = tempfile::Builder::new()
+        .prefix("vm-job-accepted-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the shared reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let spin = build_spin_binary(artifact_tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(artifact_tmp.path(), &fixture, &spin, "spinjobvm");
+
+    let (handle, server_tmp) = spawn_vm_server(VmBootArtifacts {
+        kernel_path: fixture.kernel_path.clone(),
+        rootfs_path: rootfs.clone(),
+    })
+    .await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-job-accepted.toml",
+        &vm_job_toml_with_command(WORKLOAD_ID, "/sbin/spinjobvm", &fixture.kernel_path, &rootfs),
     );
+
+    // ---- Accepted, not rejected. The `[service]` + `[vm]` refusal S-VM-38
+    // proves must not reach the `[job]` family. ----
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("a spec declaring both [job] and [vm] must be ACCEPTED, never rejected");
+    assert_eq!(submit.workload_id, WORKLOAD_ID, "the accepted workload keeps the declared id");
+
+    // ---- ...and scheduled, and RUN. A ceiling comfortably above the 30s
+    // boot deadline, so a pass means the guest booted rather than the poll
+    // being generous. ----
+    let out = poll_until_state(
+        &cfg,
+        &submit.workload_id,
+        AllocStateWire::Running,
+        Duration::from_secs(90),
+    )
+    .await;
+    let row = out.snapshot.rows.first().expect("one allocation row for the running VM workload");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
+    // The affirmative form of "carries no failure cause", and a stronger
+    // claim than the negative: `Started` is the progress marker production
+    // writes when the driver returned `Ok(handle)` — which, per `start`'s
+    // three-way boot race, happens ONLY on the beacon-win arm. Pinning it
+    // therefore states that a real guest dialled the beacon, and
+    // structurally excludes every named failure cause at the same time.
+    assert_eq!(
+        row.reason,
+        Some(TransitionReason::Started),
+        "a Running VM allocation must carry the driver's own `Started` progress marker — any \
+         other cause would mean the state and the cause disagree",
+    );
+
+    // ---- The claim this scenario exists to make: the production `VmDriver`
+    // path RAN, not merely that the parser accepted the spec. Asserted as
+    // the exact inverse of `assert_no_allocation_scoped_vm_residue`'s four
+    // facts, so "ran" and "left nothing behind" are stated against the same
+    // resource set and cannot drift apart. ----
+    let rootfs_plan = RootfsPlan::for_alloc(rootfs.clone(), 0, &alloc);
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
+    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(Path::new("/sys/fs/cgroup"));
+
+    assert!(
+        !no_cloud_hypervisor_process_for_alloc(run_dir.path()),
+        "a Running VM allocation must have a live hypervisor process for {}",
+        run_dir.path().display(),
+    );
+    assert!(
+        rootfs_plan.clone_dest().exists(),
+        "a Running VM allocation must have its per-launch rootfs clone at {}",
+        rootfs_plan.clone_dest().display(),
+    );
+    assert!(
+        run_dir.path().exists(),
+        "a Running VM allocation must have its run directory at {}",
+        run_dir.path().display(),
+    );
+    assert!(
+        scope_dir.exists(),
+        "a Running VM allocation must have its cgroup scope at {}",
+        scope_dir.display(),
+    );
+
+    // ---- Hygiene: drive the never-self-terminating guest to Terminated
+    // through the production stop verb, so no real hypervisor outlives this
+    // test (see the doc comment above). ----
+    stop(StopArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
+        .await
+        .expect("stop the long-lived VM workload before shutdown");
+    // `poll_until_state` IS the assertion here — it panics if the workload
+    // does not reach Terminated in time. A further assert on the returned
+    // row's state would be tautological.
+    let _terminated = poll_until_state(
+        &cfg,
+        &submit.workload_id,
+        AllocStateWire::Terminated,
+        Duration::from_secs(60),
+    )
+    .await;
+
+    handle.shutdown().await.expect("clean shutdown");
 }
 
 /// S-VM-40 / `@contract-shape:bounded-change` `@happy_path` `@ac-10` `@tier3`
@@ -1590,6 +1832,47 @@ fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 ///   EXIST while Running — reaching Running through the production `VmDriver`
 ///   path is the claim, and a state field alone does not evidence it.
 /// * Close with `handle.shutdown()`.
+///
+/// # BLOCKED at step 03-04 — no Schedule execution path exists to drive
+///
+/// The activation plan above cannot be executed as written. It assumes a
+/// production path from `overdrive deploy <schedule-spec>` to a fired
+/// allocation; **no such path exists**, and building one is not this step's
+/// scope. The parser half is fine — `SectionPresence::validated` deliberately
+/// leaves the job family untouched, so `[schedule]` + `[job]` + `[vm]` parses
+/// to `WorkloadSpecInput::Schedule` — but every stage after it refuses:
+///
+/// 1. `commands::deploy::deploy` (the JSON-ack lane this file calls) has no
+///    Schedule arm; a Schedule body falls through to the legacy flat
+///    `JobSpecInput` parser, which fails on the `[job]`-nested `id`.
+/// 2. `commands::deploy::deploy_streaming` rejects `WorkloadSpecInput::
+///    Schedule(_)` outright — "schedule submission is not yet implemented
+///    (ADR-0051 OQ-5)".
+/// 3. The server's submit handler rejects `SubmitSpecInput::Schedule(_)` with
+///    the same message (`overdrive-control-plane/src/handlers.rs`).
+/// 4. `ScheduleV2::from_submit` and `ScheduleV2::to_describe`
+///    (`overdrive-core/src/aggregate/mod.rs`) are both `todo!()` RED
+///    scaffolds — no Schedule intent can be persisted or described.
+/// 5. Nothing evaluates a `CronExpr` at runtime. There is no schedule
+///    reconciler in `overdrive-core/src/reconcilers/`, and no `Action` that
+///    mints a per-firing allocation — so "when its first firing becomes due"
+///    has no producer at all.
+///
+/// Reaching `Running` therefore requires an entire Schedule execution
+/// subsystem: a CLI arm, a wire arm, a validating aggregate constructor,
+/// intent persistence, a describe projection, and a cron-firing reconciler
+/// plus its action. That work is a documented cross-feature deferral
+/// (ADR-0051 OQ-5 / ADR-0064 OQ-5, tracked by the CLI's own
+/// `SCHEDULE_EXECUTION_TRACKING_URL` = GH #166), and the approved design for
+/// this feature names none of those primitives. Per `CLAUDE.md` §
+/// "Implement to the design", the crafter returns a blocker rather than
+/// inventing the surface.
+///
+/// The scaffold therefore stays RED and discoverable
+/// (`grep -rn 'should_panic.*RED scaffold' crates/`) pending a scope ruling.
+/// S-VM-38's scoping is NOT left unguarded meanwhile: S-VM-39 above is the
+/// regression guard, and it is litmus-proven — widening the `[service]`
+/// rejection to the job family reddens it at the acceptance assertion.
 #[test]
 #[should_panic(expected = "RED scaffold")]
 fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
