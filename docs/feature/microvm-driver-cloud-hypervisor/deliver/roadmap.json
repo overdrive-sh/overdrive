@@ -828,8 +828,8 @@
         },
         {
           "id": "04-04",
-          "name": "Hypervisor confinement — Landlock/uid-drop/rlimits on the spawned process",
-          "description": "The running VM's hypervisor is a bounded, non-root, Landlock-confined process whose ruleset follows the operator's declared artifact paths.",
+          "name": "Build and apply hypervisor confinement — Landlock/uid-drop/rlimits on the spawned process",
+          "description": "Build the confinement wiring (the LandlockRule value + VmRunDir::landlock_grant / VmConfig::landlock_rules producers, and the VmConfinement::launch_wrapper uid-drop+rlimit renderer) and APPLY it in vmm.rs::create (prlimit/setpriv argv wrapper + --landlock/--landlock-rules), plus resolve the confined identity's kvm supplementary gid at compose time — THEN prove at Tier-3 that the running VM's hypervisor is a bounded, non-root, Landlock-confined process whose ruleset follows the operator's declared artifact paths. Per ADR-0082's 2026-08-17 (third) amendment, this confinement APPLICATION was deferred to US-VM-7 and never built in 01-01/01-06; this step builds AND proves it.",
           "criteria": [
             "/proc/<vmm-pid>/status reports non-zero real and effective Uid/Gid; /proc/<vmm-pid>/limits reports Max-file-size and Max-open-files strictly below the same fields on overdrive serve's own process.",
             "The Landlock ruleset names CH's auto-derived grants (kernel/disk/serial/api-socket) plus a read-write grant on the run directory, and nothing outside those.",
@@ -841,7 +841,8 @@
           "implementation_scope": {
             "source_directories": [
               "crates/overdrive-host/src/vmm.rs",
-              "crates/overdrive-core/src/vm/config.rs"
+              "crates/overdrive-core/src/vm/config.rs",
+              "crates/overdrive-control-plane/src/lib.rs"
             ],
             "test_directories": [
               "crates/overdrive-cli/tests/integration/vm_stop_restart_and_vmm_death.rs"
@@ -850,8 +851,8 @@
           "dependencies": [
             "04-01"
           ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, PID resolution via the allocation's cgroup scope cgroup.procs (never a driver-internal handle). Landlock grant derivation (VmRunDir::landlock_rules, ADR-0082 §D2.2) already lands in 01-01/01-06; this step is the real-boot proof. The vsock-directory-grant clause is a dst-lint target too (01-10) — this AT is its behavioral complement (brief.md §113). Continues under the kvm-tests gate established at step 04-01 — the /proc/<vmm-pid> assertions need a real hypervisor process."
+          "effort_hours": 10,
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, PID resolution via the allocation's cgroup scope cgroup.procs (never a driver-internal handle); per-thread seccomp read via /proc/<pid>/task/*/status (P5 correction 1 — the leader reports Seccomp:0). BUILD-AND-PROVE, CORRECTING A FALSE PREMISE: the prior note claimed 'Landlock grant derivation (VmRunDir::landlock_rules) already lands in 01-01/01-06' — it did NOT. LandlockRule, VmRunDir::landlock_grant, VmConfig::landlock_rules, and the entire uid-drop/rlimit/Landlock APPLICATION were DEFERRED to US-VM-7 per ADR-0082's 2026-08-12 gap-5 amendment and are CLOSED by its 2026-08-17 (third) amendment, which pins the exact signatures. This step BUILDS them to those signatures (do NOT invent API beyond them — CLAUDE.md 'Implement to the design'): (a) LandlockRule + to_rule_arg() ('path=<dir>,access=rw', access unconditional like image_type=raw) + VmRunDir::landlock_grant() (SOLE producer, the run dir) + VmConfig::landlock_rules() (aggregator, today vec![run_dir.landlock_grant()]) in vm/config.rs; (b) VmConfinement::launch_wrapper(rlimit_fsize) rendering the 'prlimit … -- setpriv … --' PREFIX (this is HOW uid-drop + setrlimit are applied WITHOUT unsafe pre_exec — overdrive-host is #![forbid(unsafe_code)]; the unsafe is encapsulated in util-linux prlimit/setpriv, exactly as FICLONE is encapsulated in rustix's safe wrapper); (c) wire the wrapper + --landlock + one --landlock-rules-per-rule into vmm.rs::create, ensure the per-alloc run dir is owned by / accessible to the confined identity so CH can bind its sockets under uid-drop (create-path responsibility — if it lands in vm_driver.rs run-dir creation, surface a scope addition), and in compose_vm_driver (lib.rs) REPLACE the flagged placeholder VmmIdentity { uid:1000, gid:994, supplementary:vec![] } with a reserved unprivileged numeric uid/gid (no passwd/group entry needed — setpriv takes raw numerics) plus the kvm gid resolved at compose time from /dev/kvm's group owner (the empty supplementary is the bug that would deny /dev/kvm under uid-drop). PROVE S-VM-49/50/53 at Tier-3 with a real hypervisor and real /proc. MANDATORY MUTATION TARGETS: to_rule_arg (an rw->ro or dropped-access= mutant must be killed) and launch_wrapper (a dropped --no-new-privs / uid-0 / omitted-wrapper mutant must be killed). Also extend Vmm::probe() to prove prlimit/setpriv resolve on PATH (Earned Trust — argv[0] is now the wrapper, so a missing wrapper must refuse the node at boot, not surface as HypervisorAbsent). The vsock-directory-grant clause is a dst-lint target (01-10, ALREADY LANDED and forward-looking — it sanctions the --landlock-rules FLAG literal in vmm.rs::create; to_rule_arg renders only the VALUE, so no brief.md §113 signature edit is needed); this AT is its behavioral complement (brief.md §113). ConfinementControl + VmConfinementUnavailable + the From<&DriverStartFailure> chain ALREADY EXIST (04-05 builds their producer, not the types). Continues under the kvm-tests gate established at step 04-01 — the /proc/<vmm-pid> assertions need a real hypervisor process."
         },
         {
           "id": "04-05",

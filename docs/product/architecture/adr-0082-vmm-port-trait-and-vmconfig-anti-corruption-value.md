@@ -8,6 +8,200 @@ Mode: propose.
 Tags: phase-2, vm-driver, ports-and-adapters, earned-trust, type-driven-design,
 application-arch, GH-42.
 
+**Amended 2026-08-17 (third — gap 5 CLOSED: US-VM-7 confinement is built and
+applied. `LandlockRule` gains a shape; uid-drop + `setrlimit` + Landlock get an
+application mechanism that keeps `overdrive-host` `#![forbid(unsafe_code)]`; and
+the confined identity gets a source. See DELIVER step 04-04.).** The 2026-08-12
+amendment (§ Status item 5, § D2 method block, § D2.2, § D2.5) deferred
+`LandlockRule`, `VmConfig::landlock_rules()`, `VmRunDir::landlock_grant()`, and
+the uid/gid-drop + `setrlimit` *application* to Slice 03 (US-VM-7), leaving
+`LandlockRule` with "no shape anywhere." This amendment closes that deferral by
+formalising **Spike P5's already-proven mechanism** (`spike/findings.md` § P5;
+the launch shape at `findings.md:436-441`) into exact signatures — it invents no
+posture beyond `[D7]`'s locked claim (KVM + seccomp + Landlock + cgroup/netns;
+**no chroot, no PID-ns, no mount-ns** — the jailer remainder is GH #258, out of
+scope). No prior decision is reversed.
+
+**(a) `LandlockRule` — the shape (in `crate::vm::config`).**
+
+```rust
+/// One `--landlock-rules` grant. `access=rw` is rendered UNCONDITIONALLY and is
+/// NOT a field: a read-only rule is insufficient (P5 — a `vsock-only +
+/// dir-ro-rule` VM still `EACCES`es), so there is no access parameter to get
+/// wrong — the same lever `DiskAttachment` uses for `image_type=raw` (§ D2.1).
+/// The grant names a DIRECTORY, never a socket path: CH validates rule paths for
+/// existence at config-parse time and the vsock UDS does not exist yet (P5
+/// correction 2).
+pub struct LandlockRule { path: PathBuf }   // private field
+
+impl LandlockRule {
+    /// The complete `--landlock-rules` VALUE: `path=<dir>,access=rw`. One pure
+    /// rendering site and a mutation target (a mutant flipping `rw`->`ro` or
+    /// dropping `access=` must be killed). The FLAG literal `--landlock-rules`
+    /// is rendered separately in `vmm.rs::create` — the sole site the 01-10
+    /// dst-lint clause sanctions.
+    pub fn to_rule_arg(&self) -> String;
+    /// The granted directory — accessor for the dst-lint / behavioural tests.
+    pub fn path(&self) -> &Path;
+}
+```
+
+`LandlockRule` has **no public constructor**: it is built only inside
+`crate::vm::config` by `VmRunDir::landlock_grant` (same-module private-field
+construction), which is what makes that method the SOLE producer (brief.md
+§ 113 — "Landlock rules are never built outside `VmRunDir::landlock_grant`").
+
+**(b) The two producer methods — un-defer them exactly as § D2.2 / § D2 pinned.**
+
+```rust
+impl VmRunDir {
+    /// The ONE explicit Landlock grant: `access=rw` on the run directory itself.
+    /// CH auto-derives rules for `--kernel`/`--disk`/`--serial file=`/
+    /// `--api-socket` but NOT the vsock UDS it binds (P5 correction 2); the rule
+    /// must be the CONTAINING DIRECTORY (CH rejects a not-yet-existent socket
+    /// path at parse time). SD-2 exclusivity is what keeps this grant from
+    /// widening. SOLE producer of a `LandlockRule`.
+    pub fn landlock_grant(&self) -> LandlockRule;   // LandlockRule { path: self.path().to_path_buf() }
+}
+impl VmConfig {
+    /// The explicit Landlock rules for this launch — today exactly
+    /// `vec![self.run_dir.landlock_grant()]`. CH auto-derives the other four
+    /// grants, so this list carries ONLY what CH omits (the vsock directory).
+    /// `Vec` keeps the signature stable if a future explicit grant is added.
+    pub fn landlock_rules(&self) -> Vec<LandlockRule>;
+}
+```
+
+**(c) The application mechanism — a `prlimit`/`setpriv` argv WRAPPER, NOT
+`pre_exec` (this is how `#![forbid(unsafe_code)]` is honoured).** Per-child
+uid/gid drop and `setrlimit` are only expressible between `fork` and `exec` —
+i.e. in a `Command::pre_exec` closure, which is an `unsafe fn` the crate-wide
+`#![forbid(unsafe_code)]` on `overdrive-host` forbids outright. The resolution
+is the one P5 proved and the one this codebase already uses for FICLONE:
+**encapsulate the unsafe one layer out, in a proven external tool.** The FICLONE
+ioctl goes through `rustix`'s safe wrapper (the `vmm.rs` module doc states this
+verbatim); the uid-drop + rlimits go through util-linux `prlimit`/`setpriv` as an
+argv WRAPPER PREFIX — no `unsafe`, no `nix`/`rustix` fork juggling, exactly P5's
+12/12 launch shape (`findings.md:436-441`). The renderer is a new method on the
+confinement value:
+
+```rust
+impl VmConfinement {
+    /// The `prlimit … -- setpriv … --` launch-wrapper PREFIX (argv tokens) that
+    /// drops privilege and caps resource limits on the spawned hypervisor with
+    /// NO unsafe `pre_exec`. The caller appends the hypervisor binary + its args.
+    /// `rlimit_fsize` is passed in — it is a VmConfig derivation
+    /// (`VmConfig::rlimit_fsize()` = max(rootfs, guest RAM), C-6) this value does
+    /// not hold. One pure rendering site; a mutation target (a mutant dropping
+    /// `--no-new-privs`, rendering uid 0, or omitting a wrapper must be killed).
+    /// Renders, in order:
+    ///   prlimit --fsize=<rlimit_fsize> --nofile=<self.rlimit_nofile> --
+    ///   setpriv --reuid=<uid> --regid=<gid>
+    ///           --groups=<supplementary,joined> --no-new-privs --
+    /// `--groups=<numeric>` (from `VmmIdentity.supplementary`) — NOT
+    /// `--init-groups` — because the target uid has no passwd/group DB entry on
+    /// the appliance (see (e)); `--init-groups` requires one.
+    pub fn launch_wrapper(&self, rlimit_fsize: u64) -> Vec<String>;
+}
+```
+
+`VmConfinement` **already** carries the uid/gid-drop (`identity: VmmIdentity`),
+`rlimit_nofile`, and `seccomp_arg()`; `VmConfig::rlimit_fsize()` (C-6) **already**
+exists. This amendment adds ONLY the two Landlock producers and this one
+renderer — no other confinement field is minted. `vmm.rs::create` composes the
+spawned argv as:
+
+```
+launch_wrapper(config.rlimit_fsize())  ++  [hypervisor]  ++  <existing CH args, incl. --seccomp>
+                                       ++  ["--landlock"]  ++  ⨁ rule.to_rule_arg() for rule in config.landlock_rules()
+```
+
+`--landlock-rules` (the flag literal) and `--seccomp`/`--disk` all live in
+`vmm.rs::create` — the one `(file, fn)` pair the 01-10 dst-lint clause sanctions,
+already landed and forward-looking — so **brief.md § 113 needs no signature
+edit** (the clause guards the FLAG literals in `vmm.rs::create`;
+`to_rule_arg`/`seccomp_arg`/`to_disk_arg` render the VALUEs, a distinct concern).
+
+Two application consequences the crafter must discharge (both new when uid-drop
+lands; invisible in Slice 01, where CH ran as root):
+
+1. **`argv[0]` becomes `prlimit`, not the hypervisor.** The spawn-time
+   `HypervisorAbsent` NotFound detection now observes the WRAPPER chain, not CH
+   directly. Resolution (Earned Trust — principle 13): `Vmm::probe()` gains an
+   additive scenario proving the confinement toolchain (`prlimit`, `setpriv`)
+   resolves on PATH — beside the already-present `--landlock`/LSM/`/dev/kvm`
+   scenarios — so at `create()` both CH and the wrapper are known-present
+   (wire → probe → use). A confinement-wrapper non-zero exit maps to
+   `VmmError::ConfinementUnavailable`, never `HypervisorAbsent`.
+2. **Run-directory ownership.** The per-allocation run dir (tmpfs, created by
+   root) must be readable/writable by the dropped identity so CH can `bind()` its
+   vsock/api sockets there under uid-drop + Landlock. The platform must chown (or
+   mode) the run dir to the confined `uid:gid` before spawn. This is a create-path
+   responsibility; the crafter determines whether it lands in `vmm.rs::create` or
+   in upstream run-dir creation (`vm_driver.rs`) and surfaces a scope addition if
+   the latter.
+
+**(d) Fail-closed — the types already exist; this pins the PRODUCER.**
+`ConfinementControl` (six variants `Landlock`/`Seccomp`/`UidDrop`/`RlimitFsize`/
+`RlimitNofile`/`KvmAccess` — exactly S-VM-51's set), `VmmError::ConfinementUnavailable
+{ control, detail }`, `VmStartFailure::ConfinementUnavailable`, and
+`TransitionReason::VmConfinementUnavailable` are **already built and wired** (the
+total `From<&DriverStartFailure>` conversion carries `control` verbatim; the
+`TransitionReason` row is present, emit-status "Slice 03"). Step 04-05 does not
+mint them — it builds their PRODUCER. The mapping `vmm.rs::create` applies:
+
+| Applied control fails | `ConfinementControl` |
+|---|---|
+| `setpriv --reuid/--regid/--groups` (privilege / groups drop) | `UidDrop` |
+| `prlimit --fsize` / `RLIMIT_FSIZE` not settable | `RlimitFsize` |
+| `prlimit --nofile` / `RLIMIT_NOFILE` not settable | `RlimitNofile` |
+| CH rejects `--landlock` / `--landlock-rules` | `Landlock` |
+| `/dev/kvm` unreachable under the dropped identity | `KvmAccess` |
+| `--seccomp` unavailable | `Seccomp` |
+
+Two fail-closed layers, not one: **(i) boot-time / node-level** — the extended
+`probe()` refuses `serve` with `health.startup.refused` when the host cannot
+supply `--landlock` / the LSM / `/dev/kvm` / the wrapper toolchain (brief.md
+line 626, the uniform Earned-Trust posture); **(ii) per-allocation** —
+`VmConfinementUnavailable` for a control that passed the boot probe but fails for
+a specific allocation. Step 04-05 drives (ii) through the `SimVmm`
+`vmm_override` seam (ADR-0083 § D8) returning `VmmError::ConfinementUnavailable`
+directly — no genuinely Landlock-less host exists in the Lima envelope (system
+constraint 1). Mutation target: turning the fail-closed arm into
+warn-and-continue must be killed.
+
+**(e) The confined identity's source — the Slice-03 "Open DESIGN input",
+answered WITHOUT an appliance-image change (no blocker).** slice-03 § Dependencies
+asks "which uid/gid the hypervisor drops to, constrained to be resolvable
+**without appliance-image changes inside this feature** … else DESIGN returns a
+blocker." It is resolvable, so this is the answer, not a blocker:
+
+- **uid/gid**: a fixed, unprivileged, non-root NUMERIC pair the platform reserves,
+  supplied by the composition root (`compose_vm_driver` → `VmHostLayout.confinement`)
+  as a node-invariant — never core-resident, never operator surface. **No
+  `/etc/passwd` / `/etc/group` entry is required**, because
+  `setpriv --reuid=<N> --regid=<N>` operates on raw numeric ids — which is
+  precisely what satisfies the "no appliance-image change" constraint. Document
+  the reserved value as a named const at the compose site.
+- **kvm supplementary group**: the `kvm` group gid is base-OS (created by the
+  kernel/udev/systemd KVM setup — NOT this feature's appliance), owns `/dev/kvm`
+  at `0660 root:kvm`, and is DISCOVERED AT COMPOSE TIME by stat-ing `/dev/kvm`'s
+  group owner — the same `metadata.gid()` the `probe_kvm_reachable` path already
+  reads. The composition root places it in `VmmIdentity.supplementary`.
+- This **replaces** the placeholder currently at `compose_vm_driver`
+  (`VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] }`), whose
+  empty `supplementary` is the specific bug that would deny `/dev/kvm` under
+  uid-drop — the comment there already flags it as "an unsourced gap, not a
+  considered choice." The uid-drop cannot land until `supplementary` carries the
+  kvm gid.
+- **The confined uid is SHARED across VMs and does not isolate siblings** —
+  Landlock (the per-VM run-dir grant), the per-VM netns and the per-VM cgroup do
+  (P5 evidence: a sibling VM's disk is `DENIED errno=13` by Landlock). Per-VM uid
+  is NOT US-VM-7 scope; it is a #258 / future hardening. Do not read the shared
+  uid as a gap.
+
+Recorded in feature DWD (04-04 gap-5 closure).
+
 **Amended 2026-08-17 (second — the per-launch clone becomes reclaimable;
 `RootfsPlan` gains an index link. See ADR-0083's 2026-08-17 (second)
 amendment §§ D3f–D3h for the governing decision).** The amendment below moved
@@ -167,7 +361,11 @@ below (which govern), and are summarised here:
    vsock socket needs no grant until Landlock is opted into in Slice 03), and
    the § D2.2 vsock-Landlock necessity argument becomes **operative in Slice
    03, not Slice 01**. Seccomp is unaffected — `VmConfinement::seccomp_arg()`
-   stays a Slice-01 deliverable with a landed AC.
+   stays a Slice-01 deliverable with a landed AC. **CLOSED 2026-08-17 (third
+   amendment, top of § Status): `LandlockRule` now has a shape, both producer
+   methods and the `VmConfinement::launch_wrapper` application renderer are
+   pinned, and the confined-identity source is answered — all built by DELIVER
+   step 04-04.**
 
 **D-TME-12 / JOIN-1 supersession — recorded here because the cited canonical
 home could not be located.** The "no newtype for the netns field" decision is
