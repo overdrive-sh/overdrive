@@ -52,16 +52,24 @@
 //!   therefore `Vmm::create(&VmConfig)` (§D1,
 //!   `crate::traits::vmm::Vmm`) — compiles.
 //!
-//! # What remains deferred, and why
+//! # What Slice 03 (US-VM-7) lands (gap 5 CLOSED, ADR-0082 2026-08-17)
 //!
-//! `VmRunDir::landlock_grant() -> LandlockRule` and
-//! `VmConfig::landlock_rules()` are deferred to Slice 03 (US-VM-7) per
-//! ADR-0082's 2026-08-12 amendment (gap 5) — `LandlockRule` has no shape
-//! anywhere, and the slice-01 doc already assigns the additive
-//! confinement items (Landlock, uid/gid drop, rlimits) to US-VM-7. This
-//! is a scoping decision, not a blocker: Slice 01 runs Cloud Hypervisor
-//! without `--landlock`/`--landlock-rules`, so no run-directory grant is
-//! needed until Landlock confinement is opted into in Slice 03.
+//! - [`LandlockRule`] — one `--landlock-rules` grant. `access=rw` is
+//!   rendered UNCONDITIONALLY (a read-only rule is insufficient — spike
+//!   P5), the grant names a DIRECTORY (never a socket path CH would
+//!   reject at parse time), and there is NO public constructor: the only
+//!   producer is [`VmRunDir::landlock_grant`] (same-module private-field
+//!   construction), which is what makes it the SOLE producer (brief.md
+//!   § 113 dst-lint clause).
+//! - [`VmRunDir::landlock_grant`] — the one explicit grant: `access=rw`
+//!   on the run directory (CH auto-derives kernel/disk/serial/api grants
+//!   but NOT the vsock socket it binds itself — P5 correction 2).
+//! - [`VmConfig::landlock_rules`] — the aggregator, today exactly
+//!   `vec![run_dir.landlock_grant()]`.
+//! - [`VmConfinement::launch_wrapper`] — the `prlimit … -- setpriv … --`
+//!   argv PREFIX that applies uid-drop + `setrlimit` with NO `unsafe`
+//!   `pre_exec` (the resolution to `overdrive-host`'s
+//!   `#![forbid(unsafe_code)]`; ADR-0082 §(c)).
 //!
 //! [`reserve_bytes`] (§D2.3) — measured GREEN in step 01-05 via a real
 //! Cloud Hypervisor boot (see its own docstring for the full
@@ -413,6 +421,107 @@ impl VmConfinement {
     pub const fn seccomp_arg(&self) -> &'static str {
         "true"
     }
+
+    /// The confined identity Cloud Hypervisor is spawned under — read by
+    /// the create path so it can chown the run directory and the rootfs
+    /// clone to the dropped `uid:gid` BEFORE spawn (ADR-0082 §(c)
+    /// consequence 2). Without it, CH under the dropped uid could neither
+    /// bind its sockets in the root-created run directory nor open the
+    /// root-created rootfs clone `O_RDWR`. [`VmmIdentity`]'s fields are
+    /// already public; this is the read accessor the wrapper application
+    /// needs, not new confinement state.
+    #[must_use]
+    pub const fn identity(&self) -> &VmmIdentity {
+        &self.identity
+    }
+
+    /// The `prlimit … -- setpriv … --` launch-wrapper PREFIX (argv tokens)
+    /// that drops privilege and caps resource limits on the spawned
+    /// hypervisor with NO `unsafe` `pre_exec` (ADR-0082 §(c)). The caller
+    /// (`vmm.rs::create`) appends the hypervisor binary + its args. Per-child
+    /// uid/gid drop and `setrlimit` are only expressible between `fork` and
+    /// `exec`; the resolution honouring `overdrive-host`'s
+    /// `#![forbid(unsafe_code)]` is to encapsulate the unsafe one layer out,
+    /// in proven util-linux tools — exactly spike P5's 12/12 launch shape.
+    ///
+    /// `rlimit_fsize` is passed in — it is a [`VmConfig::rlimit_fsize`]
+    /// derivation (`max(rootfs, guest RAM)`, C-6) this value does not hold.
+    /// One pure rendering site and a mutation target (a mutant dropping
+    /// `--no-new-privs`, rendering uid `0`, or omitting a wrapper token must
+    /// be killed). Renders, in order:
+    ///
+    /// ```text
+    /// prlimit --fsize=<rlimit_fsize> --nofile=<self.rlimit_nofile> --
+    /// setpriv --reuid=<uid> --regid=<gid>
+    ///         --groups=<supplementary,joined> --no-new-privs --
+    /// ```
+    ///
+    /// `--groups=<numeric>` (from [`VmmIdentity::supplementary`]) — NOT
+    /// `--init-groups` — because the confined uid has no passwd/group DB
+    /// entry on the appliance (`setpriv` takes raw numerics); `--init-groups`
+    /// would require one.
+    #[must_use]
+    pub fn launch_wrapper(&self, rlimit_fsize: u64) -> Vec<String> {
+        let groups = self
+            .identity
+            .supplementary
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        vec![
+            "prlimit".to_owned(),
+            format!("--fsize={rlimit_fsize}"),
+            format!("--nofile={}", self.rlimit_nofile),
+            "--".to_owned(),
+            "setpriv".to_owned(),
+            format!("--reuid={}", self.identity.uid),
+            format!("--regid={}", self.identity.gid),
+            format!("--groups={groups}"),
+            "--no-new-privs".to_owned(),
+            "--".to_owned(),
+        ]
+    }
+}
+
+// -----------------------------------------------------------------------
+// US-VM-7 (gap 5) — LandlockRule: one `--landlock-rules` directory grant
+// -----------------------------------------------------------------------
+
+/// One `--landlock-rules` grant (ADR-0082 §(a)). `access=rw` is rendered
+/// UNCONDITIONALLY and is NOT a field: a read-only rule is insufficient
+/// (spike P5 — a `vsock-only + dir-ro-rule` VM still `EACCES`es), so there
+/// is no access parameter to get wrong — the same lever [`DiskAttachment`]
+/// uses for `image_type=raw` (§D2.1). The grant names a DIRECTORY, never a
+/// socket path: CH validates rule paths for existence at config-parse time
+/// and the vsock UDS does not exist yet (P5 correction 2).
+///
+/// There is **no public constructor**: a `LandlockRule` is built only by
+/// [`VmRunDir::landlock_grant`] (same-module private-field construction),
+/// which is what makes that method the SOLE producer (brief.md § 113 —
+/// "Landlock rules are never built outside `VmRunDir::landlock_grant`").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandlockRule {
+    path: PathBuf,
+}
+
+impl LandlockRule {
+    /// The complete `--landlock-rules` VALUE: `path=<dir>,access=rw`. One
+    /// pure rendering site and a mutation target (a mutant flipping `rw` →
+    /// `ro` or dropping `access=` must be killed). The FLAG literal
+    /// `--landlock-rules` is rendered separately in `vmm.rs::create` — the
+    /// sole site the 01-10 dst-lint clause sanctions.
+    #[must_use]
+    pub fn to_rule_arg(&self) -> String {
+        format!("path={},access=rw", self.path.display())
+    }
+
+    /// The granted directory — accessor for the dst-lint / behavioural
+    /// tests.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -590,12 +699,8 @@ impl fmt::Display for VsockPort {
 /// The per-allocation run directory (SD-2 — tmpfs, one per allocation,
 /// holding NOTHING else). This type owns every path inside it, which is
 /// why SD-2's exclusivity is a structural property rather than a
-/// convention (ADR-0082 §D2.2).
-///
-/// `landlock_grant() -> LandlockRule` is deferred to Slice 03 (US-VM-7,
-/// gap 5) — Slice 01 launches Cloud Hypervisor without
-/// `--landlock`/`--landlock-rules`, so no directory grant is minted this
-/// slice.
+/// convention (ADR-0082 §D2.2). Its [`landlock_grant`](Self::landlock_grant)
+/// is the SOLE producer of a [`LandlockRule`] (gap 5, US-VM-7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VmRunDir(PathBuf);
 
@@ -638,6 +743,20 @@ impl VmRunDir {
     #[must_use]
     pub fn console_log(&self) -> PathBuf {
         self.0.join("console.log")
+    }
+
+    /// The ONE explicit Landlock grant: `access=rw` on the run directory
+    /// itself (ADR-0082 §(b), gap 5). CH auto-derives rules for
+    /// `--kernel` / `--disk` / `--serial file=` / `--api-socket` but NOT
+    /// the vsock UDS it binds (P5 correction 2); the rule must be the
+    /// CONTAINING DIRECTORY (CH rejects a not-yet-existent socket path at
+    /// parse time). SD-2 exclusivity — the run directory holds nothing but
+    /// this VM's own sockets and logs — is what keeps this grant from
+    /// widening. SOLE producer of a [`LandlockRule`] (same-module
+    /// private-field construction).
+    #[must_use]
+    pub fn landlock_grant(&self) -> LandlockRule {
+        LandlockRule { path: self.0.clone() }
     }
 }
 
@@ -693,6 +812,17 @@ impl VmConfig {
         let rootfs_bytes = self.rootfs.master_bytes();
         let guest_bytes = self.memory.guest_bytes();
         if rootfs_bytes > guest_bytes { rootfs_bytes } else { guest_bytes }
+    }
+
+    /// The explicit Landlock rules for this launch (ADR-0082 §(b), gap 5)
+    /// — today exactly `vec![self.run_dir.landlock_grant()]`. CH
+    /// auto-derives the kernel/disk/serial/api grants, so this list carries
+    /// ONLY what CH omits: the run directory containing the vsock socket
+    /// (C-4). `Vec` keeps the signature stable if a future explicit grant
+    /// is ever added.
+    #[must_use]
+    pub fn landlock_rules(&self) -> Vec<LandlockRule> {
+        vec![self.run_dir.landlock_grant()]
     }
 }
 

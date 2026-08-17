@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -40,6 +40,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
@@ -175,6 +176,56 @@ impl CloudHypervisorVmm {
             .map(|dir| dir.join(&self.binary).display().to_string())
             .collect()
     }
+
+    /// Whether the hypervisor binary resolves to an existing file the way
+    /// `execvp` would. With the confinement wrapper prepended (§(c)),
+    /// `cmd.spawn()` spawns `prlimit`, so a genuinely-absent
+    /// `cloud-hypervisor` no longer surfaces as a spawn-time `NotFound`
+    /// (`setpriv` would instead fail to exec it deep in the chain — §(c)
+    /// consequence 1). This pre-check, run BEFORE the wrapper spawn, keeps
+    /// `HypervisorAbsent` naming CH's own absence and its searched paths.
+    fn hypervisor_present(&self) -> bool {
+        self.searched_binary_paths().iter().any(|p| Path::new(p).exists())
+    }
+
+    /// Build the confined `cloud-hypervisor` spawn command (§(c)): the
+    /// `prlimit`/`setpriv` wrapper prefix, the hypervisor binary, its args
+    /// (including `--seccomp`), then `--landlock` + the explicit
+    /// run-directory rule (C-4). The FLAG literal `--landlock-rules` is
+    /// rendered HERE — the sole site the 01-10 dst-lint clause sanctions;
+    /// each rule VALUE comes from the pure [`LandlockRule::to_rule_arg`].
+    /// Extracted from `create` purely to keep it within the line budget.
+    fn build_confined_command(&self, config: &VmConfig, wrapper: &[String]) -> Command {
+        let mut cmd = Command::new(&wrapper[0]);
+        cmd.args(&wrapper[1..]);
+        cmd.arg(&self.binary)
+            .arg("--cpus")
+            .arg(format!("boot={}", config.vcpus))
+            .arg("--memory")
+            .arg(format!("size={}", config.memory.guest_bytes()))
+            .arg("--kernel")
+            .arg(config.kernel.path())
+            .arg("--cmdline")
+            .arg(config.cmdline.as_str())
+            .arg("--disk")
+            .arg(DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg())
+            .arg("--serial")
+            .arg(format!("file={}", config.run_dir.console_log().display()))
+            .arg("--console")
+            .arg("off")
+            .arg("--vsock")
+            .arg(format!("cid=3,socket={}", config.run_dir.vsock_socket().display()))
+            .arg("--api-socket")
+            .arg(config.run_dir.api_socket())
+            .arg("--seccomp")
+            .arg(config.confinement.seccomp_arg())
+            .arg("--landlock");
+        for rule in config.landlock_rules() {
+            cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
+        }
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
+        cmd
+    }
 }
 
 #[async_trait]
@@ -188,6 +239,8 @@ impl Vmm for CloudHypervisorVmm {
         spawn_blocking_probe(move || probe_reflink(&image_dir)).await?;
 
         probe_cloud_hypervisor_capable(&self.binary).await?;
+
+        probe_confinement_toolchain().await?;
 
         spawn_blocking_probe(probe_kvm_reachable).await?;
 
@@ -215,31 +268,53 @@ impl Vmm for CloudHypervisorVmm {
             .await
             .map_err(|join_err| VmmError::create(format!("FICLONE task panicked: {join_err}")))??;
 
-        let mut cmd = Command::new(&self.binary);
-        cmd.arg("--cpus")
-            .arg(format!("boot={}", config.vcpus))
-            .arg("--memory")
-            .arg(format!("size={}", config.memory.guest_bytes()))
-            .arg("--kernel")
-            .arg(config.kernel.path())
-            .arg("--cmdline")
-            .arg(config.cmdline.as_str())
-            .arg("--disk")
-            .arg(DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg())
-            .arg("--serial")
-            .arg(format!("file={}", config.run_dir.console_log().display()))
-            .arg("--console")
-            .arg("off")
-            .arg("--vsock")
-            .arg(format!("cid=3,socket={}", config.run_dir.vsock_socket().display()))
-            .arg("--api-socket")
-            .arg(config.run_dir.api_socket())
-            .arg("--seccomp")
-            .arg(config.confinement.seccomp_arg())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .kill_on_drop(false);
+        // §(c) consequence 1: the hypervisor is spawned THROUGH the
+        // prlimit/setpriv confinement wrapper, so a genuinely-absent
+        // `cloud-hypervisor` no longer surfaces as a spawn-time `NotFound`
+        // (the wrapper spawns, then `setpriv` fails to exec CH deep in the
+        // chain). Detect CH's own absence here — after the clone (so the
+        // "clone made then removed on failure" contract is preserved) — so
+        // `HypervisorAbsent` keeps naming CH's absence, never the wrapper's.
+        if !self.hypervisor_present() {
+            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+            return Err(VmmError::HypervisorAbsent {
+                searched: self.searched_binary_paths(),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            });
+        }
+
+        // §(c) consequence 2: CH runs uid-dropped, so it must be able to open
+        // the root-created rootfs clone `O_RDWR` and bind/connect its sockets
+        // in the root-created run directory. Chown both to the confined
+        // identity (and make the clone's parent traversable by the dropped
+        // uid) BEFORE spawn. Failure here is a `Create` — the confinement
+        // could not be applied and no unconfined fallback is permitted.
+        let identity = config.confinement.identity();
+        let uid = identity.uid;
+        let gid = identity.gid.as_u32();
+        let prep_clone = clone_dest.clone();
+        let prep_kernel = config.kernel.path().to_path_buf();
+        let prep_run_dir = config.run_dir.path().to_path_buf();
+        let prep = tokio::task::spawn_blocking(move || {
+            prepare_confined_paths(&prep_clone, &prep_kernel, &prep_run_dir, uid, gid)
+        })
+        .await
+        .map_err(|join_err| VmmError::create(format!("confine-paths task panicked: {join_err}")))?;
+        if let Err(source) = prep {
+            let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
+            return Err(VmmError::create(format!(
+                "prepare confined paths for {}: {source}",
+                clone_dest.display()
+            )));
+        }
+
+        // §(c): spawn CH THROUGH the wrapper. `argv[0]` is `prlimit`; the
+        // execve chain (prlimit → setpriv → cloud-hypervisor) collapses to
+        // the hypervisor image on the SAME pid, so the recorded pid, cgroup
+        // placement, inherited stderr pipe and SIGKILL all still target
+        // cloud-hypervisor.
+        let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
+        let mut cmd = self.build_confined_command(config, &wrapper);
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
         // check below): the `Err` arm needs the `io::Error` detail, and
@@ -253,13 +328,22 @@ impl Vmm for CloudHypervisorVmm {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
                 let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
-                // §D1.1: `HypervisorAbsent` is spawn-time `NotFound` ONLY,
-                // and names every path searched. A permission error or any
-                // other spawn failure stays `Create`.
+                // §(c) consequence 1: with the wrapper, a spawn `NotFound`
+                // means the confinement toolchain (`prlimit`/`setpriv`) is
+                // absent — a confinement failure, NEVER `HypervisorAbsent`
+                // (CH's own absence is the pre-check above). The boot probe
+                // proves the toolchain present, so this is unreachable on a
+                // vetted host; it is mapped honestly regardless.
                 return Err(if source.kind() == io::ErrorKind::NotFound {
-                    VmmError::HypervisorAbsent { searched: self.searched_binary_paths(), source }
+                    VmmError::ConfinementUnavailable {
+                        control: ConfinementControl::UidDrop,
+                        detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
+                    }
                 } else {
-                    VmmError::create(format!("spawning {} failed: {source}", self.binary.display()))
+                    VmmError::create(format!(
+                        "spawning confinement wrapper {} failed: {source}",
+                        wrapper[0]
+                    ))
                 });
             }
         };
@@ -389,6 +473,57 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
         return Err(VmmError::Io(err.into()));
     }
     Ok(())
+}
+
+/// Ready the root-created rootfs clone, the operator's kernel, and the run
+/// directory for a uid-dropped hypervisor (ADR-0082 §(c) consequence 2). Sync
+/// — runs on the blocking pool. CH under the dropped uid opens all three; each
+/// grant below is the minimum that identity needs, and each is applied to a
+/// KNOWN path (never a directory listing), so an unprivileged read/traverse is
+/// all that is exposed:
+///
+/// 1. **Rootfs clone** — chown to `uid:gid` (CH opens the `--disk` clone
+///    `O_RDWR`), and add "other execute" (traversal, not listing) on its
+///    parent so the dropped uid can reach the clone `FICLONE` placed beside
+///    the operator's master.
+/// 2. **Kernel** — the operator's read-only master, opened read-only. Add
+///    "other read" on the file and "other execute" on its parent. A kernel
+///    image is not secret; without this a `600 root:root` master (the
+///    common shape) fails as `Cannot open kernel file: Permission denied`
+///    under the dropped uid, before Landlock is even reached.
+/// 3. **Run directory + its current entries** (the beacon socket the driver
+///    bound before `create`) — chown to `uid:gid`, so CH can bind its own
+///    vsock/api sockets there, write `console.log`, and connect to the beacon
+///    under the dropped uid.
+fn prepare_confined_paths(
+    clone_dest: &Path,
+    kernel: &Path,
+    run_dir: &Path,
+    uid: u32,
+    gid: u32,
+) -> io::Result<()> {
+    std::os::unix::fs::chown(clone_dest, Some(uid), Some(gid))?;
+    add_other_mode_bits(clone_dest.parent(), 0o001)?;
+
+    add_other_mode_bits(Some(kernel), 0o004)?;
+    add_other_mode_bits(kernel.parent(), 0o001)?;
+
+    std::os::unix::fs::chown(run_dir, Some(uid), Some(gid))?;
+    for entry in std::fs::read_dir(run_dir)? {
+        let entry = entry?;
+        std::os::unix::fs::chown(entry.path(), Some(uid), Some(gid))?;
+    }
+    Ok(())
+}
+
+/// OR `bits` into `path`'s mode (idempotent), if `path` is `Some`. Used to
+/// grant the confined uid the minimum "other" read (`0o004`) / traverse
+/// (`0o001`) it needs on artifacts it does not own — never widening beyond
+/// the one bit requested.
+fn add_other_mode_bits(path: Option<&Path>, bits: u32) -> io::Result<()> {
+    let Some(path) = path else { return Ok(()) };
+    let mode = std::fs::metadata(path)?.permissions().mode();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | bits))
 }
 
 /// Classify a resolved (or failed-to-observe) child exit into the
@@ -537,6 +672,24 @@ async fn probe_cloud_hypervisor_capable(binary: &Path) -> std::result::Result<()
     let lsms = tokio::fs::read_to_string("/sys/kernel/security/lsm").await.unwrap_or_default();
     if !lsms.split(',').any(|lsm| lsm.trim() == "landlock") {
         return Err(VmmProbeError::landlock_lsm_absent(lsms.trim().to_owned()));
+    }
+    Ok(())
+}
+
+/// §(c) consequence 1 — the confinement wrapper tools (`prlimit`, `setpriv`)
+/// resolve on `PATH`. The hypervisor is spawned THROUGH them (the resolution
+/// honouring `overdrive-host`'s `#![forbid(unsafe_code)]`), so `argv[0]` is
+/// `prlimit`; a missing wrapper must refuse the node at boot (wire → probe →
+/// use), never surface later as a misclassified `HypervisorAbsent`. A
+/// successful spawn of `<tool> --version` (any exit status) proves the tool is
+/// present; only a spawn `NotFound`/error means it is absent.
+async fn probe_confinement_toolchain() -> std::result::Result<(), VmmProbeError> {
+    for tool in ["prlimit", "setpriv"] {
+        Command::new(tool)
+            .arg("--version")
+            .output()
+            .await
+            .map_err(|source| VmmProbeError::confinement_toolchain_absent(tool, source))?;
     }
     Ok(())
 }

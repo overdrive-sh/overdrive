@@ -1640,6 +1640,24 @@ enum VmComposeError {
 /// See [`VmComposeError`] for the two-way error split; see
 /// `run_server`'s call site doc comment for the ABSENCE-vs-REFUSAL
 /// framing.
+/// The reserved, unprivileged NUMERIC identity the confined hypervisor is
+/// spawned under (ADR-0082 §(e)). No `/etc/passwd`/`/etc/group` entry is
+/// required — `setpriv --reuid/--regid` take raw numerics, which is precisely
+/// what satisfies the "no appliance-image change" constraint. `65534`
+/// (`nobody`/`nogroup`) is the canonical own-nothing unprivileged identity,
+/// guaranteed non-root and unlikely to collide with a login user (uid `1000`
+/// on the appliance). The confined uid is SHARED across VMs and does NOT
+/// isolate siblings — Landlock (the per-VM run-directory grant), the per-VM
+/// netns and the per-VM cgroup do that; a per-VM uid is GH #258, not US-VM-7.
+const OVERDRIVE_VMM_UID: u32 = 65_534;
+const OVERDRIVE_VMM_GID: u32 = 65_534;
+
+/// `RLIMIT_NOFILE` cap for the confined hypervisor. `256` is spike P5's proven
+/// value (a full `--landlock` + vsock + disk + serial + api boot completed
+/// under it) and is comfortably below any reasonable `overdrive serve` open-
+/// files ceiling, so the confined limit is strictly below serve's (S-VM-49).
+const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
+
 async fn compose_vm_driver(
     cgroup_root: std::path::PathBuf,
     clone_index_dir: std::path::PathBuf,
@@ -1689,6 +1707,36 @@ async fn compose_vm_driver(
     // just validated).
     let arch = if cfg!(target_arch = "aarch64") { HostArch::Aarch64 } else { HostArch::X86_64 };
 
+    // Resolve the `kvm` group gid by stat-ing `/dev/kvm`'s group owner — the
+    // same `metadata.gid()` the probe's `probe_kvm_reachable` reads (ADR-0082
+    // §(e)). `/dev/kvm` is `0660 root:kvm`; the confined uid reaches it ONLY
+    // via kvm-group membership, so this gid MUST land in `supplementary` or
+    // the uid-drop denies `/dev/kvm` — the empty-`supplementary` bug the
+    // placeholder carried. The probe above already opened `/dev/kvm` `O_RDWR`,
+    // so a stat failure here is a TOCTOU anomaly: refuse the node fail-closed
+    // rather than confine against an unknown kvm group.
+    let kvm_gid = match tokio::fs::metadata("/dev/kvm").await {
+        Ok(meta) => {
+            use std::os::unix::fs::MetadataExt;
+            meta.gid()
+        }
+        Err(source) => {
+            let cause = error::VmmBootError::Probe {
+                source: overdrive_core::traits::vmm::VmmProbeError::kvm_unreachable(
+                    OVERDRIVE_VMM_UID,
+                    OVERDRIVE_VMM_GID,
+                    0,
+                    source,
+                ),
+            };
+            return Err(if injected {
+                VmComposeError::Refused(cause)
+            } else {
+                VmComposeError::NotAvailable(cause)
+            });
+        }
+    };
+
     let layout = VmHostLayout {
         cgroup_root,
         run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
@@ -1699,21 +1747,21 @@ async fn compose_vm_driver(
         clone_index_dir,
         arch,
         vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
-        // Confined identity per ADR-0082 §D2.5. NO production system
-        // user/group is designated for the confined VMM identity by any
-        // ADR or roadmap step — this is a flagged gap (see this step's
-        // final report), not a considered choice. `1000`/`994` mirrors
-        // the only existing precedent in the tree
-        // (`crates/overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs`),
-        // itself unsourced from a real deployment identity. Root (0/0)
-        // is deliberately avoided — it would defeat confinement outright.
+        // Confined identity per ADR-0082 §(e) (gap-5 closure). A reserved,
+        // unprivileged NUMERIC identity the platform runs the hypervisor
+        // under — no `/etc/passwd`/`/etc/group` entry required (`setpriv`
+        // takes raw numerics). The `kvm` group gid, discovered at compose
+        // time by stat-ing `/dev/kvm`, rides in `supplementary` — WITHOUT
+        // it the uid-drop denies `/dev/kvm` (the specific bug the prior
+        // `supplementary: vec![]` placeholder carried). Root (0/0) is
+        // deliberately avoided — it would defeat confinement outright.
         confinement: VmConfinement::confined(
             VmmIdentity {
-                uid: 1000,
-                gid: overdrive_core::vm::config::Gid::new(994),
-                supplementary: vec![],
+                uid: OVERDRIVE_VMM_UID,
+                gid: overdrive_core::vm::config::Gid::new(OVERDRIVE_VMM_GID),
+                supplementary: vec![overdrive_core::vm::config::Gid::new(kvm_gid)],
             },
-            1024,
+            OVERDRIVE_VMM_RLIMIT_NOFILE,
         ),
     };
 

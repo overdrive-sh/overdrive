@@ -146,7 +146,14 @@
 //! documents (S-VM-05, fourth pass).
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
-#![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::missing_panics_doc,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    // real_uid/eff_uid/real_gid/eff_gid mirror /proc/<pid>/status's own
+    // real/effective columns -- the names are intentionally parallel.
+    clippy::similar_names
+)]
 
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
@@ -358,11 +365,7 @@ fn stage_rootfs_replacing_init(tmp: &Path, fixture: &VmFixture, host_bin: &Path)
 /// Copy the shared rootfs, loopback-mount the copy, run `edit` against the
 /// mount point, unmount, and return the per-test copy. The single
 /// `losetup`/`mount`/`umount` plumbing both stagers above share.
-fn with_mounted_rootfs_copy(
-    tmp: &Path,
-    fixture: &VmFixture,
-    edit: impl FnOnce(&Path),
-) -> PathBuf {
+fn with_mounted_rootfs_copy(tmp: &Path, fixture: &VmFixture, edit: impl FnOnce(&Path)) -> PathBuf {
     let rootfs_copy = tmp.join("rootfs.ext4");
     std::fs::copy(&fixture.rootfs_path, &rootfs_copy)
         .expect("copy the shared fixture rootfs into a per-test working copy");
@@ -538,11 +541,8 @@ async fn spawn_vm_server_at(data_dir: &Path, config_dir: &Path) -> ServeHandle {
     std::fs::create_dir_all(data_dir).expect("create data dir");
     std::fs::create_dir_all(config_dir).expect("create operator config dir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs {
-        bind,
-        data_dir: data_dir.to_path_buf(),
-        config_dir: config_dir.to_path_buf(),
-    };
+    let args =
+        ServeArgs { bind, data_dir: data_dir.to_path_buf(), config_dir: config_dir.to_path_buf() };
     overdrive_cli::commands::serve::run_with_dataplane(
         args,
         std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
@@ -747,10 +747,7 @@ async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
     // The hypervisor exited cleanly (0) — the signal path is untaken, which
     // is what makes this the "VMM exits 0, yet still a crash" refusal.
     assert!(
-        matches!(
-            reason,
-            TransitionReason::VmGuestExitUnreported { vmm_signal: None, .. }
-        ),
+        matches!(reason, TransitionReason::VmGuestExitUnreported { vmm_signal: None, .. }),
         "the hypervisor exited (status 0), not signalled: {reason:?}",
     );
 
@@ -856,7 +853,8 @@ async fn host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process() {
         row.reason,
     );
 
-    let reason = row.reason.clone().expect("a crashed VM allocation must carry a structured reason");
+    let reason =
+        row.reason.clone().expect("a crashed VM allocation must carry a structured reason");
     // The SAME reason a crashed PROCESS produces (`exit_observer::classify`'s
     // `Crashed` arm → `WorkloadCrashedImmediately`). The `signal` is left
     // unpinned: whether the drained VMM exit or the broken guest connection
@@ -1034,9 +1032,7 @@ async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
     assert!(
         matches!(
             row.reason,
-            Some(TransitionReason::Stopped {
-                by: StoppedBy::Operator | StoppedBy::Reconciler
-            }),
+            Some(TransitionReason::Stopped { by: StoppedBy::Operator | StoppedBy::Reconciler }),
         ),
         "an operator stop must be attributed to Operator/Reconciler, never a crash: {:?}",
         row.reason,
@@ -1151,9 +1147,7 @@ async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
     assert!(
         matches!(
             row.reason,
-            Some(TransitionReason::Stopped {
-                by: StoppedBy::Operator | StoppedBy::Reconciler
-            }),
+            Some(TransitionReason::Stopped { by: StoppedBy::Operator | StoppedBy::Reconciler }),
         ),
         "a VM operator stop must reach the operator-stop terminal, never a crash: {:?}",
         row.reason,
@@ -1278,9 +1272,7 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
     assert!(
         matches!(
             row.reason,
-            Some(TransitionReason::Stopped {
-                by: StoppedBy::Operator | StoppedBy::Reconciler
-            }),
+            Some(TransitionReason::Stopped { by: StoppedBy::Operator | StoppedBy::Reconciler }),
         ),
         "an unresponsive guest's stop is still an operator stop, never a crash: {:?}",
         row.reason,
@@ -1413,8 +1405,7 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     // The restarted guest booted from a fresh clone: it found NO marker and
     // spun again -> Running with restart_count == 1. Had it booted the mutated
     // clone, it would exit 66 (crash) and this poll would time out.
-    let restarted =
-        poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(120)).await;
+    let restarted = poll_until_restarted(&cfg, &submit.workload_id, Duration::from_secs(120)).await;
     let restarted_row = restarted.snapshot.rows.first().expect("one row after the restart");
     assert_eq!(
         restarted_row.restart_count, 1,
@@ -1455,4 +1446,329 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     poll_until_terminated(&cfg, &submit.workload_id, Duration::from_secs(30)).await;
 
     handle2.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// AC-13 (US-VM-7) — the hypervisor process is confined, or it does not run.
+// S-VM-49 / S-VM-50 / S-VM-53. These prove ADR-0082's confinement application
+// (the `prlimit … -- setpriv … --` launch wrapper + `--landlock` ruleset)
+// end-to-end through the production `overdrive serve` + `overdrive deploy`
+// path against a REAL Cloud Hypervisor VMM. No production file is modified by
+// the tests themselves; they read the confined process's own `/proc` surface.
+// ---------------------------------------------------------------------------
+
+/// `/proc/<pid>/status`'s `Uid:` / `Gid:` lines → `(real_uid, eff_uid,
+/// real_gid, eff_gid)`. The thread-group LEADER's status reports the whole
+/// PROCESS's uid/gid — uid-drop is process-wide, unlike seccomp which installs
+/// per-thread (spike P5 correction 1) — so the leader is the correct read for
+/// the uid/gid assertions here.
+fn proc_status_ids(pid: u32) -> (u32, u32, u32, u32) {
+    let status =
+        std::fs::read_to_string(format!("/proc/{pid}/status")).expect("read /proc/<pid>/status");
+    let cols = |rest: &str| -> Vec<u32> {
+        rest.split_whitespace().filter_map(|c| c.parse::<u32>().ok()).collect()
+    };
+    let mut uid: Option<(u32, u32)> = None;
+    let mut gid: Option<(u32, u32)> = None;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Uid:") {
+            let c = cols(rest);
+            uid = Some((c[0], c[1]));
+        } else if let Some(rest) = line.strip_prefix("Gid:") {
+            let c = cols(rest);
+            gid = Some((c[0], c[1]));
+        }
+    }
+    let (real_uid, eff_uid) = uid.expect("/proc status carries a Uid: line");
+    let (real_gid, eff_gid) = gid.expect("/proc status carries a Gid: line");
+    (real_uid, eff_uid, real_gid, eff_gid)
+}
+
+/// A named `/proc/<pid>/limits` row → `(soft, hard)`, with `unlimited` mapped
+/// to `u64::MAX`. `limit_name` matches the row label exactly (`"Max file
+/// size"`, `"Max open files"`); the two columns after the label are the soft
+/// and hard limits.
+fn proc_limit(pid: u32, limit_name: &str) -> (u64, u64) {
+    let limits =
+        std::fs::read_to_string(format!("/proc/{pid}/limits")).expect("read /proc/<pid>/limits");
+    let parse = |tok: &str| -> u64 {
+        if tok == "unlimited" {
+            u64::MAX
+        } else {
+            tok.parse::<u64>().expect("numeric limit column")
+        }
+    };
+    for line in limits.lines() {
+        if let Some(rest) = line.strip_prefix(limit_name) {
+            let c: Vec<&str> = rest.split_whitespace().collect();
+            return (parse(c[0]), parse(c[1]));
+        }
+    }
+    panic!("no {limit_name:?} row in /proc/{pid}/limits");
+}
+
+/// `/proc/<pid>/cmdline` split into argv tokens (NUL-separated, empties
+/// dropped). After the `prlimit → setpriv → cloud-hypervisor` execve chain
+/// this is the FINAL `cloud-hypervisor` argv — the wrapper images are
+/// replaced in place (same pid), so the hypervisor's own flags (including
+/// `--landlock` / `--landlock-rules`) are what remain.
+fn proc_cmdline_args(pid: u32) -> Vec<String> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).expect("read /proc/<pid>/cmdline");
+    raw.split(|&b| b == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .collect()
+}
+
+/// Every value that immediately FOLLOWS a `--landlock-rules` token in `args`
+/// — the EXPLICIT Landlock grants the platform passed (CH's auto-derived
+/// kernel/disk/serial/api grants are internal and never appear here).
+fn explicit_landlock_rules(args: &[String]) -> Vec<String> {
+    args.windows(2).filter(|w| w[0] == "--landlock-rules").map(|w| w[1].clone()).collect()
+}
+
+/// Deploy a long-lived spin VM and return `(handle, server_tmp, cfg, workload,
+/// alloc, vmm_pid)` once it is Running — the shared setup S-VM-49/50/53 need to
+/// observe the confined hypervisor's live `/proc` surface. `rootfs_prefix`
+/// controls the per-test tempdir prefix so S-VM-50 can stage its rootfs at a
+/// distinctly-named (operator-declared) path.
+async fn deploy_running_spin_vm(
+    fixture: &VmFixture,
+    rootfs_prefix: &str,
+    workload_id: &str,
+) -> (ServeHandle, TempDir, PathBuf, AllocationId, u32, PathBuf) {
+    let tmp = tempfile::Builder::new()
+        .prefix(rootfs_prefix)
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    // Leak the tempdir guard so the staged rootfs outlives this helper; the
+    // returned PathBuf keeps the declared rootfs path addressable to the caller.
+    let tmp_path = tmp.keep();
+    let spin = build_spin_binary(&tmp_path);
+    let rootfs = stage_rootfs_with_extra_binary(&tmp_path, fixture, &spin, "spin");
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        &format!("{workload_id}.toml"),
+        &vm_job_toml(workload_id, "/sbin/spin", &fixture.kernel_path, &rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the long-lived VM workload");
+    let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+    let alloc = alloc_id_of(&running);
+    let vmm_pid = cloud_hypervisor_pid_for_alloc(&alloc);
+    (handle, server_tmp, cfg, alloc, vmm_pid, rootfs)
+}
+
+/// Reap the still-Running spin VM through the production stop path, then shut
+/// the server down — `kill_on_drop(false)` means nothing kills a Running VM
+/// merely because this process exits (the same leak class the sibling
+/// long-lived-spin scenarios guard against).
+async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
+    stop(StopArgs { id: workload_id.to_owned(), config_path: cfg.to_owned() })
+        .await
+        .expect("stop the running VM workload before shutdown to avoid leaking the VMM");
+    poll_until_terminated(cfg, workload_id, Duration::from_secs(30)).await;
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+/// S-VM-49 / `@kpi:K7` — an untrusted VM workload runs with a bounded,
+/// non-root, Landlock-confined hypervisor. The confined process reports a
+/// non-zero real AND effective uid/gid, resource limits strictly below the
+/// NAMED `overdrive serve` process (by explicit numeric pid, never
+/// `/proc/self`), and a Landlock ruleset whose ONLY explicit grant is the
+/// run-directory read-write grant (C-4 — the vsock socket CH does not
+/// auto-derive a rule for).
+///
+/// ```gherkin
+/// Given Ana has deployed a VM workload on a host that supports the required
+///   confinement
+/// When the allocation reaches Running
+/// Then /proc/<vmm-pid>/status reports a non-zero real AND effective Uid and Gid
+/// And /proc/<vmm-pid>/limits reports Max file size and Max open files strictly
+///   below the SAME fields on the overdrive serve process
+/// And the hypervisor was launched under a Landlock ruleset naming that
+///   allocation's own kernel, rootfs copy and API socket by CH's auto-derived
+///   grants, PLUS a directory read-write grant on that allocation's own run
+///   directory, and nothing outside those grants
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs) =
+        deploy_running_spin_vm(&fixture, "vm-confined-", "vm-confined").await;
+
+    // --- non-zero real AND effective uid/gid (never root) ---
+    let (real_uid, eff_uid, real_gid, eff_gid) = proc_status_ids(vmm_pid);
+    assert!(
+        real_uid != 0 && eff_uid != 0 && real_gid != 0 && eff_gid != 0,
+        "the confined hypervisor must run non-root real AND effective uid/gid; got \
+         ruid={real_uid} euid={eff_uid} rgid={real_gid} egid={eff_gid}",
+    );
+
+    // --- limits strictly below the NAMED serve process (never /proc/self) ---
+    // This in-process `overdrive serve` runs inside the test process, so the
+    // serve process IS `std::process::id()`; its limits are read by explicit
+    // numeric pid, never the `/proc/self` symlink (US-VM-7 AC note).
+    let serve_pid = std::process::id();
+    let (_, vmm_fsize_hard) = proc_limit(vmm_pid, "Max file size");
+    let (_, serve_fsize_hard) = proc_limit(serve_pid, "Max file size");
+    assert!(
+        vmm_fsize_hard < serve_fsize_hard,
+        "confined Max file size must be strictly below serve's; vmm={vmm_fsize_hard} \
+         serve={serve_fsize_hard}",
+    );
+    let (_, vmm_nofile_hard) = proc_limit(vmm_pid, "Max open files");
+    let (_, serve_nofile_hard) = proc_limit(serve_pid, "Max open files");
+    assert!(
+        vmm_nofile_hard < serve_nofile_hard,
+        "confined Max open files must be strictly below serve's; vmm={vmm_nofile_hard} \
+         serve={serve_nofile_hard}",
+    );
+
+    // --- Landlock: --landlock + EXACTLY the run-directory rw grant ---
+    let args = proc_cmdline_args(vmm_pid);
+    assert!(
+        args.iter().any(|a| a == "--landlock"),
+        "the hypervisor must be launched with --landlock; argv={args:?}",
+    );
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
+    let expected_rule = format!("path={},access=rw", run_dir.path().display());
+    assert_eq!(
+        explicit_landlock_rules(&args),
+        vec![expected_rule],
+        "the ONLY explicit Landlock grant must be the run-directory read-write grant (C-4), and \
+         nothing outside it; argv={args:?}",
+    );
+
+    stop_and_shutdown(handle, &cfg, "vm-confined").await;
+}
+
+/// S-VM-50 — the confinement ruleset follows the operator's declared artifact
+/// paths, never a hardcoded directory. A rootfs declared OUTSIDE the default
+/// artifact location still boots under confinement: were the disk Landlock
+/// grant hardcoded to a default dir, the confined hypervisor could not reach
+/// THIS path and the boot would fail. CH auto-derives the `--disk` grant from
+/// the actual disk path, so a spec-declared path just works — the falsifiable
+/// half of "derived, not hardcoded".
+///
+/// ```gherkin
+/// Given Ana's rootfs lives outside the default artifact directory
+/// When the allocation starts
+/// Then the VM boots successfully
+/// And the hypervisor can reach the declared kernel and rootfs and nothing else
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    // Staged under a distinctly-named ("outside the default artifact dir")
+    // subtree on the same reflink-capable filesystem (FICLONE is
+    // intra-filesystem). Reaching Running IS the assertion: the confined boot
+    // succeeded despite the non-default path.
+    let (handle, _server_tmp, cfg, _alloc, vmm_pid, rootfs) =
+        deploy_running_spin_vm(&fixture, "vm-outside-artifact-dir-", "vm-outside").await;
+
+    // The boot is genuinely confined (not an unconfined root fall-through that
+    // would boot any path): --landlock is present, and the --disk clone names
+    // THIS declared rootfs's own directory, proving the ruleset was derived
+    // from the spec rather than a hardcoded default.
+    let args = proc_cmdline_args(vmm_pid);
+    assert!(
+        args.iter().any(|a| a == "--landlock"),
+        "the boot must be confined (--landlock present), not an unconfined root boot; argv={args:?}",
+    );
+    let declared_dir = rootfs.parent().expect("declared rootfs has a parent directory");
+    let disk_arg = args
+        .windows(2)
+        .find(|w| w[0] == "--disk")
+        .map(|w| w[1].clone())
+        .expect("a --disk argument in the hypervisor argv");
+    assert!(
+        disk_arg.contains(&declared_dir.display().to_string()),
+        "the --disk clone must sit beside the DECLARED rootfs path {declared_dir:?}, proving the \
+         Landlock ruleset is derived from the spec, not a hardcoded directory; disk={disk_arg}",
+    );
+
+    // The confined hypervisor is not root — the same bound S-VM-49 pins, here
+    // proving the non-default path did not silently disable confinement.
+    let (real_uid, eff_uid, ..) = proc_status_ids(vmm_pid);
+    assert!(
+        real_uid != 0 && eff_uid != 0,
+        "a non-default rootfs path must not disable confinement; ruid={real_uid} euid={eff_uid}",
+    );
+
+    stop_and_shutdown(handle, &cfg, "vm-outside").await;
+}
+
+/// S-VM-53 / `@correction:C-4` — the vsock socket's Landlock grant is a
+/// DIRECTORY grant, scoped to nothing else. The run directory holds nothing
+/// but this VM's own sockets and logs, and the ruleset grants read-write on
+/// that directory (CH does NOT auto-derive a rule for the vsock socket it
+/// binds itself, unlike `--kernel` / `--disk` / `--serial file=` /
+/// `--api-socket`). The directory-exclusivity property (SD-2) is what makes
+/// the grant derivable rather than a list a crafter must remember.
+///
+/// ```gherkin
+/// Given Ana has deployed a VM workload
+/// When the hypervisor is launched
+/// Then the run directory holds nothing but this VM's own sockets and logs
+/// And the Landlock ruleset grants read-write on that directory
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs) =
+        deploy_running_spin_vm(&fixture, "vm-vsock-grant-", "vm-vsock-grant").await;
+
+    let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
+
+    // The run directory holds NOTHING but this VM's own sockets and logs.
+    let entries: Vec<String> = std::fs::read_dir(run_dir.path())
+        .expect("read the allocation's run directory")
+        .filter_map(std::result::Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        !entries.is_empty(),
+        "the run directory must hold this VM's own sockets/logs, it is empty: {}",
+        run_dir.path().display(),
+    );
+    for name in &entries {
+        // This VM's own files: CH's main vsock UDS (`vsock`), API socket
+        // (`api`) and the API-socket lock CH writes beside it (`api.lock`),
+        // the serial capture (`console.log`), and the driver-bound beacon
+        // socket (`vsock_<port>`). All belong to THIS allocation — nothing
+        // foreign shares the directory (SD-2).
+        let is_own = matches!(name.as_str(), "vsock" | "api" | "api.lock" | "console.log")
+            || name.starts_with("vsock_");
+        assert!(
+            is_own,
+            "the run directory must hold ONLY this VM's own sockets and logs; found a foreign \
+             entry {name:?} among {entries:?}",
+        );
+    }
+
+    // The ONLY explicit Landlock grant is a read-write DIRECTORY grant on that
+    // run directory (C-4). CH auto-derives kernel/disk/serial/api grants; the
+    // vsock socket it binds itself is the one it omits, so the platform grants
+    // the CONTAINING DIRECTORY (CH rejects a not-yet-existent socket path).
+    let args = proc_cmdline_args(vmm_pid);
+    let expected_rule = format!("path={},access=rw", run_dir.path().display());
+    assert_eq!(
+        explicit_landlock_rules(&args),
+        vec![expected_rule],
+        "the ONLY explicit Landlock grant must be a read-write directory grant on the run dir \
+         (C-4), scoped to nothing else; argv={args:?}",
+    );
+
+    stop_and_shutdown(handle, &cfg, "vm-vsock-grant").await;
 }

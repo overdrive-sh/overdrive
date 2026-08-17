@@ -441,6 +441,15 @@ pub enum VmmProbeError {
     /// beacon sockets both land in it.
     #[error("VM run-directory root {root} is unusable: {source}")]
     RunDirUnusable { root: PathBuf, source: std::io::Error },
+
+    /// A confinement-wrapper tool (`prlimit` / `setpriv`) does not resolve
+    /// on `PATH`. Because the hypervisor is spawned THROUGH this wrapper
+    /// (ADR-0082 §(c) — the resolution honouring `#![forbid(unsafe_code)]`),
+    /// argv[0] is `prlimit`, not the hypervisor; a missing wrapper must
+    /// refuse the node at boot (wire → probe → use) rather than surface
+    /// later as a misclassified `HypervisorAbsent`.
+    #[error("confinement wrapper tool {tool} not found on PATH: {source}")]
+    ConfinementToolchainAbsent { tool: String, source: std::io::Error },
 }
 
 impl VmmProbeError {
@@ -471,5 +480,10 @@ impl VmmProbeError {
     #[must_use]
     pub const fn run_dir_unusable(root: PathBuf, source: std::io::Error) -> Self {
         Self::RunDirUnusable { root, source }
+    }
+
+    #[must_use]
+    pub fn confinement_toolchain_absent(tool: impl Into<String>, source: std::io::Error) -> Self {
+        Self::ConfinementToolchainAbsent { tool: tool.into(), source }
     }
 }
