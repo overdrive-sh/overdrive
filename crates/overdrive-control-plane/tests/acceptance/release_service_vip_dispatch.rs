@@ -57,8 +57,13 @@ impl Driver for InertDriver {
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         // Unused on the ReleaseServiceVip dispatch path.
         Err(DriverError::StartRejected {
-            reason: "InertDriver: start() not expected on ReleaseServiceVip dispatch".to_owned(),
-            driver: DriverType::Exec,
+            failure: overdrive_core::traits::driver::DriverStartFailure {
+                class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
+                    driver: DriverType::Exec,
+                },
+                detail: "InertDriver: start() not expected on ReleaseServiceVip dispatch"
+                    .to_owned(),
+            },
         })
     }
 

@@ -28,7 +28,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::traits::vmm::{
-    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmError, VmmExit, VmmProbeError,
+    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics, VmmError,
+    VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::VmConfig;
 use parking_lot::Mutex;
@@ -42,6 +43,15 @@ struct SimProcessEntry {
     /// Consumed exactly once, on the first `terminate` call (mirrors the
     /// host adapter's `VmExitWatch` fill-once contract).
     exit_tx: Option<oneshot::Sender<VmmExit>>,
+    /// Reader on this process's bounded capture. The final
+    /// `VmmExit.stderr_tail` is read back off it at terminate time — the
+    /// SAME ordering the host adapter's reaper uses, so live and final
+    /// tails cannot disagree in either adapter.
+    diagnostics: VmmDiagnostics,
+    /// Scripted process ending, if one was injected. `None` keeps this
+    /// double's established default (an un-beaconed process settles as
+    /// `Killed`, signal 9).
+    scripted_exit: Option<(Option<i32>, Option<u8>)>,
 }
 
 #[derive(Default)]
@@ -105,6 +115,13 @@ pub struct SimVmm {
     /// Consumed by the NEXT `probe` call only — ADR-0083 §D8's
     /// `ServerConfig.vmm_override` fault-injection seam (S-VM-13).
     probe_fault: Arc<Mutex<Option<SimVmmProbeFault>>>,
+    /// Console/stderr bytes the NEXT `create` call captures into its
+    /// bounded diagnostics. The injected-script equivalent of a real
+    /// hypervisor writing to its stderr pipe.
+    scripted_console: Arc<Mutex<Option<Vec<u8>>>>,
+    /// The ending the NEXT created process reports. Consumed by that one
+    /// `create`, mirroring `fail_next_create`'s one-shot style.
+    scripted_exit: Arc<Mutex<Option<(Option<i32>, Option<u8>)>>>,
 }
 
 impl Default for SimVmm {
@@ -124,7 +141,27 @@ impl SimVmm {
             next_pid: Arc::new(AtomicU32::new(1_000_000)),
             fail_next_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             probe_fault: Arc::new(Mutex::new(None)),
+            scripted_console: Arc::new(Mutex::new(None)),
+            scripted_exit: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Script the console/stderr bytes the NEXT [`Vmm::create`] captures
+    /// into that process's bounded diagnostics — the injected-script
+    /// stand-in for a real hypervisor writing to its stderr pipe.
+    ///
+    /// Byte-oriented and framing-agnostic, exactly like the real capture:
+    /// callers may inject a partial line, many lines, or no newline at
+    /// all, and the same bounds apply.
+    pub fn inject_console_output(&self, bytes: impl Into<Vec<u8>>) {
+        *self.scripted_console.lock() = Some(bytes.into());
+    }
+
+    /// Script the ending the NEXT created process reports, so a test can
+    /// pin an exact exit code / terminating signal instead of this
+    /// double's default `Killed`-with-signal-9 settle.
+    pub fn inject_exit(&self, exit_code: Option<i32>, signal: Option<u8>) {
+        *self.scripted_exit.lock() = Some((exit_code, signal));
     }
 
     /// Arm a one-shot failure for the NEXT [`Vmm::create`] call — fires
@@ -207,14 +244,30 @@ impl Vmm for SimVmm {
 
         let pid = self.next_pid.fetch_add(1, Ordering::SeqCst);
         let (exit_tx, exit_rx) = oneshot::channel::<VmmExit>();
-        self.state
-            .lock()
-            .processes
-            .insert(pid, SimProcessEntry { terminated: false, exit_tx: Some(exit_tx) });
+
+        // ONE bounded capture per process, same as the host adapter. The
+        // writer stays adapter-side and is dropped once the scripted
+        // output is captured — this double has no long-lived pipe to read.
+        let (diagnostics, writer) = VmmDiagnostics::new();
+        if let Some(scripted) = self.scripted_console.lock().take() {
+            writer.append(&scripted);
+        }
+        let scripted_exit = self.scripted_exit.lock().take();
+
+        self.state.lock().processes.insert(
+            pid,
+            SimProcessEntry {
+                terminated: false,
+                exit_tx: Some(exit_tx),
+                diagnostics: diagnostics.clone(),
+                scripted_exit,
+            },
+        );
 
         Ok(VmProcess {
             control: VmControl { pid, api_socket: config.run_dir.api_socket() },
             exit: VmExitWatch::new(exit_rx),
+            diagnostics,
         })
     }
 
@@ -222,7 +275,7 @@ impl Vmm for SimVmm {
         // Scoped tightly: the lock is held only long enough to flip
         // `terminated` and take the (already-live) exit sender back out
         // -- the actual `send` happens after the guard drops.
-        let exit_tx = {
+        let taken = {
             let mut state = self.state.lock();
             let Some(entry) = state.processes.get_mut(&control.pid) else {
                 // §D6: no record at all -- already gone (never tracked, or
@@ -234,16 +287,20 @@ impl Vmm for SimVmm {
                 return Ok(VmTermination::Killed);
             }
             entry.terminated = true;
-            let taken = entry.exit_tx.take();
+            let taken = (entry.exit_tx.take(), entry.diagnostics.clone(), entry.scripted_exit);
             drop(state);
             taken
         };
-        // Nothing in this double ever exits "on its own" within grace
-        // (see module doc) -- every live process settles as Killed, the
-        // same outcome a real un-beaconed cloud-hypervisor process
-        // reaches once its grace window elapses.
+        let (exit_tx, diagnostics, scripted_exit) = taken;
+        // Absent an injected script, nothing in this double ever exits "on
+        // its own" within grace (see module doc) -- every live process
+        // settles as Killed, the same outcome a real un-beaconed
+        // cloud-hypervisor process reaches once its grace window elapses.
+        let (exit_code, signal) = scripted_exit.unwrap_or((None, Some(9)));
         if let Some(tx) = exit_tx {
-            let _ = tx.send(VmmExit { exit_code: None, signal: Some(9), stderr_tail: None });
+            // The final tail is READ BACK off the same bounded capture the
+            // live reader observes -- never separately assembled.
+            let _ = tx.send(VmmExit { exit_code, signal, stderr_tail: diagnostics.console_tail() });
         }
         Ok(VmTermination::Killed)
     }

@@ -15,12 +15,17 @@
 //! `SimVmm` are step 01-06); the trait compiles with zero implementors,
 //! which is expected.
 
+use std::collections::VecDeque;
+use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
+use crate::traits::driver::{ConfinementControl, STDERR_TAIL_LINES};
 use crate::vm::config::VmConfig;
 
 /// Result alias for [`Vmm`]'s fallible methods.
@@ -161,12 +166,124 @@ pub trait Vmm: Send + Sync + 'static {
 // D3 — create returns a process, an exit watch, and a control handle
 // -----------------------------------------------------------------------
 
-/// What [`Vmm::create`] hands back on success: the live process handle
-/// plus the adapter-agnostic watch on its own ending.
+/// What [`Vmm::create`] hands back on success: the live process handle,
+/// the adapter-agnostic watch on its own ending, and the READ handle on
+/// this process's bounded diagnostic capture.
+///
+/// `diagnostics` is deliberately the reader only (ADR-0082 §D1.1): the
+/// capture task keeps the sole [`VmmDiagnosticsWriter`], so nothing
+/// downstream of `create` — `VmDriver`, the §D3 boot race, the exit
+/// watcher — can mutate what the process reported.
 #[derive(Debug)]
 pub struct VmProcess {
     pub control: VmControl,
     pub exit: VmExitWatch,
+    pub diagnostics: VmmDiagnostics,
+}
+
+/// Upper bound on RETAINED capture bytes, independent of the line bound
+/// (ADR-0082 §D1.1). Whichever bound binds first applies, so a single
+/// unterminated line cannot grow without limit.
+pub const VMM_CONSOLE_TAIL_MAX_BYTES: usize = 8 * 1024;
+
+/// The one bounded capture both diagnostics handles reference. Stores
+/// BYTES, never `String`: `append` makes no framing assumption and a
+/// front-drop may land mid-UTF-8-sequence.
+#[derive(Debug, Default)]
+struct BoundedCapture {
+    bytes: VecDeque<u8>,
+}
+
+impl BoundedCapture {
+    /// Retain the most recent output under BOTH bounds, dropping from the
+    /// FRONT. Line accounting is over `b'\n'` only.
+    fn append(&mut self, chunk: &[u8]) {
+        self.bytes.extend(chunk.iter().copied());
+
+        while self.bytes.len() > VMM_CONSOLE_TAIL_MAX_BYTES {
+            self.bytes.pop_front();
+        }
+
+        let mut terminated_lines = self.bytes.iter().filter(|&&byte| byte == b'\n').count();
+        while terminated_lines > STDERR_TAIL_LINES {
+            while let Some(byte) = self.bytes.pop_front() {
+                if byte == b'\n' {
+                    break;
+                }
+            }
+            terminated_lines -= 1;
+        }
+    }
+
+    /// Lossy-UTF-8 render of the retained bytes with one trailing newline
+    /// trimmed. `None` iff nothing has been captured.
+    fn snapshot(&self) -> Option<String> {
+        if self.bytes.is_empty() {
+            return None;
+        }
+        let retained: Vec<u8> = self.bytes.iter().copied().collect();
+        let mut text = String::from_utf8_lossy(&retained).into_owned();
+        if text.ends_with('\n') {
+            text.pop();
+        }
+        Some(text)
+    }
+}
+
+/// READ handle on one `VmProcess`'s bounded diagnostic capture
+/// (ADR-0082 §D1.1). `Clone + Send + Sync`; every clone observes the ONE
+/// capture, never a copy.
+#[derive(Debug, Clone)]
+pub struct VmmDiagnostics {
+    capture: Arc<Mutex<BoundedCapture>>,
+}
+
+impl VmmDiagnostics {
+    /// The ONLY constructor. Creates one bounded capture and returns its
+    /// read handle together with its single write handle.
+    ///
+    /// There is deliberately no `Default` and no reader-only constructor:
+    /// a reader with no writer is an orphan capture that would silently
+    /// report `None` forever.
+    #[must_use]
+    pub fn new() -> (Self, VmmDiagnosticsWriter) {
+        let capture = Arc::new(Mutex::new(BoundedCapture::default()));
+        let writer = VmmDiagnosticsWriter { capture: Arc::clone(&capture), _not_sync: PhantomData };
+        (Self { capture }, writer)
+    }
+
+    /// Pure snapshot of the guest-console / VMM-stderr tail captured so
+    /// far. Reads no file, socket, clock, process, or global.
+    ///
+    /// Returns `None` iff nothing has been appended, and `Some(_)` once
+    /// any byte has been captured. Two calls with no intervening `append`
+    /// return equal values.
+    #[must_use]
+    pub fn console_tail(&self) -> Option<String> {
+        self.capture.lock().snapshot()
+    }
+}
+
+/// WRITE handle on the SAME capture (ADR-0082 §D1.1). `Send`, and
+/// deliberately NOT `Clone` and NOT `Sync` — exactly one capture task owns
+/// the append side of a given process's capture, so the retained order is
+/// that task's own sequential order.
+#[derive(Debug)]
+pub struct VmmDiagnosticsWriter {
+    capture: Arc<Mutex<BoundedCapture>>,
+    /// Removes `Sync` without removing `Send`, making "two tasks append to
+    /// one capture concurrently" unrepresentable rather than merely
+    /// discouraged.
+    _not_sync: PhantomData<std::cell::Cell<()>>,
+}
+
+impl VmmDiagnosticsWriter {
+    /// Append raw captured bytes. `&self`, so the owning capture task may
+    /// hold it behind a shared reference. Infallible: output beyond the
+    /// bounds is dropped from the front, never surfaced as an error.
+    pub fn append(&self, chunk: &[u8]) {
+        self.capture.lock().append(chunk);
+    }
 }
 
 /// The hypervisor process's identity and its control-plane socket.
@@ -254,6 +371,23 @@ pub enum VmTermination {
 /// failure modes.
 #[derive(Debug, thiserror::Error)]
 pub enum VmmError {
+    /// The hypervisor binary could not be found at spawn time. Used ONLY
+    /// for a spawn-time `NotFound`; carries every path the adapter
+    /// searched. A permission error, short read, clone failure, or
+    /// malformed response is NEVER relabelled as absence.
+    #[error("hypervisor binary not found (searched: {}): {source}", searched.join(", "))]
+    HypervisorAbsent { searched: Vec<String>, source: std::io::Error },
+
+    /// The configured rootfs master disappeared before or during
+    /// per-launch staging.
+    #[error("rootfs master {} not found: {source}", path.display())]
+    RootfsNotFound { path: PathBuf, source: std::io::Error },
+
+    /// The host cannot supply one confinement control — the single typed
+    /// adapter-local mapping to ADR-0083's confinement cause.
+    #[error("confinement control {control} unavailable: {detail}")]
+    ConfinementUnavailable { control: ConfinementControl, detail: String },
+
     /// The hypervisor process could not be spawned, or `create`'s
     /// staging steps (rootfs clone, socket bind, run-directory setup)
     /// failed before the process existed. `detail` carries the

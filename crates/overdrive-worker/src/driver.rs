@@ -32,8 +32,9 @@ use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources, STDERR_TAIL_LINES,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExecStartFailure, ExitEvent, ExitKind, Resources,
+    STDERR_TAIL_LINES,
 };
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
@@ -59,12 +60,50 @@ const STDERR_DRAIN_MAX_YIELDS: usize = 64;
 /// lifetime, so a small constant is plenty.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
 
-/// Construct a `DriverError::StartRejected` for the exec driver. The
-/// `driver: DriverType::Exec` discriminator is fixed by construction,
-/// so the call sites only need to supply the human-readable reason. Used
-/// by every fallible step in `Driver::start`.
-fn start_rejected(reason: impl Into<String>) -> DriverError {
-    DriverError::StartRejected { driver: DriverType::Exec, reason: reason.into() }
+/// Construct a `DriverError::StartRejected` carrying a typed Exec cause
+/// plus the verbatim low-level diagnostic (ADR-0083 §D5, DWD-24). Private
+/// to this module — it only assembles the public `DriverStartFailure`.
+fn start_rejected(class: ExecStartFailure, detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure { class: DriverStartClass::Exec(class), detail: detail.into() },
+    }
+}
+
+/// Construct a `DriverError::StartRejected` for an Exec failure with no
+/// named class. Converts to the pre-existing `DriverInternalError`.
+fn start_rejected_unclassified(detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+            detail: detail.into(),
+        },
+    }
+}
+
+/// Select the Exec spawn cause from the OS error's STRUCTURED identity —
+/// never from its `Display` text (DWD-24). The three live classifications
+/// stay byte-identical to the ones the retired action-shim text grammar
+/// produced: ENOENT, EACCES, and ENOEXEC (canonical
+/// `kind == "exec_format_error"`).
+///
+/// `ErrorKind` covers the first two portably; ENOEXEC has no stable
+/// `ErrorKind` mapping, so it is selected on the raw errno.
+/// `@mandatory:mutation_target` — a mutant collapsing any arm re-opens
+/// the "every start failure looks internal" defect this step closes.
+fn classify_spawn_error(command: &str, err: &std::io::Error) -> Option<ExecStartFailure> {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => {
+            Some(ExecStartFailure::BinaryNotFound { path: command.to_owned() })
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            Some(ExecStartFailure::PermissionDenied { path: command.to_owned() })
+        }
+        _ if err.raw_os_error() == Some(libc::ENOEXEC) => Some(ExecStartFailure::BinaryInvalid {
+            path: command.to_owned(),
+            kind: "exec_format_error".to_owned(),
+        }),
+        _ => None,
+    }
 }
 
 /// Classify a child's `wait()` resolution into the typed `ExitKind`
@@ -413,7 +452,13 @@ impl Driver for ExecDriver {
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
-            return Err(start_rejected(format!("create workload scope: {err}")));
+            return Err(start_rejected(
+                ExecStartFailure::CgroupSetupFailed {
+                    kind: "create_scope".to_owned(),
+                    source: err.to_string(),
+                },
+                format!("create workload scope: {err}"),
+            ));
         }
 
         // 2. Write limits BEFORE PID enrolment per ADR-0026 D9.
@@ -489,7 +534,12 @@ impl Driver for ExecDriver {
                         source: err,
                     });
                 }
-                return Err(start_rejected(format!("spawn {}: {err}", spec.driver.command())));
+                let command = spec.driver.command();
+                let detail = format!("spawn {command}: {err}");
+                return match classify_spawn_error(command, &err) {
+                    Some(class) => Err(start_rejected(class, detail)),
+                    None => Err(start_rejected_unclassified(detail)),
+                };
             }
         };
 
@@ -501,7 +551,9 @@ impl Driver for ExecDriver {
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
             let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-            return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
+            return Err(start_rejected_unclassified(
+                "tokio Child returned no pid (already reaped?)",
+            ));
         };
         if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, pid).await {
             // Best-effort kill + cleanup. We don't await here —
@@ -519,7 +571,13 @@ impl Driver for ExecDriver {
                 }
             }
             let _ = self.cgroup_manager.remove_workload_scope(&scope).await;
-            return Err(start_rejected(format!("place pid in scope: {err}")));
+            return Err(start_rejected(
+                ExecStartFailure::CgroupSetupFailed {
+                    kind: "place_pid".to_owned(),
+                    source: err.to_string(),
+                },
+                format!("place pid in scope: {err}"),
+            ));
         }
 
         // 5. Record the allocation as live and spawn the per-alloc

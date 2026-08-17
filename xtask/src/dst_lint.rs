@@ -284,6 +284,13 @@ pub enum BannedKind {
     /// (the shim's terminal-row arms release too, per brief.md §105a.3's
     /// site table, and are out of this clause's scope by design).
     ReleaseSupervisionMisplacement,
+    /// A RETIRED driver-start shape reappeared (DWD-24 / ADR-0032
+    /// amendment 2026-08-16): either a `StartRejected` variant carrying a
+    /// `reason: String`, or a `classify_driver_failure` function. Both
+    /// were deleted in favour of the typed `DriverStartFailure` envelope
+    /// and its total `From` conversion; neither is retained as a
+    /// compatibility path.
+    RetiredDriverStartGrammar,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -2610,7 +2617,10 @@ impl<'ast> Visit<'ast> for CloudHypervisorArgLiteralCollector<'_> {
 /// Returns `Err` when `source` fails to parse as a Rust file, matching the
 /// convention used by the other `scan_source_*` entry points in this
 /// module.
-pub fn scan_source_ch_disk_arg_literal(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
+pub fn scan_source_ch_disk_arg_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
     let file = file.as_ref().to_path_buf();
     let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
     let mut collector = CloudHypervisorArgLiteralCollector::new(
@@ -2811,7 +2821,10 @@ impl<'ast> Visit<'ast> for MemoryPlanLiteralCollector<'_> {
 /// Returns `Err` when `source` fails to parse as a Rust file, matching the
 /// convention used by the other `scan_source_*` entry points in this
 /// module.
-pub fn scan_source_memory_plan_literal(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
+pub fn scan_source_memory_plan_literal(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
     let file = file.as_ref().to_path_buf();
     let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
     let mut collector = MemoryPlanLiteralCollector::new(&file);
@@ -2940,6 +2953,126 @@ pub fn scan_source_release_supervision_placement(
                     .to_owned(),
                 kind: BannedKind::ReleaseSupervisionMisplacement,
             });
+        }
+    }
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
+// DWD-24 — the retired driver-start text grammar must not come back
+// -----------------------------------------------------------------------------
+
+/// Scan `source` for the RETIRED driver-start shapes (ADR-0032 amendment
+/// 2026-08-16 / DWD-24):
+///
+/// (a) a `StartRejected` variant carrying a `reason: String` field, and
+/// (b) any function named `classify_driver_failure`.
+///
+/// Rust's own exhaustiveness already forces the typed conversion to cover
+/// every class, and the behavioral suites pin the operator outcomes. This
+/// clause closes the third, different question: that nobody reintroduces
+/// the stringly-typed boundary or a second text classifier beside the
+/// total conversion. The three layers are orthogonal on purpose — no text
+/// convention is trusted as a contract.
+///
+/// # Errors
+///
+/// Returns `Err` when `source` does not parse as Rust.
+pub fn scan_source_retired_driver_start_grammar(
+    source: &str,
+    file: impl AsRef<Path>,
+) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = RetiredDriverStartGrammarCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+/// AST collector for [`scan_source_retired_driver_start_grammar`].
+struct RetiredDriverStartGrammarCollector {
+    file: PathBuf,
+    violations: Vec<Violation>,
+}
+
+impl RetiredDriverStartGrammarCollector {
+    fn new(file: &Path) -> Self {
+        Self { file: file.to_path_buf(), violations: Vec::new() }
+    }
+
+    fn push(&mut self, span: proc_macro2::Span, banned: &str, replacement: &str) {
+        let loc = span.start();
+        self.violations.push(Violation {
+            file: self.file.clone(),
+            line: loc.line,
+            column: loc.column + 1,
+            banned_path: banned.to_owned(),
+            replacement_trait: replacement.to_owned(),
+            kind: BannedKind::RetiredDriverStartGrammar,
+        });
+    }
+}
+
+impl<'ast> Visit<'ast> for RetiredDriverStartGrammarCollector {
+    fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
+        // Scoped to the PORT error type only. A sim adapter's own
+        // fault-injection script may legitimately carry a `reason`
+        // string (`SimDriver`'s `FailureMode::StartRejected`) — that is
+        // an injected input, not the driver-to-shim boundary this
+        // amendment retired, and flagging it would be a false positive.
+        if node.ident == "DriverError" {
+            for variant in &node.variants {
+                if variant.ident != "StartRejected" {
+                    continue;
+                }
+                for field in &variant.fields {
+                    let Some(ident) = field.ident.as_ref() else { continue };
+                    if ident == "reason" {
+                        self.push(
+                            ident.span(),
+                            "DriverError::StartRejected { reason: String }",
+                            "StartRejected { failure: DriverStartFailure } — the typed cause \
+                             plus a separately preserved verbatim detail (ADR-0083 §D5)",
+                        );
+                    }
+                }
+            }
+        }
+        syn::visit::visit_item_enum(self, node);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if node.sig.ident == "classify_driver_failure" {
+            self.push(
+                node.sig.ident.span(),
+                "fn classify_driver_failure(..)",
+                "impl From<&DriverStartFailure> for TransitionReason — the total, core-owned \
+                 conversion; the action shim never classifies text",
+            );
+        }
+        syn::visit::visit_item_fn(self, node);
+    }
+}
+
+/// Dispatch the DWD-24 retired-grammar clause across every workspace
+/// crate's `src/` tree. Deliberately NOT scoped to one file: the point is
+/// that neither shape may reappear ANYWHERE, including in a new crate.
+fn scan_retired_driver_start_grammar_workspace(
+    classes: &[(String, PathBuf, Option<String>)],
+) -> Result<Vec<Violation>> {
+    let mut violations = Vec::new();
+    for (_name, root, _class) in classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_retired_driver_start_grammar(&source, &rel) {
+                violations.extend(found);
+            }
         }
     }
     Ok(violations)
@@ -3122,6 +3255,7 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
     // body must contain exactly one `release_supervision` call, never
     // inside `match outcome`.
     violations.extend(scan_release_supervision_placement_workspace(&classes)?);
+    violations.extend(scan_retired_driver_start_grammar_workspace(&classes)?);
     Ok(violations)
 }
 
@@ -3387,6 +3521,16 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
                 v.replacement_trait,
             ),
             "see brief.md §105a.3 / §113 (DWD-09 clause 5), S-VM-77",
+        ),
+        BannedKind::RetiredDriverStartGrammar => (
+            "error: retired driver-start text grammar reintroduced",
+            format!(
+                "use {} — a `reason: String` boundary discards the structured facts the \
+                 operator needs, and a text classifier binds correctness to upstream prose; \
+                 both were deleted, not kept as a compatibility path.",
+                v.replacement_trait,
+            ),
+            "see ADR-0032 §4 (amendment 2026-08-16) / ADR-0083 §D5 / DWD-24",
         ),
     }
 }
@@ -5253,11 +5397,9 @@ mod tests {
                 }
             }
         "#;
-        let violations = scan_source_ch_disk_arg_literal(
-            source,
-            Path::new("crates/overdrive-host/src/vmm.rs"),
-        )
-        .expect("parses");
+        let violations =
+            scan_source_ch_disk_arg_literal(source, Path::new("crates/overdrive-host/src/vmm.rs"))
+                .expect("parses");
         assert!(
             violations.is_empty(),
             "the sanctioned (file, fn) pair must not be flagged; got {violations:?}"
@@ -5275,11 +5417,9 @@ mod tests {
                 }
             }
         "#;
-        let violations = scan_source_ch_disk_arg_literal(
-            source,
-            Path::new("crates/overdrive-host/src/vmm.rs"),
-        )
-        .expect("parses");
+        let violations =
+            scan_source_ch_disk_arg_literal(source, Path::new("crates/overdrive-host/src/vmm.rs"))
+                .expect("parses");
         assert_eq!(
             violations.len(),
             1,
@@ -5460,10 +5600,10 @@ mod tests {
     /// one `release_supervision` call, outside `match outcome`.
     #[test]
     fn release_supervision_real_exit_observer_is_clean() {
-        let path = workspace_root()
-            .join("crates/overdrive-control-plane/src/worker/exit_observer.rs");
-        let source =
-            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let path =
+            workspace_root().join("crates/overdrive-control-plane/src/worker/exit_observer.rs");
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let violations = scan_source_release_supervision_placement(
             &source,
             Path::new("worker/exit_observer.rs"),
@@ -5494,12 +5634,14 @@ mod tests {
                 });
             }
         ";
-        let violations = scan_source_release_supervision_placement(
-            source,
-            Path::new("worker/exit_observer.rs"),
-        )
-        .expect("parses");
-        assert_eq!(violations.len(), 1, "expected exactly one violation (the 2nd call); got {violations:?}");
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected exactly one violation (the 2nd call); got {violations:?}"
+        );
         assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
     }
 
@@ -5523,12 +5665,14 @@ mod tests {
                 });
             }
         ";
-        let violations = scan_source_release_supervision_placement(
-            source,
-            Path::new("worker/exit_observer.rs"),
-        )
-        .expect("parses");
-        assert_eq!(violations.len(), 1, "expected exactly one violation (inside match); got {violations:?}");
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert_eq!(
+            violations.len(),
+            1,
+            "expected exactly one violation (inside match); got {violations:?}"
+        );
         assert_eq!(violations[0].kind, BannedKind::ReleaseSupervisionMisplacement);
     }
 
@@ -5552,12 +5696,116 @@ mod tests {
                 });
             }
         ";
-        let violations = scan_source_release_supervision_placement(
-            source,
-            Path::new("worker/exit_observer.rs"),
-        )
-        .expect("parses");
-        assert!(violations.is_empty(), "the sanctioned shape must not be flagged; got {violations:?}");
+        let violations =
+            scan_source_release_supervision_placement(source, Path::new("worker/exit_observer.rs"))
+                .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "the sanctioned shape must not be flagged; got {violations:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // DWD-24 — the retired driver-start grammar guard.
+    // -----------------------------------------------------------------
+
+    /// A `StartRejected` variant carrying `reason: String` is rejected.
+    #[test]
+    fn retired_start_rejected_reason_string_field_is_flagged() {
+        let source = r"
+            pub enum DriverError {
+                StartRejected { driver: DriverType, reason: String },
+                NotFound { alloc: AllocationId },
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("traits/driver.rs"))
+                .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::RetiredDriverStartGrammar);
+    }
+
+    /// A `classify_driver_failure` function is rejected wherever it lives.
+    #[test]
+    fn retired_classify_driver_failure_fn_is_flagged() {
+        let source = r#"
+            pub(crate) fn classify_driver_failure(
+                text: &str,
+                _driver: DriverType,
+                _command: &str,
+            ) -> TransitionReason {
+                TransitionReason::DriverInternalError { detail: text.to_owned() }
+            }
+        "#;
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("action_shim/mod.rs"))
+                .expect("parses");
+        assert_eq!(violations.len(), 1, "expected exactly one violation; got {violations:?}");
+        assert_eq!(violations[0].kind, BannedKind::RetiredDriverStartGrammar);
+    }
+
+    /// A sim adapter's fault-injection script is NOT the retired port
+    /// boundary. Caught as a real false positive when the clause first
+    /// ran against the workspace: `SimDriver`'s `FailureMode` carries an
+    /// injected `reason` string, which is an input, not the
+    /// driver-to-shim contract.
+    #[test]
+    fn sim_fault_injection_reason_field_is_not_flagged() {
+        let source = r"
+            enum FailureMode {
+                StartRejected { reason: String },
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("adapters/driver.rs"))
+                .expect("parses");
+        assert!(
+            violations.is_empty(),
+            "an injected sim fault script must not be flagged; got {violations:?}",
+        );
+    }
+
+    /// The typed shape the amendment mandates is ACCEPTED — without this
+    /// the clause could pass by rejecting everything.
+    #[test]
+    fn typed_start_rejected_failure_envelope_is_accepted() {
+        let source = r"
+            pub enum DriverError {
+                StartRejected { failure: DriverStartFailure },
+                NotFound { alloc: AllocationId },
+            }
+
+            impl From<&DriverStartFailure> for TransitionReason {
+                fn from(failure: &DriverStartFailure) -> Self {
+                    match &failure.class {
+                        DriverStartClass::Unclassified { .. } => {
+                            Self::DriverInternalError { detail: failure.detail.clone() }
+                        }
+                    }
+                }
+            }
+        ";
+        let violations =
+            scan_source_retired_driver_start_grammar(source, Path::new("traits/driver.rs"))
+                .expect("parses");
+        assert!(violations.is_empty(), "the typed shape must not be flagged; got {violations:?}");
+    }
+
+    /// The REAL tree is clean — the clause is checked against production
+    /// source, not only against synthetic fixtures.
+    #[test]
+    fn real_workspace_has_no_retired_driver_start_grammar() {
+        for relative in [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+        ] {
+            let path = workspace_root().join(relative);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+            let violations = scan_source_retired_driver_start_grammar(&source, Path::new(relative))
+                .expect("parses");
+            assert!(violations.is_empty(), "{relative} must be clean; got {violations:?}");
+        }
     }
 
     /// (b) A `MemoryPlan` literal outside overdrive-core is flagged.

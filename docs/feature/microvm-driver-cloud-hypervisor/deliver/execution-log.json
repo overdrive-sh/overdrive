@@ -827,6 +827,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-16T14:57:55Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: DWD-24 requires replacing DriverError::StartRejected { driver, reason } with { failure }, but the strict owned-path boundary excludes required compile-time consumers: crates/overdrive-sim/src/adapters/driver.rs and six existing acceptance files under crates/overdrive-sim/tests/acceptance and crates/overdrive-control-plane/tests/acceptance. No compatible exact API can satisfy both shapes; compatibility surface is explicitly forbidden.",
+      "t": "2026-08-16T15:23:29Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: DWD-24/ADR-0082 requires VmProcess.diagnostics: VmmDiagnostics backed by one private shared bounded capture, but specifies only VmmDiagnostics::console_tail(). Cross-crate CloudHypervisorVmm and SimVmm cannot construct or populate private core storage without a new public constructor/writer capability. The exact signature is not approved; inventing it would violate CLAUDE.md and repeat the VmExitWatch::new precedent.",
+      "t": "2026-08-16T15:26:59Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T00:16:10Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T00:16:10Z"
     }
   ]
 }

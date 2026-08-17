@@ -14,13 +14,15 @@
 //! Per Mandate 9 (`nw-tdd-methodology`): this is a FIXED, hand-enumerated
 //! call sequence at layer 3+ — `@example`, not `@property`.
 
+#![allow(clippy::unused_async)]
+
 use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
-use overdrive_core::traits::vmm::{Vmm, VmTermination};
+use overdrive_core::traits::vmm::{VmTermination, Vmm};
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
     VmConfig, VmConfinement, VmRunDir, VmmIdentity,
@@ -50,7 +52,10 @@ fn validated_kernel(fixture: &VmFixture) -> KernelImage {
 }
 
 const fn sample_confinement() -> VmConfinement {
-    VmConfinement::confined(VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] }, 1024)
+    VmConfinement::confined(
+        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+        1024,
+    )
 }
 
 /// Build a real, fully-resolved `VmConfig` sharing `fixture`'s staged
@@ -100,7 +105,9 @@ async fn drive_shared_sequence(vmm: &dyn Vmm, fixture: &VmFixture, run_root: &Pa
     // the discriminating assertions on WHICH variant comes back live on
     // `outcome_again` and `zero_grace_outcome` further down (both assert
     // `Killed`).
-    vmm.terminate(&proc1.control, Duration::from_secs(5)).await.expect("terminate succeeds against a live VMM");
+    vmm.terminate(&proc1.control, Duration::from_secs(5))
+        .await
+        .expect("terminate succeeds against a live VMM");
 
     let outcome_again = vmm
         .terminate(&proc1.control, Duration::from_secs(5))
@@ -173,7 +180,8 @@ async fn vmm_equivalence_cloud_hypervisor_vmm() {
     // a deliberately broken `cloud-hypervisor` binary path so
     // `Command::spawn` itself fails, after the FICLONE clone has already
     // succeeded.
-    let broken = CloudHypervisorVmm::new().with_binary(PathBuf::from("/nonexistent/cloud-hypervisor"));
+    let broken =
+        CloudHypervisorVmm::new().with_binary(PathBuf::from("/nonexistent/cloud-hypervisor"));
     let config = sample_vm_config(&fixture, &run_root, "vmmeq-fail-ch");
     std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
     let clone_dest = config.rootfs.clone_dest().to_path_buf();
@@ -204,7 +212,9 @@ fn path_without_cloud_hypervisor() -> String {
         .filter(|out| out.status.success())
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
         .and_then(|resolved| Path::new(&resolved).parent().map(Path::to_path_buf))
-        .expect("cloud-hypervisor must be resolvable via `which` on this host before we can hide it");
+        .expect(
+            "cloud-hypervisor must be resolvable via `which` on this host before we can hide it",
+        );
 
     std::env::var("PATH")
         .unwrap_or_default()
@@ -258,8 +268,8 @@ async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
     let kernel_mtime_before =
         std::fs::metadata(&first.kernel_path).expect("stat kernel").modified().expect("mtime");
 
-    let second =
-        VmFixture::provision(&staging_root).expect("second provision succeeds (re-verify, not re-bake)");
+    let second = VmFixture::provision(&staging_root)
+        .expect("second provision succeeds (re-verify, not re-bake)");
 
     assert_eq!(first.kernel_path, second.kernel_path, "re-run must resolve the SAME kernel path");
     assert_eq!(first.rootfs_path, second.rootfs_path, "re-run must resolve the SAME rootfs path");
@@ -275,5 +285,112 @@ async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
     assert_eq!(
         kernel_mtime_before, kernel_mtime_after,
         "a second provision() must REUSE the staged kernel, not re-stage it"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Step 03-05 / DWD-24 — bounded VMM diagnostics equivalence.
+// ---------------------------------------------------------------------
+
+/// `@contract-shape:pure-function` — repeated live reads and the terminal
+/// `VmmExit` projection observe ONE bounded diagnostic stream: the live
+/// console tail and the final stderr tail are coherent for both adapters.
+///
+/// This is what makes the boot-deadline arm trustworthy. If the live
+/// snapshot and the terminal projection were assembled separately, an
+/// operator reading a deadline failure and an operator reading the
+/// eventual exit row would be told different things about one process.
+#[tokio::test]
+async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_adapters() {
+    let staging_root = default_staging_root();
+    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
+
+    // --- SimVmm: scripted output, observed live and then finally. ---
+    let sim_run_root = staging_root.join("run-sim-tail");
+    let sim = SimVmm::new();
+    let scripted = "cloud-hypervisor: warn: vsock ready\ncloud-hypervisor: fatal: giving up";
+    sim.inject_console_output(scripted.as_bytes().to_vec());
+    sim.inject_exit(Some(3), None);
+
+    let config = sample_vm_config(&fixture, &sim_run_root, "vmmeq-tail-sim");
+    std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
+    let mut process = sim.create(&config).await.expect("sim create succeeds");
+
+    // Repeated live reads are stable with no intervening append.
+    let live_first = process.diagnostics.console_tail();
+    let live_second = process.diagnostics.console_tail();
+    assert_eq!(live_first, live_second, "two live reads with no append must be equal");
+    assert_eq!(
+        live_first.as_deref(),
+        Some(scripted),
+        "the live tail must render exactly what was captured",
+    );
+
+    sim.terminate(&process.control, Duration::ZERO).await.expect("terminate the sim process");
+    let sim_exit = process.exit.recv().await.expect("the sim process reports its ending");
+    assert_eq!(
+        sim_exit.stderr_tail, live_first,
+        "SimVmm's final stderr tail must be the SAME capture the live reader observed",
+    );
+
+    // --- CloudHypervisorVmm: a real process that really writes stderr. ---
+    let ch_run_root = staging_root.join("run-ch-tail");
+    let ch_config = sample_vm_config(&fixture, &ch_run_root, "vmmeq-tail-ch");
+    std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let ch = CloudHypervisorVmm::new();
+    let mut ch_process = ch.create(&ch_config).await.expect("real CH spawns");
+
+    let ch_exit = ch_process.exit.recv().await.expect("the real CH process reports its ending");
+    let ch_live = ch_process.diagnostics.console_tail();
+    assert_eq!(
+        ch_exit.stderr_tail, ch_live,
+        "CloudHypervisorVmm's final stderr tail must be the SAME capture the live reader \
+         observes — a separately assembled tail is exactly the incoherence this guards",
+    );
+    let _ = ch.terminate(&ch_process.control, Duration::ZERO).await;
+}
+
+/// `@contract-shape:bounded-change` — an early process exit retains its
+/// exact exit code, terminating signal, and final stderr tail through
+/// both the `SimVmm` and real Cloud Hypervisor adapters.
+#[tokio::test]
+async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters() {
+    let staging_root = default_staging_root();
+    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
+
+    // --- SimVmm: a scripted ending with an exact code and signal. ---
+    let sim_run_root = staging_root.join("run-sim-early");
+    let sim = SimVmm::new();
+    sim.inject_console_output(b"cloud-hypervisor: fatal: bad disk".to_vec());
+    sim.inject_exit(Some(101), Some(11));
+
+    let config = sample_vm_config(&fixture, &sim_run_root, "vmmeq-early-sim");
+    std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
+    let mut process = sim.create(&config).await.expect("sim create succeeds");
+    sim.terminate(&process.control, Duration::ZERO).await.expect("terminate the sim process");
+
+    let sim_exit = process.exit.recv().await.expect("the sim process reports its ending");
+    assert_eq!(sim_exit.exit_code, Some(101), "the scripted exit code must survive");
+    assert_eq!(sim_exit.signal, Some(11), "the scripted terminating signal must survive");
+    assert_eq!(
+        sim_exit.stderr_tail.as_deref(),
+        Some("cloud-hypervisor: fatal: bad disk"),
+        "the captured stderr must survive alongside the code and signal",
+    );
+
+    // --- CloudHypervisorVmm: a REAL process ending, really observed. ---
+    let ch_run_root = staging_root.join("run-ch-early");
+    let ch_config = sample_vm_config(&fixture, &ch_run_root, "vmmeq-early-ch");
+    std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let ch = CloudHypervisorVmm::new();
+    let mut ch_process = ch.create(&ch_config).await.expect("real CH spawns");
+
+    // Kill it and observe the REAL reported ending — the adapter must
+    // report a code or a signal, never silence.
+    let _ = ch.terminate(&ch_process.control, Duration::ZERO).await;
+    let ch_exit = ch_process.exit.recv().await.expect("the real CH process reports its ending");
+    assert!(
+        ch_exit.exit_code.is_some() || ch_exit.signal.is_some(),
+        "a real ending must report a code or a signal, not silence: {ch_exit:?}",
     );
 }

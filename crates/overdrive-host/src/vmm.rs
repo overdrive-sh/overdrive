@@ -30,7 +30,7 @@
 //! encapsulated inside `rustix`), which is what lets this crate call it
 //! under its crate-wide `#![forbid(unsafe_code)]`.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
@@ -40,13 +40,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_core::traits::driver::STDERR_TAIL_LINES;
 use overdrive_core::traits::vmm::{
-    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmError, VmmExit, VmmProbeError,
+    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
+    VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::{DiskAttachment, VmConfig};
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{ChildStderr, Command};
 use tokio::sync::{Notify, oneshot, watch};
 
@@ -156,6 +156,25 @@ impl CloudHypervisorVmm {
         self.run_dir_root = dir;
         self
     }
+
+    /// Every path a spawn of [`Self::binary`] would have consulted — the
+    /// evidence `VmmError::HypervisorAbsent` carries so an operator can
+    /// see WHERE the platform looked, not merely that it failed.
+    ///
+    /// An absolute (or explicitly-relative) binary resolves to exactly
+    /// itself; a bare name resolves against each `PATH` entry in order,
+    /// which is precisely what `execvp` would have walked.
+    fn searched_binary_paths(&self) -> Vec<String> {
+        if self.binary.components().count() > 1 {
+            return vec![self.binary.display().to_string()];
+        }
+        let Some(path_var) = std::env::var_os("PATH") else {
+            return vec![self.binary.display().to_string()];
+        };
+        std::env::split_paths(&path_var)
+            .map(|dir| dir.join(&self.binary).display().to_string())
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -181,7 +200,18 @@ impl Vmm for CloudHypervisorVmm {
     async fn create(&self, config: &VmConfig) -> Result<VmProcess> {
         let master = config.rootfs.master().to_path_buf();
         let clone_dest = config.rootfs.clone_dest().to_path_buf();
-        tokio::task::spawn_blocking(move || ficlone_rootfs(&master, &clone_dest))
+        // A configured master that has disappeared is the ONE absence
+        // class here. Every other staging failure stays `Io` / `Create`
+        // and reaches the driver's explicit unknown fallback (§D1.1), so
+        // a permission error is never relabelled as "not found".
+        if let Err(source) = tokio::fs::metadata(&master).await
+            && source.kind() == io::ErrorKind::NotFound
+        {
+            return Err(VmmError::RootfsNotFound { path: master, source });
+        }
+        let clone_master = master.clone();
+        let clone_target = clone_dest.clone();
+        tokio::task::spawn_blocking(move || ficlone_rootfs(&clone_master, &clone_target))
             .await
             .map_err(|join_err| VmmError::create(format!("FICLONE task panicked: {join_err}")))??;
 
@@ -223,10 +253,14 @@ impl Vmm for CloudHypervisorVmm {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
                 let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
-                return Err(VmmError::create(format!(
-                    "spawning {} failed: {source}",
-                    self.binary.display()
-                )));
+                // §D1.1: `HypervisorAbsent` is spawn-time `NotFound` ONLY,
+                // and names every path searched. A permission error or any
+                // other spawn failure stays `Create`.
+                return Err(if source.kind() == io::ErrorKind::NotFound {
+                    VmmError::HypervisorAbsent { searched: self.searched_binary_paths(), source }
+                } else {
+                    VmmError::create(format!("spawning {} failed: {source}", self.binary.display()))
+                });
             }
         };
 
@@ -243,12 +277,16 @@ impl Vmm for CloudHypervisorVmm {
         let state = Arc::new(VmProcessState { kill_now: Notify::new(), outcome: outcome_tx });
         self.live.lock().insert(pid, Arc::clone(&state));
 
+        // ONE bounded capture per process (§D1.1). The reaper task holds
+        // the sole writer; `VmProcess` carries only the reader, so the
+        // live deadline snapshot and the final `VmmExit.stderr_tail` are
+        // reads of the SAME bytes and cannot disagree.
+        let (diagnostics, writer) = VmmDiagnostics::new();
+        let exit_diagnostics = diagnostics.clone();
+
         let live = Arc::clone(&self.live);
         tokio::spawn(async move {
-            let ring: Arc<Mutex<VecDeque<String>>> =
-                Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
-            let reader_handle =
-                stderr_pipe.map(|pipe| spawn_stderr_tail_reader(pipe, Arc::clone(&ring)));
+            let reader_handle = stderr_pipe.map(|pipe| spawn_stderr_capture(pipe, writer));
 
             let status = tokio::select! {
                 biased;
@@ -268,16 +306,10 @@ impl Vmm for CloudHypervisorVmm {
                 }
                 drop(handle);
             }
-            let stderr_tail = {
-                let guard = ring.lock();
-                if guard.is_empty() {
-                    None
-                } else {
-                    Some(guard.iter().cloned().collect::<Vec<_>>().join("\n"))
-                }
-            };
 
-            let vmm_exit = classify_exit(status, stderr_tail);
+            // The final tail is read back off the capture AFTER the last
+            // append, never separately assembled.
+            let vmm_exit = classify_exit(status, exit_diagnostics.console_tail());
             let _ = exit_tx.send(vmm_exit.clone());
             let _ = state.outcome.send(Some(vmm_exit));
             live.lock().remove(&pid);
@@ -286,6 +318,7 @@ impl Vmm for CloudHypervisorVmm {
         Ok(VmProcess {
             control: VmControl { pid, api_socket: config.run_dir.api_socket() },
             exit: VmExitWatch::new(exit_rx),
+            diagnostics,
         })
     }
 
@@ -374,23 +407,27 @@ fn classify_exit(
     }
 }
 
-/// Spawn a task that reads `pipe` line-by-line into a shared bounded ring
-/// (capacity [`STDERR_TAIL_LINES`]) — mirrors
-/// `overdrive_worker::driver::spawn_stderr_tail_reader` exactly (same
-/// non-blocking-snapshot rationale: a daemonised grandchild holding the
-/// pipe open must never make `terminate`/the reaper hang waiting for EOF).
-fn spawn_stderr_tail_reader(
+/// Spawn the SOLE capture task for this process: reads `pipe` in raw byte
+/// chunks and appends them to the one bounded capture behind `writer`
+/// (§D1.1). Byte-oriented rather than line-oriented because a guest that
+/// dies mid-line still printed the bytes that explain WHY — a line reader
+/// would silently discard the unterminated final line, which is exactly
+/// the output a boot-deadline snapshot most needs.
+///
+/// Same non-blocking rationale as before: a daemonised grandchild holding
+/// the pipe open must never make `terminate` / the reaper hang on EOF.
+fn spawn_stderr_capture(
     pipe: ChildStderr,
-    ring: Arc<Mutex<VecDeque<String>>>,
+    writer: VmmDiagnosticsWriter,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut reader = BufReader::new(pipe).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let mut guard = ring.lock();
-            if guard.len() == STDERR_TAIL_LINES {
-                guard.pop_front();
+        let mut reader = BufReader::new(pipe);
+        let mut chunk = [0u8; 4096];
+        loop {
+            match reader.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(read) => writer.append(&chunk[..read]),
             }
-            guard.push_back(line);
         }
     })
 }

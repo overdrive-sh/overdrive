@@ -29,6 +29,9 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::traits::driver::{
+    ConfinementControl, DriverStartClass, DriverStartFailure, ExecStartFailure, VmStartFailure,
+};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
 
 /// Structured reason for a lifecycle transition.
@@ -57,6 +60,22 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
 /// | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
 /// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+/// | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
+/// | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
+/// | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
+/// | `VmKernelNotFound { path }` | cause | `VmDriver` — per-allocation kernel preflight | yes |
+/// | `VmRootfsNotFound { path }` | cause | `VmDriver` — per-allocation rootfs preflight | yes |
+/// | `VmHypervisorAbsent { searched }` | cause | `VmDriver` — `VmmError::HypervisorAbsent` join | yes |
+/// | `VmBootDeadlineExceeded { deadline_ms, console_tail }` | cause | `VmDriver` — boot-race deadline arm | yes |
+/// | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
+/// | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
+/// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
+/// | `VmVolumeSourceNotFound { path }` | cause | `VmDriver` — volume preflight | NO — Slice 04 |
+/// | `VmStorageDaemonAbsent { searched }` | cause | `VmDriver` — storage-sidecar spawn | NO — Slice 04 |
+/// | `VmGuestMountFailed { target, detail }` | cause | `VmDriver` — guest-reported mount failure | NO — Slice 04 |
+/// | `VmStorageSocketTimeout { socket, waited_ms }` | cause | `VmDriver` — storage-sidecar readiness wait | NO — Slice 04 |
+/// | `VmStorageSandboxUnavailable { requested, detail }` | cause | `VmDriver` — storage-sidecar sandbox mode | NO — Slice 04 |
+/// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 ///
 /// **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
 /// subscription not yet present in the Phase 1 `ExecDriver`; it is defined
@@ -239,6 +258,152 @@ pub enum TransitionReason {
     /// never populates `ExitEvent::oom`, so every Exec crash falls
     /// through unchanged to `WorkloadCrashedImmediately`.
     VmOutOfMemory { limit_bytes: u64, oom_kill_count: u64 },
+
+    // -----------------------------------------------------------------
+    // VM start-time cause classes (ADR-0083 §D5 rows 1-12 and 15).
+    //
+    // **Additive position**: appended after `VmOutOfMemory` to keep every
+    // pre-existing rkyv discriminant stable, per this enum's own
+    // additive-position discipline. Row 15 therefore sits physically
+    // after the mid-run rows 13/14 despite being a start-time cause.
+    //
+    // Every variant below is reachable ONLY through the total, pure
+    // `From<&DriverStartFailure>` conversion — the action shim performs no
+    // parsing, prefix matching, or path extraction to select one.
+    // -----------------------------------------------------------------
+    /// The configured guest kernel was absent when this allocation
+    /// started. Distinct from `VmRootfsNotFound`: they name different
+    /// artifacts and never share a variant.
+    VmKernelNotFound { path: String },
+    /// The configured rootfs master was absent when this allocation
+    /// started. `path` is the exact configured master path.
+    VmRootfsNotFound { path: String },
+    /// No hypervisor binary was found; `searched` names every path tried.
+    VmHypervisorAbsent { searched: Vec<String> },
+    /// The guest never signalled READY within `deadline_ms`.
+    /// `console_tail` is the live capture snapshot taken at the moment the
+    /// deadline fired — never text derived from the timeout itself.
+    VmBootDeadlineExceeded { deadline_ms: u64, console_tail: Option<String> },
+    /// The configured kernel exists but is not loadable on this arch.
+    /// `detail` is the validator's own stable format diagnosis, so the
+    /// operator never reads the hypervisor's misleading size-cap wording.
+    VmKernelFormatUnsupported { path: String, arch: String, detail: String },
+    /// The host could not supply one confinement control.
+    VmConfinementUnavailable { control: ConfinementControl, detail: String },
+    /// The hypervisor process ended before the guest reported READY. The
+    /// hypervisor's own stderr stays in the row's verbatim `detail`.
+    VmGuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> },
+    /// A declared volume's source path was absent at start.
+    VmVolumeSourceNotFound { path: String },
+    /// No storage daemon binary was found; `searched` names every path.
+    VmStorageDaemonAbsent { searched: Vec<String> },
+    /// The guest reported a start-time mount failure.
+    VmGuestMountFailed { target: String, detail: String },
+    /// The storage daemon's socket never became ready within `waited_ms`.
+    VmStorageSocketTimeout { socket: String, waited_ms: u64 },
+    /// The requested storage-daemon sandbox mode is unavailable here.
+    VmStorageSandboxUnavailable { requested: String, detail: String },
+    /// READY arrived but the guest command could not be delivered before
+    /// the allocation reached Running.
+    VmGuestCommandDispatchFailed { detail: String },
+}
+
+/// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
+///
+/// This is the ONLY driver-start path into [`TransitionReason`]. It is
+/// exhaustive over the closed `DriverStartClass` / `ExecStartFailure` /
+/// `VmStartFailure` variant set, so adding a class without extending this
+/// conversion fails at COMPILE time rather than silently degrading an
+/// operator's diagnosis to the unknown fallback.
+///
+/// Two properties this impl exists to guarantee:
+///
+/// 1. **Wording independence.** Only `failure.class` selects the variant.
+///    `failure.detail` is copied into the unknown fallback and nowhere
+///    else, so changing a driver's diagnostic prose can never change the
+///    operator-visible cause.
+/// 2. **Exec parity.** Every pre-existing Exec classification maps to the
+///    identical `TransitionReason` payload it produced under the retired
+///    text grammar — `kind == "exec_format_error"` for ENOEXEC, and
+///    `"create_scope"` / `"place_pid"` for cgroup setup.
+impl From<&DriverStartFailure> for TransitionReason {
+    fn from(failure: &DriverStartFailure) -> Self {
+        match &failure.class {
+            DriverStartClass::Exec(exec) => match exec {
+                ExecStartFailure::BinaryNotFound { path } => {
+                    Self::ExecBinaryNotFound { path: path.clone() }
+                }
+                ExecStartFailure::PermissionDenied { path } => {
+                    Self::ExecPermissionDenied { path: path.clone() }
+                }
+                ExecStartFailure::BinaryInvalid { path, kind } => {
+                    Self::ExecBinaryInvalid { path: path.clone(), kind: kind.clone() }
+                }
+                ExecStartFailure::CgroupSetupFailed { kind, source } => {
+                    Self::CgroupSetupFailed { kind: kind.clone(), source: source.clone() }
+                }
+            },
+            DriverStartClass::Vm(vm) => match vm {
+                VmStartFailure::KernelNotFound { path } => {
+                    Self::VmKernelNotFound { path: path.clone() }
+                }
+                VmStartFailure::RootfsNotFound { path } => {
+                    Self::VmRootfsNotFound { path: path.clone() }
+                }
+                VmStartFailure::HypervisorAbsent { searched } => {
+                    Self::VmHypervisorAbsent { searched: searched.clone() }
+                }
+                VmStartFailure::BootDeadlineExceeded { deadline_ms, console_tail } => {
+                    Self::VmBootDeadlineExceeded {
+                        deadline_ms: *deadline_ms,
+                        console_tail: console_tail.clone(),
+                    }
+                }
+                VmStartFailure::KernelFormatUnsupported { path, arch, detail } => {
+                    Self::VmKernelFormatUnsupported {
+                        path: path.clone(),
+                        arch: arch.clone(),
+                        detail: detail.clone(),
+                    }
+                }
+                VmStartFailure::ConfinementUnavailable { control, detail } => {
+                    Self::VmConfinementUnavailable { control: *control, detail: detail.clone() }
+                }
+                VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal } => {
+                    Self::VmGuestExitUnreported {
+                        vmm_exit_code: *vmm_exit_code,
+                        vmm_signal: *vmm_signal,
+                    }
+                }
+                VmStartFailure::VolumeSourceNotFound { path } => {
+                    Self::VmVolumeSourceNotFound { path: path.clone() }
+                }
+                VmStartFailure::StorageDaemonAbsent { searched } => {
+                    Self::VmStorageDaemonAbsent { searched: searched.clone() }
+                }
+                VmStartFailure::GuestMountFailed { target, detail } => {
+                    Self::VmGuestMountFailed { target: target.clone(), detail: detail.clone() }
+                }
+                VmStartFailure::StorageSocketTimeout { socket, waited_ms } => {
+                    Self::VmStorageSocketTimeout { socket: socket.clone(), waited_ms: *waited_ms }
+                }
+                VmStartFailure::StorageSandboxUnavailable { requested, detail } => {
+                    Self::VmStorageSandboxUnavailable {
+                        requested: requested.clone(),
+                        detail: detail.clone(),
+                    }
+                }
+                VmStartFailure::GuestCommandDispatchFailed { detail } => {
+                    Self::VmGuestCommandDispatchFailed { detail: detail.clone() }
+                }
+            },
+            // The ONLY unknown fallback, for both an unmapped driver and
+            // an unmapped VMM failure. Carries the diagnostic verbatim.
+            DriverStartClass::Unclassified { .. } => {
+                Self::DriverInternalError { detail: failure.detail.clone() }
+            }
+        }
+    }
 }
 
 /// Initiator of a `Stopped` transition.
@@ -847,6 +1012,45 @@ impl TransitionReason {
             Self::VmOutOfMemory { limit_bytes, oom_kill_count } => {
                 format!("VM out of memory (limit {limit_bytes}b, oom_kill_count {oom_kill_count})")
             }
+
+            // VM start-time cause classes (ADR-0083 §D5 rows 1-12, 15).
+            Self::VmKernelNotFound { path } => format!("VM kernel not found: {path}"),
+            Self::VmRootfsNotFound { path } => format!("VM rootfs not found: {path}"),
+            Self::VmHypervisorAbsent { searched } => {
+                format!("VM hypervisor not found (searched: {})", searched.join(", "))
+            }
+            Self::VmBootDeadlineExceeded { deadline_ms, .. } => {
+                format!("VM boot deadline exceeded after {deadline_ms}ms with no guest beacon")
+            }
+            Self::VmKernelFormatUnsupported { path, arch, detail } => {
+                format!("VM kernel format unsupported on {arch} ({detail}): {path}")
+            }
+            Self::VmConfinementUnavailable { control, detail } => {
+                format!("VM confinement control {control} unavailable: {detail}")
+            }
+            Self::VmGuestExitUnreported { vmm_exit_code, vmm_signal } => {
+                format!(
+                    "VM hypervisor exited before the guest reported ready (exit {vmm_exit_code:?}, signal {vmm_signal:?})",
+                )
+            }
+            Self::VmVolumeSourceNotFound { path } => {
+                format!("VM volume source not found: {path}")
+            }
+            Self::VmStorageDaemonAbsent { searched } => {
+                format!("VM storage daemon not found (searched: {})", searched.join(", "))
+            }
+            Self::VmGuestMountFailed { target, detail } => {
+                format!("VM guest mount failed at {target}: {detail}")
+            }
+            Self::VmStorageSocketTimeout { socket, waited_ms } => {
+                format!("VM storage socket {socket} not ready after {waited_ms}ms")
+            }
+            Self::VmStorageSandboxUnavailable { requested, detail } => {
+                format!("VM storage sandbox {requested} unavailable: {detail}")
+            }
+            Self::VmGuestCommandDispatchFailed { detail } => {
+                format!("VM guest command dispatch failed: {detail}")
+            }
         }
     }
 
@@ -881,7 +1085,21 @@ impl TransitionReason {
             | Self::WorkloadCrashedImmediately { .. }
             | Self::MtlsInterceptInstallFailed { .. }
             | Self::WorkloadNetnsProvisionFailed { .. }
-            | Self::VmOutOfMemory { .. } => true,
+            | Self::VmOutOfMemory { .. }
+            // VM start-time cause classes — every one is a failure.
+            | Self::VmKernelNotFound { .. }
+            | Self::VmRootfsNotFound { .. }
+            | Self::VmHypervisorAbsent { .. }
+            | Self::VmBootDeadlineExceeded { .. }
+            | Self::VmKernelFormatUnsupported { .. }
+            | Self::VmConfinementUnavailable { .. }
+            | Self::VmGuestExitUnreported { .. }
+            | Self::VmVolumeSourceNotFound { .. }
+            | Self::VmStorageDaemonAbsent { .. }
+            | Self::VmGuestMountFailed { .. }
+            | Self::VmStorageSocketTimeout { .. }
+            | Self::VmStorageSandboxUnavailable { .. }
+            | Self::VmGuestCommandDispatchFailed { .. } => true,
         }
     }
 }

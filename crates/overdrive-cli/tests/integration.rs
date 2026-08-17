@@ -129,6 +129,10 @@ mod integration {
     // the start of their own RED phase, per `distill/wave-decisions.md`
     // DWD-06.
     mod vm_walking_skeleton;
+    // Step 03-05 / S-VM-34 (DWD-24) — real serve + deploy + workload
+    // describe proof for an absent configured rootfs, including exact cause
+    // vocabulary and zero leaked allocation-scoped VM resources.
+    mod vm_boot_failure_vocabulary;
 
     // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
     // §105a, GH #42) — the Tier-3 suite for the `VmReclamation`

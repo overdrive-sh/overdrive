@@ -299,6 +299,10 @@ mod acceptance {
     mod terminal_error_and_workflow_status_roundtrip;
 
     // microvm-driver-cloud-hypervisor (GH #42) — DISTILL RED scaffolds.
+    // Step 03-05 (DWD-24) — the closed typed driver-start failure envelope,
+    // exact Exec parity, wording-independent cause selection, and the sole
+    // unclassified fallback to the existing DriverInternalError.
+    mod driver_start_failure;
     // Pure-function `@property` scenarios only; every Tier-3 real-VMM
     // scenario lives in `overdrive-cli`'s `tests/integration/` (see
     // `vm_walking_skeleton.rs`), and the JobEnvelope V1->V2 schema-

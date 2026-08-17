@@ -83,8 +83,12 @@ impl Driver for ScriptedDriver {
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(4242) })
             }
             StartOutcome::Reject => Err(DriverError::StartRejected {
-                reason: "scripted rejection: no capacity".to_owned(),
-                driver: DriverType::Exec,
+                failure: overdrive_core::traits::driver::DriverStartFailure {
+                    class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
+                        driver: DriverType::Exec,
+                    },
+                    detail: "scripted rejection: no capacity".to_owned(),
+                },
             }),
         }
     }

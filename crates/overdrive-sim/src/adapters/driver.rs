@@ -28,8 +28,8 @@ use tokio::sync::{mpsc, oneshot};
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExitEvent, ExitKind, Resources,
 };
 
 use crate::adapters::clock::SimClock;
@@ -347,7 +347,15 @@ impl Driver for SimDriver {
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         let failure = self.failure_mode.lock().clone();
         if let Some(FailureMode::StartRejected { reason }) = failure {
-            return Err(DriverError::StartRejected { driver: self.r#type, reason });
+            // A scripted rejection carries no driver-specific structured
+            // cause, so it takes the ONE unknown fallback and preserves the
+            // injected text verbatim as the diagnostic (DWD-24).
+            return Err(DriverError::StartRejected {
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Unclassified { driver: self.r#type },
+                    detail: reason,
+                },
+            });
         }
 
         self.allocations.lock().insert(spec.alloc.clone(), AllocationState::Running);

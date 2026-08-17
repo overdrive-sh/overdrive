@@ -98,10 +98,203 @@ impl FromStr for DriverType {
 #[error("unknown driver type: {0:?}")]
 pub struct UnknownDriverType(pub String);
 
+/// A driver's structured refusal to start one allocation (ADR-0032 §4,
+/// ADR-0083 §D5, DWD-24).
+///
+/// The driver authors both halves where the cause is still known:
+/// [`Self::class`] is the machine-readable cause the operator surface
+/// renders, and [`Self::detail`] is the verbatim low-level diagnostic the
+/// row keeps for audit. They are independent channels — **no consumer may
+/// recover the class by inspecting `detail`'s spelling**, which is exactly
+/// the text-reparsing coupling this type retires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverStartFailure {
+    /// The typed cause. Encodes the driver family, so an independent
+    /// `driver` field cannot contradict it.
+    pub class: DriverStartClass,
+    /// Non-empty verbatim low-level diagnostic, preserved verbatim as
+    /// `AllocStatusRow.detail`. NEVER a classification input.
+    pub detail: String,
+}
+
+impl Display for DriverStartFailure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "driver {} rejected start: {}", self.class.driver_type(), self.detail)
+    }
+}
+
+/// The driver-family discriminator for a [`DriverStartFailure`]
+/// (ADR-0083 §D5). There is deliberately no sibling `driver` field: the
+/// family rides the variant, so a `driver: Exec` / VM-cause mismatch is
+/// unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DriverStartClass {
+    Exec(ExecStartFailure),
+    Vm(VmStartFailure),
+    /// A failure with no named class for this driver family. Converts to
+    /// the pre-existing `DriverInternalError`; the ONLY unknown fallback.
+    Unclassified {
+        driver: DriverType,
+    },
+}
+
+impl DriverStartClass {
+    /// The driver family this cause belongs to.
+    #[must_use]
+    pub const fn driver_type(&self) -> DriverType {
+        match self {
+            Self::Exec(_) => DriverType::Exec,
+            Self::Vm(_) => DriverType::Vm,
+            Self::Unclassified { driver } => *driver,
+        }
+    }
+}
+
+/// `ExecDriver`'s named start causes (ADR-0083 §D5). Selected from
+/// structured OS error identity — never from `Display` text. Every payload
+/// string is the pre-existing live operator surface and does not change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecStartFailure {
+    /// `spawn(2)` returned ENOENT.
+    BinaryNotFound { path: String },
+    /// `spawn(2)` returned EACCES.
+    PermissionDenied { path: String },
+    /// `spawn(2)` returned ENOEXEC / ELIBBAD. `kind` is the canonical
+    /// `"exec_format_error"` for the ENOEXEC case.
+    BinaryInvalid { path: String, kind: String },
+    /// Cgroup setup failed. `kind` is `"create_scope"` or `"place_pid"`.
+    CgroupSetupFailed { kind: String, source: String },
+}
+
+/// `VmDriver`'s named start causes (ADR-0083 §D5 rows 1-12 and 15). Not
+/// every cause originates in `VmmError`: the kernel/rootfs preflight, the
+/// boot deadline, `VmmExit`, guest control, and the storage-sidecar facts
+/// are `VmDriver`'s own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum VmStartFailure {
+    /// The configured kernel path was absent at this allocation's start.
+    KernelNotFound {
+        path: String,
+    },
+    /// The configured rootfs master was absent at this allocation's start.
+    RootfsNotFound {
+        path: String,
+    },
+    /// The hypervisor binary could not be found — spawn-time `NotFound`
+    /// only; names every path searched.
+    HypervisorAbsent {
+        searched: Vec<String>,
+    },
+    /// The guest never signalled READY within the driver's boot deadline.
+    /// `console_tail` is the live `VmmDiagnostics` snapshot, never text
+    /// reconstructed from the timeout.
+    BootDeadlineExceeded {
+        deadline_ms: u64,
+        console_tail: Option<String>,
+    },
+    /// The configured kernel is present but not loadable on this arch.
+    /// `detail` is the validator's own stable format diagnosis — never the
+    /// hypervisor's misleading firmware-size-cap wording.
+    KernelFormatUnsupported {
+        path: String,
+        arch: String,
+        detail: String,
+    },
+    /// The host cannot supply one confinement control.
+    ConfinementUnavailable {
+        control: ConfinementControl,
+        detail: String,
+    },
+    /// The hypervisor process ended before the guest reported READY.
+    GuestExitUnreported {
+        vmm_exit_code: Option<i32>,
+        vmm_signal: Option<u8>,
+    },
+    VolumeSourceNotFound {
+        path: String,
+    },
+    StorageDaemonAbsent {
+        searched: Vec<String>,
+    },
+    GuestMountFailed {
+        target: String,
+        detail: String,
+    },
+    StorageSocketTimeout {
+        socket: String,
+        waited_ms: u64,
+    },
+    StorageSandboxUnavailable {
+        requested: String,
+        detail: String,
+    },
+    /// READY arrived but the guest command could not be delivered before
+    /// the allocation reached Running.
+    GuestCommandDispatchFailed {
+        detail: String,
+    },
+}
+
+/// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
+/// One cause class discriminated by a typed field — never a stringly-typed
+/// discriminant.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ConfinementControl {
+    Landlock,
+    Seccomp,
+    UidDrop,
+    RlimitFsize,
+    RlimitNofile,
+    KvmAccess,
+}
+
+impl ConfinementControl {
+    /// Canonical lowercase label — the enum owns its own vocabulary per
+    /// `.claude/rules/development.md` § "Label enums own their string
+    /// representation".
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Landlock => "landlock",
+            Self::Seccomp => "seccomp",
+            Self::UidDrop => "uid_drop",
+            Self::RlimitFsize => "rlimit_fsize",
+            Self::RlimitNofile => "rlimit_nofile",
+            Self::KvmAccess => "kvm_access",
+        }
+    }
+}
+
+impl Display for ConfinementControl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum DriverError {
-    #[error("driver {driver} rejected start: {reason}")]
-    StartRejected { driver: DriverType, reason: String },
+    #[error("{failure}")]
+    StartRejected { failure: DriverStartFailure },
     #[error("allocation {alloc} not found")]
     NotFound { alloc: AllocationId },
     #[error("driver I/O: {0}")]

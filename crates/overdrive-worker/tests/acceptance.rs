@@ -33,4 +33,8 @@ mod acceptance {
     // crafter-authored race-arm examples against SimVmm (ADR-0082
     // §§D3-D4).
     mod vm_driver_stop_totality;
+    // Step 03-05 (DWD-24) — typed VmDriver start-failure join: structured
+    // cause selection, verbatim diagnostics, early-exit/deadline facts,
+    // initial/restart parity, and allocation-scoped cleanup.
+    mod vm_driver_start_failure_contract;
 }

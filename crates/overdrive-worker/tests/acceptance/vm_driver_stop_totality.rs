@@ -74,9 +74,17 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
     std::fs::write(&rootfs_master, b"deterministic-fixture-rootfs-bytes")
         .expect("write synthetic master rootfs");
 
+    let kernel_path = tmp.path().join("vmlinuz");
     let mut header = vec![0u8; KERNEL_MAGIC_WINDOW];
     header[..4].copy_from_slice(b"\x7fELF");
-    let kernel = KernelImage::validate(tmp.path().join("vmlinuz"), HostArch::X86_64, &header)
+    // The bytes must really be on disk: `VmDriver::start` reopens the
+    // CONFIGURED kernel path and re-validates it for every allocation
+    // (ADR-0082 §D2.4), which is what makes a post-composition
+    // delete/replace observable as an allocation failure. A fixture that
+    // validated a path it never staged modelled a host whose kernel does
+    // not exist — previously unobservable, now correctly rejected.
+    std::fs::write(&kernel_path, &header).expect("stage the synthetic kernel image");
+    let kernel = KernelImage::validate(kernel_path, HostArch::X86_64, &header)
         .expect("synthetic ELF header validates");
 
     VmHostLayout {
@@ -846,7 +854,13 @@ impl Vmm for NeverSignalsExit {
         let (tx, rx) = tokio::sync::oneshot::channel();
         // Deliberate permanent leak — see the struct doc comment.
         std::mem::forget(tx);
-        Ok(VmProcess { control: process.control, exit: VmExitWatch::new(rx) })
+        // Carry the inner adapter's own diagnostics reader through: this
+        // decorator replaces only the exit watch, never the capture.
+        Ok(VmProcess {
+            control: process.control,
+            exit: VmExitWatch::new(rx),
+            diagnostics: process.diagnostics,
+        })
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {

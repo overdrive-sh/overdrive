@@ -28,7 +28,8 @@ use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverType,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverStartClass,
+    DriverStartFailure, DriverType,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, CrashFacts, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -179,74 +180,20 @@ pub struct LifecycleEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Classifier — DriverError::StartRejected.reason text → TransitionReason
+// The driver-start text grammar is RETIRED (DWD-24 / ADR-0032 §4
+// amendment 2026-08-16).
+//
+// `classify_driver_failure` and its `split_once_after_path` helper are
+// DELETED, not retained behind a compatibility path: drivers now author a
+// typed `DriverStartFailure`, and this layer applies the total, pure,
+// core-owned `TransitionReason::from(&failure)` conversion. The shim
+// performs no parsing, no prefix matching, no path extraction, and no
+// `DriverType` dispatch to select a cause.
+//
+// The structural guard against regression is the `xtask::dst_lint` clause
+// that rejects both a `reason: String` field on `StartRejected` and any
+// function named `classify_driver_failure` in this crate.
 // ---------------------------------------------------------------------------
-
-/// Classify a `DriverError::StartRejected.reason` text into a typed
-/// cause-class `TransitionReason` variant per ADR-0032 §4 Amendment
-/// 2026-04-30.
-///
-/// Prefix-match table (order matters — specific before generic):
-///
-/// | Prefix shape | Variant |
-/// |---|---|
-/// | `spawn <path>: No such file or directory (os error 2)` | `ExecBinaryNotFound { path }` |
-/// | `spawn <path>: Permission denied (os error 13)`        | `ExecPermissionDenied { path }` |
-/// | `spawn <path>: Exec format error (os error 8)`         | `ExecBinaryInvalid { path, kind: "exec_format_error" }` |
-/// | `cgroup setup failed: <kind>: <source>`                | `CgroupSetupFailed { kind, source }` |
-/// | (anything else)                                        | `DriverInternalError { detail }` |
-///
-/// `_driver` and `_command` are accepted for forward-compatibility —
-/// future phases may use the driver kind or the configured command to
-/// disambiguate ambiguous prefix matches. Phase 1's prefix table is
-/// `ExecDriver`-shaped only and the parameters are unused.
-#[must_use]
-pub(crate) fn classify_driver_failure(
-    text: &str,
-    _driver: DriverType,
-    _command: &str,
-) -> TransitionReason {
-    // `spawn <path>: No such file or directory (os error 2)`
-    if let Some(rest) = text.strip_prefix("spawn ")
-        && let Some((path, tail)) = split_once_after_path(rest)
-    {
-        if tail.starts_with("No such file or directory") {
-            return TransitionReason::ExecBinaryNotFound { path: path.to_owned() };
-        }
-        if tail.starts_with("Permission denied") {
-            return TransitionReason::ExecPermissionDenied { path: path.to_owned() };
-        }
-        if tail.starts_with("Exec format error") {
-            return TransitionReason::ExecBinaryInvalid {
-                path: path.to_owned(),
-                kind: "exec_format_error".to_owned(),
-            };
-        }
-    }
-
-    // `cgroup setup failed: <kind>: <source>`
-    if let Some(rest) = text.strip_prefix("cgroup setup failed: ")
-        && let Some(idx) = rest.find(": ")
-    {
-        let kind = &rest[..idx];
-        let source = &rest[idx + 2..];
-        return TransitionReason::CgroupSetupFailed {
-            kind: kind.to_owned(),
-            source: source.to_owned(),
-        };
-    }
-
-    // Unclassified — fall through to internal error with the verbatim text.
-    TransitionReason::DriverInternalError { detail: text.to_owned() }
-}
-
-/// Helper: given a string of the form `<path>: <tail>`, split into
-/// `(path, tail)` on the first `: `. Returns `None` if no separator is
-/// found.
-fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
-    let idx = s.find(": ")?;
-    Some((&s[..idx], &s[idx + 2..]))
-}
 
 // ---------------------------------------------------------------------------
 // dispatch — single async I/O boundary, with broadcast emit
@@ -1411,8 +1358,10 @@ async fn dispatch_single(
                 match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec).await,
                     None => Err(DriverError::StartRejected {
-                        driver: driver_kind,
-                        reason: format!("no {driver_kind} driver composed on this node"),
+                        failure: DriverStartFailure {
+                            class: DriverStartClass::Unclassified { driver: driver_kind },
+                            detail: format!("no {driver_kind} driver composed on this node"),
+                        },
                     }),
                 };
             // Per ADR-0032 §4 Amendment 2026-04-30: classify the
@@ -1434,16 +1383,17 @@ async fn dispatch_single(
                     None,
                     TransitionSource::Driver(driver_kind),
                 ),
-                Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
-                    let cause = classify_driver_failure(&reason_text, drv, spec.driver.command());
-                    (
-                        None,
-                        AllocState::Failed,
-                        Some(cause),
-                        Some(reason_text),
-                        TransitionSource::Driver(drv),
-                    )
-                }
+                // DWD-24: apply the total, core-owned conversion and
+                // preserve the driver's verbatim diagnostic separately.
+                // No parsing, no prefix table, no `DriverType` dispatch —
+                // the family comes from the typed class itself.
+                Err(DriverError::StartRejected { failure }) => (
+                    None,
+                    AllocState::Failed,
+                    Some(TransitionReason::from(&failure)),
+                    Some(failure.detail.clone()),
+                    TransitionSource::Driver(failure.class.driver_type()),
+                ),
                 Err(other) => return Err(ShimError::Driver(other)),
             };
             // Per ADR-0037 §4: StartAllocation is never a terminal
@@ -1664,8 +1614,10 @@ async fn dispatch_single(
                 match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec).await,
                     None => Err(DriverError::StartRejected {
-                        driver: driver_kind,
-                        reason: format!("no {driver_kind} driver composed on this node"),
+                        failure: DriverStartFailure {
+                            class: DriverStartClass::Unclassified { driver: driver_kind },
+                            detail: format!("no {driver_kind} driver composed on this node"),
+                        },
                     }),
                 };
             // Failed restart — same cause-class classification path
@@ -1685,16 +1637,17 @@ async fn dispatch_single(
                     None,
                     TransitionSource::Driver(driver_kind),
                 ),
-                Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
-                    let cause = classify_driver_failure(&reason_text, drv, spec.driver.command());
-                    (
-                        None,
-                        AllocState::Failed,
-                        Some(cause),
-                        Some(reason_text),
-                        TransitionSource::Driver(drv),
-                    )
-                }
+                // DWD-24: apply the total, core-owned conversion and
+                // preserve the driver's verbatim diagnostic separately.
+                // No parsing, no prefix table, no `DriverType` dispatch —
+                // the family comes from the typed class itself.
+                Err(DriverError::StartRejected { failure }) => (
+                    None,
+                    AllocState::Failed,
+                    Some(TransitionReason::from(&failure)),
+                    Some(failure.detail.clone()),
+                    TransitionSource::Driver(failure.class.driver_type()),
+                ),
                 Err(other) => return Err(ShimError::Driver(other)),
             };
             // Per ADR-0037 §4: RestartAllocation is never a terminal
@@ -2094,7 +2047,12 @@ async fn dispatch_single(
         // kill -> discard -> write -> four evaluations); a refused race
         // returns `Ok(())` by design, never a `ShimError`.
         Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
-            &alloc_id, host, obs, clock, writer_node, broker,
+            &alloc_id,
+            host,
+            obs,
+            clock,
+            writer_node,
+            broker,
         )
         .await
         .map_err(ShimError::from),
@@ -2496,8 +2454,8 @@ mod fail_closed_mtls_tests {
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::reconcilers::TickContext;
     use overdrive_core::traits::driver::{
-        AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType,
-        Resources,
+        AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+        DriverStartFailure, DriverType, Resources,
     };
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -2558,8 +2516,10 @@ mod fail_closed_mtls_tests {
 
         async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
             Err(DriverError::StartRejected {
-                reason: "RecordingDriver: start() is not on the fail-closed path".to_owned(),
-                driver: DriverType::Exec,
+                failure: DriverStartFailure {
+                    class: DriverStartClass::Unclassified { driver: DriverType::Exec },
+                    detail: "RecordingDriver: start() is not on the fail-closed path".to_owned(),
+                },
             })
         }
 

@@ -68,7 +68,8 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     );
 
     let staging_root = default_staging_root();
-    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions (real kernel/rootfs/CH)");
+    let fixture =
+        VmFixture::provision(&staging_root).expect("fixture provisions (real kernel/rootfs/CH)");
 
     let master = non_reflink_dir.join("master.img");
     std::fs::copy(&fixture.rootfs_path, &master).expect("stage a master rootfs copy onto tmpfs");
@@ -120,8 +121,11 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
                 "expected the typed FICLONE errno EOPNOTSUPP or EXDEV, got {errno:?} ({io_err})"
             );
         }
-        VmmError::Create { .. } => {
-            panic!("expected VmmError::Io carrying the typed FICLONE errno, got {err:?}")
+        // Every other variant is wrong here. A non-reflink target is an
+        // I/O capability failure, and must never be relabelled as an
+        // artifact-absence or confinement class (DWD-24 / §D1.1).
+        other => {
+            panic!("expected VmmError::Io carrying the typed FICLONE errno, got {other:?}")
         }
     }
 

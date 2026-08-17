@@ -29,13 +29,14 @@ use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, OomFacts, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
+    DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources, VmStartFailure,
 };
-use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm};
+use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit};
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
-    HostArch, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig, VmConfinement, VmRunDir,
+    HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
+    VmConfinement, VmRunDir,
 };
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -75,10 +76,103 @@ const GUEST_REPORT_DRAIN_MAX_YIELDS: u32 = 64;
 /// `overdrive_worker::driver::EXIT_CHANNEL_CAPACITY`.
 const EXIT_CHANNEL_CAPACITY: usize = 256;
 
-/// Construct a `DriverError::StartRejected` for the VM driver. Mirrors
+/// Construct a `DriverError::StartRejected` carrying a typed VM cause plus
+/// the verbatim low-level diagnostic (ADR-0083 §D5, DWD-24). Mirrors
 /// `overdrive_worker::driver::start_rejected`.
-fn start_rejected(reason: impl Into<String>) -> DriverError {
-    DriverError::StartRejected { driver: DriverType::Vm, reason: reason.into() }
+fn start_rejected(class: VmStartFailure, detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure { class: DriverStartClass::Vm(class), detail: detail.into() },
+    }
+}
+
+/// Construct a `DriverError::StartRejected` for a VM failure with no named
+/// class. Converts to the pre-existing `DriverInternalError` — the only
+/// unknown fallback, never a guessed named cause.
+fn start_rejected_unclassified(detail: impl Into<String>) -> DriverError {
+    DriverError::StartRejected {
+        failure: DriverStartFailure {
+            class: DriverStartClass::Unclassified { driver: DriverType::Vm },
+            detail: detail.into(),
+        },
+    }
+}
+
+/// The STRUCTURAL `VmmError -> DriverStartClass` join (ADR-0082 §D1.1).
+/// Selection is by VARIANT only — no `VmmError::Display` string selects a
+/// class, so changing an adapter's prose cannot change the operator's
+/// diagnosis. `@mandatory:mutation_target`.
+fn classify_vmm_error(err: &VmmError) -> DriverError {
+    match err {
+        VmmError::HypervisorAbsent { searched, source } => start_rejected(
+            VmStartFailure::HypervisorAbsent { searched: searched.clone() },
+            source.to_string(),
+        ),
+        VmmError::RootfsNotFound { path, source } => start_rejected(
+            VmStartFailure::RootfsNotFound { path: path.display().to_string() },
+            source.to_string(),
+        ),
+        VmmError::ConfinementUnavailable { control, detail } => start_rejected(
+            VmStartFailure::ConfinementUnavailable { control: *control, detail: detail.clone() },
+            detail.clone(),
+        ),
+        // A staging/spawn failure the adapter does not further distinguish,
+        // and a bare I/O failure, both reach the explicit unknown fallback
+        // rather than being guessed into an absence class.
+        VmmError::Create { detail } => start_rejected_unclassified(detail.clone()),
+        VmmError::Io { .. } => start_rejected_unclassified(err.to_string()),
+    }
+}
+
+/// Per-allocation kernel preflight (ADR-0082 §D2.4): reopen the CONFIGURED
+/// path, read the same bounded magic window, and re-run the pure validator
+/// immediately before `Vmm::create`.
+///
+/// This is what makes a post-composition delete/replace observable as an
+/// allocation failure instead of a process-startup refusal — the kernel was
+/// validated once at `serve` boot, and this proves it is still loadable for
+/// THIS start. Reads only; it never writes the path or its directory.
+async fn preflight_kernel(kernel: &KernelImage, arch: HostArch) -> Result<(), DriverError> {
+    let path = kernel.path().to_path_buf();
+    let header = match read_kernel_magic_window(&path).await {
+        Ok(header) => header,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(start_rejected(
+                VmStartFailure::KernelNotFound { path: path.display().to_string() },
+                err.to_string(),
+            ));
+        }
+        Err(err) => {
+            return Err(start_rejected_unclassified(format!(
+                "read kernel header {}: {err}",
+                path.display()
+            )));
+        }
+    };
+
+    // The validator's own diagnosis is the payload — never the
+    // hypervisor's misleading firmware-size-cap wording (C-7).
+    KernelImage::validate(path.clone(), arch, &header).map(|_| ()).map_err(|format_err| {
+        start_rejected(
+            VmStartFailure::KernelFormatUnsupported {
+                path: path.display().to_string(),
+                arch: arch.to_string(),
+                detail: format_err.to_string(),
+            },
+            format_err.to_string(),
+        )
+    })
+}
+
+/// Read at most [`KERNEL_MAGIC_WINDOW`] bytes off the configured kernel.
+/// A short file is not an error here — the pure validator decides whether
+/// the bytes it got constitute a loadable image.
+async fn read_kernel_magic_window(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+
+    let file = tokio::fs::File::open(path).await?;
+    let mut header = Vec::with_capacity(KERNEL_MAGIC_WINDOW);
+    file.take(KERNEL_MAGIC_WINDOW as u64).read_to_end(&mut header).await?;
+    Ok(header)
 }
 
 // ---------------------------------------------------------------------
@@ -364,7 +458,15 @@ impl VmDriver {
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
         if let Err(err) = tokio::fs::create_dir_all(run_dir.path()).await {
             self.release_claim(&spec.alloc);
-            return Err(start_rejected(format!("create VM run directory: {err}")));
+            return Err(start_rejected_unclassified(format!("create VM run directory: {err}")));
+        }
+
+        // Per-allocation artifact preflight (ADR-0082 §D2.4). Runs before
+        // anything else is provisioned so a deleted/replaced kernel costs
+        // no scope, no clone, and no hypervisor spawn.
+        if let Err(rejection) = preflight_kernel(&self.layout.kernel, self.layout.arch).await {
+            self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
+            return Err(rejection);
         }
 
         // The listener must exist before the guest can dial (SD-1
@@ -373,7 +475,7 @@ impl VmDriver {
             Ok(listener) => listener,
             Err(err) => {
                 self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
-                return Err(start_rejected(format!("bind beacon listener: {err}")));
+                return Err(start_rejected_unclassified(format!("bind beacon listener: {err}")));
             }
         };
 
@@ -381,7 +483,7 @@ impl VmDriver {
         if let Err(err) = self.cgroup_manager.create_workload_scope(&scope).await {
             drop(listener);
             self.cleanup_after_start_failure(&spec.alloc, &run_dir, None, None).await;
-            return Err(start_rejected(format!("create workload scope: {err}")));
+            return Err(start_rejected_unclassified(format!("create workload scope: {err}")));
         }
 
         // Resource limits: memory.max MUST be the reserve-padded
@@ -406,11 +508,22 @@ impl VmDriver {
             );
         }
 
+        // Per-allocation rootfs preflight. `NotFound` is the ONE arm that
+        // names the absence class; a permission error / EIO / broken mount
+        // is NOT relabelled as absence — it reaches the unknown fallback,
+        // so the operator never gets "file missing" remediation for a
+        // permissions problem (`.claude/rules/development.md` § Errors).
         let master_bytes = match tokio::fs::metadata(&self.layout.rootfs_master).await {
             Ok(meta) => meta.len(),
             Err(err) => {
                 self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
-                return Err(start_rejected(format!("stat rootfs master: {err}")));
+                let configured = self.layout.rootfs_master.display().to_string();
+                let detail = format!("stat rootfs master {configured}: {err}");
+                return Err(if err.kind() == std::io::ErrorKind::NotFound {
+                    start_rejected(VmStartFailure::RootfsNotFound { path: configured }, detail)
+                } else {
+                    start_rejected_unclassified(detail)
+                });
             }
         };
         let rootfs =
@@ -429,18 +542,18 @@ impl VmDriver {
             cgroup_scope: scope.clone(),
         };
 
-        let (control, exit) = match self.vmm.create(&config).await {
-            Ok(process) => (process.control, process.exit),
+        let (control, exit, diagnostics) = match self.vmm.create(&config).await {
+            Ok(process) => (process.control, process.exit, process.diagnostics),
             Err(err) => {
                 // §D6: `Vmm::create`'s own Err contract guarantees no
                 // process is left running and no clone is left on disk
                 // — nothing extra to remove here.
                 self.cleanup_after_start_failure(&spec.alloc, &run_dir, Some(&scope), None).await;
-                return Err(start_rejected(format!("Vmm::create: {err}")));
+                return Err(classify_vmm_error(&err));
             }
         };
 
-        Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, rootfs, memory })
+        Ok(ProvisionedVmm { run_dir, listener, scope, control, exit, diagnostics, rootfs, memory })
     }
 
     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
@@ -481,7 +594,11 @@ impl VmDriver {
 /// anonymous tuple.
 enum BootRaceOutcome {
     Beacon(std::io::Result<(BufReader<OwnedReadHalf>, OwnedWriteHalf)>),
-    VmmExited,
+    /// Carries the RESOLVED [`VmmExit`] rather than discarding it: the
+    /// hypervisor's exit code, terminating signal, and final stderr tail
+    /// are the operator-visible facts this arm exists to preserve
+    /// (ADR-0082 §D3). `None` means the watch closed without reporting.
+    VmmExited(Option<VmmExit>),
     Deadline,
 }
 
@@ -494,6 +611,10 @@ struct ProvisionedVmm {
     scope: CgroupPath,
     control: VmControl,
     exit: VmExitWatch,
+    /// READ handle on this process's bounded capture. The deadline arm
+    /// snapshots it live — the only way to report what an unresponsive
+    /// guest printed, since `VmmExit` exists only after termination.
+    diagnostics: VmmDiagnostics,
     rootfs: RootfsPlan,
     /// Carried through to the exit watcher so its post-mortem
     /// `CgroupAccounting::oom_kill_count` read (ADR-0082 §D8) can report
@@ -509,8 +630,16 @@ impl Driver for VmDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let ProvisionedVmm { run_dir, listener, scope, control, mut exit, rootfs, memory } =
-            self.provision_vmm(spec).await?;
+        let ProvisionedVmm {
+            run_dir,
+            listener,
+            scope,
+            control,
+            mut exit,
+            diagnostics,
+            rootfs,
+            memory,
+        } = self.provision_vmm(spec).await?;
 
         // Transition Starting -> Live (still §103 step 0's Held phase;
         // brief §105a.3's transition table treats Starting|Live as one
@@ -535,7 +664,7 @@ impl Driver for VmDriver {
                 Some((&control, &rootfs)),
             )
             .await;
-            return Err(start_rejected(format!("place VMM pid in scope: {err}")));
+            return Err(start_rejected_unclassified(format!("place VMM pid in scope: {err}")));
         }
 
         // The three-way race (ADR-0082 §D3). `biased;` is load-bearing:
@@ -545,7 +674,7 @@ impl Driver for VmDriver {
         let outcome = tokio::select! {
             biased;
             accepted = accept_ready(&listener) => BootRaceOutcome::Beacon(accepted),
-            _ended = exit.recv() => BootRaceOutcome::VmmExited,
+            ended = exit.recv() => BootRaceOutcome::VmmExited(ended),
             () = self.clock.sleep(VM_BOOT_DEADLINE) => BootRaceOutcome::Deadline,
         };
 
@@ -578,7 +707,11 @@ impl Driver for VmDriver {
                         Some((&control, &rootfs)),
                     )
                     .await;
-                    return Err(start_rejected(format!("EXEC write failed: {err}")));
+                    let detail = format!("EXEC write failed: {err}");
+                    return Err(start_rejected(
+                        VmStartFailure::GuestCommandDispatchFailed { detail: detail.clone() },
+                        detail,
+                    ));
                 }
 
                 {
@@ -608,9 +741,12 @@ impl Driver for VmDriver {
                     Some((&control, &rootfs)),
                 )
                 .await;
-                Err(start_rejected(format!("beacon accept failed: {err}")))
+                Err(start_rejected_unclassified(format!("beacon accept failed: {err}")))
             }
-            BootRaceOutcome::VmmExited => {
+            // The VMM's own ending is CONSUMED, never discarded: the exit
+            // code and terminating signal become the typed cause, and the
+            // hypervisor's captured stderr becomes the verbatim detail.
+            BootRaceOutcome::VmmExited(ended) => {
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -618,9 +754,31 @@ impl Driver for VmDriver {
                     Some((&control, &rootfs)),
                 )
                 .await;
-                Err(start_rejected("VMM exited before the guest signalled ready"))
+                let (vmm_exit_code, vmm_signal, detail) = match ended {
+                    Some(VmmExit { exit_code, signal, stderr_tail }) => (
+                        exit_code,
+                        signal,
+                        stderr_tail.unwrap_or_else(|| {
+                            "VMM exited before the guest signalled ready; no stderr captured"
+                                .to_owned()
+                        }),
+                    ),
+                    // A stable channel-closed diagnostic — the watch was
+                    // torn down before it observed an exit.
+                    None => {
+                        (None, None, "VMM exit watch closed before reporting an exit".to_owned())
+                    }
+                };
+                Err(start_rejected(
+                    VmStartFailure::GuestExitUnreported { vmm_exit_code, vmm_signal },
+                    detail,
+                ))
             }
+            // The live capture is snapshotted HERE, while the process is
+            // still up — `VmmExit` does not exist yet on this arm, so the
+            // tail can come from nowhere else.
             BootRaceOutcome::Deadline => {
+                let console_tail = diagnostics.console_tail();
                 self.cleanup_after_start_failure(
                     &spec.alloc,
                     &run_dir,
@@ -628,9 +786,18 @@ impl Driver for VmDriver {
                     Some((&control, &rootfs)),
                 )
                 .await;
-                Err(start_rejected(format!(
-                    "boot deadline ({VM_BOOT_DEADLINE:?}) elapsed with no beacon"
-                )))
+                let deadline_ms = u64::try_from(VM_BOOT_DEADLINE.as_millis()).unwrap_or(u64::MAX);
+                Err(start_rejected(
+                    VmStartFailure::BootDeadlineExceeded {
+                        deadline_ms,
+                        console_tail: console_tail.clone(),
+                    },
+                    console_tail.unwrap_or_else(|| {
+                        format!(
+                            "boot deadline ({deadline_ms}ms) elapsed with no beacon; no console output captured"
+                        )
+                    }),
+                ))
             }
         }
     }

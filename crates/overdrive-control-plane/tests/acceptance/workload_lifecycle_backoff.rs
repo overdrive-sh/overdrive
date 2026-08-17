@@ -65,8 +65,12 @@ impl Driver for AlwaysFailDriver {
             *n = n.saturating_add(1);
         }
         Err(DriverError::StartRejected {
-            driver: DriverType::Exec,
-            reason: "deliberate failure injection for backoff test".to_string(),
+            failure: overdrive_core::traits::driver::DriverStartFailure {
+                class: overdrive_core::traits::driver::DriverStartClass::Unclassified {
+                    driver: DriverType::Exec,
+                },
+                detail: "deliberate failure injection for backoff test".to_string(),
+            },
         })
     }
 

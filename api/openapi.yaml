@@ -682,6 +682,19 @@ components:
             type: string
         region:
           type: string
+    ConfinementControl:
+      type: string
+      description: |-
+        The confinement control a host failed to supply (ADR-0083 §D5 row 6).
+        One cause class discriminated by a typed field — never a stringly-typed
+        discriminant.
+      enum:
+      - landlock
+      - seccomp
+      - uid_drop
+      - rlimit_fsize
+      - rlimit_nofile
+      - kvm_access
     DescribeSpecOutput:
       oneOf:
       - allOf:
@@ -3217,6 +3230,307 @@ components:
             type: string
             enum:
             - vm_out_of_memory
+      - type: object
+        description: |-
+          The configured guest kernel was absent when this allocation
+          started. Distinct from `VmRootfsNotFound`: they name different
+          artifacts and never share a variant.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured guest kernel was absent when this allocation
+              started. Distinct from `VmRootfsNotFound`: they name different
+              artifacts and never share a variant.
+            required:
+            - path
+            properties:
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_kernel_not_found
+      - type: object
+        description: |-
+          The configured rootfs master was absent when this allocation
+          started. `path` is the exact configured master path.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured rootfs master was absent when this allocation
+              started. `path` is the exact configured master path.
+            required:
+            - path
+            properties:
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_rootfs_not_found
+      - type: object
+        description: No hypervisor binary was found; `searched` names every path tried.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: No hypervisor binary was found; `searched` names every path tried.
+            required:
+            - searched
+            properties:
+              searched:
+                type: array
+                items:
+                  type: string
+          kind:
+            type: string
+            enum:
+            - vm_hypervisor_absent
+      - type: object
+        description: |-
+          The guest never signalled READY within `deadline_ms`.
+          `console_tail` is the live capture snapshot taken at the moment the
+          deadline fired — never text derived from the timeout itself.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The guest never signalled READY within `deadline_ms`.
+              `console_tail` is the live capture snapshot taken at the moment the
+              deadline fired — never text derived from the timeout itself.
+            required:
+            - deadline_ms
+            properties:
+              console_tail:
+                type:
+                - string
+                - 'null'
+              deadline_ms:
+                type: integer
+                format: int64
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_boot_deadline_exceeded
+      - type: object
+        description: |-
+          The configured kernel exists but is not loadable on this arch.
+          `detail` is the validator's own stable format diagnosis, so the
+          operator never reads the hypervisor's misleading size-cap wording.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The configured kernel exists but is not loadable on this arch.
+              `detail` is the validator's own stable format diagnosis, so the
+              operator never reads the hypervisor's misleading size-cap wording.
+            required:
+            - path
+            - arch
+            - detail
+            properties:
+              arch:
+                type: string
+              detail:
+                type: string
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_kernel_format_unsupported
+      - type: object
+        description: The host could not supply one confinement control.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The host could not supply one confinement control.
+            required:
+            - control
+            - detail
+            properties:
+              control:
+                $ref: '#/components/schemas/ConfinementControl'
+              detail:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_confinement_unavailable
+      - type: object
+        description: |-
+          The hypervisor process ended before the guest reported READY. The
+          hypervisor's own stderr stays in the row's verbatim `detail`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              The hypervisor process ended before the guest reported READY. The
+              hypervisor's own stderr stays in the row's verbatim `detail`.
+            properties:
+              vmm_exit_code:
+                type:
+                - integer
+                - 'null'
+                format: int32
+              vmm_signal:
+                type:
+                - integer
+                - 'null'
+                format: int32
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_guest_exit_unreported
+      - type: object
+        description: A declared volume's source path was absent at start.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: A declared volume's source path was absent at start.
+            required:
+            - path
+            properties:
+              path:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_volume_source_not_found
+      - type: object
+        description: No storage daemon binary was found; `searched` names every path.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: No storage daemon binary was found; `searched` names every path.
+            required:
+            - searched
+            properties:
+              searched:
+                type: array
+                items:
+                  type: string
+          kind:
+            type: string
+            enum:
+            - vm_storage_daemon_absent
+      - type: object
+        description: The guest reported a start-time mount failure.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The guest reported a start-time mount failure.
+            required:
+            - target
+            - detail
+            properties:
+              detail:
+                type: string
+              target:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_guest_mount_failed
+      - type: object
+        description: The storage daemon's socket never became ready within `waited_ms`.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The storage daemon's socket never became ready within `waited_ms`.
+            required:
+            - socket
+            - waited_ms
+            properties:
+              socket:
+                type: string
+              waited_ms:
+                type: integer
+                format: int64
+                minimum: 0
+          kind:
+            type: string
+            enum:
+            - vm_storage_socket_timeout
+      - type: object
+        description: The requested storage-daemon sandbox mode is unavailable here.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The requested storage-daemon sandbox mode is unavailable here.
+            required:
+            - requested
+            - detail
+            properties:
+              detail:
+                type: string
+              requested:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_storage_sandbox_unavailable
+      - type: object
+        description: |-
+          READY arrived but the guest command could not be delivered before
+          the allocation reached Running.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              READY arrived but the guest command could not be delivered before
+              the allocation reached Running.
+            required:
+            - detail
+            properties:
+              detail:
+                type: string
+          kind:
+            type: string
+            enum:
+            - vm_guest_command_dispatch_failed
       description: |-
         Structured reason for a lifecycle transition.
 
@@ -3244,6 +3558,22 @@ components:
         | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | NO — emit site is GH #261 |
         | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
         | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
+        | `MtlsInterceptInstallFailed { stage, detail }` | cause | action shim — per-alloc mTLS intercept install failed fail-closed | yes |
+        | `WorkloadNetnsProvisionFailed { stage, detail }` | cause | action shim — per-workload netns/veth provision failed fail-closed | yes |
+        | `VmOutOfMemory { limit_bytes, oom_kill_count }` | cause | VM exit observer — post-mortem `memory.events` read | yes |
+        | `VmKernelNotFound { path }` | cause | `VmDriver` — per-allocation kernel preflight | yes |
+        | `VmRootfsNotFound { path }` | cause | `VmDriver` — per-allocation rootfs preflight | yes |
+        | `VmHypervisorAbsent { searched }` | cause | `VmDriver` — `VmmError::HypervisorAbsent` join | yes |
+        | `VmBootDeadlineExceeded { deadline_ms, console_tail }` | cause | `VmDriver` — boot-race deadline arm | yes |
+        | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
+        | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
+        | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
+        | `VmVolumeSourceNotFound { path }` | cause | `VmDriver` — volume preflight | NO — Slice 04 |
+        | `VmStorageDaemonAbsent { searched }` | cause | `VmDriver` — storage-sidecar spawn | NO — Slice 04 |
+        | `VmGuestMountFailed { target, detail }` | cause | `VmDriver` — guest-reported mount failure | NO — Slice 04 |
+        | `VmStorageSocketTimeout { socket, waited_ms }` | cause | `VmDriver` — storage-sidecar readiness wait | NO — Slice 04 |
+        | `VmStorageSandboxUnavailable { requested, detail }` | cause | `VmDriver` — storage-sidecar sandbox mode | NO — Slice 04 |
+        | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 
         **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
         subscription not yet present in the Phase 1 `ExecDriver`; it is defined
