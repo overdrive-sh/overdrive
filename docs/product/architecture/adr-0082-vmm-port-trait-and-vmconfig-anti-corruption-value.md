@@ -327,22 +327,87 @@ pub struct VmProcess {
     pub diagnostics: VmmDiagnostics,
 }
 
+/// READ handle. This is the ONLY diagnostics capability `VmProcess` carries,
+/// so nothing downstream of `Vmm::create` can mutate the capture.
+/// `Clone + Send + Sync`; every clone observes the ONE capture, never a copy.
 #[derive(Clone)]
-pub struct VmmDiagnostics { /* private shared bounded capture */ }
+pub struct VmmDiagnostics { /* Arc to the one bounded capture */ }
 
 impl VmmDiagnostics {
+    /// The ONLY constructor. Creates one bounded capture and returns its read
+    /// handle together with its single write handle. There is deliberately no
+    /// `Default` and no reader-only constructor: a reader with no writer is an
+    /// orphan capture that would silently report `None` forever.
+    pub fn new() -> (Self, VmmDiagnosticsWriter);
+
     /// Pure snapshot of the guest-console / VMM-stderr tail captured so far.
     pub fn console_tail(&self) -> Option<String>;
 }
+
+/// WRITE handle. `Send`, and deliberately NOT `Clone` and NOT `Sync` — exactly
+/// one capture task owns the append side of a given process's capture, so the
+/// retained order is that task's own sequential order.
+pub struct VmmDiagnosticsWriter { /* Arc to the SAME bounded capture */ }
+
+impl VmmDiagnosticsWriter {
+    /// Append raw captured bytes. `&self`, so the owning capture task may hold
+    /// it behind a shared reference. Infallible: output beyond the bound below
+    /// is dropped from the front, never surfaced as an error.
+    pub fn append(&self, chunk: &[u8]);
+}
 ```
+
+> **Amendment 2026-08-16 (03-05 implementation gap — the diagnostics WRITE
+> capability was unpinned).** The first draft of this subsection gave
+> `VmmDiagnostics` private storage and a read-only method, but
+> `CloudHypervisorVmm` (`overdrive-host`) and `SimVmm` (`overdrive-sim`) must
+> **construct and populate** that capture from another crate — so the type as
+> pinned was not implementable. This is the same omission class as the
+> 2026-08-14 `VmExitWatch::new` blessing recorded at § D2.4 (a private-field
+> return type whose only honest constructor was missing), and it is closed the
+> same way: by naming the exact surface rather than leaving a crafter to
+> improvise one (CLAUDE.md § *"Implement to the design"*). The reader/writer
+> split is the decision — `VmProcess` carries only the reader, so mutation is
+> unreachable from `VmDriver`, the § D3 boot race, and the exit watcher, while
+> the capture task holds the sole writer. **No generic mutable buffer is
+> exposed and no second storage exists.** Additive; no prior decision reversed.
+
+**Bounded-capture semantics (normative).**
+
+- One storage allocation per `VmmDiagnostics::new()` call. Both handles
+  reference that one capture: `console_tail()` never copies storage into a
+  parallel buffer, and the writer never owns a second one.
+- The capture retains at most the last `STDERR_TAIL_LINES` newline-terminated
+  lines plus the current unterminated trailing line, and independently at most
+  `VMM_CONSOLE_TAIL_MAX_BYTES` (8 KiB) of retained bytes. Whichever bound binds
+  first applies, and excess is dropped from the FRONT so the retained text is
+  always the most recent output. A single unterminated line therefore cannot
+  grow without limit.
+- `append` is byte-oriented and makes no framing assumption: a chunk may split a
+  line, carry many lines, or carry no newline at all. Line accounting is over
+  `b'\n'` only.
+- The capture stores BYTES, not `String`. `console_tail()` renders the retained
+  bytes with lossy UTF-8 conversion and trims one trailing newline; invalid
+  sequences become `U+FFFD`. A front-dropped multi-byte sequence degrades to
+  `U+FFFD` — never a panic, never a silent truncation of the whole tail.
+- `console_tail()` returns `None` **iff** nothing has been appended, and
+  `Some(_)` once any byte has been captured. Two calls with no intervening
+  `append` return equal values.
 
 `VmmDiagnostics::console_tail` is **pure-function / return-only**. Its closed
 universe is the adapter-owned bounded capture for this one `VmProcess`; it may
-read no file, socket, clock, process, or global. `VmmExit.stderr_tail` is the
-final snapshot of that same capture, never a separately assembled diagnostic.
-`CloudHypervisorVmm` and `SimVmm` must satisfy this live/final coherence in the
-existing VMM equivalence suite. This is compile-time-enforced at the port
-boundary because every successful `Vmm::create` must return the field.
+read no file, socket, clock, process, or global. `VmmDiagnosticsWriter::append`
+is **bounded-change**: its universe is exactly that same capture and its declared
+delta is "the retained tail advances", with no other observable effect.
+
+`VmmExit.stderr_tail` is the final snapshot of that same capture — the adapter's
+watcher performs its last `append`, then fills the exit value from
+`diagnostics.console_tail()` on a reader handle. It is never separately
+assembled, so a live deadline snapshot and the final exit tail cannot disagree
+about what the process emitted. `CloudHypervisorVmm` and `SimVmm` must satisfy
+this live/final coherence in the existing VMM equivalence suite. The field
+itself is compile-time-enforced at the port boundary because every successful
+`Vmm::create` must return it.
 
 `VmDriver` owns the total structural mapping because it is the boundary from
 `Vmm::create -> Result<_, VmmError>` to `Driver::start -> Result<_,
