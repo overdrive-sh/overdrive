@@ -1,0 +1,4 @@
+# the binary under test
+path:  /home/ubuntu/overdrive/target/debug/overdrive
+build: cargo build -p overdrive-cli --bin overdrive   (no --features)
+-rwxr-xr-x 2 root root 129225880 Aug 17 10:01 /home/ubuntu/overdrive/target/debug/overdrive

@@ -1,0 +1,7 @@
+arch:            x86_64
+kernel:          Linux 7.0.0-29-generic
+cgroup fstype:   cgroup2fs
+kvm:             /dev/kvm present
+cloud-hypervisor: /usr/local/bin/cloud-hypervisor -- cloud-hypervisor v53.0
+staged kernel:   /srv/vm/overdrive-testing/kernel (17295752 bytes)
+staged rootfs:   /srv/vm/overdrive-testing/rootfs.ext4 (67108864 bytes)

@@ -1,0 +1,13 @@
+expectation_id: "E06"
+date_utc: "2026-08-17T10:13:45Z"
+overdrive_sha: "655ac964fd485433fe13e16ee90d9ced1f7652a4"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "f5788127341d7a8ec1330eaf121de3b47ee081e6"
+harness_invocation: "verification/harness/run-expectation.sh E06"
+executed_in_lima: true
+runner_exit_code: "1"
+anchors: ["S-VM-39 (`docs/feature/microvm-driver-cloud-hypervisor/distill/test-scenarios.md:1269` — *"A VM job spec is accepted … Then the workload is accepted and scheduled / And its VM allocation reaches Running through the production VmDriver path"*)","roadmap 03-04 (`docs/feature/microvm-driver-cloud-hypervisor/deliver/roadmap.json:621` — criteria[0]: *"S-VM-39: a spec declaring [job] + [vm] is accepted and scheduled, and its VM allocation reaches Running through the production VmDriver path"*; `implementation_notes`: *"The test must drive real serve composition and the production VmDriver path; a parser-only acceptance assertion is insufficient"*)","K4 (`docs/feature/microvm-driver-cloud-hypervisor/feature-delta.md:2398` — *"The production composition path | can reach the VM driver via `overdrive serve` + `overdrive deploy` | binary: yes | … | A real `serve` + `deploy` boots a VM with **no** test-only wiring | Leading (the feature's pass/fail bar)"*; `:2427` assigns its measurement to *"A real `overdrive serve` + `overdrive deploy` in the verification catalogue — `verification/harness/run-expectation.sh` — Per slice — DELIVER / DEVOPS"*)","DWD-24 (`docs/feature/microvm-driver-cloud-hypervisor/distill/wave-decisions.md:2158` — *"S-VM-39/40 now prove the VM runs"*)","ADR-0083 (`docs/product/architecture/adr-0083-driver-registry-and-per-driver-allocation-payload.md` — *"the registry **is** the VM capability gate"*; § D2 composes `Vm` by discovering the hypervisor binary, and a node without it *"boots normally; `[vm]` deploys are rejected at admission naming the absent capability"*)","ADR-0082 (`docs/product/architecture/adr-0082-vmm-port-trait-and-vmconfig-anti-corruption-value.md` — the `Vmm` port trait and `VmConfig` anti-corruption value the `VmDriver` path is built on)"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

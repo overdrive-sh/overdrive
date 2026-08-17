@@ -1,0 +1,5 @@
+# Allocation-scoped VM resources that appeared during this run.
+# Captured after the 90s ceiling elapsed without Running.
+new_hypervisors=0
+new_run_dirs=0
+new_scopes=0

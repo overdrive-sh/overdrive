@@ -1,0 +1,28 @@
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-KbSUoq/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:00 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-KbSUoq/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-J5gHoe/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:05 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-J5gHoe/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-k2a1lr/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:09 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-k2a1lr/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped
+# staged guest command into the PRIVATE rootfs clone (master untouched)
+master: /srv/vm/overdrive-testing/rootfs.ext4
+clone:  /srv/vm/overdrive-testing/e06-uoycSx/rootfs.ext4
+total 2728
+-rwxr-xr-x 1 root root 2190672 Aug 17 10:14 busybox
+-rwxr-xr-x 1 root root  598768 Aug 17 09:27 init
+/srv/vm/overdrive-testing/e06-uoycSx/mnt/sbin/busybox: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=45585fa7eea9146e74dd8d23ba506c66b4d1b809, for GNU/Linux 3.2.0, stripped

@@ -1,0 +1,447 @@
+--- 2026-08-17T10:14:08Z ---
+0 allocations for workload e06-vm-job — the spec is committed, but no allocation has converged to a Running instance yet. If it stays at 0, check that a node is eligible to place it and the control plane's convergence loop is running.
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: In progress (no terminal yet)
+
+Attempt  State        Exit   Started              Duration  
+--- 2026-08-17T10:14:10Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:12Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:14Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:16Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:18Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:20Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:23Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:25Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:27Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:29Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:31Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:33Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:35Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:37Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:39Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:41Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:43Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:45Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:47Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:49Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:51Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:54Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:56Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:14:58Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:00Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:02Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:04Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:06Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:08Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:10Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:12Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:14Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:16Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:18Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:21Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:23Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:25Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:27Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:29Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:31Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:33Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:35Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:37Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node
+--- 2026-08-17T10:15:39Z ---
+Job 'e06-vm-job' (kind: Job)
+Spec digest: 0825be61fcea077d74c34cb1538e79cc3c248db48a05825a2ef9c50fdb4e43f4
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       —      (c=6,w=local)        —         
+
+    reason: driver internal error: no vm driver composed on this node
+    error: no vm driver composed on this node

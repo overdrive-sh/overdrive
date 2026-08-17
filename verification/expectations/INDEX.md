@@ -17,6 +17,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [O05](O05-ca-issued-certificates-audit-row/) | O | every issuance observable as an `issued_certificates` audit row via `workload describe`; no silent issuance | K1 | S-05-03/04, ADR-0063 D6, journey step 4 | `pending` |
 | [D01](D01-ca-root-key-never-plaintext-at-rest/) | D | root CA private key never plaintext at rest (byte-scan IntentStore) | K3 | S-02-02, ADR-0063 D2/D4, built-in-ca K3 | `pending` |
 | [O07](O07-liveness-probe-drives-restart/) | O | a declared liveness probe reaches the reconciler's restart decision | K1 | ADR-0080 D1/D2 + "A third instance", ADR-0055, ADR-0057 §132-134 | `pending` (captured; sub-claim 4 refuted) |
+| [E06](E06-vm-job-deploy-reaches-running/) | E | a `[job]` + `[vm]` deploy reaches Running through the production `VmDriver` path | K4 | S-VM-39, roadmap 03-04, K4, DWD-24, ADR-0083, ADR-0082 | `pending` (captured; sub-claims 2+3 refuted) |
 
 ## Feature coverage
 
@@ -97,6 +98,52 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
   require GitHub issues"). O07 deliberately does NOT claim ADR-0080 § D4
   (`Stable` stops only the startup role): no allocation reaches `Stable` here,
   since the startup probe is unreachable for the same reason.
+
+- **microvm-driver-cloud-hypervisor** (GH #42) — E06 (a `[job]` + `[vm]` deploy
+  reaches Running through the production `VmDriver` path — S-VM-39 seen from
+  outside the binary). This is the catalogue's **K4 instrument**, assigned by
+  name in `feature-delta.md:2427`: *"A real `overdrive serve` + `overdrive
+  deploy` in the verification catalogue — `verification/harness/run-expectation.sh`
+  — Per slice"*. K4 is the feature's binary pass/fail bar, and the surface no
+  in-process tier can cover: the Tier-3 witness
+  `job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running`
+  (`crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`,
+  step 03-04 / `4243e849`) does boot a real guest and reach Running, but it
+  reaches the composition root through the `integration-tests`-gated helper
+  `run_with_dataplane_and_vm_artifacts` — so by construction it cannot answer
+  whether an *operator* can get there.
+
+  **First expectation in this catalogue whose execution substrate is NOT
+  Lima.** It boots a real Cloud Hypervisor guest, which needs x86_64 + nested
+  KVM; Lima on Apple Silicon has neither, so the runner uses `cargo xtask metal
+  run --` against `$OVERDRIVE_METAL_TARGET` (`.claude/rules/testing.md` §
+  "bare-metal KVM box"). Consequence, stated rather than hidden:
+  `verification.yaml`'s `executed_in_lima` field records only that the runner
+  executed, so it reads `true` while nothing ran in Lima —
+  `evidence/execution_substrate.txt` is the accurate record for E06, and the
+  harness's Lima-shaped field should not be read as a Lima claim here.
+
+  Status `pending` — evidence IS captured (`runner_exit_code: 1`, SHA
+  `655ac964`, on an `x86_64` / `cloud-hypervisor v53.0` / `/dev/kvm` box that
+  is demonstrably capable). Sub-claims 0 and 1 pass — a `[job]` + `[vm]` deploy
+  is accepted (`Accepted.`, exit 0), confirming S-VM-38's `[service]` rejection
+  stayed scoped. Sub-claims 2 and 3 are **refuted**: across all 45 polls of the
+  90s ceiling the allocation sat at `Failed`, never `Running`, and no
+  allocation-scoped hypervisor process, run directory or cgroup scope was ever
+  created. The operator surface names the cause itself — *"driver internal
+  error: no vm driver composed on this node"*. That is **upstream of step
+  03-04**, not a regression in it: the `[vm]` boot-artifact seam
+  (`ServerConfig::vm_artifacts`) is `#[cfg(feature = "integration-tests")]` and
+  no argv, env var or config file reaches it, so the shipped binary composes no
+  `Vm` driver. The feature's own risk register predicted exactly this shape —
+  *"the mechanism composes but no production path reaches it"*
+  (`feature-delta.md:2445`). **K4 therefore reads not-yet-met**, and E06 is the
+  standing instrument that will read differently the moment an
+  operator-reachable artifact-supply path lands; the runner re-runs unchanged.
+  `partial`/`broken` are not claimed because the legend requires a linked issue
+  and issue creation needs explicit user approval (CLAUDE.md § "Deferrals
+  require GitHub issues"); the verdict is left to a different-fox adversarial
+  audit rather than self-stamped.
 
 ## Adding an expectation
 

@@ -1,0 +1,42 @@
+  [ok] metal box reachable
+  --- cargo xtask metal run -- bash -c <inner> ---
+  metal run exit: 0
+
+echo "INNER_DONE serve_status=$SERVE_STATUS deploy_rc=$DEPLOY_RC final_state=$FINAL_STATE"
+exit 0'`
+/usr/bin/ssh
+xtask: running metal sync (bootstrap.sh --sync-only)
+
+########## [bootstrap] preflight: ssh to ubuntu@<metal-host-redacted>
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/hanoi -> ubuntu@<metal-host-redacted>:/home/ubuntu/overdrive
+
+sent 118,988 bytes  received 6,232 bytes  50,088.00 bytes/sec
+total size is 53,540,578  speedup is 427.57
+
+########## [bootstrap] sync-only; skipping provisioning
+xtask: running ssh <metal> <cmd>
+sudo: preserving the entire environment is not supported, '-E' is ignored
+# building: cargo build -p overdrive-cli --bin overdrive (DEFAULT features)
+# phase A: serve with no KEK delivered (expect a fail-closed refusal)
+# phase A: serve refused to start, as designed (see serve_no_kek.log)
+# phase B: starting ephemeral production serve: bind=127.0.0.1:7643
+# serve ready (pid 330293)
+# deploy exit: 0
+INNER_DONE serve_status=ready deploy_rc=0 final_state=never-Running(last=Failed)
+  [ok] remote evidence retrieved
+  [PASS] no-leak: leaked_hypervisors=0
+  [PASS] no-leak: leaked_scopes=0
+  [PASS] no-leak: leaked_run_dirs=0
+  [PASS] no-leak: leaked_xdp=0
+  [PASS] sub-claim 0: the box is KVM-capable with cloud-hypervisor and staged artifacts
+  [PASS] sub-claim 1a: deploy exited 0
+  [PASS] 'deploy_vm_job.out' contains: Accepted.
+  [FAIL] sub-claim 2: the VM allocation never reached Running (final_state='never-Running(last=Failed)')
+         see describe_final.out / describe_poll_trail.out for the states observed
+  [FAIL] sub-claim 3: new_hypervisors=0 — no allocation-scoped VM resource appeared
+  [FAIL] sub-claim 3: new_run_dirs=0 — no allocation-scoped VM resource appeared
+  [FAIL] sub-claim 3: new_scopes=0 — no allocation-scoped VM resource appeared
+E06 sub-claim aggregate exit: 1

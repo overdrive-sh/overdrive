@@ -1,0 +1,1 @@
+?? verification/expectations/E06-vm-job-deploy-reaches-running/

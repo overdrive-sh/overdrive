@@ -1,0 +1,6 @@
+# Every line here must read 0. A non-zero count is residue this run left
+# on a SHARED box, and the host-side gate fails the run on it.
+leaked_hypervisors=0
+leaked_scopes=0
+leaked_run_dirs=0
+leaked_xdp=0
