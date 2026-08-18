@@ -3407,109 +3407,6 @@ components:
             enum:
             - vm_guest_exit_unreported
       - type: object
-        description: A declared volume's source path was absent at start.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: A declared volume's source path was absent at start.
-            required:
-            - path
-            properties:
-              path:
-                type: string
-          kind:
-            type: string
-            enum:
-            - vm_volume_source_not_found
-      - type: object
-        description: No storage daemon binary was found; `searched` names every path.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: No storage daemon binary was found; `searched` names every path.
-            required:
-            - searched
-            properties:
-              searched:
-                type: array
-                items:
-                  type: string
-          kind:
-            type: string
-            enum:
-            - vm_storage_daemon_absent
-      - type: object
-        description: The guest reported a start-time mount failure.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: The guest reported a start-time mount failure.
-            required:
-            - target
-            - detail
-            properties:
-              detail:
-                type: string
-              target:
-                type: string
-          kind:
-            type: string
-            enum:
-            - vm_guest_mount_failed
-      - type: object
-        description: The storage daemon's socket never became ready within `waited_ms`.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: The storage daemon's socket never became ready within `waited_ms`.
-            required:
-            - socket
-            - waited_ms
-            properties:
-              socket:
-                type: string
-              waited_ms:
-                type: integer
-                format: int64
-                minimum: 0
-          kind:
-            type: string
-            enum:
-            - vm_storage_socket_timeout
-      - type: object
-        description: The requested storage-daemon sandbox mode is unavailable here.
-        required:
-        - data
-        - kind
-        properties:
-          data:
-            type: object
-            description: The requested storage-daemon sandbox mode is unavailable here.
-            required:
-            - requested
-            - detail
-            properties:
-              detail:
-                type: string
-              requested:
-                type: string
-          kind:
-            type: string
-            enum:
-            - vm_storage_sandbox_unavailable
-      - type: object
         description: |-
           READY arrived but the guest command could not be delivered before
           the allocation reached Running.
@@ -3568,11 +3465,6 @@ components:
         | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
         | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
-        | `VmVolumeSourceNotFound { path }` | cause | `VmDriver` — volume preflight | NO — Slice 04 |
-        | `VmStorageDaemonAbsent { searched }` | cause | `VmDriver` — storage-sidecar spawn | NO — Slice 04 |
-        | `VmGuestMountFailed { target, detail }` | cause | `VmDriver` — guest-reported mount failure | NO — Slice 04 |
-        | `VmStorageSocketTimeout { socket, waited_ms }` | cause | `VmDriver` — storage-sidecar readiness wait | NO — Slice 04 |
-        | `VmStorageSandboxUnavailable { requested, detail }` | cause | `VmDriver` — storage-sidecar sandbox mode | NO — Slice 04 |
         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 
         **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
@@ -3701,10 +3593,11 @@ components:
       type: object
       description: |-
         Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
-        Mirrors the runtime `traits::driver::VmPayload` shape MINUS `volumes`
-        (deferred to Slice 04) — `String`, not `PathBuf`, for both `kernel`
-        and `rootfs` (serde-clean wire shape, matches `ExecInput.command`'s
-        shape).
+        Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
+        not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
+        shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+        of scope for this feature (deferred to overdrive-fs, GH #97 /
+        virtiofsd, GH #43).
       required:
       - command
       - args
