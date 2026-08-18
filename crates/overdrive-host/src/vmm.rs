@@ -254,6 +254,14 @@ impl Vmm for CloudHypervisorVmm {
         Ok(())
     }
 
+    // `create` is a cohesive VM-create sequence (clone -> kernel-copy -> confine
+    // -> spawn); prep is already extracted into ficlone_rootfs /
+    // prepare_confined_paths / hypervisor_present. The ordering across these
+    // steps is confinement-critical and review-validated (ADR-0082 4th
+    // amendment); splitting further to satisfy the line count would obscure that
+    // ordering. `#[allow]` (not `#[expect]`) because the `#[async_trait]`
+    // expansion makes `#[expect]` self-fulfilment unreliable here.
+    #[allow(clippy::too_many_lines)]
     async fn create(&self, config: &VmConfig) -> Result<VmProcess> {
         let master = config.rootfs.master().to_path_buf();
         let clone_dest = config.rootfs.clone_dest().to_path_buf();
