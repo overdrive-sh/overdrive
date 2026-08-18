@@ -158,4 +158,16 @@ mod integration {
     // exit_observer::classify / WorkloadLifecycle restart-backoff) is REUSED
     // UNCHANGED; this file drives it end-to-end.
     mod vm_stop_restart_and_vmm_death;
+
+    // microvm-driver-cloud-hypervisor step 06-01 (AC-17, US-VM-5, ADR-0082
+    // §D2, GH #42) — the Tier-3 guest-observed vCPU-sizing proof:
+    //   * S-VM-69 — cpu_milli=2000 boots a guest reporting exactly 2 online
+    //     CPUs, observed FROM INSIDE the guest (available_parallelism →
+    //     exit code → beacon EXIT), never against VmConfig.vcpus.
+    //   * S-VM-70 — cpu_milli=250 (sub-core) floors at 1 online CPU and the
+    //     allocation reaches Running.
+    // Gated behind `kvm-tests` (real Cloud Hypervisor boot). The pure
+    // derivation `@property` half (S-VM-73) lives in overdrive-core's
+    // `tests/acceptance/vm_resources_derivation.rs`.
+    mod vm_resources_sizing;
 }

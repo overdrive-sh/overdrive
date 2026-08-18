@@ -37,7 +37,7 @@ use overdrive_core::traits::vmm::{VmControl, VmExitWatch, Vmm, VmmDiagnostics, V
 use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir,
+    VmConfinement, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -337,7 +337,11 @@ pub struct VmHostLayout {
     /// token via [`KernelCmdline::platform_default`], and the
     /// architecture each allocation's kernel is validated against.
     pub arch: HostArch,
-    /// Fixed vcpu count for this slice's single VM template.
+    /// Composed per-node default vCPU count. **No longer read by
+    /// [`VmDriver::start`]** (step 06-01): the per-allocation vCPU count is
+    /// derived from that allocation's own `[resources] cpu_milli` via
+    /// [`vcpus_for`] — `[resources]` is the single source of truth for VM
+    /// size (US-VM-5). Composition sites still populate it.
     pub vcpus: NonZeroU8,
     /// The confined identity + rlimits Cloud Hypervisor is spawned
     /// under.
@@ -701,7 +705,12 @@ impl VmDriver {
             rootfs: rootfs.clone(),
             cmdline,
             memory,
-            vcpus: self.layout.vcpus,
+            // vCPUs are DERIVED per-allocation from this allocation's own
+            // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
+            // floor 1 (US-VM-5, ADR-0082 §D2). `[resources]` is the single
+            // source of truth for VM size; the per-node `layout.vcpus`
+            // template is no longer consulted here (step 06-01).
+            vcpus: vcpus_for(spec.resources.cpu_milli),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),
             netns: spec.netns.clone(),

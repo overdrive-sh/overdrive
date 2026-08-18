@@ -313,7 +313,16 @@ mod acceptance {
     // `.claude/rules/development.md` § "rkyv schema evolution" ·
     // `distill/wave-decisions.md` DWD-06.
     mod vm_config_pure_functions; // S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20 — ADR-0082 §D2
+
+    // microvm-driver-cloud-hypervisor step 06-01 (US-VM-5, ADR-0082 §D2
+    // "derived from cpu_milli, floor 1", GH #42) — S-VM-73: the pure
+    // vCPU-derivation `@property` `@tier1`. `vcpus_for` is
+    // `max(1, round_up(cpu_milli / 1000))` saturated into `NonZeroU8`, for
+    // any u32 including 0 and non-multiples of 1000; never zero. The
+    // Tier-3 guest-observed halves (S-VM-69/70) live in overdrive-cli's
+    // `tests/integration/vm_resources_sizing.rs`.
     mod vm_reclamation_plan_purity; // S-VM-31, S-VM-32, S-VM-92 — ADR-0083 §D7, brief §105a
+    mod vm_resources_derivation; // S-VM-73 — ADR-0082 §D2 / US-VM-5
     mod vm_spec_driver_table_dispatch; // S-VM-06, S-VM-07 — ADR-0083 §D4
 
     // `CgroupPath` RELOCATED here from `overdrive-worker/tests/acceptance/`

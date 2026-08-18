@@ -518,6 +518,22 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_stop_restart_and_vmm_death)'
 test-group = 'host-kernel-shared'
 
+# microvm-driver-cloud-hypervisor step 06-01 (AC-17 / US-VM-5, GH #42) —
+# `overdrive-cli`'s vm_resources_sizing.rs → `host-kernel-shared`, by
+# MODULE. Same shared-real-host-cgroupfs + sibling-serve-reclamation
+# reasons as the four vm_* modules above: each S-VM-69/70 test boots a
+# real `overdrive serve` against the machine-global
+# `/sys/fs/cgroup/overdrive.slice` tree and a real Cloud Hypervisor VM.
+# Measured, not inferred — under default concurrency the two tests raced
+# and a sibling serve's reclamation SIGKILL corrupted the guest exit into
+# `VmGuestExitUnreported { vmm_signal: Some(9) }` (the exact 0.82s artefact
+# the vm_stop_restart_and_vmm_death block above records). `#[serial(cgroup)]`
+# on every test is the same in-process-only guard that cannot reach across
+# nextest's per-test processes. Matched BY-MODULE, rename-proof.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(vm_resources_sizing)'
+test-group = 'host-kernel-shared'
+
 # S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
 # 02-07). Each trial spawns a real `/bin/bash` workload via the
 # production `ExecDriver` against the per-allocation cgroup hierarchy,

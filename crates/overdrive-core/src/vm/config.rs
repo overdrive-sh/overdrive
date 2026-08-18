@@ -347,6 +347,43 @@ pub const fn reserve_bytes(guest_bytes: u64) -> u64 {
 }
 
 // -----------------------------------------------------------------------
+// US-VM-5 — vCPU derivation from cpu_milli (ADR-0082 §D2 "derived from
+// cpu_milli, floor 1")
+// -----------------------------------------------------------------------
+
+/// Derive the guest vCPU count from an operator's `cpu_milli` figure:
+/// `max(1, round_up(cpu_milli / 1000))`, saturating at [`u8::MAX`] so the
+/// result always inhabits [`NonZeroU8`] (US-VM-5; ADR-0082 §D2 "derived
+/// from cpu_milli, floor 1"). This is the SOLE producer of
+/// [`VmConfig::vcpus`] from the `[resources]` block — `[resources]` is the
+/// single source of truth for VM size (the same figure GH #92's
+/// right-sizing reconciler reads).
+///
+/// A sub-core request rounds UP and floors at ONE: a VM cannot have a
+/// fractional or zero CPU, so the platform floors at one rather than
+/// refusing (a `cpu_milli` of 0 or 250 both yield exactly one vCPU). The
+/// `NonZeroU8` return type makes "never zero" a type invariant upheld at
+/// construction.
+///
+/// **PURE** — the derivation RULE is DESIGN's (US-VM-5 Technical Notes);
+/// this is the one rendering site and a mutation target (a mutant swapping
+/// round-up for round-down, dropping the floor, or removing the u8
+/// saturation must be killed — S-VM-73).
+#[must_use]
+pub fn vcpus_for(cpu_milli: u32) -> NonZeroU8 {
+    // round_up(cpu_milli / 1000): a sub-core or non-multiple request
+    // rounds UP to the next whole vCPU. `u32::div_ceil` never overflows.
+    let rounded_up = cpu_milli.div_ceil(1000);
+    // Saturate into u8 (round_up can exceed 255 — `NonZeroU8` caps at 255)
+    // via `try_from` so truncation is structurally impossible, then floor
+    // at 1 — no fractional/zero CPU — so the value always inhabits
+    // `NonZeroU8`.
+    let clamped = u8::try_from(rounded_up).unwrap_or(u8::MAX).max(1);
+    NonZeroU8::new(clamped)
+        .unwrap_or_else(|| unreachable!("clamped is floored at 1, so it is never zero"))
+}
+
+// -----------------------------------------------------------------------
 // D2.5 — VmConfinement: three variants, one reachable constructor
 // -----------------------------------------------------------------------
 
