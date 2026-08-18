@@ -248,6 +248,15 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // Kind-specific body (the workload-kind-discriminator [D4] design).
     render_kind_aware_body(&mut s, &out.snapshot);
 
+    // Declared memory figure (`[resources] memory_bytes`, the SSOT for VM
+    // and process size alike). Read from the per-row `resources` the
+    // describe handler populates from the workload intent for EVERY kind,
+    // so a VM (Job-kind) allocation reports the declared figure identically
+    // to a process allocation — one render surface, never a VM-only fork.
+    // Presence-guarded + additive, the same discipline as the sections
+    // below.
+    render_memory_section(&mut s, &out.snapshot.rows);
+
     // VIP + Listeners are the Service frontend — group them (VIP first).
     // The VIP rides on the snapshot envelope (`vip: Some(..)` for a
     // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
@@ -512,6 +521,41 @@ fn render_last_terminated_detail(
             let _ = writeln!(out, "      {line}");
         }
     }
+}
+
+/// Append the operator-facing `Memory:` line to `out` IFF the workload's
+/// first allocation row carries a non-zero declared `memory_bytes` — the
+/// `[resources] memory_bytes` single source of truth.
+///
+/// The describe handler populates every row's `resources` from the workload
+/// intent (`handlers` builds `ResourcesBody` from `job.resources` /
+/// `svc.resources` / `sched.job.resources`, kind-agnostically), so the
+/// figure is the SAME whether the allocation is backed by a process driver
+/// or the microVM driver: a VM allocation reports the declared memory the
+/// SAME way a process allocation does, through this one render surface —
+/// never a parallel VM-only renderer. Every row of a workload carries the
+/// same declared figure, so the first row is representative.
+///
+/// Presence-guarded + additive: omitted entirely at 0 allocations, or when
+/// the figure is unknown/zero (the `From<AllocStatusRow>` default before the
+/// handler overlays the intent-derived resources). Output for a workload
+/// with no resolved memory figure is byte-identical to before this section
+/// existed — the same discipline as `render_vip_section` /
+/// `render_listeners_section`. The label aligns to the offset-15 value
+/// column the other key-value lines use.
+fn render_memory_section(
+    out: &mut String,
+    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+) {
+    use std::fmt::Write as _;
+    let Some(row) = rows.first() else {
+        return;
+    };
+    let memory_bytes = row.resources.memory_bytes;
+    if memory_bytes == 0 {
+        return;
+    }
+    let _ = writeln!(out, "Memory:        {memory_bytes}");
 }
 
 /// Append the operator-facing `VIP:` line to `out` IFF the workload
