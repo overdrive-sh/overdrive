@@ -628,7 +628,11 @@ async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources(
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // ---- Rejected starts leak nothing. ----
-    assert_no_allocation_scoped_vm_residue(&alloc, &missing_rootfs, &server_tmp.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc,
+        &missing_rootfs,
+        &server_tmp.path().join("data"),
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -756,7 +760,11 @@ async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hyper
 
     // The preflight runs before anything is provisioned, so nothing was
     // spawned and nothing is left behind.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc,
+        &fixture.rootfs_path,
+        &server_tmp.path().join("data"),
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -879,7 +887,11 @@ async fn hypervisor_removed_after_composition_names_every_searched_path() {
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // A spawn that never happened leaves nothing behind.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc,
+        &fixture.rootfs_path,
+        &server_tmp.path().join("data"),
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -1153,7 +1165,11 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // The preflight rejects before any hypervisor is spawned.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc,
+        &fixture.rootfs_path,
+        &server_tmp.path().join("data"),
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -1368,7 +1384,11 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
     )
     .await;
     let alloc_a = assert_reads_as_unclassified_carrying(&out_a, UNMAPPED_DIAGNOSTIC_A);
-    assert_no_allocation_scoped_vm_residue(&alloc_a, &fixture.rootfs_path, &server_a.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc_a,
+        &fixture.rootfs_path,
+        &server_a.path().join("data"),
+    );
     handle_a.shutdown().await.expect("clean shutdown");
 
     // ---- (2) Wording independence: same class, different detail only. ----
@@ -1381,7 +1401,11 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
     )
     .await;
     let alloc_b = assert_reads_as_unclassified_carrying(&out_b, UNMAPPED_DIAGNOSTIC_B);
-    assert_no_allocation_scoped_vm_residue(&alloc_b, &fixture.rootfs_path, &server_b.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc_b,
+        &fixture.rootfs_path,
+        &server_b.path().join("data"),
+    );
     handle_b.shutdown().await.expect("clean shutdown");
 
     // The wording-independence claim, stated once as a fact rather than left
@@ -1456,7 +1480,11 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
         "the VMM's own diagnostic must not reach an operator whose start never got that far:\n\
          {rendered_c}",
     );
-    assert_no_allocation_scoped_vm_residue(&alloc_c, &fixture.rootfs_path, &server_c.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc_c,
+        &fixture.rootfs_path,
+        &server_c.path().join("data"),
+    );
     handle_c.shutdown().await.expect("clean shutdown");
 }
 
@@ -2219,7 +2247,11 @@ async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_err
     // A dispatch-time registry miss runs no driver, so it leaks nothing — and
     // this forecloses the reading that "Failed" here meant a start was
     // attempted and aborted.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
+    assert_no_allocation_scoped_vm_residue(
+        &alloc,
+        &fixture.rootfs_path,
+        &server_tmp.path().join("data"),
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -2458,6 +2490,22 @@ async fn unservable_rootfs_directory_names_the_directory_and_the_clone_requireme
         "S-VM-83: the node HAS a VM driver, so this must be a per-launch clone precondition \
          failure, not the registry-miss cause S-VM-82 owns:\n{rendered}",
     );
+
+    // AC-21, the label-reaches-the-operator half: the TYPED confinement cause
+    // must RENDER into the ratified operator vocabulary — not merely be
+    // absent-from-the-wrong-cause (the negative guard above). The verbatim
+    // EXDEV clone diagnostic (naming the VM data filesystem the master must
+    // live on) survives on the row's own channel...
+    let detail = row.error.clone().expect(
+        "the verbatim EXDEV clone diagnostic (naming the VM data filesystem) must be preserved",
+    );
+    // ...and `render::workload_describe` surfaces the ratified
+    // `VM confinement control uid_drop unavailable: {detail}` label, so the
+    // operator reads the typed cause and is sent to fix the master's filesystem
+    // placement, not the low-level diagnostic alone. (Same embeds-the-detail
+    // shape as S-VM-37's DriverInternalError, so the helper's integrity guard
+    // is satisfied structurally.)
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // The clone fails before the hypervisor is spawned, so all four residue
     // facts hold — the hypervisor never started unconfined.
