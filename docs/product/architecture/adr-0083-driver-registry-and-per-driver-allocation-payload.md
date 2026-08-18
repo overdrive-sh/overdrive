@@ -1147,12 +1147,16 @@ asserted in `vm_host_state_equivalence.rs` across both adapters.
 the VM run root; every per-launch clone in the image directory. Cross-reference
 against the allocation set.
 
-> **Corrected by the 2026-08-17 (second) amendment, § D7 correction item 1.**
-> There is no single "image directory" after § D3a — clones land beside the
-> operator's own `[vm] rootfs`. Read the third surface as: *every per-launch
-> clone reachable through the platform-owned clone index (§ D3f)*. The model is
-> still **three** surfaces; the index is the index *for* the third, not a
-> fourth.
+> **Corrected by the 2026-08-17 (second) amendment, § D7 correction item 1;
+> clone location further updated by the ADR-0082 fourth amendment (2026-08-18).**
+> There is no single "image directory" after § D3a. Per-launch clones land in the
+> platform-owned `clone_staging_dir(data_dir)` on the master's (VM data)
+> filesystem (ADR-0082 fourth amendment § (c-fix.2) — see § D3a's amendment note;
+> the earlier "beside the operator's own `[vm] rootfs`" location is stale). Read
+> the third surface as: *every per-launch clone reachable through the
+> platform-owned clone index (§ D3f)* — which is **unchanged**, because the index
+> records the clone's location wherever it lives. The model is still **three**
+> surfaces; the index is the index *for* the third, not a fourth.
 
 **The three surfaces are NOT equally attributable, and the diff must not treat
 them as if they were** *(a precision added at iteration 3; SD-1's prose leaves it
@@ -1863,6 +1867,52 @@ SHA `655ac964`, on a real x86_64 + KVM host).
 
 ### D3a — The artifact contract is per-allocation. There is no node-level artifact configuration.
 
+> **Amended 2026-08-18 (ADR-0082 fourth amendment — the confined-artifact-access
+> mechanism relocates the per-launch clone; this is the companion § D3a follow-up
+> the fourth amendment surfaced for ratification, now ratified, implemented and
+> reviewed in DELIVER phase 04).** The prose below — and in §§ D3b, D3f, D3i and
+> the § D7 correction — originally said the per-launch rootfs clone lands **beside
+> the operator's own `[vm] rootfs`, on the master's own filesystem, wherever the
+> operator placed it**. That is now stale. Per
+> [ADR-0082](adr-0082-vmm-port-trait-and-vmconfig-anti-corruption-value.md)'s
+> **fourth amendment (§ (c-fix.2), the governing decision)**, the FICLONE clone
+> lands in a **platform-owned staging root** —
+> `overdrive_core::vm::config::clone_staging_dir(data_dir)`, a sibling of
+> `clone_index_dir(data_dir)`, threaded through `VmHostLayout` as a new
+> `clone_staging_dir: PathBuf` field — and **never** in the operator's directory
+> (reaching a clone under the operator's dir would require `o+x` traverse on an
+> operator-owned path, the DAC regression B1 the amendment reverses). Two
+> consequences carry into § D3a:
+>
+> 1. **The rootfs master must reside on the VM data filesystem** — the same
+>    filesystem as `clone_staging_dir(data_dir)` — because FICLONE is an
+>    intra-filesystem ioctl (C-1, no full-copy fallback) and must stage the clone
+>    on the master's own filesystem. On the appliance the one durable data
+>    partition holds BYO artifacts by construction, so the constraint only
+>    excludes a master an operator placed on a separate mount. The **kernel**
+>    carries no such constraint — it is COPIED (not cloned) into the per-alloc run
+>    dir, so it may live on any host path.
+> 2. **A foreign-filesystem master fails closed.** `Vmm::create` observes the
+>    cross-device FICLONE as `EXDEV` and returns
+>    `VmmError::ConfinementUnavailable { control: UidDrop, .. }` (→
+>    `TransitionReason::VmConfinementUnavailable { control: UidDrop }`) — never a
+>    silent operator-dir widening, never a C-1-defeating full-copy fallback.
+>
+> **The clone-index reclamation semantics of §§ D3f–D3h are UNCHANGED by this
+> relocation.** `RootfsPlan::clone_dest` moves only its *parent directory* (from
+> `parent(master)` to the platform staging root) while KEEPING its existing
+> `.overdrive-vm-rootfs-<alloc>.img` filename; the `index_link` symlink still
+> points at `clone_dest` **wherever it lives**, so `observe_clones`,
+> `discard_artifacts`, the create-before / remove-after ordering, and
+> `RealVmHostState`'s alloc-from-filename attribution all behave exactly as
+> §§ D3f–D3h document. Only the clone's parent directory moved — the
+> record-don't-re-derive design (§ D3f) is precisely what makes that move
+> invisible to reclamation; it is the very "future move of `clone_dest`" that
+> design was built to tolerate (§ Consequences, *"A future move of `clone_dest`
+> cannot silently blind the sweep"*). `RootfsPlan::for_alloc` gains the staging
+> root (`for_alloc(master, master_bytes, alloc, staging_dir, index_dir)`); no
+> `Vmm` method, no reconciler `State` / `View`, and no `Action` variant changes.
+
 `VmDriver::start` resolves the kernel and rootfs for an allocation **from that
 allocation's own `VmPayload`**, never from node state:
 
@@ -1962,6 +2012,21 @@ node's own staging area, and still catches the node-level misconfiguration it
 was written for); it simply stops being a proof about operator-chosen paths.
 This is the honest residual of making artifacts per-allocation, and it is a
 real narrowing of what boot-time Earned Trust buys.
+
+> **Corrected by the ADR-0082 fourth amendment (2026-08-18); see § D3a's
+> amendment note.** This paragraph's location premise — "the clone destination is
+> the master's own parent directory, wherever the operator's `[vm] rootfs` lives,
+> possibly on a different filesystem" — is stale. Under the fourth amendment
+> (§ (c-fix.2)) `RootfsPlan` stages the clone in the platform-owned
+> `clone_staging_dir(data_dir)` on the master's filesystem, and the master **must**
+> reside on the VM data filesystem: a foreign-filesystem master fails closed as
+> `ConfinementUnavailable { control: UidDrop }` (FICLONE `EXDEV`) rather than
+> staging anywhere. The *narrowing* this paragraph names still holds in substance
+> — a boot `probe_reflink` on `image_dir` is not itself a proof about the
+> clone-staging filesystem — but its *location* is now the platform staging root,
+> not an operator-chosen directory; S-VM-94 / step 03-08's sixth criterion
+> continue to own the same-filesystem non-reflink fail-closed, with the EXDEV
+> foreign-filesystem fail-closed layered on top.
 
 Two consequences follow, and neither is deferred silently:
 
@@ -2227,8 +2292,17 @@ location must therefore be **recorded at the moment the platform chooses it**.
 <index_dir>/.overdrive-vm-rootfs-<alloc>.img  ->  <clone_dest>
 ```
 
-- The **clone itself does not move.** It stays beside the master, so FICLONE
-  stays intra-filesystem and § D3b is untouched.
+- The **clone's parent directory moves once — and the index tolerates it by
+  design.** As authored (2026-08-17) the clone stayed beside the master; the
+  ADR-0082 fourth amendment (2026-08-18, § (c-fix.2) — see § D3a's amendment note)
+  relocates its parent to the platform-owned `clone_staging_dir(data_dir)` on the
+  master's (VM data) filesystem, so FICLONE stays intra-filesystem and § D3b's
+  intra-filesystem premise is preserved (the master must reside on the VM data
+  filesystem; a foreign-filesystem master fails closed). This relocation is
+  exactly the "future move of `clone_dest`" this section is built to absorb:
+  `index_link` records `clone_dest` **wherever it lives** rather than re-deriving
+  it, so the filename-carries-attribution rule, the ordering contract, and the
+  crash table below are **unchanged** — only the parent directory differs.
 - The **filename is the existing one**, so `RealVmHostState`'s `CLONE_PREFIX` /
   `CLONE_SUFFIX` parsing and its `AllocationId::from_str` recovery are
   unchanged. Attribution still rides on the filename, exactly as ADR-0082 § D2
@@ -2356,17 +2430,22 @@ it was being fed an empty surface.
   deliberately carries **no** path *string* — the symlink is a pointer into the
   real resource, resolved at read time, not a remembered derivation.
 - **Constrain clone placement to a single platform-owned directory.**
-  Rejected as **impossible**, not merely undesirable, and it is worth stating
-  why so it is not re-proposed: FICLONE is intra-filesystem, the master's
-  filesystem is operator-chosen per § D3a, so no single directory can serve
-  every master. ADR-0082 § D2 gap 3 already says as much ("staging into `/run`
-  fails `EXDEV`"). The only viable variants — a platform-owned subdirectory at
-  each master's directory, or at each master's filesystem root — still yield
-  *N* directories and therefore still require an enumeration mechanism, which
-  is the actual problem. The filesystem-root variant additionally needs
-  mount-point resolution on **both** sides (the driver's, and the sweep's),
-  reintroducing precisely the two-independent-derivations defect D3f exists to
-  eliminate.
+  Rejected **at the time** as impossible, on the reasoning that FICLONE is
+  intra-filesystem and the master's filesystem was operator-chosen per § D3a, so
+  no single directory could serve every master; ADR-0082 § D2 gap 3 said as much
+  ("staging into `/run` fails `EXDEV`"), and the viable *N*-directory variants
+  still required an enumeration mechanism. **Superseded by the ADR-0082 fourth
+  amendment (2026-08-18, § (c-fix.2) — see § D3a's amendment note):** clone
+  placement IS now constrained to a single platform-owned directory
+  (`clone_staging_dir(data_dir)`), made possible by the companion constraint the
+  amendment adds — **the rootfs master must reside on the VM data filesystem** —
+  so the one staging root is always intra-filesystem with the master, and a
+  foreign-filesystem master fails closed (`ConfinementUnavailable { control:
+  UidDrop }`, FICLONE `EXDEV`) rather than needing an *N*-directory scheme. The
+  single-directory placement is what removes the operator-dir traverse (B1); it
+  does **not** disturb § D3f's index, which still records `clone_dest` wherever it
+  lives and now enumerates one platform-owned directory instead of chasing
+  operator paths.
 - **Accept the leak with a documented bound.** Rejected: there is no bound.
   One clone per crashed or restart-orphaned launch, unbounded over the node's
   lifetime, each growing toward full rootfs size, on a filesystem the operator
@@ -2482,11 +2561,19 @@ has landed with two callers, and a rename buys nothing but churn.
   remove-after ordering is a discipline a future edit to `VmDriver` can break.
   A test owns that ordering directly (S-VM-85) precisely because a comment
   would not hold it.
-- **Negative.** The clone still lands in the operator's directory, which may
-  still be read-only or shared. § D3a's Consequence on that point stands
-  unchanged and is **not** claimed as fixed here; § D3b's narrowing of
-  `Vmm::probe`'s reflink proof likewise stands, and S-VM-94 / step 03-08's
-  sixth criterion continue to own the fail-closed behaviour.
+- **Superseded by the ADR-0082 fourth amendment (2026-08-18).** As authored this
+  read: *"the clone still lands in the operator's directory, which may still be
+  read-only or shared."* That is no longer true — the fourth amendment
+  (§ (c-fix.2) — see § D3a's amendment note) relocates the clone into the
+  platform-owned `clone_staging_dir(data_dir)`, so the read-only / shared
+  operator-directory concern § D3a raised is resolved for the clone (the operator
+  directory is no longer written to or traversed). What remains is the companion
+  precondition — the **rootfs master must reside on the VM data filesystem**, with
+  a foreign-filesystem master failing closed (`ConfinementUnavailable { control:
+  UidDrop }`, FICLONE `EXDEV`); § D3b's narrowing of `Vmm::probe`'s reflink proof
+  and S-VM-94 / step 03-08's sixth criterion continue to own the same-filesystem
+  non-reflink fail-closed. The clone-index reclamation of §§ D3f–D3h is unchanged
+  by the relocation — `index_link` records `clone_dest` wherever it lives.
 - **Negative.** `VmHostLayout` gains a field one step after § D3a removed two,
   and `compose_vm_driver` gains a parameter. The justification is the same test
   § D3a applied: `clone_index_dir` is node-invariant, so it belongs on the

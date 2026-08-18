@@ -1442,7 +1442,7 @@ discriminant. The typed admission-time rejection remains DWD-23's scoped
 follow-up and is explicitly out of scope here. Not `@requires-kvm`: the whole
 point is a host that cannot boot a guest.
 
-#### S-VM-83: A per-launch clone the operator's own rootfs directory cannot serve names that directory and the requirement
+#### S-VM-83: A rootfs master foreign to the VM data filesystem fails closed as VmConfinementUnavailable, naming the requirement the operator can act on
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`) then `overdrive workload describe`
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@ac-21` `@tier3` `@real-io`
@@ -1450,62 +1450,101 @@ point is a host that cannot boot a guest.
 ```gherkin
 Given "overdrive serve" is running and its VM capability probe passed, so the
   node does have a VM driver
-And Ana has written a spec declaring [job] and [vm] whose rootfs image sits in a
-  directory whose filesystem cannot serve the per-launch clone
+And Ana has written a spec declaring [job] and [vm] whose rootfs master resides
+  on a filesystem foreign to the platform VM data partition (the per-launch
+  FICLONE clone into the platform-owned clone_staging_dir would cross devices)
 When she runs "overdrive deploy render.toml" and then "overdrive workload describe"
-Then the allocation is Failed and the reported cause names that rootfs directory
-  and the filesystem capability the per-launch clone requires
-And the cause does not present the operator's own directory choice as an internal
-  platform error
+Then the allocation is Failed with TransitionReason::VmConfinementUnavailable
+  { control: UidDrop } -- the confined rootfs clone could not be staged (FICLONE
+  EXDEV), never the unclassified driver-internal cause
+And that typed cause renders into the operator's vocabulary naming the VM data
+  filesystem the master must live on -- never the operator's own directory
+  choice presented as an internal platform error
 And the cause is distinct from the absent-VM-capability cause a node with no VM
-  driver reports, and distinct from a missing rootfs
+  driver reports (S-VM-82), and distinct from a missing rootfs
 And no hypervisor process, run directory, rootfs clone or cgroup scope survives
 ```
 
-**Crafter notes**: **The boundary with S-VM-94, stated so a future reader does
-not merge them.** S-VM-94 owns the **adapter-layer fail-closed behaviour** —
-`CloudHypervisorVmm::create()` called directly, asserting the typed `FICLONE`
-errno surfaces and that no full-copy fallback silently substitutes for a
-reflink. It is the mutation target, and the typing belongs with it. THIS
-scenario owns the **operator-facing message** one layer up: the rendered
-`overdrive workload describe` cause, reached through the full
-`deploy` → dispatch → `VmDriver::start` path, naming the directory and the
-requirement. The two are not duplicates and neither subsumes the other — a
-correctly fail-closed adapter (S-VM-94 green) can still reach the operator as
-an opaque internal error, which is exactly the gap this scenario closes.
-Per the roadmap note, this **mints no `VmStartFailure` variant**; S-VM-94 owns
-the typing. Message actionability only.
+**Crafter notes**: **RE-FRAMED by ADR-0082's 2026-08-18 fourth amendment
+(c-fix.2 / M1) — the trigger and classification both moved; the observable
+invariants (Failed, message-actionability, distinctness, no residue) did not.**
+Pre-amendment the per-launch clone landed BESIDE the operator's master, so an
+operator directory on a non-reflink filesystem produced `EOPNOTSUPP` and this
+scenario asserted an *unclassified*, message-only cause. The B1 fix relocated
+the clone to the platform-owned `clone_staging_dir(data_dir)` on the VM data
+partition, so the operator constraint is now "the rootfs master must live on the
+VM data filesystem", and a master on a FOREIGN filesystem fails the
+intra-filesystem `FICLONE` with `EXDEV` and is refused FAIL-CLOSED as the TYPED
+`TransitionReason::VmConfinementUnavailable { control: UidDrop }` (the confined
+clone could not be staged), never the unclassified `DriverInternalError`. This
+**mints no `TransitionReason` variant** — `VmConfinementUnavailable` is the
+existing confinement-application class (ADR-0082 §(d-fix)/M1), reused.
 
-**Why this exists at all, and why only now.** Before DWD-25 the per-launch
-clone targeted the node's own `image_dir`, the very directory `Vmm::probe`
-proves reflink-capable at boot. After 03-07 the clone targets the
-**operator-named** rootfs directory, which the boot probe never saw. `FICLONE`
-is intra-filesystem, so the boot probe no longer speaks for the clone at all —
-and the operator's directory may equally be read-only or shared. The
-capability gap is new, created by the ruling, and it needs its own message.
+**The boundary with S-VM-94, stated so a future reader does not merge them.**
+S-VM-94 owns the **adapter-layer, SAME-filesystem** case: a genuinely
+non-reflink VM data partition (master and clone both on it) fails
+`CloudHypervisorVmm::create()` with `VmmError::Io` carrying the `FICLONE`
+`EOPNOTSUPP` errno — an I/O capability failure, and the
+`@mandatory:mutation_target` that proves no full-copy fallback. THIS scenario
+owns the FOREIGN-filesystem (`EXDEV`) case AND the operator-facing message one
+layer up: the typed `VmConfinementUnavailable { control: UidDrop }` cause,
+reached through the full `deploy` → dispatch → `VmDriver::start` path and
+rendered into the ratified operator label
+(`VM confinement control uid_drop unavailable: {detail}`) whose detail names the
+VM data filesystem the master must live on. Neither subsumes the other — a
+correctly fail-closed adapter (S-VM-94 green) can still reach the operator as an
+opaque internal error, which is exactly the gap this scenario closes (AC-21's
+operator-message-actionability obligation, restored as a positive rendering
+assertion in commit `361b44b6`). This is the REAL-adapter (`CloudHypervisorVmm`)
+complement to S-VM-51's SimVmm-driven fail-closed proof.
 
-**The fixture must genuinely lack the capability, or the scenario is vacuous.**
+**Why this exists at all, and why the FOREIGN-fs framing now.** Before DWD-25 the
+per-launch clone targeted the node's own `image_dir`, the very directory
+`Vmm::probe` proves reflink-capable at boot. DWD-25 moved the artifact path to
+the operator-named rootfs directory; the fourth amendment then moved the clone
+DESTINATION to the platform-owned `clone_staging_dir`. `FICLONE` is
+intra-filesystem, so the boot probe — which proves the staging root
+reflink-capable — no longer speaks for a master the operator placed on a
+DIFFERENT filesystem; the capability gap is a cross-device `EXDEV`, created by
+the ruling, and it needs its own typed message.
+
+**The fixture must genuinely be foreign, or the scenario is vacuous.**
 Verification expectation `E06-vm-job-deploy-reaches-running` **cannot** catch
-this: it stages under `/srv/vm`, which IS the probed filesystem, so its clone
-always succeeds. The spec's rootfs must point at a directory on a filesystem
-**without reflink support** (or a read-only one). `/dev/shm` is the
-already-proven in-repo choice — guaranteed tmpfs on Linux, used for exactly
-this purpose by S-VM-75's boot probe. Note the register shift that makes tmpfs
-legitimate HERE and not elsewhere: every other Tier-3 VM scenario deliberately
-stages on the XFS-backed reflink-capable root because cloud-hypervisor disk
-I/O needs `O_DIRECT`, which tmpfs cannot serve — but this clone fails *before*
-any hypervisor opens the image, so that constraint never binds.
+this: it stages under `/srv/vm`, which IS the VM data filesystem, so its clone
+always succeeds. The landed test stages the rootfs master on tmpfs (`/dev/shm`)
+— a filesystem FOREIGN to the XFS reflink staging root the server `data_dir`
+lives on — so cloning into `clone_staging_dir(data_dir)` returns `EXDEV`. Do NOT
+"fix" the fixture onto the staging root: co-locating the master with the data
+partition makes the deploy simply succeed and the scenario vacuous. (This is
+also why the master is on tmpfs rather than the XFS-backed root despite every
+other Tier-3 VM scenario needing `O_DIRECT` — the clone fails *before* any
+hypervisor opens the image, so that constraint never binds.)
 
 **Three anti-vacuity guards, all load-bearing.** (a) The node's VM capability
-probe must PASS — a host where it does not yields S-VM-82's registry-miss cause
-instead, and the scenario would "pass" having proven nothing; assert the cause
-is not that one. (b) The rootfs master must EXIST and be readable, so the
-outcome is not `VmRootfsNotFound`; only the clone may fail. (c) The rendered
-cause must name the DIRECTORY, not merely the master file — the requirement
-being reported is a property of the filesystem the directory sits on, and a
-message naming only the image tells the operator to fix the wrong thing.
-Placement: `crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`,
+probe must PASS against its own `image_dir` — a host where it does not yields
+S-VM-82's registry-miss cause instead, and the scenario would "pass" having
+proven nothing; assert the rendered cause is not that one. (b) The rootfs master
+must EXIST and be readable, so the outcome is the `EXDEV` clone precondition, not
+`VmRootfsNotFound`; only the clone may fail. (c) The typed cause must RENDER into
+the operator's vocabulary, not merely be absent-from-the-wrong-cause —
+`assert_named_cause_is_rendered` proves the
+`VM confinement control uid_drop unavailable: {detail}` label reaches the
+operator with the `EXDEV` diagnostic (naming the VM data filesystem) embedded.
+Placement: `crates/overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`
+(`unservable_rootfs_directory_names_the_directory_and_the_clone_requirement`),
 alongside S-VM-82.
+
+Back-propagation: this re-framing was driven by DELIVER phase 04 (step 04-04,
+ADR-0082 fourth amendment 2026-08-18, c-fix.2 / M1), which closed the B1 security
+regression — the prior 04-04 confinement build reached the uid-dropped
+hypervisor's artifacts by mutating operator file permissions (`o+r` on the
+kernel, `o+x` on operator dirs); the fix relocates the kernel COPY and the rootfs
+CLONE into platform-owned directories so no operator artifact's mode or bytes
+changes. Commits `ccb6def3` (the revision: staging-root relocation +
+`EXDEV → ConfinementUnavailable{UidDrop}` mapping) and `361b44b6` (restored this
+scenario's operator-message-rendering assertion). Adversarially reviewed APPROVE,
+GREEN on metal. Tags unchanged — still `@ac-21`, still not `@requires-kvm` (no
+guest is booted; the clone fails before spawn).
 
 ---
 
@@ -1769,8 +1808,9 @@ And the terminal state and exit code she reads are unchanged
 ```gherkin
 Given Ana has deployed a VM workload
 When the hypervisor is launched
-Then the run directory holds nothing but this VM's own sockets and logs
-And the Landlock ruleset grants read-write on that directory (CH does NOT
+Then the run directory holds nothing but this VM's own sockets, logs and its
+  own kernel copy
+And the Landlock ruleset grants read-write on that ONE directory (CH does NOT
   auto-derive a rule for the vsock socket it binds itself, unlike --kernel /
   --disk / --serial file= / --api-socket)
 ```
@@ -1778,11 +1818,39 @@ And the Landlock ruleset grants read-write on that directory (CH does NOT
 **Crafter notes**: Spike P5 correction 1 — omitting this grant fails as
 `CreateVsockBackend(UnixBind(EACCES))`, which never mentions Landlock. The
 directory-exclusivity property (SD-2) is what makes the grant derivable
-rather than a list a crafter must remember. Complementary static
-enforcement — the `xtask dst-lint` `"--landlock-rules"` clause (`brief.md`
-§113: Landlock rules never built outside `VmRunDir::landlock_grant`) is a
-`xtask/src/dst_lint.rs` unit test; see `distill/wave-decisions.md`'s
-dst-lint-clause decision.
+rather than a list a crafter must remember.
+
+The run-directory exclusivity set now legitimately includes this VM's own
+`kernel` copy: ADR-0082's 2026-08-18 fourth amendment (c-fix.1) copies the
+operator's kernel byte-for-byte into the per-alloc run dir at
+`VmRunDir::kernel_copy()` (chown'd to the confined identity) and renders
+`--kernel` against the copy, so the operator's kernel is never made
+world-readable to reach the confined hypervisor. SD-2's "holds nothing else"
+therefore refines to "sockets, console log, and this allocation's own kernel
+copy" — the landed exclusivity assertion admits `vsock`, `api`, `api.lock`,
+`console.log`, `vsock_<port>` and `kernel`, and nothing foreign. **The
+single-`rw`-directory Landlock grant invariant is UNCHANGED** — CH still
+auto-derives the read-only `--kernel` grant (now against the copy in the run
+dir), and the ONE explicit grant is still the read-write directory grant on the
+run dir.
+
+Complementary static enforcement — the `xtask dst-lint` `"--landlock-rules"`
+clause (`brief.md` §113: Landlock rules never built outside
+`VmRunDir::landlock_grant`) is a `xtask/src/dst_lint.rs` unit test; see
+`distill/wave-decisions.md`'s dst-lint-clause decision.
+
+Back-propagation: the kernel-copy refinement was driven by DELIVER phase 04
+(step 04-04, ADR-0082 fourth amendment 2026-08-18, c-fix.1), which resolved the
+B1 security regression — the prior 04-04 impl reached the uid-dropped
+hypervisor's kernel by adding `o+r`/`o+x` to the operator's own kernel and
+directories; the fix COPIES the kernel into the platform-owned run dir instead,
+so no operator artifact's mode or bytes changes (operator-artifact-mutation
+removed). Proven GREEN on metal by
+`vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else`
+(`vm_stop_restart_and_vmm_death.rs`), whose exclusivity set now admits the
+`kernel` entry. Commits `ccb6def3` (the revision) + `361b44b6` (S-VM-83
+rendering restore, same step). Adversarially reviewed APPROVE. Tags unchanged —
+still `@correction:C-4`.
 
 ---
 
@@ -2310,11 +2378,13 @@ And BOTH adapters are driven through the three probe fault classes ADR-0082
 **Tags**: `@contract-shape:bounded-change` `@error_path` `@tier3` `@real-io` `@mandatory:mutation_target`
 
 ```gherkin
-Given a VmConfig whose rootfs clone destination is a REAL non-reflink target
-  (a tmpfs directory or a loopback-mounted ext4 image -- no SimVmm)
+Given a VmConfig whose rootfs clone destination shares the master's own REAL
+  non-reflink filesystem (a tmpfs directory or a loopback-mounted ext4 image --
+  no SimVmm)
 When CloudHypervisorVmm::create(&config) attempts the per-launch rootfs
   clone
-Then create returns Err with the typed FICLONE errno (EOPNOTSUPP or EXDEV)
+Then create returns Err(VmmError::Io) carrying the typed FICLONE EOPNOTSUPP
+  errno (a same-filesystem no-reflink-support capability failure)
 And no full-copy fallback occurs -- the clone destination is empty or
   absent afterwards, never a byte-for-byte copy of the master image
 And no hypervisor process was spawned
@@ -2333,6 +2403,31 @@ cost). Without this scenario, an adapter implemented with
 forever and only degrades in production. Placement:
 `crates/overdrive-host/tests/integration/vmm_ficlone_per_launch.rs`, real
 non-reflink fixture, gated `integration-tests`.
+
+**Errno classification split (ADR-0082 2026-08-18 fourth amendment).** The two
+`FICLONE` errnos now map to DIFFERENT typed variants and are owned by different
+scenarios. This scenario pins the SAME-filesystem no-reflink-support case:
+master and clone destination both on the non-reflink substrate → `EOPNOTSUPP` →
+`VmmError::Io` (an I/O capability failure — per DWD-24 / §D1.1 never an
+artifact-absence class). The CROSS-filesystem case — a master on a filesystem
+FOREIGN to the platform staging root → `EXDEV` — is the SEPARATE
+`VmmError::ConfinementUnavailable { control: UidDrop }`
+confinement-precondition class, owned by S-VM-83 at the `deploy` layer (the
+fourth amendment relocated the clone into the platform-owned
+`clone_staging_dir(data_dir)`, so a foreign-fs master is a confinement-staging
+failure, not a substrate-capability failure). The landed test stages master and
+clone on one shared tmpfs so it exercises the `EOPNOTSUPP`/`Io` arm only; the
+`Then` above is narrowed to that arm accordingly.
+
+Back-propagation: this classification split was driven by DELIVER phase 04 (step
+04-04, ADR-0082 fourth amendment 2026-08-18, c-fix.2 / M1) resolving the B1
+security regression (operator-artifact-mutation removed — the rootfs clone now
+stages in a platform-owned directory). Proven GREEN on metal by
+`ficlone_fails_closed_on_a_real_non_reflink_target` (`vmm_ficlone_per_launch.rs`),
+whose match arms assert `EOPNOTSUPP → VmmError::Io` here and document
+`EXDEV → ConfinementUnavailable{UidDrop}` as S-VM-83's. Commits `ccb6def3` (the
+revision) + `361b44b6` (S-VM-83 rendering restore, same step). Adversarially
+reviewed APPROVE. Tags unchanged — still `@mandatory:mutation_target`.
 
 ---
 
