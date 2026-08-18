@@ -221,6 +221,16 @@ async fn read_kernel_magic_window(path: &std::path::Path) -> std::io::Result<Vec
 /// removed (NotFound-tolerant) before the fresh one is created, since
 /// `symlink(2)` fails `EEXIST` otherwise.
 async fn create_index_link(rootfs: &RootfsPlan) -> std::io::Result<()> {
+    // Ensure the platform-owned clone-staging root exists before the FICLONE
+    // writes the clone into it (ADR-0082 2026-08-18 fourth amendment). In
+    // production `compose_vm_driver` created it once at node setup with the
+    // confined-identity traverse posture (`0710 root:<gid>`); `create_dir_all`
+    // is idempotent and NEVER alters an existing directory's mode, so this
+    // never disturbs that posture — it is the driver's belt-and-braces (and
+    // lets a harness that bypasses composition stage a clone).
+    if let Some(staging) = rootfs.clone_dest().parent() {
+        tokio::fs::create_dir_all(staging).await?;
+    }
     let link = rootfs.index_link();
     if let Some(parent) = link.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -314,6 +324,15 @@ pub struct VmHostLayout {
     /// The SAME expression `RealVmHostState`'s `index_dir` is fed, so the
     /// sweep enumerates exactly the links `start` writes.
     pub clone_index_dir: PathBuf,
+    /// The platform-owned VM clone-staging root
+    /// ([`overdrive_core::vm::config::clone_staging_dir`] over the node's
+    /// durable `data_dir`) where each per-launch rootfs clone is FICLONE'd —
+    /// a platform-owned directory, never beside the operator's master, so the
+    /// confined identity never needs an operator-dir traverse grant (ADR-0082
+    /// 2026-08-18 fourth amendment, B1 fix). MUST share the rootfs master's
+    /// filesystem (FICLONE is intra-filesystem); `compose_vm_driver` creates
+    /// it once with the confined-identity traverse posture at node setup.
+    pub clone_staging_dir: PathBuf,
     /// Host CPU architecture — selects the guest cmdline's console
     /// token via [`KernelCmdline::platform_default`], and the
     /// architecture each allocation's kernel is validated against.
@@ -672,6 +691,7 @@ impl VmDriver {
             payload.rootfs.clone(),
             master_bytes,
             &spec.alloc,
+            &self.layout.clone_staging_dir,
             &self.layout.clone_index_dir,
         );
         let cmdline = KernelCmdline::platform_default(self.layout.arch);

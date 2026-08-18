@@ -102,6 +102,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
         cgroup_root: tmp.path().join("cgroup"),
         run_dir_root: tmp.path().join("run"),
         clone_index_dir: tmp.path().join("clone-index"),
+        clone_staging_dir: tmp.path().join("clone-staging"),
         arch: HostArch::X86_64,
         vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
@@ -291,7 +292,13 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan =
-        RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc, &tmp.path().join("clone-index"));
+        RootfsPlan::for_alloc(
+            rootfs_master,
+            master_bytes,
+            &alloc,
+            &tmp.path().join("clone-staging"),
+            &tmp.path().join("clone-index"),
+        );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed after a Vmm::create failure, still present at {}",
@@ -364,7 +371,13 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan =
-        RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc, &tmp.path().join("clone-index"));
+        RootfsPlan::for_alloc(
+            rootfs_master,
+            master_bytes,
+            &alloc,
+            &tmp.path().join("clone-staging"),
+            &tmp.path().join("clone-index"),
+        );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed on the exit-before-beacon arm, still present at {}",
@@ -457,7 +470,13 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
     let rootfs_plan =
-        RootfsPlan::for_alloc(rootfs_master, master_bytes, &alloc, &tmp.path().join("clone-index"));
+        RootfsPlan::for_alloc(
+            rootfs_master,
+            master_bytes,
+            &alloc,
+            &tmp.path().join("clone-staging"),
+            &tmp.path().join("clone-index"),
+        );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed on the deadline arm, still present at {}",

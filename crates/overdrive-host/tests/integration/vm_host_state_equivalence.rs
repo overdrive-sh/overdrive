@@ -71,7 +71,16 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, index_dir: &Path) -> V
     VmConfig {
         alloc: alloc.clone(),
         kernel: validated_kernel(fixture),
-        rootfs: RootfsPlan::for_alloc(fixture.rootfs_path.clone(), master_bytes, &alloc, index_dir),
+        rootfs: RootfsPlan::for_alloc(
+            fixture.rootfs_path.clone(),
+            master_bytes,
+            &alloc,
+            // Stage the clone on the master's own filesystem (`run_root` is
+            // under the fixture's reflink staging root) — ADR-0082 2026-08-18
+            // fourth amendment (B1 fix): a platform dir, never beside the master.
+            run_root,
+            index_dir,
+        ),
         cmdline: KernelCmdline::platform_default(HostArch::X86_64),
         memory: MemoryPlan::derive(GUEST_BYTES),
         vcpus: NonZeroU8::new(1).expect("1 is nonzero"),
@@ -320,8 +329,12 @@ async fn index_backed_clone_surface_stays_equivalent_across_adapters() {
     // A real clone beside the operator master and a real index symlink
     // resolving to it — the on-disk shape `VmDriver::start` records
     // (link -> clone; ADR-0083 §D3f).
-    let plan = RootfsPlan::for_alloc(operator_dir.join("master.img"), 0, &alloc, &index_dir);
-    std::fs::write(plan.clone_dest(), b"clone-bytes").expect("stage the clone beside the master");
+    // Synthetic observe/discard fixture: the clone location is arbitrary (a
+    // per-test dir here) because VmHostState follows the INDEX LINK, not the
+    // clone path. Staging it under `operator_dir` keeps the fixture compact.
+    let plan =
+        RootfsPlan::for_alloc(operator_dir.join("master.img"), 0, &alloc, &operator_dir, &index_dir);
+    std::fs::write(plan.clone_dest(), b"clone-bytes").expect("stage the synthetic clone");
     std::os::unix::fs::symlink(plan.clone_dest(), plan.index_link())
         .expect("record the clone in the index");
     // Structural: the clone is NOT inside the index dir — a re-derivation

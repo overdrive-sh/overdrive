@@ -77,6 +77,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
         cgroup_root: tmp.path().join("cgroup"),
         run_dir_root: tmp.path().join("run"),
         clone_index_dir: tmp.path().join("clone-index"),
+        clone_staging_dir: tmp.path().join("clone-staging"),
         arch: HostArch::X86_64,
         vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
@@ -460,6 +461,9 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
             rootfs_master,
             master_bytes,
             &alloc,
+            // Same staging dir the layout gives `VmDriver::start` (B1 fix): the
+            // clone lands here, and the cleanup path must remove it from here.
+            &tmp.path().join("clone-staging"),
             std::path::Path::new("/run/overdrive/vm/clone-index"),
         );
         assert!(

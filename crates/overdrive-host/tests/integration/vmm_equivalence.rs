@@ -73,8 +73,14 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, alloc_suffix: &str) ->
             fixture.rootfs_path.clone(),
             master_bytes,
             &alloc,
-            // Vmm-level test: only `clone_dest` is exercised (the FICLONE);
-            // the index link is `VmDriver`'s concern, so this dir is inert.
+            // Vmm-level test: the clone (FICLONE) is what's exercised. Stage it
+            // on the master's OWN filesystem — `run_root` is under the fixture's
+            // reflink-capable staging root, so FICLONE is intra-fs (a foreign-fs
+            // staging dir is the EXDEV fail-closed path, not this sequence).
+            // ADR-0082 2026-08-18 fourth amendment: the clone lives in a
+            // platform-owned staging dir, never beside the operator's master.
+            run_root,
+            // The index link is `VmDriver`'s concern, so this dir is inert here.
             std::path::Path::new("/run/overdrive/vm/clone-index"),
         ),
         cmdline: KernelCmdline::platform_default(HostArch::X86_64),

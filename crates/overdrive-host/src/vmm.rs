@@ -32,7 +32,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -203,8 +203,12 @@ impl CloudHypervisorVmm {
             .arg(format!("boot={}", config.vcpus))
             .arg("--memory")
             .arg(format!("size={}", config.memory.guest_bytes()))
+            // §(c-fix.1): CH loads THIS allocation's own kernel copy in the
+            // run dir (chown'd to the confined uid), never the operator's
+            // master — whose mode/bytes the platform never touches. CH
+            // auto-derives the read-only kernel Landlock grant against it.
             .arg("--kernel")
-            .arg(config.kernel.path())
+            .arg(config.run_dir.kernel_copy())
             .arg("--cmdline")
             .arg(config.cmdline.as_str())
             .arg("--disk")
@@ -283,29 +287,46 @@ impl Vmm for CloudHypervisorVmm {
             });
         }
 
-        // §(c) consequence 2: CH runs uid-dropped, so it must be able to open
-        // the root-created rootfs clone `O_RDWR` and bind/connect its sockets
-        // in the root-created run directory. Chown both to the confined
-        // identity (and make the clone's parent traversable by the dropped
-        // uid) BEFORE spawn. Failure here is a `Create` — the confinement
-        // could not be applied and no unconfined fallback is permitted.
+        // §(c-fix): CH runs uid-dropped, so before spawn the platform readies
+        // this allocation's artifacts for the confined identity: chown the
+        // platform-staged rootfs clone, COPY the operator kernel into the run
+        // dir, and chown the run dir + its entries. The operator's own kernel
+        // and image directories are NEVER mode-widened (B1 fix). Failure here
+        // is a confinement-APPLICATION failure — no unconfined fallback is
+        // permitted.
         let identity = config.confinement.identity();
         let uid = identity.uid;
         let gid = identity.gid.as_u32();
         let prep_clone = clone_dest.clone();
-        let prep_kernel = config.kernel.path().to_path_buf();
+        let prep_kernel_master = config.kernel.path().to_path_buf();
+        let prep_kernel_copy = config.run_dir.kernel_copy();
         let prep_run_dir = config.run_dir.path().to_path_buf();
         let prep = tokio::task::spawn_blocking(move || {
-            prepare_confined_paths(&prep_clone, &prep_kernel, &prep_run_dir, uid, gid)
+            prepare_confined_paths(
+                &prep_clone,
+                &prep_kernel_master,
+                &prep_kernel_copy,
+                &prep_run_dir,
+                uid,
+                gid,
+            )
         })
         .await
-        .map_err(|join_err| VmmError::create(format!("confine-paths task panicked: {join_err}")))?;
+        .map_err(|join_err| VmmError::ConfinementUnavailable {
+            control: ConfinementControl::UidDrop,
+            detail: format!("confine-paths task panicked: {join_err}"),
+        })?;
         if let Err(source) = prep {
             let _ = tokio::fs::remove_file(config.rootfs.clone_dest()).await;
-            return Err(VmmError::create(format!(
-                "prepare confined paths for {}: {source}",
-                clone_dest.display()
-            )));
+            // §(d-fix) M1: applying the confined identity to the per-alloc
+            // artifacts (chown/copy of the clone or the kernel copy, run-dir
+            // chown) failed — a confinement-APPLICATION failure, mapped to
+            // ConfinementUnavailable { UidDrop }, never flattened to
+            // Unclassified (`.claude/rules/development.md` § "Errors").
+            return Err(VmmError::ConfinementUnavailable {
+                control: ConfinementControl::UidDrop,
+                detail: format!("prepare confined paths for {}: {source}", clone_dest.display()),
+            });
         }
 
         // §(c): spawn CH THROUGH the wrapper. `argv[0]` is `prlimit`; the
@@ -453,10 +474,15 @@ impl Vmm for CloudHypervisorVmm {
 // create() helpers
 // ---------------------------------------------------------------------
 
-/// Clone `master` to `clone_dest` via the `FICLONE` ioctl on `master`'s
-/// own filesystem — never `cp`. §D6 edge cases: an existing `clone_dest`
-/// (a crashed prior launch) is REPLACED, never adopted; on ioctl failure
-/// the (possibly empty) destination is removed, never left behind.
+/// Clone `master` to `clone_dest` (in the platform-owned staging root) via
+/// the `FICLONE` ioctl — never `cp`. §D6 edge cases: an existing `clone_dest`
+/// (a crashed prior launch) is REPLACED, never adopted; on ioctl failure the
+/// (possibly empty) destination is removed, never left behind. FICLONE is
+/// intra-filesystem, so a `master` on a DIFFERENT filesystem from the staging
+/// root returns `EXDEV`; that is the create-time confinement precondition
+/// (ADR-0082 2026-08-18 fourth amendment (c-fix.2)) and FAILS CLOSED as
+/// `ConfinementUnavailable { UidDrop }` — never a silent operator-dir
+/// widening, never a C-1-defeating full-copy fallback.
 fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
     if clone_dest.exists() {
         std::fs::remove_file(clone_dest).map_err(VmmError::Io)?;
@@ -470,43 +496,56 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
     if let Err(err) = rustix::fs::ioctl_ficlone(&dst, &src) {
         drop(dst);
         let _ = std::fs::remove_file(clone_dest);
+        if err == rustix::io::Errno::XDEV {
+            return Err(VmmError::ConfinementUnavailable {
+                control: ConfinementControl::UidDrop,
+                detail: format!(
+                    "rootfs master {} is not on the VM data filesystem (FICLONE EXDEV): {err}",
+                    master.display()
+                ),
+            });
+        }
         return Err(VmmError::Io(err.into()));
     }
     Ok(())
 }
 
-/// Ready the root-created rootfs clone, the operator's kernel, and the run
-/// directory for a uid-dropped hypervisor (ADR-0082 §(c) consequence 2). Sync
-/// — runs on the blocking pool. CH under the dropped uid opens all three; each
-/// grant below is the minimum that identity needs, and each is applied to a
-/// KNOWN path (never a directory listing), so an unprivileged read/traverse is
-/// all that is exposed:
+/// Ready the platform-staged rootfs clone, this allocation's kernel COPY, and
+/// the run directory for a uid-dropped hypervisor (ADR-0082 2026-08-18 fourth
+/// amendment, B1 fix). Sync — runs on the blocking pool. The governing
+/// invariant: the confined identity's DAC access path to every artifact
+/// contains ONLY platform-owned directories, so **no operator artifact's mode
+/// or bytes is ever changed** — there is nothing to revert and nothing to leak:
 ///
-/// 1. **Rootfs clone** — chown to `uid:gid` (CH opens the `--disk` clone
-///    `O_RDWR`), and add "other execute" (traversal, not listing) on its
-///    parent so the dropped uid can reach the clone `FICLONE` placed beside
-///    the operator's master.
-/// 2. **Kernel** — the operator's read-only master, opened read-only. Add
-///    "other read" on the file and "other execute" on its parent. A kernel
-///    image is not secret; without this a `600 root:root` master (the
-///    common shape) fails as `Cannot open kernel file: Permission denied`
-///    under the dropped uid, before Landlock is even reached.
-/// 3. **Run directory + its current entries** (the beacon socket the driver
-///    bound before `create`) — chown to `uid:gid`, so CH can bind its own
-///    vsock/api sockets there, write `console.log`, and connect to the beacon
-///    under the dropped uid.
+/// 1. **Rootfs clone** — the platform created it in the platform-owned staging
+///    root (`clone_staging_dir`); `chown` it to `uid:gid` so CH opens the
+///    `--disk` clone `O_RDWR`. The staging root's set-once `0710` traverse
+///    grant (applied at node setup, never here) is what lets the dropped uid
+///    reach it — no per-alloc directory widening.
+/// 2. **Kernel** — COPY the operator's read-only master into this allocation's
+///    run dir (`kernel_copy`) and `chown` the COPY (below, with the run-dir
+///    entries). The operator's master is only ever OPENED READ-ONLY by root
+///    here; its mode and bytes are untouched (the prior impl's `o+r` on the
+///    master, and `o+x` on its directory, are DELETED). CH loads the copy.
+/// 3. **Run directory + everything now inside it** — the beacon socket the
+///    driver bound before `create`, the guest's `console.log`, and the kernel
+///    copy just written — `chown` to `uid:gid`, so CH can bind its own
+///    vsock/api sockets, write the console log, connect to the beacon, and
+///    read its kernel copy under the dropped uid.
 fn prepare_confined_paths(
     clone_dest: &Path,
-    kernel: &Path,
+    kernel_master: &Path,
+    kernel_copy: &Path,
     run_dir: &Path,
     uid: u32,
     gid: u32,
 ) -> io::Result<()> {
     std::os::unix::fs::chown(clone_dest, Some(uid), Some(gid))?;
-    add_other_mode_bits(clone_dest.parent(), 0o001)?;
 
-    add_other_mode_bits(Some(kernel), 0o004)?;
-    add_other_mode_bits(kernel.parent(), 0o001)?;
+    // Copy the operator's kernel into this allocation's run dir. `std::fs::copy`
+    // only READS the master (mode/bytes untouched) and writes a fresh file the
+    // run-dir chown loop below hands to the confined identity.
+    std::fs::copy(kernel_master, kernel_copy)?;
 
     std::os::unix::fs::chown(run_dir, Some(uid), Some(gid))?;
     for entry in std::fs::read_dir(run_dir)? {
@@ -514,16 +553,6 @@ fn prepare_confined_paths(
         std::os::unix::fs::chown(entry.path(), Some(uid), Some(gid))?;
     }
     Ok(())
-}
-
-/// OR `bits` into `path`'s mode (idempotent), if `path` is `Some`. Used to
-/// grant the confined uid the minimum "other" read (`0o004`) / traverse
-/// (`0o001`) it needs on artifacts it does not own — never widening beyond
-/// the one bit requested.
-fn add_other_mode_bits(path: Option<&Path>, bits: u32) -> io::Result<()> {
-    let Some(path) = path else { return Ok(()) };
-    let mode = std::fs::metadata(path)?.permissions().mode();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | bits))
 }
 
 /// Classify a resolved (or failed-to-observe) child exit into the

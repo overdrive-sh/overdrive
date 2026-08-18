@@ -1563,6 +1563,7 @@ pub async fn run_server(
         match compose_vm_driver(
             cgroup_root_path,
             overdrive_core::vm::config::clone_index_dir(&config.data_dir),
+            overdrive_core::vm::config::clone_staging_dir(&config.data_dir),
             Arc::clone(&clock),
             fs,
             cgroup_accounting,
@@ -1640,17 +1641,37 @@ enum VmComposeError {
 /// See [`VmComposeError`] for the two-way error split; see
 /// `run_server`'s call site doc comment for the ABSENCE-vs-REFUSAL
 /// framing.
-/// The reserved, unprivileged NUMERIC identity the confined hypervisor is
-/// spawned under (ADR-0082 §(e)). No `/etc/passwd`/`/etc/group` entry is
+/// The DEDICATED reserved, unprivileged NUMERIC identity the confined
+/// hypervisor is spawned under (ADR-0082 §(e), sharpened by the 2026-08-18
+/// fourth amendment (e-fix) M2). No `/etc/passwd`/`/etc/group` entry is
 /// required — `setpriv --reuid/--regid` take raw numerics, which is precisely
-/// what satisfies the "no appliance-image change" constraint. `65534`
-/// (`nobody`/`nogroup`) is the canonical own-nothing unprivileged identity,
-/// guaranteed non-root and unlikely to collide with a login user (uid `1000`
-/// on the appliance). The confined uid is SHARED across VMs and does NOT
-/// isolate siblings — Landlock (the per-VM run-directory grant), the per-VM
-/// netns and the per-VM cgroup do that; a per-VM uid is GH #258, not US-VM-7.
-const OVERDRIVE_VMM_UID: u32 = 65_534;
-const OVERDRIVE_VMM_GID: u32 = 65_534;
+/// what satisfies the "no appliance-image change" constraint.
+///
+/// `4200` is a value the appliance leaves unassigned: verified FREE against
+/// the metal box's `/etc/passwd` + `/etc/group` (no user, no group at 4200/4200)
+/// and unused by any base-OS daemon (highest in-use is the `ubuntu` login user
+/// at 1000). It is deliberately NOT `65534` (`nobody`/`nogroup`) — the kernel's
+/// overflow/anonymous id (`/proc/sys/kernel/overflowuid`, NFS id-squash, unmapped
+/// user-namespace principals), a SHARED system identity the platform has not
+/// reserved and which would NOT ptrace/signal/`/proc`-isolate the hypervisor from
+/// every overflow-mapped principal on the host (M2 rejects it). Both the uid and
+/// its primary gid are dedicated numerics.
+///
+/// The confined uid is SHARED across VMs and does NOT isolate siblings —
+/// Landlock (the per-VM run-directory grant), the per-VM netns and the per-VM
+/// cgroup do that; a per-VM uid is GH #258, not US-VM-7.
+const OVERDRIVE_VMM_UID: u32 = 4_200;
+const OVERDRIVE_VMM_GID: u32 = 4_200;
+
+/// Traverse-only permission mode for the platform-owned VM clone-staging root
+/// (`0710`): owner (root) rwx, group (the confined gid) `--x` (traverse, not
+/// read/list), other nothing. Applied ONCE at node setup with
+/// `root:<confined-gid>` ownership so the confined identity can reach its OWN
+/// chown'd clone by name without being able to LIST the staging root and
+/// discover other allocations' clone names (ADR-0082 2026-08-18 fourth
+/// amendment (c-fix.2)). Sibling-disk isolation is Landlock's job (P5), not
+/// DAC's — a flat staging root with alloc-named files is correct.
+const OVERDRIVE_VMM_STAGING_MODE: u32 = 0o710;
 
 /// `RLIMIT_NOFILE` cap for the confined hypervisor. `256` is spike P5's proven
 /// value (a full `--landlock` + vsock + disk + serial + api boot completed
@@ -1661,6 +1682,7 @@ const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 async fn compose_vm_driver(
     cgroup_root: std::path::PathBuf,
     clone_index_dir: std::path::PathBuf,
+    clone_staging_dir: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
@@ -1737,6 +1759,30 @@ async fn compose_vm_driver(
         }
     };
 
+    // Node setup (once, idempotent — converge-on-boot): create the
+    // platform-owned VM clone-staging root with the confined-identity
+    // traverse posture (`0710 root:<confined-gid>`). Every per-launch rootfs
+    // clone is FICLONE'd here (never beside the operator's master, so no
+    // operator dir is ever widened — the B1 fix), and the confined uid reaches
+    // its OWN chown'd clone via the group-execute traverse bit without being
+    // able to LIST the directory (ADR-0082 2026-08-18 fourth amendment
+    // (c-fix.2)). A failure here refuses the node fail-closed — no VM can be
+    // confined without it — via the SAME injected/discovered split every
+    // fallible step above uses.
+    if let Err(source) = prepare_clone_staging_root(&clone_staging_dir, OVERDRIVE_VMM_GID).await {
+        let cause = error::VmmBootError::Probe {
+            source: overdrive_core::traits::vmm::VmmProbeError::run_dir_unusable(
+                clone_staging_dir.clone(),
+                source,
+            ),
+        };
+        return Err(if injected {
+            VmComposeError::Refused(cause)
+        } else {
+            VmComposeError::NotAvailable(cause)
+        });
+    }
+
     let layout = VmHostLayout {
         cgroup_root,
         run_dir_root: std::path::PathBuf::from("/run/overdrive/vm"),
@@ -1745,6 +1791,10 @@ async fn compose_vm_driver(
         // `RealVmHostState`'s `index_dir` is fed — `clone_index_dir` is the
         // one derivation both composition sites call (S-VM-84 criterion 4).
         clone_index_dir,
+        // The platform-owned staging root just created above with the
+        // confined-identity traverse posture; `RootfsPlan::for_alloc` stages
+        // each clone here (ADR-0082 2026-08-18 fourth amendment, B1 fix).
+        clone_staging_dir,
         arch,
         vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
         // Confined identity per ADR-0082 §(e) (gap-5 closure). A reserved,
@@ -1766,6 +1816,31 @@ async fn compose_vm_driver(
     };
 
     Ok(overdrive_worker::vm_driver::VmDriver::new(vmm, clock, fs, cgroup_accounting, layout))
+}
+
+/// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
+/// create it, then set `root:<gid>` ownership and the `0710`
+/// ([`OVERDRIVE_VMM_STAGING_MODE`]) traverse posture so the confined identity
+/// can reach its OWN chown'd clone by name without listing the directory
+/// (ADR-0082 2026-08-18 fourth amendment (c-fix.2)). Converge-on-boot: the
+/// mkdir is `-p` and the chown/chmod are re-applied every boot, so a
+/// pre-existing staging root from a prior boot converges rather than erroring.
+/// `chown` needs root, which `overdrive serve` (and the Tier-3 harness) run as.
+async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io::Result<()> {
+    tokio::fs::create_dir_all(dir).await?;
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        use std::os::unix::fs::PermissionsExt;
+        std::os::unix::fs::chown(&dir, Some(0), Some(gid))?;
+        std::fs::set_permissions(
+            &dir,
+            std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE),
+        )
+    })
+    .await
+    .map_err(|join_err| {
+        std::io::Error::other(format!("clone-staging-root setup task panicked: {join_err}"))
+    })?
 }
 
 /// Compose the production `ExecDriver` with its Earned-Trust-vetted
@@ -3357,6 +3432,7 @@ mod tests {
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from("/srv/overdrive/data")),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
@@ -3425,6 +3501,7 @@ mod tests {
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from("/srv/overdrive/data")),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),

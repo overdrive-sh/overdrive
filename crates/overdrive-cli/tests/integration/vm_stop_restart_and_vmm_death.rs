@@ -191,13 +191,33 @@ fn shared_staging_root() -> PathBuf {
     overdrive_testing::vm_fixture::default_staging_root()
 }
 
+/// A server-side tempdir (holding `data/` + `conf/`) on the reflink-capable
+/// staging root, NOT the system tmpdir. Required because each per-launch rootfs
+/// clone is FICLONE'd into `clone_staging_dir(data_dir)`, and FICLONE is
+/// intra-filesystem (ADR-0082 2026-08-18 fourth amendment): with `data_dir` on
+/// tmpfs and the master on the xfs staging root, the clone would fail `EXDEV`
+/// and every VM boot would refuse. Co-locating `data_dir` with the masters
+/// respects the production invariant (one VM data partition holds both).
+fn server_tmp_on_staging_root() -> TempDir {
+    tempfile::Builder::new()
+        .prefix("vm-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("server tempdir on the reflink-capable staging root")
+}
+
 /// A real in-process `overdrive serve` — production `run_server` wiring
 /// with only the dataplane and KEK external ports replaced by their
 /// established simulation adapters (the same composition
 /// `vm_walking_skeleton.rs`'s S-VM-01/02 use; these scenarios need a real
 /// CH and the real exit-classification chain, not the real `EbpfDataplane`).
 async fn spawn_vm_server() -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    // The server's `data_dir` MUST share the rootfs master's filesystem: each
+    // per-launch clone is FICLONE'd into `clone_staging_dir(data_dir)` and
+    // FICLONE is intra-filesystem (ADR-0082 2026-08-18 fourth amendment). The
+    // masters stage on the reflink-capable `shared_staging_root()` (xfs on the
+    // metal box); the system tmpdir is tmpfs and would fail FICLONE `EXDEV`, so
+    // the data_dir tempdir is created on the staging root too.
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -224,7 +244,8 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// of the same name (a file-local copy — sibling test modules cannot share
 /// private items).
 async fn spawn_vm_server_with_vmm(vmm: std::sync::Arc<dyn Vmm>) -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    // data_dir on the reflink staging root — see `server_tmp_on_staging_root`.
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -1408,7 +1429,10 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     // The operator's artifact, fingerprinted BEFORE any launch.
     let fingerprint_before = rootfs_fingerprint(&rootfs);
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    // data_dir on the reflink staging root — the per-launch clone is FICLONE'd
+    // into `clone_staging_dir(data_dir)` and FICLONE is intra-filesystem
+    // (ADR-0082 2026-08-18 fourth amendment); tmpfs would fail `EXDEV`.
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
     let cfg = config_path(server_tmp.path());
@@ -1579,16 +1603,13 @@ async fn deploy_running_spin_vm(
     fixture: &VmFixture,
     rootfs_prefix: &str,
     workload_id: &str,
-) -> (ServeHandle, TempDir, PathBuf, AllocationId, u32, PathBuf) {
+) -> (ServeHandle, TempDir, PathBuf, AllocationId, u32, PathBuf, TempDir) {
     let tmp = tempfile::Builder::new()
         .prefix(rootfs_prefix)
         .tempdir_in(shared_staging_root())
         .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
-    // Leak the tempdir guard so the staged rootfs outlives this helper; the
-    // returned PathBuf keeps the declared rootfs path addressable to the caller.
-    let tmp_path = tmp.keep();
-    let spin = build_spin_binary(&tmp_path);
-    let rootfs = stage_rootfs_with_extra_binary(&tmp_path, fixture, &spin, "spin");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), fixture, &spin, "spin");
 
     let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
@@ -1603,7 +1624,11 @@ async fn deploy_running_spin_vm(
     let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
     let alloc = alloc_id_of(&running);
     let vmm_pid = cloud_hypervisor_pid_for_alloc(&alloc);
-    (handle, server_tmp, cfg, alloc, vmm_pid, rootfs)
+    // M3: the rootfs-staging tempdir guard (`tmp`) is RETURNED, not
+    // `.keep()`-leaked — the caller holds it for the test's lifetime and it is
+    // RAII-cleaned on drop, so staged rootfs copies never accumulate on the
+    // shared metal box across runs.
+    (handle, server_tmp, cfg, alloc, vmm_pid, rootfs, tmp)
 }
 
 /// Reap the still-Running spin VM through the production stop path, then shut
@@ -1643,7 +1668,7 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs) =
+    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs, _rootfs_tmp) =
         deploy_running_spin_vm(&fixture, "vm-confined-", "vm-confined").await;
 
     // --- non-zero real AND effective uid/gid (never root) ---
@@ -1715,28 +1740,40 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
     // subtree on the same reflink-capable filesystem (FICLONE is
     // intra-filesystem). Reaching Running IS the assertion: the confined boot
     // succeeded despite the non-default path.
-    let (handle, _server_tmp, cfg, _alloc, vmm_pid, rootfs) =
+    let (handle, server_tmp, cfg, _alloc, vmm_pid, rootfs, _rootfs_tmp) =
         deploy_running_spin_vm(&fixture, "vm-outside-artifact-dir-", "vm-outside").await;
 
     // The boot is genuinely confined (not an unconfined root fall-through that
-    // would boot any path): --landlock is present, and the --disk clone names
-    // THIS declared rootfs's own directory, proving the ruleset was derived
-    // from the spec rather than a hardcoded default.
+    // would boot any path): --landlock is present, and the --disk clone lives in
+    // the PLATFORM-OWNED staging dir (derived from the node's data_dir), NEVER
+    // beside the operator's declared rootfs. That the VM booted (reached
+    // Running) from a rootfs declared OUTSIDE the default artifact dir proves
+    // the rootfs SOURCE is derived from the spec, not hardcoded; that the clone
+    // sits in the platform staging dir is the ADR-0082 fourth-amendment
+    // relocation (the confined identity never traverses the operator's dir).
     let args = proc_cmdline_args(vmm_pid);
     assert!(
         args.iter().any(|a| a == "--landlock"),
         "the boot must be confined (--landlock present), not an unconfined root boot; argv={args:?}",
     );
     let declared_dir = rootfs.parent().expect("declared rootfs has a parent directory");
+    let staging_dir =
+        overdrive_core::vm::config::clone_staging_dir(&server_tmp.path().join("data"));
     let disk_arg = args
         .windows(2)
         .find(|w| w[0] == "--disk")
         .map(|w| w[1].clone())
         .expect("a --disk argument in the hypervisor argv");
     assert!(
-        disk_arg.contains(&declared_dir.display().to_string()),
-        "the --disk clone must sit beside the DECLARED rootfs path {declared_dir:?}, proving the \
-         Landlock ruleset is derived from the spec, not a hardcoded directory; disk={disk_arg}",
+        disk_arg.contains(&staging_dir.display().to_string()),
+        "the --disk clone must live in the platform-owned staging dir {staging_dir:?} (derived from \
+         the node data_dir), proving the ruleset follows the actual disk path; disk={disk_arg}",
+    );
+    assert!(
+        !disk_arg.contains(&declared_dir.display().to_string()),
+        "the --disk clone must NOT sit beside the operator's declared rootfs {declared_dir:?} -- the \
+         B1 fix stages it in a platform dir so the confined identity never traverses the operator's \
+         directory; disk={disk_arg}",
     );
 
     // The confined hypervisor is not root — the same bound S-VM-49 pins, here
@@ -1752,11 +1789,13 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
 
 /// S-VM-53 / `@correction:C-4` — the vsock socket's Landlock grant is a
 /// DIRECTORY grant, scoped to nothing else. The run directory holds nothing
-/// but this VM's own sockets and logs, and the ruleset grants read-write on
-/// that directory (CH does NOT auto-derive a rule for the vsock socket it
-/// binds itself, unlike `--kernel` / `--disk` / `--serial file=` /
-/// `--api-socket`). The directory-exclusivity property (SD-2) is what makes
-/// the grant derivable rather than a list a crafter must remember.
+/// but this VM's own sockets, logs, and its own kernel copy (ADR-0082
+/// 2026-08-18 fourth amendment (c-fix.1) copies the operator kernel into the
+/// run dir), and the ruleset grants read-write on that directory (CH does NOT
+/// auto-derive a rule for the vsock socket it binds itself, unlike `--kernel`
+/// / `--disk` / `--serial file=` / `--api-socket`). The directory-exclusivity
+/// property (SD-2) is what makes the grant derivable rather than a list a
+/// crafter must remember.
 ///
 /// ```gherkin
 /// Given Ana has deployed a VM workload
@@ -1769,7 +1808,7 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
 async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
-    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs) =
+    let (handle, _server_tmp, cfg, alloc, vmm_pid, _rootfs, _rootfs_tmp) =
         deploy_running_spin_vm(&fixture, "vm-vsock-grant-", "vm-vsock-grant").await;
 
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
@@ -1788,11 +1827,15 @@ async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
     for name in &entries {
         // This VM's own files: CH's main vsock UDS (`vsock`), API socket
         // (`api`) and the API-socket lock CH writes beside it (`api.lock`),
-        // the serial capture (`console.log`), and the driver-bound beacon
-        // socket (`vsock_<port>`). All belong to THIS allocation — nothing
-        // foreign shares the directory (SD-2).
-        let is_own = matches!(name.as_str(), "vsock" | "api" | "api.lock" | "console.log")
-            || name.starts_with("vsock_");
+        // the serial capture (`console.log`), the driver-bound beacon socket
+        // (`vsock_<port>`), and THIS allocation's own `kernel` copy — ADR-0082
+        // 2026-08-18 fourth amendment (c-fix.1) refines SD-2's "holds nothing
+        // else" to "sockets, console log, and this allocation's own kernel
+        // copy". All belong to THIS allocation — nothing foreign shares the
+        // directory (SD-2).
+        let is_own =
+            matches!(name.as_str(), "vsock" | "api" | "api.lock" | "console.log" | "kernel")
+                || name.starts_with("vsock_");
         assert!(
             is_own,
             "the run directory must hold ONLY this VM's own sockets and logs; found a foreign \
@@ -1814,6 +1857,121 @@ async fn vsock_landlock_grant_is_the_run_directory_scoped_to_nothing_else() {
     );
 
     stop_and_shutdown(handle, &cfg, "vm-vsock-grant").await;
+}
+
+// ---------------------------------------------------------------------------
+// B1 regression guard (ADR-0082 2026-08-18 fourth amendment) — a confined
+// deploy MUST NOT mutate the operator's OWN kernel/rootfs artifacts, in bytes
+// OR in permission mode. Closes the gap S-VM-48 left open: S-VM-48 fingerprints
+// the rootfs BYTES only, so the prior 04-04 impl's `o+r` on the operator kernel
+// and `o+x` on its directories (a world-widening DAC regression that leaked
+// across allocations and survived teardown) shipped green. This guard is RED
+// against that regression and GREEN once the kernel is COPIED into the run dir
+// and the rootfs clone is staged in a platform-owned directory.
+// ---------------------------------------------------------------------------
+
+/// `(mode_bits, len, content_hash)` of a file — the permission mode PLUS the
+/// [`rootfs_fingerprint`] byte identity, so a guard proves an operator artifact
+/// is unchanged in BOTH its permission bits and its bytes.
+fn artifact_mode_and_bytes(path: &Path) -> (u32, u64, u64) {
+    let mode =
+        std::fs::metadata(path).expect("stat operator artifact").permissions().mode() & 0o7777;
+    let (len, hash) = rootfs_fingerprint(path);
+    (mode, len, hash)
+}
+
+/// The permission mode bits of a path (file or directory).
+fn path_mode(path: &Path) -> u32 {
+    std::fs::metadata(path).expect("stat path for mode").permissions().mode() & 0o7777
+}
+
+/// B1 regression guard (`@security` / ADR-0082 fourth amendment) — a confined
+/// deploy cycle leaves the operator's OWN kernel and rootfs masters, AND their
+/// containing directories, byte-identical AND mode-identical. The prior 04-04
+/// impl reached the uid-dropped hypervisor's artifacts by adding `o+r` to the
+/// operator kernel FILE and `o+x` to the operator kernel/image DIRECTORIES — a
+/// world-widening DAC regression that leaked across allocations and survived
+/// teardown, exposing adjacent rootfs masters and secrets by name. The
+/// amendment forbids ALL operator-artifact mutation: the kernel is COPIED into
+/// the per-alloc run dir and `chown`'d there, and the rootfs clone is FICLONE'd
+/// into a platform-owned staging dir — so the operator's own files are only
+/// ever OPENED READ-ONLY by root. This guard is RED against the regression
+/// (the operator kernel's mode changes `0o600 → 0o604`) and GREEN after the
+/// fix. Per-test operator artifacts (not the shared fixture) at the common
+/// `0o600` posture keep the before/after capture clean and isolated.
+///
+/// ```gherkin
+/// Given Ana's kernel and rootfs are 0o600 operator-owned files
+/// When she deploys a VM workload that reaches Running under confinement
+/// Then her kernel and rootfs files, and their directories, are unchanged in
+///   both bytes and permission mode
+/// ```
+#[tokio::test]
+#[serial(cgroup)]
+async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchanged() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("vm-operator-artifacts-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+
+    // Per-test OPERATOR artifacts at the common `0o600` operator posture: a
+    // byte-for-byte kernel copy and a rootfs copy with the spin guest injected.
+    // These are the operator-owned masters the confined hypervisor must reach
+    // WITHOUT the platform touching their mode or bytes.
+    let kernel = tmp.path().join("operator-kernel");
+    std::fs::copy(&fixture.kernel_path, &kernel).expect("stage a per-test operator kernel copy");
+    std::fs::set_permissions(&kernel, std::fs::Permissions::from_mode(0o600))
+        .expect("set the operator kernel to the common 0o600 posture");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
+    std::fs::set_permissions(&rootfs, std::fs::Permissions::from_mode(0o600))
+        .expect("set the operator rootfs to the common 0o600 posture");
+
+    let kernel_before = artifact_mode_and_bytes(&kernel);
+    let rootfs_before = artifact_mode_and_bytes(&rootfs);
+    let kernel_dir_before = path_mode(kernel.parent().expect("kernel has a parent dir"));
+    let rootfs_dir_before = path_mode(rootfs.parent().expect("rootfs has a parent dir"));
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-operator-artifacts.toml",
+        &vm_job_toml("vm-operator-artifacts", "/sbin/spin", &kernel, &rootfs),
+    );
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the confined VM workload sourcing per-test operator artifacts");
+    // Reaching Running proves the confined hypervisor DID reach its kernel and
+    // rootfs -- via platform-owned copies/clones, not by widening the operator's.
+    poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
+
+    assert_eq!(
+        artifact_mode_and_bytes(&kernel),
+        kernel_before,
+        "the operator's KERNEL master must be byte- AND mode-unchanged across a confined deploy \
+         (the fourth amendment COPIES it into the run dir; the prior impl widened it o+r)",
+    );
+    assert_eq!(
+        artifact_mode_and_bytes(&rootfs),
+        rootfs_before,
+        "the operator's ROOTFS master must be byte- AND mode-unchanged across a confined deploy \
+         (FICLONE only READS it; the clone is staged in a platform dir, never beside it)",
+    );
+    assert_eq!(
+        path_mode(kernel.parent().expect("kernel dir")),
+        kernel_dir_before,
+        "the operator's KERNEL directory mode must be unchanged (the prior impl widened it o+x)",
+    );
+    assert_eq!(
+        path_mode(rootfs.parent().expect("rootfs dir")),
+        rootfs_dir_before,
+        "the operator's ROOTFS directory mode must be unchanged (the prior impl widened it o+x)",
+    );
+
+    stop_and_shutdown(handle, &cfg, "vm-operator-artifacts").await;
 }
 
 // ---------------------------------------------------------------------------

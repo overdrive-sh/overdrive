@@ -78,6 +78,7 @@ use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::config::{HostArch, RootfsPlan, VmRunDir};
 use overdrive_host::CloudHypervisorVmm;
@@ -90,11 +91,25 @@ fn shared_staging_root() -> PathBuf {
     overdrive_testing::vm_fixture::default_staging_root()
 }
 
+/// A server-side tempdir (holding `data/` + `conf/`) on the reflink-capable
+/// staging root, NOT the system tmpdir. Required because each per-launch rootfs
+/// clone is FICLONE'd into `clone_staging_dir(data_dir)`, and FICLONE is
+/// intra-filesystem (ADR-0082 2026-08-18 fourth amendment): with `data_dir` on
+/// tmpfs and the master on the xfs staging root, the clone would fail `EXDEV`
+/// and the VM boot would refuse. Co-locating `data_dir` with the masters
+/// respects the production invariant (one VM data partition holds both).
+fn server_tmp_on_staging_root() -> TempDir {
+    tempfile::Builder::new()
+        .prefix("vm-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("server tempdir on the reflink-capable staging root")
+}
+
 /// The same real in-process `serve` composition used by the existing microVM
 /// walking skeleton: production server wiring with only the dataplane and KEK
 /// external ports replaced by their established simulation adapters.
 async fn spawn_vm_server() -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -119,7 +134,7 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// never mutates the host-shared `cloud-hypervisor` sibling Tier-3
 /// scenarios (`vmm_equivalence`) spawn in parallel nextest processes.
 async fn spawn_vm_server_with_vmm(vmm: Arc<dyn Vmm>) -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -281,11 +296,20 @@ fn stage_rootfs_with_extra_binary(
 /// S-VM-37 (step 03-02) is the sixth caller, and it calls this once per
 /// unclassified run: an unclassified rejection leaks no more than a
 /// named one.
-fn assert_no_allocation_scoped_vm_residue(alloc: &AllocationId, rootfs_master: &Path) {
+fn assert_no_allocation_scoped_vm_residue(
+    alloc: &AllocationId,
+    rootfs_master: &Path,
+    data_dir: &Path,
+) {
     let rootfs_plan = RootfsPlan::for_alloc(
         rootfs_master.to_path_buf(),
         0,
         alloc,
+        // The per-launch clone lands in the platform staging dir under the
+        // server's data_dir (ADR-0082 2026-08-18 fourth amendment, B1 fix), so
+        // verify the cleanup removed it FROM THERE — not beside the operator's
+        // master. `clone_dest` derives from this staging dir.
+        &overdrive_core::vm::config::clone_staging_dir(data_dir),
         std::path::Path::new("/run/overdrive/vm/clone-index"),
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), alloc);
@@ -604,7 +628,7 @@ async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources(
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // ---- Rejected starts leak nothing. ----
-    assert_no_allocation_scoped_vm_residue(&alloc, &missing_rootfs);
+    assert_no_allocation_scoped_vm_residue(&alloc, &missing_rootfs, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -732,7 +756,7 @@ async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hyper
 
     // The preflight runs before anything is provisioned, so nothing was
     // spawned and nothing is left behind.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -855,7 +879,7 @@ async fn hypervisor_removed_after_composition_names_every_searched_path() {
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // A spawn that never happened leaves nothing behind.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -984,7 +1008,7 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
     }
 
     // An aborted boot leaves nothing behind, hypervisor included.
-    assert_no_allocation_scoped_vm_residue(&alloc, &silent_rootfs);
+    assert_no_allocation_scoped_vm_residue(&alloc, &silent_rootfs, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -1129,7 +1153,7 @@ async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() 
     assert_named_cause_is_rendered(&rendered, &reason, &detail);
 
     // The preflight rejects before any hypervisor is spawned.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -1335,7 +1359,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
         .expect("tempdir on the shared reflink-capable staging root");
 
     // ---- (1) Verbatim preservation. ----
-    let (out_a, handle_a, _server_a) = deploy_against_unclassifiable_vmm(
+    let (out_a, handle_a, server_a) = deploy_against_unclassifiable_vmm(
         "vm-unclassified-a",
         &fixture.kernel_path,
         &fixture.rootfs_path,
@@ -1344,11 +1368,11 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
     )
     .await;
     let alloc_a = assert_reads_as_unclassified_carrying(&out_a, UNMAPPED_DIAGNOSTIC_A);
-    assert_no_allocation_scoped_vm_residue(&alloc_a, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc_a, &fixture.rootfs_path, &server_a.path().join("data"));
     handle_a.shutdown().await.expect("clean shutdown");
 
     // ---- (2) Wording independence: same class, different detail only. ----
-    let (out_b, handle_b, _server_b) = deploy_against_unclassifiable_vmm(
+    let (out_b, handle_b, server_b) = deploy_against_unclassifiable_vmm(
         "vm-unclassified-b",
         &fixture.kernel_path,
         &fixture.rootfs_path,
@@ -1357,7 +1381,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
     )
     .await;
     let alloc_b = assert_reads_as_unclassified_carrying(&out_b, UNMAPPED_DIAGNOSTIC_B);
-    assert_no_allocation_scoped_vm_residue(&alloc_b, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc_b, &fixture.rootfs_path, &server_b.path().join("data"));
     handle_b.shutdown().await.expect("clean shutdown");
 
     // The wording-independence claim, stated once as a fact rather than left
@@ -1390,7 +1414,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
     // the VMM is reached, so the armed diagnostic cannot claim it. ----
     let kernel = copy_kernel_for_this_test(artifact_tmp.path(), &fixture, "kernel-to-replace");
     let replacement = artifact_tmp.path().join("incompatible-image.staged");
-    let (out_c, handle_c, _server_c) = deploy_against_unclassifiable_vmm(
+    let (out_c, handle_c, server_c) = deploy_against_unclassifiable_vmm(
         "vm-unclassified-not-format",
         &kernel,
         &fixture.rootfs_path,
@@ -1432,7 +1456,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
         "the VMM's own diagnostic must not reach an operator whose start never got that far:\n\
          {rendered_c}",
     );
-    assert_no_allocation_scoped_vm_residue(&alloc_c, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc_c, &fixture.rootfs_path, &server_c.path().join("data"));
     handle_c.shutdown().await.expect("clean shutdown");
 }
 
@@ -1727,6 +1751,10 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
         rootfs.clone(),
         0,
         &alloc,
+        // The live clone sits in the platform staging dir under the server
+        // data_dir (ADR-0082 fourth amendment B1 fix); this positive assertion
+        // must point THERE or it goes vacuously RED.
+        &overdrive_core::vm::config::clone_staging_dir(&server_tmp.path().join("data")),
         std::path::Path::new("/run/overdrive/vm/clone-index"),
     );
     let run_dir = VmRunDir::for_alloc(Path::new("/run/overdrive/vm"), &alloc);
@@ -2191,7 +2219,7 @@ async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_err
     // A dispatch-time registry miss runs no driver, so it leaks nothing — and
     // this forecloses the reading that "Failed" here meant a start was
     // attempted and aborted.
-    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path);
+    assert_no_allocation_scoped_vm_residue(&alloc, &fixture.rootfs_path, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }
@@ -2330,62 +2358,56 @@ async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_err
 /// the requirement are both named. Pair it with the S-VM-37-shaped integrity
 /// guard that the phrases being searched for are not already substrings of the
 /// cause's own label, or the containment checks pass for free.
-/// The filesystem-capability half of S-VM-83's rendered cause: the phrase
-/// naming what the per-launch clone requires of the operator's rootfs
-/// directory's filesystem. Named so the test-integrity guard can state it
-/// is not already a substring of [`UNCLASSIFIED_LABEL`].
-const CLONE_REQUIREMENT_PHRASE: &str = "reflink (FICLONE)";
-
-/// S-VM-83 — activated. A per-launch clone the operator's own rootfs
-/// directory cannot serve (its filesystem cannot reflink) reaches the
-/// operator as a cause naming THAT directory and the filesystem capability
-/// the clone requires — never an internal-shaped error, and never the
-/// absent-VM-capability cause. Message-actionability only: it mints no
-/// `VmStartFailure` variant (S-VM-94 owns the adapter-layer typing); the
-/// clone failure stays the EXISTING unclassified `DriverInternalError`
-/// whose `detail` now names the directory and the requirement (ADR-0083
-/// §D3b, Consequences).
+/// S-VM-83 — activated, and RE-FRAMED by ADR-0082's 2026-08-18 fourth amendment
+/// (c-fix.2 / M1). A rootfs master the platform cannot FICLONE into its own VM
+/// data partition — because the master sits on a filesystem FOREIGN to that
+/// partition — fails the intra-filesystem FICLONE with `EXDEV` and is refused
+/// FAIL-CLOSED as `VmConfinementUnavailable { control: UidDrop }` (the confined
+/// clone could not be staged), never an unclassified cause and never the
+/// absent-VM-capability cause. The hypervisor is NEVER started, and no residue
+/// is left behind. This is the REAL-adapter (`CloudHypervisorVmm`) complement
+/// to S-VM-51's SimVmm-driven fail-closed proof: it exercises the production
+/// adapter's own EXDEV→ConfinementUnavailable mapping end to end through
+/// `serve` + `deploy`.
+///
+/// NOTE (surfaced to acceptance-designer — scenario CONTRACT changed by the
+/// amendment): pre-amendment this scenario asserted an *unclassified* clone
+/// failure naming the reflink requirement, because the clone landed BESIDE the
+/// operator's master and a non-reflink master DIRECTORY produced `EOPNOTSUPP`.
+/// The amendment's B1 fix relocated the clone to the platform staging root
+/// (`clone_staging_dir(data_dir)`), so the operator constraint is now "the
+/// rootfs master must live on the VM data filesystem", and a foreign-fs master
+/// is the TYPED `ConfinementUnavailable { UidDrop }` fail-closed precondition,
+/// NOT an unclassified cause. The same-filesystem `EOPNOTSUPP` (a genuinely
+/// non-reflink data partition) path is owned by S-VM-94
+/// (`vmm_ficlone_per_launch.rs`) at the adapter layer.
 #[tokio::test]
 #[serial(cgroup)]
 async fn unservable_rootfs_directory_names_the_directory_and_the_clone_requirement() {
-    // Test integrity (S-VM-37-shaped): the requirement phrase must not be a
-    // substring of the unclassified LABEL, or the rendered-containment check
-    // below passes for free against the label `assert_named_cause_is_rendered`
-    // requires.
-    assert!(
-        !UNCLASSIFIED_LABEL.contains(CLONE_REQUIREMENT_PHRASE),
-        "test integrity: {CLONE_REQUIREMENT_PHRASE:?} must not be a substring of \
-         {UNCLASSIFIED_LABEL:?}",
-    );
-
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
 
-    // Stage the rootfs MASTER on tmpfs (`/dev/shm`) — a REAL non-reflink
-    // filesystem. This is legitimate HERE and NOWHERE ELSE in this file:
-    // every other Tier-3 VM scenario stages on the XFS-backed reflink-capable
-    // root because cloud-hypervisor disk I/O needs `O_DIRECT`, which tmpfs
-    // cannot serve. That constraint never binds here — the per-launch clone
-    // fails BEFORE any hypervisor opens the image. Do NOT "fix" this fixture
-    // back onto XFS: pointing it at a reflink-capable directory makes the
-    // deploy simply succeed and the scenario vacuous.
+    // Stage the rootfs MASTER on tmpfs (`/dev/shm`) — a filesystem FOREIGN to
+    // the server's VM data partition (the XFS reflink staging root the server
+    // `data_dir` lives on). FICLONE is intra-filesystem, so cloning this master
+    // into `clone_staging_dir(data_dir)` on the XFS partition returns EXDEV. Do
+    // NOT "fix" this fixture onto the staging root: co-locating the master with
+    // the data partition makes the deploy simply succeed and the scenario
+    // vacuous.
     let shm_dir = tempfile::Builder::new()
         .prefix("vm-reflink-")
         .tempdir_in("/dev/shm")
-        .expect("tmpfs tempdir under /dev/shm (guaranteed non-reflink on Linux)");
+        .expect("tmpfs tempdir under /dev/shm (a filesystem foreign to the XFS VM data partition)");
     let rootfs_master = shm_dir.path().join("rootfs.img");
     std::fs::copy(&fixture.rootfs_path, &rootfs_master).expect(
-        "copy the shared fixture rootfs onto tmpfs so the master EXISTS but its directory \
-         cannot serve the per-launch clone",
+        "copy the shared fixture rootfs onto tmpfs so the master EXISTS but is not on the VM data \
+         filesystem",
     );
 
     // Real `serve` with the production `CloudHypervisorVmm` composed (no
-    // `vmm_override`). On this KVM-capable host `Vmm::probe` reads `/dev/kvm`
-    // and self-tests reflink against the node's own `image_dir` (`/srv/vm`,
-    // reflink-capable) — so the probe PASSES and a `Vm` entry exists. The gap
-    // this scenario proves is exactly that a passing boot probe no longer
-    // speaks for the operator-named rootfs directory (§D3b): `FICLONE` is
-    // intra-filesystem.
+    // `vmm_override`). `Vmm::probe` passes against the node's own `image_dir`
+    // (`/srv/vm`, reflink-capable) — so a `Vm` entry exists — but a passing
+    // probe does not speak for a master the operator placed on a foreign fs.
     let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
@@ -2395,71 +2417,51 @@ async fn unservable_rootfs_directory_names_the_directory_and_the_clone_requireme
     );
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
-        .expect("deploy the VM workload whose per-launch clone the tmpfs rootfs dir cannot serve");
+        .expect("deploy the VM workload whose master is foreign to the VM data filesystem");
     let out = poll_until_failed(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
 
     // Anti-vacuity guard (b): the master EXISTS and is readable, so the outcome
-    // is a clone failure, NOT `VmRootfsNotFound` — "present but unservable"
-    // proven rather than assumed.
+    // is the clone (EXDEV) precondition failure, NOT `VmRootfsNotFound`.
     assert!(
         rootfs_master.exists(),
         "S-VM-83 precondition: the rootfs master must be present at assertion time; only its \
-         DIRECTORY may be unable to serve the clone",
+         filesystem placement may be wrong",
     );
 
     let row = out.snapshot.rows.first().expect("one failed allocation row for the deployed VM job");
     let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
     let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
-    let detail = row.error.clone().expect("the clone-failure detail must be preserved");
 
-    // No variant is minted here (S-VM-94 owns the typed variant): the clone
-    // failure stays the EXISTING unclassified cause carrying the enriched
-    // detail (ADR-0083 §D3b).
-    assert_eq!(
-        reason,
-        TransitionReason::DriverInternalError { detail: detail.clone() },
-        "S-VM-83: an unservable-clone failure must stay the EXISTING unclassified cause, no \
-         VmStartFailure variant minted here",
+    // Fail-closed with the TYPED confinement cause naming UidDrop (the confined
+    // clone could not be staged) — the amendment's EXDEV→ConfinementUnavailable
+    // mapping, never the unclassified fallback.
+    assert!(
+        matches!(
+            reason,
+            TransitionReason::VmConfinementUnavailable { control: ConfinementControl::UidDrop, .. }
+        ),
+        "S-VM-83 (ADR-0082 4th amendment): a rootfs master foreign to the VM data filesystem must \
+         fail closed as VmConfinementUnavailable{{UidDrop}}, got {reason:?}",
+    );
+    assert!(
+        !matches!(reason, TransitionReason::DriverInternalError { .. }),
+        "an EXDEV clone precondition is the typed confinement cause, never the unclassified \
+         driver-internal fallback: {reason:?}",
     );
 
     let rendered = overdrive_cli::render::workload_describe(&out);
-    let dir = shm_dir.path().display().to_string();
-    // The reported cause names the rootfs DIRECTORY — a property of the
-    // filesystem that directory sits on, not merely the master image FILE. A
-    // message naming only the image sends the operator to fix the wrong thing.
-    assert!(
-        !UNCLASSIFIED_LABEL.contains(dir.as_str()),
-        "test integrity: the staged directory {dir:?} must not be a substring of \
-         {UNCLASSIFIED_LABEL:?}",
-    );
-    assert!(
-        rendered.contains(dir.as_str()),
-        "S-VM-83: the rendered cause must NAME the rootfs directory {dir}, not merely the master \
-         image file:\n{rendered}",
-    );
-    assert!(
-        rendered.contains(CLONE_REQUIREMENT_PHRASE),
-        "S-VM-83: the rendered cause must name the filesystem capability the per-launch clone \
-         requires ({CLONE_REQUIREMENT_PHRASE:?}):\n{rendered}",
-    );
-
-    // Anti-vacuity guard (a): the cause is NOT the absent-VM-capability one. On
-    // a host where the probe did NOT pass, the deploy would take S-VM-82's
-    // registry-miss path and never reach the clone — the test would go green
-    // having proven nothing.
+    // Anti-vacuity guard (a): the node HAS a VM driver (its probe passed against
+    // /srv/vm), so this is a per-launch clone precondition failure, not the
+    // registry-miss cause S-VM-82 owns.
     assert!(
         !rendered.contains(ABSENT_CAPABILITY_PHRASE),
-        "S-VM-83: the node HAS a VM driver, so this must be a per-launch clone failure, not the \
-         registry-miss cause S-VM-82 owns:\n{rendered}",
+        "S-VM-83: the node HAS a VM driver, so this must be a per-launch clone precondition \
+         failure, not the registry-miss cause S-VM-82 owns:\n{rendered}",
     );
 
-    // The whole `driver internal error: {detail}` label reaches the operator.
-    assert_named_cause_is_rendered(&rendered, &reason, &detail);
-
     // The clone fails before the hypervisor is spawned, so all four residue
-    // facts must hold — which also distinguishes "the clone was refused" from
-    // "a hypervisor started and then died".
-    assert_no_allocation_scoped_vm_residue(&alloc, &rootfs_master);
+    // facts hold — the hypervisor never started unconfined.
+    assert_no_allocation_scoped_vm_residue(&alloc, &rootfs_master, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }

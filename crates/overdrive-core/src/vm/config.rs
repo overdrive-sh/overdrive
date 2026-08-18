@@ -549,10 +549,19 @@ impl RootfsPlan {
     /// Functional-Core / Imperative-Shell split [`KernelImage::validate`]
     /// applies.
     ///
-    /// The clone destination is derived on the **master's own
-    /// filesystem** (FICLONE is intra-filesystem; staging into `/run`
-    /// fails `EXDEV`), with a filename **carrying `alloc`** so a
-    /// reboot-orphaned clone is attributable (SD-1 / SD-2).
+    /// The clone destination sits in the **platform-owned staging root**
+    /// `staging_dir` ([`clone_staging_dir`], derived over the node's durable
+    /// `data_dir`), NOT beside the operator's master (ADR-0082 2026-08-18
+    /// fourth amendment (c-fix.2), B1 fix). Reaching a clone under the
+    /// operator's directory would require an `o+x` traverse grant on that
+    /// operator dir — the DAC regression this fix removes. FICLONE is
+    /// intra-filesystem, so `staging_dir` MUST share the master's filesystem
+    /// (the appliance's one VM data partition — the operator-facing
+    /// create-time precondition; a master on a foreign fs fails closed as
+    /// `ConfinementUnavailable { UidDrop }` on the FICLONE `EXDEV`). The
+    /// filename **carries `alloc`** so a reboot-orphaned clone is
+    /// attributable (SD-1 / SD-2) and so ADR-0083's `index_link` parsing is
+    /// unchanged wherever the clone lives.
     ///
     /// The **index link** sits in `index_dir` (the platform-owned
     /// [`clone_index_dir`], derived over the node's durable `data_dir`)
@@ -560,19 +569,19 @@ impl RootfsPlan {
     /// `CLONE_PREFIX`/`CLONE_SUFFIX` parsing recovers the same allocation
     /// id from the link. The clone's location is **recorded** in this
     /// durable index at the moment the platform chooses it — never
-    /// re-derived — because an operator spec-edit or workload deletion can
-    /// destroy `parent(master)` while the clone survives (ADR-0083 §§D3f-D3h,
+    /// re-derived — because a boot that lost its in-memory [`RootfsPlan`]
+    /// must still reclaim the clone by reading the link (ADR-0083 §§D3f-D3h,
     /// DWD-26).
     #[must_use]
     pub fn for_alloc(
         master: PathBuf,
         master_bytes: u64,
         alloc: &AllocationId,
+        staging_dir: &Path,
         index_dir: &Path,
     ) -> Self {
         let file_name = format!(".overdrive-vm-rootfs-{alloc}.img");
-        let dir = master.parent().unwrap_or_else(|| Path::new(""));
-        let clone_dest = dir.join(&file_name);
+        let clone_dest = staging_dir.join(&file_name);
         let index_link = index_dir.join(&file_name);
         Self { master, master_bytes, clone_dest, index_link }
     }
@@ -620,6 +629,25 @@ impl RootfsPlan {
 #[must_use]
 pub fn clone_index_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("vm").join("clone-index")
+}
+
+/// The platform-owned VM clone-staging root under the node's durable
+/// `data_dir`: `<data_dir>/vm/clone-staging/` (ADR-0082 2026-08-18 fourth
+/// amendment (c-fix.2)). Every per-launch rootfs clone is FICLONE'd HERE —
+/// a platform-owned directory the confined identity reaches via a
+/// set-once traverse grant (`0710 root:<confined-gid>`, applied at node
+/// setup, never per-alloc) — instead of beside the operator's master,
+/// whose directory the platform must never widen. Because FICLONE is
+/// intra-filesystem, this root MUST live on the same filesystem as the
+/// operator's rootfs master (the appliance's one VM data partition); a
+/// master on a foreign filesystem is the create-time `EXDEV` that
+/// [`crate::traits::vmm::Vmm::create`] maps to `ConfinementUnavailable`.
+/// ONE derivation, sibling of [`clone_index_dir`] — a pure join over
+/// `data_dir`, deliberately NOT under `/run` so it shares the durable
+/// data partition where BYO artifacts land.
+#[must_use]
+pub fn clone_staging_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("vm").join("clone-staging")
 }
 
 // -----------------------------------------------------------------------
@@ -745,6 +773,23 @@ impl VmRunDir {
         self.0.join("console.log")
     }
 
+    /// `<dir>/kernel` — this allocation's OWN copy of the operator's kernel
+    /// master (ADR-0082 2026-08-18 fourth amendment (c-fix.1), B1 fix). The
+    /// platform copies the operator's kernel byte-for-byte here as root
+    /// before spawn and `chown`s the copy to the confined identity;
+    /// `Vmm::create` renders `--kernel` against THIS path, so Cloud
+    /// Hypervisor loads the copy and auto-derives its read-only kernel
+    /// Landlock grant against it. The operator's own kernel is only ever
+    /// OPENED READ-ONLY to source the copy — never mode-widened. Sibling of
+    /// [`console_log`](Self::console_log) / [`vsock_socket`](Self::vsock_socket)
+    /// per SD-2's "`VmRunDir` owns every path inside it"; reclaimed with the
+    /// run dir at teardown, and inside this allocation's OWN Landlock
+    /// boundary.
+    #[must_use]
+    pub fn kernel_copy(&self) -> PathBuf {
+        self.0.join("kernel")
+    }
+
     /// The ONE explicit Landlock grant: `access=rw` on the run directory
     /// itself (ADR-0082 §(b), gap 5). CH auto-derives rules for
     /// `--kernel` / `--disk` / `--serial file=` / `--api-socket` but NOT
@@ -846,12 +891,14 @@ mod tests {
     // -------------------------------------------------------------------
 
     proptest! {
-        /// `RootfsPlan::for_alloc` derives the clone destination on the
-        /// master's OWN parent directory (FICLONE is intra-filesystem)
-        /// with a filename carrying the allocation id (SD-1 / SD-2 reap
-        /// attribution).
+        /// `RootfsPlan::for_alloc` derives the clone destination in the
+        /// PLATFORM-OWNED staging root (never beside the operator's master —
+        /// ADR-0082 2026-08-18 fourth amendment (c-fix.2), B1 fix) with a
+        /// filename carrying the allocation id (SD-1 / SD-2 reap attribution),
+        /// while the index link keeps that SAME filename under the durable
+        /// index dir.
         #[test]
-        fn rootfs_plan_clone_dest_sits_beside_master_and_carries_alloc(
+        fn rootfs_plan_clone_dest_sits_in_staging_root_and_carries_alloc(
             dir_name in "[a-z0-9]{1,8}",
             file_name in "[a-z0-9]{1,8}",
             data_name in "[a-z0-9]{1,8}",
@@ -860,12 +907,18 @@ mod tests {
         ) {
             let alloc = AllocationId::new(&alloc_suffix).unwrap();
             let master = PathBuf::from(format!("/var/lib/overdrive/{dir_name}/{file_name}.img"));
-            let index_dir = clone_index_dir(&PathBuf::from(format!("/srv/{data_name}")));
-            let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
+            let data_dir = PathBuf::from(format!("/srv/{data_name}"));
+            let staging_dir = clone_staging_dir(&data_dir);
+            let index_dir = clone_index_dir(&data_dir);
+            let plan =
+                RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &staging_dir, &index_dir);
 
             prop_assert_eq!(plan.master(), master.as_path());
             prop_assert_eq!(plan.master_bytes(), master_bytes);
-            prop_assert_eq!(plan.clone_dest().parent(), master.parent());
+            // The clone lives in the PLATFORM staging root, NOT beside the
+            // operator's master — the whole point of the B1 fix.
+            prop_assert_eq!(plan.clone_dest().parent(), Some(staging_dir.as_path()));
+            prop_assert_ne!(plan.clone_dest().parent(), master.parent());
 
             let clone_name = plan
                 .clone_dest()
@@ -880,17 +933,24 @@ mod tests {
 
             // The index link sits in `index_dir` and shares the clone's
             // filename, so `VmHostState`'s prefix/suffix parsing recovers
-            // the SAME alloc id from the link (ADR-0083 §§D3f-D3h).
+            // the SAME alloc id from the link WHEREVER the clone lives
+            // (ADR-0083 §§D3f-D3h — attribution is unchanged by the relocation).
             prop_assert_eq!(plan.index_link().parent(), Some(index_dir.as_path()));
             prop_assert_eq!(
                 plan.index_link().file_name(),
                 plan.clone_dest().file_name(),
                 "index link and clone must share a filename so the sweep parses the alloc from the link",
             );
-            // The index link is NOT the clone itself — the clone lives
-            // beside the master, the link under the durable index dir.
+            // The index link is NOT the clone itself — the clone lives in the
+            // staging root, the link under the durable index dir.
             prop_assert_ne!(plan.index_link(), plan.clone_dest());
         }
+    }
+
+    #[test]
+    fn clone_staging_dir_is_data_dir_joined_vm_clone_staging() {
+        let dir = clone_staging_dir(&PathBuf::from("/srv/overdrive/data"));
+        assert_eq!(dir, PathBuf::from("/srv/overdrive/data/vm/clone-staging"));
     }
 
     #[test]
@@ -1024,6 +1084,7 @@ mod tests {
                 PathBuf::from("/var/lib/overdrive/images/base.img"),
                 master_bytes,
                 &alloc,
+                &clone_staging_dir(&PathBuf::from("/srv/overdrive/data")),
                 &clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
             ),
             cmdline: KernelCmdline::platform_default(HostArch::X86_64),

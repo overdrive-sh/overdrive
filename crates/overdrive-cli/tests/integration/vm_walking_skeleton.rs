@@ -276,6 +276,20 @@ fn shared_staging_root() -> PathBuf {
     overdrive_testing::vm_fixture::default_staging_root()
 }
 
+/// A server-side tempdir (holding `data/` + `conf/`) on the reflink-capable
+/// staging root, NOT the system tmpdir. Required because each per-launch rootfs
+/// clone is FICLONE'd into `clone_staging_dir(data_dir)`, and FICLONE is
+/// intra-filesystem (ADR-0082 2026-08-18 fourth amendment): with `data_dir` on
+/// tmpfs and the master on the xfs staging root, the clone would fail `EXDEV`
+/// and the VM boot would refuse. Co-locating `data_dir` with the masters
+/// respects the production invariant (one VM data partition holds both).
+fn server_tmp_on_staging_root() -> TempDir {
+    tempfile::Builder::new()
+        .prefix("vm-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("server tempdir on the reflink-capable staging root")
+}
+
 /// Cross-builds a tiny static-musl binary that does nothing but
 /// `std::process::exit(exit_code)`, via a direct `rustc` invocation (no
 /// throwaway Cargo project). Mirrors `vm_fixture`'s own
@@ -398,7 +412,7 @@ fn build_empty_rootfs(tmp: &Path) -> PathBuf {
 /// against this handle must source its kernel and rootfs from its own
 /// `[vm]` spec.
 async fn spawn_vm_server() -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -423,7 +437,7 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
 /// mesh-composed serve correctly SKIPS the `MtlsInterceptWorker` gate
 /// for a `DriverType::Vm` allocation rather than crashing on it).
 async fn spawn_vm_server_mtls_composed() -> (ServeHandle, TempDir) {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -1432,6 +1446,10 @@ async fn vm_deadline_arm_leaks_nothing() {
         broken_rootfs.clone(),
         master_bytes,
         &alloc,
+        // The clone lands in the platform staging dir under the server data_dir
+        // (ADR-0082 fourth amendment B1 fix); the deadline arm must remove it
+        // FROM THERE -- `clone_dest` derives from this staging dir.
+        &overdrive_core::vm::config::clone_staging_dir(&server_tmp.path().join("data")),
         std::path::Path::new("/run/overdrive/vm/clone-index"),
     );
     assert!(
@@ -1741,7 +1759,7 @@ async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capa
 async fn spawn_vm_server_with_vmm_override(
     vmm_override: std::sync::Arc<dyn overdrive_core::traits::vmm::Vmm>,
 ) -> Result<(ServeHandle, TempDir), overdrive_cli::http_client::CliError> {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = server_tmp_on_staging_root();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -2226,44 +2244,50 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
     let alloc_two = AllocationId::new(&row_two.alloc_id)
         .expect("server-echoed alloc_id parses as AllocationId");
 
-    // The discriminating assertion. Each allocation's per-launch clone
-    // must sit beside the master ITS OWN SPEC named, and the live
-    // hypervisor for THAT allocation's run directory must carry that clone
-    // path in its argv. A single node-level master cannot put one clone
-    // under `tmp_one` and the other under `tmp_two`.
+    // The discriminating assertion. Each allocation derives its OWN distinct
+    // per-launch clone (a distinct alloc-named file in the platform staging
+    // dir, ADR-0082 2026-08-18 fourth amendment B1 fix -- NEVER beside either
+    // operator's master), and the live hypervisor for THAT allocation's run
+    // directory must carry that clone path in its argv. A single node-level
+    // master would collapse the two onto one image.
     let master_bytes_one =
         std::fs::metadata(&rootfs_one).expect("stat the first rootfs master").len();
     let master_bytes_two =
         std::fs::metadata(&rootfs_two).expect("stat the second rootfs master").len();
+    let staging_dir =
+        overdrive_core::vm::config::clone_staging_dir(&server_tmp.path().join("data"));
     let plan_one =
-        RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one, tmp_one.path());
+        RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one, &staging_dir, tmp_one.path());
     let plan_two =
-        RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two, tmp_two.path());
+        RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two, &staging_dir, tmp_two.path());
     let clone_one = plan_one.clone_dest();
     let clone_two = plan_two.clone_dest();
 
     assert!(
         clone_one.exists(),
-        "the first allocation's per-launch clone must exist beside the master ITS spec named, at {}",
+        "the first allocation's per-launch clone must exist in the platform staging dir, at {}",
         clone_one.display(),
     );
     assert!(
         clone_two.exists(),
-        "the second allocation's per-launch clone must exist beside the master ITS spec named, at \
-         {}",
+        "the second allocation's per-launch clone must exist in the platform staging dir, at {}",
         clone_two.display(),
     );
-    assert!(
-        !clone_one.starts_with(tmp_two.path()),
-        "the first allocation's clone must NOT live under the SECOND image's directory ({}) -- a \
-         node-level artifact default is exactly what that would look like",
-        tmp_two.path().display(),
+    assert_ne!(
+        clone_one, clone_two,
+        "each allocation must derive its OWN distinct per-launch clone; got the same path {}",
+        clone_one.display(),
     );
     assert!(
-        !clone_two.starts_with(tmp_one.path()),
-        "the second allocation's clone must NOT live under the FIRST image's directory ({}) -- a \
-         node-level artifact default is exactly what that would look like",
+        !clone_one.starts_with(tmp_one.path())
+            && !clone_one.starts_with(tmp_two.path())
+            && !clone_two.starts_with(tmp_one.path())
+            && !clone_two.starts_with(tmp_two.path()),
+        "the per-launch clones must live in the platform staging dir, NEVER under either operator's \
+         own image directory (tmp_one={}, tmp_two={}) -- a node-level artifact default (or the pre-B1 \
+         beside-the-master placement) is exactly what that would look like",
         tmp_one.path().display(),
+        tmp_two.path().display(),
     );
 
     let argv_one = hypervisor_argv_for_alloc(&alloc_one);

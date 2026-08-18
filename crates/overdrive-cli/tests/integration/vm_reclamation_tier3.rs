@@ -107,6 +107,20 @@ fn shared_staging_root() -> PathBuf {
     overdrive_testing::vm_fixture::default_staging_root()
 }
 
+/// A server-side tempdir (holding `data/` + `conf/`) on the reflink-capable
+/// staging root, NOT the system tmpdir. Required because each per-launch rootfs
+/// clone is FICLONE'd into `clone_staging_dir(data_dir)`, and FICLONE is
+/// intra-filesystem (ADR-0082 2026-08-18 fourth amendment): with `data_dir` on
+/// tmpfs and the master on the xfs staging root, the clone would fail `EXDEV`
+/// and the VM boot would refuse. Co-locating `data_dir` with the masters
+/// respects the production invariant (one VM data partition holds both).
+fn server_tmp_on_staging_root() -> TempDir {
+    tempfile::Builder::new()
+        .prefix("vm-serve-")
+        .tempdir_in(shared_staging_root())
+        .expect("server tempdir on the reflink-capable staging root")
+}
+
 /// A long-lived guest binary that never exits on its own — needed
 /// whenever the assertion window requires the real `cloud-hypervisor`
 /// process to still be observable at a specific moment.
@@ -469,12 +483,14 @@ fn clone_link_path(index_dir: &Path, alloc_id: &str) -> PathBuf {
 /// which is why [`restrand_vm_exclusive_artifacts`] now creates BOTH the
 /// clone file (here) and the index link (in `clone_index_dir(&data_dir)`).
 ///
-/// A clone from a REAL boot lands beside the operator's own `[vm] rootfs`
-/// (per-test tempdir), and its index link is created by the real
-/// `VmDriver::start`; those scenarios (S-VM-30/23/25a/81/28) still do not
-/// assert the clone directly — S-VM-84 owns the without-stop clone-leak
-/// claim — but the clone IS now reclaimed via the durable index (the prior
-/// "the sweep structurally cannot see it" residual is CLOSED by step 03-09).
+/// A clone from a REAL boot lands in the platform-owned
+/// `clone_staging_dir(<server data_dir>)` (ADR-0082 2026-08-18 fourth
+/// amendment (B1 fix) — NOT beside the operator's master), and its index link
+/// is created by the real `VmDriver::start`; those scenarios
+/// (S-VM-30/23/25a/81/28) still do not assert the clone directly — S-VM-84
+/// owns the without-stop clone-leak claim — but the clone IS reclaimed via the
+/// durable index (the prior "the sweep structurally cannot see it" residual is
+/// CLOSED by step 03-09).
 fn node_staging_dir() -> PathBuf {
     let dir = PathBuf::from("/run/overdrive/vm-rootfs-staging");
     std::fs::create_dir_all(&dir).expect("create the reflink-capable strand-clone directory");
@@ -614,7 +630,7 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -650,15 +666,14 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     // happened by the time boot #2's handle is available.
     assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
     assert!(!run_dir_path(&alloc_id).exists(), "the surviving run dir must be reclaimed at boot");
-    // The clone is NOT asserted here -- the same named residual documented
-    // on `node_staging_dir`. Boot #1's clone was produced by a REAL boot,
-    // so it sits beside the operator's own `[vm] rootfs`, and
-    // `RealVmHostState`'s single platform-owned clone surface cannot see
-    // it. The run dir (fixed `/run/overdrive/vm`) and the scope are both
-    // platform-owned paths, are unaffected by the artifact relocation, and
-    // ARE asserted above -- which is this scenario's actual claim: a node
-    // with no `Vm` registry entry still reclaims via `Observed(the empty
-    // set)`.
+    // The clone is NOT asserted here -- S-VM-84 owns the direct clone-leak
+    // claim. Boot #1's clone was produced by a REAL boot, so it lands in the
+    // platform-owned `clone_staging_dir(<data_dir>)` (ADR-0082 2026-08-18
+    // fourth amendment (B1 fix)) and is recorded in the durable index. The run
+    // dir (fixed `/run/overdrive/vm`) and the scope are both platform-owned
+    // paths, are unaffected by the artifact relocation, and ARE asserted above
+    // -- which is this scenario's actual claim: a node with no `Vm` registry
+    // entry still reclaims via `Observed(the empty set)`.
     handle2.shutdown().await.expect("clean shutdown");
 }
 
@@ -683,7 +698,7 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -717,13 +732,14 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     // named design residual rather than an oversight.
     //
     // This clone was produced by a REAL boot, so `RootfsPlan::for_alloc`
-    // put it beside the operator's own `[vm] rootfs` (ADR-0083 §D3a/§D3b —
-    // FICLONE is intra-filesystem, so the clone MUST share the master's
-    // filesystem). `RealVmHostState`'s clone surface is the single
-    // platform-owned `node_staging_dir()`, so the sweep structurally
-    // cannot see it. This allocation also never went through
-    // `VmDriver::stop` (which DOES remove the clone directly, holding the
-    // allocation's own `RootfsPlan`), so nothing removes it.
+    // FICLONEd it into the platform-owned `clone_staging_dir(<data_dir>)`
+    // (ADR-0082 2026-08-18 fourth amendment (B1 fix); FICLONE is
+    // intra-filesystem, so the staging dir shares the master's filesystem).
+    // Its location is recorded in the durable clone-index, so a boot-epoch
+    // sweep CAN reclaim it — S-VM-84 owns that direct clone-leak claim; this
+    // scenario asserts only the scope/run-dir reclamation. This allocation
+    // never went through `VmDriver::stop` (which removes the clone directly,
+    // holding the allocation's own `RootfsPlan`).
     //
     // That is a real leak on the natural-exit / crash path, ratified only
     // in its premise: ADR-0083's Consequences accept that the clone leaves
@@ -761,12 +777,13 @@ async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve()
     // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
     // This scenario strands artifacts artificially, so it is free to strand
     // them where the sweep looks — that keeps `discard_artifacts`' clone
-    // path genuinely exercised. A clone from a REAL boot lands beside the
-    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
-    // two scenarios that produce one that way say so at their own sites.
+    // path genuinely exercised. A clone from a REAL boot lands in the
+    // platform-owned `clone_staging_dir(<data_dir>)` instead (ADR-0082
+    // 2026-08-18 fourth amendment (B1 fix)), reclaimed via the durable index;
+    // the S-VM-84 scenarios that produce one that way say so at their sites.
     let staging_dir = node_staging_dir();
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -852,12 +869,13 @@ async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
     // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
     // This scenario strands artifacts artificially, so it is free to strand
     // them where the sweep looks — that keeps `discard_artifacts`' clone
-    // path genuinely exercised. A clone from a REAL boot lands beside the
-    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
-    // two scenarios that produce one that way say so at their own sites.
+    // path genuinely exercised. A clone from a REAL boot lands in the
+    // platform-owned `clone_staging_dir(<data_dir>)` instead (ADR-0082
+    // 2026-08-18 fourth amendment (B1 fix)), reclaimed via the durable index;
+    // the S-VM-84 scenarios that produce one that way say so at their sites.
     let staging_dir = node_staging_dir();
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -916,7 +934,7 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     let exit0 = build_exit0_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -952,13 +970,14 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     // named design residual rather than an oversight.
     //
     // This clone was produced by a REAL boot, so `RootfsPlan::for_alloc`
-    // put it beside the operator's own `[vm] rootfs` (ADR-0083 §D3a/§D3b —
-    // FICLONE is intra-filesystem, so the clone MUST share the master's
-    // filesystem). `RealVmHostState`'s clone surface is the single
-    // platform-owned `node_staging_dir()`, so the sweep structurally
-    // cannot see it. This allocation also never went through
-    // `VmDriver::stop` (which DOES remove the clone directly, holding the
-    // allocation's own `RootfsPlan`), so nothing removes it.
+    // FICLONEd it into the platform-owned `clone_staging_dir(<data_dir>)`
+    // (ADR-0082 2026-08-18 fourth amendment (B1 fix); FICLONE is
+    // intra-filesystem, so the staging dir shares the master's filesystem).
+    // Its location is recorded in the durable clone-index, so a boot-epoch
+    // sweep CAN reclaim it — S-VM-84 owns that direct clone-leak claim; this
+    // scenario asserts only the scope/run-dir reclamation. This allocation
+    // never went through `VmDriver::stop` (which removes the clone directly,
+    // holding the allocation's own `RootfsPlan`).
     //
     // That is a real leak on the natural-exit / crash path, ratified only
     // in its premise: ADR-0083's Consequences accept that the clone leaves
@@ -1011,12 +1030,13 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     // the surface `RealVmHostState` enumerates (see `node_staging_dir`).
     // This scenario strands artifacts artificially, so it is free to strand
     // them where the sweep looks — that keeps `discard_artifacts`' clone
-    // path genuinely exercised. A clone from a REAL boot lands beside the
-    // operator's own `[vm] rootfs` instead, which the sweep cannot see; the
-    // two scenarios that produce one that way say so at their own sites.
+    // path genuinely exercised. A clone from a REAL boot lands in the
+    // platform-owned `clone_staging_dir(<data_dir>)` instead (ADR-0082
+    // 2026-08-18 fourth amendment (B1 fix)), reclaimed via the durable index;
+    // the S-VM-84 scenarios that produce one that way say so at their sites.
     let staging_dir = node_staging_dir();
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -1179,7 +1199,7 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -1322,7 +1342,7 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
 
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
 
@@ -1451,26 +1471,27 @@ async fn reclaim_then_restart_populates_restart_count_and_last_terminated_togeth
 // And the VM has reached Running under a real "overdrive serve"
 // When the allocation ends WITHOUT VmDriver::stop being called
 // Then the VmReclamation pass reclaims the per-launch rootfs clone
-// And no .overdrive-vm-rootfs-<alloc>.img file remains in the operator's
-//   rootfs directory
+// And no .overdrive-vm-rootfs-<alloc>.img file remains in the platform
+//   clone-staging directory
 // And the clone index holds no entry for that allocation
 // And the cgroup scope and run directory are reclaimed as they already were
 // ```
 //
 // ### Fixture placement is the load-bearing precondition
 //
-// Stage the `[vm] rootfs` master in a per-test OPERATOR-chosen directory
-// — a `tempdir_in(shared_staging_root())` (reflink-capable, so FICLONE
-// works) that is deliberately NEITHER `node_staging_dir()`
-// (`/run/overdrive/vm-rootfs-staging`) NOR the server's `data_dir`. That
-// is exactly where a real boot lands the clone: `RootfsPlan::for_alloc`
-// derives `clone_dest` from `parent([vm] rootfs)` (§ D3a/§ D3b). A
-// regression that re-points the sweep at a platform directory then fails
-// HERE rather than passing vacuously. The activated assertions read:
-//   * the operator clone is gone —
-//     `clone_path(<operator_rootfs_dir>, &alloc_id)` (the SAME
-//     `.overdrive-vm-rootfs-<alloc>.img` helper, pointed at the operator
-//     dir, NOT `node_staging_dir()`) no longer `exists()`;
+// Stage the `[vm] rootfs` master in a per-test OPERATOR-chosen directory —
+// a `tempdir_in(shared_staging_root())` (reflink-capable, so FICLONE works)
+// that is NOT any platform directory. A real boot then FICLONEs the clone
+// into the PLATFORM-owned `clone_staging_dir(<server data_dir>)` (ADR-0082
+// 2026-08-18 fourth amendment (B1 fix), NEVER beside the operator's master),
+// records that location in the durable clone-INDEX link, and the reclamation
+// sweep reads the index to find and remove it. The server's `data_dir` shares
+// the master's filesystem so FICLONE (intra-fs) succeeds. The activated
+// assertions read:
+//   * the platform-staged clone is gone —
+//     `clone_path(<clone_staging_dir>, &alloc_id)` (the SAME
+//     `.overdrive-vm-rootfs-<alloc>.img` helper, pointed at the platform
+//     staging dir, NOT `node_staging_dir()`) no longer `exists()`;
 //   * the clone-index entry is gone — no
 //     `.overdrive-vm-rootfs-<alloc>.img` symlink under
 //     `clone_index_dir(<data_dir>)` = `<data_dir>/vm/clone-index/`
@@ -1510,18 +1531,22 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
         .tempdir_in(shared_staging_root())
         .expect("tempdir on the staging root");
     let exit0 = build_exit0_binary(tmp.path());
-    // The rootfs master sits in the OPERATOR's own directory (`tmp`) — NOT
-    // `node_staging_dir()` and NOT the server `data_dir`. That is where a
-    // real boot lands the clone (`RootfsPlan::for_alloc` derives it from
-    // `parent([vm] rootfs)`), so a regression re-pointing the sweep at a
-    // platform dir fails HERE rather than passing vacuously.
+    // The rootfs master sits in the OPERATOR's own directory (`tmp`). A real
+    // boot stages the clone in the PLATFORM-owned `clone_staging_dir(data_dir)`
+    // (ADR-0082 2026-08-18 fourth amendment (B1 fix)) — NEVER beside the master
+    // — and records its location in the durable clone-index link, which is what
+    // the reclamation sweep reads. A regression re-pointing the sweep at the
+    // wrong surface fails HERE rather than passing vacuously.
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &exit0, "exit0");
-    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
-
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
     let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    // ADR-0082 2026-08-18 fourth amendment (B1 fix): a REAL boot stages the
+    // per-launch clone in the PLATFORM-owned `clone_staging_dir(data_dir)`, NOT
+    // beside the operator's master (which the platform never mode-widens).
+    // Reclamation still finds it via the durable clone-index link.
+    let staging_dir = overdrive_core::vm::config::clone_staging_dir(&data_dir);
 
     // Boot #1 — deploy an exit-0 guest and let it reach Terminated via the
     // natural-exit path (`run_exit_watcher`), never `VmDriver::stop`.
@@ -1539,8 +1564,8 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
     // The clone and its durable index link both survive the guest exit —
     // no `stop` ran to remove them.
     assert!(
-        clone_path(&operator_dir, &alloc_id).exists(),
-        "sanity: the operator-dir clone must survive a guest exit that never called stop"
+        clone_path(&staging_dir, &alloc_id).exists(),
+        "sanity: the platform-staged clone must survive a guest exit that never called stop"
     );
     assert!(
         clone_link_path(&index_dir, &alloc_id).exists(),
@@ -1554,8 +1579,8 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
     // reclaiming the operator clone.
     let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
     assert!(
-        !clone_path(&operator_dir, &alloc_id).exists(),
-        "the per-launch rootfs clone must be reclaimed from the operator's own directory"
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the platform staging directory"
     );
     assert!(
         !clone_link_path(&index_dir, &alloc_id).exists(),
@@ -1585,12 +1610,15 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
-
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
     let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    // ADR-0082 2026-08-18 fourth amendment (B1 fix): a REAL boot stages the
+    // per-launch clone in the PLATFORM-owned `clone_staging_dir(data_dir)`, NOT
+    // beside the operator's master (which the platform never mode-widens).
+    // Reclamation still finds it via the durable clone-index link.
+    let staging_dir = overdrive_core::vm::config::clone_staging_dir(&data_dir);
 
     let handle = spawn_vm_server(&data_dir, &config_dir).await;
     let cfg = config_path(&config_dir);
@@ -1623,8 +1651,8 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
     // the operator clone the dead hypervisor left behind.
     let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
     assert!(
-        !clone_path(&operator_dir, &alloc_id).exists(),
-        "the per-launch rootfs clone must be reclaimed from the operator's own directory"
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the platform staging directory"
     );
     assert!(
         !clone_link_path(&index_dir, &alloc_id).exists(),
@@ -1660,12 +1688,15 @@ async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
         .expect("tempdir on the staging root");
     let spin = build_spin_binary(tmp.path());
     let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "spin");
-    let operator_dir = rootfs.parent().expect("operator rootfs dir").to_path_buf();
-
-    let server_tmp = TempDir::new().expect("server tempdir");
+    let server_tmp = server_tmp_on_staging_root();
     let data_dir = server_tmp.path().join("data");
     let config_dir = server_tmp.path().join("conf");
     let index_dir = overdrive_core::vm::config::clone_index_dir(&data_dir);
+    // ADR-0082 2026-08-18 fourth amendment (B1 fix): a REAL boot stages the
+    // per-launch clone in the PLATFORM-owned `clone_staging_dir(data_dir)`, NOT
+    // beside the operator's master (which the platform never mode-widens).
+    // Reclamation still finds it via the durable clone-index link.
+    let staging_dir = overdrive_core::vm::config::clone_staging_dir(&data_dir);
 
     // Boot #1 — deploy a long-lived guest to Running, then shut down
     // UNCLEANLY (no stop): `kill_on_drop(false)` leaves the real VMM
@@ -1684,9 +1715,9 @@ async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
     poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     assert!(
-        clone_path(&operator_dir, &alloc_id).exists()
+        clone_path(&staging_dir, &alloc_id).exists()
             && clone_link_path(&index_dir, &alloc_id).exists(),
-        "sanity: both the operator clone and its durable index link exist while Running"
+        "sanity: both the platform-staged clone and its durable index link exist while Running"
     );
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
     wait_for_data_dir_release().await;
@@ -1698,8 +1729,8 @@ async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
     // survive the process).
     let handle2 = spawn_vm_server(&data_dir, &config_dir).await;
     assert!(
-        !clone_path(&operator_dir, &alloc_id).exists(),
-        "the per-launch rootfs clone must be reclaimed from the operator's own directory via the \
+        !clone_path(&staging_dir, &alloc_id).exists(),
+        "the per-launch rootfs clone must be reclaimed from the platform staging directory via the \
          durable index, even though the in-memory RootfsPlan was lost across the restart"
     );
     assert!(

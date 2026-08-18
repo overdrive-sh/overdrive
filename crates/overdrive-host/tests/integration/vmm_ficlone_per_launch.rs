@@ -76,13 +76,25 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     let master_bytes = std::fs::metadata(&master).expect("stat staged master").len();
 
     let alloc = AllocationId::new("ficlone-neg").expect("valid alloc id");
-    let rootfs = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &non_reflink_dir);
+    let rootfs = RootfsPlan::for_alloc(
+        master.clone(),
+        master_bytes,
+        &alloc,
+        // Stage the clone in the SAME non-reflink dir as the master (both on
+        // tmpfs) so FICLONE fails EOPNOTSUPP -- the "no reflink support on this
+        // filesystem" capability failure this test exercises. A cross-filesystem
+        // master would instead be the EXDEV confinement-precondition class
+        // (ADR-0082 2026-08-18 fourth amendment (c-fix.2)).
+        &non_reflink_dir,
+        // The index link is `VmDriver`'s concern, inert at the Vmm layer.
+        Path::new("/run/overdrive/vm/clone-index"),
+    );
     let clone_dest = rootfs.clone_dest().to_path_buf();
     assert_eq!(
         clone_dest.parent(),
         Some(non_reflink_dir.as_path()),
-        "clone_dest must sit beside the master (FICLONE is intra-filesystem) -- precondition \
-         for this test to actually exercise a non-reflink target"
+        "clone_dest must sit in the non-reflink staging dir on the master's own filesystem -- \
+         precondition for this test to exercise the EOPNOTSUPP no-reflink-support path"
     );
 
     let run_root = non_reflink_dir.join("run");
@@ -116,16 +128,22 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     match &err {
         VmmError::Io(io_err) => {
             let errno = io_err.raw_os_error();
-            assert!(
-                errno == Some(libc::EOPNOTSUPP) || errno == Some(libc::EXDEV),
-                "expected the typed FICLONE errno EOPNOTSUPP or EXDEV, got {errno:?} ({io_err})"
+            assert_eq!(
+                errno,
+                Some(libc::EOPNOTSUPP),
+                "a same-filesystem non-reflink target (tmpfs) fails with the typed FICLONE \
+                 EOPNOTSUPP, got {errno:?} ({io_err})"
             );
         }
-        // Every other variant is wrong here. A non-reflink target is an
-        // I/O capability failure, and must never be relabelled as an
-        // artifact-absence or confinement class (DWD-24 / §D1.1).
+        // Every other variant is wrong here. A non-reflink-CAPABILITY failure
+        // on the master's own filesystem is an I/O capability failure
+        // (`VmmError::Io`), never an artifact-absence class (DWD-24 / §D1.1).
+        // Note (ADR-0082 2026-08-18 fourth amendment): EXDEV — a master on a
+        // DIFFERENT filesystem from the platform staging root — is the SEPARATE
+        // `ConfinementUnavailable { UidDrop }` confinement-precondition class,
+        // NOT exercised here (master and staging dir share tmpfs).
         other => {
-            panic!("expected VmmError::Io carrying the typed FICLONE errno, got {other:?}")
+            panic!("expected VmmError::Io carrying the typed FICLONE EOPNOTSUPP errno, got {other:?}")
         }
     }
 

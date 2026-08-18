@@ -109,6 +109,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
         cgroup_root: tmp.path().join("cgroup"),
         run_dir_root: tmp.path().join("run"),
         clone_index_dir: clone_index_dir(tmp),
+        clone_staging_dir: tmp.path().join("clone-staging"),
         arch: HostArch::X86_64,
         vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
@@ -242,6 +243,7 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let index_dir = layout.clone_index_dir.clone();
+    let staging_dir = layout.clone_staging_dir.clone();
     let master = operator_rootfs_path(&tmp);
     let master_bytes = std::fs::metadata(&master).expect("stat master").len();
 
@@ -269,7 +271,7 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     // The running state: both the clone and its index link exist, and the
     // link RESOLVES to the clone beside the operator master — NOT into the
     // index dir (so a re-derivation would target the wrong path).
-    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
+    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &staging_dir, &index_dir);
     assert!(plan.clone_dest().exists(), "the per-launch clone exists while running");
     assert!(link_present(plan.index_link()), "the clone-index link exists while running");
     assert_eq!(
@@ -306,7 +308,7 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     // before link removal): observe still yields an entry; discard
     // disposes it idempotently, never leaving a clone without a link. ===
     let dangling = AllocationId::new("alloc-clone-index-dangling").expect("valid alloc id");
-    let dangling_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &dangling, &index_dir);
+    let dangling_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &dangling, &staging_dir, &index_dir);
     std::fs::create_dir_all(&index_dir).expect("index dir");
     std::fs::write(dangling_plan.clone_dest(), b"x").expect("stage a clone");
     std::os::unix::fs::symlink(dangling_plan.clone_dest(), dangling_plan.index_link())
@@ -330,7 +332,7 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     let alloc_stop = AllocationId::new("alloc-clone-index-stop").expect("valid alloc id");
     let spec_stop = build_spec(&alloc_stop, &tmp);
     start_with_beacon(&driver, &spec_stop, &run_dir_root).await;
-    let stop_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc_stop, &index_dir);
+    let stop_plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc_stop, &staging_dir, &index_dir);
     assert!(
         stop_plan.clone_dest().exists() && link_present(stop_plan.index_link()),
         "running: both present"
@@ -376,6 +378,7 @@ async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let index_dir = layout.clone_index_dir.clone();
+    let staging_dir = layout.clone_staging_dir.clone();
     let master = operator_rootfs_path(&tmp);
     let master_bytes = std::fs::metadata(&master).expect("stat master").len();
     let (driver, clock) = build_driver(Arc::new(SimVmm::new()), layout.clone());
@@ -383,7 +386,7 @@ async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
     let alloc = AllocationId::new("alloc-clone-index-stuck").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
     start_with_beacon(&driver, &spec, &run_dir_root).await;
-    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &index_dir);
+    let plan = RootfsPlan::for_alloc(master.clone(), master_bytes, &alloc, &staging_dir, &index_dir);
     assert!(
         plan.clone_dest().exists() && link_present(plan.index_link()),
         "running: both the clone and its index link exist"
