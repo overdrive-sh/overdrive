@@ -1051,6 +1051,223 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-17T17:52:58Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T19:48:40Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T19:55:57Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T19:58:08Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:18:16Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:18:16Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:20:37Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:56:42Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:57:13Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T20:59:02Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: US-VM-7 confinement wiring never implemented. LandlockRule type/VmRunDir::landlock_grant()/VmConfig::landlock_rules() do not exist (config.rs:57-64,595 mark them deferred; ADR-0082 says LandlockRule has no shape). vmm.rs::create (host/vmm.rs:218-242) applies no uid/gid drop, no setrlimit, no --landlock. No feat step lands it between Slice-01 deferral and this proof step (04-01/02/03 are pure Tier-3 test proofs). Cannot author S-VM-49/50/53 RED for the right business reason. Escalated to nw-solution-architect.",
+      "t": "2026-08-17T21:14:22Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN unreachable \u2014 no confinement production code exists to prove, and building the entire US-VM-7 subsystem exceeds this step's 'minimal support where not already wired' scope AND requires two architect-level decisions: (1) pin the LandlockRule shape + landlock_grant/landlock_rules signatures (ADR-0082 \u00a7D2.2 names but does not shape them); (2) resolve setrlimit-before-execve needing unsafe pre_exec vs overdrive-host #![forbid(unsafe_code)] (lib.rs:21). Crafter must not invent API or make the unsafe-policy decision.",
+      "t": "2026-08-17T21:14:30Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: nothing to commit \u2014 no tests authored (would be testing theater against unconfined CH) and no src changed (would be inventing API surface the design never pinned). Awaiting architect to insert a US-VM-7 confinement implementation step and pin LandlockRule shape + unsafe-policy decision before 04-04 can serve as its Tier-3 real-boot proof.",
+      "t": "2026-08-17T21:14:32Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T22:13:17Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T22:45:09Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T22:47:24Z"
+    },
+    {
+      "sid": "04-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T23:09:41Z"
+    },
+    {
+      "sid": "04-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T23:17:04Z"
+    },
+    {
+      "sid": "04-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-17T23:20:31Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T00:11:40Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T00:11:40Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T01:13:17Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T01:17:42Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T01:55:32Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T01:59:32Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:02:16Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:05:42Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:06:36Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:07:43Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:08:06Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:12:52Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T02:15:57Z"
     }
   ]
 }
