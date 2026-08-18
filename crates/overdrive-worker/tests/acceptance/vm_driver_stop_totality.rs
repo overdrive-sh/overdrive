@@ -20,7 +20,6 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -104,7 +103,6 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
         clone_index_dir: tmp.path().join("clone-index"),
         clone_staging_dir: tmp.path().join("clone-staging"),
         arch: HostArch::X86_64,
-        vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
             VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
             1024,

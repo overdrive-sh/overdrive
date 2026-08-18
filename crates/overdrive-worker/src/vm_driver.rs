@@ -18,7 +18,6 @@
 //! relocated guest half of `stop`.
 
 use std::collections::BTreeMap;
-use std::num::NonZeroU8;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -337,12 +336,6 @@ pub struct VmHostLayout {
     /// token via [`KernelCmdline::platform_default`], and the
     /// architecture each allocation's kernel is validated against.
     pub arch: HostArch,
-    /// Composed per-node default vCPU count. **No longer read by
-    /// [`VmDriver::start`]** (step 06-01): the per-allocation vCPU count is
-    /// derived from that allocation's own `[resources] cpu_milli` via
-    /// [`vcpus_for`] — `[resources]` is the single source of truth for VM
-    /// size (US-VM-5). Composition sites still populate it.
-    pub vcpus: NonZeroU8,
     /// The confined identity + rlimits Cloud Hypervisor is spawned
     /// under.
     pub confinement: VmConfinement,
@@ -708,8 +701,8 @@ impl VmDriver {
             // vCPUs are DERIVED per-allocation from this allocation's own
             // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
             // floor 1 (US-VM-5, ADR-0082 §D2). `[resources]` is the single
-            // source of truth for VM size; the per-node `layout.vcpus`
-            // template is no longer consulted here (step 06-01).
+            // source of truth for VM size — there is no per-node vCPU
+            // template (step 06-01).
             vcpus: vcpus_for(spec.resources.cpu_milli),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),

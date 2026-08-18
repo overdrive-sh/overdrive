@@ -1796,7 +1796,6 @@ async fn compose_vm_driver(
         // each clone here (ADR-0082 2026-08-18 fourth amendment, B1 fix).
         clone_staging_dir,
         arch,
-        vcpus: std::num::NonZeroU8::new(1).unwrap_or_else(|| unreachable!("1 != 0")),
         // Confined identity per ADR-0082 §(e) (gap-5 closure). A reserved,
         // unprivileged NUMERIC identity the platform runs the hypervisor
         // under — no `/etc/passwd`/`/etc/group` entry required (`setpriv`
@@ -1832,10 +1831,7 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
     tokio::task::spawn_blocking(move || {
         use std::os::unix::fs::PermissionsExt;
         std::os::unix::fs::chown(&dir, Some(0), Some(gid))?;
-        std::fs::set_permissions(
-            &dir,
-            std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE),
-        )
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE))
     })
     .await
     .map_err(|join_err| {
@@ -3432,7 +3428,9 @@ mod tests {
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
-                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from(
+                    "/srv/overdrive/data",
+                )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(SimCgroupAccounting::new()),
@@ -3501,7 +3499,9 @@ mod tests {
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
-                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from(
+                    "/srv/overdrive/data",
+                )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
                 Arc::new(sim_cgroup_accounting),

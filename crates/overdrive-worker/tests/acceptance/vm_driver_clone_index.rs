@@ -47,7 +47,6 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
-use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -111,7 +110,6 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
         clone_index_dir: clone_index_dir(tmp),
         clone_staging_dir: tmp.path().join("clone-staging"),
         arch: HostArch::X86_64,
-        vcpus: NonZeroU8::new(1).expect("1 != 0"),
         confinement: VmConfinement::confined(
             VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
             1024,
