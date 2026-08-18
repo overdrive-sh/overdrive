@@ -237,7 +237,7 @@ pub enum BannedKind {
     ///
     /// Exempt: `#[cfg(test)]` items, and the sanctioned renderer function
     /// itself (matched by file path AND function name — see
-    /// [`is_ch_argv_renderer_file`] / [`CH_ARGV_RENDERER_FN`]).
+    /// [`is_ch_argv_renderer_file`] / [`CH_ARGV_RENDERER_FNS`]).
     CloudHypervisorDiskArgLiteral,
     /// A `"--landlock-rules"` string literal outside the sanctioned
     /// renderer — DWD-09 clause 2. See
@@ -2482,7 +2482,7 @@ const CH_ARGV_RENDERER_FILE_SUFFIX: &str = "overdrive-host/src/vmm.rs";
 /// `landlock_grant` / `seccomp_arg` naming is the VALUE-rendering half; the
 /// FLAG-NAME literals `--disk`/`--landlock-rules`/`--seccomp` are rendered
 /// at the `create` call site that consumes those values).
-const CH_ARGV_RENDERER_FN: &str = "create";
+const CH_ARGV_RENDERER_FNS: &[&str] = &["create", "build_confined_command"];
 /// The sanctioned path, named in every CH-argv-literal violation's help
 /// text.
 const CH_ARGV_RENDERER_REPLACEMENT: &str = "CloudHypervisorVmm::create (crates/overdrive-host/src/vmm.rs) -- the \
@@ -2501,7 +2501,7 @@ fn is_ch_argv_renderer_file(rel_path: &Path) -> bool {
 /// fn)` pair — [`is_ch_argv_renderer_file`] gates the file (fixed at
 /// construction, from the path passed to
 /// [`scan_source_ch_disk_arg_literal`] and its two siblings),
-/// [`CH_ARGV_RENDERER_FN`] gates the enclosing function name.
+/// [`CH_ARGV_RENDERER_FNS`] gates the enclosing function name.
 struct CloudHypervisorArgLiteralCollector<'a> {
     file: &'a Path,
     needle: &'static str,
@@ -2512,7 +2512,7 @@ struct CloudHypervisorArgLiteralCollector<'a> {
     /// `true` iff `file` is [`CH_ARGV_RENDERER_FILE_SUFFIX`] — fixed for
     /// the lifetime of one scan.
     in_sanctioned_file: bool,
-    /// Depth of currently-open [`CH_ARGV_RENDERER_FN`] bodies. Only
+    /// Depth of currently-open [`CH_ARGV_RENDERER_FNS`] bodies. Only
     /// meaningful when `in_sanctioned_file` is `true`.
     in_sanctioned_fn_depth: usize,
 }
@@ -2538,7 +2538,7 @@ impl<'a> CloudHypervisorArgLiteralCollector<'a> {
     /// when combined with `in_sanctioned_file` — tracked by the two
     /// `visit_item*fn` overrides below.
     fn pushes_sanctioned_fn(&self, ident: &syn::Ident) -> bool {
-        self.in_sanctioned_file && ident == CH_ARGV_RENDERER_FN
+        self.in_sanctioned_file && CH_ARGV_RENDERER_FNS.iter().any(|fn_name| ident == fn_name)
     }
 }
 
