@@ -347,6 +347,103 @@ pub const fn reserve_bytes(guest_bytes: u64) -> u64 {
 }
 
 // -----------------------------------------------------------------------
+// [D8a]/[D8b] — VmVolume: the VmConfig volume payload, and the derived
+// memory backing (`--memory shared=on` iff a volume is declared)
+// -----------------------------------------------------------------------
+
+/// One declared volume — a host↔guest share (feature-delta [D8a],
+/// ADR-0083 §D3, GH #42, Slice 04). `source` is the host directory the
+/// operator reads afterwards, `target` is the in-guest mount point the
+/// operator's own command writes to, and `read_only` is enforced
+/// HOST-side ([D8g]). The operator surface is exactly these three fields
+/// — the virtiofsd mechanism (socket, tag, `--cache`, `--sandbox`,
+/// `--memory shared=…`) is platform-derived and never appears here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmVolume {
+    source: PathBuf,
+    target: PathBuf,
+    read_only: bool,
+}
+
+impl VmVolume {
+    /// Build a declared volume from its three operator inputs.
+    #[must_use]
+    pub const fn new(source: PathBuf, target: PathBuf, read_only: bool) -> Self {
+        Self { source, target, read_only }
+    }
+
+    /// The host directory the operator reads afterwards.
+    #[must_use]
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+
+    /// The in-guest mount point the operator's command writes to.
+    #[must_use]
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
+    /// Whether the share is host-enforced read-only ([D8g]).
+    #[must_use]
+    pub const fn read_only(&self) -> bool {
+        self.read_only
+    }
+}
+
+/// How the guest's RAM is backed. `Shared` maps guest RAM as a shared
+/// mapping (a memfd) — MANDATORY for any vhost-user backend, because the
+/// backend (virtiofsd) must map the guest's memory; `Private` (anonymous
+/// memory) is the volume-free default (feature-delta [D8b]).
+///
+/// A two-variant sum type so the `--memory` argument cannot carry an
+/// invalid third state, and so `shared=on` is derived from ONE input —
+/// the declared volumes — with no builder and no second config shape
+/// (system constraint 4 / [D8b] reason 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryBacking {
+    /// Private anonymous memory — the volume-free default. A VM with no
+    /// volumes boots byte-identically to Slices 01–03 (S-VM-57).
+    Private,
+    /// Shared (memfd) backing — required by a vhost-user virtiofsd
+    /// backend, so every volume-carrying VM uses it.
+    Shared,
+}
+
+impl MemoryBacking {
+    /// Derive the backing from the declared volumes: `Shared` iff at
+    /// least one volume is declared, `Private` otherwise (feature-delta
+    /// [D8b] — "`shared=on` iff `!volumes.is_empty()`"). This is THE ONE
+    /// derivation `shared=on` comes from — no volume, no shared backing;
+    /// one or more volumes, shared backing — which is what keeps a
+    /// volume-free VM's boot byte-identical to Slices 01–03.
+    #[must_use]
+    pub const fn for_volumes(volumes: &[VmVolume]) -> Self {
+        if volumes.is_empty() { Self::Private } else { Self::Shared }
+    }
+
+    /// `true` iff the guest RAM is shared-backed (renders `shared=on`).
+    #[must_use]
+    pub const fn is_shared(self) -> bool {
+        matches!(self, Self::Shared)
+    }
+
+    /// The `--memory` argument suffix this backing appends after
+    /// `size=<bytes>`: `,shared=on` for [`Shared`](Self::Shared), the
+    /// empty string for [`Private`](Self::Private). This is the ONE
+    /// branch [D8b] reason 2 names — rendered at the single `--memory`
+    /// construction site, so a volume-free VM's `--memory` argument is
+    /// unchanged from Slices 01–03.
+    #[must_use]
+    pub const fn memory_arg_suffix(self) -> &'static str {
+        match self {
+            Self::Private => "",
+            Self::Shared => ",shared=on",
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
 // D2.5 — VmConfinement: three variants, one reachable constructor
 // -----------------------------------------------------------------------
 
@@ -1111,6 +1208,64 @@ mod tests {
         ) {
             let config = sample_vm_config(master_bytes, guest_bytes);
             prop_assert_eq!(config.rlimit_fsize(), master_bytes.max(guest_bytes));
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // VmVolume + MemoryBacking (feature-delta [D8a]/[D8b], Slice 04)
+    // -------------------------------------------------------------------
+
+    fn sample_volume(i: usize) -> VmVolume {
+        VmVolume::new(
+            PathBuf::from(format!("/host/vol{i}")),
+            PathBuf::from(format!("/guest/vol{i}")),
+            i.is_multiple_of(2),
+        )
+    }
+
+    proptest! {
+        /// [D8b] — `shared=on` is derived from `!volumes.is_empty()` and
+        /// nothing else: `MemoryBacking::for_volumes` is `Shared` iff at
+        /// least one volume is declared, `Private` otherwise, for any
+        /// number of declared volumes. The `--memory` suffix renders
+        /// `,shared=on` ONLY for the shared backing, so a volume-free VM's
+        /// `--memory` argument is byte-identical to Slices 01–03 (S-VM-57).
+        #[test]
+        fn memory_backing_shared_iff_volumes_present(volume_count in 0usize..8) {
+            let volumes: Vec<VmVolume> = (0..volume_count).map(sample_volume).collect();
+            let backing = MemoryBacking::for_volumes(&volumes);
+
+            let expected_shared = volume_count > 0;
+            prop_assert_eq!(backing.is_shared(), expected_shared);
+            prop_assert_eq!(
+                backing,
+                if expected_shared { MemoryBacking::Shared } else { MemoryBacking::Private },
+            );
+            prop_assert_eq!(
+                backing.memory_arg_suffix(),
+                if expected_shared { ",shared=on" } else { "" },
+            );
+        }
+    }
+
+    proptest! {
+        /// A `VmVolume` preserves its three operator inputs verbatim —
+        /// `source`, `target` and `read_only` are exactly what was
+        /// declared (the operator surface [D8a] pins).
+        #[test]
+        fn vm_volume_preserves_source_target_read_only(
+            source in "[a-z/]{1,16}",
+            target in "[a-z/]{1,16}",
+            read_only in any::<bool>(),
+        ) {
+            let volume = VmVolume::new(
+                PathBuf::from(&source),
+                PathBuf::from(&target),
+                read_only,
+            );
+            prop_assert_eq!(volume.source(), Path::new(&source));
+            prop_assert_eq!(volume.target(), Path::new(&target));
+            prop_assert_eq!(volume.read_only(), read_only);
         }
     }
 }

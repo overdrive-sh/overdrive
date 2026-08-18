@@ -525,6 +525,39 @@ pub struct ExecInput {
     pub args: Vec<String>,
 }
 
+/// One `[[vm.volume]]` block — a declared host↔guest share (feature-delta
+/// [D8a], ADR-0083 §D3 / GH #42, Slice 04). The operator names a host
+/// `source` directory, the guest `target` mount point and (optionally)
+/// `read_only`; every other volume mechanism (virtiofsd socket, tag,
+/// `--cache`, `--sandbox`, `--memory shared=…`) is platform-derived.
+///
+/// `deny_unknown_fields` CLOSES the operator surface: an unrecognised key
+/// (e.g. `cache`) is rejected BY NAME at the parse boundary (S-VM-62 /
+/// AC-15) — exactly the same nested-`deny_unknown_fields` mechanism that
+/// makes the `[vm]` block itself reject stray keys.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct VmVolumeInput {
+    /// Host directory the operator reads afterwards (required).
+    pub source: String,
+    /// Guest mount point the operator's command writes to (required).
+    pub target: String,
+    /// Host-enforced read-only flag ([D8g]); optional, defaults `false`.
+    #[serde(default)]
+    pub read_only: bool,
+}
+
 /// Wire-side `[vm]` block (ADR-0083 §D4, GH #42). Mirrors
 /// `aggregate::VmInput` in shape, kept private to the new parser surface
 /// for the same reason `ExecInput` above is — see that type's doc
@@ -551,6 +584,14 @@ pub struct VmInput {
     pub kernel: String,
     /// Operator-supplied rootfs artifact path (BYO).
     pub rootfs: String,
+    /// Declared `[[vm.volume]]` shares (feature-delta [D8a], Slice 04).
+    /// Zero volumes is the default and stays valid — a `[vm]` with no
+    /// `[[vm.volume]]` is exactly Slice 01's VM (S-VM-57). `[[vm.volume]]`
+    /// rides inside Slice 01's `JobEnvelope` V2; this parser surface is
+    /// where the operator declares volumes. Flowing them onward to the
+    /// driver payload is a later Slice-04 step.
+    #[serde(default)]
+    pub volume: Vec<VmVolumeInput>,
 }
 
 /// Driver-table dispatch on a `[job]` / `[schedule]` body (ADR-0083 §D4,
