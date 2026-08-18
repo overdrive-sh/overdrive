@@ -29,7 +29,7 @@ use overdrive_core::SpiffeId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, ExitKind, Resources,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverType, ExitKind, Resources,
 };
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
@@ -992,4 +992,84 @@ async fn live_allocations_reports_membership_and_release_supervision_is_idempote
     // teardown does not race a still-live SimVmm process (harmless
     // either way, but keeps the fixture tidy).
     let _ = driver.stop(&handle).await;
+}
+
+// ---------------------------------------------------------------------
+// S-VM-72 (resize half) — `Driver::resize` rejects honestly with
+// `DriverError::ResizeUnsupported` naming GH #92 (ADR-0082 §D4
+// Amendment 2026-08-18). The sizing-parity half of S-VM-72 (guest
+// vCPU + memory on the single private backing) is the Tier-3 metal
+// case in `overdrive-cli/tests/integration/vm_resources_sizing.rs`;
+// this port-to-port half belongs where the `Driver`/`Vmm` surface is
+// composed — `overdrive-cli` has no `overdrive-worker` dependency and
+// so cannot reach `VmDriver`, the impl under test. `SimVmm`-backed,
+// default lane (no real KVM needed): the rejection is UNCONDITIONAL,
+// so a running VM's resize is refused exactly like any other.
+// ---------------------------------------------------------------------
+
+/// S-VM-72 (resize half) — `VmDriver::resize` REJECTS every call with a
+/// typed `DriverError::ResizeUnsupported` that names GH #92 as the
+/// deferred right-sizing / CPU-hotplug work, never a silent `Ok(())`
+/// no-op and never a hotplug. Driven port-to-port through the
+/// `Driver::resize` surface against `SimVmm` on a LIVE allocation: the
+/// rejection is unconditional (resize is not implemented by this driver
+/// in this feature), so even a running VM's resize is refused honestly.
+///
+/// # Port-to-port litmus
+///
+/// Revert `resize` to its prior `Ok(())`-on-`Live` no-op body and this
+/// stays RED — `expect_err` fails on the silent success, which is
+/// exactly the defect ADR-0082 §D4's amendment closes.
+#[tokio::test]
+async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+
+    let alloc = AllocationId::new("vm-resize-refused").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+
+    // The typed rejection — the variant, the self-named driver family,
+    // the allocation resize was called on, and `#92` in the detail.
+    let err = driver
+        .resize(&handle, Resources { cpu_milli: 4000, memory_bytes: 4 * 1024 * 1024 * 1024 })
+        .await
+        .expect_err("resize must reject, never return Ok(()) as a silent no-op");
+    match err {
+        DriverError::ResizeUnsupported { driver: driver_type, alloc: rejected, detail } => {
+            assert_eq!(driver_type, DriverType::Vm, "the VM driver names itself as the rejector");
+            assert_eq!(rejected, alloc, "the rejection names the allocation resize was called on");
+            assert!(
+                detail.contains("#92"),
+                "detail must name GH #92 as the deferred right-sizing / CPU-hotplug work; got: {detail}"
+            );
+        }
+        other => panic!(
+            "resize must reject with DriverError::ResizeUnsupported naming #92, never Ok / another \
+             variant; got {other:?}"
+        ),
+    }
+
+    // Unconditional: a second, differently-sized call is refused identically,
+    // and the operator-facing `Display` names the driver + allocation.
+    let shown = driver
+        .resize(&handle, Resources { cpu_milli: 1, memory_bytes: 1 })
+        .await
+        .expect_err("resize rejects every call, unconditionally")
+        .to_string();
+    assert!(
+        shown.contains("does not support resize") && shown.contains(&alloc.to_string()),
+        "Display renders the resize refusal naming the driver and allocation; got: {shown}"
+    );
+
+    // No `driver.stop(&handle)` here on purpose: with a beacon session
+    // held, `stop` awaits `clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE)` on
+    // the `SimClock`, which only advances when a harness `tick(...)` fires
+    // — irrelevant to this resize assertion and a hang if left unadvanced.
+    // `SimVmm` is in-memory and the run directory lives under `tmp`, so
+    // the `TempDir` teardown reclaims everything; the beacon `_stream`
+    // drops at scope end, releasing the spawned exit watcher.
 }

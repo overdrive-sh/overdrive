@@ -1111,19 +1111,27 @@ impl Driver for VmDriver {
         handle: &AllocationHandle,
         _resources: Resources,
     ) -> Result<(), DriverError> {
-        // Hotplug resize needs Cloud Hypervisor's `--api-socket` (kept
-        // in `VmConfig` for exactly this future use, ADR-0082 §D4) —
-        // not exercised by any ACL in this feature. This minimal body
-        // validates the allocation is live and otherwise accepts the
-        // call as a no-op rather than fabricating a resource change no
-        // path in this slice implements.
-        let live = self.live.lock();
-        match live.get(&handle.alloc) {
-            Some(VmSupervision::Starting | VmSupervision::Live(_)) => Ok(()),
-            Some(VmSupervision::EndingInFlight) | None => {
-                Err(DriverError::NotFound { alloc: handle.alloc.clone() })
-            }
-        }
+        // Resize is NOT implemented by this driver in this feature. The
+        // hotplug substrate — Cloud Hypervisor's `--api-socket` — is kept
+        // in `VmConfig` for GH #92 (right-sizing / CPU hotplug) but is
+        // exercised by no path here (ADR-0082 §D4 Amendment 2026-08-18),
+        // so resize REJECTS HONESTLY rather than silently no-oping — a
+        // silent `Ok(())` would falsely tell the operator a resource
+        // change landed. UNCONDITIONAL: the driver has no resize mechanism
+        // at all, so a live-or-not allocation is refused identically;
+        // `NotFound` would wrongly assert the allocation is absent when
+        // resize is called on a running VM, and `Ok(())` would fabricate a
+        // change no path implements. A resize-refusal is its own failure
+        // mode, so it gets its own typed variant callers can `matches!` on
+        // (`.claude/rules/development.md` § "Errors").
+        Err(DriverError::ResizeUnsupported {
+            driver: DriverType::Vm,
+            alloc: handle.alloc.clone(),
+            detail: "resize (right-sizing / CPU hotplug) is deferred to GH #92; the \
+                     --api-socket hotplug substrate is kept in VmConfig for that work but is \
+                     not exercised by any path in this feature"
+                .to_owned(),
+        })
     }
 
     fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {

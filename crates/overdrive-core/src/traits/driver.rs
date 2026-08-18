@@ -271,6 +271,13 @@ pub enum DriverError {
     /// diagnosing test-fixture netns plumbing.
     #[error("driver {driver} could not enter netns {netns_path}: {source}")]
     NetnsEntry { driver: DriverType, netns_path: String, source: std::io::Error },
+    /// `Driver::resize` is not implemented by this driver in this feature.
+    /// The `--api-socket` hotplug substrate is kept in `VmConfig` for GH #92
+    /// (right-sizing / CPU hotplug) but is not exercised by any path here;
+    /// resize therefore rejects honestly rather than silently no-oping.
+    /// (ADR-0082 §D4 Amendment 2026-08-18.)
+    #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
+    ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,

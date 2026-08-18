@@ -571,3 +571,124 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
 
     handle.shutdown().await.expect("clean shutdown");
 }
+
+// ---------------------------------------------------------------------
+// S-VM-72 — guest-observed vCPU count AND memory size both match the
+// declared figures for ONE VM allocation shape, on the single (private)
+// memory backing. The `shared=on` / volume backing half was withdrawn
+// with Slice 04 (volumes cut 2026-08-18 → GH #97/#43/#22), so this
+// reduces to a single-backing sizing-parity case that asserts BOTH
+// dimensions together — the "AND" AC-17 requires, which neither
+// S-VM-69/70 (cpu only, 256 MiB) nor S-VM-71 (memory only, cpu_milli=1000)
+// makes on one shape. The typed resize-rejection half of S-VM-72 lives
+// in `overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs`
+// (port-to-port at `Driver::resize`, which `overdrive-cli` cannot reach —
+// it has no `overdrive-worker` dependency).
+// ---------------------------------------------------------------------
+
+/// S-VM-72 (sizing-parity half) — a VM declaring `cpu_milli = 2000` AND
+/// `memory_bytes = 2 GiB` (2147483648) boots a guest that observes BOTH
+/// exactly two online vCPUs AND ~2 GiB of RAM, FROM INSIDE the guest
+/// (`available_parallelism` / `sysinfo(2)` totalram — never the generated
+/// hypervisor config), on the single private memory backing.
+///
+/// The 8-bit beacon `EXIT` channel carries one figure per boot, so the
+/// SAME fixed spec size is deployed twice against one `overdrive serve`:
+/// once reporting online vCPUs (expect 2 = `round_up(2000/1000)`), once
+/// reporting total RAM (expect ~2 GiB, a little below for kernel
+/// reservation, never above). Both deploys carry the identical
+/// `[resources]` (`cpu_milli=2000`, `memory_bytes=2` GiB), so the assertion
+/// is "for one VM shape, both sizing dimensions land correctly".
+///
+/// # Port-to-port litmus
+///
+/// Revert either the `cpu_milli -> vcpus` wiring or the `MemoryPlan`
+/// guest-RAM sizing in `VmDriver::start` and exactly one dimension goes
+/// RED while the other stays GREEN — the two halves fail independently.
+#[tokio::test]
+#[serial(cgroup)]
+async fn declared_cpu_and_memory_match_guest_observed_on_single_private_backing() {
+    const CPU_MILLI: u32 = 2000; // round_up(2000 / 1000) = 2 vCPUs
+    const DECLARED_MEMORY_BYTES: u64 = 2_147_483_648; // 2 GiB
+    const UNIT_BYTES: u64 = 16 * 1024 * 1024;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    const DECLARED_UNITS: i32 = (DECLARED_MEMORY_BYTES / UNIT_BYTES) as i32; // 128
+    // ~2 GiB, a little below the declared figure (guest-kernel reservation),
+    // never above — same tolerance band as S-VM-71.
+    const MIN_UNITS: i32 = DECLARED_UNITS - 8; // 120
+
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    // Two distinct tempdirs so each dimension's staged rootfs (each
+    // `stage_rootfs_with_extra_binary` writes `rootfs.ext4` in its tmp)
+    // is independent and neither deploy races the other's staging.
+    let cpu_tmp = tempfile::Builder::new()
+        .prefix("vm-resources-cpu-")
+        .tempdir_in(shared_staging_root())
+        .expect("cpu tempdir on the XFS-backed reflink-capable staging root (never tmpfs)");
+    let mem_tmp = tempfile::Builder::new()
+        .prefix("vm-resources-mem-")
+        .tempdir_in(shared_staging_root())
+        .expect("mem tempdir on the XFS-backed reflink-capable staging root (never tmpfs)");
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+
+    // Dimension 1 — the derived vCPU count, guest-observed.
+    let cpu_bin = build_report_cpus_binary(cpu_tmp.path());
+    let cpu_rootfs =
+        stage_rootfs_with_extra_binary(cpu_tmp.path(), &fixture, &cpu_bin, "reportcpus");
+    let cpu_spec = write_toml(
+        server_tmp.path(),
+        "vm-parity-cpu.toml",
+        &vm_job_toml_sized(
+            "vm-parity-cpu",
+            "/sbin/reportcpus",
+            &fixture.kernel_path,
+            &cpu_rootfs,
+            CPU_MILLI,
+            DECLARED_MEMORY_BYTES,
+        ),
+    );
+    let cpu_submit = deploy(DeployArgs { spec: cpu_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the cpu-report [vm] spec (cpu_milli=2000, memory=2 GiB)");
+    let cpu_out = poll_until_terminal(&cfg, &cpu_submit.workload_id, Duration::from_secs(90)).await;
+    assert_eq!(
+        guest_reported_cpu_count(&cpu_out),
+        2,
+        "cpu_milli=2000 (with memory=2 GiB) must derive 2 vCPUs and the guest must observe \
+         exactly 2 online CPUs FROM INSIDE, on the single private backing",
+    );
+
+    // Dimension 2 — the declared memory, guest-observed, SAME spec size.
+    let mem_bin = build_report_mem_binary(mem_tmp.path());
+    let mem_rootfs =
+        stage_rootfs_with_extra_binary(mem_tmp.path(), &fixture, &mem_bin, "reportmem");
+    let mem_spec = write_toml(
+        server_tmp.path(),
+        "vm-parity-mem.toml",
+        &vm_job_toml_sized(
+            "vm-parity-mem",
+            "/sbin/reportmem",
+            &fixture.kernel_path,
+            &mem_rootfs,
+            CPU_MILLI,
+            DECLARED_MEMORY_BYTES,
+        ),
+    );
+    let mem_submit = deploy(DeployArgs { spec: mem_spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the mem-report [vm] spec (cpu_milli=2000, memory=2 GiB)");
+    let mem_out = poll_until_terminal(&cfg, &mem_submit.workload_id, Duration::from_secs(90)).await;
+    let observed_units = guest_reported_mem_units_16mib(&mem_out);
+    assert!(
+        (MIN_UNITS..=DECLARED_UNITS).contains(&observed_units),
+        "declared memory_bytes=2 GiB (with cpu_milli=2000) must be observed as ~2 GiB inside the \
+         guest on the single private backing: expected {MIN_UNITS}..={DECLARED_UNITS} units of \
+         16 MiB, got {observed_units} ({} MiB)",
+        observed_units * 16,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
