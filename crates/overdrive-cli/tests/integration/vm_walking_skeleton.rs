@@ -2256,10 +2256,20 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
         std::fs::metadata(&rootfs_two).expect("stat the second rootfs master").len();
     let staging_dir =
         overdrive_core::vm::config::clone_staging_dir(&server_tmp.path().join("data"));
-    let plan_one =
-        RootfsPlan::for_alloc(rootfs_one.clone(), master_bytes_one, &alloc_one, &staging_dir, tmp_one.path());
-    let plan_two =
-        RootfsPlan::for_alloc(rootfs_two.clone(), master_bytes_two, &alloc_two, &staging_dir, tmp_two.path());
+    let plan_one = RootfsPlan::for_alloc(
+        rootfs_one.clone(),
+        master_bytes_one,
+        &alloc_one,
+        &staging_dir,
+        tmp_one.path(),
+    );
+    let plan_two = RootfsPlan::for_alloc(
+        rootfs_two.clone(),
+        master_bytes_two,
+        &alloc_two,
+        &staging_dir,
+        tmp_two.path(),
+    );
     let clone_one = plan_one.clone_dest();
     let clone_two = plan_two.clone_dest();
 
@@ -2274,7 +2284,8 @@ async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named
         clone_two.display(),
     );
     assert_ne!(
-        clone_one, clone_two,
+        clone_one,
+        clone_two,
         "each allocation must derive its OWN distinct per-launch clone; got the same path {}",
         clone_one.display(),
     );
