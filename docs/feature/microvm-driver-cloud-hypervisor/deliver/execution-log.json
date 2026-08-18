@@ -1268,6 +1268,90 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-08-18T02:15:57Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:08:56Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:17:06Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:20:23Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:43:24Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:45:36Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T10:46:54Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC#2 resize honest-rejection needs a NEW typed DriverError variant (e.g. ResizeUnsupported{driver,alloc,detail}) in overdrive-core/src/traits/driver.rs. No existing variant can HONESTLY carry 'resize unsupported, see GH #92': StartRejected renders 'rejected START' (semantic lie for a resize; VmStartFailure is non_exhaustive start-only causes); NotFound carries no reason string and is false for a live alloc; Io(io::Error) flattens a capability-refusal into a stringly-typed generic I/O error (the anti-pattern development.md #Errors forbids; G4 demands typed); NetnsEntry is netns-specific. That file is OUTSIDE the step modify-boundary; per the BINDING note + BOUNDARY_RULES + CLAUDE.md 'never invent API surface' the crafter must NOT mint the variant. Route to nw-solution-architect to ratify the variant in ADR-0082 D4, then re-dispatch 06-03 with boundary widened to include traits/driver.rs. AC#1 (sizing parity, single private backing) is NOT blocked but is one coherent step with AC#2 \u2014 no partial commit.",
+      "t": "2026-08-18T11:02:27Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC#2 resize honest-rejection needs a NEW typed DriverError variant (e.g. ResizeUnsupported{driver,alloc,detail}) in overdrive-core/src/traits/driver.rs. No existing variant can HONESTLY carry 'resize unsupported, see GH #92': StartRejected renders 'rejected START' (semantic lie for a resize; VmStartFailure is non_exhaustive start-only causes); NotFound carries no reason string and is false for a live alloc; Io(io::Error) flattens a capability-refusal into a stringly-typed generic I/O error (the anti-pattern development.md #Errors forbids; G4 demands typed); NetnsEntry is netns-specific. That file is OUTSIDE the step modify-boundary; per the BINDING note + BOUNDARY_RULES + CLAUDE.md 'never invent API surface' the crafter must NOT mint the variant. Route to nw-solution-architect to ratify the variant in ADR-0082 D4, then re-dispatch 06-03 with boundary widened to include traits/driver.rs. AC#1 (sizing parity, single private backing) is NOT blocked but is one coherent step with AC#2 \u2014 no partial commit.",
+      "t": "2026-08-18T11:02:27Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: AC#2 resize honest-rejection needs a NEW typed DriverError variant (e.g. ResizeUnsupported{driver,alloc,detail}) in overdrive-core/src/traits/driver.rs. No existing variant can HONESTLY carry 'resize unsupported, see GH #92': StartRejected renders 'rejected START' (semantic lie for a resize; VmStartFailure is non_exhaustive start-only causes); NotFound carries no reason string and is false for a live alloc; Io(io::Error) flattens a capability-refusal into a stringly-typed generic I/O error (the anti-pattern development.md #Errors forbids; G4 demands typed); NetnsEntry is netns-specific. That file is OUTSIDE the step modify-boundary; per the BINDING note + BOUNDARY_RULES + CLAUDE.md 'never invent API surface' the crafter must NOT mint the variant. Route to nw-solution-architect to ratify the variant in ADR-0082 D4, then re-dispatch 06-03 with boundary widened to include traits/driver.rs. AC#1 (sizing parity, single private backing) is NOT blocked but is one coherent step with AC#2 \u2014 no partial commit.",
+      "t": "2026-08-18T11:02:27Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T11:38:39Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T11:45:57Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-08-18T11:50:14Z"
     }
   ]
 }
