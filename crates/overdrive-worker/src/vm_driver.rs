@@ -1086,6 +1086,19 @@ impl Driver for VmDriver {
             // (`VmReclamation`'s future `PlatformReclaimed`, ADR-0082
             // §D4) — exactly the hazard `EndingInFlightIsNeverReclaimed`
             // exists to forbid.
+            //
+            // This replace also RELEASES THE RUNNING-GATE. The prior
+            // `Live(LiveVm)` value is dropped here, and with it the
+            // stashed `LiveVm.gate_sender` (see its field docs). So even
+            // when the action shim never fired the gate —
+            // `obs.write(Running)` failed, so `release_for_exit_emission`
+            // was skipped — the watcher's `gate_receiver.await` resolves
+            // `Err(RecvError)` (the `Driver::start` § "Sender drop"
+            // orphan path) and the watcher proceeds instead of stranding
+            // on the gate. This is the implicit-drop analogue of
+            // `ExecDriver::stop`'s explicit `drop(gate_sender)`;
+            // `release_supervision` releases the gate the same way by
+            // removing the entry.
             // `@mandatory:mutation_target` — a mutant that drops or
             // no-ops this insert leaves the entry `Live` after `stop`
             // returns `Ok`, so `status` keeps reporting `Running`
@@ -1426,4 +1439,99 @@ async fn run_exit_watcher(
     // makes that reachable in practice — no caller yet drives
     // transitions 5/6 — but the guard's Drop still covers it correctly
     // per transition 4 if it ever is).
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
+    use tokio::net::UnixStream;
+
+    use super::*;
+
+    /// The Running-gate ORPHAN path (greptile PR #268 P1). The happy
+    /// path — the action shim firing `release_for_exit_emission` after
+    /// `obs.write(Running)` commits — is proven by
+    /// `tests/acceptance/vm_driver_stop_totality.rs::
+    /// exit_event_is_gated_until_running_confirmed_release`. This pins its
+    /// COMPLEMENT: the branch that STRANDS a watcher if it is wrong.
+    ///
+    /// When `obs.write(Running)` FAILS, `release_for_exit_emission` is
+    /// skipped and the gate is never fired. The watcher must not block on
+    /// `gate_receiver.await` forever — `VmDriver::stop` (its
+    /// `Live -> EndingInFlight` replace) and `release_supervision` (its
+    /// remove) both DROP the stashed `LiveVm.gate_sender`, and the drop
+    /// MUST resolve the await to `Err(RecvError)` so the watcher proceeds
+    /// (the `Driver::start` § "Sender drop (orphan path)" contract).
+    ///
+    /// This test drops the gate sender WITHOUT firing it and asserts the
+    /// watcher completes AND emits — with a `Held` (`Starting`) entry left
+    /// in the map so `try_begin_ending` fires the post-release emit path.
+    /// A watcher stranded on the gate would never reach the send, so the
+    /// `timeout` elapsing IS the strand detector. Black-box coverage is
+    /// impossible here: after `stop`/`release_supervision` the entry is no
+    /// longer `Held`, so the released watcher emits nothing and "released"
+    /// is indistinguishable from "stranded" through the public surface.
+    #[tokio::test]
+    async fn dropped_gate_sender_releases_watcher_without_stranding() {
+        let alloc = AllocationId::new("orphan-gate").expect("valid alloc id");
+
+        // `Starting` is the trivial `Held` variant — the released
+        // watcher's `try_begin_ending` sees it and emits (transition 3),
+        // giving a positive observable without any `LiveVm` scaffolding.
+        let live: Arc<LiveMap> =
+            Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::Starting)])));
+
+        // Closed beacon connection -> immediate EOF, so `drain_guest_report`
+        // resolves on its biased read arm with no guest report (`None`),
+        // which then routes through the cgroup OOM read.
+        let (near, far) = UnixStream::pair().expect("unix socketpair");
+        drop(far);
+        let (read_half, _write_half) = near.into_split();
+        let reader = BufReader::new(read_half);
+
+        // A `VmExitWatch` the biased read arm never consults (EOF wins
+        // first), but the watcher requires one; the unused sender half
+        // drops at the end of this statement.
+        let exit = VmExitWatch::new(oneshot::channel::<VmmExit>().1);
+
+        let (exit_tx, mut exit_rx) = mpsc::channel::<ExitEvent>(1);
+        let cgroup_accounting: Arc<dyn CgroupAccounting> = Arc::new(SimCgroupAccounting::new());
+
+        // Orphan: mint the gate, then DROP the sender WITHOUT firing it —
+        // exactly what `stop` (replace) and `release_supervision` (remove)
+        // do to the stashed `LiveVm.gate_sender`.
+        let (gate_sender, gate_receiver) = oneshot::channel::<()>();
+        drop(gate_sender);
+
+        let event = tokio::time::timeout(Duration::from_secs(5), async {
+            run_exit_watcher(
+                alloc.clone(),
+                exit,
+                reader,
+                Arc::clone(&live),
+                exit_tx,
+                cgroup_accounting,
+                PathBuf::from("/sys/fs/cgroup"),
+                CgroupPath::for_alloc(&alloc),
+                0,
+                gate_receiver,
+            )
+            .await;
+            exit_rx.recv().await
+        })
+        .await
+        .expect("dropped gate sender must release the watcher; it stranded on the gate")
+        .expect("the released watcher emits its ExitEvent (entry still Held)");
+
+        assert_eq!(event.alloc, alloc, "the emitted event is this allocation's");
+        // EOF beacon (no guest EXIT report) + no VMM signal -> an
+        // unreported crash with neither an exit code nor a signal.
+        assert!(
+            matches!(event.kind, ExitKind::Crashed { exit_code: None, signal: None }),
+            "EOF beacon + no VMM signal classifies as an unreported crash; got {:?}",
+            event.kind
+        );
+    }
 }
