@@ -332,8 +332,13 @@ async fn index_backed_clone_surface_stays_equivalent_across_adapters() {
     // Synthetic observe/discard fixture: the clone location is arbitrary (a
     // per-test dir here) because VmHostState follows the INDEX LINK, not the
     // clone path. Staging it under `operator_dir` keeps the fixture compact.
-    let plan =
-        RootfsPlan::for_alloc(operator_dir.join("master.img"), 0, &alloc, &operator_dir, &index_dir);
+    let plan = RootfsPlan::for_alloc(
+        operator_dir.join("master.img"),
+        0,
+        &alloc,
+        &operator_dir,
+        &index_dir,
+    );
     std::fs::write(plan.clone_dest(), b"clone-bytes").expect("stage the synthetic clone");
     std::os::unix::fs::symlink(plan.clone_dest(), plan.index_link())
         .expect("record the clone in the index");

@@ -519,6 +519,14 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 
     let (handle, mut stream) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
 
+    // Fire the Running-confirmed gate, standing in for the action shim's
+    // post-`obs.write(Running)` `release_for_exit_emission` (this
+    // driver-level test has no action shim). Without it the exit watcher
+    // parks on the gate forever and `exit_rx.recv()` below never resolves
+    // — the very happens-before edge the gate provides (the `Driver::start`
+    // post-condition in `overdrive_core::traits::driver`).
+    driver.release_for_exit_emission(&handle);
+
     // The VMM's OWN teardown exit (the same event a self-powered-off
     // guest triggers on the real substrate) resolves FIRST this time
     // (01-07 review D4) — forcing the exit watcher's
@@ -1070,4 +1078,79 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     // `SimVmm` is in-memory and the run directory lives under `tmp`, so
     // the `TempDir` teardown reclaims everything; the beacon `_stream`
     // drops at scope end, releasing the spawned exit watcher.
+}
+
+// ---------------------------------------------------------------------
+// Running-confirmed exit gate (greptile PR #268 P1) — the
+// `Driver::start` post-condition every `ExitEvent`-emitting driver must
+// honour (`overdrive_core::traits::driver`), mirroring `ExecDriver`.
+// ---------------------------------------------------------------------
+
+/// A guest that exits immediately — before the action shim commits the
+/// `Running` observation — must NOT have its `ExitEvent` delivered to
+/// the exit-observer channel until [`Driver::release_for_exit_emission`]
+/// fires. Without the gate the observer's `find_prior_row → NoPriorRow`
+/// arm silently drops the only exit event and the allocation is stranded
+/// reported as `Running`, defeating terminal-state and restart-budget
+/// processing. This is the `VmDriver` analogue of the `SimDriver` /
+/// action-shim end-to-end gate test at
+/// `overdrive-control-plane/tests/integration/workload_lifecycle/
+/// exit_observer_running_gate.rs`.
+///
+/// The gate is a `tokio::sync::oneshot`, not a `Clock` wait — no
+/// `SimClock` tick is needed. The two `tokio::time::timeout`s are
+/// real-time bounds on the channel: the first proves the gate HOLDS the
+/// event; the second proves `release_for_exit_emission` RELEASES it.
+#[tokio::test]
+async fn exit_event_is_gated_until_running_confirmed_release() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new();
+    let (driver, _clock) = build_driver(std::sync::Arc::new(sim), layout);
+
+    let alloc = AllocationId::new("alloc-running-gate").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+
+    // Drain the driver's `ExitEvent` channel — the exit observer's role.
+    let mut exit_rx = driver.take_exit_receiver().expect("exit receiver available exactly once");
+
+    // Beacon wins the boot race: `start` returns Ok and the exit watcher
+    // is armed with a gate whose sender is stashed on the `Live` entry.
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &run_dir_root).await;
+
+    // The guest exits cleanly and immediately — the sub-millisecond
+    // lifetime the gate exists to defend. The watcher reads `EXIT 0`,
+    // classifies `CleanExit`, then parks on the gate.
+    guest.write_all(b"EXIT 0\n").await.expect("write EXIT");
+
+    // Before the gate fires the event MUST NOT be delivered. A bounded
+    // real-time wait that ELAPSES is the proof the gate is holding it —
+    // an absent gate would have queued the event the instant the watcher
+    // read `EXIT`, so this `recv` would resolve well inside the window.
+    let gated = tokio::time::timeout(Duration::from_millis(500), exit_rx.recv()).await;
+    assert!(
+        gated.is_err(),
+        "the ExitEvent must be gated until release_for_exit_emission fires; got {gated:?} \
+         instead of a timeout — the watcher emitted before the Running row could commit, \
+         which is the exit observer's find_prior_row -> NoPriorRow silent-drop"
+    );
+
+    // Fire the Running-confirmed gate — the action shim's post-
+    // `obs.write(Running)` step. The event is now delivered.
+    driver.release_for_exit_emission(&handle);
+    let event = tokio::time::timeout(Duration::from_secs(5), exit_rx.recv())
+        .await
+        .expect("ExitEvent delivered within timeout once the gate fires")
+        .expect("exit channel is open");
+    assert_eq!(event.alloc, alloc, "the delivered event is this allocation's");
+    assert!(
+        matches!(event.kind, ExitKind::CleanExit),
+        "EXIT 0 classifies as a clean exit; got {:?}",
+        event.kind
+    );
+
+    // Idempotent second fire against the now-`EndingInFlight` entry is a
+    // no-op, never a panic — the `Option::take` + consume-self contract.
+    driver.release_for_exit_emission(&handle);
 }

@@ -143,7 +143,9 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
         // `ConfinementUnavailable { UidDrop }` confinement-precondition class,
         // NOT exercised here (master and staging dir share tmpfs).
         other => {
-            panic!("expected VmmError::Io carrying the typed FICLONE EOPNOTSUPP errno, got {other:?}")
+            panic!(
+                "expected VmmError::Io carrying the typed FICLONE EOPNOTSUPP errno, got {other:?}"
+            )
         }
     }
 

@@ -42,7 +42,7 @@ use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
@@ -375,6 +375,27 @@ struct LiveVm {
     scope: CgroupPath,
     run_dir: VmRunDir,
     rootfs: RootfsPlan,
+    /// "Running-confirmed" gate sender — the [`Driver::start`]
+    /// post-condition every `ExitEvent`-emitting driver must honour
+    /// (`overdrive_core::traits::driver`), mirroring `ExecDriver`'s
+    /// `LiveAllocation::gate_sender`. The action shim takes it via
+    /// [`Driver::release_for_exit_emission`] after
+    /// `obs.write(AllocStatus::Running)` commits Ok (or after the May-2
+    /// degraded-escalation `LifecycleEvent` path); the matching
+    /// `oneshot::Receiver` is handed to [`run_exit_watcher`] and awaited
+    /// BEFORE its first `ExitEvent` send. That is the happens-before
+    /// edge preventing the exit observer's `find_prior_row → NoPriorRow`
+    /// silent-drop when a guest exits sub-millisecond after receiving
+    /// its command, before the Running row commits.
+    ///
+    /// `Some` from the beacon-win arm of `start` until
+    /// [`Driver::release_for_exit_emission`] `take()`s it; `None`
+    /// thereafter (idempotent fire). Dropped when `stop` /
+    /// `release_supervision` replaces or removes this entry — the
+    /// watcher's `gate_receiver.await` then resolves `Err(RecvError)`
+    /// and emit proceeds (orphan path), per the `Driver::start` rustdoc
+    /// § "Sender drop (orphan path)".
+    gate_sender: Option<oneshot::Sender<()>>,
 }
 
 /// The authorship claim on one allocation's ending, in one of three
@@ -764,6 +785,7 @@ impl VmDriver {
         reader: BufReader<OwnedReadHalf>,
         scope: CgroupPath,
         limit_bytes: u64,
+        gate_receiver: oneshot::Receiver<()>,
     ) {
         let watcher_live = Arc::clone(&self.live);
         let watcher_tx = self.exit_tx.clone();
@@ -780,6 +802,7 @@ impl VmDriver {
                 watcher_cgroup_root,
                 scope,
                 limit_bytes,
+                gate_receiver,
             )
             .await;
         });
@@ -860,6 +883,10 @@ impl Driver for VmDriver {
                 scope: scope.clone(),
                 run_dir: run_dir.clone(),
                 rootfs: rootfs.clone(),
+                // Minted in the beacon-win arm below, once the guest has
+                // dialled and the exit watcher is about to spawn — there
+                // is no watcher to gate until then.
+                gate_sender: None,
             }),
         );
 
@@ -923,11 +950,29 @@ impl Driver for VmDriver {
                     ));
                 }
 
+                // Mint the Running-confirmed gate (the `Driver::start`
+                // post-condition, mirroring `ExecDriver`). The sender is
+                // stashed on the `LiveVm` entry; the action shim takes it
+                // via `Driver::release_for_exit_emission` after
+                // `obs.write(Running)` commits Ok (or via the exit
+                // observer's May-2 degraded path). The receiver is handed
+                // to the watcher and awaited BEFORE its first `ExitEvent`
+                // send — the happens-before edge that stops a
+                // sub-millisecond-lifetime guest's exit racing the Running
+                // write into the observer's `find_prior_row → NoPriorRow`
+                // silent-drop.
+                let (gate_sender, gate_receiver) = oneshot::channel::<()>();
                 {
                     let mut live = self.live.lock();
                     if let Some(VmSupervision::Live(live_vm)) = live.get_mut(&spec.alloc) {
                         live_vm.beacon = Some(BeaconSession { write_half });
+                        live_vm.gate_sender = Some(gate_sender);
                     }
+                    // If the entry is no longer `Live` (a concurrent stop
+                    // raced in), `gate_sender` drops here — the watcher's
+                    // `gate_receiver.await` then resolves `Err(RecvError)`
+                    // and emit proceeds via the orphan path, which is
+                    // correct: there is no Running row to gate against.
                 }
                 self.spawn_exit_watcher_task(
                     spec.alloc.clone(),
@@ -935,6 +980,7 @@ impl Driver for VmDriver {
                     reader,
                     scope,
                     memory.cgroup_max_bytes(),
+                    gate_receiver,
                 );
                 Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(control.pid) })
             }
@@ -1131,6 +1177,30 @@ impl Driver for VmDriver {
         self.exit_rx.lock().take()
     }
 
+    /// Fire the Running-confirmed gate for `handle.alloc`, releasing the
+    /// exit watcher's pre-emit await. Idempotent: a call against an
+    /// alloc whose gate has already fired, whose entry is no longer
+    /// `Live` (a stop / `release_supervision` already dropped the
+    /// sender), or which is unknown to the driver, is a no-op. The
+    /// structural exactly-once guarantee is `Option::take` +
+    /// `oneshot::Sender::send` consume-self. See the `Driver::start`
+    /// rustdoc post-condition (`overdrive_core::traits::driver`).
+    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        // Hold the lock only long enough to take the sender — never
+        // across an `.await` (we do not await here; the discipline is
+        // uniform, `.claude/rules/development.md` § Concurrency & async).
+        let sender = self.live.lock().get_mut(&handle.alloc).and_then(|sup| match sup {
+            VmSupervision::Live(live_vm) => live_vm.gate_sender.take(),
+            VmSupervision::Starting | VmSupervision::EndingInFlight => None,
+        });
+        if let Some(sender) = sender {
+            // `send` consumes self — double-fire is structurally
+            // impossible. `Err(())` from a closed receiver (watcher
+            // already dropped, e.g. mid-flight stop) is benign.
+            let _ = sender.send(());
+        }
+    }
+
     /// EVERY variant of [`VmSupervision`] is supervised — reporting
     /// only `Live` is exactly the defect this method's trait-level
     /// contract refuses.
@@ -1291,6 +1361,7 @@ async fn run_exit_watcher(
     cgroup_root: PathBuf,
     scope: CgroupPath,
     limit_bytes: u64,
+    gate_receiver: oneshot::Receiver<()>,
 ) {
     let (guest_report, vmm_signal) = drain_guest_report(&mut exit, reader).await;
     let kind = classify_vm_exit(guest_report, vmm_signal);
@@ -1307,6 +1378,31 @@ async fn run_exit_watcher(
     } else {
         None
     };
+
+    // Running-confirmed gate: block until the action shim signals that
+    // `obs.write(Running)` has committed (`release_for_exit_emission`),
+    // or until the gate sender is dropped (orphan path: `RecvError`).
+    // This is the structural happens-before edge the `Driver::start`
+    // post-condition mandates for every `ExitEvent`-emitting driver;
+    // without it a guest that exits before the Running row commits has
+    // its only exit event dropped by the observer's `find_prior_row →
+    // NoPriorRow` arm, stranding the allocation as Running forever.
+    //
+    // ORDERING is load-bearing: the await MUST precede
+    // `try_begin_ending` below. That transition replaces the `Live`
+    // entry with `EndingInFlight`, dropping the stashed `gate_sender`;
+    // awaiting after it would always resolve `RecvError` and the gate
+    // would never actually block. `tokio::sync::oneshot` is not
+    // `Clock`-dependent — this is a logical edge, identical under
+    // `SimClock`, turmoil, and real tokio (`.claude/rules/development.md`
+    // § "Production code is not shaped by simulation").
+    if gate_receiver.await.is_err() {
+        tracing::debug!(
+            alloc = %alloc,
+            "vm exit_watcher: gate sender dropped before fire; \
+             proceeding with ExitEvent emission (orphan path)",
+        );
+    }
 
     let mut guard = ClaimGuard::new(alloc.clone(), live);
     if guard.try_begin_ending() {
