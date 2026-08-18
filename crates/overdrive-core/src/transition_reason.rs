@@ -70,11 +70,6 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 /// | `VmKernelFormatUnsupported { path, arch, detail }` | cause | `VmDriver` — `KernelImage::validate` rejection | yes |
 /// | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
 /// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
-/// | `VmVolumeSourceNotFound { path }` | cause | `VmDriver` — volume preflight | NO — Slice 04 |
-/// | `VmStorageDaemonAbsent { searched }` | cause | `VmDriver` — storage-sidecar spawn | NO — Slice 04 |
-/// | `VmGuestMountFailed { target, detail }` | cause | `VmDriver` — guest-reported mount failure | NO — Slice 04 |
-/// | `VmStorageSocketTimeout { socket, waited_ms }` | cause | `VmDriver` — storage-sidecar readiness wait | NO — Slice 04 |
-/// | `VmStorageSandboxUnavailable { requested, detail }` | cause | `VmDriver` — storage-sidecar sandbox mode | NO — Slice 04 |
 /// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 ///
 /// **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
@@ -293,16 +288,6 @@ pub enum TransitionReason {
     /// The hypervisor process ended before the guest reported READY. The
     /// hypervisor's own stderr stays in the row's verbatim `detail`.
     VmGuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> },
-    /// A declared volume's source path was absent at start.
-    VmVolumeSourceNotFound { path: String },
-    /// No storage daemon binary was found; `searched` names every path.
-    VmStorageDaemonAbsent { searched: Vec<String> },
-    /// The guest reported a start-time mount failure.
-    VmGuestMountFailed { target: String, detail: String },
-    /// The storage daemon's socket never became ready within `waited_ms`.
-    VmStorageSocketTimeout { socket: String, waited_ms: u64 },
-    /// The requested storage-daemon sandbox mode is unavailable here.
-    VmStorageSandboxUnavailable { requested: String, detail: String },
     /// READY arrived but the guest command could not be delivered before
     /// the allocation reached Running.
     VmGuestCommandDispatchFailed { detail: String },
@@ -373,24 +358,6 @@ impl From<&DriverStartFailure> for TransitionReason {
                     Self::VmGuestExitUnreported {
                         vmm_exit_code: *vmm_exit_code,
                         vmm_signal: *vmm_signal,
-                    }
-                }
-                VmStartFailure::VolumeSourceNotFound { path } => {
-                    Self::VmVolumeSourceNotFound { path: path.clone() }
-                }
-                VmStartFailure::StorageDaemonAbsent { searched } => {
-                    Self::VmStorageDaemonAbsent { searched: searched.clone() }
-                }
-                VmStartFailure::GuestMountFailed { target, detail } => {
-                    Self::VmGuestMountFailed { target: target.clone(), detail: detail.clone() }
-                }
-                VmStartFailure::StorageSocketTimeout { socket, waited_ms } => {
-                    Self::VmStorageSocketTimeout { socket: socket.clone(), waited_ms: *waited_ms }
-                }
-                VmStartFailure::StorageSandboxUnavailable { requested, detail } => {
-                    Self::VmStorageSandboxUnavailable {
-                        requested: requested.clone(),
-                        detail: detail.clone(),
                     }
                 }
                 VmStartFailure::GuestCommandDispatchFailed { detail } => {
@@ -1033,21 +1000,6 @@ impl TransitionReason {
                     "VM hypervisor exited before the guest reported ready (exit {vmm_exit_code:?}, signal {vmm_signal:?})",
                 )
             }
-            Self::VmVolumeSourceNotFound { path } => {
-                format!("VM volume source not found: {path}")
-            }
-            Self::VmStorageDaemonAbsent { searched } => {
-                format!("VM storage daemon not found (searched: {})", searched.join(", "))
-            }
-            Self::VmGuestMountFailed { target, detail } => {
-                format!("VM guest mount failed at {target}: {detail}")
-            }
-            Self::VmStorageSocketTimeout { socket, waited_ms } => {
-                format!("VM storage socket {socket} not ready after {waited_ms}ms")
-            }
-            Self::VmStorageSandboxUnavailable { requested, detail } => {
-                format!("VM storage sandbox {requested} unavailable: {detail}")
-            }
             Self::VmGuestCommandDispatchFailed { detail } => {
                 format!("VM guest command dispatch failed: {detail}")
             }
@@ -1094,11 +1046,6 @@ impl TransitionReason {
             | Self::VmKernelFormatUnsupported { .. }
             | Self::VmConfinementUnavailable { .. }
             | Self::VmGuestExitUnreported { .. }
-            | Self::VmVolumeSourceNotFound { .. }
-            | Self::VmStorageDaemonAbsent { .. }
-            | Self::VmGuestMountFailed { .. }
-            | Self::VmStorageSocketTimeout { .. }
-            | Self::VmStorageSandboxUnavailable { .. }
             | Self::VmGuestCommandDispatchFailed { .. } => true,
         }
     }

@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "microvm-driver-cloud-hypervisor",
     "created_at": "2026-08-11T19:07:27Z",
-    "total_steps": 37
+    "total_steps": 31
   },
   "phases": [
     {
@@ -884,177 +884,6 @@
       ]
     },
     {
-      "id": "05",
-      "name": "Volumes and the storage daemon's honesty (Slice 04)",
-      "steps": [
-        {
-          "id": "05-01",
-          "name": "[[vm.volume]] spec parse + VmConfig volume payload + derived shared=on + no-volume regression guard",
-          "description": "The volume array-of-tables surface, the derived --memory shared=on flag, and the guard proving a volume-free VM is byte-identical to Slices 01-03.",
-          "criteria": [
-            "A VM job with no volume declared starts no storage daemon, derives shared=on OFF, and reaches the same terminal state and exit code as before volumes existed.",
-            "An unrecognised [[vm.volume]] key (e.g. \"cache\") is rejected by name; only source, target and read_only are accepted.",
-            "shared=on is derived from !volumes.is_empty() at one VmConfig construction site — no builder, no second config shape."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-          "scenario_name": "S-VM-57, S-VM-62",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-core/src/aggregate/workload_spec.rs",
-              "crates/overdrive-core/src/vm/config.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-              "crates/overdrive-cli/tests/integration.rs",
-              "crates/overdrive-core/tests/acceptance/vm_spec_driver_table_dispatch.rs"
-            ]
-          },
-          "dependencies": [
-            "01-08",
-            "03-01",
-            "03-07",
-            "03-09",
-            "04-01"
-          ],
-          "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: S-VM-57 is Tier 3, gated integration-tests, single-example (the regression guard); S-VM-62 is Tier 1 in-memory (parse rejection, no VMM). Author fresh at Slice 04's own RED phase (DWD-06a). [[vm.volume]] rides inside Slice 01's JobEnvelope V2 (01-02) — no second rkyv bump. S-VM-62 lands in the EXISTING vm_spec_driver_table_dispatch.rs — a DISTILL-committed RED scaffold (S-VM-06/S-VM-07) already in tree, wired into crates/overdrive-core/tests/acceptance.rs; step 01-08 only UNSKIPS its two scaffolds, it does not create the file — not a CLI integration file; do not create a redundant Tier-3 CLI test for it. MICROVM-BOOT-TESTS GATE: vm_volumes_and_storage_daemon.rs is a NEW file; its S-VM-57 real-boot regression guard compiles only under crates/overdrive-cli's existing kvm-tests feature (declared at step 01-08) alongside integration-tests. S-VM-62, in vm_spec_driver_table_dispatch.rs, is Tier 1 in-memory and unaffected."
-        },
-        {
-          "id": "05-02",
-          "name": "Supervised virtiofsd lifecycle — ordering, socket readiness, teardown",
-          "description": "One supervised virtiofsd per volume-carrying VM, in the allocation's cgroup scope and netns, running before the guest boots and torn down after the VM.",
-          "criteria": [
-            "A missing virtiofsd binary is Failed/VmStorageDaemonAbsent naming the paths searched, distinct from a missing source directory.",
-            "The guest does not begin booting until the storage daemon's socket is ready; an expired readiness wait is Failed/VmStorageSocketTimeout naming the socket and the wait.",
-            "No daemon process or vhost-user socket survives any terminal path — a failed start, a readiness timeout, or a sandbox refusal."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-          "scenario_name": "S-VM-59, S-VM-66, S-VM-68",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-worker/src/vm_driver.rs",
-              "crates/overdrive-host/src/virtiofsd.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
-            ]
-          },
-          "dependencies": [
-            "05-01"
-          ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. virtiofsd is a sidecar VmDriver spawns and supervises DIRECTLY (Command::spawn, same shape as ExecDriver's own workload process) — it sits OUTSIDE the Vmm port entirely (system constraint 9). Placement: allocation's cgroup scope + netns (load-bearing — cgroup_kill must reap it). overdrive-host/src/virtiofsd.rs is NOT a port/trait seam — no storage-daemon supervision port is minted (ADR-0083 §D8, explicit ruling: 'Path (a) is explicitly not taken'). It holds plain spawn/supervise helper functions (Command::spawn + wait, mirroring ExecDriver's own workload-process handling) that VmDriver (overdrive-worker, which already depends on overdrive-host per Cargo.toml) calls directly. Do not treat it as a trait boundary or add a Vmm-shaped abstraction over it. Continues in vm_volumes_and_storage_daemon.rs, inheriting the kvm-tests gate established at step 05-01."
-        },
-        {
-          "id": "05-03",
-          "name": "Host<->guest byte-faithful round-trip + read-only host-side enforcement",
-          "description": "A guest write inside a declared volume is byte-identical on the host, read by ordinary filesystem access; a read-only volume defeats even an uncooperative guest.",
-          "criteria": [
-            "A guest write inside a declared volume is present, readable, and byte-identical in the operator's host source directory, verified by ordinary filesystem access, not through any Overdrive API.",
-            "A read_only=true volume's guest write fails inside the guest and the host directory is byte-unchanged, including against a guest that tries to remount the share read-write.",
-            "A missing volume source directory is Failed/VmVolumeSourceNotFound naming the source and the path, distinct from a missing rootfs and a missing storage daemon."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-          "scenario_name": "S-VM-55, S-VM-56, S-VM-58",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-host/src/virtiofsd.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
-            ]
-          },
-          "dependencies": [
-            "05-02"
-          ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-56 is a mandatory mutation target and MUST defeat a guest-side-only implementation — a cooperative guest's failed write alone is insufficient evidence (US-VM-8 AC 2). read_only is enforced HOST-side (the export); a guest-side -o ro is an ergonomic guard only, never the boundary. virtiofsd.rs (overdrive-host) is plain spawn/supervise helpers, not a port trait — see 05-02's note; this step's host<->guest byte-faithful assertions read/write the operator's source directory directly via ordinary filesystem access, never through a (nonexistent) storage-daemon port. Continues under the kvm-tests gate established at step 05-01."
-        },
-        {
-          "id": "05-04",
-          "name": "Guest-side mount + refuse-to-exec (the composite-lie case) + Landlock non-widening",
-          "description": "overdrive-init refuses to exec the operator's command when a required mount fails; a volume never widens what the hypervisor process can reach.",
-          "criteria": [
-            "overdrive-init refuses to exec the operator's command when a required volume mount fails; the allocation is Failed/VmGuestMountFailed naming the volume that could not be mounted.",
-            "The allocation with a failed required mount NEVER reaches a completed terminal state — never Terminated/Completed{exit_code:0} over an empty host directory.",
-            "The volume source directory never appears in the hypervisor's Landlock ruleset for a volume-carrying allocation; the rest of the [D7] posture (uid, rlimits, cgroup, netns) is unchanged from a volume-free VM on the SAME allocation."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-          "scenario_name": "S-VM-60, S-VM-61",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-init/src/main.rs",
-              "crates/overdrive-host/src/vmm.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
-            ]
-          },
-          "dependencies": [
-            "05-02",
-            "01-03"
-          ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example. S-VM-60 is THE mandatory mutation target the [D4] amendment exists to defend — without the refuse-to-exec guard, the command writes into the discarded per-launch rootfs copy, exits 0, and workload describe lies. overdrive-init's fifth duty (mount then refuse) is a scoped, non-passive amendment — name the subject, per the [D8g] correction. Continues under the kvm-tests gate established at step 05-01."
-        },
-        {
-          "id": "05-05",
-          "name": "RLIMIT_FSIZE accounts for shared=on's memfd + storage-daemon sandbox launch-argument",
-          "description": "rlimit_fsize() covers a memfd-backed guest uniformly; the storage daemon's launch argument is a pure rendering-site value that only ever emits --sandbox=namespace or a typed refusal.",
-          "criteria": [
-            "rlimit_fsize() always returns max(rootfs image size, guest RAM), uniformly whether or not shared=on is in play for this VmConfig.",
-            "The storage daemon's launch-argument rendering always emits --sandbox=namespace for an available capability signal.",
-            "An unavailable capability signal always yields a typed refusal, never a launch; no input ever yields --sandbox=chroot and no input ever omits --sandbox."
-          ],
-          "test_file": "crates/overdrive-core/tests/acceptance/vm_storage_daemon_sandbox_arg.rs",
-          "scenario_name": "S-VM-63, S-VM-67",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-core/src/vm/config.rs",
-              "crates/overdrive-host/src/virtiofsd.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-core/tests/acceptance/vm_storage_daemon_sandbox_arg.rs",
-              "crates/overdrive-core/tests/acceptance.rs"
-            ]
-          },
-          "dependencies": [
-            "05-01"
-          ],
-          "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: Tier 1, default lane, proptest, both mandatory mutation targets. S-VM-67's driving port is a value with private fields and exactly one rendering site (mirroring DiskAttachment::to_disk_arg's D2.1 shape) — the exact type is NOT yet ADR-pinned; DELIVER names it at RED phase per CLAUDE.md 'Implement to the design' (do not invent a storage-daemon supervision port — ADR-0083 §D8 explicitly mints none). The rendering type ITSELF lands in overdrive-core (crates/overdrive-core/src/vm/config.rs), mirroring the DiskAttachment §D2.1 precedent — private fields, one rendering site, pure, testable in this step's own overdrive-core acceptance file. overdrive-host is never a dev-dependency of overdrive-core's test lane (development.md § 'Port-trait dependencies'), so the rendering type cannot live in overdrive-host; only the impure spawn call site that consumes the rendered value lives in overdrive-host/src/virtiofsd.rs (or wherever 05-02 places the virtiofsd module). S-VM-67's Then proves ONLY the rendered argument; it does NOT prove a running virtiofsd enforces the sandbox or that the platform fails closed end-to-end — that stays an undischarged Tier-3 property of this slice (DWD-13), not covered by any scenario in this roadmap. MICROVM-BOOT-TESTS GATE: this step's own test file (vm_storage_daemon_sandbox_arg.rs, in overdrive-core) is Tier 1 pure/proptest and spawns no VMM — it is deliberately NOT gated behind kvm-tests, only the crate's normal default lane."
-        },
-        {
-          "id": "05-06",
-          "name": "Storage-daemon exit honesty — clean exit contributes nothing, mid-run death is never clean",
-          "description": "The daemon's own exit status never drives ExitKind in either direction; a mid-run death overrides even a guest-reported clean exit.",
-          "criteria": [
-            "A completed VM job's storage-daemon exit is observed in the allocation's event/audit trail while contributing nothing to ExitKind.",
-            "A storage daemon that dies while the guest is still running is Failed/VmStorageDaemonDied naming the socket, never Terminated/Completed; disposition StoppedBy::Process, never PlatformReclaimed.",
-            "A guest that self-reports EXIT 0 over vsock AFTER its storage daemon already died still resolves VmStorageDaemonDied, overriding the guest-reported clean exit."
-          ],
-          "test_file": "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs",
-          "scenario_name": "S-VM-64, S-VM-65",
-          "implementation_scope": {
-            "source_directories": [
-              "crates/overdrive-worker/src/vm_driver.rs",
-              "crates/overdrive-worker/src/exit_observer.rs",
-              "crates/overdrive-core/src/transition_reason.rs"
-            ],
-            "test_directories": [
-              "crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs"
-            ]
-          },
-          "dependencies": [
-            "05-02",
-            "05-04"
-          ],
-          "effort_hours": 8,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single-example, both shapes of S-VM-65 mandatory. The exit_observer's storage_daemon_died precedence check runs AHEAD of ExitKind entirely — NOT nested inside the Crashed arm the way VmOutOfMemory (row 13) is (ADR-0083 §D5 row 14). S-VM-64 must discriminate, not merely observe green: assert the daemon's exit WAS observed while contributing nothing — a do-nothing implementation would also pass a naive assertion. Continues in vm_volumes_and_storage_daemon.rs, inheriting the kvm-tests gate established at step 05-01."
-        }
-      ]
-    },
-    {
       "id": "06",
       "name": "[resources] sizes the VM (Slice 05)",
       "steps": [
@@ -1117,10 +946,10 @@
         },
         {
           "id": "06-03",
-          "name": "Sizing parity across both memory backings + Driver::resize",
-          "description": "Guest-observed vCPU/memory match the declared figures identically on private memory and on shared=on; resize rejects with a named, typed reason (hotplug is GH #92's right-sizing reconciler, out of this feature's scope), never a silent no-op.",
+          "name": "Sizing parity + Driver::resize",
+          "description": "Guest-observed vCPU/memory match the declared figures for a VM allocation on the single (private) memory backing; resize rejects with a named, typed reason (hotplug is GH #92's right-sizing reconciler, out of this feature's scope), never a silent no-op. VOLUMES CUT 2026-08-18: the volume-carrying shared=on backing was removed with Slice 04 (deferred to GH #97/#43/#22).",
           "criteria": [
-            "One parametrized Tier-3 case: guest-observed vCPU count and memory size match the declared figures identically for a volume-free (private memory) and a volume-carrying (shared=on) VM.",
+            "One Tier-3 case: guest-observed vCPU count and memory size match the declared figures for a VM allocation (single private memory backing; the volume-carrying shared=on backing was removed with Slice 04 — volumes cut 2026-08-18, deferred to GH #97/#43/#22).",
             "Driver::resize rejects every call with a named, typed reason citing GH #92 as the deferred hotplug work (ADR-0082 §D4: the api-socket 'is not depended on by any path in this feature'); it never silently no-ops and never hotplugs in this feature."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs",
@@ -1134,11 +963,10 @@
             ]
           },
           "dependencies": [
-            "06-02",
-            "05-01"
+            "06-02"
           ],
           "effort_hours": 6,
-          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single parametrized case (not two separate tests) — the reason Slice 04 (volumes) is ordered before Slice 05 (resources). Driver::resize rejects, always — ADR-0082 §D4 keeps --api-socket in VmConfig only as the future hotplug substrate for GH #92's right-sizing reconciler and states plainly it 'is not depended on by any path in this feature'; a silent no-op is a review rejection, and so is an implemented hotplug this feature does not need. Continues under the kvm-tests gate established at step 06-01."
+          "implementation_notes": "TEST PARADIGM: Tier 3, gated integration-tests, single Tier-3 case. VOLUMES CUT 2026-08-18 (deferred to GH #97 managed block-volume / #43 virtiofsd lifecycle / #22 object store): the prior 'parametrized across both memory backings (private vs shared=on)' shape dissolved with Slice 04 — there is no derived shared=on / memfd backing in this feature, so this step proves sizing parity on the single (private) memory backing only, and its dependency on 05-01 is dropped. Driver::resize rejects, always — ADR-0082 §D4 keeps --api-socket in VmConfig only as the future hotplug substrate for GH #92's right-sizing reconciler and states plainly it 'is not depended on by any path in this feature'; a silent no-op is a review rejection, and so is an implemented hotplug this feature does not need. Continues under the kvm-tests gate established at step 06-01."
         }
       ]
     }

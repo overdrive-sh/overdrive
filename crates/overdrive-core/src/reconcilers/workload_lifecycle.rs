@@ -769,9 +769,6 @@ impl WorkloadLifecycle {
                                 args: args.clone(),
                                 kernel: PathBuf::from(kernel),
                                 rootfs: PathBuf::from(rootfs),
-                                // `[[vm.volume]]` is a Slice 04 concern —
-                                // empty for every Slice 01-03 allocation.
-                                volumes: Vec::new(),
                             })
                         }
                     };
@@ -899,10 +896,6 @@ impl WorkloadLifecycle {
                                     args: args.clone(),
                                     kernel: PathBuf::from(kernel),
                                     rootfs: PathBuf::from(rootfs),
-                                    // `[[vm.volume]]` is a Slice 04
-                                    // concern — empty for every Slice
-                                    // 01-03 allocation.
-                                    volumes: Vec::new(),
                                 })
                             }
                         };

@@ -176,66 +176,27 @@ pub enum ExecStartFailure {
 #[non_exhaustive]
 pub enum VmStartFailure {
     /// The configured kernel path was absent at this allocation's start.
-    KernelNotFound {
-        path: String,
-    },
+    KernelNotFound { path: String },
     /// The configured rootfs master was absent at this allocation's start.
-    RootfsNotFound {
-        path: String,
-    },
+    RootfsNotFound { path: String },
     /// The hypervisor binary could not be found — spawn-time `NotFound`
     /// only; names every path searched.
-    HypervisorAbsent {
-        searched: Vec<String>,
-    },
+    HypervisorAbsent { searched: Vec<String> },
     /// The guest never signalled READY within the driver's boot deadline.
     /// `console_tail` is the live `VmmDiagnostics` snapshot, never text
     /// reconstructed from the timeout.
-    BootDeadlineExceeded {
-        deadline_ms: u64,
-        console_tail: Option<String>,
-    },
+    BootDeadlineExceeded { deadline_ms: u64, console_tail: Option<String> },
     /// The configured kernel is present but not loadable on this arch.
     /// `detail` is the validator's own stable format diagnosis — never the
     /// hypervisor's misleading firmware-size-cap wording.
-    KernelFormatUnsupported {
-        path: String,
-        arch: String,
-        detail: String,
-    },
+    KernelFormatUnsupported { path: String, arch: String, detail: String },
     /// The host cannot supply one confinement control.
-    ConfinementUnavailable {
-        control: ConfinementControl,
-        detail: String,
-    },
+    ConfinementUnavailable { control: ConfinementControl, detail: String },
     /// The hypervisor process ended before the guest reported READY.
-    GuestExitUnreported {
-        vmm_exit_code: Option<i32>,
-        vmm_signal: Option<u8>,
-    },
-    VolumeSourceNotFound {
-        path: String,
-    },
-    StorageDaemonAbsent {
-        searched: Vec<String>,
-    },
-    GuestMountFailed {
-        target: String,
-        detail: String,
-    },
-    StorageSocketTimeout {
-        socket: String,
-        waited_ms: u64,
-    },
-    StorageSandboxUnavailable {
-        requested: String,
-        detail: String,
-    },
+    GuestExitUnreported { vmm_exit_code: Option<i32>, vmm_signal: Option<u8> },
     /// READY arrived but the guest command could not be delivered before
     /// the allocation reached Running.
-    GuestCommandDispatchFailed {
-        detail: String,
-    },
+    GuestCommandDispatchFailed { detail: String },
 }
 
 /// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
@@ -489,20 +450,7 @@ pub struct VmPayload {
     pub kernel: PathBuf,
     /// Operator-supplied rootfs artifact path (BYO).
     pub rootfs: PathBuf,
-    /// Per-VM volume mounts. `vec![]` for every Slice 01-03 allocation —
-    /// `[[vm.volume]]` is a Slice 04 concern (design not yet written);
-    /// the field is threaded now so `VmPayload`'s shape does not change
-    /// again when Slice 04 lands. `AllocationSpec` derives neither serde
-    /// nor rkyv, so widening [`VmVolume`] later is not a schema-evolution
-    /// event.
-    pub volumes: Vec<VmVolume>,
 }
-
-/// Placeholder for a future per-VM volume mount (Slice 04 — not yet
-/// designed). Carries no fields; [`VmPayload::volumes`] stays `vec![]`
-/// until that slice's design lands.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VmVolume {}
 
 impl DriverPayload {
     /// The routing key — [`DriverRegistry::get`] indexes on this.

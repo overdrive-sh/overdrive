@@ -239,10 +239,11 @@ pub struct Exec {
 }
 
 /// microVM-driver invocation fields (ADR-0083 Amendment 2026-08-12,
-/// GH #42). Mirrors the runtime `VmPayload` shape (ADR-0083 § D3)
-/// MINUS `volumes` (deferred to Slice 04) — `String`, not `PathBuf`,
-/// for both `kernel` and `rootfs` (rkyv/serde-clean, matches
-/// `Exec.command`'s shape).
+/// GH #42). Mirrors the runtime `VmPayload` shape (ADR-0083 § D3) —
+/// `String`, not `PathBuf`, for both `kernel` and `rootfs`
+/// (rkyv/serde-clean, matches `Exec.command`'s shape). Per-VM volumes
+/// are out of scope for this feature (deferred to overdrive-fs, GH #97
+/// / virtiofsd, GH #43).
 #[derive(
     Debug,
     Clone,
@@ -1282,10 +1283,11 @@ pub struct ExecInput {
 }
 
 /// Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
-/// Mirrors the runtime `traits::driver::VmPayload` shape MINUS `volumes`
-/// (deferred to Slice 04) — `String`, not `PathBuf`, for both `kernel`
-/// and `rootfs` (serde-clean wire shape, matches `ExecInput.command`'s
-/// shape).
+/// Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
+/// not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
+/// shape, matches `ExecInput.command`'s shape). Per-VM volumes are out
+/// of scope for this feature (deferred to overdrive-fs, GH #97 /
+/// virtiofsd, GH #43).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VmInput {

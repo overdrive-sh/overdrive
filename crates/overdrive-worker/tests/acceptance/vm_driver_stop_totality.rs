@@ -123,7 +123,6 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
                 args: vec![],
                 kernel: fixture_kernel_path(tmp),
                 rootfs: fixture_rootfs_path(tmp),
-                volumes: vec![],
             },
         ),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
@@ -291,14 +290,13 @@ async fn create_failure_releases_claim_and_cleans_up_run_directory() {
     // run-directory assertion above.
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
-    let rootfs_plan =
-        RootfsPlan::for_alloc(
-            rootfs_master,
-            master_bytes,
-            &alloc,
-            &tmp.path().join("clone-staging"),
-            &tmp.path().join("clone-index"),
-        );
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs_master,
+        master_bytes,
+        &alloc,
+        &tmp.path().join("clone-staging"),
+        &tmp.path().join("clone-index"),
+    );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed after a Vmm::create failure, still present at {}",
@@ -370,14 +368,13 @@ async fn vmm_exits_before_beacon_releases_claim_and_cleans_up() {
     // @mandatory:mutation_target companions (01-07 review D2).
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
-    let rootfs_plan =
-        RootfsPlan::for_alloc(
-            rootfs_master,
-            master_bytes,
-            &alloc,
-            &tmp.path().join("clone-staging"),
-            &tmp.path().join("clone-index"),
-        );
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs_master,
+        master_bytes,
+        &alloc,
+        &tmp.path().join("clone-staging"),
+        &tmp.path().join("clone-index"),
+    );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed on the exit-before-beacon arm, still present at {}",
@@ -469,14 +466,13 @@ async fn boot_deadline_elapses_releases_claim_and_cleans_up() {
     // @mandatory:mutation_target companions (01-07 review D2).
     let master_bytes =
         std::fs::metadata(&rootfs_master).expect("stat synthetic master rootfs").len();
-    let rootfs_plan =
-        RootfsPlan::for_alloc(
-            rootfs_master,
-            master_bytes,
-            &alloc,
-            &tmp.path().join("clone-staging"),
-            &tmp.path().join("clone-index"),
-        );
+    let rootfs_plan = RootfsPlan::for_alloc(
+        rootfs_master,
+        master_bytes,
+        &alloc,
+        &tmp.path().join("clone-staging"),
+        &tmp.path().join("clone-index"),
+    );
     assert!(
         !rootfs_plan.clone_dest().exists(),
         "rootfs clone must be removed on the deadline arm, still present at {}",

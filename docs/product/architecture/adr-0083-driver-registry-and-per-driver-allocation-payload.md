@@ -72,6 +72,22 @@ classes and verbatim detail are preserved; VM causes are constructed where
 their fields are known; every unknown uses the existing
 `DriverInternalError` fallback. Rows 13/14 remain exit-observer-only, and row
 15 is appended for the already-known post-READY `EXEC` delivery failure.
+**Amended 2026-08-18 (user ruling — volumes cut from this feature; §§ D3 / D5 / D8
+volume decisions superseded).** `[[vm.volume]]` was designed as a **virtiofs host↔guest
+bind-mount** (a host `source` directory shared into the guest at `target`, host and guest
+seeing the same bytes). The user ruled this the **wrong mechanism and the wrong name** and
+**removed volumes from this feature entirely.** A real persistent volume is guest-owned and
+**block-device-shaped** (`overdrive-fs`, GH #97, Phase 6.13 — whose own spike evidence
+P9–P11 says the guest sees a block device, ext4 / vhost-user-blk, NOT a virtiofs / FUSE
+mount, the *opposite* mechanism), and #97 was already scoped OUT of #42 (user ruling
+2026-08-10). The `virtiofsd` mechanism itself is GH #43's ([3.6] virtiofsd lifecycle +
+cross-workload sharing). US-VM-8's host-`ls` / `cat` use case is fictional on the production
+target (immutable appliance OS, no operator shell, node-local artifact not surviving a
+reschedule; the correct sink is the object store Garage #22 or `overdrive-fs` #97). Volumes
+are therefore **deferred to #97 / #43 / #22, not renamed or kept.** The superseded items are
+enumerated in the **Amendment 2026-08-18** section at the end; the volume-free VM
+boot / stop / restart / confinement path (§ D5 rows 1–7, 13, 15; the `ExitEvent.oom` field;
+§§ D1 / D2 / D2a / D4 / D6 / D7 / D8-`vmm_override`) is UNCHANGED.
 Decision-makers: Morgan (nw-solution-architect, DESIGN wave, third of three).
 Mode: propose.
 Tags: phase-2, vm-driver, composition-root, action-shim, spec-parse, reconciler,
@@ -498,6 +514,9 @@ pub struct VmPayload {
     pub args:    Vec<String>,
     pub kernel:  PathBuf,         // operator surface, BYO artifact
     pub rootfs:  PathBuf,         // operator surface, BYO artifact
+    // SUPERSEDED 2026-08-18 (volumes cut — see Amendment 2026-08-18): this field is
+    // REMOVED; `VmPayload` carries no volume field, and the `VmVolume` value is deleted.
+    // Deferred to GH #97 (block-device managed volume) / #43 (virtiofsd) / #22 (object store).
     pub volumes: Vec<VmVolume>,   // Slice 04; empty for Slices 01–03
 }
 
@@ -614,11 +633,14 @@ pub enum VmStartFailure {
         vmm_exit_code: Option<i32>,
         vmm_signal: Option<u8>,
     },
+    // SUPERSEDED 2026-08-18 (volumes cut — Amendment 2026-08-18): the five volume
+    // variants immediately below are REMOVED (deferred to #97 / #43 / #22).
     VolumeSourceNotFound { path: String },
     StorageDaemonAbsent { searched: Vec<String> },
     GuestMountFailed { target: String, detail: String },
     StorageSocketTimeout { socket: String, waited_ms: u64 },
     StorageSandboxUnavailable { requested: String, detail: String },
+    // GuestCommandDispatchFailed is NOT a volume variant (row 15) — it STAYS.
     GuestCommandDispatchFailed { detail: String },
 }
 
@@ -688,6 +710,12 @@ supply confinement control X"* — one cause class discriminated by a typed fiel
 which is what Slice 03 asks for in as many words (*"a **fifth** variant minted
 in Slice 02's shape"*). A `String` discriminant would have been the stringly-
 typed version and is rejected.
+
+> **SUPERSEDED 2026-08-18 — volumes cut (Amendment 2026-08-18).** Row 14
+> (`VmStorageDaemonDied`), the `ExitEvent.storage_daemon_died` field, the
+> `StorageDaemonDeathFacts` value, and this ahead-of-`ExitKind` precedence rule are
+> **removed** with volumes; `ExitEvent` keeps only its `oom` field (row 13). Deferred to
+> #43 (virtiofsd lifecycle). The prose below is retained as history, not as live design.
 
 **Row 14 — why it is mid-run and not `DriverStartFailure`'s to construct,
 and why it must be checked ahead of `ExitKind`, not nested inside it.**
@@ -768,6 +796,12 @@ append-only row 15) plus two mid-run classes (`VmOutOfMemory`, row 13, and
 reclamation **disposition** is deliberately **not** in this table and must not
 be counted toward K3 — counting a disposition as a failure cause would let the
 feature satisfy K3 without shipping a fourth diagnosis.
+
+> **SUPERSEDED 2026-08-18 — volumes cut (Amendment 2026-08-18).** With volumes removed,
+> the count is **nine** distinct VM diagnoses — rows 1–7 and row 15 (start-time) plus row
+> 13 `VmOutOfMemory` (mid-run) — still comfortably ≥ 4. The five volume start-time causes
+> (**rows 8–12**) and mid-run **row 14** (`VmStorageDaemonDied`), plus the enum's five
+> volume variants above, are superseded. Deferred to #97 / #43 / #22.
 
 `TransitionReason` is `#[non_exhaustive]` (`transition_reason.rs:87`) and every
 addition is appended, preserving rkyv discriminants — row 15 therefore stays
@@ -1418,6 +1452,11 @@ them at the time:
 This was recorded here so the gap was visible rather than silently assumed
 solved by proximity to S-VM-13 / S-VM-51's (real) seam.
 
+> **SUPERSEDED 2026-08-18 — volumes cut (Amendment 2026-08-18).** This entire S-VM-67 /
+> `--sandbox=namespace` ruling is withdrawn: `virtiofsd` is not part of this feature at
+> all. Its sandbox posture becomes GH #43's (virtiofsd lifecycle) / #258's (daemon
+> posture) when that work is designed. The blockquote below is retained as history.
+>
 > **Ruled 2026-08-11, by user ruling — closes the open item above. Path
 > (b).** The `--sandbox=namespace` posture is verified at the
 > **launch-argument construction layer** — the same enforcement tier
@@ -1678,6 +1717,11 @@ everything downstream stays real.
   minimal and fail-safe (`None` ⇒ authorises nothing; the release default is a
   no-op), but they are changes to the trait every driver implements.
   *(Widened from one method 2026-08-11, iteration-2 review NEW-1.)*
+> **SUPERSEDED 2026-08-18 — volumes cut (Amendment 2026-08-18).** The next two bullets
+> (S-VM-67's absent seam, and `ExitEvent`'s second `storage_daemon_died` field) concern
+> `virtiofsd` / volumes and no longer apply: there is no `virtiofsd` in this feature and
+> `ExitEvent` retains only `oom` (row 13). Deferred to #97 / #43. Retained as history.
+
 - **S-VM-67 has no seam this ADR pair supplies, and that is stated rather
   than papered over** (§ D8). `virtiofsd`'s `--sandbox=namespace`
   capability check sits outside the `Vmm` port entirely (no volume field
@@ -2584,3 +2628,109 @@ has landed with two callers, and a rename buys nothing but churn.
   changes. `plan_reclamation` is untouched.
 
 Recorded in feature DWD-26. Delivered by roadmap step 03-09.
+
+---
+
+## Amendment 2026-08-18 — Volumes (Slice 04) cut from this feature; §§ D3 / D5 / D8 volume decisions superseded
+
+**Decision-maker:** Morgan (nw-solution-architect, DESIGN wave). **Mode:** propose.
+**Ratified by the user 2026-08-18.** Tags: vm-driver, volumes, descope, GH-42, GH-97,
+GH-43, GH-22.
+
+**What changed, and why.** `[[vm.volume]]` (§ D3 `VmPayload.volumes`, § D5's storage
+transition reasons, § D8's `virtiofsd` sandbox ruling) was designed as a **virtiofs
+host↔guest bind-mount**: a host `source` directory shared into the guest at `target`,
+host and guest seeing the same bytes (S-VM-55: *"byte-identical in the operator's host
+source directory"*). The user has ruled this the **wrong mechanism and the wrong name**
+and removed volumes from this feature entirely. Three grounds, recorded faithfully:
+
+1. **A real persistent volume is block-device-shaped, not a virtiofs share — the
+   opposite mechanism.** A platform-managed, guest-owned persistent volume is
+   `overdrive-fs` (GH #97, Phase 6.13). Its own spike evidence (P9–P11, banked on #97)
+   states the guest should see a **block device (ext4 / vhost-user-blk), NOT a
+   virtiofs / vhost-user-fs / FUSE mount** — the inverse of Slice 04's design. #97 was
+   **explicitly scoped OUT of #42** by the user's 2026-08-10 ruling (*"boot a VM through
+   serve + deploy. Nothing else … the chunk store … belong[s] to #96 / #97 / #100 and
+   [is] explicitly out of this feature's design"*).
+2. **The virtiofsd mechanism is a separate, later concern.** GH #43 ([3.6] virtiofsd
+   lifecycle management + cross-workload volume sharing) owns the `virtiofsd`
+   supervision, socket-readiness, and sharing mechanism that Slice 04 (steps
+   05-02 … 05-06) was going to build.
+3. **The headline use case is fictional on the production target.** US-VM-8's frame —
+   *"Ana reads the output on the host with `ls` / `cat`"* — assumes an operator shell on
+   the node. Overdrive nodes run an **immutable appliance OS with no operator shell**;
+   the artifact is node-local and does not survive the node or a reschedule; the correct
+   artifact sink is the **object store (Garage, GH #22)** or **`overdrive-fs` (#97)**. So
+   volumes are **deferred, not renamed or kept.**
+
+**Superseded (volume-only — removed from this feature's scope; deferred to #97 / #43 / #22):**
+
+- **§ D3 — `VmPayload.volumes: Vec<VmVolume>`** and the `VmVolume` value are removed;
+  `VmPayload` carries **no volume field**. The persisted V2 `Vm` payload was already
+  authored *"minus `volumes`"* (Amendment 2026-08-12) — that is now the permanent shape,
+  no longer a Slice-04-pending deferral, so **no rkyv envelope change follows from this
+  cut** (the V1→V2 bump already landed at step 01-02 and is unaffected).
+- **§ D5 — the five volume `VmStartFailure` variants** `VolumeSourceNotFound`,
+  `StorageDaemonAbsent`, `GuestMountFailed`, `StorageSocketTimeout`,
+  `StorageSandboxUnavailable` and their `TransitionReason` mappings (**table rows 8–12**:
+  `VmVolumeSourceNotFound`, `VmStorageDaemonAbsent`, `VmGuestMountFailed`,
+  `VmStorageSocketTimeout`, `VmStorageSandboxUnavailable`) are removed, along with the
+  `ConfinementControl` values used only by them (none — `ConfinementControl` stays whole;
+  it is shared with § D5 row 6 `VmConfinementUnavailable`, which is KEPT).
+- **§ D5 — mid-run row 14** `VmStorageDaemonDied`, the `ExitEvent.storage_daemon_died`
+  field, the `StorageDaemonDeathFacts` value, and the ahead-of-`ExitKind` precedence
+  check are removed. `ExitEvent` retains **only** its `oom` field (row 13). The header
+  amendment notes dated 2026-08-11 (gap-1, row 14) and the 2026-08-11 `virtiofsd` sandbox
+  rulings are superseded by this amendment.
+- **§ D8 closing ruling (S-VM-67)** — the `--sandbox=namespace` argv-layer assertion and
+  the *"this feature mints no storage-daemon supervision port"* negative decision are
+  **moot**: there is no `virtiofsd` in this feature at all. (`virtiofsd` sandbox posture
+  is now wholly #43's / #258's when that work is designed.)
+- **Consequences** — the *"S-VM-67 has no seam this ADR pair supplies"* bullet and the
+  *"`ExitEvent` gains a second additive field (`storage_daemon_died`)"* bullet are
+  superseded.
+
+**KEPT (shared with the volume-free path — explicitly NOT removed):**
+
+- **§ D5 rows 1–7** (`VmKernelNotFound`, `VmRootfsNotFound`, `VmHypervisorAbsent`,
+  `VmBootDeadlineExceeded`, `VmKernelFormatUnsupported`, `VmConfinementUnavailable`,
+  `VmGuestExitUnreported`), **row 13** (`VmOutOfMemory`, mid-run OOM), and **row 15**
+  (`VmGuestCommandDispatchFailed` — READY arrived but the `EXEC` beacon delivery failed
+  before `Running`; **not** a volume concern). These are core VM boot / confinement /
+  memory diagnoses and are untouched.
+- **`ExitEvent.oom`** (ADR-0082 § D8) and its `handle_exit_event` precedence check — row
+  13 — stay.
+- **`ConfinementControl`** (all six controls) — shared with row 6 `VmConfinementUnavailable`.
+- **§§ D1, D2, D2a, D3 (payload minus volumes), D4, D6, D7, D8 (the `vmm_override` seam),
+  and all D3a–D3i amendments** — unchanged.
+
+**K3 still holds.** § D5's *"≥ 4 distinct diagnoses"* count survives the cut with margin:
+**nine** distinct VM diagnoses remain — eight start-time (rows 1–7 and row 15) plus one
+mid-run (row 13 `VmOutOfMemory`) — against the ≥ 4 floor, before the four Exec classes are
+counted. Cutting volumes does not threaten K3.
+
+**Companion / plan changes made in the same pass (recorded for cross-reference):**
+
+- `feature-delta.md` — US-VM-8 / US-VM-9 and the `[D8]` … `[D8g]` family marked descoped
+  (deferred → #97 / #43 / #22), dated 2026-08-18; the narrative is annotated, not deleted.
+- `distill/test-scenarios.md` — S-VM-55 … S-VM-68 annotated descoped; S-VM-72's
+  `shared=on` half withdrawn.
+- `deliver/roadmap.json` — Phase 05 (steps 05-01 … 05-06) removed; step 06-03 reduced to
+  single- (private-) memory-backing sizing parity, its `Driver::resize` portion kept, and
+  its `05-01` dependency dropped.
+- The already-landed step **05-01** (commit `ebef5c27`) is reverted under the single-cut
+  rule (no stubs, no shims): `VmVolumeInput` / `VmInput.volume` in `workload_spec.rs`,
+  `VmVolume` / `MemoryBacking` (the derived `shared=on`) in `vm/config.rs`, the whole
+  `vm_volumes_and_storage_daemon.rs` test file, its `mod` line in `integration.rs`, and
+  the two S-VM-62 volume tests appended to `vm_spec_driver_table_dispatch.rs`. `ebef5c27`
+  is purely additive (+607 / −0) and 100% volume-only, so a straight revert is clean.
+
+**Out of scope for this amendment (surfaced, not actioned).** ADR-0082 carries
+forward-references to volumes as a Slice-04 concern — VmConfig deliberately holds *no*
+volume field, but its `--memory shared=on` forward pointer (VmConfig memory docstring) and
+`virtiofsd`-sidecar mentions now point at deferred work. Those references are stale but
+harmless (they describe what a future slice *would* do); correcting them is a separate edit
+outside this amendment's named scope, surfaced to the orchestrator.
+
+Recorded in feature DWD (2026-08-18 volumes cut). Supersedes the 05-01 plan step and the
+Slice-04 volume decisions across §§ D3 / D5 / D8.

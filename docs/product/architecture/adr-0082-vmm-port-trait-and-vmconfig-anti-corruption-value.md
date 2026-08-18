@@ -453,6 +453,19 @@ same honesty D2.1 states about itself). **No storage-daemon supervision
 port is minted by this feature.** No decision in this ADR changes; only the
 cross-reference above is now stale and is corrected by this note.
 
+> **Deferred 2026-08-18 — volumes/`virtiofsd` cut from this feature (GH #42;
+> governing decision: ADR-0083 Amendment 2026-08-18).** The two amendments
+> immediately above turn on `virtiofsd`'s `--sandbox=namespace` posture and
+> S-VM-67, which were `[[vm.volume]]` (Slice-04) scope. Volumes are cut from
+> this feature, so there is no `virtiofsd` here to sandbox and no volume
+> information to reach — or be kept out of — `VmConfig` / any `Vmm` method.
+> Both the "the seam does not reach S-VM-67" boundary and the
+> "`--sandbox=namespace` verified at the launch-argument layer" ruling are
+> therefore **moot in this feature**. The `virtiofsd` sandbox posture is
+> **deferred to GH #43 (virtiofsd lifecycle)**; a real, block-device-shaped
+> managed volume is **GH #97 (`overdrive-fs`)**. The two amendments above are
+> retained as history, not as live design.
+
 **Amendment 2026-08-12 (DELIVER 01-01 design-gap closure, GH #42, user
 ruling).** DELIVER step 01-01 landed the pure value family (`DiskAttachment`,
 `MemoryPlan` + `reserve_bytes`, `KernelImage`, `VmConfinement`; committed
@@ -715,6 +728,16 @@ unclassified driver fallback. `ConfinementUnavailable` is the one typed
 adapter-local mapping to ADR-0083's confinement cause. Storage-daemon and
 guest-mount failures remain `VmDriver` concerns; volume information does not
 enter this port.
+
+> **Deferred 2026-08-18 — volumes/`virtiofsd` cut from this feature (GH #42;
+> see ADR-0083 Amendment 2026-08-18).** The clause "storage-daemon and
+> guest-mount failures remain `VmDriver` concerns" pointed at `[[vm.volume]]`
+> (Slice-04) scope. Volumes are cut, so no storage-daemon (`virtiofsd`) or
+> guest-mount failure arises in this feature; that clause is **deferred to
+> GH #43 (virtiofsd lifecycle) / #97 (managed block-volume)**. The invariant
+> it protects — **volume information never enters the `Vmm` port** — is
+> unchanged and, if anything, stronger: it holds a fortiori now that no
+> volume path exists in the feature at all.
 
 `VmProcess` gains one required field and one new core value:
 
@@ -1081,6 +1104,21 @@ impl VmConfig {
     pub fn rlimit_fsize(&self) -> u64;
 }
 ```
+
+> **Deferred 2026-08-18 — `--memory shared=on` cut from this feature (GH #42;
+> see ADR-0083 Amendment 2026-08-18).** The docstring above justifies the
+> `guest RAM` term in the `max()` by "Slice 04 turns `--memory shared=on` on …
+> a memfd is a *file* for `RLIMIT_FSIZE`." Slice 04 is cut, so `shared=on` /
+> memfd does not land in this feature and guest RAM stays anonymous memory
+> (not a file). The `max(rootfs, guest RAM)` value and its `rlimit_fsize()`
+> body are **retained unchanged** (US-VM-7 confinement, landed at DELIVER
+> 04-04) — the guest-RAM term is now kept **conservatively**, as a
+> deliberately loose cap, rather than because a memfd currently backs guest
+> RAM. The memfd / `shared=on` rationale is repointed at the **deferred**
+> managed-volume / `shared=on` work (**GH #97**), future work — not "Slice 04
+> in this feature." The landed docstring at
+> `crates/overdrive-core/src/vm/config.rs` carries this corrected wording; the
+> code block above is retained as history.
 
 #### D2.1 — `image_type=raw` (lie 2 / C-2): the value renders its own `--disk` argument
 
@@ -1548,6 +1586,16 @@ the latter (S-VM-67) is not, because no volume information reaches
 that boundary stated in full, including the 2026-08-11 user ruling that
 closes it (argv-layer assertion, no storage-daemon supervision port
 minted).
+
+> **Deferred 2026-08-18 — volumes/`virtiofsd` cut from this feature (GH #42;
+> see ADR-0083 Amendment 2026-08-18).** The clause "`virtiofsd`'s own sandbox
+> check … the latter (S-VM-67) … no volume information reaches `VmConfig`" is
+> `[[vm.volume]]` (Slice-04) scope. Volumes are cut, so `virtiofsd` and
+> S-VM-67 are not part of this feature at all; the sandbox check is
+> **deferred to GH #43 (virtiofsd lifecycle)** and managed block-volumes to
+> **GH #97**. The still-live half — the five probe scenarios above and
+> `Vmm::create`'s confinement failures — is unaffected: the `Vmm` port never
+> carried volume information, which holds a fortiori now. Retained as history.
 
 Scenario 1 is an **executed `FICLONE`**, not an fstype string comparison —
 `infra/metal/provision.sh:419-430` already does exactly this

@@ -1854,6 +1854,25 @@ still `@correction:C-4`.
 
 ---
 
+> **DESCOPED 2026-08-18 — volumes cut from this feature (user ruling).** Every scenario in
+> this Slice-04 section — **S-VM-55 … S-VM-68** (AC-14, AC-15, AC-16) — is **deferred, not
+> built here.** `[[vm.volume]]` was a *virtiofs host↔guest bind-mount*; the user ruled it the
+> wrong mechanism AND the wrong name. A real persistent volume is **block-device-shaped**
+> (`overdrive-fs`, GH #97 — its P9–P11 spike says block device, NOT virtiofs, the opposite
+> mechanism); the `virtiofsd` mechanism is **GH #43**'s; the artifact sink for job output is
+> the object store (**Garage, #22**) or `overdrive-fs` (#97). Deferred to **#97 / #43 / #22**.
+> See feature-delta.md § Changelog 2026-08-18 and ADR-0083 Amendment 2026-08-18 (§§ D3/D5/D8
+> volume decisions superseded).
+>
+> **Two of these scaffolds already landed and are being reverted (single-cut).** Step 05-01
+> (commit `ebef5c27`) is reverted: **S-VM-57** landed in the NEW file
+> `crates/overdrive-cli/tests/integration/vm_volumes_and_storage_daemon.rs` (whole file
+> deleted on revert) and **S-VM-62** landed as two appended tests in the existing
+> `crates/overdrive-core/tests/acceptance/vm_spec_driver_table_dispatch.rs` (those two volume
+> tests truncated; the two Slice-01 driver-table-dispatch tests kept). No scaffold for
+> S-VM-55/56/58/59/60/61/63/64/65/66/67/68 was ever authored — they were Slice-04
+> RED-at-DELIVER and never reached.
+
 ## Slice 04 — `vm-writes-output-the-operator-can-read`
 
 Consumes: US-VM-8, US-VM-9, contradiction C-6, K8, K9, K7 (volume-carrying case).
@@ -2250,6 +2269,14 @@ Then the guest reports approximately 2 GiB of memory
 And "overdrive workload describe" reports the same declared figure
 ```
 
+> **AMENDED 2026-08-18 — `shared=on` half withdrawn (volumes cut).** With volumes deferred
+> (→ #97 / #43 / #22) there is no `--memory shared=on` / memfd backing in this feature, so
+> this scenario reduces to the **single (private) memory backing** — a plain sizing-parity
+> Tier-3 case, no parametrization across two backings. Roadmap step 06-03 is reduced to match
+> and its `05-01` dependency dropped. See feature-delta.md § Changelog 2026-08-18 and ADR-0083
+> Amendment 2026-08-18. The `WITH a volume (--memory shared=on)` arm of the Gherkin below is
+> withdrawn; retained as history.
+
 #### S-VM-72: Sizing holds on both memory backings
 
 **Driving port**: `overdrive deploy` (direct CLI handler call per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no subprocess", real in-process `overdrive serve`, parametrized)
@@ -2480,8 +2507,8 @@ No pipeline/service-level test (calling `VmDriver::start` directly) substitutes 
 | K5 (crash-restart parity) | S-VM-43 | Same reconciler, ceiling, backoff as a crashed process |
 | K6 (bounded time-to-Running) | S-VM-01 (companion timing assertion) | p50 ≤3s / p99 ≤10s over ≥20 deploys |
 | K7 (confinement, guardrail) | S-VM-05, S-VM-49, S-VM-61 | 100% confined, 0 degraded-silently, 0 widened by a volume |
-| K8 (output fidelity) | S-VM-55 | Byte-identical guest write reaches the host directory |
-| K9 (storage-daemon death, guardrail) | S-VM-64, S-VM-65 | 0 false-crash, 0 false-clean, both directions |
+| K8 (output fidelity) | ~~S-VM-55~~ | **DESCOPED 2026-08-18 — volumes cut (→ #97 / #43 / #22)**; output-fidelity KPI deferred with volumes |
+| K9 (storage-daemon death, guardrail) | ~~S-VM-64, S-VM-65~~ | **DESCOPED 2026-08-18 — volumes cut (→ #43 / #97)**; no `virtiofsd` in this feature |
 | K10 (declared-size fidelity) | S-VM-69, S-VM-71, S-VM-72 | Guest-observed vCPU/memory match declared figure, both memory backings |
 
 All 10 KPIs traced. K6 is the only "secondary" KPI (a companion assertion on an existing scenario rather than its own).
@@ -2499,8 +2526,8 @@ All 10 KPIs traced. K6 is the only "secondary" KPI (a companion assertion on an 
 | US-VM-5 | AC-17 | S-VM-69…73 | 3 UAT scenarios + parametrized sizing + property |
 | US-VM-6 | AC-10 | S-VM-38…40 | 3/3 UAT scenarios |
 | US-VM-7 | AC-13 | S-VM-49…53 | 4 UAT scenarios + Landlock-directory-grant correction; S-VM-49's ruleset enumeration corrected to match S-VM-53 |
-| US-VM-8 | AC-14, AC-15 | S-VM-55…63 | 7 UAT scenarios + engineering-constraint scenario |
-| US-VM-9 | AC-16 | S-VM-64…68 | 5/5 UAT scenarios; S-VM-65's hedged `TransitionReason` variant RESOLVED by the concurrent DESIGN pass (ADR-0083 §D5 row 14, `VmStorageDaemonDied`); S-VM-67 RESOLVED by explicit user ruling (DWD-13) — rewritten to the pure launch-argument-construction layer, `@tier1`/`@in-memory`, no storage-daemon supervision port minted; the deploy-level fail-closed claim stays an undischarged Tier-3 property of Slice 04, not covered by any scenario in this catalogue |
+| ~~US-VM-8~~ | ~~AC-14, AC-15~~ | ~~S-VM-55…63~~ | **DESCOPED 2026-08-18 — volumes cut; deferred → #97 / #43 / #22 (see § Changelog / ADR-0083 Amendment 2026-08-18)** |
+| ~~US-VM-9~~ | ~~AC-16~~ | ~~S-VM-64…68~~ | **DESCOPED 2026-08-18 — volumes cut; deferred → #43 / #97.** (historical:) 5/5 UAT scenarios; S-VM-65's hedged `TransitionReason` variant RESOLVED by the concurrent DESIGN pass (ADR-0083 §D5 row 14, `VmStorageDaemonDied`); S-VM-67 RESOLVED by explicit user ruling (DWD-13) — rewritten to the pure launch-argument-construction layer, `@tier1`/`@in-memory`, no storage-daemon supervision port minted; the deploy-level fail-closed claim stays an undischarged Tier-3 property of Slice 04, not covered by any scenario in this catalogue |
 | SD-1 (Bar 2 reconciler) | AC-08, AC-19, AC-20 | S-VM-21…32, S-VM-77…81, S-VM-84, S-VM-85, S-VM-87…89 | 5 ACs (105a.10) + 2 property tests (P1 totality, `plan_reclamation` purity) + DD-1 trap scenarios (a)/(b)/(d) + the five NEW-1 pins (abandonment boundary, hydration read order, write-time terminality guard, P2-over-`VmReclamation`, the fourth `svid_lifecycle` evaluation) + all four §105a.11 ESR invariants + the DWD-26 clone-reclamation pair (the without-`stop` leak closed end-to-end; the index-link ordering invariant that makes the clone surface complete) |
 | Port contract enforcement (cross-cutting, no single owning story) | — | S-VM-90…94 | `Vmm`, `VmHostState`, `CgroupAccounting` adapter equivalence; `SupervisionSet::reclamation_authorised` purity; per-launch `FICLONE` self-application |
 

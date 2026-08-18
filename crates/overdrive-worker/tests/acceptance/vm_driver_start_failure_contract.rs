@@ -97,7 +97,6 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
             args: vec![],
             kernel: fixture_kernel_path(tmp),
             rootfs: fixture_rootfs_path(tmp),
-            volumes: vec![],
         }),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),

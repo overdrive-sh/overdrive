@@ -89,16 +89,6 @@ mod integration {
     // RED scaffold — production bodies land in slice 01 + slice 08.
     mod service_honest_stable;
 
-    // microvm-driver-cloud-hypervisor (GH #42) Slice 04, step 05-01 —
-    // volumes + virtiofs storage-daemon suite. First scenario:
-    //   * S-VM-57 (@guardrail) — a VM job declaring no [[vm.volume]]
-    //     behaves EXACTLY as before volumes existed (same terminal state
-    //     + exit code as Slice 01; no storage daemon; --memory shared=on
-    //     NOT derived). The Slice-04 regression guard.
-    // Gated `integration-tests,kvm-tests` (real guest boot on the metal
-    // box). Later Slice-04 steps add S-VM-55/56/58/59/60/61/64/65/66/68.
-    mod vm_volumes_and_storage_daemon;
-
     // service-health-check-probes — probe state is operator-observable
     // through `overdrive workload describe` (US-06 / K4; EDD O02).
     // Drives the whole store → API type → handler → CLI chain against a

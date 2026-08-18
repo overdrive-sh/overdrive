@@ -551,6 +551,18 @@ UNCONDITIONAL**, and guest-agent attack surface (when
 > and Cloud Hypervisor does not. **The `cloud-hypervisor` process still has neither.** A
 > reader who sees "virtiofsd is namespace-sandboxed" must not infer the hypervisor is.
 
+> **DESCOPED 2026-08-18 — volumes cut from this feature (user ruling).** The entire `[D8]`
+> family below (`[D8a]`–`[D8g]`: the `[[vm.volume]]` surface, derived `--memory shared=on`,
+> `--cache=never`, `--sandbox=namespace`, the supervised `virtiofsd` sidecar lifecycle, the
+> guest-side mount + refuse-to-exec, and host-side `read_only` enforcement) is **deferred,
+> not built here.** `[[vm.volume]]` was a *virtiofs host↔guest bind-mount*; the user ruled it
+> the wrong mechanism AND the wrong name. A real persistent volume is **block-device-shaped**
+> (`overdrive-fs`, GH #97 — its P9–P11 spike says block device, NOT virtiofs, the opposite
+> mechanism); the `virtiofsd` mechanism is **GH #43**'s; the artifact sink for job output is
+> the object store (**Garage, #22**) or `overdrive-fs` (#97). Deferred to **#97 / #43 / #22**.
+> The narrative below is retained as history (see § Changelog 2026-08-18 and ADR-0083
+> Amendment 2026-08-18), NOT as scope.
+
 ### `[D8]` Storage splits by ROLE — `virtio-blk` for the rootfs, `virtiofs` for volumes
 
 **Decision (locked, = intake `I-6`): the mechanism is chosen by the storage's ROLE, not by
@@ -808,7 +820,7 @@ Run before journey/story investment. **Four oversized signals fired.**
 | 01 | `vm-job-boots-and-exit-code-is-honest` | `overdrive deploy` a `[vm]` + `[job]` spec → the guest runs → its **real** exit code reaches `workload describe`. **Walking skeleton.** | **11–14 d** *(was 5–8 d; re-sized 2026-08-11 for the D-3 fold-in — see § Scope re-assessment below; guardrail 3 fires, retired as a decision gate by the user's 2026-08-11 ruling — see the Changelog)* |
 | 02 | `boot-failure-vocabulary` | A VM that fails to boot says **why**, in operator language, with a fix. | 2–3 d |
 | 03 | `stop-restart-and-vmm-death` | `job stop` and crash-restart converge for VMs; an unreported VMM death is `Crashed`, never `CleanExit`; **the hypervisor process is confined** (`[D7]` items 1–3). | 4–6 d |
-| **04** | **`vm-writes-output-the-operator-can-read`** | **A `[vm]`+`[job]` workload writes a file and the operator reads it on the host — and the storage daemon's death is classified as honestly as the hypervisor's (`[D8]`).** | **6–9 d** |
+| ~~**04**~~ | ~~**`vm-writes-output-the-operator-can-read`**~~ | **DESCOPED 2026-08-18 — volumes cut (deferred → #97 / #43 / #22; see § Changelog 2026-08-18).** ~~A `[vm]`+`[job]` workload writes a file and the operator reads it on the host — and the storage daemon's death is classified as honestly as the hypervisor's (`[D8]`).~~ | ~~6–9 d~~ |
 | 05 | `resources-size-the-vm` | `[resources]` drives vCPU count and memory — the #92 CPU-hotplug precondition. | 2 d |
 
 **Slice 04 is new (2026-08-02) and Slice 05 is the former Slice 04, renumbered.** The
@@ -2021,6 +2033,15 @@ constructed a flag.
 
 ---
 
+> **DESCOPED 2026-08-18 — deferred, not built in this feature (user ruling).** US-VM-8
+> assumed the operator reads job output on the host with `ls` / `cat` via a *virtiofs
+> host↔guest bind-mount*. That frame is fictional on the production target: Overdrive nodes
+> run an immutable appliance OS with no operator shell, and the artifact is node-local and
+> does not survive the node or a reschedule. A real persistent volume is block-device-shaped
+> (`overdrive-fs`, GH #97); the artifact sink for job output is the object store (Garage,
+> #22). Deferred to **#97 / #43 / #22**. Story retained as history — see § Changelog
+> 2026-08-18, ADR-0083 Amendment 2026-08-18, and the `[D8]` banner.
+
 ### US-VM-8 — A VM job writes its output to a host directory the operator can read
 
 **Job:** `J-OPS-003` · **Slice:** 04 · **MoSCoW:** Must
@@ -2211,6 +2232,13 @@ live in their own block below.
   capability; that one is its honesty.
 
 ---
+
+> **DESCOPED 2026-08-18 — deferred, not built in this feature (user ruling).** US-VM-9 is
+> the storage-daemon (`virtiofsd`) lifecycle-honesty story; with volumes cut there is no
+> `virtiofsd` in this feature. The `virtiofsd` lifecycle mechanism is **GH #43**'s ([3.6]).
+> Deferred to **#43 / #97**. The `VmStorageDaemonDied` / `ExitEvent.storage_daemon_died`
+> design this story drove is superseded in ADR-0083 (Amendment 2026-08-18); `ExitEvent` keeps
+> only `oom` (row 13). Story retained as history.
 
 ### US-VM-9 — A storage daemon's death is classified as honestly as the hypervisor's
 
@@ -4217,6 +4245,7 @@ binary.
 
 | Date | Wave | Change |
 |---|---|---|
+| 2026-08-18 | DESIGN (application — Morgan, user ruling) | **Volumes (Slice 04) CUT from this feature.** `[[vm.volume]]` was a **virtiofs host↔guest bind-mount** (host `source` shared into the guest at `target`, byte-identical both sides — S-VM-55). The user ruled it the wrong mechanism AND the wrong name and removed volumes entirely. A real persistent volume is guest-owned and **block-device-shaped** — `overdrive-fs` (GH #97, Phase 6.13), whose own spike P9–P11 says the guest sees a block device (ext4 / vhost-user-blk), NOT a virtiofs / FUSE mount (the *opposite* mechanism); #97 was already scoped OUT of #42 (user ruling 2026-08-10). The `virtiofsd` mechanism is GH #43's ([3.6] virtiofsd lifecycle + cross-workload sharing). US-VM-8's host-`ls`/`cat` frame is fictional on the production target (immutable appliance OS, no operator shell, node-local artifact not surviving a reschedule; correct sink is the object store Garage #22 or `overdrive-fs` #97). **Deferred to #97 / #43 / #22 — not renamed, not kept.** Descope annotated, not deleted: `[D8]`…`[D8g]`, US-VM-8, US-VM-9, the Slice 04 row. Companions: **ADR-0083 Amendment 2026-08-18** (§§ D3/D5/D8 volume decisions superseded — `VmPayload.volumes`, the five volume `VmStartFailure` variants + table rows 8–12, mid-run row 14 `VmStorageDaemonDied` + `ExitEvent.storage_daemon_died`, the S-VM-67 sandbox ruling); `distill/test-scenarios.md` (S-VM-55…68 descoped, S-VM-72 `shared=on` half withdrawn); `deliver/roadmap.json` (Phase 05 / steps 05-01…05-06 removed, 06-03 reduced to single memory backing + `05-01` dep dropped). Already-landed step 05-01 (commit `ebef5c27`, +607/−0, 100% volume-only) reverted single-cut. No GitHub issues created (#97/#43/#22 already exist). No commit made. |
 | 2026-08-12 | DESIGN | **ADR-0082 § D7 amended — operator-command→guest channel (GH #42, user ruling).** The operator's `command`/`args` reach `overdrive-init` as a host→guest **`EXEC`** beacon message (JSON-encoded argv — spaces/newlines safe), NOT the kernel cmdline. Handshake pinned (Candidate A: `READY`→`EXEC`→exec→`EXIT`); the `EXEC` write is folded into § D3's Ok continuation so **Running ⟹ command dispatched**, and § D4's `LiveVm.beacon` becomes `Some` only after it (no host-side `EXEC`/`SHUTDOWN` race, guest never sees `SHUTDOWN` before `EXEC`). § D2 gap-4 punt resolved to point at the amendment. Ownership pinned: type + guest-consume → **01-03** (review-remediation), send → **01-07**, source-wiring → **01-08** — closes the 01-03 review's unowned-deferral gap. Stdio forwarding confirmed a *separate* channel (rides `/dev/console` → CH stdout), not a second blocker for S-VM-01 (which gates on the already-landed `EXIT` exit code). |
 | 2026-08-12 | DESIGN (application — Morgan, DELIVER 01-02 schema-fork amendment, GH #42) | **Corrected the stale `JobEnvelope` name and pinned the `WorkloadIntentEnvelope` V1→V2 payload-type fork** for adding `WorkloadDriver::Vm`. `JobEnvelope` was deleted by ADR-0050; the live envelope is `WorkloadIntentEnvelope`. ADR-0083 amendment records the uniform fork (`WorkloadDriverV1/V2`, `Job`/`Service`/`Schedule` V1→V2, `WorkloadIntentV1→V2`, `From<WorkloadIntentV1> for V2`, `into_latest()` chain) per ADR-0048 alias-to-payload + the six-step version-bump; `canonical_v1_*` builders and `FIXTURE_V1_*` golden bytes stay verbatim. |
 | 2026-08-12 | DESIGN (application — Morgan, DELIVER 01-01 design-gap closure, user ruling) | **Closed five under-/mis-specified `VmConfig` field types that blocked DELIVER 01-01 from compiling `VmConfig` / `VmRunDir` / the `Vmm` trait** (the crafter landed the pure value family — `DiskAttachment`/`MemoryPlan`/`KernelImage`/`VmConfinement`, commit `2636ba1c` — then correctly refused to invent API per CLAUDE.md § "Implement to the design"). All five pinned in **ADR-0082 § D2** (which governs): **(1)** `CgroupPath` is **relocated verbatim** from `overdrive_worker::cgroup_manager` into `overdrive_core::cgroup` (worker re-exports; the core `CgroupFs` trait speaks `&Path`, so no cycle; rkyv layout byte-compatible) — ADR-0029 § 2's stale "only caller is workload-cgroup management" placement bullet marked superseded. **(2)** A new **INTERNAL** `NetnsName` newtype (`overdrive_core::id`; validating `from_hex4` constructor + `Display`/`as_str`; **no serde/rkyv/FromStr** — the value is machine-minted, bounded `ovd-ns-<4hex>`, never operator-typed, never persisted) at **both** `AllocationSpec.netns` and `VmConfig.netns`, **superseding D-TME-12 / JOIN-1** (which chose `Option<String>`; user ruling option (a), both sites). **(3)** `RootfsPlan { master, master_bytes, clone_dest }` + `for_alloc(master, master_bytes, &AllocationId)` + accessors. **(4)** `KernelCmdline(String)` + `platform_default(arch)` + `as_str` (platform-derived; no operator surface). **(5)** `LandlockRule` + `VmConfig::landlock_rules()` + `VmRunDir::landlock_grant()` **deferred to Slice 03 / US-VM-7** — Slice 01 runs CH without `--landlock`/`--landlock-rules`; § D2.2's vsock-Landlock argument becomes Slice-03-operative; seccomp (`VmConfinement::seccomp_arg`) stays Slice 01. **D-TME-12 / JOIN-1 supersession recorded in ADR-0082 § D2 because its cited canonical home — `docs/feature/transparent-mtls-enrollment/design/wave-decisions.md` — does not exist** (feature archived; surviving refs in `docs/architecture/transparent-mtls-enrollment/feature-delta.md` + `docs/evolution/`, neither housing the decision). Consistency sweep: `brief.md` § 108 contract-shape table dropped `VmConfig::landlock_rules` from the Slice-01 pure-function targets; ADR-0083 § D7 `RootfsPlan::for_alloc` verified consistent. Design artifacts only — **no Rust written** (the crafter implements the pinned shapes in DELIVER). No GitHub issues created. No commit made. |
