@@ -1542,6 +1542,19 @@ an already-granted directory, CH auto-derives its Landlock rule, and it is the
 substrate `Driver::resize` will need when GH #92 lands. It is not depended on
 by any path in this feature.
 
+> **Amendment 2026-08-18 (06-03 design-gap closure — the typed error `Driver::resize` rejects with, GH #42, user-approved dedicated variant).** §D4 above mandates that resize *rejects honestly* — the `--api-socket` hotplug substrate is kept in `VmConfig` for **GH #92** (right-sizing / CPU hotplug) but is exercised by no path in this feature — yet it never named the `DriverError` the rejection returns, and DELIVER step 06-03 stopped correctly on that gap (CLAUDE.md § "Implement to the design — never invent API surface"). **Decision: `VmDriver::resize` returns `Err(DriverError::ResizeUnsupported { .. })` — never `Ok(())`, never a silent no-op, and never a CH hotplug in this feature.** The variant is a new, dedicated addition to `DriverError` (`crates/overdrive-core/src/traits/driver.rs`), matching the enum's field-struct style (cf. `NetnsEntry { driver, netns_path, source }`):
+>
+> ```rust
+> /// `Driver::resize` is not implemented by this driver in this feature.
+> /// The `--api-socket` hotplug substrate is kept in `VmConfig` for GH #92
+> /// (right-sizing / CPU hotplug) but is not exercised by any path here;
+> /// resize therefore rejects honestly rather than silently no-oping.
+> #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
+> ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
+> ```
+>
+> `driver` and `alloc` reuse the newtypes already in scope in the module — `DriverType` (as in `NetnsEntry`) and `AllocationId` (as in `NotFound`) — no new type is minted. `detail` carries the human string that names **GH #92** as the deferred right-sizing / CPU-hotplug mechanism the substrate is held for. **Why a dedicated variant, not a reuse of one of the four existing ones:** none can carry this rejection without lying. `StartRejected { failure: DriverStartFailure }` renders a *START* rejection and `DriverStartFailure` enumerates start-only causes — semantically false for a resize. `NotFound { alloc }` asserts the allocation is absent, but resize is called on a **live** alloc — also false, and it carries no reason string. `Io(std::io::Error)` would flatten a capability-refusal into generic I/O, the exact anti-pattern `.claude/rules/development.md` § "Errors" forbids ("never flatten a typed error … at a composition boundary"). `NetnsEntry` is netns-setup-specific. A resize-refusal is a **distinct failure mode**, so per § "Distinct failure modes get distinct error variants" it gets its own variant callers can `matches!` on. This closes the 06-03 blocker and adds no new API surface beyond this single variant.
+
 An unresponsive guest still lands `Terminated / Stopped { by: Operator }`, never
 a crash (Slice 03 AC) — `VmTermination::Killed` is an outcome of the
 *mechanism*, not a classification of the *workload*, which is why the enum

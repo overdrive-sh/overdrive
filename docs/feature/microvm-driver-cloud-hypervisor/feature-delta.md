@@ -1771,6 +1771,10 @@ Scenario: Declared memory is what the guest gets
   declared size via `Driver::resize`.
 - `Driver::resize` is a required trait method; whether Slice 05 implements live hotplug or
   rejects resize honestly is DESIGN's call — but it must not silently no-op.
+  DESIGN's call is pinned: `VmDriver::resize` returns
+  `Err(DriverError::ResizeUnsupported { .. })` (never `Ok(())`, never a hotplug in this
+  feature), the `detail` naming GH #92 as the deferred right-sizing / CPU-hotplug
+  mechanism. Signature and rationale live in **ADR-0082 §D4 Amendment 2026-08-18** (SSOT).
 - **`[D8e]` interaction, stated:** a volume-carrying VM's `virtiofsd` sits in the
   allocation's cgroup scope, so its memory counts against `resources.memory_bytes`. DESIGN
   decides whether the guest's memory size is derived from the declared figure as-is or net
