@@ -21,26 +21,40 @@ runs:
         # (The default composite bash shell runs with `-eo pipefail`, hence
         # the explicit `|| true` guards below.)
 
-        # 1. Stop the background apt units that grab the dpkg lock.
-        sudo systemctl stop \
-          apt-daily.timer apt-daily-upgrade.timer \
-          apt-daily.service apt-daily-upgrade.service \
-          unattended-upgrades.service 2>/dev/null || true
-        sudo systemctl kill --kill-who=all \
-          apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+        # 1. Stop AND MASK the background apt units. `mask` is strictly
+        #    stronger than `stop`: a plain stop leaves the .timer free to
+        #    re-arm the .service seconds later, which is how the QEMU / mold
+        #    install kept racing apt-daily even after this step "freed" the
+        #    lock. Masking blocks re-activation for the (ephemeral) life of
+        #    the runner.
+        for u in apt-daily.timer apt-daily-upgrade.timer \
+                 apt-daily.service apt-daily-upgrade.service \
+                 unattended-upgrades.service; do
+          sudo systemctl stop "$u" 2>/dev/null || true
+          sudo systemctl mask "$u" 2>/dev/null || true
+        done
 
-        # 2. Wait (bounded, ~2 min) for any in-flight apt/dpkg to release the
-        #    lock. A missing `fuser` makes the test succeed and breaks the
-        #    loop on the first iteration, so this can never itself hang.
-        for i in $(seq 1 60); do
+        # 2. Wait (bounded, ~5 min) for any in-flight apt/dpkg/unattended-
+        #    upgrade to RELEASE the lock on its own. Do NOT kill it — SIGKILL
+        #    on a running dpkg transaction leaves a half-configured package
+        #    and a stale frontend lock, after which the next apt-get blocks
+        #    indefinitely. That kill (previously here) is the likely cause of
+        #    the mold-install hang on 2026-08-19: the lock was "freed" but
+        #    dpkg was left wedged. A missing `fuser` makes the test succeed
+        #    and breaks the loop immediately, so this can never itself hang.
+        for i in $(seq 1 150); do
           if ! sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
              && ! sudo fuser /var/lib/dpkg/lock         >/dev/null 2>&1 \
              && ! sudo fuser /var/lib/apt/lists/lock    >/dev/null 2>&1; then
             break
           fi
-          echo "waiting for apt/dpkg lock to be released ($i/60)..."
+          echo "waiting for apt/dpkg lock to be released ($i/150)..."
           sleep 2
         done
+
+        # 2b. Recover any dpkg transaction a prior interruption left
+        #     half-applied, so the frontend lock is clean for our apt-get.
+        sudo dpkg --configure -a 2>/dev/null || true
 
         # 3. Make needrestart auto-restart services instead of prompting, so
         #    install-time package configuration cannot hang on a TTY. Perl
@@ -51,8 +65,12 @@ runs:
             | sudo tee -a /etc/needrestart/needrestart.conf >/dev/null || true
         fi
 
-        # 4. Bound apt's network waits so a stalled mirror fails fast and
-        #    retries rather than hanging. Read globally via apt.conf.d, so it
-        #    also governs the Lima setup's own apt-get.
-        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+        # 4. Bound apt's waits so a stalled mirror OR a still-held lock fails
+        #    fast and retries rather than hanging forever. `DPkg::Lock::
+        #    Timeout 300` makes apt wait AT MOST 5 min for the dpkg lock (vs
+        #    the default -1 = wait forever) then exit with a real error,
+        #    instead of silently burning the whole job budget. Read globally
+        #    via apt.conf.d, so it also governs the Lima setup's own apt-get
+        #    and the apt.llvm.org llvm.sh install.
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nDPkg::Lock::Timeout "300";\n' \
           | sudo tee /etc/apt/apt.conf.d/99-overdrive-ci-timeouts >/dev/null || true
