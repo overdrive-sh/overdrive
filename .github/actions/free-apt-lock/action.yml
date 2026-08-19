@@ -1,0 +1,58 @@
+name: "Free apt/dpkg lock"
+description: >-
+  Stop the background apt-daily / unattended-upgrades units, wait for the
+  dpkg lock to be released, and make needrestart non-interactive — so a
+  later apt-get (notably lima-vm/lima-actions installing QEMU) does not block
+  on the lock and burn the entire job timeout. GitHub-hosted runners run
+  apt-daily in the background, which holds /var/lib/dpkg/lock-frontend; when
+  the Lima setup's `apt-get install ... qemu-system-x86` collides with it the
+  install waits for the lock. That hang has twice consumed the whole
+  20-minute bpf-build budget on this repo (2026-08-18 during apt-get update,
+  2026-08-19 during apt-get install), cancelling the linchpin job that every
+  downstream BPF job depends on. This step removes the contention up front.
+runs:
+  using: composite
+  steps:
+    - name: Free apt/dpkg lock and disable needrestart prompts
+      shell: bash
+      run: |
+        # Every command is best-effort: a missing unit or tool must never
+        # fail the step — that would break the very job we are unblocking.
+        # (The default composite bash shell runs with `-eo pipefail`, hence
+        # the explicit `|| true` guards below.)
+
+        # 1. Stop the background apt units that grab the dpkg lock.
+        sudo systemctl stop \
+          apt-daily.timer apt-daily-upgrade.timer \
+          apt-daily.service apt-daily-upgrade.service \
+          unattended-upgrades.service 2>/dev/null || true
+        sudo systemctl kill --kill-who=all \
+          apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+
+        # 2. Wait (bounded, ~2 min) for any in-flight apt/dpkg to release the
+        #    lock. A missing `fuser` makes the test succeed and breaks the
+        #    loop on the first iteration, so this can never itself hang.
+        for i in $(seq 1 60); do
+          if ! sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+             && ! sudo fuser /var/lib/dpkg/lock         >/dev/null 2>&1 \
+             && ! sudo fuser /var/lib/apt/lists/lock    >/dev/null 2>&1; then
+            break
+          fi
+          echo "waiting for apt/dpkg lock to be released ($i/60)..."
+          sleep 2
+        done
+
+        # 3. Make needrestart auto-restart services instead of prompting, so
+        #    install-time package configuration cannot hang on a TTY. Perl
+        #    "last assignment wins", so appending is enough and avoids sed
+        #    fragility against the shipped conf.
+        if [ -f /etc/needrestart/needrestart.conf ]; then
+          printf "\n\$nrconf{restart} = 'a';\n" \
+            | sudo tee -a /etc/needrestart/needrestart.conf >/dev/null || true
+        fi
+
+        # 4. Bound apt's network waits so a stalled mirror fails fast and
+        #    retries rather than hanging. Read globally via apt.conf.d, so it
+        #    also governs the Lima setup's own apt-get.
+        printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+          | sudo tee /etc/apt/apt.conf.d/99-overdrive-ci-timeouts >/dev/null || true

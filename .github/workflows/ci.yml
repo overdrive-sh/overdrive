@@ -221,6 +221,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
+
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
 
@@ -366,6 +373,13 @@ jobs:
     needs: bpf-build
     steps:
       - uses: actions/checkout@v4
+
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
 
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
@@ -913,6 +927,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
+
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
 
@@ -1060,6 +1081,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
+
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
 
@@ -1189,6 +1217,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
+
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
 
@@ -1292,6 +1327,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
+      # Free the dpkg lock before the third-party Lima setup runs its
+      # `apt-get install ... qemu-system-x86`. Without this, GitHub's
+      # background apt-daily holds the lock and the install blocks until the
+      # job timeout — the recurring bpf-build cancellation. See the action.
+      - name: Free apt/dpkg lock (avoid QEMU install hang)
+        uses: ./.github/actions/free-apt-lock
 
       - name: Install Lima
         uses: lima-vm/lima-actions/setup@v1
